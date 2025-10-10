@@ -1,0 +1,162 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": [
+      "default",
+      "!{projectRoot}/.eslintrc.json",
+      "!{projectRoot}/eslint.config.mjs",
+      "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
+      "!{projectRoot}/tsconfig.spec.json",
+      "!{projectRoot}/src/test-setup.[jt]s"
+    ],
+    "sharedGlobals": []
+},
+
+  "tui": { "enabled": false },
+  "plugins": [
+    {
+      "plugin": "@nx/eslint/plugin",
+      "options": {
+        "targetName": "lint"
+      }
+    },
+    {
+      "plugin": "@nx/js/typescript",
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        },
+        "build": {
+          "targetName": "build",
+          "configName": "tsconfig.lib.json",
+          "buildDepsName": "build-deps",
+          "watchDepsName": "watch-deps"
+        }
+      }
+    },
+    {
+      "plugin": "@nx/react/router-plugin",
+      "options": {
+        "buildTargetName": "build",
+        "devTargetName": "dev",
+        "startTargetName": "start",
+        "watchDepsTargetName": "watch-deps",
+        "buildDepsTargetName": "build-deps",
+        "typecheckTargetName": "typecheck"
+      }
+    },
+    {
+      "plugin": "@nx/vite/plugin",
+      "options": {
+        "buildTargetName": "build",
+        "testTargetName": "test",
+        "serveTargetName": "serve",
+        "devTargetName": "dev",
+        "previewTargetName": "preview",
+        "serveStaticTargetName": "serve-static",
+        "typecheckTargetName": "typecheck",
+        "buildDepsTargetName": "build-deps",
+        "watchDepsTargetName": "watch-deps"
+      }
+    }
+  ],
+  "workspaceLayout": {
+    "appsDir": "apps",
+    "libsDir": "packages"
+  },
+  "targetDefaults": {
+    "@nx/esbuild:esbuild": {
+      "options": {
+        "outputPath": "{projectRoot}/dist",
+        "main": "{projectRoot}/src/index.ts",
+        "tsConfig": "{projectRoot}/tsconfig.lib.json",
+        "format": ["esm"],
+        "declarationRootDir": "{projectRoot}/src",
+        "deleteOutputPath": false,
+        "minify": false,
+        "sourcemap": true,
+        "esbuildOptions": {
+          "loader": {
+            ".txt": "text"
+          }
+        },
+        "external": [
+          "@deepagents/readme",
+          "@deepagents/core",
+          "@deepagents/spec",
+          "@deepagents/typescript",
+          "@deepagents/dart",
+          "@deepagents/cli",
+          "@deepagents/generic",
+          "@deepagents/hono"
+        ]
+      },
+      "cache": true,
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"]
+    },
+    "build": {
+      "dependsOn": [
+        {
+          "target": "client",
+          "projects": "@deepagents/source"
+        },
+        "^build"
+      ]
+    },
+    "dev": {
+      "dependsOn": [
+        {
+          "target": "client",
+          "projects": "@deepagents/source"
+        },
+        "^build"
+      ]
+    }
+  },
+  "release": {
+    "conventionalCommits": {
+      "types": {
+        "chore": {
+          "changelog": {
+            "hidden": true
+          }
+        },
+        "refactor": {
+          "semverBump": "patch"
+        }
+      }
+    },
+    "changelog": {
+      "workspaceChangelog": {
+        "file": false
+      }
+    },
+    "releaseTagPattern": "release/{version}",
+    "version": {
+      "preVersionCommand": "NX_DAEMON=false npx nx run-many -t build --prod --exclude client && nx run client:build --prod && npm run test",
+      "conventionalCommits": true
+    }
+  },
+  "sync": {
+    "applyChanges": true
+  },
+  "generators": {
+    "@nx/react": {
+      "application": {
+        "babel": true,
+        "style": "css",
+        "linter": "eslint",
+        "bundler": "vite"
+      },
+      "component": {
+        "style": "css"
+      },
+      "library": {
+        "style": "css",
+        "linter": "eslint"
+      }
+    }
+  }
+}

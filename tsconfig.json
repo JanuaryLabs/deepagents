@@ -1,0 +1,61 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "compilerOptions": {
+    "target": "ESNext"
+  },
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/hono"
+    },
+    {
+      "path": "./packages/generic"
+    },
+    {
+      "path": "./packages/typescript"
+    },
+    {
+      "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/dart"
+    },
+    {
+      "path": "./packages/apiref"
+    },
+    {
+      "path": "./packages/spec"
+    },
+    {
+      "path": "./packages/readme"
+    },
+    {
+      "path": "./apps/www"
+    },
+    {
+      "path": "./apps/api"
+    },
+    {
+      "path": "./packages/client"
+    },
+    {
+      "path": "./packages/python"
+    },
+    {
+      "path": "./packages/rpc"
+    },
+    {
+      "path": "./apps/agent"
+    },
+    {
+      "path": "./packages/shadcn"
+    },
+    {
+      "path": "./packages/vite"
+    }
+  ]
+}
