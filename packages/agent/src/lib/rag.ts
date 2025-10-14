@@ -4,8 +4,8 @@ import {
   type IngestionConfig,
   nodeSQLite,
   similaritySearch,
-} from '@agent/retrieval';
-import * as connectors from '@agent/retrieval/connectors';
+} from '@deepagents/retrieval';
+import * as connectors from '@deepagents/retrieval/connectors';
 
 import { agent } from './agent.ts';
 import { embed } from './models.ts';
@@ -62,7 +62,7 @@ if (import.meta.main) {
       ingestWhen: 'expired',
       expiresAfter: 1000 * 60 * 60 * 24, // 1 day
     }),
-    store: nodeSQLite(348),
+    store: nodeSQLite('./swarm.sqlite', 348),
     embedder: embed,
   });
   printer.stdout(stream);

@@ -4,10 +4,6 @@ import z from 'zod';
 import { agent, instructions } from '../../agent.ts';
 import { toOutput } from '../../stream_utils.ts';
 import { execute } from '../../swarm.ts';
-import {
-  type Source as DDGSource,
-  duckDuckGoSearch,
-} from '../../tools/ddg-search.ts';
 
 // ===============
 // Types & Schemas
@@ -110,7 +106,7 @@ const rewooToolExecutor = agent({
     ],
   }),
   tools: {
-    ddg_search: duckDuckGoSearch,
+    // ddg_search: duckDuckGoSearch,
   },
 });
 
@@ -147,7 +143,7 @@ export async function runRewoo(query: string) {
   // 2) Execute tool calls (in parallel)
   const evidences: Evidence[] = await Promise.all(
     plan.tool_calls.map(async (call) => {
-      const source: DDGSource =
+      const source =
         call.tool === 'web' ? 'text' : call.tool === 'news' ? 'news' : 'images';
 
       const execInput = `Run ddg_search with { query: ${JSON.stringify(

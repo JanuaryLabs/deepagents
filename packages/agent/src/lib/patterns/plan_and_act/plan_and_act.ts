@@ -1,10 +1,10 @@
 import { groq } from '@ai-sdk/groq';
 import { z } from 'zod';
 
+
 import { agent, instructions } from '../../agent.ts';
 import { toOutput } from '../../stream_utils.ts';
 import { execute } from '../../swarm.ts';
-import { duckDuckGoSearch } from '../../tools/ddg-search.ts';
 
 // ===============
 // Types & Schemas
@@ -129,7 +129,7 @@ const executor = agent({
     ],
   }),
   tools: {
-    web_search: duckDuckGoSearch,
+    // web_search: duckDuckGoSearch,
   },
 });
 

@@ -16,7 +16,7 @@ import {
   smoothStream,
   stepCountIs,
   streamText,
-  wrapLanguageModel
+  wrapLanguageModel,
 } from 'ai';
 import chalk from 'chalk';
 import dedent from 'dedent';
@@ -80,8 +80,11 @@ export function execute<C>(
   agent: Agent<C>,
   messages: UIMessage[] | string,
   contextVariables: C,
-  systemPrompt?: string,
-  abortSignal?: AbortSignal,
+  prompt?: string,
+  config?: {
+    abortSignal?: AbortSignal;
+    providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
+  },
 ) {
   const model = agent.model ?? lmstudio('qwen/qwen3-4b-2507');
 
@@ -91,9 +94,10 @@ export function execute<C>(
     : [messageToUiMessage(messages)];
 
   return streamText({
-    abortSignal,
+    abortSignal: config?.abortSignal,
+    providerOptions: config?.providerOptions,
     model: model,
-    system: `${systemPrompt}\n${agent.instructions(contextVariables)}`,
+    system: `${prompt}\n${agent.instructions(contextVariables)}`,
     messages: convertToModelMessages(uiMessages),
     temperature: agent.temperature ?? 0,
     stopWhen: stepCountIs(25),
@@ -101,11 +105,13 @@ export function execute<C>(
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,
+    toolChoice: agent.toolChoice,
     onError: (error) => {
       console.error(
-        chalk.red('Error during agent execution:'),
+        chalk.red(`Error during agent (${agent.internalName}) execution: `),
         error instanceof Error ? error.message : error,
       );
+      console.dir(error, { depth: null });
     },
     experimental_output: agent.output
       ? Output.object({ schema: agent.output })
@@ -119,7 +125,7 @@ export function execute<C>(
         );
       }
     },
-    prepareStep: prepareStep(agent, model, systemPrompt, contextVariables),
+    prepareStep: prepareStep(agent, model, prompt, contextVariables),
   });
 }
 
@@ -192,7 +198,7 @@ export function swarm<C>(
         originalMessages,
         contextVariables,
         systemPrompt,
-        abortSignal,
+        { abortSignal },
       );
       const parts: UIMessagePart<UIDataTypes, UITools>[] = [];
 

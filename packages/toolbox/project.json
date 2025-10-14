@@ -1,7 +1,7 @@
 {
-  "name": "@deepagents/agent",
+  "name": "@deepagents/toolbox",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/agent/src",
+  "sourceRoot": "packages/toolbox/src",
   "projectType": "library",
   "tags": [],
   "targets": {

@@ -91,7 +91,7 @@ export function createSupervisor<C>(props: {
         messages,
         contextVariables,
         supervisor.instructions(contextVariables),
-        abortSignal,
+        { abortSignal },
       );
     },
   });
@@ -157,14 +157,10 @@ const supervisor = createSupervisor({
 });
 
 if (import.meta.main) {
-  const [stream, messages] = swarm(
+  const stream = swarm(
     supervisor,
     `A reflection on the quiet art of living alone.`,
     { currentActiveAgent: supervisor.internalName },
-  ).tee();
-  printer.readableStream(stream);
-  await writeFile(
-    'messages.json',
-    JSON.stringify(await Array.fromAsync(messages), null, 2),
   );
+  printer.readableStream(stream);
 }

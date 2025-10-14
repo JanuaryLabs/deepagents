@@ -16,7 +16,7 @@ import { Readable } from 'node:stream';
 import {
   visualizeMermaid,
   visualizeRichSemantic,
-  visualizeSemantic
+  visualizeSemantic,
 } from './visualize.ts';
 
 export async function streamWrite(
@@ -85,7 +85,7 @@ export const printer = {
   ) => {
     const includeReasoning = options?.reasoning ?? true;
     const wrapInTags = options?.wrapInTags ?? true;
-    for await (const chunk of stream) {
+    for await (const chunk of stream as any) {
       printChunk(chunk, { reasoning: includeReasoning, wrapInTags });
     }
   },
@@ -117,6 +117,7 @@ export function messageToUiMessage(message: string): UIMessage {
     ],
   };
 }
+export const user = messageToUiMessage;
 
 export async function input(defaultValue?: string): Promise<string> {
   const rl = createInterface({

@@ -1,5 +1,5 @@
 {
-  "name": "@deepagents/agent",
+  "name": "@deepagents/toolbox",
   "version": "0.0.1",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/lib/*",
+      "import": "./dist/lib/*",
+      "default": "./dist/lib/*"
     }
   },
   "files": [
@@ -22,22 +27,15 @@
     "access": "public"
   },
   "dependencies": {
-    "stringcase": "^4.3.1",
+    "ai": "^5.0.65",
+    "nano-spawn": "^1.0.3",
+    "zod": "^3.25.76 || ^4.0.0",
+    "duck-duck-scrape": "^2.2.7",
     "lodash-es": "^4.17.21",
-    "zod-to-json-schema": "^3.24.6",
-    "ai": "^5.0.68",
-    "chalk": "^5.6.2",
-    "@ai-sdk/groq": "2.0.24",
-    "listr2": "^9.0.4",
-    "@ai-sdk/openai": "2.0.51",
-    "conf": "^15.0.2",
-    "@ai-sdk/openai-compatible": "^1.0.22",
-    "dedent": "1.7.0",
-    "@deepagents/retrieval": "0.0.1"
+    "@ai-sdk/groq": "2.0.23",
+    "@deepagents/agent": "0.0.1"
   },
-  "peerDependencies": {
-    "zod": "^3.25.76 || ^4.0.0"
-  },
+  "peerDependencies": {},
   "devDependencies": {
     "@types/debug": "^4.1.12"
   }

@@ -4,6 +4,7 @@ import { embedMany } from 'ai';
 export const lmstudio = createOpenAICompatible({
   name: 'lmstudio',
   baseURL: 'http://127.0.0.1:1234/v1',
+  supportsStructuredOutputs: true,
 });
 
 export const glm = createOpenAICompatible({

@@ -1,10 +1,10 @@
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
+
 import { agent, instructions } from '../../agent.ts';
 import { confirm, toOutput } from '../../stream_utils.ts';
 import { execute } from '../../swarm.ts';
-import { execute_os_command } from '../../tools/container.ts';
 
 // Define the schemas for structured output
 const PlanSchema = z.object({
@@ -74,7 +74,7 @@ const executor = agent({
   }),
   tools: {
     // browser_search: groq.tools.browserSearch({}),
-    execute_os_command,
+    // execute_os_command,
   },
 });
 
