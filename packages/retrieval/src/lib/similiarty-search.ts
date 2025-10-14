@@ -42,8 +42,8 @@ export async function similaritySearch(
   return config.store
     .search(
       query,
-      { sourceId: config.connector.sourceId },
-      config.embedder ,
+      { sourceId: config.connector.sourceId, topN: 50 },
+      config.embedder,
     )
     .then(
       (results) =>

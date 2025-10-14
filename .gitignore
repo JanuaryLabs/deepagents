@@ -58,3 +58,5 @@ combined.txt
 .sst
 .tasks.json
 packages/apiref/app/_generated/
+
+local_cache/

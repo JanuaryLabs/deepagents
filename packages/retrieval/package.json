@@ -1,7 +1,6 @@
 {
-  "name": "@agent/retrieval",
+  "name": "@deepagents/retrieval",
   "version": "0.0.1",
-  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -20,9 +19,29 @@
       "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo",
+    "!**/*.test.*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "zod": "^3.24.2",
-    "libphonenumber-js": "^1.12.6",
-    "date-fns": "^4.1.0"
+    "execa": "^9.6.0",
+    "@linear/sdk": "^60.0.0",
+    "fast-glob": "^3.3.3",
+    "ignore": "^7.0.5",
+    "unpdf": "^1.3.2",
+    "@mozilla/readability": "^0.6.0",
+    "rss-parser": "^3.13.0",
+    "jsdom": "^27.0.0",
+    "fastembed": "^2.0.0",
+    "@huggingface/transformers": "^3.7.5",
+    "langchain": "^0.3.35",
+    "ai": "^5.0.65",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "dedent": "1.7.0",
+    "lodash-es": "^4.17.21"
   }
 }

@@ -10,7 +10,7 @@ export function repo(
   extensions: string[],
   ingestWhen: Connector['ingestWhen'],
 ): Connector {
-  const sourceId = `repo:*`;
+  const sourceId = `repo:${dir}`;
   return {
     sourceId,
     ingestWhen,

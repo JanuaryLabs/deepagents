@@ -172,7 +172,7 @@ export class SQLiteStore implements Store {
     const stmt = this.#db.prepare(dedent`
 				SELECT 1 FROM sources WHERE source_id = ? LIMIT 1
 			`);
-    const row = stmt.run(sourceId);
+    const row = stmt.get(sourceId);
     return Boolean(row);
   }
   sourceExpired(sourceId: string) {

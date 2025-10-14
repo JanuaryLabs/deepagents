@@ -3,12 +3,11 @@ import * as sqliteVec from 'sqlite-vec';
 
 import { SQLiteStore } from './sqlite.js';
 
-const db = new DatabaseSync('./swarm.sqlite', {
-  allowExtension: true,
-});
+export function nodeSQLite(dbName: string, dimension: number) {
+  const db = new DatabaseSync(dbName, {
+    allowExtension: true,
+  });
 
-db.loadExtension(sqliteVec.getLoadablePath());
-
-export function nodeSQLite(dimension: number) {
+  db.loadExtension(sqliteVec.getLoadablePath());
   return new SQLiteStore(db, dimension);
 }

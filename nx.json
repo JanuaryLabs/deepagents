@@ -11,7 +11,7 @@
       "!{projectRoot}/src/test-setup.[jt]s"
     ],
     "sharedGlobals": []
-},
+  },
 
   "tui": { "enabled": false },
   "plugins": [
@@ -34,31 +34,6 @@
           "watchDepsName": "watch-deps"
         }
       }
-    },
-    {
-      "plugin": "@nx/react/router-plugin",
-      "options": {
-        "buildTargetName": "build",
-        "devTargetName": "dev",
-        "startTargetName": "start",
-        "watchDepsTargetName": "watch-deps",
-        "buildDepsTargetName": "build-deps",
-        "typecheckTargetName": "typecheck"
-      }
-    },
-    {
-      "plugin": "@nx/vite/plugin",
-      "options": {
-        "buildTargetName": "build",
-        "testTargetName": "test",
-        "serveTargetName": "serve",
-        "devTargetName": "dev",
-        "previewTargetName": "preview",
-        "serveStaticTargetName": "serve-static",
-        "typecheckTargetName": "typecheck",
-        "buildDepsTargetName": "build-deps",
-        "watchDepsTargetName": "watch-deps"
-      }
     }
   ],
   "workspaceLayout": {
@@ -73,7 +48,8 @@
         "tsConfig": "{projectRoot}/tsconfig.lib.json",
         "format": ["esm"],
         "declarationRootDir": "{projectRoot}/src",
-        "deleteOutputPath": false,
+        "deleteOutputPath": true,
+        "bundle": true,
         "minify": false,
         "sourcemap": true,
         "esbuildOptions": {
@@ -142,21 +118,5 @@
   "sync": {
     "applyChanges": true
   },
-  "generators": {
-    "@nx/react": {
-      "application": {
-        "babel": true,
-        "style": "css",
-        "linter": "eslint",
-        "bundler": "vite"
-      },
-      "component": {
-        "style": "css"
-      },
-      "library": {
-        "style": "css",
-        "linter": "eslint"
-      }
-    }
-  }
+  "generators": {}
 }
