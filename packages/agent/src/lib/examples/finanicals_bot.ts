@@ -4,7 +4,7 @@ import z from 'zod';
 
 import { type OutputExtractorFn, agent, instructions } from '../agent.ts';
 import { input, toOutput } from '../stream_utils.ts';
-import { execute } from '../swarm.ts';
+import { execute, generate } from '../swarm.ts';
 import { createProgress, withMessageProgress } from './planner.ts';
 
 const FinancialSearchItemSchema = z.object({
@@ -156,8 +156,10 @@ const progress = createProgress<Ctx>();
 progress.add({
   title: 'Planning searches',
   task: async (ctx, task) => {
-    const plan = await toOutput<FinancialSearchPlan>(
-      execute(plannerAgent, `Query: ${query}`, {}),
+    const { experimental_output: plan } = await generate(
+      plannerAgent,
+      `Query: ${query}`,
+      {},
     );
     ctx.plan = plan;
     task.title = `Planned ${plan.searches.length} searches`;
@@ -225,13 +227,13 @@ progress.add({
       task.output = `📝 ${message}`;
     });
 
-    const report = await toOutput<FinancialReportData>(
+    const report = (await toOutput(
       execute(
         writerWithTools,
         `Original query: ${query}\nSummarized search results: ${ctx.searchResults}`,
         {},
       ),
-    );
+    )) as FinancialReportData;
 
     progressUpdater[Symbol.dispose]?.();
 
@@ -248,8 +250,10 @@ progress.add({
     task.output = '🔍 Checking report quality and consistency...';
     task.title = '🔍 Verifying report';
 
-    const verification = await toOutput<VerificationResult>(
-      execute(verifierAgent, ctx.report!.markdown_report, {}),
+    const { experimental_output: verification } = await generate(
+      verifierAgent,
+      ctx.report!.markdown_report,
+      {},
     );
 
     ctx.verification = verification;

@@ -1,6 +1,8 @@
+import { groq } from '@ai-sdk/groq';
 import {
   type CoreMessage,
   type ModelMessage,
+  NoSuchToolError,
   Output,
   type PrepareStepFunction,
   type PrepareStepResult,
@@ -13,6 +15,7 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   generateId,
+  generateText,
   smoothStream,
   stepCountIs,
   streamText,
@@ -28,8 +31,7 @@ import {
   type TransferTool,
   isTransferToolResult,
 } from './agent.ts';
-import { lmstudio } from './models.ts';
-import { last, messageToUiMessage } from './stream_utils.ts';
+import { last, messageToUiMessage, user } from './stream_utils.ts';
 
 export type OutputMode = 'full_history' | 'last_message';
 
@@ -76,36 +78,99 @@ function filterAgentOutput(
   return allMessages;
 }
 
-export function execute<C>(
-  agent: Agent<C>,
+export function run<O, C>(
+  agent: Agent<O, C>,
   messages: UIMessage[] | string,
   contextVariables: C,
-  prompt?: string,
   config?: {
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
   },
 ) {
-  const model = agent.model ?? lmstudio('qwen/qwen3-4b-2507');
+  return generateText({
+    abortSignal: config?.abortSignal,
+    providerOptions: config?.providerOptions,
+    model: agent.model,
+    system: agent.instructions(contextVariables),
+    messages: convertToModelMessages(
+      Array.isArray(messages) ? messages : [user(messages)],
+    ),
+    temperature: agent.temperature,
+    stopWhen: stepCountIs(25),
+    tools: agent.toToolset(),
+    activeTools: agent.toolsNames,
+    experimental_context: contextVariables,
+    toolChoice: agent.toolChoice,
+    experimental_output: agent.output
+      ? Output.object({ schema: agent.output })
+      : undefined,
+    // onStepFinish: (step) => tagAgents(step, agent.handoff.name),
+    onStepFinish: (step) => {
+      const toolCall = step.toolCalls.at(-1);
+      if (toolCall) {
+        console.log(
+          `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
+        );
+      }
+    },
+    prepareStep: prepareStep(agent, agent.model, contextVariables),
+    // onFinish: (result) => {
+    //   (contextVariables as any).content = result.content;
+    // },
+  });
+}
 
-  // Ensure messages are properly converted to UIMessage array
-  const uiMessages = Array.isArray(messages)
-    ? messages
-    : [messageToUiMessage(messages)];
-
+export function execute<O, C>(
+  agent: Agent<O, C>,
+  messages: UIMessage[] | string,
+  contextVariables: C,
+  config?: {
+    abortSignal?: AbortSignal;
+    providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
+  },
+) {
   return streamText({
     abortSignal: config?.abortSignal,
     providerOptions: config?.providerOptions,
-    model: model,
-    system: `${prompt}\n${agent.instructions(contextVariables)}`,
-    messages: convertToModelMessages(uiMessages),
-    temperature: agent.temperature ?? 0,
+    model: agent.model,
+    system: agent.instructions(contextVariables),
+    messages: convertToModelMessages(
+      Array.isArray(messages) ? messages : [user(messages)],
+    ),
+    temperature: agent.temperature,
     stopWhen: stepCountIs(25),
     experimental_transform: smoothStream(),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,
     toolChoice: agent.toolChoice,
+    experimental_repairToolCall: async ({
+      toolCall,
+      tools,
+      inputSchema,
+      error,
+    }) => {
+      if (NoSuchToolError.isInstance(error)) {
+        return null; // do not attempt to fix invalid tool names
+      }
+
+      const tool = tools[toolCall.toolName as keyof typeof tools];
+
+      const { experimental_output } = await generateText({
+        model: groq('openai/gpt-oss-20b'),
+        experimental_output: Output.object({ schema: tool.inputSchema }),
+        prompt: [
+          `The model tried to call the tool "${toolCall.toolName}"` +
+            ` with the following inputs:`,
+          JSON.stringify(toolCall.input),
+          `The tool accepts the following schema:`,
+          JSON.stringify(inputSchema(toolCall)),
+          'Please fix the inputs.',
+        ].join('\n'),
+      });
+
+      return { ...toolCall, input: JSON.stringify(experimental_output) };
+    },
     onError: (error) => {
       console.error(
         chalk.red(`Error during agent (${agent.internalName}) execution: `),
@@ -125,36 +190,29 @@ export function execute<C>(
         );
       }
     },
-    prepareStep: prepareStep(agent, model, prompt, contextVariables),
+    prepareStep: prepareStep(agent, agent.model, contextVariables),
+    // onFinish: (result) => {
+    //   (contextVariables as any).content = result.content;
+    // },
   });
 }
 
+export const stream = execute;
+export const generate = run;
+
 export const prepareStep = <C>(
-  agent: Agent<any>,
+  agent: Agent<unknown, C>,
   model: AgentModel,
-  systemPrompt: string | undefined,
   contextVariables: C,
 ): PrepareStepFunction<NoInfer<Record<string, Tool>>> => {
   return async ({ steps, messages }) => {
     const step = steps.at(-1);
     const agentName = (contextVariables as any).currentActiveAgent;
     if (!step) {
-      return await prepareAgent(
-        systemPrompt,
-        model,
-        agent,
-        messages,
-        contextVariables,
-      );
+      return await prepareAgent(model, agent, messages, contextVariables);
     }
     if (!agentName) {
-      return await prepareAgent(
-        systemPrompt,
-        model,
-        agent,
-        messages,
-        contextVariables,
-      );
+      return await prepareAgent(model, agent, messages, contextVariables);
     }
 
     const nextAgent = findAgent(agent, agentName);
@@ -169,21 +227,14 @@ export const prepareStep = <C>(
       );
       return void 0;
     }
-    return await prepareAgent(
-      systemPrompt,
-      model,
-      nextAgent,
-      messages,
-      contextVariables,
-    );
+    return await prepareAgent(model, nextAgent, messages, contextVariables);
   };
 };
 
 export function swarm<C>(
-  agent: Agent<C>,
+  agent: Agent<unknown, C>,
   messages: UIMessage[] | string,
   contextVariables: C,
-  systemPrompt?: string,
   abortSignal?: AbortSignal,
 ) {
   const originalMessages = Array.isArray(messages)
@@ -193,13 +244,9 @@ export function swarm<C>(
     originalMessages,
     generateId: generateId,
     async execute({ writer }) {
-      const stream = execute(
-        agent,
-        originalMessages,
-        contextVariables,
-        systemPrompt,
-        { abortSignal },
-      );
+      const stream = execute(agent, originalMessages, contextVariables, {
+        abortSignal,
+      });
       const parts: UIMessagePart<UIDataTypes, UITools>[] = [];
 
       writer.merge(
@@ -259,9 +306,8 @@ export function swarm<C>(
 }
 
 export async function prepareAgent<C>(
-  prompt: string | undefined,
   defaultModel: AgentModel,
-  agent: Agent<C>,
+  agent: Agent<unknown, C>,
   messages: ModelMessage[],
   contextVariables?: C,
 ): Promise<PrepareStepResult<NoInfer<Record<string, Tool>>>> {
@@ -288,7 +334,7 @@ export async function prepareAgent<C>(
     });
   }
   return {
-    system: `${prompt || ''}\n${agent.instructions(contextVariables)}`,
+    system: agent.instructions(contextVariables),
     activeTools: agent.toolsNames,
     model: stepModel,
     messages,
@@ -311,7 +357,7 @@ function getLastAgentFromSteps(
   return void 0;
 }
 
-function findAgent<C>(agent: Agent<C>, agentName: string) {
+function findAgent<C>(agent: Agent<unknown, C>, agentName: string) {
   // FIXME: first argument agent not always the first passed agent.
   return [...agent.toHandoffs(), agent].find(
     (it) => it.handoff.name === agentName,

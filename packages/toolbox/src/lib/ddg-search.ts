@@ -14,21 +14,31 @@ export async function serp({
 }: z.input<typeof ddgSearchSchema>) {
   const safeSearch =
     ddg.SafeSearchType[
-      'MODERATE'
+      'STRICT'
       // input.safesearch.toUpperCase() as keyof typeof ddg.SafeSearchType
     ];
   const time =
     ddg.SearchTimeType[
-      input.time?.toUpperCase() as keyof typeof ddg.SearchTimeType
+      (input.time || 'y')?.toUpperCase() as keyof typeof ddg.SearchTimeType
     ];
 
   if (source === 'text') {
-    const res = await ddg.search(query, {
-      region: 'wt-wt',
-      safeSearch,
-      time,
-      locale,
-    });
+    const res = await ddg.search(
+      query,
+      {
+        region: 'wt-wt',
+        safeSearch,
+        time,
+        locale,
+      },
+      {
+        uri_modifier: (rawUrl: string) => {
+          const url = new URL(rawUrl);
+          url.searchParams.delete('ss_mkt');
+          return url.toString();
+        },
+      },
+    );
     const items = res.results.slice(0, maxResults).map((r) => ({
       snippet: r.description,
       title: r.title,
@@ -83,7 +93,7 @@ export const ddgSearchSchema = z.object({
   locale: z.string().optional().default('en-us'),
   // region: z.string().default('wt-wt'),
   // safesearch: z.enum(['strict', 'moderate', 'off']).default('moderate'),
-  time: z.enum(['d', 'w', 'm', 'y']).optional(),
+  time: z.enum(['d', 'w', 'm', 'y']).optional().default('y'),
   maxResults: z.number().int().positive().max(50).default(5),
 });
 export const duckDuckGoSearch = tool({

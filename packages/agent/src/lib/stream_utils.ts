@@ -1,4 +1,5 @@
 import {
+  type GenerateTextResult,
   type InferUIMessageChunk,
   type StreamTextResult,
   type Tool,
@@ -12,6 +13,7 @@ import { flow } from 'lodash-es';
 import { createWriteStream } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { Readable } from 'node:stream';
+import { isPromise } from 'node:util/types';
 
 import {
   visualizeMermaid,
@@ -51,9 +53,13 @@ export async function streamWrite(
 
 function printChunk(
   chunk: InferUIMessageChunk<UIMessage<unknown, UIDataTypes, UITools>>,
-  options: { reasoning: boolean; wrapInTags: boolean },
+  options: { reasoning: boolean; wrapInTags: boolean; text: boolean },
 ) {
-  const { reasoning: includeReasoning, wrapInTags } = options;
+  const {
+    reasoning: includeReasoning,
+    wrapInTags,
+    text: includeText,
+  } = options;
   if (includeReasoning) {
     if (chunk.type === 'reasoning-start') {
       process.stdout.write(`\n${wrapInTags ? '<reasoning>' : ''}\n`);
@@ -65,14 +71,16 @@ function printChunk(
       process.stdout.write(`\n${wrapInTags ? '</reasoning>' : ''}\n`);
     }
   }
-  if (chunk.type === 'text-start') {
-    process.stdout.write(`\n${wrapInTags ? '<text>' : ''}\n`);
-  }
-  if (chunk.type === 'text-delta') {
-    process.stdout.write(chunk.delta);
-  }
-  if (chunk.type === 'text-end') {
-    process.stdout.write(`\n${wrapInTags ? '</text>' : ''}\n`);
+  if (includeText) {
+    if (chunk.type === 'text-start') {
+      process.stdout.write(`\n${wrapInTags ? '<text>' : ''}\n`);
+    }
+    if (chunk.type === 'text-delta') {
+      process.stdout.write(chunk.delta);
+    }
+    if (chunk.type === 'text-end') {
+      process.stdout.write(`\n${wrapInTags ? '</text>' : ''}\n`);
+    }
   }
 }
 
@@ -81,22 +89,32 @@ export const printer = {
     stream: ReadableStream<
       InferUIMessageChunk<UIMessage<unknown, UIDataTypes, UITools>>
     >,
-    options?: { reasoning?: boolean; wrapInTags?: boolean },
+    options?: { reasoning?: boolean; wrapInTags?: boolean; text?: boolean },
   ) => {
     const includeReasoning = options?.reasoning ?? true;
     const wrapInTags = options?.wrapInTags ?? true;
+    const includeText = options?.text ?? true;
     for await (const chunk of stream as any) {
-      printChunk(chunk, { reasoning: includeReasoning, wrapInTags });
+      printChunk(chunk, {
+        reasoning: includeReasoning,
+        wrapInTags,
+        text: includeText,
+      });
     }
   },
   stdout: async (
     response: StreamTextResult<Record<string, Tool>, unknown>,
-    options?: { reasoning?: boolean; wrapInTags?: boolean },
+    options?: { reasoning?: boolean; text?: boolean; wrapInTags?: boolean },
   ) => {
     const includeReasoning = options?.reasoning ?? true;
+    const includeText = options?.text ?? true;
     const wrapInTags = options?.wrapInTags ?? true;
     for await (const chunk of response.toUIMessageStream()) {
-      printChunk(chunk, { reasoning: includeReasoning, wrapInTags });
+      printChunk(chunk, {
+        reasoning: includeReasoning,
+        text: includeText,
+        wrapInTags,
+      });
     }
     console.log(await response.totalUsage);
   },
@@ -174,8 +192,14 @@ export async function finished<T>(iterable: AsyncIterable<T>) {
   await Array.fromAsync(iterable);
 }
 
-export function toOutput<T>(result: StreamTextResult<Record<string, Tool>, T>) {
-  return last(result.experimental_partialOutputStream);
+export function toOutput<T>(
+  result:
+    | Promise<GenerateTextResult<Record<string, Tool>, T>>
+    | StreamTextResult<Record<string, Tool>, T>,
+) {
+  return isPromise(result)
+    ? result.then((res) => res.experimental_output)
+    : last(result.experimental_partialOutputStream);
 }
 
 export function toState<C>(options: ToolCallOptions) {

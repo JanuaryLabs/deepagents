@@ -1,7 +1,7 @@
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-
-import { tool } from 'ai';
 import z from 'zod';
 
 import { type Agent, agent, instructions } from '../agent.ts';
@@ -63,11 +63,13 @@ function parseSizeToBytes(sizeStr: string | undefined): number {
   return Math.round(n * mul);
 }
 const docker_container_agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'docker_container_agent',
   handoffDescription:
     'Specialist for container queries: listing, logs, processes, stats, ports, and container inspect.',
   prompt: instructions({
     purpose: [
+      SYSTEM_PROMPT,
       'Answer container-related questions without changing state.',
       'Prefer concise output and suggest filters when large.',
     ],
@@ -196,6 +198,7 @@ const docker_container_agent = agent({
 });
 
 const docker_image_agent: Agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'docker_image_agent',
   handoffDescription:
     'A helpful agent that specializes in image queries: listing, inspect, history, versions.',
@@ -308,12 +311,14 @@ const docker_image_agent: Agent = agent({
 });
 
 const docker_network_agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'docker_network_agent',
   handoffDescription:
     'Specialist for network queries: list/inspect networks and related info.',
   prompt: instructions({
     purpose: 'Answer network-related questions in read-only mode.',
     routine: [
+      SYSTEM_PROMPT,
       'Use docker_network_ls to list and docker_network_inspect to inspect.',
       'Refuse any action that would change state (create/connect/disconnect/rm).',
     ],
@@ -353,12 +358,15 @@ const docker_network_agent = agent({
 });
 
 const docker_volume_agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'docker_volume_agent',
   handoffDescription:
     'A helpful agent that specializes in volume queries: list/inspect volumes.',
   prompt: instructions({
-    purpose:
+    purpose: [
+      SYSTEM_PROMPT,
       'You are helpful docker volume agents that have access to docker volumes.',
+    ],
     routine: [
       'Use docker_volume_ls to list volumes',
       'Use docker_volume_inspect to inspect a volume',
@@ -399,11 +407,15 @@ const docker_volume_agent = agent({
 });
 
 const docker_system_agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'docker_system_agent',
   handoffDescription:
     'Specialist for daemon/system queries: info, df, events, contexts, plugins.',
   prompt: instructions({
-    purpose: 'Answer system/daemon-wide questions in read-only mode.',
+    purpose: [
+      SYSTEM_PROMPT,
+      'Answer system/daemon-wide questions in read-only mode.',
+    ],
     routine: [
       'Use docker_info, docker_df, docker_events (bounded), docker_context_ls, docker_plugin_ls.',
       'Refuse any action that would change state (system prune, context use, plugin enable/disable).',
@@ -477,10 +489,12 @@ const docker_system_agent = agent({
 });
 
 export const docker_triage_agent: Agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'docker_triage_agent',
   handoffDescription: `Handoff to the triage_agent to handle the request.`,
   prompt: instructions({
     purpose: [
+      SYSTEM_PROMPT,
       `You are a helpful orchestrator agent that coordinates the process by delegating tasks to specialized agents based on user requests and the current state of the execution.`,
       `First you need to create plan in order to navigate between the specialized agents`,
       `Transfers to specialized agents are achieved by calling a transfer function, named \`transfer_to_<agent_name>\`.`,
@@ -510,7 +524,6 @@ const response = execute(
     ),
   ],
   {},
-  SYSTEM_PROMPT,
 );
 
 await printer.stdout(response);

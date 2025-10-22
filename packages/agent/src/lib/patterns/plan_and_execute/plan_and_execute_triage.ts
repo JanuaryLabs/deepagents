@@ -1,8 +1,7 @@
-import { exec } from 'node:child_process';
-
 import { groq } from '@ai-sdk/groq';
 import { openai } from '@ai-sdk/openai';
 import { tool } from 'ai';
+import { exec } from 'node:child_process';
 import z from 'zod';
 
 import { type Agent, agent, instructions } from '../../agent.ts';
@@ -47,7 +46,7 @@ interface PlanExecuteState {
   response?: string;
 }
 
-const planner = agent<PlanExecuteState>({
+const planner = agent<unknown, PlanExecuteState>({
   model: openai('gpt-4.1-nano'),
   name: 'PlannerAgent',
   handoffDescription:
@@ -85,7 +84,7 @@ const planner = agent<PlanExecuteState>({
   handoffs: [() => executor],
 });
 
-const executor = agent<PlanExecuteState>({
+const executor = agent<unknown, PlanExecuteState>({
   name: 'ExecutorAgent',
   model: groq('openai/gpt-oss-120b'),
   handoffDescription:
@@ -136,7 +135,7 @@ const executor = agent<PlanExecuteState>({
   },
 });
 
-const replanner = agent<PlanExecuteState>({
+const replanner = agent<unknown,PlanExecuteState>({
   name: 'ReplannerAgent',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   handoffDescription:
@@ -194,7 +193,10 @@ const replanner = agent<PlanExecuteState>({
   handoffs: [() => executor, () => triage],
 });
 
-const triage: Agent<PlanExecuteState> = agent<PlanExecuteState>({
+const triage: Agent<unknown, PlanExecuteState> = agent<
+  unknown,
+  PlanExecuteState
+>({
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   name: 'triage_agent',
   handoffDescription: `Use this agent to delegate questions to other appropriate agents.`,
@@ -216,7 +218,7 @@ const triage: Agent<PlanExecuteState> = agent<PlanExecuteState>({
         };
       },
     }),
-  }
+  },
 });
 
 if (import.meta.main) {

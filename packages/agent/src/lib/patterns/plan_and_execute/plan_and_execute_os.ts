@@ -1,10 +1,9 @@
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
-
 import { agent, instructions } from '../../agent.ts';
-import { confirm, toOutput } from '../../stream_utils.ts';
-import { execute } from '../../swarm.ts';
+import { confirm } from '../../stream_utils.ts';
+import { execute, generate } from '../../swarm.ts';
 
 // Define the schemas for structured output
 const PlanSchema = z.object({
@@ -111,8 +110,10 @@ export async function planAndExecute(
     plan: [],
     pastSteps: [],
   };
-  const initialPlan = await toOutput<Plan>(
-    execute(planner, `Objective: ${objective}`, {}),
+  const { experimental_output: initialPlan } = await generate(
+    planner,
+    `Objective: ${objective}`,
+    {},
   );
   state.plan = initialPlan.steps;
   console.log('📋 Initial plan created:');
@@ -170,8 +171,10 @@ Based on the progress made, either:
 Only include steps that still NEED to be done. Do not repeat completed steps.
     `.trim();
 
-    const replanResult = await toOutput<ReplanResult>(
-      execute(replanner, replanPrompt, {}),
+    const { experimental_output: replanResult } = await generate(
+      replanner,
+      replanPrompt,
+      {},
     );
 
     if (replanResult.type === 'response') {

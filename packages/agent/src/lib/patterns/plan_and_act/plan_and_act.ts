@@ -1,10 +1,8 @@
 import { groq } from '@ai-sdk/groq';
 import { z } from 'zod';
 
-
 import { agent, instructions } from '../../agent.ts';
-import { toOutput } from '../../stream_utils.ts';
-import { execute } from '../../swarm.ts';
+import { generate } from '../../swarm.ts';
 
 // ===============
 // Types & Schemas
@@ -176,8 +174,10 @@ export async function runPlanAndAct(
 
   // Step 1: Generate initial plan
   console.log('\n📋 PLANNING PHASE');
-  const initialPlanResponse = await toOutput<PlanningResponse>(
-    execute(planner, `Create a plan to accomplish this task: ${query}`, {}),
+  const { experimental_output: initialPlanResponse } = await generate(
+    planner,
+    `Create a plan to accomplish this task: ${query}`,
+    {},
   );
 
   console.log('💭 Reasoning:', initialPlanResponse.reasoning);
@@ -211,15 +211,13 @@ export async function runPlanAndAct(
     console.log(`🔄 Executing Step ${stepIndex + 1}: ${currentStep}`);
 
     // Execute the current step
-    const executionResult = await toOutput<ExecutionResult>(
-      execute(
-        executor,
-        `Execute this step: ${currentStep}
+    const { experimental_output: executionResult } = await generate(
+      executor,
+      `Execute this step: ${currentStep}
 
 Context: You are working on this overall task: "${query}"
 Previous steps completed: ${state.executionHistory.length}`,
-        {},
-      ),
+      {},
     );
 
     console.log(`💭 Execution reasoning: ${executionResult.reasoning}`);
@@ -261,11 +259,11 @@ Analyze the progress and decide whether to continue with more steps or provide t
 
     // Replan based on execution results
     console.log('\n🔄 REPLANNING PHASE');
-    const replanningDecision = await toOutput<ReplanningDecision>(
-      execute(replanner, contextForReplanning, {}),
+    const { experimental_output: replanningDecision } = await generate(
+      replanner,
+      contextForReplanning,
+      {},
     );
-
-    console.log(`💭 Replanning reasoning: ${replanningDecision.reasoning}`);
 
     // Record this execution cycle
     state.executionHistory.push({

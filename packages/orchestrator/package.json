@@ -1,0 +1,43 @@
+{
+  "name": "@deepagents/orchestrator",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/lib/*",
+      "import": "./dist/lib/*",
+      "default": "./dist/lib/*"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo",
+    "!**/*.test.*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@deepagents/agent": "0.0.1",
+    "@ai-sdk/groq": "2.0.24",
+    "zod": "^3.25.76 || ^4.0.0",
+    "ai": "^5.0.65",
+    "lodash-es": "^4.17.21",
+    "@deepagents/retrieval": "0.0.1",
+    "@deepagents/toolbox": "0.0.1",
+    "p-limit": "^6.1.0"
+  },
+  "peerDependencies": {},
+  "devDependencies": {
+    "@types/debug": "^4.1.12"
+  }
+}

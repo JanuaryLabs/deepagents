@@ -1,7 +1,7 @@
 import { type Tool, dynamicTool } from 'ai';
 import z from 'zod';
 
-import { type Agent, agent, instructions } from '../agent.ts';
+import { type Agent, type AgentModel, agent, instructions } from '../agent.ts';
 
 // Simple in-memory mock filesystem shared across tools
 const mockFS = new Map<string, string>();
@@ -162,11 +162,10 @@ export type SubAgent = {
   model_settings?: Record<string, unknown>; // accepted for API parity; not used here
 };
 
-// create_deep_agent: Python-style API, implemented using our swarm Agent
 export function create_deep_agent(
   tools: Record<string, Tool>,
   prompt: string,
-  model?: unknown, // accepted for parity; not used, model is selected in swarm()
+  model: AgentModel,
   subagents?: SubAgent[],
 ) {
   const externalTools: Record<string, Tool> = tools ?? {};
@@ -177,6 +176,7 @@ export function create_deep_agent(
 
   // general-purpose subagent mirrors Python default behavior
   const generalPurpose = agent({
+    model: model,
     name: 'general-purpose',
     handoffDescription:
       'General-purpose agent for researching complex questions and multi-step tasks.',
@@ -203,6 +203,7 @@ export function create_deep_agent(
         )
       : { ...allToolset };
     return agent({
+      model: model,
       name: sa.name,
       handoffDescription: sa.description,
       prompt: instructions({ purpose: sa.prompt, routine: [] }),
@@ -214,6 +215,7 @@ export function create_deep_agent(
   const children = [generalPurpose, ...customAgents];
 
   const manager: Agent = agent({
+    model: model,
     name: 'deepagents_manager',
     handoffDescription:
       'Coordinates deep agent workflow and delegates via task or transfers.',

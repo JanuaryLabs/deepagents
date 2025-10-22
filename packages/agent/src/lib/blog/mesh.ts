@@ -1,3 +1,5 @@
+import { groq } from '@ai-sdk/groq';
+
 import { type Agent, agent, instructions } from '../agent.ts';
 
 export const SYSTEM_PROMPT = `
@@ -9,6 +11,7 @@ Your job is to collaborate through a structured, multi-step process to take a us
 `.trim();
 
 const outline = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'blog_outline_writer_agent',
   handoffDescription: `A helpful agent that crafts concise blog post outlines.`,
   prompt: instructions({
@@ -24,6 +27,7 @@ const outline = agent({
 });
 
 const writer: Agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'blog_writer_agent',
   handoffDescription: `A helpful agent that writes blog posts.`,
   prompt: instructions({
@@ -42,6 +46,7 @@ const writer: Agent = agent({
 });
 
 const editor = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'blog_editor_agent',
   handoffDescription: `An editorial agent that reviews and refines blog posts for quality and accuracy.`,
   prompt: instructions({
@@ -61,6 +66,7 @@ const editor = agent({
 });
 
 export const triage = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'triage_agent',
   handoffDescription: `Handoff to the triage_agent to handle the request.`,
   prompt: instructions({

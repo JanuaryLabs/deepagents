@@ -32,7 +32,7 @@ export interface Handoff<C> {
   handoffDescription?: string;
   tools: Record<string, Tool>;
 }
-export type Handoffs<C> = (Agent<C> | (() => Agent<C>))[];
+export type Handoffs<C> = (Agent<unknown, C> | (() => Agent<unknown, C>))[];
 
 export type Runner<T, C> = (
   prompt: string,
@@ -44,8 +44,10 @@ type transfer_tool = `transfer_to_${string}`;
 
 export type ContextVariables = Record<string, unknown>;
 
-export function agent<C = ContextVariables>(config: CreateAgent<C>): Agent<C> {
-  return new Agent(config);
+export function agent<Output, C = ContextVariables>(
+  config: CreateAgent<Output, C>,
+): Agent<Output, C> {
+  return new Agent<Output, C>(config);
 }
 
 export type ResponseMessage = UIMessage<unknown, UIDataTypes, UITools>;
@@ -64,7 +66,7 @@ export type PrepareEndFn<C> = (config: {
   abortSignal?: AbortSignal;
 }) => StreamTextResult<Record<string, Tool>, any> | undefined | void;
 
-export interface CreateAgent<C> {
+export interface CreateAgent<Output, C> {
   name: string;
   prompt: Instruction<C>;
   temperature?: number;
@@ -73,14 +75,14 @@ export interface CreateAgent<C> {
   prepareEnd?: PrepareEndFn<C>;
   handoffs?: Handoffs<C>;
   tools?: Record<string, Tool>;
-  model?: AgentModel;
+  model: AgentModel;
   toolChoice?: ToolChoice<Record<string, unknown>>;
-  output?: z.Schema<any>;
+  output?: z.Schema<Output>;
 }
-export class Agent<C = ContextVariables> {
-  model: AgentModel | undefined;
+export class Agent<Output = unknown, C = ContextVariables> {
+  model: AgentModel;
   toolChoice: ToolChoice<Record<string, unknown>> | undefined;
-  parent?: Agent<C>;
+  parent?: Agent<unknown, C>;
   handoffs: Handoffs<C>;
   readonly prepareHandoff?: PrepareHandoffFn;
   readonly prepareEnd?: PrepareEndFn<C>;
@@ -88,11 +90,11 @@ export class Agent<C = ContextVariables> {
   readonly handoff: Handoff<C>;
   readonly handoffToolName: transfer_tool;
   readonly handoffTool: Record<string, Tool>;
-  readonly output?: z.Schema<any>;
+  readonly output?: z.Schema<Output>;
   readonly temperature?: number;
-  constructor(config: CreateAgent<C>) {
+  constructor(config: CreateAgent<Output, C>) {
     this.model = config.model;
-    this.toolChoice = config.toolChoice;
+    this.toolChoice = config.toolChoice || 'auto';
     this.handoffs = config.handoffs ?? [];
     this.prepareHandoff = config.prepareHandoff;
     this.prepareEnd = config.prepareEnd;
@@ -181,7 +183,7 @@ export class Agent<C = ContextVariables> {
   }
 
   toHandoffs() {
-    const hfs: Agent<C>[] = [];
+    const hfs: Agent<unknown, C>[] = [];
     for (const it of this.handoffs ?? []) {
       const hf = typeof it === 'function' ? it() : it;
       hf.parent = this;
@@ -224,7 +226,6 @@ export class Agent<C = ContextVariables> {
             prepareStep: prepareStep(
               this,
               this.model!,
-              '',
               options.experimental_context,
             ),
           });
@@ -244,7 +245,7 @@ export class Agent<C = ContextVariables> {
     toolDescription?: string;
     outputExtractor?: OutputExtractorFn;
   }) {
-    return {[this.handoffToolName]: this.asTool(props)};
+    return { [this.handoffToolName]: this.asTool(props) };
   }
 
   debug(prefix = '') {
@@ -279,7 +280,7 @@ export class Agent<C = ContextVariables> {
     includeHandoffs?: boolean;
   }): Record<string, Tool> {
     const tools = flattenTools(
-      this as Agent<C>,
+      this as Agent<unknown, C>,
       (node) => node.toHandoffs(),
       (node) => node.handoff.tools,
     );
@@ -291,8 +292,10 @@ export class Agent<C = ContextVariables> {
     };
   }
 
-  clone(agent?: Omit<Partial<CreateAgent<C>>, 'handoffs'>): Agent<C> {
-    return new Agent({
+  clone(
+    agent?: Omit<Partial<CreateAgent<Output, C>>, 'handoffs'>,
+  ): Agent<Output, C> {
+    return new Agent<Output, C>({
       prepareHandoff: (messages) => {
         this.prepareHandoff?.(messages);
       },

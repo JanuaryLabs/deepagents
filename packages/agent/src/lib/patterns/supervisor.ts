@@ -1,5 +1,4 @@
 import { type Tool } from 'ai';
-import { writeFile } from 'node:fs/promises';
 
 import {
   type Agent,
@@ -14,9 +13,9 @@ import { execute, swarm } from '../swarm.ts';
 
 export function createSupervisor<C>(props: {
   prompt: Instruction<C>;
-  subagents: Agent<C>[];
+  subagents: Agent<unknown, C>[];
   name?: string;
-  model?: AgentModel;
+  model: AgentModel;
   outputMode?: 'full_history' | 'last_message';
   handoffDescription?: string;
   tools?: Record<string, Tool>;
@@ -24,7 +23,7 @@ export function createSupervisor<C>(props: {
   const subagents = props.subagents.map((subagent) =>
     subagent.clone({ model: subagent.model || props.model }),
   );
-  const supervisor: Agent<C> = agent<C>({
+  const supervisor: Agent<unknown, C> = agent<unknown, C>({
     name: props.name || 'supervisor',
     model: props.model,
     prompt: props.prompt,
@@ -86,13 +85,9 @@ export function createSupervisor<C>(props: {
         input: {},
         output: `Transfer successful to ${this.name}`,
       });
-      return execute<C>(
-        supervisor,
-        messages,
-        contextVariables,
-        supervisor.instructions(contextVariables),
-        { abortSignal },
-      );
+      return execute<unknown, C>(supervisor, messages, contextVariables, {
+        abortSignal,
+      });
     },
   });
   for (const subagent of subagents) {

@@ -102,6 +102,7 @@ Maximum ${maxSources} sources. Return comprehensive analysis with key findings.`
 
 export const researchAgent = <C>(handoffs: Handoffs<C>) =>
   agent({
+    model: groq('openai/gpt-oss-20b'),
     name: 'research_agent',
     handoffDescription:
       'A research agent that conducts comprehensive web research and provides structured analysis',

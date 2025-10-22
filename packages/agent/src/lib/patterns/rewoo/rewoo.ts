@@ -2,8 +2,7 @@ import { openai } from '@ai-sdk/openai';
 import z from 'zod';
 
 import { agent, instructions } from '../../agent.ts';
-import { toOutput } from '../../stream_utils.ts';
-import { execute } from '../../swarm.ts';
+import { execute, generate } from '../../swarm.ts';
 
 // ===============
 // Types & Schemas
@@ -138,7 +137,7 @@ export const rewooSolver = agent({
 
 export async function runRewoo(query: string) {
   // 1) Plan
-  const plan = await toOutput<RewooPlan>(execute(rewooPlanner, query, {}));
+  const { experimental_output: plan } = await generate(rewooPlanner, query, {});
 
   // 2) Execute tool calls (in parallel)
   const evidences: Evidence[] = await Promise.all(

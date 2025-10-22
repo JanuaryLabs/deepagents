@@ -60,3 +60,7 @@ combined.txt
 packages/apiref/app/_generated/
 
 local_cache/
+
+
+**/.vitepress/cache/
+deepsearch.sqlite*

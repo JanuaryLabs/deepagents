@@ -1,7 +1,7 @@
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
 import fs, { glob } from 'node:fs/promises';
 import path from 'node:path';
-
-import { tool } from 'ai';
 import z from 'zod';
 
 import { type Agent, agent, instructions } from '../agent.ts';
@@ -149,11 +149,13 @@ const read_package_json_tool = tool({
 
 // ---------- Sub-agents ----------
 const discoveryAgent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_discovery_agent',
   handoffDescription:
     'Finds all package.json files and returns a compact list for further analysis.',
   prompt: instructions.supervisor_subagent({
     purpose: [
+      SYSTEM_PROMPT,
       'Discover all package.json files in the repository and output a compact list for downstream agents.',
     ],
     routine: [
@@ -170,11 +172,13 @@ const discoveryAgent = agent({
 });
 
 const scriptsAgent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_scripts_agent',
   handoffDescription:
     'Analyzes scripts across all packages, flags duplicates, risks, and dead scripts.',
   prompt: instructions.supervisor_subagent({
     purpose: [
+      SYSTEM_PROMPT,
       'Analyze scripts from discovered packages; detect duplicates, conflicts, and suspicious lifecycle hooks. Suggest concise improvements.',
     ],
     routine: [
@@ -189,11 +193,13 @@ const scriptsAgent = agent({
 });
 
 const depsAgent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_deps_agent',
   handoffDescription:
     'Audits dependencies, devDependencies, peerDependencies across the workspace.',
   prompt: instructions.supervisor_subagent({
     purpose: [
+      SYSTEM_PROMPT,
       'Detect version skew, duplicate ranges, peer mismatches, and misplaced deps vs devDeps. Propose minimal alignment steps.',
     ],
     routine: [
@@ -208,11 +214,13 @@ const depsAgent = agent({
 });
 
 const metadataAgent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_metadata_agent',
   handoffDescription:
     'Checks metadata hygiene: license, repository, bugs, author, engines, packageManager.',
   prompt: instructions.supervisor_subagent({
     purpose: [
+      SYSTEM_PROMPT,
       'Ensure each package has appropriate metadata fields and that packageManager/engines align with the toolchain.',
     ],
     routine: [
@@ -226,11 +234,13 @@ const metadataAgent = agent({
 });
 
 const publishabilityAgent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_publishability_agent',
   handoffDescription:
     'Evaluates library publish readiness: exports map, types, files, sideEffects, publishConfig.',
   prompt: instructions.supervisor_subagent({
     purpose: [
+      SYSTEM_PROMPT,
       'Assess which packages are publishable and what is missing for clean publishing. Keep suggestions minimal and safe.',
     ],
     routine: [
@@ -244,6 +254,7 @@ const publishabilityAgent = agent({
 });
 
 const reporterAgent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_reporter_agent',
   handoffDescription:
     'Compiles sub-agent outputs into a final, concise report for the user.',
@@ -262,9 +273,11 @@ const reporterAgent = agent({
 
 // ---------- Manager (star center) ----------
 export const managerAgent: Agent = agent({
+  model: groq('openai/gpt-oss-20b'),
   name: 'pkg_manager_agent',
   prompt: instructions.supervisor({
     purpose: [
+      SYSTEM_PROMPT,
       'Coordinate the package.json analysis by delegating to specialized agents based on the mandatory sequence.',
       'Do not perform the analysis yourself; only orchestrate and ensure each step yields the required tagged output.',
     ],
@@ -300,7 +313,6 @@ const response = execute(
   managerAgent,
   [messageToUiMessage(`“Which packages miss license or repository fields?”`)],
   {},
-  SYSTEM_PROMPT,
 );
 
 await printer.stdout(response);

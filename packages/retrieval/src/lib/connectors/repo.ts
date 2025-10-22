@@ -1,7 +1,6 @@
+import fg from 'fast-glob';
 import { opendir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-
-import fg from 'fast-glob';
 
 import type { Connector } from './connector.js';
 
@@ -87,6 +86,100 @@ async function gitignore(gitignoreFile: string) {
   return patterns;
 }
 
+export async function ignorePatterns(repo: string) {
+  return [
+    // Inherit repo-specific ignore patterns
+    ...(await gitignore(join(repo, '.gitignore'))),
+
+    // Package managers & dependency dirs
+    'node_modules/**',
+    '**/node_modules/**',
+    '**/.pnpm/**',
+    '**/.npm/**',
+    '**/.yarn/**',
+    '**/vendor/**', // PHP / Go modules (when vendored)
+    '**/3rdparty/**',
+
+    // Version control + VCS metadata
+    '**/.git/**',
+    '**/.svn/**',
+    '**/.hg/**',
+
+    // OS / system junk
+    '**/.DS_Store',
+    '**/Thumbs.db',
+    '**/Library/**',
+    '**/Applications/**',
+    '**/Pictures/**',
+    '**/Movies/**',
+    '**/Music/**',
+    '**/Downloads/**',
+    '**/.cache/**',
+
+    // Environment / secrets (explicit)
+    '**/.env',
+    '**/.env.*',
+
+    // Lockfiles & generated dependency state
+    '**/*.lock',
+    '**/yarn.lock',
+    '**/package-lock.json',
+    '**/pnpm-lock.yaml',
+
+    // Build / compilation outputs
+    '**/dist/**',
+    '**/debug/**',
+    '**/build/**',
+    '**/out/**',
+    '**/target/**', // Rust / JVM
+    '**/bin/**',
+    '**/obj/**',
+    '**/classes/**',
+
+    // Framework / tool specific build artifacts
+    '**/.next/**',
+    '**/.vercel/**',
+    '**/.turbo/**',
+    '**/.docusaurus/**',
+    '**/.vite/**',
+    '**/.parcel-cache/**',
+    '**/.rollup.cache/**',
+    '**/.vuepress/**',
+    'cdk.out/**',
+
+    // Infra & deployment tooling
+    '**/.serverless/**',
+    '**/.terraform/**',
+    '**/.terragrunt-cache/**',
+    '**/.pulumi/**',
+
+    // Coverage & testing caches
+    '**/coverage/**',
+    '**/.nyc_output/**',
+    '**/jest-cache/**',
+    '**/.pytest_cache/**',
+
+    // Language / tooling caches
+    '**/__pycache__/**',
+    '**/.mypy_cache/**',
+    '**/.tox/**',
+    '**/.gradle/**',
+    '**/.mvn/**',
+    '**/.eslintcache',
+    '**/.stylelintcache',
+
+    // IDE / editor configs + history (we don't want to embed these)
+    '**/.idea/**',
+    '**/.vscode/**',
+    '**/.fleet/**',
+    '**/.history/**',
+
+    // Virtual environments
+    '**/.venv/**',
+    '**/venv/**',
+  ];
+}
+
 export async function collectFiles(
   repo: string,
   extensions: string[],
@@ -100,97 +193,7 @@ export async function collectFiles(
       unique: true,
       absolute: true,
       cwd: repo,
-      ignore: [
-        // Inherit repo-specific ignore patterns
-        ...(await gitignore(join(repo, '.gitignore'))),
-
-        // Package managers & dependency dirs
-        'node_modules/**',
-        '**/node_modules/**',
-        '**/.pnpm/**',
-        '**/.npm/**',
-        '**/.yarn/**',
-        '**/vendor/**', // PHP / Go modules (when vendored)
-        '**/3rdparty/**',
-
-        // Version control + VCS metadata
-        '**/.git/**',
-        '**/.svn/**',
-        '**/.hg/**',
-
-        // OS / system junk
-        '**/.DS_Store',
-        '**/Thumbs.db',
-        '**/Library/**',
-        '**/Applications/**',
-        '**/Pictures/**',
-        '**/Movies/**',
-        '**/Music/**',
-        '**/Downloads/**',
-        '**/.cache/**',
-
-        // Environment / secrets (explicit)
-        '**/.env',
-        '**/.env.*',
-
-        // Lockfiles & generated dependency state
-        '**/*.lock',
-        '**/yarn.lock',
-        '**/package-lock.json',
-        '**/pnpm-lock.yaml',
-
-        // Build / compilation outputs
-        '**/dist/**',
-        '**/debug/**',
-        '**/build/**',
-        '**/out/**',
-        '**/target/**', // Rust / JVM
-        '**/bin/**',
-        '**/obj/**',
-        '**/classes/**',
-
-        // Framework / tool specific build artifacts
-        '**/.next/**',
-        '**/.vercel/**',
-        '**/.turbo/**',
-        '**/.docusaurus/**',
-        '**/.vite/**',
-        '**/.parcel-cache/**',
-        '**/.rollup.cache/**',
-        '**/.vuepress/**',
-        'cdk.out/**',
-
-        // Infra & deployment tooling
-        '**/.serverless/**',
-        '**/.terraform/**',
-        '**/.terragrunt-cache/**',
-        '**/.pulumi/**',
-
-        // Coverage & testing caches
-        '**/coverage/**',
-        '**/.nyc_output/**',
-        '**/jest-cache/**',
-        '**/.pytest_cache/**',
-
-        // Language / tooling caches
-        '**/__pycache__/**',
-        '**/.mypy_cache/**',
-        '**/.tox/**',
-        '**/.gradle/**',
-        '**/.mvn/**',
-        '**/.eslintcache',
-        '**/.stylelintcache',
-
-        // IDE / editor configs + history (we don't want to embed these)
-        '**/.idea/**',
-        '**/.vscode/**',
-        '**/.fleet/**',
-        '**/.history/**',
-
-        // Virtual environments
-        '**/.venv/**',
-        '**/venv/**',
-      ],
+      ignore: await ignorePatterns(repo),
     },
   ) as AsyncIterable<string>;
 }

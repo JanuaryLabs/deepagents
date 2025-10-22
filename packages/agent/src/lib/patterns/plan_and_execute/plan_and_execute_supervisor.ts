@@ -1,7 +1,6 @@
-import { writeFileSync } from 'node:fs';
-
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
+import { writeFileSync } from 'node:fs';
 import z from 'zod';
 
 import { type Agent, agent, instructions } from '../../agent.ts';
@@ -508,7 +507,7 @@ function createStateTools() {
 // Initialize state manager
 const stateTools = createStateTools();
 
-const planner = agent<PlanExecuteStateManager>({
+const planner = agent<unknown, PlanExecuteStateManager>({
   name: 'planner',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   handoffDescription:
@@ -563,7 +562,7 @@ const planner = agent<PlanExecuteStateManager>({
   handoffs: [() => supervisor],
 });
 
-const executor = agent<PlanExecuteStateManager>({
+const executor = agent<unknown, PlanExecuteStateManager>({
   name: 'executor',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   handoffDescription:
@@ -635,7 +634,7 @@ const executor = agent<PlanExecuteStateManager>({
   handoffs: [() => supervisor],
 });
 
-const judge = agent<PlanExecuteStateManager>({
+const judge = agent<unknown, PlanExecuteStateManager>({
   name: 'judge',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   handoffDescription:
@@ -716,7 +715,7 @@ const judge = agent<PlanExecuteStateManager>({
   handoffs: [() => supervisor],
 });
 
-const replanner = agent<PlanExecuteStateManager>({
+const replanner = agent<unknown, PlanExecuteStateManager>({
   name: 'replanner',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   handoffDescription:
@@ -797,83 +796,85 @@ const replanner = agent<PlanExecuteStateManager>({
   handoffs: [() => supervisor],
 });
 
-const supervisor: Agent<PlanExecuteStateManager> = createSupervisor({
-  subagents: [planner, executor, judge, replanner],
-  prompt: (context) => {
-    const state = context?.getCurrentState();
-    const hasPlan = state ? state.plan.length > 0 : false;
-    const hasPendingWork = context?.hasPendingWork() || false;
-    const hasFeedback = context?.hasWorkFeedback() || false;
-    const isComplete = context?.isComplete() || false;
-    const completedCount = state?.pastSteps.length || 0;
-    const pendingCount = context?.getPendingWork()?.length || 0;
-    const feedbackCount = context?.getWorkFeedback()?.length || 0;
+const supervisor: Agent<unknown, PlanExecuteStateManager> =
+  createSupervisor<PlanExecuteStateManager>({
+    model: groq('moonshotai/kimi-k2-instruct-0905'),
+    subagents: [planner, executor, judge, replanner],
+    prompt: (context) => {
+      const state = context?.getCurrentState();
+      const hasPlan = state ? state.plan.length > 0 : false;
+      const hasPendingWork = context?.hasPendingWork() || false;
+      const hasFeedback = context?.hasWorkFeedback() || false;
+      const isComplete = context?.isComplete() || false;
+      const completedCount = state?.pastSteps.length || 0;
+      const pendingCount = context?.getPendingWork()?.length || 0;
+      const feedbackCount = context?.getWorkFeedback()?.length || 0;
 
-    return instructions.supervisor({
-      purpose: [
-        '🎯 You orchestrate a quality-controlled plan-and-execute workflow.',
-        '⚖️ CRITICAL: ALL work must pass through judge evaluation before completion.',
-        '🔄 Manage the flow: Plan → Execute → Judge → (Approve/Feedback) → Replanning',
-        `📊 Status: ${completedCount} ✅ completed, ${hasPlan ? state!.plan.length : 0} 📋 planned, ${pendingCount} ⏳ pending review, ${feedbackCount} 📝 feedback`,
-        hasPlan
-          ? isComplete
-            ? '✅ Workflow complete - all work passed quality control'
-            : '🔄 Quality-controlled workflow in progress'
-          : '📋 Ready to create initial plan',
-      ],
-      routine: [
-        '🎯 QUALITY-CONTROLLED WORKFLOW DECISION TREE:',
-        '',
-        '1️⃣ PLANNING PHASE:',
-        !hasPlan
-          ? '   → No plan exists → handoff to PLANNER (create initial plan)'
-          : '',
-        '',
-        '2️⃣ EXECUTION PHASE:',
-        hasPlan && !hasPendingWork && !hasFeedback
-          ? '   → Plan exists, no pending work, no feedback → handoff to EXECUTOR'
-          : '',
-        '',
-        '3️⃣ QUALITY CONTROL PHASE (MANDATORY):',
-        hasPendingWork
-          ? `   → ${pendingCount} pending work items need evaluation → handoff to JUDGE`
-          : '',
-        '',
-        '4️⃣ FEEDBACK RESOLUTION PHASE:',
-        hasFeedback && !hasPendingWork
-          ? `   → ${feedbackCount} feedback items need addressing → handoff to EXECUTOR`
-          : '',
-        '',
-        '5️⃣ PROGRESS ASSESSMENT PHASE:',
-        '   → After judge approval cycles → handoff to REPLANNER for progress review',
-        '',
-        '6️⃣ COMPLETION:',
-        isComplete
-          ? '   ✅ Task complete (final response approved by judge) → END workflow'
-          : '',
-        '',
-        '⚠️ WORKFLOW INTEGRITY RULES:',
-        '   • NO work bypasses judge evaluation',
-        '   • ALL feedback must be addressed before new work',
-        '   • Judge decisions determine completion status',
-        '   • Replanner only acts after judge-approved work',
-        '   • Executor MUST use submit_work tool - not just describe work',
-        '   • If executor transfers without submitting work → redirect to EXECUTOR',
-        '',
-        '🚨 TROUBLESHOOTING:',
-        '   • If no pending work but work was described → redirect to EXECUTOR',
-        '   • If executor bypassed submit_work → redirect to EXECUTOR',
-        '   • If work output but not submitted → redirect to EXECUTOR',
-        '',
-        '� Monitor quality control effectiveness and workflow efficiency',
-      ],
-    });
-  },
-  tools: {
-    get_current_state: stateTools.get_current_state,
-    cleanup_state: stateTools.cleanup_state,
-  },
-});
+      return instructions.supervisor({
+        purpose: [
+          '🎯 You orchestrate a quality-controlled plan-and-execute workflow.',
+          '⚖️ CRITICAL: ALL work must pass through judge evaluation before completion.',
+          '🔄 Manage the flow: Plan → Execute → Judge → (Approve/Feedback) → Replanning',
+          `📊 Status: ${completedCount} ✅ completed, ${hasPlan ? state!.plan.length : 0} 📋 planned, ${pendingCount} ⏳ pending review, ${feedbackCount} 📝 feedback`,
+          hasPlan
+            ? isComplete
+              ? '✅ Workflow complete - all work passed quality control'
+              : '🔄 Quality-controlled workflow in progress'
+            : '📋 Ready to create initial plan',
+        ],
+        routine: [
+          '🎯 QUALITY-CONTROLLED WORKFLOW DECISION TREE:',
+          '',
+          '1️⃣ PLANNING PHASE:',
+          !hasPlan
+            ? '   → No plan exists → handoff to PLANNER (create initial plan)'
+            : '',
+          '',
+          '2️⃣ EXECUTION PHASE:',
+          hasPlan && !hasPendingWork && !hasFeedback
+            ? '   → Plan exists, no pending work, no feedback → handoff to EXECUTOR'
+            : '',
+          '',
+          '3️⃣ QUALITY CONTROL PHASE (MANDATORY):',
+          hasPendingWork
+            ? `   → ${pendingCount} pending work items need evaluation → handoff to JUDGE`
+            : '',
+          '',
+          '4️⃣ FEEDBACK RESOLUTION PHASE:',
+          hasFeedback && !hasPendingWork
+            ? `   → ${feedbackCount} feedback items need addressing → handoff to EXECUTOR`
+            : '',
+          '',
+          '5️⃣ PROGRESS ASSESSMENT PHASE:',
+          '   → After judge approval cycles → handoff to REPLANNER for progress review',
+          '',
+          '6️⃣ COMPLETION:',
+          isComplete
+            ? '   ✅ Task complete (final response approved by judge) → END workflow'
+            : '',
+          '',
+          '⚠️ WORKFLOW INTEGRITY RULES:',
+          '   • NO work bypasses judge evaluation',
+          '   • ALL feedback must be addressed before new work',
+          '   • Judge decisions determine completion status',
+          '   • Replanner only acts after judge-approved work',
+          '   • Executor MUST use submit_work tool - not just describe work',
+          '   • If executor transfers without submitting work → redirect to EXECUTOR',
+          '',
+          '🚨 TROUBLESHOOTING:',
+          '   • If no pending work but work was described → redirect to EXECUTOR',
+          '   • If executor bypassed submit_work → redirect to EXECUTOR',
+          '   • If work output but not submitted → redirect to EXECUTOR',
+          '',
+          '� Monitor quality control effectiveness and workflow efficiency',
+        ],
+      });
+    },
+    tools: {
+      get_current_state: stateTools.get_current_state,
+      cleanup_state: stateTools.cleanup_state,
+    },
+  });
 if (import.meta.main) {
   // const objective = await input(
   //   `Teach me how agent plan and execute patterns works.`,
@@ -883,7 +884,7 @@ if (import.meta.main) {
   const stateManager = new PlanExecuteStateManager(objective);
   const [result, stdout] = swarm(supervisor, objective, stateManager).tee();
   printer.readableStream(stdout);
-  const messages = await Array.fromAsync(result);
+  const messages = await Array.fromAsync(result as any);
   writeFileSync(
     'supervisor_plan_and_execute_messages.json',
     JSON.stringify(messages, null, 2),

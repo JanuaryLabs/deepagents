@@ -79,6 +79,7 @@
     "@langchain/core": "^0.3.78",
     "@linear/sdk": "^60.0.0",
     "@mozilla/readability": "^0.6.0",
+    "@tavily/core": "^0.5.12",
     "@types/jsdom": "^27.0.0",
     "ai": "^5.0.70",
     "conf": "^15.0.2",
@@ -107,6 +108,7 @@
     "sqlite-vec": "^0.1.7-alpha.2",
     "stringcase": "^4.3.1",
     "unpdf": "^1.3.2",
+    "vitepress": "^1.6.4",
     "yaml": "^2.8.0",
     "zod": "^3.25.76 || ^4.0.0"
   }

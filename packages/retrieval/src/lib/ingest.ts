@@ -53,7 +53,7 @@ export async function ingest(
   }
 }
 
-function split(content: string) {
+function split(id: string, content: string) {
   const splitter = new MarkdownTextSplitter();
   return splitter.splitText(content);
 }

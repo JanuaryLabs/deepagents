@@ -2,8 +2,8 @@ import { openai } from '@ai-sdk/openai';
 import z from 'zod';
 
 import { agent, instructions } from '../agent.ts';
-import { input, toOutput } from '../stream_utils.ts';
-import { execute } from '../swarm.ts';
+import { input } from '../stream_utils.ts';
+import { execute, generate } from '../swarm.ts';
 
 const WebSearchPlanSchema = z.object({
   searches: z
@@ -96,8 +96,10 @@ const writer = agent({
 
 async function planSearches(query: string): Promise<WebSearchPlan> {
   console.log('Planning searches...');
-  const plan = await toOutput<WebSearchPlan>(
-    await execute(planner, `Query: ${query}`, {}),
+  const { experimental_output: plan } = await generate(
+    planner,
+    `Query: ${query}`,
+    {},
   );
   console.log(`Will perform ${plan.searches.length} searches`);
   return plan;
@@ -126,7 +128,12 @@ async function performSearches(plan: WebSearchPlan) {
 async function writeReport(query: string, searchResults: SearchResult[]) {
   console.log('Thinking about report...');
   const writerInput = `Original query: ${query}\nSummarized search results: ${JSON.stringify(searchResults)}`;
-  return toOutput<ReportData>(execute(writer, writerInput, {}));
+  const { experimental_output: report } = await generate(
+    writer,
+    writerInput,
+    {},
+  );
+  return report;
 }
 
 async function run(query: string) {
