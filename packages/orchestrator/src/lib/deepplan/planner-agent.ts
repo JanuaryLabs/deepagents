@@ -1,9 +1,8 @@
-import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
-import { agent, generate, user } from '@deepagents/agent';
+import { agent, generate, lmstudio, user } from '@deepagents/agent';
 
-import { createExecutionContext } from './executor-agent.ts';
+import { createExecutionContext } from './executors/generic-executor.ts';
 
 const PlanStepSchema = z.object({
   description: z
@@ -41,6 +40,36 @@ export type PlanStep = z.infer<typeof PlanStepSchema>;
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
 
 /**
+ * Environment context that describes the execution capabilities.
+ * This helps the planner create steps that are actually executable.
+ */
+export interface PlanEnvironment {
+  /**
+   * Type of executor that will execute the steps
+   * @example 'research', 'hackernews', 'generic', 'product_manager'
+   */
+  executor_type: string;
+
+  /**
+   * Available tools the executor has access to
+   * @example ['browser_search', 'scratchpad'], ['hackernews_search', 'scratchpad']
+   */
+  available_tools: string[];
+
+  /**
+   * Domain or task category
+   * @example 'market research', 'hackernews sentiment analysis', 'code repository search'
+   */
+  domain: string;
+
+  /**
+   * High-level capabilities description
+   * @example ['web search', 'source verification', 'numerical data extraction']
+   */
+  capabilities?: string[];
+}
+
+/**
  * Planner agent that creates structured execution plans:
  * 1. Understanding Phase: Deeply understand the user's request
  * 2. Variable Extraction: Extract relevant variables and their corresponding numerical values
@@ -49,15 +78,29 @@ export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
  *
  * Enhanced with adaptive replanning for dynamic task execution.
  */
-export const plannerAgent = agent({
+export const plannerAgent = agent<
+  z.output<typeof PlannerOutputSchema>,
+  { environment?: PlanEnvironment }
+>({
   name: 'planner_agent',
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
+  model: lmstudio('google/gemma-3-12b'),
+  // model: groq('moonshotai/kimi-k2-instruct-0905'),
   temperature: 0.3, // Slightly creative for better planning
-  prompt: `
+  prompt: (context) => `
     <SystemContext>
       You are an expert planning agent that creates adaptive, well-structured plans.
       Plans are executed step-by-step and adjusted as needed based on findings.
     </SystemContext>
+
+    <ExecutionEnvironment>
+      ${formatEnvironmentContext(context?.environment)}
+
+      CRITICAL: Create steps that match the available tools and domain.
+      - Only plan steps that can be executed with the available tools
+      - Tailor your approach to the executor's domain and capabilities
+      - Don't ask for actions the executor cannot perform
+      - Frame steps in terms the executor understands
+    </ExecutionEnvironment>
 
     <Identity>
       Your task is to deeply understand user requests and create detailed execution plans.
@@ -66,6 +109,7 @@ export const plannerAgent = agent({
       - Extracting key variables and constraints
       - Breaking complex tasks into clear, actionable steps
       - Defining success criteria
+      - Creating executable plans that match available capabilities
     </Identity>
 
     <PlanningMethodology>
@@ -129,7 +173,10 @@ export const plannerAgent = agent({
     </StepDesignPrinciples>
 
     <Examples>
+      Example 1: Web Research Task
+
       User Request: "Did Apple release any new products in the past 3 months?"
+      Environment: Executor Type: research, Tools: [browser_search, scratchpad], Domain: market research
 
       Understanding: User wants to know about recent Apple product launches
 
@@ -146,18 +193,44 @@ export const plannerAgent = agent({
 
       Success Criteria: List of Apple products released in last 3 months with names and dates
 
-      Steps:
-        1. Find Apple's official announcements from the past 3 months
-           Expected: List of press releases and announcements
+      Steps (tailored to browser_search capability):
+        1. Search Apple's newsroom for product announcements from the past 3 months
+           Expected: List of official press releases and announcements
 
         2. Identify product-specific announcements (filter out software updates, services)
            Expected: Subset of announcements that are actual product launches
 
-        3. Extract product names and release dates
+        3. Extract product names and release dates from announcements
            Expected: Product name, date, and brief description for each
 
-        4. Verify products are consumer-facing (not enterprise-only or regional)
-           Expected: Confirmed list of publicly available products
+      ---
+
+      Example 2: HackerNews Research Task
+
+      User Request: "What does the tech community think about Rust vs Go?"
+      Environment: Executor Type: hackernews, Tools: [hackernews_search, scratchpad], Domain: hackernews sentiment analysis
+
+      Understanding: User wants to understand tech community opinions comparing Rust and Go
+
+      Variables:
+        - languages: ["Rust", "Go"]
+        - info_type: "sentiment comparison"
+
+      Constraints:
+        - HackerNews community only
+        - Recent discussions preferred
+
+      Success Criteria: Summary of HN community sentiment on Rust vs Go with key points from both sides
+
+      Steps (tailored to hackernews_search capability):
+        1. Search HackerNews for recent discussions about Rust programming language
+           Expected: Stories and comments about Rust with engagement metrics
+
+        2. Search HackerNews for recent discussions about Go programming language
+           Expected: Stories and comments about Go with engagement metrics
+
+        3. Search HackerNews for direct comparisons between Rust and Go
+           Expected: Discussions explicitly comparing the two languages
     </Examples>
 
     <CriticalInstructions>
@@ -183,11 +256,39 @@ export const plannerAgent = agent({
   output: PlannerOutputSchema,
 });
 
-export async function plan(userRequest: string) {
+/**
+ * Format environment context for the planner prompt
+ */
+function formatEnvironmentContext(environment?: PlanEnvironment): string {
+  if (!environment) {
+    return `No specific environment provided. Infer environment from user request.`;
+  }
+
+  const capabilitiesText = environment.capabilities
+    ? `\n      Capabilities: ${environment.capabilities.join(', ')}`
+    : '';
+
+  return `
+      Executor Type: ${environment.executor_type}
+      Domain: ${environment.domain}
+      Available Tools: ${environment.available_tools.join(', ')}${capabilitiesText}
+  `.trim();
+}
+
+/**
+ * Create an execution plan for the given user request
+ *
+ * @param userRequest - The user's task or question
+ * @param environment - Optional execution environment describing available tools and domain
+ */
+export async function plan(
+  userRequest: string,
+  state: { environment?: PlanEnvironment } = {},
+) {
   const { experimental_output: plan } = await generate(
     plannerAgent,
     [user(userRequest)],
-    {},
+    state,
   );
   return createExecutionContext(userRequest, plan);
 }

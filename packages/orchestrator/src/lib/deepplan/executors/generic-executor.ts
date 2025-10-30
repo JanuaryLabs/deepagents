@@ -1,10 +1,10 @@
 import { groq } from '@ai-sdk/groq';
 
-import { agent, execute, user } from '@deepagents/agent';
+import { agent } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
 
-import { search_content_tool } from '../deepwiki/tools.ts';
-import type { PlanStep, PlannerOutput } from './planner-agent.ts';
+import { search_content_tool } from '../../deepwiki/tools.ts';
+import type { PlanStep, PlannerOutput } from '../planner-agent.ts';
 
 /**
  * Executor Agent
@@ -195,6 +195,21 @@ Execute this step and provide a detailed report of what you find.
   `.trim();
 }
 
+export function createExecutionContext(
+  request: string,
+  plannerOutput: PlannerOutput,
+): ExecutionContext {
+  return {
+    original_request: request,
+    understanding: plannerOutput.understanding,
+    initial_plan: plannerOutput.steps,
+    current_plan: [...plannerOutput.steps],
+    variables: { ...plannerOutput.variables },
+    step_results: [],
+    is_complete: false,
+  };
+}
+
 export interface ExecutionContext {
   // Request information
   original_request: string;
@@ -213,53 +228,4 @@ export interface ExecutionContext {
   // Status
   is_complete: boolean;
   success_criteria_met?: boolean;
-}
-
-export function createExecutionContext(
-  request: string,
-  plannerOutput: PlannerOutput,
-): ExecutionContext {
-  return {
-    original_request: request,
-    understanding: plannerOutput.understanding,
-    initial_plan: plannerOutput.steps,
-    current_plan: [...plannerOutput.steps],
-    variables: { ...plannerOutput.variables },
-    step_results: [],
-    is_complete: false,
-  };
-}
-
-/**
- * Final result of the entire planning and execution process
- */
-export interface AdaptivePlanResult {
-  // Request info
-  original_request: string;
-  understanding: string;
-
-  // Execution summary
-  success: boolean;
-  completion_status: 'completed' | 'partial' | 'failed';
-
-  // Results
-  final_data: Record<string, unknown>;
-
-  execution_history: string[];
-
-  // Full context (for debugging/analysis)
-  execution_context: ExecutionContext;
-}
-
-export async function run(step: PlanStep, context: ExecutionContext) {
-  const result = await execute(
-    executorAgent,
-    [user(formatStepForExecutor(step, context))],
-    { repo_path: process.cwd() },
-  ).text;
-  return {
-    ...context,
-    variables: { ...context.variables },
-    step_results: [...context.step_results, result],
-  };
 }

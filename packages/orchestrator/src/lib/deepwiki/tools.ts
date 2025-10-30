@@ -164,12 +164,14 @@ export const search_content_tool = dynamicTool({
       query: {
         type: 'string',
         description: 'The search query.',
-        minLength: 1,
       },
     },
     required: ['query'],
   }),
   async execute(input: any, options) {
+    if (typeof input.query !== 'string' || input.query.trim().length === 0) {
+      return 'Invalid input: "query" must be a non-empty string.';
+    }
     try {
       const context = toState<{ repo_path: string }>(options);
       const results = await similaritySearch(input.query, {

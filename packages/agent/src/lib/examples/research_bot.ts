@@ -69,7 +69,7 @@ const research = agent({
   }),
   tools: {
     // browser_search: groq.tools.browserSearch({}),
-    web_search_preview: openai.tools.webSearchPreview({
+    web_search: (openai as any).tools.webSearch({
       searchContextSize: 'low',
     }),
   },

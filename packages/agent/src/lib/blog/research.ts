@@ -68,7 +68,7 @@ Research Guidelines:
 
 Maximum ${maxSources} sources. Return comprehensive analysis with key findings.`,
         tools: {
-          browser_search: groq.tools.browserSearch({}),
+          browser_search: (groq as any).tools.browserSearch({}),
         },
         toolChoice: 'required',
         providerOptions: {

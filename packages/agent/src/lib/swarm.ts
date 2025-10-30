@@ -8,6 +8,7 @@ import {
   type PrepareStepResult,
   type StepResult,
   type Tool,
+  type ToolCallRepairFunction,
   type UIDataTypes,
   type UIMessage,
   type UIMessagePart,
@@ -78,7 +79,7 @@ function filterAgentOutput(
   return allMessages;
 }
 
-export function run<O, C>(
+export function generate<O, C>(
   agent: Agent<O, C>,
   messages: UIMessage[] | string,
   contextVariables: C,
@@ -89,7 +90,7 @@ export function run<O, C>(
 ) {
   return generateText({
     abortSignal: config?.abortSignal,
-    providerOptions: config?.providerOptions,
+    providerOptions: agent.providerOptions ?? config?.providerOptions,
     model: agent.model,
     system: agent.instructions(contextVariables),
     messages: convertToModelMessages(
@@ -129,6 +130,7 @@ export function execute<O, C>(
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
   },
 ) {
+  const runId = generateId();
   return streamText({
     abortSignal: config?.abortSignal,
     providerOptions: config?.providerOptions,
@@ -144,36 +146,12 @@ export function execute<O, C>(
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,
     toolChoice: agent.toolChoice,
-    experimental_repairToolCall: async ({
-      toolCall,
-      tools,
-      inputSchema,
-      error,
-    }) => {
-      if (NoSuchToolError.isInstance(error)) {
-        return null; // do not attempt to fix invalid tool names
-      }
-
-      const tool = tools[toolCall.toolName as keyof typeof tools];
-
-      const { experimental_output } = await generateText({
-        model: groq('openai/gpt-oss-20b'),
-        experimental_output: Output.object({ schema: tool.inputSchema }),
-        prompt: [
-          `The model tried to call the tool "${toolCall.toolName}"` +
-            ` with the following inputs:`,
-          JSON.stringify(toolCall.input),
-          `The tool accepts the following schema:`,
-          JSON.stringify(inputSchema(toolCall)),
-          'Please fix the inputs.',
-        ].join('\n'),
-      });
-
-      return { ...toolCall, input: JSON.stringify(experimental_output) };
-    },
+    experimental_repairToolCall: repairToolCall,
     onError: (error) => {
       console.error(
-        chalk.red(`Error during agent (${agent.internalName}) execution: `),
+        chalk.red(
+          `Error during agent (${agent.internalName})(${runId}) execution: `,
+        ),
         error instanceof Error ? error.message : error,
       );
       console.dir(error, { depth: null });
@@ -186,7 +164,7 @@ export function execute<O, C>(
       const toolCall = step.toolCalls.at(-1);
       if (toolCall) {
         console.log(
-          `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
+          `Debug: (${runId}) ${chalk.bold.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
         );
       }
     },
@@ -198,7 +176,6 @@ export function execute<O, C>(
 }
 
 export const stream = execute;
-export const generate = run;
 
 export const prepareStep = <C>(
   agent: Agent<unknown, C>,
@@ -464,3 +441,35 @@ function removeTransferCalls(messages: ModelMessage[]): ModelMessage[] {
   }
   return messages;
 }
+
+const repairToolCall: ToolCallRepairFunction<Record<string, Tool>> = async ({
+  toolCall,
+  tools,
+  inputSchema,
+  error,
+}) => {
+  if (NoSuchToolError.isInstance(error)) {
+    return null; // do not attempt to fix invalid tool names
+  }
+
+  console.log(
+    `Debug: ${chalk.yellow('RepairingToolCall')}: ${toolCall.toolName}`,
+  );
+
+  const tool = tools[toolCall.toolName as keyof typeof tools];
+
+  const { experimental_output } = await generateText({
+    model: groq('openai/gpt-oss-20b'),
+    experimental_output: Output.object({ schema: tool.inputSchema }),
+    prompt: [
+      `The model tried to call the tool "${toolCall.toolName}"` +
+        ` with the following inputs:`,
+      JSON.stringify(toolCall.input),
+      `The tool accepts the following schema:`,
+      JSON.stringify(inputSchema(toolCall)),
+      'Please fix the inputs.',
+    ].join('\n'),
+  });
+
+  return { ...toolCall, input: JSON.stringify(experimental_output) };
+};

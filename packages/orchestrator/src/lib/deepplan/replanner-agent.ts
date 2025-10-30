@@ -1,9 +1,9 @@
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
-import { agent, execute, toOutput, user } from '@deepagents/agent';
+import { agent, generate, lmstudio, user } from '@deepagents/agent';
 
-import { type ExecutionContext } from './executor-agent.ts';
+import { type ExecutionContext } from './executors/generic-executor.ts';
 import type { PlanStep } from './planner-agent.ts';
 
 const PlanStepSchema = z.object({
@@ -22,8 +22,7 @@ export const ReplanDecisionSchema = z.object({
     .max(4)
     .describe('Updated list of remaining steps'),
   new_insights: z
-    .array(z.string())
-    .default([])
+    .string()
     .describe('New insights learned that affected the plan'),
 });
 
@@ -42,7 +41,8 @@ export type ReplanDecision = z.infer<typeof ReplanDecisionSchema>;
  */
 export const replannerAgent = agent({
   name: 'replanner_agent',
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
+  // model: groq('moonshotai/kimi-k2-instruct-0905'),
+  model: lmstudio('google/gemma-3-12b'),
   temperature: 0.1,
   prompt: `
     <SystemContext>
@@ -249,12 +249,11 @@ Consider:
 
 export async function replan(context: ExecutionContext) {
   const remainingSteps = context.current_plan.slice(1);
-  const replannerResult = execute(
+  const { experimental_output: decision } = await generate(
     replannerAgent,
     [user(formatReplannerPrompt(context, remainingSteps))],
     {},
   );
-  const decision = (await toOutput(replannerResult)) as ReplanDecision;
   return {
     ...context,
     current_plan: decision.remaining_steps,

@@ -78,6 +78,7 @@ export interface CreateAgent<Output, C> {
   model: AgentModel;
   toolChoice?: ToolChoice<Record<string, unknown>>;
   output?: z.Schema<Output>;
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
 }
 export class Agent<Output = unknown, C = ContextVariables> {
   model: AgentModel;
@@ -92,6 +93,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
   readonly handoffTool: Record<string, Tool>;
   readonly output?: z.Schema<Output>;
   readonly temperature?: number;
+  readonly providerOptions?: CreateAgent<Output, C>['providerOptions'];
   constructor(config: CreateAgent<Output, C>) {
     this.model = config.model;
     this.toolChoice = config.toolChoice || 'auto';
@@ -101,6 +103,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
     this.output = config.output;
     this.temperature = config.temperature;
     this.internalName = snakecase(config.name);
+    this.providerOptions = config.providerOptions;
     this.handoff = {
       name: this.internalName,
       instructions: config.prompt,
@@ -200,13 +203,24 @@ export class Agent<Output = unknown, C = ContextVariables> {
       description: props?.toolDescription || this.handoff.handoffDescription,
       inputSchema: z.object({
         input: z.string(),
+        output: z
+          .string()
+          .optional()
+          .describe(
+            'Optional instructions on how the final output should be formatted. this would be passed to the underlying llm as part of the prompt.',
+          ),
       }),
-      execute: async ({ input }, options) => {
+      execute: async ({ input, output }, options) => {
         try {
           const result = await generateText({
             model: this.model!,
             system: this.#prepareInstructions(),
-            prompt: input,
+            prompt: `
+              <Input>
+              ${input}
+              </Input>
+              ${output ? `<OutputInstructions>\n${output}\n</OutputInstructions>` : ''}
+            `,
             temperature: 0,
             tools: this.handoff.tools,
             abortSignal: options.abortSignal,
@@ -235,7 +249,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
           return result.steps.map((it) => it.toolResults).flat();
         } catch (error) {
           console.error(error);
-          return `Error: ${JSON.stringify(error)}`;
+          return `An error thrown from a tool call. \n<ErrorDetails>\n${JSON.stringify(error)}\n</ErrorDetails>`;
         }
       },
     });
@@ -250,7 +264,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
 
   debug(prefix = '') {
     console.log(
-      `Debug: ${chalk.bgMagenta('Agent')}: ${chalk.bold(this.handoff.name)}`,
+      `Debug: ${chalk.bgMagenta('Agent')}: ${chalk.dim.black(this.handoff.name)}`,
     );
     // console.log(
     //   `Debug: ${chalk.blue('Tools')}: ${Object.keys(toToolset(agent))}`,

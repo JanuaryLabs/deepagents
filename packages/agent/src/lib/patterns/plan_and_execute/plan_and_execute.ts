@@ -73,7 +73,7 @@ const executor = agent({
     ],
   }),
   tools: {
-    browser_search: groq.tools.browserSearch({}),
+    browser_search: (groq as any).tools.browserSearch({}),
   },
 });
 

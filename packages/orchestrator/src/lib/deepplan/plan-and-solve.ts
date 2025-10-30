@@ -1,14 +1,17 @@
+import { pl } from 'zod/v4/locales';
+
 import {
   type Agent,
   type ContextVariables,
   execute,
+  generate,
   user,
 } from '@deepagents/agent';
 
 import {
   type ExecutionContext,
   formatStepForExecutor,
-} from './executor-agent.ts';
+} from './executors/generic-executor.ts';
 import { type PlanStep, plan } from './planner-agent.ts';
 import { replan } from './replanner-agent.ts';
 import { synthesize } from './synthesizer.ts';
@@ -113,15 +116,15 @@ async function runExecutor(
   step: PlanStep,
   state: ContextVariables,
 ) {
-  const result = await execute(
+  const { text } = await generate(
     agent,
     [user(formatStepForExecutor(step, context))],
     state,
-  ).text;
+  );
   return {
     ...context,
     variables: { ...context.variables },
-    step_results: [...context.step_results, result],
+    step_results: [...context.step_results, text],
   };
 }
 
@@ -144,8 +147,17 @@ async function runExecutor(
  * ```typescript
  * const result = await planAndSolve({
  *   input: "Find all AI startups that raised Series A",
- *   executor: myExecutor,
- *   state: { repo_path: process.cwd() },
+ *   executor: researchExecutor,
+ *   state: {
+ *      repo_path: process.cwd()
+ *   },
+ *      environment: {
+ *     executor_type: 'research',
+ *     available_tools: ['browser_search', 'scratchpad'],
+ *     domain: 'market research',
+ *     capabilities: ['web search', 'source verification', 'numerical data extraction']
+ *   },
+ *   },
  *   hooks: {
  *     beforeReplan: async (context) => {
  *       // Save progress before replanning
@@ -164,11 +176,11 @@ async function runExecutor(
 export async function planAndSolve(options: {
   input: string;
   executor: Agent<any, any>;
-  synthesizer?: Agent<any, any>;
   state: ContextVariables;
   hooks?: PlanHooks;
 }) {
   let context = await plan(options.input);
+  const plans = [context.current_plan];
 
   if (options.hooks?.onInitialPlan) {
     const initialPlanResult = await options.hooks.onInitialPlan(context);
@@ -202,6 +214,7 @@ export async function planAndSolve(options: {
 
     // -- Start Replanning --
     context = await replan(context);
+    plans.push(context.current_plan);
     // -- End Replanning --
 
     if (options.hooks?.afterReplan) {
@@ -216,5 +229,6 @@ export async function planAndSolve(options: {
     }
   }
 
+  options.state.plans = plans;
   return synthesize(context.step_results, context.original_request);
 }

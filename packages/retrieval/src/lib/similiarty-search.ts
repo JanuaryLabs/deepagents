@@ -42,7 +42,7 @@ export async function similaritySearch(
   return config.store
     .search(
       query,
-      { sourceId: config.connector.sourceId, topN: 50 },
+      { sourceId: config.connector.sourceId, topN: 10 },
       config.embedder,
     )
     .then(

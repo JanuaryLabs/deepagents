@@ -6,7 +6,7 @@ import {
   user_story_formatter_tool,
 } from '@deepagents/toolbox';
 
-import { search_content_tool } from '../deepwiki/tools.ts';
+import { search_content_tool } from '../../deepwiki/tools.ts';
 
 /**
  * Product Manager Executor Agent
@@ -22,7 +22,7 @@ import { search_content_tool } from '../deepwiki/tools.ts';
 export const productManagerExecutor = agent({
   name: 'product_manager_executor',
   model: groq('openai/gpt-oss-20b'),
-  temperature: 0.2, // Slightly creative for better story writing
+  temperature: 0,
   prompt: `
     <SystemContext>
       You are a Product Manager executor agent that analyzes codebases and generates comprehensive user stories.
@@ -228,7 +228,7 @@ export const productManagerExecutor = agent({
   `,
   tools: {
     scratchpad: scratchpad_tool,
-    search: search_content_tool,
-    format_user_story: user_story_formatter_tool,
+    search_content: search_content_tool,
+    // format_user_story: user_story_formatter_tool,
   },
 });

@@ -28,13 +28,17 @@
   },
   "dependencies": {
     "@deepagents/agent": "0.1.0",
-    "@ai-sdk/groq": "2.0.24",
+    "@ai-sdk/groq": "2.0.26",
     "zod": "^3.25.76 || ^4.0.0",
-    "ai": "^5.0.65",
+    "ai": "^5.0.82",
     "lodash-es": "^4.17.21",
     "@deepagents/retrieval": "0.1.0",
     "@deepagents/toolbox": "0.1.0",
-    "p-limit": "^6.1.0"
+    "p-limit": "^7.2.0",
+    "@ai-sdk/openai": "2.0.58",
+    "@tavily/core": "^0.5.12",
+    "fast-glob": "^3.3.3",
+    "nano-spawn": "^2.0.0"
   },
   "peerDependencies": {},
   "devDependencies": {
