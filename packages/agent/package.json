@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -33,7 +33,7 @@
     "conf": "^15.0.2",
     "@ai-sdk/openai-compatible": "^1.0.24",
     "dedent": "1.7.0",
-    "@deepagents/retrieval": "0.1.0"
+    "@deepagents/retrieval": "0.1.1"
   },
   "peerDependencies": {
     "zod": "^3.25.76 || ^4.0.0"
