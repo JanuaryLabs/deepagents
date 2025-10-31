@@ -1,4 +1,4 @@
-import { type Tool } from 'ai';
+import { type ToolSet } from 'ai';
 
 import {
   type Agent,
@@ -18,7 +18,7 @@ export function createSupervisor<C>(props: {
   model: AgentModel;
   outputMode?: 'full_history' | 'last_message';
   handoffDescription?: string;
-  tools?: Record<string, Tool>;
+  tools?: ToolSet;
 }) {
   const subagents = props.subagents.map((subagent) =>
     subagent.clone({ model: subagent.model || props.model }),

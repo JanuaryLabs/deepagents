@@ -4,8 +4,8 @@ import {
   type ModelMessage,
   Output,
   type StreamTextResult,
-  type Tool,
   type ToolChoice,
+  type ToolSet,
   type UIDataTypes,
   type UIMessage,
   type UITools,
@@ -30,7 +30,7 @@ export interface Handoff<C> {
   name: string;
   instructions: Instruction<C>;
   handoffDescription?: string;
-  tools: Record<string, Tool>;
+  tools: ToolSet;
 }
 export type Handoffs<C> = (Agent<unknown, C> | (() => Agent<unknown, C>))[];
 
@@ -54,17 +54,17 @@ export type ResponseMessage = UIMessage<unknown, UIDataTypes, UITools>;
 
 export type AgentModel = Exclude<LanguageModel, string>;
 export type OutputExtractorFn = (
-  output: GenerateTextResult<Record<string, Tool>, any>,
+  output: GenerateTextResult<ToolSet, any>,
 ) => string | Promise<string>;
 export type PrepareHandoffFn = (
   messages: ModelMessage[],
 ) => void | Promise<void>;
-export type PrepareEndFn<C> = (config: {
+export type PrepareEndFn<C, O> = (config: {
   messages: ResponseMessage[];
   responseMessage: ResponseMessage;
   contextVariables: C;
   abortSignal?: AbortSignal;
-}) => StreamTextResult<Record<string, Tool>, any> | undefined | void;
+}) => StreamTextResult<ToolSet, O> | undefined | void;
 
 export interface CreateAgent<Output, C> {
   name: string;
@@ -72,9 +72,9 @@ export interface CreateAgent<Output, C> {
   temperature?: number;
   handoffDescription?: string;
   prepareHandoff?: PrepareHandoffFn;
-  prepareEnd?: PrepareEndFn<C>;
+  prepareEnd?: PrepareEndFn<C, Output>;
   handoffs?: Handoffs<C>;
-  tools?: Record<string, Tool>;
+  tools?: ToolSet;
   model: AgentModel;
   toolChoice?: ToolChoice<Record<string, unknown>>;
   output?: z.Schema<Output>;
@@ -86,11 +86,11 @@ export class Agent<Output = unknown, C = ContextVariables> {
   parent?: Agent<unknown, C>;
   handoffs: Handoffs<C>;
   readonly prepareHandoff?: PrepareHandoffFn;
-  readonly prepareEnd?: PrepareEndFn<C>;
+  readonly prepareEnd?: PrepareEndFn<C, Output>;
   readonly internalName: string;
   readonly handoff: Handoff<C>;
   readonly handoffToolName: transfer_tool;
-  readonly handoffTool: Record<string, Tool>;
+  readonly handoffTool: ToolSet;
   readonly output?: z.Schema<Output>;
   readonly temperature?: number;
   readonly providerOptions?: CreateAgent<Output, C>['providerOptions'];
@@ -292,7 +292,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
   toToolset(options?: {
     includeTransferTool?: boolean;
     includeHandoffs?: boolean;
-  }): Record<string, Tool> {
+  }): ToolSet {
     const tools = flattenTools(
       this as Agent<unknown, C>,
       (node) => node.toHandoffs(),

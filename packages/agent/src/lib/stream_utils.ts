@@ -2,8 +2,8 @@ import {
   type GenerateTextResult,
   type InferUIMessageChunk,
   type StreamTextResult,
-  type Tool,
   type ToolCallOptions,
+  type ToolSet,
   type UIDataTypes,
   type UIMessage,
   type UITools,
@@ -21,9 +21,7 @@ import {
   visualizeSemantic,
 } from './visualize.ts';
 
-export async function streamWrite(
-  response: StreamTextResult<Record<string, Tool>, never>,
-) {
+export async function streamWrite(response: StreamTextResult<ToolSet, never>) {
   response.consumeStream();
   const writeStream = createWriteStream('blog_writer_output.md');
   Readable.fromWeb(response.textStream as any).pipe(writeStream);
@@ -103,7 +101,7 @@ export const printer = {
     }
   },
   stdout: async (
-    response: StreamTextResult<Record<string, Tool>, unknown>,
+    response: StreamTextResult<ToolSet, unknown>,
     options?: { reasoning?: boolean; text?: boolean; wrapInTags?: boolean },
   ) => {
     const includeReasoning = options?.reasoning ?? true;
@@ -194,8 +192,8 @@ export async function finished<T>(iterable: AsyncIterable<T>) {
 
 export function toOutput<T>(
   result:
-    | Promise<GenerateTextResult<Record<string, Tool>, T>>
-    | StreamTextResult<Record<string, Tool>, T>,
+    | Promise<GenerateTextResult<ToolSet, T>>
+    | StreamTextResult<ToolSet, T>,
 ) {
   return isPromise(result)
     ? result.then((res) => res.experimental_output)

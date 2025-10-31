@@ -1,4 +1,4 @@
-import { type Tool, dynamicTool } from 'ai';
+import { type ToolSet, dynamicTool } from 'ai';
 import z from 'zod';
 
 import { type Agent, type AgentModel, agent, instructions } from '../agent.ts';
@@ -163,13 +163,13 @@ export type SubAgent = {
 };
 
 export function create_deep_agent(
-  tools: Record<string, Tool>,
+  tools: ToolSet,
   prompt: string,
   model: AgentModel,
   subagents?: SubAgent[],
 ) {
-  const externalTools: Record<string, Tool> = tools ?? {};
-  const allToolset: Record<string, Tool> = {
+  const externalTools: ToolSet = tools ?? {};
+  const allToolset: ToolSet = {
     ...builtInTools,
     ...externalTools,
   };
@@ -193,8 +193,8 @@ export function create_deep_agent(
   });
 
   const customAgents = (subagents ?? []).map((sa) => {
-    const filtered: Record<string, Tool> = sa.tools
-      ? sa.tools.reduce<Record<string, Tool>>(
+    const filtered: ToolSet = sa.tools
+      ? sa.tools.reduce<ToolSet>(
           (acc, key) => {
             if (externalTools[key]) acc[key] = externalTools[key];
             return acc;

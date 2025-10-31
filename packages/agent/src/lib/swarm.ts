@@ -7,8 +7,8 @@ import {
   type PrepareStepFunction,
   type PrepareStepResult,
   type StepResult,
-  type Tool,
   type ToolCallRepairFunction,
+  type ToolSet,
   type UIDataTypes,
   type UIMessage,
   type UIMessagePart,
@@ -181,7 +181,7 @@ export const prepareStep = <C>(
   agent: Agent<unknown, C>,
   model: AgentModel,
   contextVariables: C,
-): PrepareStepFunction<NoInfer<Record<string, Tool>>> => {
+): PrepareStepFunction<NoInfer<ToolSet>> => {
   return async ({ steps, messages }) => {
     const step = steps.at(-1);
     const agentName = (contextVariables as any).currentActiveAgent;
@@ -287,7 +287,7 @@ export async function prepareAgent<C>(
   agent: Agent<unknown, C>,
   messages: ModelMessage[],
   contextVariables?: C,
-): Promise<PrepareStepResult<NoInfer<Record<string, Tool>>>> {
+): Promise<PrepareStepResult<NoInfer<ToolSet>>> {
   agent.debug();
   await agent.prepareHandoff?.(messages);
 
@@ -321,7 +321,7 @@ export async function prepareAgent<C>(
 }
 
 function getLastAgentFromSteps(
-  steps: StepResult<NoInfer<Record<string, Tool>>>[],
+  steps: StepResult<NoInfer<ToolSet>>[],
 ): string | undefined {
   for (let i = steps.length - 1; i >= 0; i--) {
     const step = steps[i];
@@ -363,7 +363,7 @@ function getActiveAgentName(messages: ModelMessage[]): string | undefined {
 }
 
 function tagAgents(
-  step: StepResult<NoInfer<Record<string, Tool>>>,
+  step: StepResult<NoInfer<ToolSet>>,
   defaultAgentName: string,
 ) {
   const { request, response, ...stepResult } = step;
@@ -442,7 +442,7 @@ function removeTransferCalls(messages: ModelMessage[]): ModelMessage[] {
   return messages;
 }
 
-const repairToolCall: ToolCallRepairFunction<Record<string, Tool>> = async ({
+const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
   toolCall,
   tools,
   inputSchema,
