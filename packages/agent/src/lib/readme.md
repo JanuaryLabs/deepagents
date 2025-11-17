@@ -460,8 +460,7 @@ const allMessages = await Array.fromAsync(messages);
 import { z } from 'zod';
 
 import { agent } from './agent.ts';
-import { toOutput } from './stream_utils.ts';
-import { execute } from './swarm.ts';
+import { generate } from './swarm.ts';
 
 const data_extractor = agent({
   name: 'data_extractor',
@@ -472,8 +471,7 @@ const data_extractor = agent({
   // ... other config
 });
 
-const result = await execute(data_extractor, 'Analyze this data...');
-const structuredData = await toOutput(result);
+const {experimental_output: structuredData} = await generate(data_extractor, 'Analyze this data...');
 console.log(structuredData.summary);
 ```
 

@@ -1,28 +1,17 @@
 import { groq } from '@ai-sdk/groq';
 import { type UIMessage, generateId, tool } from 'ai';
-import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import z from 'zod';
-import { th } from 'zod/v4/locales';
 
 import {
   agent,
   execute,
   generate,
   instructions,
-  lmstudio,
-  toOutput,
-  toState,
   user,
 } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
 
-import {
-  file_exists_tool,
-  read_dir_tool,
-  read_file_tool,
-  search_files_tool,
-} from './tools.ts';
+import { read_file_tool } from './tools.ts';
 
 const BaseOutlineItem = z.object({
   title: z.string().trim().min(1, 'Title is required'),
@@ -178,13 +167,11 @@ export async function generateOutline(state: OutlineAgentContext) {
   if (!state.outline.length) {
     throw new Error('Outline generation failed.');
   }
-  return toOutput(
-    generate(
-      outlineCondensedAgent,
-      `Condense and optimize the following outline:\n\n${buildToc(state.outline)}`,
-      state,
-    ),
-  );
+  return generate(
+    outlineCondensedAgent,
+    `Condense and optimize the following outline:\n\n${buildToc(state.outline)}`,
+    state,
+  ).then(({ experimental_output }) => experimental_output);
 }
 
 function slugify(text: string) {

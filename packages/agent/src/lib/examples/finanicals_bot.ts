@@ -3,7 +3,7 @@ import { type ListrTask } from 'listr2';
 import z from 'zod';
 
 import { type OutputExtractorFn, agent, instructions } from '../agent.ts';
-import { input, toOutput } from '../stream_utils.ts';
+import { input } from '../stream_utils.ts';
 import { execute, generate } from '../swarm.ts';
 import { createProgress, withMessageProgress } from './planner.ts';
 
@@ -227,13 +227,11 @@ progress.add({
       task.output = `📝 ${message}`;
     });
 
-    const report = (await toOutput(
-      execute(
-        writerWithTools,
-        `Original query: ${query}\nSummarized search results: ${ctx.searchResults}`,
-        {},
-      ),
-    )) as FinancialReportData;
+    const { experimental_output: report } = await generate(
+      writerWithTools,
+      `Original query: ${query}\nSummarized search results: ${ctx.searchResults}`,
+      {},
+    );
 
     progressUpdater[Symbol.dispose]?.();
 

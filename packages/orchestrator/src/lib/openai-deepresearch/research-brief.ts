@@ -1,7 +1,7 @@
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
-import { agent, execute, generate, toOutput } from '@deepagents/agent';
+import { agent, generate } from '@deepagents/agent';
 
 const transform_messages_into_research_topic_prompt = `You will be given a set of messages that have been exchanged so far between yourself and the user.
 Your job is to translate these messages into a more detailed and concrete research question that will be used to guide the research.

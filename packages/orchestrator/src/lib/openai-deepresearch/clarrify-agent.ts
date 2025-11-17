@@ -1,14 +1,7 @@
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
-import {
-  agent,
-  execute,
-  generate,
-  lmstudio,
-  printer,
-  toOutput,
-} from '@deepagents/agent';
+import { agent, generate } from '@deepagents/agent';
 
 const clarify_with_user_instructions = `
 Today's date is ${new Date().toISOString()}.

@@ -4,13 +4,7 @@ import { uniqBy } from 'lodash-es';
 import { readFile, writeFile } from 'node:fs/promises';
 import z from 'zod';
 
-import {
-  agent,
-  execute,
-  generate,
-  lmstudio,
-  toOutput,
-} from '@deepagents/agent';
+import { agent, execute, generate, lmstudio } from '@deepagents/agent';
 import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import * as connectors from '@deepagents/retrieval/connectors';
 

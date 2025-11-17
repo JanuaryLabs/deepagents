@@ -3,7 +3,7 @@ import { embedMany } from 'ai';
 
 export const lmstudio = createOpenAICompatible({
   name: 'lmstudio',
-  baseURL: 'http://127.0.0.1:1234/v1',
+  baseURL: process.env.LM_STUDIO_BASE_URL ?? 'http://127.0.0.1:1234/v1',
   supportsStructuredOutputs: true,
   includeUsage: true,
 });

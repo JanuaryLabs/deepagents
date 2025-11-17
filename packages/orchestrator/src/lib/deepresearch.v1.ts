@@ -2,18 +2,9 @@ import { groq } from '@ai-sdk/groq';
 import { openai } from '@ai-sdk/openai';
 import { tavily } from '@tavily/core';
 import { writeFile } from 'node:fs/promises';
-import { report } from 'node:process';
 import { z } from 'zod';
 
-import {
-  agent,
-  execute,
-  generate,
-  input,
-  toOutput,
-  user,
-} from '@deepagents/agent';
-import { serp } from '@deepagents/toolbox';
+import { agent, execute, generate, input, user } from '@deepagents/agent';
 
 export interface SearchEntry {
   title: string;

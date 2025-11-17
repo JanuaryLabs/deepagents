@@ -2,7 +2,7 @@ import { dynamicTool, jsonSchema, tool } from 'ai';
 import FastGlob from 'fast-glob';
 import spawn from 'nano-spawn';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import z from 'zod';
 
 import { toState } from '@deepagents/agent';
@@ -166,9 +166,12 @@ export const search_content_tool = dynamicTool({
         description: 'The search query.',
       },
     },
-    required: ['query'],
   }),
   async execute(input: any, options) {
+    const keys = Object.keys(input).filter((k) => k !== 'query');
+    if (keys.length > 0) {
+      return `Invalid input: only "query" is supported. Found extra keys: ${keys.join(', ')}`;
+    }
     if (typeof input.query !== 'string' || input.query.trim().length === 0) {
       return 'Invalid input: "query" must be a non-empty string.';
     }
@@ -184,14 +187,26 @@ export const search_content_tool = dynamicTool({
         store: nodeSQLite('deepsearch.sqlite', 384),
         embedder: fastembed(),
       });
-      const contents = results.map((it) => ({
-        source: relative(context.repo_path, it.document_id),
-        snippet: it.content,
-        // similarity: it.similarity,
-      }));
+      const contents = results.map((it) => {
+        const source = relative(context.repo_path, it.document_id);
+        const filename = basename(source);
+        return {
+          source: source,
+          snippet: it.content,
+          citation: `[${filename}](./${source})`,
+        };
+      });
       return contents
-        .map((it) => `File: ${it.source}\n\`\`\`\n${it.snippet}\n\`\`\``)
-        .join('\n\n---\n\n');
+        .map((it) =>
+          [
+            `File: ${it.source}`,
+            `Citation: ${it.citation}`,
+            '```',
+            it.snippet,
+            '```',
+          ].join('\n'),
+        )
+        .join('\n\n------\n\n');
     } catch (error) {
       console.error('Error in search_content_tool:', error);
       return `Error during content search: ${JSON.stringify(error)}`;
