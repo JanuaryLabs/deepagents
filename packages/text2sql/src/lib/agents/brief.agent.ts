@@ -8,13 +8,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import z from 'zod';
 
-import { agent, generate, user } from '@deepagents/agent';
+import {
+  type StreamFunction,
+  agent,
+  generate,
+  toState,
+  user,
+} from '@deepagents/agent';
 
-import type { StreamFunction } from '../pipe.ts';
-import db from './db.ts';
-import { inspector } from './introspector.ts';
+import { Adapter, type Introspection } from '../adapters/adapter.ts';
+import { databaseSchemaPrompt } from '../prompt.ts';
 
-class BriefCache {
+export class BriefCache {
   public path: string;
   constructor(watermark: string) {
     const hash = createHash('md5').update(watermark).digest('hex');
@@ -36,7 +41,7 @@ class BriefCache {
 const briefAgent = agent<
   unknown,
   {
-    schema: ReturnType<typeof inspector>;
+    introspection: Introspection;
   }
 >({
   name: 'db-brief-agent',
@@ -47,27 +52,7 @@ const briefAgent = agent<
       You have READ-ONLY access to the database.
     </identity>
 
-   <database-schema>
-      The database has the following tables with their columns and types:
-      ${state?.schema.tables
-        .map(
-          (t) =>
-            `- Table: ${t.name}\n  Columns:\n${t.columns.map((c) => `    - ${c.name} (${c.type})`).join('\n')}`,
-        )
-        .join('\n\n')}
-
-      Relationships (foreign keys):
-      ${
-        state?.schema.relationships?.length
-          ? state.schema.relationships
-              .map(
-                (r) =>
-                  `- ${r.table} (${r.from.join(', ')}) -> ${r.referenced_table} (${r.to.join(', ')})`,
-              )
-              .join('\n')
-          : 'None detected'
-      }
-    </database-schema>
+    ${databaseSchemaPrompt(state!)}
 
     <instructions>
       Write a business context that helps another agent answer questions accurately.
@@ -95,25 +80,15 @@ const briefAgent = agent<
           .string()
           .describe('What insight you are trying to gather with this query'),
       }),
-      execute: ({ sql }) => {
-        try {
-          const result = db.prepare(sql).all();
-          return result;
-        } catch (error) {
-          return {
-            error:
-              error instanceof Error ? error.message : 'Unknown error occurred',
-          };
-        }
+      execute: ({ sql }, options) => {
+        const state = toState<Adapter>(options);
+        return state.execute(sql);
       },
     }),
   },
 });
 
-async function runAndCache(
-  inspection: ReturnType<typeof inspector>,
-  cache: BriefCache,
-) {
+async function runAndCache(introspection: Introspection, cache: BriefCache) {
   const { text } = await generate(
     briefAgent,
     [
@@ -121,25 +96,36 @@ async function runAndCache(
         'Please analyze the database and write a contextual report about what this database represents.',
       ),
     ],
-    { schema: inspection },
+    { introspection },
   );
 
   await cache.set(text);
   return text;
 }
 
-export function runDBreifAgent(
-  forceRefresh = false,
-): StreamFunction<{
-  dbPath: string;
-  introspection: ReturnType<typeof inspector>;
-}> {
-  return (state) =>
-    createUIMessageStream({
+export async function generateBrief(
+  introspection: Introspection,
+  cache: BriefCache,
+) {
+  const brief = await cache.get();
+  if (!brief) {
+    return runAndCache(introspection, cache);
+  }
+  return brief;
+}
+
+export function toBrief(forceRefresh = false): StreamFunction<
+  {
+    cache: BriefCache;
+    introspection: Introspection;
+  },
+  { context: string }
+> {
+  return (state, setState) => {
+    return createUIMessageStream({
       execute: async ({ writer }) => {
-        const cache = new BriefCache(state.dbPath);
         if (forceRefresh) {
-          const brief = await runAndCache(state.introspection, cache);
+          const brief = await runAndCache(state.introspection, state.cache);
           writer.write({
             type: 'data-brief-agent',
             data: {
@@ -147,8 +133,9 @@ export function runDBreifAgent(
               brief: brief,
             },
           });
+          setState({ context: brief });
         } else {
-          let brief = await cache.get();
+          let brief = await state.cache.get();
           if (!brief) {
             writer.write({
               type: 'data-brief-agent',
@@ -156,7 +143,7 @@ export function runDBreifAgent(
                 cache: 'miss',
               },
             });
-            brief = await runAndCache(state.introspection, cache);
+            brief = await runAndCache(state.introspection, state.cache);
             writer.write({
               type: 'data-brief-agent',
               data: {
@@ -176,4 +163,5 @@ export function runDBreifAgent(
         }
       },
     });
+  };
 }

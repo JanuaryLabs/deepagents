@@ -79,16 +79,16 @@ function filterAgentOutput(
   return allMessages;
 }
 
-export function generate<O, C>(
-  agent: Agent<O, C>,
+export function generate<O, CIn, COut = CIn>(
+  agent: Agent<O, CIn, COut>,
   messages: UIMessage[] | string,
-  contextVariables: C,
+  contextVariables: CIn,
   config?: {
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
   },
 ) {
-  return generateText({
+  const result = generateText({
     abortSignal: config?.abortSignal,
     providerOptions: agent.providerOptions ?? config?.providerOptions,
     model: agent.model,
@@ -119,19 +119,20 @@ export function generate<O, C>(
     //   (contextVariables as any).content = result.content;
     // },
   });
+  return Object.assign(result, { state: contextVariables as unknown as COut });
 }
 
-export function execute<O, C>(
-  agent: Agent<O, C>,
+export function execute<O, CIn, COut = CIn>(
+  agent: Agent<O, CIn, COut>,
   messages: UIMessage[] | string,
-  contextVariables: C,
+  contextVariables: CIn,
   config?: {
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
   },
 ) {
   const runId = generateId();
-  return streamText({
+  const stream = streamText({
     abortSignal: config?.abortSignal,
     providerOptions: config?.providerOptions,
     model: agent.model,
@@ -173,14 +174,15 @@ export function execute<O, C>(
     //   (contextVariables as any).content = result.content;
     // },
   });
+  return Object.assign(stream, { state: contextVariables as unknown as COut });
 }
 
 export const stream = execute;
 
-export const prepareStep = <C>(
-  agent: Agent<unknown, C>,
+export const prepareStep = <CIn>(
+  agent: Agent<unknown, CIn, any>,
   model: AgentModel,
-  contextVariables: C,
+  contextVariables: CIn,
 ): PrepareStepFunction<NoInfer<ToolSet>> => {
   return async ({ steps, messages }) => {
     const step = steps.at(-1);
@@ -208,10 +210,10 @@ export const prepareStep = <C>(
   };
 };
 
-export function swarm<C>(
-  agent: Agent<unknown, C>,
+export function swarm<CIn>(
+  agent: Agent<unknown, CIn, any>,
   messages: UIMessage[] | string,
-  contextVariables: C,
+  contextVariables: CIn,
   abortSignal?: AbortSignal,
 ) {
   const originalMessages = Array.isArray(messages)
@@ -282,11 +284,11 @@ export function swarm<C>(
   });
 }
 
-export async function prepareAgent<C>(
+export async function prepareAgent<CIn>(
   defaultModel: AgentModel,
-  agent: Agent<unknown, C>,
+  agent: Agent<unknown, CIn, any>,
   messages: ModelMessage[],
-  contextVariables?: C,
+  contextVariables?: CIn,
 ): Promise<PrepareStepResult<NoInfer<ToolSet>>> {
   agent.debug();
   await agent.prepareHandoff?.(messages);
@@ -334,7 +336,7 @@ function getLastAgentFromSteps(
   return void 0;
 }
 
-function findAgent<C>(agent: Agent<unknown, C>, agentName: string) {
+function findAgent<CIn>(agent: Agent<unknown, CIn, any>, agentName: string) {
   // FIXME: first argument agent not always the first passed agent.
   return [...agent.toHandoffs(), agent].find(
     (it) => it.handoff.name === agentName,

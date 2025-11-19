@@ -100,7 +100,7 @@ Maximum ${maxSources} sources. Return comprehensive analysis with key findings.`
   },
 });
 
-export const researchAgent = <C>(handoffs: Handoffs<C>) =>
+export const researchAgent = <C>(handoffs: Handoffs<C, C>) =>
   agent({
     model: groq('openai/gpt-oss-20b'),
     name: 'research_agent',

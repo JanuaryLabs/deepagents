@@ -1,42 +1,32 @@
-import {
-  type GenerateTextResult,
-  type LanguageModel,
-  type ModelMessage,
-  Output,
-  type StreamTextResult,
-  type ToolChoice,
-  type ToolSet,
-  type UIDataTypes,
-  type UIMessage,
-  type UITools,
-  dynamicTool,
-  generateText,
-  jsonSchema,
-  stepCountIs,
-  tool,
-} from 'ai';
+import { type GenerateTextResult, type LanguageModel, type ModelMessage, Output, type StreamTextResult, type ToolChoice, type ToolSet, type UIDataTypes, type UIMessage, type UITools, dynamicTool, generateText, jsonSchema, stepCountIs, tool } from 'ai';
 import chalk from 'chalk';
 import { snakecase } from 'stringcase';
 import z from 'zod';
 
-import {
-  RECOMMENDED_PROMPT_PREFIX,
-  SUPERVISOR_PROMPT_PREFIX,
-} from './prompts.ts';
+
+
+import { RECOMMENDED_PROMPT_PREFIX, SUPERVISOR_PROMPT_PREFIX } from './prompts.ts';
 import { toState } from './stream_utils.ts';
 import { prepareStep } from './swarm.ts';
 
-export interface Handoff<C> {
+
+
+
+
+export interface Handoff<CIn> {
   name: string;
-  instructions: Instruction<C>;
+  instructions: Instruction<CIn>;
   handoffDescription?: string;
   tools: ToolSet;
 }
-export type Handoffs<C> = (Agent<unknown, C> | (() => Agent<unknown, C>))[];
+export type Handoffs<CIn, COut> = (
+  | Agent<unknown, CIn, COut>
+  | (() => Agent<unknown, CIn, COut>)
+)[];
 
-export type Runner<T, C> = (
+export type Runner<T, CIn> = (
   prompt: string,
-  agent: Agent<C>,
+  agent: Agent<CIn>,
   messages: ModelMessage[],
 ) => Promise<T>;
 
@@ -44,10 +34,12 @@ type transfer_tool = `transfer_to_${string}`;
 
 export type ContextVariables = Record<string, unknown>;
 
-export function agent<Output, C = ContextVariables>(
-  config: CreateAgent<Output, C>,
-): Agent<Output, C> {
-  return new Agent<Output, C>(config);
+export function agent<
+  Output,
+  CIn  = ContextVariables,
+  COut = CIn,
+>(config: CreateAgent<Output, CIn, COut>): Agent<Output, CIn, COut> {
+  return new Agent<Output, CIn, COut>(config);
 }
 
 export type ResponseMessage = UIMessage<unknown, UIDataTypes, UITools>;
@@ -66,35 +58,36 @@ export type PrepareEndFn<C, O> = (config: {
   abortSignal?: AbortSignal;
 }) => StreamTextResult<ToolSet, O> | undefined | void;
 
-export interface CreateAgent<Output, C> {
+export interface CreateAgent<Output, CIn, COut = CIn> {
   name: string;
-  prompt: Instruction<C>;
+  prompt: Instruction<CIn>;
   temperature?: number;
   handoffDescription?: string;
   prepareHandoff?: PrepareHandoffFn;
-  prepareEnd?: PrepareEndFn<C, Output>;
-  handoffs?: Handoffs<C>;
+  // Runs AFTER this agent finishes; receives the updated state
+  prepareEnd?: PrepareEndFn<COut, Output>;
+  handoffs?: Handoffs<CIn, COut>;
   tools?: ToolSet;
   model: AgentModel;
-  toolChoice?: ToolChoice<Record<string, unknown>>;
+  toolChoice?: ToolChoice<Record<string, COut>>;
   output?: z.Schema<Output>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
 }
-export class Agent<Output = unknown, C = ContextVariables> {
+export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   model: AgentModel;
-  toolChoice: ToolChoice<Record<string, unknown>> | undefined;
-  parent?: Agent<unknown, C>;
-  handoffs: Handoffs<C>;
+  toolChoice: ToolChoice<Record<string, COut>> | undefined;
+  parent?: Agent<unknown, any, any>;
+  handoffs: Handoffs<CIn, COut>;
   readonly prepareHandoff?: PrepareHandoffFn;
-  readonly prepareEnd?: PrepareEndFn<C, Output>;
+  readonly prepareEnd?: PrepareEndFn<COut, Output>;
   readonly internalName: string;
-  readonly handoff: Handoff<C>;
+  readonly handoff: Handoff<CIn>;
   readonly handoffToolName: transfer_tool;
   readonly handoffTool: ToolSet;
   readonly output?: z.Schema<Output>;
   readonly temperature?: number;
-  readonly providerOptions?: CreateAgent<Output, C>['providerOptions'];
-  constructor(config: CreateAgent<Output, C>) {
+  readonly providerOptions?: CreateAgent<Output, CIn, COut>['providerOptions'];
+  constructor(config: CreateAgent<Output, CIn, COut>) {
     this.model = config.model;
     this.toolChoice = config.toolChoice || 'auto';
     this.handoffs = config.handoffs ?? [];
@@ -149,7 +142,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
     ];
   }
 
-  #prepareInstructions(contextVariables?: C) {
+  #prepareInstructions(contextVariables?: CIn) {
     return [
       typeof this.handoff.instructions === 'function'
         ? this.handoff.instructions(contextVariables)
@@ -161,7 +154,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
     ].join('\n');
   }
 
-  instructions(contextVariables?: C) {
+  instructions(contextVariables?: CIn) {
     const text = this.#prepareInstructions(contextVariables);
     const handoffsData = this.toHandoffs();
 
@@ -186,7 +179,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
   }
 
   toHandoffs() {
-    const hfs: Agent<unknown, C>[] = [];
+    const hfs: Agent<unknown, CIn, COut>[] = [];
     for (const it of this.handoffs ?? []) {
       const hf = typeof it === 'function' ? it() : it;
       hf.parent = this;
@@ -294,7 +287,7 @@ export class Agent<Output = unknown, C = ContextVariables> {
     includeHandoffs?: boolean;
   }): ToolSet {
     const tools = flattenTools(
-      this as Agent<unknown, C>,
+      this as Agent<unknown, CIn, COut>,
       (node) => node.toHandoffs(),
       (node) => node.handoff.tools,
     );
@@ -307,9 +300,9 @@ export class Agent<Output = unknown, C = ContextVariables> {
   }
 
   clone(
-    agent?: Omit<Partial<CreateAgent<Output, C>>, 'handoffs'>,
-  ): Agent<Output, C> {
-    return new Agent<Output, C>({
+    agent?: Omit<Partial<CreateAgent<Output, CIn, COut>>, 'handoffs'>,
+  ): Agent<Output, CIn, COut> {
+    return new Agent<Output, CIn, COut>({
       prepareHandoff: (messages) => {
         this.prepareHandoff?.(messages);
       },
