@@ -54,7 +54,8 @@
         "sourcemap": true,
         "esbuildOptions": {
           "loader": {
-            ".txt": "text"
+            ".txt": "text",
+            ".sql": "text"
           }
         },
         "external": [

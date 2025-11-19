@@ -182,6 +182,6 @@ export const text2sqlOnly = text2sqlAgent.clone({
 });
 
 export const text2sqlMonolith = text2sqlAgent.clone({
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
+  model: groq('openai/gpt-oss-20b'),
   tools,
 });

@@ -7,6 +7,6 @@
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
-  "references": [],
+  "include": ["src/**/*.ts", "../../global.d.ts"],
+  "references": []
 }

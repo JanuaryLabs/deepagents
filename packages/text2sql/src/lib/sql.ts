@@ -1,24 +1,38 @@
-import type {
-  InferUIMessageChunk,
-  UIDataTypes,
-  UIMessage,
-  UIMessageChunk,
-  UITools,
+import {
+  type InferUIMessageChunk,
+  InvalidToolInputError,
+  NoSuchToolError,
+  ToolCallRepairError,
+  type UIDataTypes,
+  type UIMessage,
+  type UIMessageChunk,
+  type UITools,
 } from 'ai';
 import dedent from 'dedent';
+import { v7 } from 'uuid';
 
 import { generate, pipe, printer, stream, user } from '@deepagents/agent';
 
 import type { Adapter } from './adapters/adapter.ts';
 import { Sqlite } from './adapters/sqlite.ts';
 import { BriefCache, generateBrief, toBrief } from './agents/brief.agent.ts';
+import { suggestionsAgent } from './agents/suggestions.agents.ts';
 import { synthesizerAgent } from './agents/synthesizer.agent.ts';
 import { text2sqlMonolith, text2sqlOnly } from './agents/text2sql.agent.ts';
-import { suggestionsAgent } from './agents/suggestions.agents.ts';
+import { History } from './history/history.ts';
+import { SqliteHistory } from './history/sqlite.history.ts';
 
 export class Text2Sql {
-  #config: { adapter: Adapter; cache: BriefCache };
-  constructor(config: { adapter: Adapter; cache: BriefCache }) {
+  #config: {
+    adapter: Adapter;
+    cache: BriefCache;
+    history: History;
+  };
+  constructor(config: {
+    adapter: Adapter;
+    cache: BriefCache;
+    history: History;
+  }) {
     this.#config = config;
   }
   async #getSql(
@@ -158,39 +172,100 @@ export class Text2Sql {
       adapter: this.#config.adapter,
       introspection,
       adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
-      context: await generateBrief(introspection, this.#config.cache)
+      context: await generateBrief(introspection, this.#config.cache),
     });
   }
-  public async chat(messages: UIMessage[]) {
+  public async chat(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
     const [introspection, adapterInfo] = await Promise.all([
       this.#config.adapter.introspect(),
       this.#config.adapter.info(),
     ]);
-    return stream(text2sqlMonolith, messages, {
-      adapter: this.#config.adapter,
-      introspection,
-      adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
-      context: await generateBrief(introspection, this.#config.cache)
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const result = stream(
+      text2sqlMonolith,
+      [...chat.messages.map((it) => it.content), ...messages],
+      {
+        adapter: this.#config.adapter,
+        introspection,
+        adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
+        context: await generateBrief(introspection, this.#config.cache),
+      },
+    );
+    return result.toUIMessageStream({
+      onError: (error) => {
+        if (NoSuchToolError.isInstance(error)) {
+          return 'The model tried to call a unknown tool.';
+        } else if (InvalidToolInputError.isInstance(error)) {
+          return 'The model called a tool with invalid arguments.';
+        } else if (ToolCallRepairError.isInstance(error)) {
+          return 'The model tried to call a tool with invalid arguments, but it was repaired.';
+        } else {
+          return 'An unknown error occurred.';
+        }
+      },
+      sendStart: true,
+      sendFinish: true,
+      sendReasoning: true,
+      sendSources: true,
+      originalMessages: messages,
+      onFinish: async ({ messages }) => {
+        const userMessage = messages.at(-2);
+        const botMessage = messages.at(-1);
+        if (!userMessage || !botMessage) {
+          throw new Error('Not implemented yet');
+        }
+        await this.#config.history.addMessage({
+          id: v7(),
+          chatId: params.chatId,
+          role: userMessage.role,
+          content: userMessage,
+        });
+        await this.#config.history.addMessage({
+          id: v7(),
+          chatId: params.chatId,
+          role: botMessage.role,
+          content: botMessage,
+        });
+      },
     });
   }
 }
+
 if (import.meta.main) {
   const { DatabaseSync } = await import('node:sqlite');
   const sqliteClient = new DatabaseSync(
     '/Users/ezzabuzaid/Downloads/Chinook.db',
-    {
-      readOnly: true,
-      open: true,
-    },
+    { readOnly: true },
   );
+  const history = new SqliteHistory('./text2sql_history.sqlite');
+  const chats = await history.listChats('default');
+  for (const chat of chats) {
+    console.log(`- Chat ID: ${chat.id}, Title: ${chat.title}`);
+  }
   const text2sql = new Text2Sql({
+    cache: new BriefCache('brief'),
+    history: history,
     adapter: new Sqlite({
       execute: (sql) => sqliteClient.prepare(sql).all(),
     }),
-    cache: new BriefCache('brief'),
   });
-  const sql = await text2sql.single(
-    'What tracks have a unit price greater than $1.00?',
+  const sql = await text2sql.chat(
+    [user('what was the question I asked you?')],
+    {
+      userId: 'default',
+      chatId: '019a9b5a-f118-76a9-9dee-609e28ec60b3',
+    },
   );
-  await printer.stdout(sql);
+  await printer.readableStream(sql);
 }

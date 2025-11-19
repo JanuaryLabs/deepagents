@@ -6,3 +6,6 @@ export * from './lib/adapters/adapter.ts';
 export * from './lib/adapters/sqlite.ts';
 export * from './lib/adapters/postgres.ts';
 export * from './lib/adapters/sqlserver.ts';
+export * from './lib/history/history.ts';
+export * from './lib/history/sqlite.history.ts';
+export * from './lib/history/memory.history.ts';
