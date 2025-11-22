@@ -132,10 +132,10 @@ export function databaseSchemaPrompt(options: {
   const contextInfo = options.context || '';
   const adapterInfo = options.adapterInfo;
   const lines = [
-    adapterInfo ? `<adapter>${adapterInfo}</adapter>` : '',
+    adapterInfo ? `<dialect_info>${adapterInfo}</dialect_info>` : '',
     contextInfo ? `<context>${contextInfo}</context>` : '',
     `<tables>\n${tablesSummary}\n</tables>`,
     `<relationships>\n${relationshipsSummary}\n</relationships>`,
   ];
-  return lines.filter(Boolean).join('\n\n');
+  return `<schema_context>${lines.filter(Boolean).join('\n\n')}</schema_context>`
 }

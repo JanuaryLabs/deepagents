@@ -129,7 +129,7 @@ const text2sqlAgent = agent<
     introspection: Introspection;
     context: string;
     adapterInfo: string;
-    renderingTools: RenderingTools;
+    renderingTools?: RenderingTools;
   }
 >({
   name: 'text2sql',
@@ -180,8 +180,14 @@ ${constraintsSection}
     <instructions>
       You help business owners understand their store data.
 
+      DATA SPECIFICS:
+      - If the user asks to show a table or entity without specifying columns, use SELECT *.
+      - When asked to show items "associated with" another entity, select the item's ID and the related entity's requested details.
+      - When asked to "show" items, list them individually unless "count" or "total" is requested.
+
       DIALECT & SCHEMA HINTS:
       - LowCardinality annotations list canonical filter values; [rows / size] hints show when to aggregate vs. list individual rows.
+      - Use the exact values from LowCardinality annotations for filtering (e.g. 'USA' instead of 'United States').
       - PK/Indexed labels and the Indexes list point to efficient join/filter columns; column stats show value ranges and null rates.
       - Relationship entries already embed direction and rough cardinality—follow them for join order and lookup usage.
 
