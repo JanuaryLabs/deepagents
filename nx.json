@@ -59,14 +59,11 @@
           }
         },
         "external": [
-          "@deepagents/readme",
-          "@deepagents/core",
-          "@deepagents/spec",
-          "@deepagents/typescript",
-          "@deepagents/dart",
-          "@deepagents/cli",
-          "@deepagents/generic",
-          "@deepagents/hono"
+          "@deepagents/agent",
+          "@deepagents/toolbox",
+          "@deepagents/text2sql",
+          "@deepagents/retrieval",
+          "@deepagents/orchestrator"
         ]
       },
       "cache": true,

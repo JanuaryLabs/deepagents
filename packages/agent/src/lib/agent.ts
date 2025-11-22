@@ -1,17 +1,30 @@
-import { type GenerateTextResult, type LanguageModel, type ModelMessage, Output, type StreamTextResult, type ToolChoice, type ToolSet, type UIDataTypes, type UIMessage, type UITools, dynamicTool, generateText, jsonSchema, stepCountIs, tool } from 'ai';
+import {
+  type GenerateTextResult,
+  type LanguageModel,
+  type ModelMessage,
+  Output,
+  type StreamTextResult,
+  type ToolChoice,
+  type ToolSet,
+  type UIDataTypes,
+  type UIMessage,
+  type UITools,
+  dynamicTool,
+  generateText,
+  jsonSchema,
+  stepCountIs,
+  tool,
+} from 'ai';
 import chalk from 'chalk';
 import { snakecase } from 'stringcase';
 import z from 'zod';
 
-
-
-import { RECOMMENDED_PROMPT_PREFIX, SUPERVISOR_PROMPT_PREFIX } from './prompts.ts';
+import {
+  RECOMMENDED_PROMPT_PREFIX,
+  SUPERVISOR_PROMPT_PREFIX,
+} from './prompts.ts';
 import { toState } from './stream_utils.ts';
 import { prepareStep } from './swarm.ts';
-
-
-
-
 
 export interface Handoff<CIn> {
   name: string;
@@ -34,11 +47,9 @@ type transfer_tool = `transfer_to_${string}`;
 
 export type ContextVariables = Record<string, unknown>;
 
-export function agent<
-  Output,
-  CIn  = ContextVariables,
-  COut = CIn,
->(config: CreateAgent<Output, CIn, COut>): Agent<Output, CIn, COut> {
+export function agent<Output, CIn = ContextVariables, COut = CIn>(
+  config: CreateAgent<Output, CIn, COut>,
+): Agent<Output, CIn, COut> {
   return new Agent<Output, CIn, COut>(config);
 }
 
@@ -315,6 +326,8 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
         agent?.handoffDescription ?? this.handoff.handoffDescription,
       handoffs: [...this.handoffs],
       output: agent?.output ?? this.output,
+      temperature: agent?.temperature ?? this.temperature,
+      providerOptions: agent?.providerOptions ?? this.providerOptions,
     });
   }
 }
