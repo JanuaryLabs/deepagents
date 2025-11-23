@@ -13,7 +13,7 @@ import { scratchpad_tool } from '@deepagents/toolbox';
 import type { Adapter, Introspection } from '../adapters/adapter.ts';
 import { databaseSchemaPrompt } from '../prompt.ts';
 
-export type RenderingTools = Record<string, Tool>;
+export type RenderingTools = Record<string, Tool<unknown, never>>;
 
 const tools = {
   validate_query: tool({
@@ -130,6 +130,7 @@ const text2sqlAgent = agent<
     context: string;
     adapterInfo: string;
     renderingTools?: RenderingTools;
+    teachings: string;
   }
 >({
   name: 'text2sql',
@@ -141,15 +142,9 @@ const text2sqlAgent = agent<
       '**Validation**: You must validate your query before final execution. Follow the pattern: Draft Query → `validate_query` → Fix (if needed) → `db_query`.',
       '**Data Inspection**: If you are unsure about column values (e.g. status codes, date formats), use `get_sample_rows` to inspect the data before writing the query.',
       '**Tool Usage**: If you have not produced a SQL snippet, do not call `db_query`. First produce the query string, then validate.',
-    ];
-
-    if (renderingGuidance.constraint) {
-      constraints.push(renderingGuidance.constraint);
-    }
-
-    constraints.push(
+      renderingGuidance.constraint,
       '**Scratchpad**: Use the `scratchpad` tool for strategic reflection during SQL query generation.',
-    );
+    ].filter(Boolean);
 
     const constraintsSection = constraints
       .map((constraint, index) => `      ${index + 1}. ${constraint}`)
@@ -162,6 +157,8 @@ const text2sqlAgent = agent<
     </identity>
 
     ${databaseSchemaPrompt(state!)}
+
+    ${state?.teachings || ''}
 
     <query_reasoning_strategy>
       ${stepBackPrompt('general', {
@@ -176,62 +173,33 @@ const text2sqlAgent = agent<
     <constraints>
 ${constraintsSection}
     </constraints>
-
-    <instructions>
-      You help business owners understand their store data.
-
-      DATA SPECIFICS:
-      - If the user asks to show a table or entity without specifying columns, use SELECT *.
-      - When asked to show items "associated with" another entity, select the item's ID and the related entity's requested details.
-      - When asked to "show" items, list them individually unless "count" or "total" is requested.
-
-      DIALECT & SCHEMA HINTS:
-      - LowCardinality annotations list canonical filter values; [rows / size] hints show when to aggregate vs. list individual rows.
-      - Use the exact values from LowCardinality annotations for filtering (e.g. 'USA' instead of 'United States').
-      - PK/Indexed labels and the Indexes list point to efficient join/filter columns; column stats show value ranges and null rates.
-      - Relationship entries already embed direction and rough cardinality—follow them for join order and lookup usage.
-
-      REASONING PLAN:
-      1. Translate the user question into required SQL patterns (aggregation, segmentation, time range, etc.).
-      2. Choose tables/relations that satisfy the patterns; note lookup tables or filters implied by low-cardinality values.
-      3. Inspect data samples using 'get_sample_rows' if column values are ambiguous (e.g. date formats, status codes).
-      4. Sketch join/filter/aggregation order considering table sizes, indexes, and column stats.
-      5. Write the SQL, then validate via 'validate_query', and finally execute via 'db_query' with a brief reasoning justification.
-
-      ERROR RECOVERY:
-      - On failures, inspect error_type: MISSING_TABLE/INVALID_COLUMN → fix identifiers; SYNTAX_ERROR → adjust structure; INVALID_JOIN → revisit relationships.
-      - Re-run at most once after adjustments; if still failing, report the issue plainly and recommend an alternative query or clarification.
-
-      AMBIGUITY:
-      - If a user question is ambiguous (e.g., “top X”, missing time range), first ask for clarification before generating a query.
-
-      SAFETY & ANSWERS:
-      - Limit raw lists to ≈100 rows; counts/aggregates need no LIMIT.
-      - Summaries should be in business language with key comparisons plus an optional helpful follow-up question.
-    </instructions>
 ${renderingGuidance.section}
-    <working_memory>
-      You have access to a scratchpad tool for strategic reflection during SQL query generation.
-
-      Use it to:
-      - Record your analysis of the database schema and relationships
-      - Note query optimization strategies you're considering
-      - Track intermediate findings from query results
-      - Document reasoning about join strategies and aggregations
-      - Plan complex multi-step queries
-
-      Call the scratchpad tool after analyzing schema or results to ensure deliberate, high-quality decision-making.
-    </working_memory>
   `;
   },
 });
 
 export const text2sqlOnly = text2sqlAgent.clone({
+  tools: {},
   output: z.object({
     sql: z
       .string()
       .describe('The SQL query generated to answer the user question.'),
   }),
+  prompt: (state) => {
+    return `
+    <identity>
+      You are an expert SQL query generator, answering business questions with accurate queries.
+      Your tone should be concise and business-friendly.
+    </identity>
+
+    ${databaseSchemaPrompt(state!)}
+
+    <constraints>
+      1. **Output**: Provide ONLY the SQL query. Do not include markdown formatting like \`\`\`sql ... \`\`\`.
+      2. **Dialect**: Use standard SQL compatible with SQLite unless specified otherwise.
+    </constraints>
+  `;
+  },
 });
 
 export const text2sqlMonolith = text2sqlAgent.clone({

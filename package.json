@@ -42,6 +42,7 @@
     "eslint-config-prettier": "10.1.5",
     "eslint-plugin-import": "2.32.0",
     "eslint-plugin-jsx-a11y": "6.10.2",
+    "evalite": "^0.19.0",
     "husky": "^9.1.7",
     "jsonc-eslint-parser": "^2.4.0",
     "nx": "21.6.4",
@@ -52,7 +53,8 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.35.0",
     "verdaccio": "6.1.4",
-    "vite-plugin-comlink": "^5.1.0"
+    "vite-plugin-comlink": "^5.1.0",
+    "vitest": "^4.0.13"
   },
   "workspaces": [
     "packages/*",
@@ -83,7 +85,7 @@
     "@tavily/core": "^0.5.12",
     "@types/jsdom": "^27.0.0",
     "@upstash/qstash": "^2.8.4",
-    "ai": "^5.0.82",
+    "ai": "^5.0.100",
     "conf": "^15.0.2",
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",

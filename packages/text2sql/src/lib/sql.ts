@@ -1,17 +1,12 @@
-import {
-  type InferUIMessageChunk,
-  InvalidToolInputError,
-  NoSuchToolError,
-  ToolCallRepairError,
-  type UIDataTypes,
-  type UIMessage,
-  type UIMessageChunk,
-  type UITools,
-} from 'ai';
+import { type InferUIMessageChunk, InvalidToolInputError, NoSuchToolError, ToolCallRepairError, type UIDataTypes, type UIMessage, type UIMessageChunk, type UITools } from 'ai';
 import dedent from 'dedent';
 import { v7 } from 'uuid';
 
-import { generate, pipe, printer, stream, user } from '@deepagents/agent';
+
+
+import { generate, pipe, stream, user } from '@deepagents/agent';
+
+
 
 import type { Adapter } from './adapters/adapter.ts';
 import { Sqlite } from './adapters/sqlite.ts';
@@ -19,13 +14,16 @@ import { BriefCache, generateBrief, toBrief } from './agents/brief.agent.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
 import { suggestionsAgent } from './agents/suggestions.agents.ts';
 import { synthesizerAgent } from './agents/synthesizer.agent.ts';
-import {
-  type RenderingTools,
-  text2sqlMonolith,
-  text2sqlOnly,
-} from './agents/text2sql.agent.ts';
+import { teachablesAuthorAgent } from './agents/teachables.agent.ts';
+import { type RenderingTools, text2sqlMonolith, text2sqlOnly } from './agents/text2sql.agent.ts';
 import { History } from './history/history.ts';
 import { SqliteHistory } from './history/sqlite.history.ts';
+import { type Teachables, toInstructions, toTeachables } from './teach/teachables.ts';
+import teachings from './teach/teachings.ts';
+
+
+
+
 
 export class Text2Sql {
   #config: {
@@ -33,14 +31,20 @@ export class Text2Sql {
     cache: BriefCache;
     history: History;
     tools?: RenderingTools;
+    instructions: Teachables[];
   };
   constructor(config: {
     adapter: Adapter;
     cache: BriefCache;
     history: History;
     tools?: RenderingTools;
+    instructions?: Teachables[];
   }) {
-    this.#config = config;
+    this.#config = {
+      ...config,
+      instructions: config.instructions ?? [],
+      tools: config.tools ?? {},
+    };
   }
   async #getSql(
     stream: ReadableStream<
@@ -82,6 +86,7 @@ export class Text2Sql {
             adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
             context,
             introspection,
+            teachings: toInstructions(...this.#config.instructions),
           },
         );
         return output.sql;
@@ -100,7 +105,35 @@ export class Text2Sql {
       adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
       context,
       introspection,
+      teachings: toInstructions(...this.#config.instructions),
     });
+  }
+
+  public instruct(...dataset: Teachables[]) {
+    this.#config.instructions.push(...dataset);
+  }
+
+  public async teach(input: string) {
+    const [introspection, adapterInfo] = await Promise.all([
+      this.#config.adapter.introspect(),
+      this.#config.adapter.info(),
+    ]);
+    const context = await generateBrief(introspection, this.#config.cache);
+    const { experimental_output } = await generate(
+      teachablesAuthorAgent,
+      [user(input)],
+      {
+        introspection,
+        adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
+        context,
+      },
+    );
+    const teachables = toTeachables(experimental_output.teachables);
+    this.#config.instructions.push(...teachables);
+    return {
+      teachables,
+      teachings: toInstructions(...this.#config.instructions),
+    };
   }
 
   public async tag(input: string) {
@@ -117,6 +150,7 @@ export class Text2Sql {
         adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
         messages: [user(input)],
         renderingTools: this.#config.tools || {},
+        teachings: toInstructions(...this.#config.instructions),
       },
       toBrief(),
       async (state, update) => {
@@ -187,10 +221,14 @@ export class Text2Sql {
     // }));
     return stream(
       text2sqlMonolith.clone({
-        tools: { ...text2sqlMonolith.handoff.tools, ...this.#config.tools },
+        tools: {
+          ...text2sqlMonolith.handoff.tools,
+          ...this.#config.tools,
+        },
       }),
       [user(input)],
       {
+        teachings: toInstructions(...this.#config.instructions),
         adapter: this.#config.adapter,
         introspection,
         adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
@@ -225,6 +263,7 @@ export class Text2Sql {
       }),
       [...chat.messages.map((it) => it.content), ...messages],
       {
+        teachings: toInstructions(...this.#config.instructions),
         adapter: this.#config.adapter,
         renderingTools: this.#config.tools || {},
         introspection,
@@ -278,28 +317,28 @@ if (import.meta.main) {
     '/Users/ezzabuzaid/Downloads/Chinook.db',
     { readOnly: true },
   );
-  const history = new SqliteHistory('./text2sql_history.sqlite');
-  const chats = await history.listChats('default');
-  for (const chat of chats) {
-    console.log(`- Chat ID: ${chat.id}, Title: ${chat.title}`);
-  }
+
   const text2sql = new Text2Sql({
+    instructions: teachings,
     cache: new BriefCache('brief'),
-    history,
+    history: new SqliteHistory('./text2sql_history.sqlite'),
     adapter: new Sqlite({
       execute: (sql) => sqliteClient.prepare(sql).all(),
     }),
   });
-  const sql = await text2sql.chat(
-    [
-      user(
-        'What is trending in sales lately, last calenar year, monthly timeframe?',
-      ),
-    ],
-    {
-      userId: 'default',
-      chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
-    },
-  );
-  await printer.readableStream(sql);
+
+  console.dir(await text2sql.teach('Generate guardrails'));
+
+  // const sql = await text2sql.chat(
+  //   [
+  //     user(
+  //       'What is trending in sales lately, last calenar year, monthly timeframe?',
+  //     ),
+  //   ],
+  //   {
+  //     userId: 'default',
+  //     chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
+  //   },
+  // );
+  // await printer.readableStream(sql);
 }
