@@ -54,10 +54,7 @@ type IndexRow = {
   is_included_column: boolean | number | null;
 };
 
-const SQL_SERVER_ERROR_MAP: Record<
-  string,
-  { type: string; hint: string }
-> = {
+const SQL_SERVER_ERROR_MAP: Record<string, { type: string; hint: string }> = {
   '208': {
     type: 'MISSING_TABLE',
     hint: 'Check that the table exists and include the schema prefix (e.g., dbo.TableName).',
@@ -176,7 +173,8 @@ export class SqlServer extends Adapter {
 
   override async validate(sql: string) {
     const validator: ValidateFunction =
-      this.#options.validate ?? (async (text: string) => {
+      this.#options.validate ??
+      (async (text: string) => {
         await this.#options.execute(
           `SET PARSEONLY ON; ${text}; SET PARSEONLY OFF;`,
         );
@@ -282,7 +280,11 @@ export class SqlServer extends Adapter {
     const relationships = new Map<string, Relationship>();
 
     for (const row of rows) {
-      if (!row.constraint_name || !row.table_name || !row.referenced_table_name) {
+      if (
+        !row.constraint_name ||
+        !row.table_name ||
+        !row.referenced_table_name
+      ) {
         continue;
       }
 
@@ -351,9 +353,7 @@ export class SqlServer extends Adapter {
       if (!table) {
         continue;
       }
-      const column = table.columns.find(
-        (col) => col.name === row.column_name,
-      );
+      const column = table.columns.find((col) => col.name === row.column_name);
       if (column) {
         column.isPrimaryKey = true;
       }
@@ -423,7 +423,9 @@ export class SqlServer extends Adapter {
       }
       if (row.column_name) {
         index.columns.push(row.column_name);
-        const column = table.columns.find((col) => col.name === row.column_name);
+        const column = table.columns.find(
+          (col) => col.name === row.column_name,
+        );
         if (column) {
           column.isIndexed = true;
         }
@@ -459,7 +461,11 @@ export class SqlServer extends Adapter {
             continue;
           }
           const nullFraction = this.#toNumber(rows[0]?.null_fraction);
-          if (rows[0]?.min_value != null || rows[0]?.max_value != null || nullFraction != null) {
+          if (
+            rows[0]?.min_value != null ||
+            rows[0]?.max_value != null ||
+            nullFraction != null
+          ) {
             column.stats = {
               min: rows[0]?.min_value ?? undefined,
               max: rows[0]?.max_value ?? undefined,
@@ -538,10 +544,7 @@ export class SqlServer extends Adapter {
       return result as Row[];
     }
 
-    if (
-      result &&
-      typeof result === 'object'
-    ) {
+    if (result && typeof result === 'object') {
       if (
         'rows' in result &&
         Array.isArray((result as { rows?: unknown }).rows)

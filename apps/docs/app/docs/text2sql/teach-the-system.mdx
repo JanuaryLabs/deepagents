@@ -1,0 +1,344 @@
+---
+title: Teach the System
+description: Add domain knowledge through teachables to improve query accuracy
+---
+
+Text2SQL can be taught domain-specific knowledge through **teachables** - structured knowledge items that improve query accuracy and understanding.
+
+## Two Ways to Teach
+
+### 1. Manual Teaching with instruct()
+
+Add teachables directly in code:
+
+```typescript
+import { example, hint, term } from '@deepagents/text2sql';
+
+text2sql.instruct(
+  term('NPL', 'non-performing loan - loan past due 90+ days'),
+  hint('Always exclude test accounts with email ending in @test.com'),
+  example({
+    question: 'show me top customers',
+    sql: 'SELECT * FROM customers ORDER BY lifetime_value DESC LIMIT 10',
+  }),
+);
+```
+
+### 2. Automatic Teaching with teach()
+
+Let the AI analyze your database and generate teachables automatically. The teachables author agent examines your schema and creates relevant, high-impact teachables:
+
+```typescript
+const result = await text2sql.teach(
+  'Our database tracks e-commerce orders. Active customers are those who ordered in the last 90 days.',
+);
+
+console.log(result.teachables); // Auto-generated teachables (3-10 items)
+console.log(result.teachings); // Formatted XML for the system prompt
+```
+
+The teach() method uses the `teachablesAuthorAgent` which:
+
+- Analyzes your database schema
+- Considers the context you provide
+- Generates 3-10 high-value teachables grounded in your actual schema
+- Prioritizes guardrails, clarifications, and hints for safety and accuracy
+- Automatically adds the teachables to your Text2SQL instance
+
+## 10 Teachable Types
+
+### term() - Domain Vocabulary
+
+Define business terms and acronyms:
+
+```typescript
+term('deadhead miles', 'distance driven with empty truck between deliveries');
+term('DFW rate', 'percentage of students receiving D, F, or Withdrawal');
+term('AUM', 'assets under management - total market value of investments');
+```
+
+### hint() - Always-Apply Rules
+
+Behavioral rules applied to all queries:
+
+```typescript
+hint("Always exclude work orders with status = 'simulation'");
+hint('View counts reset daily - use cumulative_views for historical analysis');
+hint('Square footage should specify if including basement/garage');
+```
+
+### guardrail() - Hard Boundaries
+
+Safety rules and compliance requirements:
+
+```typescript
+guardrail({
+  rule: 'Never return PHI like SSN, MRN, or full address',
+  reason: 'HIPAA compliance',
+  action: 'Offer de-identified aggregates instead',
+});
+
+guardrail({
+  rule: 'Block queries exposing individual salaries by name',
+  reason: 'Confidential payroll data',
+  action: 'Provide ranges grouped by department instead',
+});
+
+guardrail({
+  rule: 'Warn when scanning more than 10 million rows',
+  reason: 'Performance and cost control',
+  action: 'Ask user to add date range filters',
+});
+```
+
+### explain() - Rich Concept Understanding
+
+Deep explanations with metaphors:
+
+```typescript
+explain({
+  concept: 'DAU/MAU ratio',
+  explanation:
+    'like measuring how many club members visit daily vs monthly - shows stickiness',
+  therefore: 'Calculate as DAU / MAU, higher ratio means more engaged users',
+});
+
+explain({
+  concept: 'time to fill',
+  explanation:
+    'like how long a house sits on market - from job posting to accepted offer',
+  therefore: 'Calculate days between job_posted_date and offer_accepted_date',
+});
+```
+
+### example() - Few-Shot Learning
+
+Question → SQL pairs for pattern matching:
+
+```typescript
+example({
+  question: 'show me peak demand hours',
+  sql: `SELECT DATE_TRUNC('hour', reading_timestamp) as hour,
+        MAX(consumption_kwh) as peak_demand
+        FROM meter_readings
+        WHERE reading_timestamp >= CURRENT_DATE - INTERVAL '7 days'
+        GROUP BY hour ORDER BY peak_demand DESC LIMIT 10`,
+});
+
+example({
+  question: 'hotel occupancy rate this month',
+  sql: `SELECT hotel_name,
+        (SUM(occupied_rooms) / SUM(total_rooms)) * 100 as occupancy_rate
+        FROM daily_occupancy
+        WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
+        GROUP BY hotel_id, hotel_name`,
+  note: 'Occupancy rate is a percentage - multiply by 100',
+});
+```
+
+### clarification() - Proactive Questions
+
+When to ask users for more information:
+
+```typescript
+clarification({
+  when: "user asks for 'conversion rate'",
+  ask: 'Which conversion: click-to-lead, lead-to-opportunity, or opportunity-to-customer?',
+  reason: 'Conversion rate means different things at each funnel stage',
+});
+
+clarification({
+  when: "user mentions 'active members'",
+  ask: 'Do you mean paid memberships or members who visited in last 30 days?',
+  reason: "Many paid members don't use facilities",
+});
+```
+
+### workflow() - Multi-Step Analysis
+
+Complex analytical processes:
+
+```typescript
+workflow({
+  task: 'Claims Loss Ratio Analysis',
+  triggers: ['loss ratio', 'claims ratio', 'underwriting performance'],
+  steps: [
+    'Calculate total claims paid for each policy period',
+    'Calculate total premiums earned for same period',
+    'Compute loss ratio as (claims_paid / premiums_earned) * 100',
+    'Segment by policy type, geography, and underwriter',
+    'Identify policies with loss ratio > 100%',
+  ],
+  notes: 'Use incurred date for claims, not paid date',
+});
+```
+
+### quirk() - Data Edge Cases
+
+Database quirks and workarounds:
+
+```typescript
+quirk({
+  issue: 'Citizen IDs have leading zeros but stored as integers',
+  workaround: "Use LPAD(citizen_id::VARCHAR, 10, '0') to restore zeros",
+});
+
+quirk({
+  issue: 'Flight times crossing midnight show negative duration',
+  workaround: 'Add 24 hours when duration < 0',
+});
+```
+
+### styleGuide() - SQL Preferences
+
+Coding standards and conventions:
+
+```typescript
+styleGuide({
+  prefer: "Use donor-centric language: 'donor_name' not 'customer_name'",
+  never: 'Never expose internal donor IDs in external reports',
+  always: 'Include fiscal year in date aggregations (FY starts July 1)',
+});
+```
+
+### analogy() - Concept Comparisons
+
+Teach relational understanding:
+
+```typescript
+analogy({
+  concept: ['cart abandonment', 'browse abandonment'],
+  relationship:
+    'Cart abandonment is like leaving items at checkout, browse abandonment is window shopping',
+  insight: 'Cart shows purchase intent, browse shows only interest',
+  therefore:
+    'Prioritize cart abandonment recovery - higher conversion potential',
+  pitfall: "Don't combine into generic 'abandonment rate'",
+});
+```
+
+## Priority Order
+
+Teachables are applied in this order (highest priority first):
+
+1. guardrails
+2. style_guides
+3. hints
+4. clarifications
+5. workflows
+6. quirks
+7. terminology (terms)
+8. explanations
+9. analogies
+10. examples
+
+## Default Teachables
+
+Text2SQL includes a set of default teachables that enforce best practices. These are defined in `teachings.ts` and include:
+
+### Default Hints
+
+- Show tables/entities using SELECT \* when no specific columns mentioned
+- Include item ID and related details when showing associated items
+- Use canonical/low-cardinality values verbatim for filtering
+- Favor primary keys and indexed columns for joins and filters
+
+### Default Guardrails
+
+- Avoid unbounded scans on large/time-based tables (ask for date ranges)
+- Do not return oversized result sets (keep to ~100 rows, aggregate otherwise)
+- Prevent cartesian or guesswork joins (inspect relationships first)
+
+### Default Clarifications
+
+- When requests target time-based data without date range, confirm timeframe
+- When using ambiguous ranking language ("top", "best") without a metric, ask for clarification
+
+### Default Workflow
+
+The SQL generation workflow teachable defines the step-by-step process for creating queries
+
+### Default Style Guide
+
+Summaries should be concise, business-friendly, highlight comparisons, and add helpful follow-ups
+
+## Best Practices
+
+### Start with Guardrails
+
+Define safety boundaries first - these are non-negotiable rules.
+
+### Add Terms for Jargon
+
+If your domain has specific vocabulary, define it early.
+
+### Use Examples for Complex Patterns
+
+When queries need specific structure, provide examples.
+
+### Let teach() Discover More
+
+Use automatic teaching to find patterns you might miss. The teachables author agent will generate relevant, schema-grounded teachables:
+
+```typescript
+// Feed it documentation, data dictionaries, or business context
+await text2sql.teach(`
+  Our inventory system uses:
+  - SKU: unique product identifier
+  - on_hand: physical inventory count
+  - available: on_hand minus reserved items
+  Negative available means we're oversold.
+`);
+```
+
+### Inspect What's Been Taught
+
+View the complete system prompt including all teachables:
+
+```typescript
+const prompt = await text2sql.inspect();
+console.log(prompt); // Full prompt with schema, teachables, and constraints
+```
+
+## How Teachables Are Formatted
+
+Teachables are converted to XML and injected into the system prompt. The `toInstructions()` function:
+
+1. Groups teachables by type
+2. Orders them by priority (guardrails first, examples last)
+3. Converts each to XML using helper functions
+4. Wraps everything in a `<teachings>` block
+
+Example output:
+
+```xml
+<teachings>
+  <guardrails>
+    <guardrail>
+      <rule>Never return PHI like SSN or MRN</rule>
+      <reason>HIPAA compliance</reason>
+      <action>Offer de-identified aggregates instead</action>
+    </guardrail>
+  </guardrails>
+
+  <hints>
+    <hint>Always exclude test accounts with email ending in @test.com</hint>
+  </hints>
+
+  <terminology>
+    <term>
+      <name>NPL</name>
+      <definition>non-performing loan - loan past due 90+ days</definition>
+    </term>
+  </terminology>
+
+  <examples>
+    <example>
+      <question>show me top customers</question>
+      <sql>SELECT * FROM customers ORDER BY lifetime_value DESC LIMIT 10</sql>
+    </example>
+  </examples>
+</teachings>
+```
+
+This XML structure is parsed by the AI model and used to guide query generation.

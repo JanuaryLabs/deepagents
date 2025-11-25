@@ -1,0 +1,101 @@
+---
+title: Overview
+description: Convert natural language to SQL queries with AI-powered understanding of your database schema
+---
+
+Text2SQL is a package that converts natural language questions into SQL queries. It understands your database schema, learns domain-specific terminology, and generates safe, read-only queries.
+
+## Key Features
+
+- **Natural Language to SQL**: Ask questions in plain English, get executable SQL
+- **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
+- **Multi-Database Support**: Works with PostgreSQL, SQLite, and SQL Server
+- **Teachable**: Add domain knowledge through terms, hints, guardrails, and examples
+- **Conversation Memory**: Multi-turn chat with persistent history and user profiles
+- **Safe by Default**: Generates read-only queries with output limits
+
+## Quick Example
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+import { BriefCache, Sqlite, Text2Sql } from '@deepagents/text2sql';
+
+const db = new DatabaseSync('./chinook.db', { readOnly: true });
+
+const text2sql = new Text2Sql({
+  adapter: new Sqlite({
+    execute: (sql) => db.prepare(sql).all(),
+  }),
+  cache: new BriefCache('chinook'),
+  history: new MemoryHistory(),
+});
+
+// Generate SQL from natural language
+const { generate } = await text2sql.toSql(
+  'Show me top 10 customers by total purchases',
+);
+const sql = await generate();
+// SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
+// FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId
+// GROUP BY c.CustomerId ORDER BY TotalPurchases DESC LIMIT 10
+```
+
+## Core Methods
+
+| Method                    | Description                                            |
+| ------------------------- | ------------------------------------------------------ |
+| `toSql(input)`            | Generate SQL without executing                         |
+| `single(input)`           | Stream SQL generation with execution                   |
+| `chat(messages, params)`  | Multi-turn conversation with history and user profiles |
+| `explain(sql)`            | Explain SQL in plain English                           |
+| `teach(input)`            | Auto-generate teachables from context                  |
+| `instruct(...teachables)` | Manually add teachables to the system                  |
+| `suggest()`               | Get suggested questions for your database              |
+| `inspect()`               | View the full system prompt with all context           |
+
+## When to Use Text2SQL
+
+- Building analytics dashboards with natural language queries
+- Creating chatbots that answer data questions
+- Enabling non-technical users to query databases
+- Prototyping data exploration interfaces
+
+## Architecture
+
+```
+User Question
+     │
+     ▼
+┌─────────────────┐
+│  Brief Agent    │ ← Schema analysis & caching
+└─────────────────┘
+     │
+     ▼
+┌─────────────────┐
+│ Teachables      │ ← Domain knowledge (terms, hints, guardrails, etc.)
+│ System          │
+└─────────────────┘
+     │
+     ▼
+┌─────────────────┐
+│  Text2SQL Agent │ ← Step-back prompting + validation + execution
+└─────────────────┘
+     │
+     ├─────────────────────┐
+     │                     │
+     ▼                     ▼
+┌─────────────┐   ┌──────────────┐
+│  Explainer  │   │ User Profile │
+│   Agent     │   │   Memory     │
+└─────────────┘   └──────────────┘
+     │
+     ▼
+   Results
+```
+
+## Next Steps
+
+- [Getting Started](/docs/text2sql/getting-started) - Installation and first query
+- [Adapters](/docs/text2sql/postgresql) - Database-specific setup
+- [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

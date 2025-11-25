@@ -9,3 +9,4 @@ export * from './lib/adapters/sqlserver.ts';
 export * from './lib/history/history.ts';
 export * from './lib/history/sqlite.history.ts';
 export * from './lib/history/memory.history.ts';
+export * from './lib/teach/teachables.ts';

@@ -1,0 +1,169 @@
+---
+title: SQLite
+description: Configure Text2SQL with SQLite databases
+---
+
+The SQLite adapter works with SQLite databases, supporting both file-based and in-memory databases. It uses PRAGMA commands for schema introspection.
+
+## Basic Setup
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+import {
+  BriefCache,
+  InMemoryHistory,
+  Sqlite,
+  Text2Sql,
+} from '@deepagents/text2sql';
+
+const db = new DatabaseSync('./your-database.db', { readOnly: true });
+
+const text2sql = new Text2Sql({
+  adapter: new Sqlite({
+    execute: (sql) => db.prepare(sql).all(),
+  }),
+  cache: new BriefCache('my-sqlite-db'),
+  history: new InMemoryHistory(),
+});
+```
+
+## Configuration Options
+
+```typescript
+new Sqlite({
+  // Required: Execute SQL queries
+  execute: (sql) => db.prepare(sql).all(),
+
+  // Optional: Custom validation function
+  validate: (sql) => {
+    // Return void if valid, or error string if invalid
+  },
+
+  // Optional: Custom introspection function
+  introspect: () => {
+    // Return { tables, relationships }
+  },
+
+  // Optional: Database info provider
+  info: {
+    dialect: 'sqlite',
+    version: '3.45.0',
+    database: 'mydb.db',
+  },
+});
+```
+
+## Using better-sqlite3
+
+```typescript
+import Database from 'better-sqlite3';
+
+const db = new Database('./database.db', { readonly: true });
+
+new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+});
+```
+
+## Using sql.js (Browser/WASM)
+
+```typescript
+import initSqlJs from 'sql.js';
+
+const SQL = await initSqlJs();
+const db = new SQL.Database(data);
+
+new Sqlite({
+  execute: (sql) => {
+    const stmt = db.prepare(sql);
+    const rows = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return rows;
+  },
+});
+```
+
+## Automatic Features
+
+The SQLite adapter automatically:
+
+- **Discovers tables** from `sqlite_master` (excluding internal `sqlite_*` tables)
+- **Extracts columns** using `PRAGMA table_info`
+- **Detects primary keys** from the `pk` column flag
+- **Identifies indexes** using `PRAGMA index_list` and `PRAGMA index_info`
+- **Maps foreign keys** using `PRAGMA foreign_key_list`
+- **Collects column statistics** (min, max, null fraction)
+- **Detects low cardinality columns** (20 or fewer distinct values)
+- **Classifies tables by size** based on row count
+
+## Error Handling
+
+The adapter maps common SQLite errors to helpful suggestions:
+
+| Error Pattern                          | Type             | Suggestion                                           |
+| -------------------------------------- | ---------------- | ---------------------------------------------------- |
+| `no such table: X`                     | MISSING_TABLE    | Check the database schema for the correct table name |
+| `no such column: X`                    | INVALID_COLUMN   | Check the table schema for correct column names      |
+| `ambiguous column name: X`             | INVALID_COLUMN   | The column exists in multiple joined tables          |
+| `near "X": syntax error`               | SYNTAX_ERROR     | Review the query structure and punctuation           |
+| `attempt to write a readonly database` | CONSTRAINT_ERROR | Read-only queries should not trigger this            |
+
+## Query Validation
+
+By default, validation uses `EXPLAIN` to check query syntax without execution:
+
+```typescript
+new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  // Default validation
+  validate: (sql) => {
+    db.prepare(`EXPLAIN ${sql}`).all();
+  },
+});
+```
+
+## Execute Function Return Types
+
+The `execute` function can return either:
+
+```typescript
+// Array of rows directly (recommended)
+execute: (sql) => db.prepare(sql).all();
+
+// Or object with rows property
+execute: (sql) => ({ rows: db.prepare(sql).all() });
+```
+
+## In-Memory Databases
+
+For testing or temporary data:
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+const db = new DatabaseSync(':memory:');
+db.exec(`
+  CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+  INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
+`);
+
+new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+});
+```
+
+## Size Hints
+
+Tables are classified by row count:
+
+| Size Hint | Row Count       |
+| --------- | --------------- |
+| tiny      | < 100           |
+| small     | 100 - 999       |
+| medium    | 1,000 - 9,999   |
+| large     | 10,000 - 99,999 |
+| huge      | >= 100,000      |

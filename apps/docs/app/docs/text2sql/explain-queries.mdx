@@ -1,0 +1,98 @@
+---
+title: Explain Queries
+description: Get plain English explanations of SQL queries
+---
+
+The `explain()` method translates SQL queries into plain English explanations for non-technical users.
+
+## Basic Usage
+
+```typescript
+const explanation = await text2sql.explain(`
+  SELECT c.FirstName, c.LastName, SUM(i.Total) as TotalSpent
+  FROM Customer c
+  JOIN Invoice i ON c.CustomerId = i.CustomerId
+  GROUP BY c.CustomerId
+  ORDER BY TotalSpent DESC
+  LIMIT 10
+`);
+
+console.log(explanation);
+// "This query finds the top 10 customers who have spent the most money.
+// It looks at each customer's invoices, adds up their total spending,
+// and ranks them from highest to lowest spender."
+```
+
+## How It Works
+
+The `explainerAgent` is a specialized agent that:
+
+1. Receives the raw SQL query
+2. Analyzes the query structure and intent
+3. Generates a plain English explanation
+4. Focuses on **what** the query does, not **how**
+5. Uses a lightweight model (openai/gpt-oss-20b via Groq) for fast responses
+
+The explainer is designed for non-technical users - it translates SQL syntax into business intent without jargon.
+
+## Use Cases
+
+### Debugging Generated Queries
+
+Verify that generated SQL matches your intent:
+
+```typescript
+const { generate } = await text2sql.toSql('Show revenue by month');
+const sql = await generate();
+
+// Verify the query does what you expect
+const explanation = await text2sql.explain(sql);
+console.log('Generated SQL:', sql);
+console.log('Explanation:', explanation);
+```
+
+### User Education
+
+Help users understand what queries do:
+
+```typescript
+// In a dashboard or reporting tool
+const savedQuery = getUserSavedQuery(queryId);
+const explanation = await text2sql.explain(savedQuery.sql);
+
+// Display to user
+showQueryDetails({
+  sql: savedQuery.sql,
+  explanation,
+  results: await executeQuery(savedQuery.sql),
+});
+```
+
+### Query Auditing
+
+Document what queries do for compliance:
+
+```typescript
+const auditLog = queries.map(async (query) => ({
+  sql: query.sql,
+  executedAt: query.timestamp,
+  explanation: await text2sql.explain(query.sql),
+}));
+```
+
+## Explanation Style
+
+Explanations are:
+
+- **Non-technical**: No SQL jargon
+- **Intent-focused**: Describes the goal, not the mechanics
+- **Concise**: Clear and to the point
+- **Business-friendly**: Uses domain language where possible
+
+## Example Explanations
+
+| SQL                                                         | Explanation                                                      |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| `SELECT COUNT(*) FROM orders`                               | "Counts the total number of orders in the system"                |
+| `SELECT * FROM users WHERE status = 'active'`               | "Retrieves all information about users who are currently active" |
+| `SELECT product, SUM(quantity) FROM sales GROUP BY product` | "Shows how many units of each product have been sold in total"   |

@@ -17,6 +17,12 @@
     },
     {
       "path": "./packages/toolbox"
+    },
+    {
+      "path": "./apps/docs"
+    },
+    {
+      "path": "./packages/text2sql"
     }
   ]
 }

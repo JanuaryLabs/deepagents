@@ -64,3 +64,4 @@ local_cache/
 
 **/.vitepress/cache/
 deepsearch.sqlite*
+.source

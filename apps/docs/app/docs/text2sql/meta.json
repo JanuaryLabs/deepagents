@@ -1,0 +1,19 @@
+{
+  "title": "Text2SQL",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Adapters---",
+    "postgresql",
+    "sqlite",
+    "sqlserver",
+    "---Guides---",
+    "generate-sql",
+    "explain-queries",
+    "teach-the-system",
+    "build-conversations",
+    "history",
+    "grounding"
+  ]
+}

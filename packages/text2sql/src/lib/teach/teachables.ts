@@ -1,3 +1,5 @@
+import { indentBlock, leaf, list, wrapBlock } from './xml.ts';
+
 export interface Teachables {
   type:
     | 'term'
@@ -9,7 +11,8 @@ export interface Teachables {
     | 'workflow'
     | 'quirk'
     | 'styleGuide'
-    | 'analogy';
+    | 'analogy'
+    | 'user_profile';
   format: () => string;
 }
 export type GeneratedTeachable =
@@ -602,52 +605,6 @@ const SECTION_ORDER: Array<{ type: Teachables['type']; tag: string }> = [
   { type: 'example', tag: 'examples' },
 ];
 
-function wrapBlock(tag: string, children: string[]): string {
-  const content = children
-    .filter((child): child is string => Boolean(child))
-    .join('\n');
-  if (!content) {
-    return '';
-  }
-  return `<${tag}>\n${indentBlock(content, 2)}\n</${tag}>`;
-}
-
-function list(tag: string, values: string[], childTag: string): string {
-  if (!values.length) {
-    return '';
-  }
-  const children = values.map((value) => leaf(childTag, value)).join('\n');
-  return `<${tag}>\n${indentBlock(children, 2)}\n</${tag}>`;
-}
-
-function leaf(tag: string, value: string): string {
-  const safe = escapeXml(value);
-  if (safe.includes('\n')) {
-    return `<${tag}>\n${indentBlock(safe, 2)}\n</${tag}>`;
-  }
-  return `<${tag}>${safe}</${tag}>`;
-}
-
-function indentBlock(text: string, spaces: number): string {
-  if (!text.trim()) {
-    return '';
-  }
-  const padding = ' '.repeat(spaces);
-  return text
-    .split('\n')
-    .map((line) => (line.length ? padding + line : padding))
-    .join('\n');
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replaceAll(/&/g, '&amp;')
-    .replaceAll(/</g, '&lt;')
-    .replaceAll(/>/g, '&gt;')
-    .replaceAll(/"/g, '&quot;')
-    .replaceAll(/'/g, '&apos;');
-}
-
 export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
   return generated.map((item) => {
     switch (item.type) {
@@ -708,3 +665,20 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
     }
   });
 }
+
+export function userProfile(input: {
+  preferences: string;
+  identity: string;
+  working_context: string;
+}): Teachables {
+  return {
+    type: 'user_profile',
+    format: () => {
+      return '';
+    },
+  };
+}
+
+// userProfile({
+//   identity:
+// })

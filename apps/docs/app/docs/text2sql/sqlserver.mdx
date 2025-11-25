@@ -1,0 +1,192 @@
+---
+title: SQL Server
+description: Configure Text2SQL with Microsoft SQL Server databases
+---
+
+
+The SQL Server adapter supports Microsoft SQL Server databases with automatic schema introspection using INFORMATION_SCHEMA and sys catalog views.
+
+## Basic Setup
+
+```typescript
+import { Text2Sql, SqlServer, BriefCache, InMemoryHistory } from '@deepagents/text2sql';
+import sql from 'mssql';
+
+const pool = await sql.connect({
+  server: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  options: {
+    encrypt: true,
+    trustServerCertificate: true,
+  },
+});
+
+const text2sql = new Text2Sql({
+  adapter: new SqlServer({
+    execute: async (query) => {
+      const result = await pool.request().query(query);
+      return result.recordset;
+    },
+  }),
+  cache: new BriefCache('my-sqlserver-db'),
+  history: new InMemoryHistory(),
+});
+```
+
+## Configuration Options
+
+```typescript
+new SqlServer({
+  // Required: Execute SQL queries
+  execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+
+  // Optional: Custom validation function
+  validate: async (sql) => {
+    // Return void if valid, or error string if invalid
+  },
+
+  // Optional: Custom introspection function
+  introspect: async () => {
+    // Return { tables, relationships }
+  },
+
+  // Optional: Filter to specific schemas (default excludes sys, INFORMATION_SCHEMA)
+  schemas: ['dbo', 'sales'],
+
+  // Optional: Database info provider
+  info: {
+    dialect: 'sqlserver',
+    version: '2022',
+    database: 'mydb',
+  },
+});
+```
+
+## Schema Filtering
+
+By default, the adapter excludes system schemas (`INFORMATION_SCHEMA`, `sys`). To limit introspection to specific schemas:
+
+```typescript
+new SqlServer({
+  execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+  schemas: ['dbo', 'sales', 'inventory'],
+});
+```
+
+## Automatic Features
+
+The SQL Server adapter automatically:
+
+- **Uses INFORMATION_SCHEMA** for tables and columns
+- **Queries sys.indexes** for index information including clustered/nonclustered types
+- **Detects included columns** in indexes (excluded from key columns)
+- **Identifies primary keys** from constraint metadata
+- **Maps foreign key relationships** between tables
+- **Collects column statistics** using CONVERT for type-safe aggregation
+- **Detects low cardinality columns** using `SELECT DISTINCT TOP`
+- **Classifies tables by size** based on row count
+
+## Error Handling
+
+The adapter maps SQL Server error codes to helpful suggestions:
+
+| Error Code | Type | Suggestion |
+|------------|------|------------|
+| 208 | MISSING_TABLE | Check that the table exists and include schema prefix (e.g., dbo.TableName) |
+| 207 | INVALID_COLUMN | Verify the column exists and aliases are referenced correctly |
+| 156 | SYNTAX_ERROR | Review keywords, punctuation, and clauses like GROUP BY |
+| 4104 | INVALID_COLUMN | Qualify columns with table aliases when ambiguous |
+| 1934 | CONSTRAINT_ERROR | Re-check join logic and filtering |
+
+## Execute Function Return Types
+
+The `execute` function can return multiple formats:
+
+```typescript
+// Array of rows directly
+execute: async (sql) => {
+  const result = await pool.request().query(sql);
+  return result.recordset;
+}
+
+// Object with recordset property (mssql default)
+execute: async (sql) => {
+  return await pool.request().query(sql);  // { recordset: [...] }
+}
+
+// Object with rows property
+execute: async (sql) => {
+  return { rows: [...] };
+}
+
+// Object with recordsets array (for multi-statement queries)
+execute: async (sql) => {
+  return { recordsets: [[...]] };  // Uses first recordset
+}
+```
+
+## Query Validation
+
+By default, validation uses `SET PARSEONLY` to check syntax without execution:
+
+```typescript
+new SqlServer({
+  execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+  // Default validation
+  validate: async (sql) => {
+    await pool.request().query(`SET PARSEONLY ON; ${sql}; SET PARSEONLY OFF;`);
+  },
+});
+```
+
+## Using with tedious
+
+```typescript
+import { Connection, Request } from 'tedious';
+
+const connection = new Connection(config);
+
+new SqlServer({
+  execute: (sql) => new Promise((resolve, reject) => {
+    const rows = [];
+    const request = new Request(sql, (err) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+    request.on('row', (columns) => {
+      const row = {};
+      columns.forEach((col) => {
+        row[col.metadata.colName] = col.value;
+      });
+      rows.push(row);
+    });
+    connection.execSql(request);
+  }),
+});
+```
+
+## Table Naming Conventions
+
+SQL Server tables are referenced with schema prefix:
+
+```
+dbo.Users
+sales.Orders
+inventory.Products
+```
+
+The adapter automatically handles bracket quoting: `[dbo].[Users]`
+
+## Size Hints
+
+Tables are classified by row count:
+
+| Size Hint | Row Count |
+|-----------|-----------|
+| tiny | < 100 |
+| small | 100 - 999 |
+| medium | 1,000 - 9,999 |
+| large | 10,000 - 99,999 |
+| huge | >= 100,000 |

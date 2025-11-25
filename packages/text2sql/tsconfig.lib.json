@@ -9,5 +9,12 @@
   },
   "exclude": ["src/evals"],
   "include": ["src/**/*.ts", "../../global.d.ts"],
-  "references": []
+  "references": [
+    {
+      "path": "../toolbox/tsconfig.lib.json"
+    },
+    {
+      "path": "../agent/tsconfig.lib.json"
+    }
+  ]
 }

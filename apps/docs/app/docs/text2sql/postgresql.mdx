@@ -1,0 +1,161 @@
+---
+title: PostgreSQL
+description: Configure Text2SQL with PostgreSQL databases
+---
+
+The PostgreSQL adapter provides full support for PostgreSQL databases with automatic schema introspection, index detection, and helpful error messages.
+
+## Basic Setup
+
+```typescript
+import pg from 'pg';
+
+import {
+  BriefCache,
+  InMemoryHistory,
+  Postgres,
+  Text2Sql,
+} from '@deepagents/text2sql';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const text2sql = new Text2Sql({
+  adapter: new Postgres({
+    execute: async (sql) => {
+      const result = await pool.query(sql);
+      return result.rows;
+    },
+  }),
+  cache: new BriefCache('my-postgres-db'),
+  history: new InMemoryHistory(),
+});
+```
+
+## Configuration Options
+
+```typescript
+new Postgres({
+  // Required: Execute SQL queries
+  execute: async (sql) => pool.query(sql).then((r) => r.rows),
+
+  // Optional: Custom validation function
+  validate: async (sql) => {
+    // Return void if valid, or error string if invalid
+  },
+
+  // Optional: Custom introspection function
+  introspect: async () => {
+    // Return { tables, relationships }
+  },
+
+  // Optional: Filter to specific schemas
+  schemas: ['public', 'analytics'],
+
+  // Optional: Database info provider
+  info: {
+    dialect: 'postgresql',
+    version: '15.0',
+    database: 'mydb',
+  },
+});
+```
+
+## Schema Filtering
+
+By default, the adapter excludes system schemas (`pg_catalog`, `information_schema`). To limit introspection to specific schemas:
+
+```typescript
+new Postgres({
+  execute: async (sql) => pool.query(sql).then((r) => r.rows),
+  schemas: ['public', 'sales', 'inventory'],
+});
+```
+
+## Automatic Features
+
+The PostgreSQL adapter automatically:
+
+- **Detects primary keys** from table constraints
+- **Identifies indexes** including unique, clustered, and B-tree types
+- **Collects column statistics** (min, max, null fraction) for numeric/date columns
+- **Detects low cardinality columns** (columns with 20 or fewer distinct values)
+- **Counts rows** and classifies tables by size (tiny, small, medium, large, huge)
+- **Maps foreign key relationships** between tables
+
+## Error Handling
+
+The adapter maps PostgreSQL error codes to helpful suggestions:
+
+| Error Code | Type             | Suggestion                                           |
+| ---------- | ---------------- | ---------------------------------------------------- |
+| 42P01      | MISSING_TABLE    | Check the database schema for the correct table name |
+| 42703      | INVALID_COLUMN   | Verify the column exists and use table aliases       |
+| 42601      | SYNTAX_ERROR     | Review keywords, punctuation, and query shape        |
+| 42P10      | INVALID_COLUMN   | Check column names in GROUP BY/SELECT                |
+| 42883      | INVALID_FUNCTION | Confirm function name and argument types             |
+
+## Execute Function Return Types
+
+The `execute` function can return either:
+
+```typescript
+// Array of rows directly
+execute: async (sql) => {
+  const result = await pool.query(sql);
+  return result.rows;
+};
+
+// Or object with rows property
+execute: async (sql) => {
+  return await pool.query(sql); // { rows: [...] }
+};
+```
+
+## Custom Introspection
+
+For complex setups or performance optimization, provide custom introspection:
+
+```typescript
+new Postgres({
+  execute: async (sql) => pool.query(sql).then((r) => r.rows),
+  introspect: async () => ({
+    tables: [
+      {
+        name: 'public.users',
+        schema: 'public',
+        rawName: 'users',
+        columns: [
+          { name: 'id', type: 'integer', isPrimaryKey: true },
+          { name: 'email', type: 'varchar' },
+        ],
+        rowCount: 10000,
+        sizeHint: 'medium',
+      },
+    ],
+    relationships: [
+      {
+        table: 'public.orders',
+        from: ['user_id'],
+        referenced_table: 'public.users',
+        to: ['id'],
+      },
+    ],
+  }),
+});
+```
+
+## Size Hints
+
+Tables are classified by row count:
+
+| Size Hint | Row Count       |
+| --------- | --------------- |
+| tiny      | < 100           |
+| small     | 100 - 999       |
+| medium    | 1,000 - 9,999   |
+| large     | 10,000 - 99,999 |
+| huge      | >= 100,000      |
+
+This helps the AI understand query performance implications.

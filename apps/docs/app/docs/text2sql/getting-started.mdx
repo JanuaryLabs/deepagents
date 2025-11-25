@@ -1,0 +1,137 @@
+---
+title: Getting Started
+description: Install Text2SQL and run your first natural language query
+---
+
+This guide walks you through installing Text2SQL and running your first natural language to SQL query.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql
+```
+
+## Basic Setup
+
+Text2SQL requires three components:
+
+1. **Adapter** - Connects to your database (PostgreSQL, SQLite, or SQL Server)
+2. **BriefCache** - Caches schema analysis for faster queries
+3. **History** - Stores conversation history (optional for single queries)
+
+### SQLite Example
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+import {
+  BriefCache,
+  InMemoryHistory,
+  Sqlite,
+  Text2Sql,
+} from '@deepagents/text2sql';
+
+// Connect to your database
+const db = new DatabaseSync('./your-database.db', { readOnly: true });
+
+// Create the Text2SQL instance
+const text2sql = new Text2Sql({
+  adapter: new Sqlite({
+    execute: (sql) => db.prepare(sql).all(),
+  }),
+  cache: new BriefCache('my-database'),
+  history: new InMemoryHistory(),
+});
+```
+
+### PostgreSQL Example
+
+```typescript
+import pg from 'pg';
+
+import {
+  BriefCache,
+  InMemoryHistory,
+  Postgres,
+  Text2Sql,
+} from '@deepagents/text2sql';
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const text2sql = new Text2Sql({
+  adapter: new Postgres({
+    execute: async (sql) => {
+      const result = await pool.query(sql);
+      return result.rows;
+    },
+  }),
+  cache: new BriefCache('my-postgres-db'),
+  history: new InMemoryHistory(),
+});
+```
+
+## Your First Query
+
+### Generate SQL Only
+
+Use `toSql()` to generate SQL without executing it:
+
+```typescript
+const { generate } = await text2sql.toSql(
+  'Show me the top 10 customers by total purchases',
+);
+const sql = await generate();
+
+console.log(sql);
+// SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
+// FROM Customer c
+// JOIN Invoice i ON c.CustomerId = i.CustomerId
+// GROUP BY c.CustomerId
+// ORDER BY TotalPurchases DESC
+// LIMIT 10
+```
+
+### Generate and Execute
+
+Use `single()` for streaming SQL generation with execution:
+
+```typescript
+const stream = await text2sql.single('What are the most popular genres?');
+
+for await (const chunk of stream) {
+  if (chunk.type === 'text-delta') {
+    process.stdout.write(chunk.textDelta);
+  }
+}
+```
+
+## Understanding the Response
+
+When Text2SQL processes a query, it:
+
+1. **Analyzes your schema** - Examines tables, columns, relationships, and data patterns
+2. **Generates a brief** - Creates a business context summary (cached for reuse)
+3. **Applies teachables** - Uses domain knowledge (terms, hints, guardrails, examples)
+4. **Applies step-back prompting** - Considers the broader question before generating SQL
+5. **Validates the query** - Ensures the SQL is syntactically correct using `validate_query` tool
+6. **Returns results** - Either raw SQL or executed results
+
+Text2SQL includes default teachables that enforce best practices like read-only queries, row limits, and proper validation workflows.
+
+## Environment Variables
+
+Text2SQL uses Groq for AI inference. Set your API key:
+
+```bash
+export GROQ_API_KEY=your-api-key
+```
+
+## Next Steps
+
+- [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features
+- [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific features
+- [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific features
+- [Generate SQL](/docs/text2sql/generate-sql) - Deep dive into SQL generation
+- [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

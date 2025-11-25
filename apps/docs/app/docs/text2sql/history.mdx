@@ -1,0 +1,219 @@
+---
+title: History
+description: Persist conversation history for multi-turn chat experiences
+---
+
+The History interface manages conversation persistence, enabling multi-turn chats where context is maintained across sessions.
+
+## Available Implementations
+
+### SqliteHistory
+
+Persistent storage using SQLite:
+
+```typescript
+import { SqliteHistory } from '@deepagents/text2sql';
+
+const history = new SqliteHistory('./chat-history.sqlite');
+
+const text2sql = new Text2Sql({
+  adapter: new Sqlite({ execute: (sql) => db.prepare(sql).all() }),
+  cache: new BriefCache('my-db'),
+  history: history,
+});
+```
+
+### InMemoryHistory
+
+Non-persistent storage for testing:
+
+```typescript
+import { InMemoryHistory } from '@deepagents/text2sql';
+
+const history = new InMemoryHistory();
+```
+
+`InMemoryHistory` extends `SqliteHistory` with `:memory:` path - data is lost when the process ends.
+
+## Data Model
+
+### Chat
+
+```typescript
+interface Chat {
+  id: string; // Unique chat identifier
+  userId: string; // Owner of the chat
+  title?: string; // Optional chat title
+  messages: Message[]; // All messages in the chat
+}
+```
+
+### Message
+
+```typescript
+interface Message {
+  id: string; // Unique message identifier
+  chatId: string; // Parent chat ID
+  role: string; // 'user' | 'assistant' | 'system'
+  createdAt: Date; // When message was created
+  content: UIMessage; // Full message content (Vercel AI SDK format)
+}
+```
+
+## History Methods
+
+### Chat Management
+
+```typescript
+// List all chats for a user
+const chats = await history.listChats('user-123');
+
+// Get a specific chat with messages
+const chat = await history.getChat('chat-456');
+
+// Create a new chat
+await history.createChat({
+  id: 'chat-789',
+  userId: 'user-123',
+  title: 'Sales Analysis',
+});
+
+// Create or update a chat
+await history.upsertChat({
+  id: 'chat-789',
+  userId: 'user-123',
+  title: 'Updated Title',
+});
+
+// Update chat metadata
+await history.updateChat('chat-789', { title: 'New Title' });
+
+// Delete a chat (cascades to messages)
+await history.deleteChat('chat-789');
+```
+
+### Message Management
+
+```typescript
+// Add a message to a chat
+await history.addMessage({
+  id: 'msg-001',
+  chatId: 'chat-789',
+  role: 'user',
+  content: { role: 'user', content: 'Show me revenue' },
+});
+
+// Create or update a message
+await history.upsertMessage({
+  id: 'msg-001',
+  chatId: 'chat-789',
+  role: 'user',
+  content: { role: 'user', content: 'Updated content' },
+});
+
+// Delete a message
+await history.deleteMessage('msg-001');
+```
+
+## Custom History Implementation
+
+Implement the `History` abstract class for custom storage:
+
+```typescript
+import { Chat, History, Message } from '@deepagents/text2sql';
+
+class PostgresHistory extends History {
+  constructor(private pool: Pool) {
+    super();
+  }
+
+  async listChats(userId: string): Promise<Chat[]> {
+    const result = await this.pool.query(
+      'SELECT * FROM chats WHERE user_id = $1',
+      [userId],
+    );
+    return result.rows;
+  }
+
+  async getChat(chatId: string): Promise<Chat | null> {
+    // Implement chat retrieval with messages
+  }
+
+  async createChat(chat: CreateChatParams): Promise<Chat> {
+    // Implement chat creation
+  }
+
+  async upsertChat(chat: CreateChatParams): Promise<Chat> {
+    // Implement upsert logic
+  }
+
+  async deleteChat(chatId: string): Promise<void> {
+    // Implement chat deletion
+  }
+
+  async updateChat(chatId: string, updates: UpdateChatParams): Promise<void> {
+    // Implement chat update
+  }
+
+  async addMessage(message: CreateMessageParams): Promise<void> {
+    // Implement message addition
+  }
+
+  async upsertMessage(message: CreateMessageParams): Promise<Message> {
+    // Implement message upsert
+  }
+
+  async deleteMessage(messageId: string): Promise<void> {
+    // Implement message deletion
+  }
+}
+```
+
+## SQLite Schema
+
+The `SqliteHistory` automatically creates these tables:
+
+```sql
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  title TEXT
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  "chatId" TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  "createdAt" TEXT NOT NULL,
+  content TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats("userId");
+CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages("chatId");
+```
+
+## Usage with chat()
+
+History is automatically used when calling `chat()`:
+
+```typescript
+// First interaction
+await text2sql.chat([{ role: 'user', content: 'Show me sales data' }], {
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+
+// Later - history is loaded automatically
+await text2sql.chat([{ role: 'user', content: 'Filter to last quarter' }], {
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+// Previous messages are included in context
+```
+
+## Best Practices
+
+1. **Use UUIDs for IDs** - Ensures uniqueness across distributed systems
+2. **Index frequently queried columns** - userId and chatId are indexed by default
+3. **Clean up old chats** - Implement retention policies for inactive chats
+4. **Consider message limits** - Very long conversations may need truncation strategies

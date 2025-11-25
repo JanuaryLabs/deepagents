@@ -4,6 +4,12 @@
   "include": [],
   "references": [
     {
+      "path": "../toolbox"
+    },
+    {
+      "path": "../agent"
+    },
+    {
       "path": "./tsconfig.lib.json"
     }
   ]

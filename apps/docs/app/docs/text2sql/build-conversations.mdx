@@ -1,0 +1,201 @@
+---
+title: Build Conversations
+description: Create multi-turn chat experiences with persistent context
+---
+
+The `chat()` method enables multi-turn conversations where context is maintained across messages and user preferences are remembered.
+
+## Basic Usage
+
+```typescript
+const stream = await text2sql.chat(
+  [{ role: 'user', content: 'Show me top 10 customers' }],
+  {
+    chatId: 'chat-123',
+    userId: 'user-456',
+  },
+);
+
+// Stream the response
+for await (const chunk of stream) {
+  if (chunk.type === 'text-delta') {
+    process.stdout.write(chunk.textDelta);
+  }
+}
+```
+
+## How It Works
+
+When you call `chat()`:
+
+1. **Load history** - Previous messages for the chat are loaded
+2. **Load user profile** - User preferences and context are injected
+3. **Generate response** - AI processes full context
+4. **Save messages** - Both user message and response are persisted
+
+## Message Format
+
+Messages follow the Vercel AI SDK `UIMessage` format:
+
+```typescript
+interface UIMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+// Send multiple messages
+await text2sql.chat(
+  [
+    { role: 'user', content: 'Show me sales by region' },
+    { role: 'assistant', content: 'Here are sales by region...' },
+    { role: 'user', content: 'Now show me just California' },
+  ],
+  { chatId: 'chat-123', userId: 'user-456' },
+);
+```
+
+## User Profiles
+
+User profiles enable personalization and persistent memory across conversations. Text2SQL uses a `UserProfileStore` to maintain three types of user information:
+
+### Profile Item Types
+
+| Type         | Purpose             | Example                        |
+| ------------ | ------------------- | ------------------------------ |
+| `fact`       | Identity/background | "I work in supply chain"       |
+| `preference` | User preferences    | "I prefer weekly aggregations" |
+| `present`    | Current context     | "I'm analyzing Q4 data"        |
+
+The user profile is stored per userId and automatically injected into the chat context.
+
+### Automatic Profile Updates
+
+During chat, the `update_user_profile` tool is automatically available. The AI recognizes when users share facts, preferences, or context and updates the profile:
+
+```typescript
+// User says: "I'm the sales manager for West region"
+// AI automatically calls:
+update_user_profile({
+  type: 'fact',
+  text: 'Sales manager for West region',
+  action: 'add',
+});
+
+// User says: "Call me Ezz"
+// AI calls:
+update_user_profile({
+  type: 'preference',
+  text: 'Prefers to be called Ezz',
+  action: 'add',
+});
+
+// You can also remove items
+update_user_profile({
+  type: 'present',
+  text: 'Analyzing Q4 data',
+  action: 'remove',
+});
+```
+
+The tool description guides the AI to use it when:
+
+- Users explicitly state preferences
+- Users share identity or background information
+- Working context changes
+
+### Profile Injection
+
+Profiles are injected into the system prompt:
+
+```xml
+<user_profile>
+  <identity>
+    - Sales manager for West region
+    - Works with retail accounts
+  </identity>
+  <preferences>
+    - Prefers weekly aggregations
+    - Likes visual charts
+  </preferences>
+  <working_context>
+    - Analyzing Q4 2024 performance
+  </working_context>
+</user_profile>
+```
+
+## Streaming Options
+
+The chat response supports rich streaming:
+
+```typescript
+const stream = await text2sql.chat(messages, params);
+
+const uiStream = stream.toUIMessageStream({
+  sendStart: true, // Stream start event
+  sendFinish: true, // Stream finish event
+  sendReasoning: true, // AI reasoning steps
+  sendSources: true, // Data sources used
+});
+```
+
+## Error Handling
+
+The stream handles common errors gracefully:
+
+```typescript
+const stream = await text2sql.chat(messages, {
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+
+// Errors are converted to user-friendly messages
+// - "The model tried to call an unknown tool"
+// - "The model called a tool with invalid arguments"
+```
+
+## Context Window
+
+All previous messages in the chat are included in context:
+
+```typescript
+// First message
+await text2sql.chat([{ role: 'user', content: 'Show me total revenue' }], {
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+
+// Second message - has access to first conversation
+await text2sql.chat([{ role: 'user', content: 'Break that down by quarter' }], {
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+// AI knows "that" refers to revenue from previous message
+```
+
+## Integration Example
+
+```typescript
+// Express/Next.js API route
+app.post('/api/chat', async (req, res) => {
+  const { messages, chatId } = req.body;
+  const userId = req.user.id;
+
+  const stream = await text2sql.chat(messages, { chatId, userId });
+
+  // Stream response to client
+  res.setHeader('Content-Type', 'text/event-stream');
+
+  for await (const chunk of stream) {
+    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+
+  res.end();
+});
+```
+
+## Best Practices
+
+1. **Use consistent chat IDs** - Same chatId maintains conversation context
+2. **Use consistent user IDs** - Same userId maintains user profile
+3. **Handle streaming properly** - Process chunks as they arrive
+4. **Clean up old chats** - Periodically delete unused conversations

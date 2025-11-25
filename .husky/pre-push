@@ -1,1 +1,7 @@
+#!/usr/bin/env sh
+
+echo ""
+echo "📚 Reminder: Run /update-docs to sync documentation with your changes"
+echo ""
+
 NX_DAEMON=false npx nx run-many -t build --prod

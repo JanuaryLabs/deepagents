@@ -1,29 +1,38 @@
-import { type InferUIMessageChunk, InvalidToolInputError, NoSuchToolError, ToolCallRepairError, type UIDataTypes, type UIMessage, type UIMessageChunk, type UITools } from 'ai';
+import {
+  type InferUIMessageChunk,
+  InvalidToolInputError,
+  NoSuchToolError,
+  ToolCallRepairError,
+  type UIDataTypes,
+  type UIMessage,
+  type UIMessageChunk,
+  type UITools,
+  tool,
+} from 'ai';
 import dedent from 'dedent';
 import { v7 } from 'uuid';
-
-
+import z from 'zod';
 
 import { generate, pipe, stream, user } from '@deepagents/agent';
 
-
-
 import type { Adapter } from './adapters/adapter.ts';
-import { Sqlite } from './adapters/sqlite.ts';
 import { BriefCache, generateBrief, toBrief } from './agents/brief.agent.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
 import { suggestionsAgent } from './agents/suggestions.agents.ts';
 import { synthesizerAgent } from './agents/synthesizer.agent.ts';
 import { teachablesAuthorAgent } from './agents/teachables.agent.ts';
-import { type RenderingTools, text2sqlMonolith, text2sqlOnly } from './agents/text2sql.agent.ts';
+import {
+  type RenderingTools,
+  text2sqlMonolith,
+  text2sqlOnly,
+} from './agents/text2sql.agent.ts';
 import { History } from './history/history.ts';
-import { SqliteHistory } from './history/sqlite.history.ts';
-import { type Teachables, toInstructions, toTeachables } from './teach/teachables.ts';
-import teachings from './teach/teachings.ts';
-
-
-
-
+import { UserProfileStore } from './memory/user-profile.ts';
+import {
+  type Teachables,
+  toInstructions,
+  toTeachables,
+} from './teach/teachables.ts';
 
 export class Text2Sql {
   #config: {
@@ -254,11 +263,42 @@ export class Text2Sql {
       title: 'Chat ' + params.chatId,
     });
 
+    const userProfileStore = new UserProfileStore(params.userId);
+    const userProfileXml = await userProfileStore.toXml();
+
     const result = stream(
       text2sqlMonolith.clone({
         tools: {
           ...text2sqlMonolith.handoff.tools,
           ...this.#config.tools,
+          update_user_profile: tool({
+            description: `Update the user's profile with new facts, preferences, or present context.
+            Use this when the user explicitly states a preference (e.g., "I like dark mode", "Call me Ezz")
+            or when their working context changes (e.g., "I'm working on a hackathon").`,
+            inputSchema: z.object({
+              type: z
+                .enum(['fact', 'preference', 'present'])
+                .describe('The type of information to update.'),
+              text: z
+                .string()
+                .describe(
+                  'The content of the fact, preference, or present context.',
+                ),
+              action: z
+                .enum(['add', 'remove'])
+                .default('add')
+                .describe('Whether to add or remove the item.'),
+            }),
+            execute: async ({ type, text, action }) => {
+              if (action === 'remove') {
+                await userProfileStore.remove(type, text);
+                return `Removed ${type}: ${text}`;
+              }
+
+              await userProfileStore.add(type, text);
+              return `Added ${type}: ${text}`;
+            },
+          }),
         },
       }),
       [...chat.messages.map((it) => it.content), ...messages],
@@ -269,6 +309,7 @@ export class Text2Sql {
         introspection,
         adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
         context: await generateBrief(introspection, this.#config.cache),
+        userProfile: userProfileXml,
       },
     );
     return result.toUIMessageStream({
@@ -311,34 +352,32 @@ export class Text2Sql {
   }
 }
 
-if (import.meta.main) {
-  const { DatabaseSync } = await import('node:sqlite');
-  const sqliteClient = new DatabaseSync(
-    '/Users/ezzabuzaid/Downloads/Chinook.db',
-    { readOnly: true },
-  );
+// if (import.meta.main) {
+//   const { DatabaseSync } = await import('node:sqlite');
+//   const sqliteClient = new DatabaseSync(
+//     '/Users/ezzabuzaid/Downloads/Chinook.db',
+//     { readOnly: true },
+//   );
 
-  const text2sql = new Text2Sql({
-    instructions: teachings,
-    cache: new BriefCache('brief'),
-    history: new SqliteHistory('./text2sql_history.sqlite'),
-    adapter: new Sqlite({
-      execute: (sql) => sqliteClient.prepare(sql).all(),
-    }),
-  });
+//   const text2sql = new Text2Sql({
+//     instructions: teachings,
+//     cache: new BriefCache('brief'),
+//     history: new SqliteHistory('./text2sql_history.sqlite'),
+//     adapter: new Sqlite({
+//       execute: (sql) => sqliteClient.prepare(sql).all(),
+//     }),
+//   });
 
-  console.dir(await text2sql.teach('Generate guardrails'));
-
-  // const sql = await text2sql.chat(
-  //   [
-  //     user(
-  //       'What is trending in sales lately, last calenar year, monthly timeframe?',
-  //     ),
-  //   ],
-  //   {
-  //     userId: 'default',
-  //     chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
-  //   },
-  // );
-  // await printer.readableStream(sql);
-}
+//   const sql = await text2sql.chat(
+//     [
+//       user(
+//         'What is trending in sales lately, last calenar year, monthly timeframe?',
+//       ),
+//     ],
+//     {
+//       userId: 'default',
+//       chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
+//     },
+//   );
+//   await printer.readableStream(sql);
+// }

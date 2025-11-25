@@ -1,0 +1,434 @@
+---
+title: Agent
+description: A flexible and powerful agent framework for building AI-powered applications with handoffs, tools, and multi-agent orchestration
+---
+
+# Agent
+
+The Agent package provides a flexible framework for building AI-powered agents with support for tool usage, agent handoffs, and multi-agent orchestration. It's built on top of the Vercel AI SDK and provides a higher-level abstraction for creating complex agent workflows.
+
+## Core Concepts
+
+### Agent
+
+An agent is an autonomous AI entity with its own instructions, tools, and the ability to delegate work to other specialized agents through handoffs.
+
+### Handoffs
+
+Handoffs allow agents to transfer control to other specialized agents. This enables building complex multi-agent systems where each agent focuses on specific tasks.
+
+### Context Variables
+
+Context variables are typed key-value pairs that can be passed between agents to share state and information throughout a conversation.
+
+## Creating an Agent
+
+Use the `agent()` factory function or instantiate the `Agent` class directly:
+
+```typescript
+import { agent } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+
+const myAgent = agent({
+  name: 'my_agent',
+  model: openai('gpt-4'),
+  prompt: 'You are a helpful assistant.',
+  tools: {
+    // Your tools here
+  },
+});
+```
+
+## Configuration Options
+
+### CreateAgent Interface
+
+```typescript
+interface CreateAgent<Output, CIn, COut = CIn> {
+  name: string;
+  prompt: Instruction<CIn>;
+  model: AgentModel;
+  temperature?: number;
+  handoffDescription?: string;
+  prepareHandoff?: PrepareHandoffFn;
+  prepareEnd?: PrepareEndFn<COut, Output>;
+  handoffs?: Handoffs<CIn, COut>;
+  tools?: ToolSet;
+  toolChoice?: ToolChoice<Record<string, COut>>;
+  output?: z.Schema<Output>;
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+}
+```
+
+#### Required Properties
+
+- **name**: Unique identifier for the agent (will be converted to snake_case internally)
+- **prompt**: Instructions for the agent, can be a string, string array, or function
+- **model**: The language model to use (must be a LanguageModel from Vercel AI SDK)
+
+#### Optional Properties
+
+- **temperature**: Controls randomness in model responses (0-1)
+- **handoffDescription**: Description shown to other agents when this agent is available as a handoff
+- **prepareHandoff**: Callback executed before control is transferred to this agent
+- **prepareEnd**: Callback executed after this agent completes its work
+- **handoffs**: Array of agents this agent can delegate to
+- **tools**: Set of tools available to this agent
+- **toolChoice**: Controls how the model selects tools ('auto', 'required', or specific tool)
+- **output**: Zod schema for structured output
+- **providerOptions**: Provider-specific options passed to the underlying model
+
+## Instructions
+
+The `instructions` helper provides structured ways to create agent prompts:
+
+### Basic Instructions
+
+```typescript
+import { instructions } from '@deepagents/agent';
+
+const prompt = instructions({
+  purpose: 'You are a customer service agent.',
+  routine: [
+    'Greet the customer',
+    'Understand their issue',
+    'Provide a solution or escalate',
+  ],
+});
+```
+
+### Swarm Instructions
+
+For multi-agent swarm architectures:
+
+```typescript
+const prompt = instructions.swarm({
+  purpose: 'You coordinate multiple specialist agents.',
+  routine: [
+    'Analyze the request',
+    'Determine which specialist to engage',
+    'Transfer control to the appropriate agent',
+  ],
+});
+```
+
+### Supervisor Instructions
+
+For supervisor-based orchestration:
+
+```typescript
+const prompt = instructions.supervisor({
+  purpose: 'You supervise and coordinate sub-agents.',
+  routine: [
+    'Break down the task',
+    'Assign to appropriate sub-agents',
+    'Aggregate results',
+  ],
+});
+```
+
+### Supervisor Sub-agent Instructions
+
+For agents that work under a supervisor:
+
+```typescript
+const prompt = instructions.supervisor_subagent({
+  purpose: 'You handle specific data processing tasks.',
+  routine: [
+    'Process the data',
+    'Format the results',
+    'Return to supervisor',
+  ],
+});
+```
+
+## Agent Methods
+
+### instructions(contextVariables?)
+
+Generates the final instructions for the agent, including specialized agent information:
+
+```typescript
+const finalInstructions = myAgent.instructions({ userId: '123' });
+```
+
+### toHandoffs()
+
+Returns array of instantiated handoff agents:
+
+```typescript
+const handoffs = myAgent.toHandoffs();
+```
+
+### asTool(props?)
+
+Converts the agent into a tool that can be used by other agents:
+
+```typescript
+const agentTool = myAgent.asTool({
+  toolDescription: 'Use this agent for data analysis',
+  outputExtractor: (result) => result.text,
+});
+```
+
+Parameters:
+- **toolDescription**: Optional description for the tool
+- **outputExtractor**: Optional function to extract specific output from the result
+
+### toTool(props?)
+
+Similar to `asTool()` but returns an object with the tool keyed by the handoff tool name:
+
+```typescript
+const toolSet = myAgent.toTool();
+// { transfer_to_my_agent: <tool> }
+```
+
+### toToolset(options?)
+
+Returns all tools available to this agent including handoff tools:
+
+```typescript
+const allTools = myAgent.toToolset({
+  includeTransferTool: true,
+  includeHandoffs: true,
+});
+```
+
+### clone(config?)
+
+Creates a copy of the agent with optional overrides:
+
+```typescript
+const clonedAgent = myAgent.clone({
+  temperature: 0.5,
+  prompt: 'Modified instructions',
+});
+```
+
+Note: The `clone()` method preserves all properties including `temperature` and `providerOptions`.
+
+### debug(prefix?)
+
+Prints debug information about the agent:
+
+```typescript
+myAgent.debug();
+```
+
+## Properties
+
+### Readonly Properties
+
+- **internalName**: Snake-cased version of the agent name
+- **handoff**: Handoff configuration object
+- **handoffToolName**: Generated transfer tool name (e.g., `transfer_to_agent_name`)
+- **handoffTool**: The transfer tool for this agent
+- **output**: Zod schema for structured output
+- **temperature**: Temperature setting
+- **prepareHandoff**: Handoff preparation callback
+- **prepareEnd**: End preparation callback
+- **providerOptions**: Provider-specific options
+
+### Mutable Properties
+
+- **model**: The language model
+- **toolChoice**: Tool selection strategy
+- **parent**: Reference to parent agent (if any)
+- **handoffs**: Array of available handoff agents
+
+### Computed Properties
+
+- **transfer_tools**: Object containing all transfer tools from handoff agents
+- **toolsNames**: Array of all available tool names (including transfers)
+
+## Multi-Agent Patterns
+
+### Simple Handoff
+
+```typescript
+const specialist = agent({
+  name: 'specialist',
+  model: openai('gpt-4'),
+  prompt: 'You are a data analysis specialist.',
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4'),
+  prompt: 'You coordinate tasks and delegate to specialists.',
+  handoffs: [specialist],
+});
+```
+
+### Dynamic Handoffs
+
+Use functions for lazy agent initialization:
+
+```typescript
+const coordinator = agent({
+  name: 'coordinator',
+  model: openai('gpt-4'),
+  prompt: 'You coordinate tasks.',
+  handoffs: [
+    () => specialist, // Lazy initialization
+  ],
+});
+```
+
+### Context Variables
+
+Pass typed context between agents:
+
+```typescript
+interface MyContext {
+  userId: string;
+  sessionId: string;
+}
+
+const myAgent = agent<void, MyContext>({
+  name: 'my_agent',
+  model: openai('gpt-4'),
+  prompt: (ctx) => `You are helping user ${ctx?.userId}`,
+});
+```
+
+## Type Parameters
+
+The Agent class supports three generic type parameters:
+
+```typescript
+Agent<Output, CIn, COut>
+```
+
+- **Output**: Type of structured output (if using output schema)
+- **CIn**: Type of input context variables
+- **COut**: Type of output context variables (defaults to CIn)
+
+## Utility Functions
+
+### lastTransferResult(messages)
+
+Extracts the last transfer result from message history:
+
+```typescript
+import { lastTransferResult } from '@deepagents/agent';
+
+const lastTransfer = lastTransferResult(messages);
+if (lastTransfer) {
+  console.log(`Transferred from ${lastTransfer.lastActiveAgent} to ${lastTransfer.currentActiveAgent}`);
+}
+```
+
+### isTransferToolResult(call)
+
+Type guard to check if a tool call is a transfer:
+
+```typescript
+import { isTransferToolResult } from '@deepagents/agent';
+
+if (isTransferToolResult(toolCall)) {
+  // Handle transfer
+}
+```
+
+## Advanced Features
+
+### Structured Output
+
+Define output schemas using Zod:
+
+```typescript
+import { z } from 'zod';
+
+const myAgent = agent({
+  name: 'analyzer',
+  model: openai('gpt-4'),
+  prompt: 'Analyze data and return structured results.',
+  output: z.object({
+    summary: z.string(),
+    score: z.number(),
+    tags: z.array(z.string()),
+  }),
+});
+```
+
+### Custom Tool Choice
+
+Control how the model uses tools:
+
+```typescript
+const myAgent = agent({
+  name: 'my_agent',
+  model: openai('gpt-4'),
+  prompt: 'You are a helpful assistant.',
+  tools: myTools,
+  toolChoice: 'required', // Force tool usage
+});
+```
+
+### Prepare Callbacks
+
+Execute custom logic at handoff boundaries:
+
+```typescript
+const myAgent = agent({
+  name: 'my_agent',
+  model: openai('gpt-4'),
+  prompt: 'You are a helpful assistant.',
+  prepareHandoff: async (messages) => {
+    // Log or modify messages before handoff
+    console.log('Preparing handoff with', messages.length, 'messages');
+  },
+  prepareEnd: async ({ messages, responseMessage, contextVariables }) => {
+    // Execute logic after agent completes
+    console.log('Agent completed with', messages.length, 'messages');
+  },
+});
+```
+
+## Best Practices
+
+1. **Use descriptive names**: Agent names are converted to snake_case and used in transfer tools
+2. **Provide clear handoff descriptions**: Help the model understand when to delegate
+3. **Keep agents focused**: Each agent should have a specific, well-defined purpose
+4. **Use context variables**: Share state between agents using typed context
+5. **Implement prepare callbacks**: Use prepareHandoff and prepareEnd for logging and state management
+6. **Clone for variations**: Use `clone()` to create agent variations without duplicating configuration
+7. **Structure your prompts**: Use the `instructions` helpers for consistent prompt formatting
+
+## Examples
+
+### Customer Service Agent with Specialists
+
+```typescript
+const billingAgent = agent({
+  name: 'billing_specialist',
+  model: openai('gpt-4'),
+  prompt: 'You handle billing and payment questions.',
+  handoffDescription: 'Handles billing, payments, and subscription questions',
+});
+
+const technicalAgent = agent({
+  name: 'technical_specialist',
+  model: openai('gpt-4'),
+  prompt: 'You handle technical support questions.',
+  handoffDescription: 'Handles technical issues and troubleshooting',
+});
+
+const frontlineAgent = agent({
+  name: 'frontline_agent',
+  model: openai('gpt-4'),
+  prompt: instructions.swarm({
+    purpose: 'You are the first point of contact for customer inquiries.',
+    routine: [
+      'Greet the customer warmly',
+      'Understand their question or issue',
+      'Transfer to billing_specialist for billing questions',
+      'Transfer to technical_specialist for technical issues',
+      'Handle simple questions directly',
+    ],
+  }),
+  handoffs: [billingAgent, technicalAgent],
+});
+```

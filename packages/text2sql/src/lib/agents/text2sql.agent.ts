@@ -33,12 +33,10 @@ const tools = {
   get_sample_rows: tool({
     description: `Get a few sample rows from a table to understand data formatting and values. Use this when you are unsure about the content of a column (e.g. date formats, status codes, string variations).`,
     inputSchema: z.object({
-      tableName: z
-        .string()
-        .transform((name) => name.replace(/[^a-zA-Z0-9_.]/g, ''))
-        .describe('The name of the table to sample.'),
+      tableName: z.string().describe('The name of the table to sample.'),
     }),
     execute: ({ tableName }, options) => {
+      tableName = tableName.replace(/[^a-zA-Z0-9_.]/g, '');
       const state = toState<{ adapter: Adapter }>(options);
       return state.adapter.execute(`SELECT * FROM ${tableName} LIMIT 3`);
     },
@@ -131,6 +129,7 @@ const text2sqlAgent = agent<
     adapterInfo: string;
     renderingTools?: RenderingTools;
     teachings: string;
+    userProfile?: string;
   }
 >({
   name: 'text2sql',
@@ -155,6 +154,8 @@ const text2sqlAgent = agent<
       You are an expert SQL query generator, answering business questions with accurate queries.
       Your tone should be concise and business-friendly.
     </identity>
+
+    ${state?.userProfile || ''}
 
     ${databaseSchemaPrompt(state!)}
 
