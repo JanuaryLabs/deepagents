@@ -2,7 +2,9 @@ import {
   Adapter,
   type AdapterInfo,
   type AdapterInfoProvider,
+  type IntrospectOptions,
   type Introspection,
+  type OnProgress,
   type Relationship,
   type Table,
   type TablesFilter,
@@ -128,7 +130,11 @@ export class Sqlite extends Adapter {
     this.#options = options;
   }
 
-  override async introspect(): Promise<Introspection> {
+  override async introspect(
+    options?: IntrospectOptions,
+  ): Promise<Introspection> {
+    const onProgress = options?.onProgress;
+
     if (this.#introspection) {
       return this.#introspection;
     }
@@ -146,10 +152,34 @@ export class Sqlite extends Adapter {
       allTables,
       allRelationships,
     );
-    await this.#annotateRowCounts(tables);
-    await this.#annotateColumnStats(tables);
-    await this.#annotateIndexes(tables);
-    await this.#annotateLowCardinalityColumns(tables);
+    onProgress?.({
+      phase: 'tables',
+      message: `Loaded ${tables.length} tables`,
+      total: tables.length,
+    });
+
+    onProgress?.({ phase: 'row_counts', message: 'Counting table rows...' });
+    await this.#annotateRowCounts(tables, onProgress);
+
+    onProgress?.({
+      phase: 'column_stats',
+      message: 'Collecting column statistics...',
+    });
+    await this.#annotateColumnStats(tables, onProgress);
+
+    onProgress?.({ phase: 'indexes', message: 'Loading index information...' });
+    await this.#annotateIndexes(tables, onProgress);
+
+    onProgress?.({
+      phase: 'low_cardinality',
+      message: 'Identifying low cardinality columns...',
+    });
+    await this.#annotateLowCardinalityColumns(tables, onProgress);
+
+    onProgress?.({
+      phase: 'relationships',
+      message: 'Loading foreign key relationships...',
+    });
 
     this.#introspection = { tables, relationships };
     return this.#introspection;
@@ -248,8 +278,7 @@ export class Sqlite extends Adapter {
 
   async #loadRelationships(tableNames?: string[]): Promise<Relationship[]> {
     const names =
-      tableNames ??
-      (await this.#loadTables()).map((table) => table.name);
+      tableNames ?? (await this.#loadTables()).map((table) => table.name);
 
     const relationshipGroups = await Promise.all(
       names.map(async (tableName) => {
@@ -291,9 +320,17 @@ export class Sqlite extends Adapter {
     return relationshipGroups.flat();
   }
 
-  async #annotateRowCounts(tables: Table[]) {
-    for (const table of tables) {
+  async #annotateRowCounts(tables: Table[], onProgress?: OnProgress) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#formatTableIdentifier(table);
+      onProgress?.({
+        phase: 'row_counts',
+        message: `Counting rows in ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       try {
         const rows = await this.#runQuery<{ count: number | string | bigint }>(
           `SELECT COUNT(*) as count FROM ${tableIdentifier}`,
@@ -309,9 +346,17 @@ export class Sqlite extends Adapter {
     }
   }
 
-  async #annotateColumnStats(tables: Table[]) {
-    for (const table of tables) {
+  async #annotateColumnStats(tables: Table[], onProgress?: OnProgress) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#formatTableIdentifier(table);
+      onProgress?.({
+        phase: 'column_stats',
+        message: `Collecting stats for ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       for (const column of table.columns) {
         if (!this.#shouldCollectStats(column.type)) {
           continue;
@@ -353,11 +398,20 @@ export class Sqlite extends Adapter {
     }
   }
 
-  async #annotateIndexes(tables: Table[]) {
-    for (const table of tables) {
+  async #annotateIndexes(tables: Table[], onProgress?: OnProgress) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#quoteIdentifier(
         table.rawName ?? table.name,
       );
+      onProgress?.({
+        phase: 'indexes',
+        message: `Loading indexes for ${table.name}...`,
+        current: i + 1,
+        total,
+      });
+
       let indexes: Table['indexes'] = [];
       try {
         const indexList = await this.#runQuery<IndexListRow>(
@@ -400,9 +454,20 @@ export class Sqlite extends Adapter {
     }
   }
 
-  async #annotateLowCardinalityColumns(tables: Table[]) {
-    for (const table of tables) {
+  async #annotateLowCardinalityColumns(
+    tables: Table[],
+    onProgress?: OnProgress,
+  ) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#formatTableIdentifier(table);
+      onProgress?.({
+        phase: 'low_cardinality',
+        message: `Analyzing cardinality in ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       for (const column of table.columns) {
         const columnIdentifier = this.#quoteSqlIdentifier(column.name);
         // add one to the limit to detect if it exceeds the limit

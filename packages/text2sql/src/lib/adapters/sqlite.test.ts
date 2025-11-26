@@ -88,9 +88,7 @@ test('tables option filters tables and relationships', async () => {
       new Set(['Agreement', 'Customer']),
     );
 
-    const relationships = await adapter.getRelationships(
-      tables.map((t) => t.name),
-    );
+    const relationships = await adapter.getRelationships();
     assert.equal(relationships.length, 1);
     assert.deepEqual(relationships[0], {
       table: 'Agreement',
@@ -115,9 +113,7 @@ test('tables option keeps connected tables even if they do not directly match', 
     const tables = (await adapter.getTables()) as Table[];
     assert.deepEqual(new Set(tables.map((t) => t.name)), new Set(['A', 'B']));
 
-    const relationships = await adapter.getRelationships(
-      tables.map((t) => t.name),
-    );
+    const relationships = await adapter.getRelationships();
     assert.deepEqual(relationships, [
       {
         table: 'A',
@@ -148,17 +144,11 @@ test('tables regex seed pulls entire chain of related tables (Customer -> Order 
       new Set(['Customer', 'Order', 'Product', 'AuditLog']),
     );
 
-    const relationships = await adapter.getRelationships(
-      tables.map((t) => t.name),
-    );
+    const relationships = await adapter.getRelationships();
     const edges = relationships.map((r) => `${r.table}->${r.referenced_table}`);
     assert.deepEqual(
       new Set(edges),
-      new Set([
-        'Order->Customer',
-        'Product->Order',
-        'AuditLog->Product',
-      ]),
+      new Set(['Order->Customer', 'Product->Order', 'AuditLog->Product']),
     );
   } finally {
     db.close();
@@ -182,16 +172,11 @@ test('tables list seed merges multiple connected components', async () => {
       new Set(['A', 'B', 'C', 'D', 'E']),
     );
 
-    const relationships = await adapter.getRelationships(
-      tables.map((t) => t.name),
-    );
+    const relationships = await adapter.getRelationships();
     const edges = new Set(
       relationships.map((r) => `${r.table}->${r.referenced_table}`),
     );
-    assert.deepEqual(
-      edges,
-      new Set(['A->B', 'B->C', 'D->E']),
-    );
+    assert.deepEqual(edges, new Set(['A->B', 'B->C', 'D->E']));
   } finally {
     db.close();
   }
@@ -208,9 +193,7 @@ test('tables filter with no matches returns empty tables and relationships', asy
     const tables = await adapter.getTables();
     assert.deepEqual(tables, []);
 
-    const relationships = await adapter.getRelationships(
-      tables.map((t) => t.name),
-    );
+    const relationships = await adapter.getRelationships();
     assert.deepEqual(relationships, []);
   } finally {
     db.close();
@@ -228,9 +211,7 @@ test('tables filter with empty array returns empty tables and relationships', as
     const tables = await adapter.getTables();
     assert.deepEqual(tables, []);
 
-    const relationships = await adapter.getRelationships(
-      tables.map((t) => t.name),
-    );
+    const relationships = await adapter.getRelationships();
     assert.deepEqual(relationships, []);
   } finally {
     db.close();
