@@ -5,6 +5,8 @@ import {
   type Introspection,
   type Relationship,
   type Table,
+  type TablesFilter,
+  applyTablesFilter,
 } from './adapter.ts';
 
 const SQL_ERROR_MAP: Array<{
@@ -53,6 +55,7 @@ export type SqliteAdapterOptions = {
   validate?: ValidateFunction;
   introspect?: IntrospectFunction;
   info?: AdapterInfoProvider;
+  tables?: TablesFilter;
 };
 
 type TableNameRow = {
@@ -135,13 +138,18 @@ export class Sqlite extends Adapter {
       return this.#introspection;
     }
 
-    const tableNames = await this.#getTableNames();
-    const tables = await this.#loadTables(tableNames);
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships(
+      allTables.map((t) => t.name),
+    );
+    const { tables, relationships } = this.#applyTablesFilter(
+      allTables,
+      allRelationships,
+    );
     await this.#annotateRowCounts(tables);
     await this.#annotateColumnStats(tables);
     await this.#annotateIndexes(tables);
     await this.#annotateLowCardinalityColumns(tables);
-    const relationships = await this.#loadRelationships(tableNames);
 
     this.#introspection = { tables, relationships };
     return this.#introspection;
@@ -190,20 +198,25 @@ export class Sqlite extends Adapter {
     return lines.join('\n');
   }
 
-  async #getTableNames(): Promise<string[]> {
-    const rows = await this.#runQuery<TableNameRow>(
+  override async getTables(): Promise<Table[]> {
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships(
+      allTables.map((t) => t.name),
+    );
+    return this.#applyTablesFilter(allTables, allRelationships).tables;
+  }
+
+  async #loadTables(): Promise<Table[]> {
+    const rows = await this.#runQuery<{ name: string | null | undefined }>(
       `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`,
     );
 
-    return rows
+    const tableNames = rows
       .map((row) => row.name)
       .filter(
         (name): name is string =>
           typeof name === 'string' && !name.startsWith('sqlite_'),
       );
-  }
-
-  async #loadTables(tableNames: string[]): Promise<Table[]> {
     const tables = await Promise.all(
       tableNames.map(async (tableName) => {
         const columns = await this.#runQuery<ColumnRow>(
@@ -225,9 +238,21 @@ export class Sqlite extends Adapter {
     return tables;
   }
 
-  async #loadRelationships(tableNames: string[]): Promise<Relationship[]> {
+  async getRelationships(): Promise<Relationship[]> {
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships(
+      allTables.map((t) => t.name),
+    );
+    return this.#applyTablesFilter(allTables, allRelationships).relationships;
+  }
+
+  async #loadRelationships(tableNames?: string[]): Promise<Relationship[]> {
+    const names =
+      tableNames ??
+      (await this.#loadTables()).map((table) => table.name);
+
     const relationshipGroups = await Promise.all(
-      tableNames.map(async (tableName) => {
+      names.map(async (tableName) => {
         const rows = await this.#runQuery<ForeignKeyRow>(
           `PRAGMA foreign_key_list(${this.#quoteIdentifier(tableName)})`,
         );
@@ -330,7 +355,9 @@ export class Sqlite extends Adapter {
 
   async #annotateIndexes(tables: Table[]) {
     for (const table of tables) {
-      const tableIdentifier = this.#quoteIdentifier(table.rawName ?? table.name);
+      const tableIdentifier = this.#quoteIdentifier(
+        table.rawName ?? table.name,
+      );
       let indexes: Table['indexes'] = [];
       try {
         const indexList = await this.#runQuery<IndexListRow>(
@@ -348,7 +375,9 @@ export class Sqlite extends Adapter {
                 .map((col) => col.name)
                 .filter((name): name is string => Boolean(name));
               for (const columnName of columns) {
-                const column = table.columns.find((col) => col.name === columnName);
+                const column = table.columns.find(
+                  (col) => col.name === columnName,
+                );
                 if (column) {
                   column.isIndexed = true;
                 }
@@ -423,6 +452,10 @@ export class Sqlite extends Adapter {
 
   #quoteSqlIdentifier(identifier: string) {
     return `"${identifier.replace(/"/g, '""')}"`;
+  }
+
+  #applyTablesFilter(tables: Table[], relationships: Relationship[]) {
+    return applyTablesFilter(tables, relationships, this.#options.tables);
   }
 
   #formatTableIdentifier(table: Table) {

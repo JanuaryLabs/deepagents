@@ -6,6 +6,8 @@ import {
   type Relationship,
   type Table,
   type TableIndex,
+  type TablesFilter,
+  applyTablesFilter,
 } from './adapter.ts';
 
 type ExecuteFunction = (sql: string) => Promise<any> | any;
@@ -18,6 +20,7 @@ export type SqlServerAdapterOptions = {
   introspect?: IntrospectFunction;
   schemas?: string[];
   info?: AdapterInfoProvider;
+  tables?: TablesFilter;
 };
 
 type ColumnRow = {
@@ -155,13 +158,17 @@ export class SqlServer extends Adapter {
       return this.#introspection;
     }
 
-    const tables = await this.#loadTables();
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships();
+    const { tables, relationships } = this.#applyTablesFilter(
+      allTables,
+      allRelationships,
+    );
     await this.#annotateRowCounts(tables);
     await this.#annotatePrimaryKeys(tables);
     await this.#annotateIndexes(tables);
     await this.#annotateColumnStats(tables);
     await this.#annotateLowCardinalityColumns(tables);
-    const relationships = await this.#loadRelationships();
 
     this.#introspection = { tables, relationships };
     return this.#introspection;
@@ -212,6 +219,12 @@ export class SqlServer extends Adapter {
     return lines.join('\n');
   }
 
+  override async getTables(): Promise<Table[]> {
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships();
+    return this.#applyTablesFilter(allTables, allRelationships).tables;
+  }
+
   async #loadTables(): Promise<Table[]> {
     const rows = await this.#runIntrospectionQuery<ColumnRow>(`
       SELECT
@@ -254,6 +267,12 @@ export class SqlServer extends Adapter {
     }
 
     return Array.from(tables.values());
+  }
+
+  override async getRelationships(): Promise<Relationship[]> {
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships();
+    return this.#applyTablesFilter(allTables, allRelationships).relationships;
   }
 
   async #loadRelationships(): Promise<Relationship[]> {
@@ -575,6 +594,10 @@ export class SqlServer extends Adapter {
 
   #quoteIdentifier(name: string) {
     return `[${name.replace(/]/g, ']]')}]`;
+  }
+
+  #applyTablesFilter(tables: Table[], relationships: Relationship[]) {
+    return applyTablesFilter(tables, relationships, this.#options.tables);
   }
 
   #formatQualifiedTableName(table: Table) {

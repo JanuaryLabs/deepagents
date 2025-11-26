@@ -6,6 +6,8 @@ import {
   type Relationship,
   type Table,
   type TableIndex,
+  type TablesFilter,
+  applyTablesFilter,
 } from './adapter.ts';
 
 type ExecuteFunction = (sql: string) => Promise<any> | any;
@@ -18,6 +20,7 @@ export type PostgresAdapterOptions = {
   introspect?: IntrospectFunction;
   schemas?: string[];
   info?: AdapterInfoProvider;
+  tables?: TablesFilter;
 };
 
 type TableRow = {
@@ -144,13 +147,17 @@ export class Postgres extends Adapter {
       return this.#introspection;
     }
 
-    const tables = await this.#loadTables();
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships();
+    const { tables, relationships } = this.#applyTablesFilter(
+      allTables,
+      allRelationships,
+    );
     await this.#annotateRowCounts(tables);
     await this.#annotatePrimaryKeys(tables);
     await this.#annotateIndexes(tables);
     await this.#annotateColumnStats(tables);
     await this.#annotateLowCardinalityColumns(tables);
-    const relationships = await this.#loadRelationships();
 
     this.#introspection = { tables, relationships };
     return this.#introspection;
@@ -199,6 +206,12 @@ export class Postgres extends Adapter {
     return lines.join('\n');
   }
 
+  override async getTables(): Promise<Table[]> {
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships();
+    return this.#applyTablesFilter(allTables, allRelationships).tables;
+  }
+
   async #loadTables(): Promise<Table[]> {
     const rows = await this.#runIntrospectionQuery<TableRow>(`
       SELECT
@@ -238,6 +251,12 @@ export class Postgres extends Adapter {
     }
 
     return Array.from(tables.values());
+  }
+
+  async getRelationships(): Promise<Relationship[]> {
+    const allTables = await this.#loadTables();
+    const allRelationships = await this.#loadRelationships();
+    return this.#applyTablesFilter(allTables, allRelationships).relationships;
   }
 
   async #loadRelationships(): Promise<Relationship[]> {
@@ -334,9 +353,7 @@ export class Postgres extends Adapter {
       if (!table) {
         continue;
       }
-      const column = table.columns.find(
-        (col) => col.name === row.column_name,
-      );
+      const column = table.columns.find((col) => col.name === row.column_name);
       if (column) {
         column.isPrimaryKey = true;
       }
@@ -390,7 +407,7 @@ export class Postgres extends Adapter {
           columns: [],
           unique: Boolean(row.indisunique ?? false),
           primary: Boolean(row.indisprimary ?? false),
-          type: row.indisclustered ? 'clustered' : row.method ?? undefined,
+          type: row.indisclustered ? 'clustered' : (row.method ?? undefined),
         };
         indexMap.set(indexKey, index);
         if (!table.indexes) {
@@ -400,7 +417,9 @@ export class Postgres extends Adapter {
       }
       if (row.column_name) {
         index.columns.push(row.column_name);
-        const column = table.columns.find((col) => col.name === row.column_name);
+        const column = table.columns.find(
+          (col) => col.name === row.column_name,
+        );
         if (column) {
           column.isIndexed = true;
         }
@@ -534,6 +553,10 @@ export class Postgres extends Adapter {
 
   #quoteIdentifier(name: string) {
     return `"${name.replace(/"/g, '""')}"`;
+  }
+
+  #applyTablesFilter(tables: Table[], relationships: Relationship[]) {
+    return applyTablesFilter(tables, relationships, this.#options.tables);
   }
 
   #formatQualifiedTableName(table: Table) {

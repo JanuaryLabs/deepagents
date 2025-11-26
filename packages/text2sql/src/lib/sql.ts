@@ -16,6 +16,7 @@ import z from 'zod';
 import { generate, pipe, stream, user } from '@deepagents/agent';
 
 import type { Adapter } from './adapters/adapter.ts';
+import { Sqlite } from './adapters/sqlite.ts';
 import { BriefCache, generateBrief, toBrief } from './agents/brief.agent.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
 import { suggestionsAgent } from './agents/suggestions.agents.ts';
@@ -351,33 +352,37 @@ export class Text2Sql {
     });
   }
 }
+if (import.meta.main) {
+  // const { DatabaseSync } = await import('node:sqlite');
+  // const sqliteClient = new DatabaseSync('claude_creation.db', {
+  //   readOnly: true,
+  // });
+  // const adapter = new Sqlite({
+  //   execute: (sql) => sqliteClient.prepare(sql).all(),
+  // });
 
-// if (import.meta.main) {
-//   const { DatabaseSync } = await import('node:sqlite');
-//   const sqliteClient = new DatabaseSync(
-//     '/Users/ezzabuzaid/Downloads/Chinook.db',
-//     { readOnly: true },
-//   );
+  // console.log((await adapter.getTables()).map((t) => t.name));
+  // console.log(await adapter.resolveTables(['ProductCategory']));
 
-//   const text2sql = new Text2Sql({
-//     instructions: teachings,
-//     cache: new BriefCache('brief'),
-//     history: new SqliteHistory('./text2sql_history.sqlite'),
-//     adapter: new Sqlite({
-//       execute: (sql) => sqliteClient.prepare(sql).all(),
-//     }),
-//   });
+  //   const text2sql = new Text2Sql({
+  //     instructions: teachings,
+  //     cache: new BriefCache('brief'),
+  //     history: new SqliteHistory('./text2sql_history.sqlite'),
+  //     adapter: new Sqlite({
+  //       execute: (sql) => sqliteClient.prepare(sql).all(),
+  //     }),
+  //   });
 
-//   const sql = await text2sql.chat(
-//     [
-//       user(
-//         'What is trending in sales lately, last calenar year, monthly timeframe?',
-//       ),
-//     ],
-//     {
-//       userId: 'default',
-//       chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
-//     },
-//   );
-//   await printer.readableStream(sql);
-// }
+  //   const sql = await text2sql.chat(
+  //     [
+  //       user(
+  //         'What is trending in sales lately, last calenar year, monthly timeframe?',
+  //       ),
+  //     ],
+  //     {
+  //       userId: 'default',
+  //       chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
+  //     },
+  //   );
+  //   await printer.readableStream(sql);
+}
