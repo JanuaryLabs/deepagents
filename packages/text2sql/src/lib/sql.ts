@@ -13,7 +13,13 @@ import dedent from 'dedent';
 import { v7 } from 'uuid';
 import z from 'zod';
 
-import { generate, pipe, stream, user } from '@deepagents/agent';
+import {
+  type AgentModel,
+  generate,
+  pipe,
+  stream,
+  user,
+} from '@deepagents/agent';
 
 import type { Adapter } from './adapters/adapter.ts';
 import { Sqlite } from './adapters/sqlite.ts';
@@ -253,6 +259,7 @@ export class Text2Sql {
       chatId: string;
       userId: string;
     },
+    model?: AgentModel,
   ) {
     const [introspection, adapterInfo] = await Promise.all([
       this.#config.adapter.introspect(),
@@ -269,6 +276,7 @@ export class Text2Sql {
 
     const result = stream(
       text2sqlMonolith.clone({
+        model: model,
         tools: {
           ...text2sqlMonolith.handoff.tools,
           ...this.#config.tools,
@@ -360,10 +368,8 @@ if (import.meta.main) {
   // const adapter = new Sqlite({
   //   execute: (sql) => sqliteClient.prepare(sql).all(),
   // });
-
   // console.log((await adapter.getTables()).map((t) => t.name));
   // console.log(await adapter.resolveTables(['ProductCategory']));
-
   //   const text2sql = new Text2Sql({
   //     instructions: teachings,
   //     cache: new BriefCache('brief'),
@@ -372,7 +378,6 @@ if (import.meta.main) {
   //       execute: (sql) => sqliteClient.prepare(sql).all(),
   //     }),
   //   });
-
   //   const sql = await text2sql.chat(
   //     [
   //       user(
