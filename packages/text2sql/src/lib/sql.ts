@@ -21,9 +21,17 @@ import {
   user,
 } from '@deepagents/agent';
 
-import type { Adapter } from './adapters/adapter.ts';
-import { Sqlite } from './adapters/sqlite.ts';
-import { BriefCache, generateBrief, toBrief } from './agents/brief.agent.ts';
+import type {
+  Adapter,
+  IntrospectOptions,
+  Introspection,
+} from './adapters/adapter.ts';
+import {
+  JsonCache,
+  TmpCache,
+  generateBrief,
+  toBrief,
+} from './agents/brief.agent.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
 import { suggestionsAgent } from './agents/suggestions.agents.ts';
 import { synthesizerAgent } from './agents/synthesizer.agent.ts';
@@ -44,15 +52,18 @@ import {
 export class Text2Sql {
   #config: {
     adapter: Adapter;
-    cache: BriefCache;
+    cache: TmpCache;
     history: History;
     tools?: RenderingTools;
     instructions: Teachables[];
   };
+  #introspectionCache: JsonCache<Introspection>;
+
   constructor(config: {
     adapter: Adapter;
-    cache: BriefCache;
+    cache: TmpCache;
     history: History;
+    version: string;
     tools?: RenderingTools;
     instructions?: Teachables[];
   }) {
@@ -61,6 +72,9 @@ export class Text2Sql {
       instructions: config.instructions ?? [],
       tools: config.tools ?? {},
     };
+    this.#introspectionCache = new JsonCache<Introspection>(
+      'introspection' + config.version,
+    );
   }
   async #getSql(
     stream: ReadableStream<
@@ -88,7 +102,7 @@ export class Text2Sql {
 
   public async toSql(input: string) {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.index(),
       this.#config.adapter.info(),
     ]);
     const context = await generateBrief(introspection, this.#config.cache);
@@ -112,7 +126,7 @@ export class Text2Sql {
 
   public async inspect() {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.index(),
       this.#config.adapter.info(),
     ]);
     const context = await generateBrief(introspection, this.#config.cache);
@@ -129,9 +143,19 @@ export class Text2Sql {
     this.#config.instructions.push(...dataset);
   }
 
+  public async index(options?: IntrospectOptions): Promise<Introspection> {
+    const cached = await this.#introspectionCache.read();
+    if (cached) {
+      return cached;
+    }
+    const introspection = await this.#config.adapter.introspect(options);
+    await this.#introspectionCache.write(introspection);
+    return introspection;
+  }
+
   public async teach(input: string) {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.index(),
       this.#config.adapter.info(),
     ]);
     const context = await generateBrief(introspection, this.#config.cache);
@@ -154,7 +178,7 @@ export class Text2Sql {
 
   public async tag(input: string) {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.index(),
       this.#config.adapter.info(),
     ]);
     const pipeline = pipe(
@@ -205,7 +229,7 @@ export class Text2Sql {
 
   public async suggest() {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.index(),
       this.#config.adapter.info(),
     ]);
     const context = await generateBrief(introspection, this.#config.cache);
@@ -227,7 +251,7 @@ export class Text2Sql {
 
   public async single(input: string) {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.index(),
       this.#config.adapter.info(),
     ]);
     //   console.log(text2sqlMonolith.instructions({
@@ -262,7 +286,7 @@ export class Text2Sql {
     model?: AgentModel,
   ) {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect({ onProgress: console.log }),
+      this.index({ onProgress: console.log }),
       this.#config.adapter.info(),
     ]);
     const chat = await this.#config.history.upsertChat({

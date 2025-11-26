@@ -19,11 +19,11 @@ import {
 import { Adapter, type Introspection } from '../adapters/adapter.ts';
 import { databaseSchemaPrompt } from '../prompt.ts';
 
-export class BriefCache {
+export class TmpCache {
   public path: string;
-  constructor(watermark: string) {
+  constructor(watermark: string, extension = '.txt') {
     const hash = createHash('md5').update(watermark).digest('hex');
-    this.path = path.join(tmpdir(), `db-brief-${hash}.txt`);
+    this.path = path.join(tmpdir(), `text2sql-${hash}${extension}`);
   }
 
   async get() {
@@ -33,8 +33,26 @@ export class BriefCache {
     return null;
   }
 
-  set(brief: string) {
-    return writeFile(this.path, brief, 'utf-8');
+  set(content: string) {
+    return writeFile(this.path, content, 'utf-8');
+  }
+}
+
+export class JsonCache<T> extends TmpCache {
+  constructor(watermark: string) {
+    super(watermark, '.json');
+  }
+
+  async read(): Promise<T | null> {
+    const content = await this.get();
+    if (content) {
+      return JSON.parse(content) as T;
+    }
+    return null;
+  }
+
+  write(data: T) {
+    return this.set(JSON.stringify(data));
   }
 }
 
@@ -88,7 +106,7 @@ const briefAgent = agent<
   },
 });
 
-async function runAndCache(introspection: Introspection, cache: BriefCache) {
+async function runAndCache(introspection: Introspection, cache: TmpCache) {
   const { text } = await generate(
     briefAgent,
     [
@@ -105,7 +123,7 @@ async function runAndCache(introspection: Introspection, cache: BriefCache) {
 
 export async function generateBrief(
   introspection: Introspection,
-  cache: BriefCache,
+  cache: TmpCache,
 ) {
   const brief = await cache.get();
   if (!brief) {
@@ -116,7 +134,7 @@ export async function generateBrief(
 
 export function toBrief(forceRefresh = false): StreamFunction<
   {
-    cache: BriefCache;
+    cache: TmpCache;
     introspection: Introspection;
   },
   { context: string }
