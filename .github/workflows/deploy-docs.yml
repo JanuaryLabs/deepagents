@@ -39,7 +39,7 @@ jobs:
 
       - name: Build docs
         run: |
-          nx run docs:build
+          npx nx run docs:build
           # Move prerendered content from deepagents/ subdirectory to root
           mv ./apps/docs/dist/client/deepagents/* ./apps/docs/dist/client/
           rm -rf ./apps/docs/dist/client/deepagents

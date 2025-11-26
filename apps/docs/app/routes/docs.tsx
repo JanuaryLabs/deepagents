@@ -41,13 +41,17 @@ const clientLoader = browserCollections.docs.createClientLoader({
   },
 });
 
+function DocsContent({ path }: { path: string }) {
+  const Content = clientLoader.getComponent(path);
+  return <Content />;
+}
+
 export default function Page({ loaderData }: Route.ComponentProps) {
   const { tree, path } = loaderData;
-  const Content = clientLoader.getComponent(path);
 
   return (
     <DocsLayout {...baseOptions()} tree={tree as PageTree.Root} tabMode="top">
-      <Content />
+      <DocsContent path={path} />
     </DocsLayout>
   );
 }

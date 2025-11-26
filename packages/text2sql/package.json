@@ -25,7 +25,7 @@
   "dependencies": {
     "@ai-sdk/groq": "2.0.26",
     "@deepagents/agent": "0.2.1",
-    "ai": "^5.0.65",
+    "ai": "^5.0.102",
     "autoevals": "^0.0.131",
     "dedent": "1.7.0",
     "zod": "^3.25.76 || ^4.0.0",

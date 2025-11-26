@@ -262,7 +262,7 @@ export class Text2Sql {
     model?: AgentModel,
   ) {
     const [introspection, adapterInfo] = await Promise.all([
-      this.#config.adapter.introspect(),
+      this.#config.adapter.introspect({ onProgress: console.log }),
       this.#config.adapter.info(),
     ]);
     const chat = await this.#config.history.upsertChat({
