@@ -50,12 +50,34 @@ export interface AdapterInfo {
   details?: Record<string, unknown>;
 }
 
+export type IntrospectionPhase =
+  | 'tables'
+  | 'row_counts'
+  | 'primary_keys'
+  | 'indexes'
+  | 'column_stats'
+  | 'low_cardinality'
+  | 'relationships';
+
+export interface IntrospectionProgress {
+  phase: IntrospectionPhase;
+  message: string;
+  current?: number;
+  total?: number;
+}
+
+export type OnProgress = (progress: IntrospectionProgress) => void;
+
 export type AdapterInfoProvider =
   | AdapterInfo
   | (() => Promise<AdapterInfo> | AdapterInfo);
 
+export interface IntrospectOptions {
+  onProgress?: OnProgress;
+}
+
 export abstract class Adapter {
-  abstract introspect(): Promise<Introspection> | Introspection;
+  abstract introspect(options?: IntrospectOptions): Promise<Introspection> | Introspection;
 
   abstract execute(sql: string): Promise<any[]> | any[];
   abstract validate(sql: string): Promise<string|void> | string|void;

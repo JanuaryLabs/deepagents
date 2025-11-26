@@ -2,7 +2,9 @@ import {
   Adapter,
   type AdapterInfo,
   type AdapterInfoProvider,
+  type IntrospectOptions,
   type Introspection,
+  type OnProgress,
   type Relationship,
   type Table,
   type TableIndex,
@@ -134,7 +136,9 @@ export class Postgres extends Adapter {
     };
   }
 
-  override async introspect(): Promise<Introspection> {
+  override async introspect(options?: IntrospectOptions): Promise<Introspection> {
+    const onProgress = options?.onProgress;
+
     if (this.#introspection) {
       return this.#introspection;
     }
@@ -144,13 +148,37 @@ export class Postgres extends Adapter {
       return this.#introspection;
     }
 
+    onProgress?.({ phase: 'tables', message: 'Loading table schemas...' });
     const tables = await this.#loadTables();
-    await this.#annotateRowCounts(tables);
+    onProgress?.({
+      phase: 'tables',
+      message: `Loaded ${tables.length} tables`,
+      total: tables.length,
+    });
+
+    onProgress?.({ phase: 'row_counts', message: 'Counting table rows...' });
+    await this.#annotateRowCounts(tables, onProgress);
+
+    onProgress?.({ phase: 'primary_keys', message: 'Detecting primary keys...' });
     await this.#annotatePrimaryKeys(tables);
+    onProgress?.({ phase: 'primary_keys', message: 'Primary keys annotated' });
+
+    onProgress?.({ phase: 'indexes', message: 'Loading index information...' });
     await this.#annotateIndexes(tables);
-    await this.#annotateColumnStats(tables);
-    await this.#annotateLowCardinalityColumns(tables);
+    onProgress?.({ phase: 'indexes', message: 'Indexes annotated' });
+
+    onProgress?.({ phase: 'column_stats', message: 'Collecting column statistics...' });
+    await this.#annotateColumnStats(tables, onProgress);
+
+    onProgress?.({ phase: 'low_cardinality', message: 'Identifying low cardinality columns...' });
+    await this.#annotateLowCardinalityColumns(tables, onProgress);
+
+    onProgress?.({ phase: 'relationships', message: 'Loading foreign key relationships...' });
     const relationships = await this.#loadRelationships();
+    onProgress?.({
+      phase: 'relationships',
+      message: `Loaded ${relationships.length} relationships`,
+    });
 
     this.#introspection = { tables, relationships };
     return this.#introspection;
@@ -289,9 +317,17 @@ export class Postgres extends Adapter {
     return Array.from(relationships.values());
   }
 
-  async #annotateRowCounts(tables: Table[]) {
-    for (const table of tables) {
+  async #annotateRowCounts(tables: Table[], onProgress?: OnProgress) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
+      onProgress?.({
+        phase: 'row_counts',
+        message: `Counting rows in ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       try {
         const rows = await this.#runIntrospectionQuery<{
           count: number | string | bigint | null;
@@ -408,12 +444,20 @@ export class Postgres extends Adapter {
     }
   }
 
-  async #annotateColumnStats(tables: Table[]) {
+  async #annotateColumnStats(tables: Table[], onProgress?: OnProgress) {
     if (!tables.length) {
       return;
     }
-    for (const table of tables) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
+      onProgress?.({
+        phase: 'column_stats',
+        message: `Collecting stats for ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       for (const column of table.columns) {
         if (!this.#shouldCollectStats(column.type)) {
           continue;
@@ -455,9 +499,17 @@ export class Postgres extends Adapter {
     }
   }
 
-  async #annotateLowCardinalityColumns(tables: Table[]) {
-    for (const table of tables) {
+  async #annotateLowCardinalityColumns(tables: Table[], onProgress?: OnProgress) {
+    const total = tables.length;
+    for (let i = 0; i < tables.length; i++) {
+      const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
+      onProgress?.({
+        phase: 'low_cardinality',
+        message: `Analyzing cardinality in ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       for (const column of table.columns) {
         const columnIdentifier = this.#quoteIdentifier(column.name);
         const limit = LOW_CARDINALITY_LIMIT + 1;
