@@ -2,7 +2,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  BriefCache,
   Sqlite,
   SqliteHistory,
   Text2Sql,
@@ -161,7 +160,7 @@ async function runEvaluation() {
   const history = new SqliteHistory('./text2sql_history.sqlite');
 
   const text2sql = new Text2Sql({
-    cache: new BriefCache('brief'),
+    version: 'v1',
     history,
     adapter: new Sqlite({
       execute: (sql) => sqliteClient.prepare(sql).all(),

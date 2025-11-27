@@ -6,7 +6,6 @@ import { DatabaseSync } from 'node:sqlite';
 import OpenAI from 'openai';
 
 import {
-  BriefCache,
   InMemoryHistory,
   Sqlite,
   Text2Sql,
@@ -99,8 +98,8 @@ evalite('SQL Create Context', {
     // We'll use a unique history file per run or just a shared one since we don't care about history here
 
     const text2sql = new Text2Sql({
-      cache: new BriefCache(randomUUID()), // Use brief cache or mock
-      history: new InMemoryHistory(), // Use in-memory history if supported, or file
+      version: randomUUID(), // Use unique version per run for cache isolation
+      history: new InMemoryHistory(),
       adapter,
     });
 

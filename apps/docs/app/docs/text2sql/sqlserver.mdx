@@ -9,7 +9,7 @@ The SQL Server adapter supports Microsoft SQL Server databases with automatic sc
 ## Basic Setup
 
 ```typescript
-import { Text2Sql, SqlServer, BriefCache, InMemoryHistory } from '@deepagents/text2sql';
+import { Text2Sql, SqlServer, InMemoryHistory } from '@deepagents/text2sql';
 import sql from 'mssql';
 
 const pool = await sql.connect({
@@ -24,13 +24,13 @@ const pool = await sql.connect({
 });
 
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new SqlServer({
     execute: async (query) => {
       const result = await pool.request().query(query);
       return result.recordset;
     },
   }),
-  cache: new BriefCache('my-sqlserver-db'),
   history: new InMemoryHistory(),
 });
 ```

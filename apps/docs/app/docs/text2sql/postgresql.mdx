@@ -11,7 +11,6 @@ The PostgreSQL adapter provides full support for PostgreSQL databases with autom
 import pg from 'pg';
 
 import {
-  BriefCache,
   InMemoryHistory,
   Postgres,
   Text2Sql,
@@ -22,13 +21,13 @@ const pool = new pg.Pool({
 });
 
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new Postgres({
     execute: async (sql) => {
       const result = await pool.query(sql);
       return result.rows;
     },
   }),
-  cache: new BriefCache('my-postgres-db'),
   history: new InMemoryHistory(),
 });
 ```

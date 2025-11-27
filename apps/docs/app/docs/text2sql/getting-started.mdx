@@ -16,7 +16,7 @@ npm install @deepagents/text2sql
 Text2SQL requires three components:
 
 1. **Adapter** - Connects to your database (PostgreSQL, SQLite, or SQL Server)
-2. **BriefCache** - Caches schema analysis for faster queries
+2. **Version** - A string used to manage cache invalidation (bump when schema changes)
 3. **History** - Stores conversation history (optional for single queries)
 
 ### SQLite Example
@@ -25,7 +25,6 @@ Text2SQL requires three components:
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  BriefCache,
   InMemoryHistory,
   Sqlite,
   Text2Sql,
@@ -36,10 +35,10 @@ const db = new DatabaseSync('./your-database.db', { readOnly: true });
 
 // Create the Text2SQL instance
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
   }),
-  cache: new BriefCache('my-database'),
   history: new InMemoryHistory(),
 });
 ```
@@ -50,7 +49,6 @@ const text2sql = new Text2Sql({
 import pg from 'pg';
 
 import {
-  BriefCache,
   InMemoryHistory,
   Postgres,
   Text2Sql,
@@ -61,13 +59,13 @@ const pool = new pg.Pool({
 });
 
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new Postgres({
     execute: async (sql) => {
       const result = await pool.query(sql);
       return result.rows;
     },
   }),
-  cache: new BriefCache('my-postgres-db'),
   history: new InMemoryHistory(),
 });
 ```

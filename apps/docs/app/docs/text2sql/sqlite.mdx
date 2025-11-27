@@ -11,7 +11,6 @@ The SQLite adapter works with SQLite databases, supporting both file-based and i
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  BriefCache,
   InMemoryHistory,
   Sqlite,
   Text2Sql,
@@ -20,10 +19,10 @@ import {
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
 
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
   }),
-  cache: new BriefCache('my-sqlite-db'),
   history: new InMemoryHistory(),
 });
 ```

@@ -19,16 +19,16 @@ Text2SQL is a package that converts natural language questions into SQL queries.
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { BriefCache, Sqlite, Text2Sql } from '@deepagents/text2sql';
+import { InMemoryHistory, Sqlite, Text2Sql } from '@deepagents/text2sql';
 
 const db = new DatabaseSync('./chinook.db', { readOnly: true });
 
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
   }),
-  cache: new BriefCache('chinook'),
-  history: new MemoryHistory(),
+  history: new InMemoryHistory(),
 });
 
 // Generate SQL from natural language

@@ -23,7 +23,7 @@ Database
     │
     ▼
 ┌─────────────────┐
-│   BriefCache    │ ← Stores for reuse
+│     Cache       │ ← Stores for reuse (keyed by version)
 └─────────────────┘
     │
     ▼
@@ -75,47 +75,43 @@ Tables are classified by row count to help the AI understand query performance:
 | large | 10,000 - 99,999 | Indexes important, consider pagination |
 | huge | >= 100,000 | Must use indexes, pagination recommended |
 
-## BriefCache
+## Caching
 
-The `BriefCache` stores the generated database context to avoid repeated analysis:
+Text2SQL automatically caches the generated database context using the `version` parameter:
 
 ```typescript
-import { BriefCache } from '@deepagents/text2sql';
-
-// Create a cache with a unique watermark
-const cache = new BriefCache('my-database-v1');
-
 const text2sql = new Text2Sql({
+  version: 'v1', // Used for cache key
   adapter: new Sqlite({ execute }),
-  cache: cache,
   history: new InMemoryHistory(),
 });
 ```
 
 ### How Caching Works
 
-1. **First query**: Brief agent analyzes the database, result is cached
+1. **First query**: Brief agent analyzes the database, result is cached based on `version`
 2. **Subsequent queries**: Cached brief is reused
-3. **Schema changes**: Update the watermark to invalidate cache
+3. **Schema changes**: Bump the `version` to invalidate cache
 
 ### Cache Location
 
-Briefs are stored as text files in the system temp directory:
+Caches are stored as files in the system temp directory:
 
 ```
-/tmp/db-brief-{md5-hash-of-watermark}.txt
+/tmp/text2sql-{md5-hash-of-version}.txt   # Brief cache
+/tmp/text2sql-{md5-hash-of-version}.json  # Introspection cache
 ```
 
 ### Cache Invalidation
 
-Change the watermark when your schema changes:
+Bump the version when your schema changes:
 
 ```typescript
-// Version your cache
-const cache = new BriefCache('my-database-v2'); // Bump version
-
-// Or use timestamp
-const cache = new BriefCache(`my-database-${Date.now()}`);
+const text2sql = new Text2Sql({
+  version: 'v2', // Bumped version invalidates cache
+  adapter: new Sqlite({ execute }),
+  history: new InMemoryHistory(),
+});
 ```
 
 ## Brief Content
@@ -235,8 +231,8 @@ This structured format helps the AI understand:
 
 ## Best Practices
 
-1. **Use meaningful watermarks** - Include version or timestamp for cache invalidation
+1. **Use meaningful versions** - Include schema version for cache invalidation (e.g., `v1`, `v2`)
 2. **Monitor cache hits** - Track cache efficiency in production
-3. **Update on schema changes** - Always invalidate cache when schema changes
+3. **Update version on schema changes** - Always bump version when schema changes
 4. **Consider custom introspection** - For very large databases, provide pre-computed introspection
 5. **Provide business context** - The more context in your adapter info, the better the generated queries

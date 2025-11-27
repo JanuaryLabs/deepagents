@@ -137,8 +137,8 @@ import { tool } from 'ai';
 import z from 'zod';
 
 const text2sql = new Text2Sql({
+  version: 'v1',
   adapter: new Sqlite({ execute: (sql) => db.prepare(sql).all() }),
-  cache: new BriefCache('my-db'),
   history: new InMemoryHistory(),
   tools: {
     render_chart: tool({

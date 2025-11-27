@@ -17,8 +17,8 @@ import { SqliteHistory } from '@deepagents/text2sql';
 const history = new SqliteHistory('./chat-history.sqlite');
 
 const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
   adapter: new Sqlite({ execute: (sql) => db.prepare(sql).all() }),
-  cache: new BriefCache('my-db'),
   history: history,
 });
 ```
