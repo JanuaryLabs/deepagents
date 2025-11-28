@@ -12,4 +12,3 @@ export * from './lib/history/memory.history.ts';
 export * from './lib/memory/store.ts';
 export * from './lib/memory/sqlite.store.ts';
 export * from './lib/memory/memory.store.ts';
-export * from './lib/teach/teachables.ts';

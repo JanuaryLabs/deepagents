@@ -844,3 +844,21 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
     }
   });
 }
+
+/**
+ * Default export containing all system teachable factory functions.
+ * Excludes user-specific teachables (role, alias, preference, context, correction).
+ */
+export default {
+  term,
+  hint,
+  guardrail,
+  explain,
+  example,
+  clarification,
+  workflow,
+  quirk,
+  styleGuide,
+  analogy,
+  teachable,
+};
