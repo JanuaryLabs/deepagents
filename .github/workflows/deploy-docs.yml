@@ -43,6 +43,8 @@ jobs:
           # Move prerendered content from deepagents/ subdirectory to root
           mv ./apps/docs/dist/client/deepagents/* ./apps/docs/dist/client/
           rm -rf ./apps/docs/dist/client/deepagents
+          # Create 404.html for GitHub Pages SPA routing fallback
+          cp ./apps/docs/dist/client/index.html ./apps/docs/dist/client/404.html
           touch ./apps/docs/dist/client/.nojekyll
 
       - name: Setup Pages
