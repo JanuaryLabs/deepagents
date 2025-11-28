@@ -12,7 +12,13 @@ export interface Teachables {
     | 'quirk'
     | 'styleGuide'
     | 'analogy'
-    | 'user_profile';
+    | 'user_profile'
+    // User-specific teachable types
+    | 'role'
+    | 'alias'
+    | 'preference'
+    | 'context'
+    | 'correction';
   format: () => string;
 }
 export type GeneratedTeachable =
@@ -43,7 +49,13 @@ export type GeneratedTeachable =
       insight?: string;
       therefore?: string;
       pitfall?: string;
-    };
+    }
+  // User-specific teachable types
+  | { type: 'role'; description: string }
+  | { type: 'alias'; term: string; meaning: string }
+  | { type: 'preference'; aspect: string; value: string }
+  | { type: 'context'; description: string }
+  | { type: 'correction'; subject: string; clarification: string };
 
 /**
  * Teach the system domain-specific vocabulary and business terminology.
@@ -556,7 +568,139 @@ export function analogy(input: {
   };
 }
 
-export function toInstructions(...teachables: Teachables[]): string {
+// =============================================================================
+// User-Specific Teachable Types
+// =============================================================================
+
+/**
+ * Define the user's role, identity, or perspective.
+ *
+ * Use this to capture who the user is and what lens they view data through.
+ * Helps tailor explanations, terminology, and focus areas.
+ *
+ * @param description - The user's role or identity
+ *
+ * @example
+ * role("VP of Sales at Acme Corp")
+ * role("Data analyst in the marketing team")
+ * role("Executive - needs high-level summaries, not technical details")
+ * role("Finance manager focused on cost optimization")
+ */
+export function role(description: string): Teachables {
+  return {
+    type: 'role',
+    format: () => leaf('role', description),
+  };
+}
+
+/**
+ * Define user-specific term meanings and vocabulary.
+ *
+ * Use this when the user has their own definitions for terms that might
+ * differ from standard or domain definitions. Like `term()` but personal.
+ *
+ * @param termName - The term the user uses
+ * @param meaning - What the user means by this term
+ *
+ * @example
+ * alias("revenue", "gross revenue before deductions, not net")
+ * alias("active users", "users who logged in within the last 30 days")
+ * alias("the big table", "the orders table")
+ * alias("Q4", "October through December, not fiscal Q4")
+ */
+export function alias(termName: string, meaning: string): Teachables {
+  return {
+    type: 'alias',
+    format: () =>
+      wrapBlock('alias', [leaf('term', termName), leaf('meaning', meaning)]),
+  };
+}
+
+/**
+ * Define how the user prefers results presented.
+ *
+ * Use this to capture output formatting, style, and behavioral preferences
+ * that should apply to all interactions with this user.
+ *
+ * @param aspect - What aspect of output this preference applies to
+ * @param value - The user's preference
+ *
+ * @example
+ * preference("date format", "YYYY-MM-DD")
+ * preference("output style", "tables over charts unless trend data")
+ * preference("detail level", "always show the SQL query in responses")
+ * preference("row limit", "default to 50 rows unless I ask for more")
+ * preference("explanation style", "brief and to the point")
+ */
+export function preference(aspect: string, value: string): Teachables {
+  return {
+    type: 'preference',
+    format: () =>
+      wrapBlock('preference', [leaf('aspect', aspect), leaf('value', value)]),
+  };
+}
+
+/**
+ * Define the user's current working focus or project.
+ *
+ * Use this to capture temporary context that helps inform defaults,
+ * assumptions, and suggestions. Should be updated as focus changes.
+ *
+ * @param description - What the user is currently working on
+ *
+ * @example
+ * context("Preparing Q4 board presentation")
+ * context("Investigating drop in signups last week")
+ * context("Working on EMEA regional analysis for strategy meeting")
+ * context("Debugging discrepancy in revenue numbers")
+ */
+export function context(description: string): Teachables {
+  return {
+    type: 'context',
+    format: () => leaf('context', description),
+  };
+}
+
+/**
+ * Record a correction the user made to previous understanding.
+ *
+ * Use this when the user corrects a misunderstanding about data, columns,
+ * or business logic. Prevents repeating the same mistake.
+ *
+ * @param subject - What was misunderstood
+ * @param clarification - The correct understanding
+ *
+ * @example
+ * correction("status column", "1 = active, 0 = inactive, not boolean true/false")
+ * correction("orders table", "Use orders_v2, not the deprecated legacy_orders table")
+ * correction("date field", "order_date is when order was placed, ship_date is when shipped")
+ * correction("revenue calculation", "Must exclude refunds and chargebacks")
+ */
+export function correction(subject: string, clarification: string): Teachables {
+  return {
+    type: 'correction',
+    format: () =>
+      wrapBlock('correction', [
+        leaf('subject', subject),
+        leaf('clarification', clarification),
+      ]),
+  };
+}
+
+export function teachable(
+  tag: string,
+  ...teachables: Teachables[]
+): Teachables {
+  return {
+    type: 'user_profile',
+    format: () => toInstructions(tag, ...teachables),
+  };
+}
+
+export function toInstructions(
+  tag: string,
+  ...teachables: Teachables[]
+): string {
   if (!teachables.length) {
     return '';
   }
@@ -567,6 +711,8 @@ export function toInstructions(...teachables: Teachables[]): string {
     existing.push(teachable);
     grouped.set(teachable.type, existing);
   }
+
+  const definedTypes = new Set(SECTION_ORDER.map((s) => s.type));
 
   const sections = SECTION_ORDER.map(({ type, tag }) => {
     const items = grouped.get(type);
@@ -584,15 +730,37 @@ export function toInstructions(...teachables: Teachables[]): string {
     return `<${tag}>\n${renderedItems}\n</${tag}>`;
   }).filter((section): section is string => Boolean(section));
 
+  // Render types not defined in SECTION_ORDER at the end
+  for (const [type, items] of grouped) {
+    if (definedTypes.has(type)) {
+      continue;
+    }
+    const renderedItems = items
+      .map((item) => item.format().trim())
+      .filter(Boolean)
+      .map((item) => indentBlock(item, 2))
+      .join('\n');
+    if (renderedItems.length) {
+      sections.push(renderedItems);
+    }
+  }
+
   if (!sections.length) {
     return '';
   }
 
   const content = indentBlock(sections.join('\n'), 2);
-  return `<teachings>\n${content}\n</teachings>`;
+  return `<${tag}>\n${content}\n</${tag}>`;
 }
 
 const SECTION_ORDER: Array<{ type: Teachables['type']; tag: string }> = [
+  // User context (render first - most important for personalization)
+  { type: 'role', tag: 'user_role' },
+  { type: 'context', tag: 'user_context' },
+  { type: 'preference', tag: 'user_preferences' },
+  { type: 'alias', tag: 'user_vocabulary' },
+  { type: 'correction', tag: 'user_corrections' },
+  // Domain knowledge
   { type: 'guardrail', tag: 'guardrails' },
   { type: 'styleGuide', tag: 'style_guides' },
   { type: 'hint', tag: 'hints' },
@@ -662,23 +830,17 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
           therefore: item.therefore,
           pitfall: item.pitfall,
         });
+      // User-specific teachable types
+      case 'role':
+        return role(item.description);
+      case 'alias':
+        return alias(item.term, item.meaning);
+      case 'preference':
+        return preference(item.aspect, item.value);
+      case 'context':
+        return context(item.description);
+      case 'correction':
+        return correction(item.subject, item.clarification);
     }
   });
 }
-
-export function userProfile(input: {
-  preferences: string;
-  identity: string;
-  working_context: string;
-}): Teachables {
-  return {
-    type: 'user_profile',
-    format: () => {
-      return '';
-    },
-  };
-}
-
-// userProfile({
-//   identity:
-// })

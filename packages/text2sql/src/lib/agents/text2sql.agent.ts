@@ -11,7 +11,10 @@ import {
 import { scratchpad_tool } from '@deepagents/toolbox';
 
 import type { Adapter, Introspection } from '../adapters/adapter.ts';
+import memoryPrompt from '../memory/memory.prompt.ts';
+import type { TeachablesStore } from '../memory/store.ts';
 import { databaseSchemaPrompt } from '../prompt.ts';
+import type { GeneratedTeachable } from '../teach/teachables.ts';
 
 export type RenderingTools = Record<string, Tool<unknown, never>>;
 
@@ -68,6 +71,108 @@ const tools = {
     },
   }),
   scratchpad: scratchpad_tool,
+};
+
+const userMemoryTypes = [
+  'role',
+  'alias',
+  'preference',
+  'context',
+  'correction',
+] as const;
+
+const userMemorySchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('role'),
+    description: z.string().describe("The user's role or identity"),
+  }),
+  z.object({
+    type: z.literal('alias'),
+    term: z.string().describe('The term the user uses'),
+    meaning: z.string().describe('What the user means by this term'),
+  }),
+  z.object({
+    type: z.literal('preference'),
+    aspect: z
+      .string()
+      .describe('What aspect of output this preference applies to'),
+    value: z.string().describe("The user's preference"),
+  }),
+  z.object({
+    type: z.literal('context'),
+    description: z.string().describe('What the user is currently working on'),
+  }),
+  z.object({
+    type: z.literal('correction'),
+    subject: z.string().describe('What was misunderstood'),
+    clarification: z.string().describe('The correct understanding'),
+  }),
+]);
+
+export const memoryTools = {
+  remember_memory: tool({
+    description:
+      'Store something about the user for future conversations. Use silently when user shares facts, preferences, vocabulary, corrections, or context.',
+    inputSchema: z.object({ memory: userMemorySchema }),
+    execute: async ({ memory }, options) => {
+      const state = toState<{ memory: TeachablesStore; userId: string }>(
+        options,
+      );
+      await state.memory.remember(state.userId, memory as GeneratedTeachable);
+      return 'Remembered.';
+    },
+  }),
+  forget_memory: tool({
+    description:
+      'Forget a specific memory. Use when user asks to remove something.',
+    inputSchema: z.object({
+      id: z.string().describe('The ID of the teachable to forget'),
+    }),
+    execute: async ({ id }, options) => {
+      const state = toState<{ memory: TeachablesStore }>(options);
+      await state.memory.forget(id);
+      return 'Forgotten.';
+    },
+  }),
+  recall_memory: tool({
+    description:
+      'List stored memories for the current user. Use when user asks what you remember about them or wants to see their stored preferences.',
+    inputSchema: z.object({
+      type: z
+        .enum(userMemoryTypes)
+        .optional()
+        .catch(undefined)
+        .describe('Optional: filter by memory type'),
+    }),
+    execute: async ({ type }, options) => {
+      const state = toState<{ memory: TeachablesStore; userId: string }>(
+        options,
+      );
+      const memories = await state.memory.recall(state.userId, type);
+      if (memories.length === 0) {
+        return type ? `No ${type} memories stored.` : 'No memories stored.';
+      }
+      return memories.map((m) => ({
+        id: m.id,
+        type: m.type,
+        data: m.data,
+        createdAt: m.createdAt,
+      }));
+    },
+  }),
+  update_memory: tool({
+    description:
+      'Update an existing memory. Use when user wants to modify something you previously stored.',
+    inputSchema: z.object({
+      memory: userMemorySchema,
+      id: z.string().describe('The ID of the memory to update'),
+    }),
+    execute: async ({ id, memory }, options) => {
+      const state = toState<{ memory: TeachablesStore }>(options);
+      await state.memory.update(id, memory as GeneratedTeachable);
+      return 'Updated.';
+    },
+  }),
 };
 
 const getRenderingGuidance = (renderingTools?: RenderingTools) => {
@@ -129,13 +234,15 @@ const text2sqlAgent = agent<
     adapterInfo: string;
     renderingTools?: RenderingTools;
     teachings: string;
-    userProfile?: string;
+    memory?: TeachablesStore;
+    userId?: string;
   }
 >({
   name: 'text2sql',
   model: groq('openai/gpt-oss-20b'),
   prompt: (state) => {
     const renderingGuidance = getRenderingGuidance(state?.renderingTools);
+    const hasMemory = !!state?.memory;
     const constraints = [
       '**Max Output Rows**: Never output more than 100 rows of raw data. Use aggregation or pagination otherwise.',
       '**Validation**: You must validate your query before final execution. Follow the pattern: Draft Query → `validate_query` → Fix (if needed) → `db_query`.',
@@ -155,11 +262,11 @@ const text2sqlAgent = agent<
       Your tone should be concise and business-friendly.
     </identity>
 
-    ${state?.userProfile || ''}
-
     ${databaseSchemaPrompt(state!)}
 
     ${state?.teachings || ''}
+
+    ${hasMemory ? memoryPrompt : ''}
 
     <query_reasoning_strategy>
       ${stepBackPrompt('general', {
@@ -168,7 +275,7 @@ const text2sqlAgent = agent<
           'What are the SQL patterns, database principles, and schema relationships needed to answer this question?',
       })}
 
-      Skip Step-Back only if the question is a direct “SELECT * FROM …” or a simple aggregation with a clear target.
+      Skip Step-Back only if the question is a direct "SELECT * FROM …" or a simple aggregation with a clear target.
     </query_reasoning_strategy>
 
     <constraints>

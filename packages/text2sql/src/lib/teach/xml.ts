@@ -36,6 +36,9 @@ export function indentBlock(text: string, spaces: number): string {
 }
 
 export function escapeXml(value: string): string {
+  if (value == null) {
+    return '';
+  }
   return value
     .replaceAll(/&/g, '&amp;')
     .replaceAll(/</g, '&lt;')

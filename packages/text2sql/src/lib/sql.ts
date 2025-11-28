@@ -7,6 +7,7 @@ import {
   type UIMessage,
   type UIMessageChunk,
   type UITools,
+  generateId,
 } from 'ai';
 import dedent from 'dedent';
 import { v7 } from 'uuid';
@@ -15,7 +16,6 @@ import {
   type AgentModel,
   generate,
   pipe,
-  printer,
   stream,
   user,
 } from '@deepagents/agent';
@@ -25,7 +25,6 @@ import type {
   IntrospectOptions,
   Introspection,
 } from './adapters/adapter.ts';
-import { Sqlite } from './adapters/sqlite.ts';
 import {
   JsonCache,
   TmpCache,
@@ -38,14 +37,16 @@ import { synthesizerAgent } from './agents/synthesizer.agent.ts';
 import { teachablesAuthorAgent } from './agents/teachables.agent.ts';
 import {
   type RenderingTools,
+  memoryTools,
   text2sqlMonolith,
   text2sqlOnly,
 } from './agents/text2sql.agent.ts';
 import { History } from './history/history.ts';
-import { InMemoryHistory } from './history/memory.history.ts';
-import { UserProfileStore } from './memory/user-profile.ts';
+import { InMemoryTeachablesStore } from './memory/memory.store.ts';
+import type { TeachablesStore } from './memory/store.ts';
 import {
   type Teachables,
+  teachable,
   toInstructions,
   toTeachables,
 } from './teach/teachables.ts';
@@ -53,11 +54,13 @@ import teachings from './teach/teachings.ts';
 
 export class Text2Sql {
   #config: {
+    model?: AgentModel;
     adapter: Adapter;
     briefCache: TmpCache;
     history: History;
     tools?: RenderingTools;
     instructions: Teachables[];
+    memory: TeachablesStore;
   };
   #introspectionCache: JsonCache<Introspection>;
 
@@ -67,13 +70,17 @@ export class Text2Sql {
     version: string;
     tools?: RenderingTools;
     instructions?: Teachables[];
+    model?: AgentModel;
+    memory?: TeachablesStore;
   }) {
     this.#config = {
       adapter: config.adapter,
       briefCache: new TmpCache('brief-' + config.version),
       history: config.history,
-      instructions: config.instructions ?? [],
+      instructions: [...teachings, ...(config.instructions ?? [])],
       tools: config.tools ?? {},
+      model: config.model,
+      memory: config.memory || new InMemoryTeachablesStore(),
     };
     this.#introspectionCache = new JsonCache<Introspection>(
       'introspection-' + config.version,
@@ -119,7 +126,10 @@ export class Text2Sql {
             adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
             context,
             introspection,
-            teachings: toInstructions(...this.#config.instructions),
+            teachings: toInstructions(
+              'instructions',
+              ...this.#config.instructions,
+            ),
           },
         );
         return output.sql;
@@ -138,7 +148,7 @@ export class Text2Sql {
       adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
       context,
       introspection,
-      teachings: toInstructions(...this.#config.instructions),
+      teachings: toInstructions('instructions', ...this.#config.instructions),
     });
   }
 
@@ -175,7 +185,7 @@ export class Text2Sql {
     this.#config.instructions.push(...teachables);
     return {
       teachables,
-      teachings: toInstructions(...this.#config.instructions),
+      teachings: toInstructions('instructions', ...this.#config.instructions),
     };
   }
 
@@ -193,7 +203,7 @@ export class Text2Sql {
         adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
         messages: [user(input)],
         renderingTools: this.#config.tools || {},
-        teachings: toInstructions(...this.#config.instructions),
+        teachings: toInstructions('instructions', ...this.#config.instructions),
       },
       toBrief(),
       async (state, update) => {
@@ -271,7 +281,7 @@ export class Text2Sql {
       }),
       [user(input)],
       {
-        teachings: toInstructions(...this.#config.instructions),
+        teachings: toInstructions('instructions', ...this.#config.instructions),
         adapter: this.#config.adapter,
         introspection,
         adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
@@ -286,11 +296,11 @@ export class Text2Sql {
       chatId: string;
       userId: string;
     },
-    model?: AgentModel,
   ) {
-    const [introspection, adapterInfo] = await Promise.all([
+    const [introspection, adapterInfo, userTeachables] = await Promise.all([
       this.index({ onProgress: console.log }),
       this.#config.adapter.info(),
+      this.#config.memory.toTeachables(params.userId),
     ]);
     const chat = await this.#config.history.upsertChat({
       id: params.chatId,
@@ -298,28 +308,32 @@ export class Text2Sql {
       title: 'Chat ' + params.chatId,
     });
 
-    const userProfileStore = new UserProfileStore(params.userId);
-    const userProfileXml = await userProfileStore.toXml();
-
     const result = stream(
       text2sqlMonolith.clone({
-        model: model,
+        model: this.#config.model,
         tools: {
           ...text2sqlMonolith.handoff.tools,
+          ...memoryTools,
           ...this.#config.tools,
         },
       }),
       [...chat.messages.map((it) => it.content), ...messages],
       {
-        teachings: toInstructions(...this.#config.instructions),
+        teachings: toInstructions(
+          'instructions',
+          ...this.#config.instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
         adapter: this.#config.adapter,
         renderingTools: this.#config.tools || {},
         introspection,
         adapterInfo: this.#config.adapter.formatInfo(adapterInfo),
         context: await generateBrief(introspection, this.#config.briefCache),
-        userProfile: userProfileXml,
+        memory: this.#config.memory,
+        userId: params.userId,
       },
     );
+
     return result.toUIMessageStream({
       onError: (error) => {
         if (NoSuchToolError.isInstance(error)) {
@@ -337,6 +351,7 @@ export class Text2Sql {
       sendReasoning: true,
       sendSources: true,
       originalMessages: messages,
+      generateMessageId: generateId,
       onFinish: async ({ messages }) => {
         const userMessage = messages.at(-2);
         const botMessage = messages.at(-1);
@@ -360,29 +375,29 @@ export class Text2Sql {
   }
 }
 if (import.meta.main) {
-  const { DatabaseSync } = await import('node:sqlite');
-  const sqliteClient = new DatabaseSync('claude_creation.db', {
-    readOnly: true,
-  });
-
-  const text2sql = new Text2Sql({
-    version: 'v1',
-    instructions: teachings,
-    history: new InMemoryHistory(),
-    adapter: new Sqlite({
-      execute: (sql) => sqliteClient.prepare(sql).all(),
-    }),
-  });
-  const sql = await text2sql.chat(
-    [
-      user(
-        'What is trending in sales lately, last calenar year, monthly timeframe?',
-      ),
-    ],
-    {
-      userId: 'default',
-      chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
-    },
-  );
-  await printer.readableStream(sql);
+  // const { DatabaseSync } = await import('node:sqlite');
+  // const sqliteClient = new DatabaseSync('claude_creation.db', {
+  //   readOnly: true,
+  // });
+  // const text2sql = new Text2Sql({
+  //   version: 'v1',
+  //   instructions: teachings,
+  //   history: new InMemoryHistory(),
+  //   adapter: new Sqlite({
+  //     execute: (sql) => sqliteClient.prepare(sql).all(),
+  //   }),
+  //   memory: new SqliteTeachablesStore('memory_teachables.sqlite');
+  // });
+  // const sql = await text2sql.chat(
+  //   [
+  //     user(
+  //       'What is trending in sales lately, last calenar year, monthly timeframe?',
+  //     ),
+  //   ],
+  //   {
+  //     userId: 'default',
+  //     chatId: '019a9b5a-f118-76a9-9dee-609e282c60b7',
+  //   },
+  // );
+  // await printer.readableStream(sql);
 }
