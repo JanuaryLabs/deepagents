@@ -14,7 +14,7 @@ export interface Teachables {
     | 'analogy'
     | 'user_profile'
     // User-specific teachable types
-    | 'role'
+    | 'identity'
     | 'alias'
     | 'preference'
     | 'context'
@@ -31,7 +31,7 @@ export type GeneratedTeachable =
       explanation: string;
       therefore?: string;
     }
-  | { type: 'example'; question: string; sql: string; note?: string }
+  | { type: 'example'; question: string; answer: string; note?: string }
   | { type: 'clarification'; when: string; ask: string; reason: string }
   | {
       type: 'workflow';
@@ -51,7 +51,7 @@ export type GeneratedTeachable =
       pitfall?: string;
     }
   // User-specific teachable types
-  | { type: 'role'; description: string }
+  | { type: 'identity'; name?: string; role?: string }
   | { type: 'alias'; term: string; meaning: string }
   | { type: 'preference'; aspect: string; value: string }
   | { type: 'context'; description: string }
@@ -236,43 +236,43 @@ export function explain(input: {
  * and handling domain-specific query structures.
  *
  * @param input.question - The natural language question or request
- * @param input.sql - The correct SQL query that answers the question
+ * @param input.answer - The correct answer that responds to the question
  * @param input.note - Optional note or explanation about the example
  *
  * @example
  * // Energy/Utilities dataset
  * example({
  *   question: "show me peak demand hours for the last week",
- *   sql: "SELECT DATE_TRUNC('hour', reading_timestamp) as hour, MAX(consumption_kwh) as peak_demand FROM meter_readings WHERE reading_timestamp >= CURRENT_DATE - INTERVAL '7 days' GROUP BY hour ORDER BY peak_demand DESC LIMIT 10"
+ *   answer: "SELECT DATE_TRUNC('hour', reading_timestamp) as hour, MAX(consumption_kwh) as peak_demand FROM meter_readings WHERE reading_timestamp >= CURRENT_DATE - INTERVAL '7 days' GROUP BY hour ORDER BY peak_demand DESC LIMIT 10"
  * })
  *
  * @example
  * // Agriculture/Farm Management dataset
  * example({
  *   question: "what is the average yield per acre by crop type this season",
- *   sql: "SELECT crop_type, AVG(harvest_quantity / field_acres) as yield_per_acre FROM harvests WHERE harvest_date >= '2024-01-01' GROUP BY crop_type ORDER BY yield_per_acre DESC"
+ *   answer: "SELECT crop_type, AVG(harvest_quantity / field_acres) as yield_per_acre FROM harvests WHERE harvest_date >= '2024-01-01' GROUP BY crop_type ORDER BY yield_per_acre DESC"
  * })
  *
  * @example
  * // Travel/Hospitality dataset
  * example({
  *   question: "show me hotel occupancy rate for this month",
- *   sql: "SELECT hotel_name, (SUM(occupied_rooms) / SUM(total_rooms)) * 100 as occupancy_rate FROM daily_occupancy WHERE date >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY hotel_id, hotel_name ORDER BY occupancy_rate DESC",
+ *   answer: "SELECT hotel_name, (SUM(occupied_rooms) / SUM(total_rooms)) * 100 as occupancy_rate FROM daily_occupancy WHERE date >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY hotel_id, hotel_name ORDER BY occupancy_rate DESC",
  *   note: "Occupancy rate is a percentage - multiply by 100 for readable output"
  * })
  */
 export function example(input: {
   question: string;
-  sql: string;
+  answer: string;
   note?: string;
 }): Teachables {
-  const { question, sql, note } = input;
+  const { question, answer, note } = input;
   return {
     type: 'example',
     format: () =>
       wrapBlock('example', [
         leaf('question', question),
-        leaf('sql', sql),
+        leaf('answer', answer),
         note ? leaf('note', note) : '',
       ]),
   };
@@ -573,23 +573,29 @@ export function analogy(input: {
 // =============================================================================
 
 /**
- * Define the user's role, identity, or perspective.
+ * Define the user's identity including name and/or role.
  *
  * Use this to capture who the user is and what lens they view data through.
  * Helps tailor explanations, terminology, and focus areas.
  *
- * @param description - The user's role or identity
+ * @param input.name - The user's name (optional)
+ * @param input.role - The user's role or position (optional)
  *
  * @example
- * role("VP of Sales at Acme Corp")
- * role("Data analyst in the marketing team")
- * role("Executive - needs high-level summaries, not technical details")
- * role("Finance manager focused on cost optimization")
+ * identity({ name: "John", role: "VP of Sales" })
+ * identity({ role: "Data analyst in the marketing team" })
+ * identity({ name: "Sarah" })
+ * identity({ role: "Finance manager focused on cost optimization" })
  */
-export function role(description: string): Teachables {
+export function identity(input: { name?: string; role?: string }): Teachables {
+  const { name, role } = input;
   return {
-    type: 'role',
-    format: () => leaf('role', description),
+    type: 'identity',
+    format: () =>
+      wrapBlock('identity', [
+        name ? leaf('name', name) : '',
+        role ? leaf('role', role) : '',
+      ]),
   };
 }
 
@@ -755,7 +761,7 @@ export function toInstructions(
 
 const SECTION_ORDER: Array<{ type: Teachables['type']; tag: string }> = [
   // User context (render first - most important for personalization)
-  { type: 'role', tag: 'user_role' },
+  { type: 'identity', tag: 'user_identity' },
   { type: 'context', tag: 'user_context' },
   { type: 'preference', tag: 'user_preferences' },
   { type: 'alias', tag: 'user_vocabulary' },
@@ -795,7 +801,7 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
       case 'example':
         return example({
           question: item.question,
-          sql: item.sql,
+          answer: item.answer,
           note: item.note,
         });
       case 'clarification':
@@ -831,8 +837,8 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
           pitfall: item.pitfall,
         });
       // User-specific teachable types
-      case 'role':
-        return role(item.description);
+      case 'identity':
+        return identity({ name: item.name, role: item.role });
       case 'alias':
         return alias(item.term, item.meaning);
       case 'preference':
@@ -847,7 +853,7 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
 
 /**
  * Default export containing all system teachable factory functions.
- * Excludes user-specific teachables (role, alias, preference, context, correction).
+ * Excludes user-specific teachables (identity, alias, preference, context, correction).
  */
 export default {
   term,

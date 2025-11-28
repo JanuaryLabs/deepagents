@@ -15,21 +15,35 @@ export default toInstructions(
   guardrail({
     rule: 'Silently store user information when revealed. Respond to memory-related requests.',
     reason: 'Memory enables personalized responses across conversations',
-    action: 'Store silently on reveal. Respond explicitly when asked about memories.',
+    action:
+      'Store silently on reveal. Respond explicitly when asked about memories.',
   }),
 
   // Section 2: Workflows for memory operations
 
   workflow({
-    task: 'Store user information silently',
-    triggers: ["I'm a", 'I work as', 'When I say', 'I prefer', "I'm working on"],
+    task: 'Store user identity silently',
+    triggers: ["I'm a", 'I work as', 'my name is', 'my role is'],
     steps: [
-      'Identify the memory type (role/alias/preference/context/correction)',
+      'Extract name and/or role from the statement',
+      'Call remember_memory() with type: "identity" and name/role fields',
+      'Do NOT announce or confirm - continue conversation naturally',
+    ],
+    notes:
+      'This should happen silently without disrupting the conversation flow.',
+  }),
+
+  workflow({
+    task: 'Store user preferences and context silently',
+    triggers: ['When I say', 'I prefer', "I'm working on"],
+    steps: [
+      'Identify the memory type (alias/preference/context/correction)',
       'Extract the relevant information',
       'Call remember_memory() with appropriate type and fields',
       'Do NOT announce or confirm - continue conversation naturally',
     ],
-    notes: 'This should happen silently without disrupting the conversation flow.',
+    notes:
+      'This should happen silently without disrupting the conversation flow.',
   }),
 
   workflow({
@@ -57,10 +71,10 @@ export default toInstructions(
   // Section 3: Type disambiguation
 
   explain({
-    concept: 'role vs context',
+    concept: 'identity vs context',
     explanation:
-      'Role = WHO the user is (permanent identity). Context = WHAT they are working on (temporary focus).',
-    therefore: 'Role rarely changes. Context changes per project/task.',
+      'Identity = WHO the user is (name and/or role, permanent). Context = WHAT they are working on (temporary focus).',
+    therefore: 'Identity rarely changes. Context changes per project/task.',
   }),
 
   explain({
@@ -82,55 +96,65 @@ export default toInstructions(
   clarification({
     when: 'user says something like "X actually means Y" but unclear if defining their term or correcting data',
     ask: 'Are you defining your own shorthand for this term, or correcting how the data/schema actually works?',
-    reason: 'Alias is personal vocabulary. Correction is a data/schema clarification that applies universally.',
+    reason:
+      'Alias is personal vocabulary. Correction is a data/schema clarification that applies universally.',
   }),
 
   clarification({
     when: 'user mentions a project or task that could be their identity or current focus',
-    ask: 'Is this your ongoing role, or a specific project you are currently working on?',
-    reason: 'Role is permanent identity. Context is temporary focus that may change.',
+    ask: 'Is this your ongoing identity (name/role), or a specific project you are currently working on?',
+    reason:
+      'Identity is permanent. Context is temporary focus that may change.',
   }),
 
   // Section 5: Examples
 
-  // Role
+  // Identity - role
   example({
     question: "I'm the VP of Sales",
-    sql: 'remember_memory({ memory: { type: "role", description: "VP of Sales" }})',
-    note: 'Identity = role',
+    answer: 'remember_memory({ memory: { type: "identity", role: "VP of Sales" }})',
+    note: 'Identity stores role',
+  }),
+
+  // Identity - name
+  example({
+    question: 'My name is Sarah',
+    answer: 'remember_memory({ memory: { type: "identity", name: "Sarah" }})',
+    note: 'Identity stores name',
   }),
 
   // Context
   example({
     question: "I'm analyzing Q4 performance",
-    sql: 'remember_memory({ memory: { type: "context", description: "Analyzing Q4 performance" }})',
+    answer: 'remember_memory({ memory: { type: "context", description: "Analyzing Q4 performance" }})',
     note: 'Current task = context',
   }),
 
   // Alias
   example({
     question: 'When I say "big customers", I mean revenue > $1M',
-    sql: 'remember_memory({ memory: { type: "alias", term: "big customers", meaning: "revenue > $1M" }})',
+    answer: 'remember_memory({ memory: { type: "alias", term: "big customers", meaning: "revenue > $1M" }})',
     note: 'User defining their vocabulary = alias',
   }),
 
   // Correction
   example({
-    question: 'No, the status column uses 1 for active, not the string "active"',
-    sql: 'remember_memory({ memory: { type: "correction", subject: "status column values", clarification: "Uses 1 for active, not string" }})',
+    question:
+      'No, the status column uses 1 for active, not the string "active"',
+    answer: 'remember_memory({ memory: { type: "correction", subject: "status column values", clarification: "Uses 1 for active, not string" }})',
     note: 'Correcting schema/data assumption = correction',
   }),
 
   // Preference
   example({
     question: 'Always show dates as YYYY-MM-DD',
-    sql: 'remember_memory({ memory: { type: "preference", aspect: "date format", value: "YYYY-MM-DD" }})',
+    answer: 'remember_memory({ memory: { type: "preference", aspect: "date format", value: "YYYY-MM-DD" }})',
   }),
 
   // Recall
   example({
     question: 'What do you remember about me?',
-    sql: 'recall_memory({})',
+    answer: 'recall_memory({})',
     note: 'List all stored memories',
   }),
 
