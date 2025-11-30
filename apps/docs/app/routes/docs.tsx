@@ -1,5 +1,6 @@
 import type * as PageTree from 'fumadocs-core/page-tree';
 import browserCollections from 'fumadocs-mdx:collections/browser';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 // import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
@@ -34,7 +35,7 @@ const clientLoader = browserCollections.docs.createClientLoader({
         <DocsTitle>{frontmatter.title}</DocsTitle>
         <DocsDescription>{frontmatter.description}</DocsDescription>
         <DocsBody>
-          <Mdx components={{ ...defaultMdxComponents }} />
+          <Mdx components={{ ...defaultMdxComponents, Tab, Tabs }} />
         </DocsBody>
       </DocsPage>
     );
