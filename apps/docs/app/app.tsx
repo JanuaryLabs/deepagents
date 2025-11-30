@@ -1,989 +1,747 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
-// ===== Animation Components =====
+// --- Types ---
+type Page = 'HOME' | 'MODULES' | 'ARCHITECTURE';
 
-function TypingText({
-  text,
-  speed = 50,
-  delay = 0,
-  onComplete,
-}: {
-  text: string;
-  speed?: number;
-  delay?: number;
-  onComplete?: () => void;
-}) {
-  const [displayed, setDisplayed] = useState('');
-  const [showCursor, setShowCursor] = useState(true);
-  const [started, setStarted] = useState(false);
+// --- Icons ---
+const Icons = {
+  Terminal: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  ),
+  Brain: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M17.636 17.636l-.707-.707M12 21v-1M6.364 17.636l.707-.707M3 12h1M6.364 6.364l.707.707" />
+    </svg>
+  ),
+  Send: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+    </svg>
+  ),
+  Sparkles: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    </svg>
+  ),
+  Code: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+    </svg>
+  ),
+  Cycle: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  ),
+  Server: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+    </svg>
+  ),
+  Lock: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+    </svg>
+  ),
+  Database: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+    </svg>
+  ),
+  Book: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+    </svg>
+  ),
+  MessageSquare: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  ),
+};
 
-  useEffect(() => {
-    const startTimer = setTimeout(() => setStarted(true), delay);
-    return () => clearTimeout(startTimer);
-  }, [delay]);
+// --- Navigation ---
 
-  useEffect(() => {
-    if (!started) return;
-
-    let i = 0;
-    const timer = setInterval(() => {
-      if (i < text.length) {
-        setDisplayed(text.slice(0, i + 1));
-        i++;
-      } else {
-        clearInterval(timer);
-        onComplete?.();
-      }
-    }, speed);
-    return () => clearInterval(timer);
-  }, [text, speed, started, onComplete]);
-
-  useEffect(() => {
-    const blink = setInterval(() => setShowCursor((c) => !c), 530);
-    return () => clearInterval(blink);
-  }, []);
-
+function Navbar({ activePage, onNavigate }: { activePage: Page; onNavigate: (p: Page) => void }) {
   return (
-    <span>
-      {displayed}
-      <span
-        className={`inline-block w-2 bg-[#00ff00] ${showCursor ? 'opacity-100' : 'opacity-0'}`}
-      >
-        ▌
-      </span>
-    </span>
+    <nav className="fixed top-0 left-0 right-0 z-50 glass-panel border-b-0 border-b-solar-700/30">
+      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div
+          className="flex items-center gap-2 text-solar-300 cursor-pointer"
+          onClick={() => onNavigate('HOME')}
+        >
+          <div className="w-8 h-8 bg-solar-800 border border-solar-500 flex items-center justify-center">
+            <Icons.Terminal />
+          </div>
+          <span className="font-bold tracking-tighter text-lg">
+            DEEPAGENTS<span className="text-solar-accent">/TEXT2SQL</span>
+          </span>
+        </div>
+        <div className="hidden md:flex items-center gap-8 text-sm font-medium text-solar-400">
+          <button
+            onClick={() => onNavigate('MODULES')}
+            className={`hover:text-solar-accent transition-colors ${activePage === 'MODULES' ? 'text-solar-accent' : ''}`}
+          >
+            MODULES
+          </button>
+          <button
+            onClick={() => onNavigate('ARCHITECTURE')}
+            className={`hover:text-solar-accent transition-colors ${activePage === 'ARCHITECTURE' ? 'text-solar-accent' : ''}`}
+          >
+            ARCHITECTURE
+          </button>
+          <a
+            href="/docs/text2sql"
+            className="text-solar-300 border border-solar-500 px-4 py-1.5 hover:bg-solar-500 hover:text-solar-900 transition-colors"
+          >
+            DOCS
+          </a>
+        </div>
+      </div>
+    </nav>
   );
 }
 
-function AnimatedCounter({
-  target,
-  duration = 2000,
+// --- Components ---
+
+function FeatureCard({
+  title,
+  icon,
+  description,
+  code,
+  expanded,
 }: {
-  target: string;
-  duration?: number;
+  title: string;
+  icon: React.ReactNode;
+  description: string;
+  code: string;
+  expanded?: boolean;
 }) {
-  const [count, setCount] = useState(0);
-  const [started, setStarted] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-
-  const numericTarget = parseInt(target, 10);
-  const isNumeric = !isNaN(numericTarget);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !started) {
-          setStarted(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.5 }
-    );
-
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [started]);
-
-  useEffect(() => {
-    if (!started || !isNumeric) return;
-
-    const steps = 60;
-    const increment = numericTarget / steps;
-    let current = 0;
-
-    const timer = setInterval(() => {
-      current += increment;
-      if (current >= numericTarget) {
-        setCount(numericTarget);
-        clearInterval(timer);
-      } else {
-        setCount(Math.floor(current));
-      }
-    }, duration / steps);
-
-    return () => clearInterval(timer);
-  }, [started, numericTarget, isNumeric, duration]);
-
-  return <span ref={ref}>{isNumeric ? count : target}</span>;
-}
-
-function SQLReveal({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setVisible(true), delay);
-    return () => clearTimeout(timer);
-  }, [delay]);
-
   return (
     <div
-      className={`transition-all duration-300 ${
-        visible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
-      }`}
+      className={`border border-solar-700 bg-solar-900/50 hover:bg-solar-800/50 transition-all group relative overflow-hidden p-6 flex flex-col h-full ${expanded ? 'md:col-span-3 md:flex-row gap-8' : ''}`}
     >
-      {children}
+      <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-solar-600 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+      <div className={`${expanded ? 'flex-1' : ''}`}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="p-2 bg-solar-800 text-solar-accent border border-solar-600/50">{icon}</div>
+          <span className="text-[10px] uppercase text-solar-600 font-bold tracking-widest">
+            Module Active
+          </span>
+        </div>
+        <h3 className="text-xl font-bold text-solar-300 mb-2 group-hover:text-solar-accent transition-colors">
+          {title}
+        </h3>
+        <p className="text-sm text-solar-500 mb-6 flex-1 leading-relaxed">{description}</p>
+      </div>
+      <div
+        className={`bg-[#050604] p-4 rounded border border-solar-800 overflow-hidden ${expanded ? 'flex-1 min-w-[400px]' : ''}`}
+      >
+        <pre className="text-[10px] text-solar-400 font-mono overflow-x-auto">
+          <code>{code}</code>
+        </pre>
+      </div>
     </div>
   );
 }
 
-// ===== UI Components =====
+// --- Page: Architecture ---
 
-function CopyButton({
-  text,
-  className = '',
-}: {
-  text: string;
-  className?: string;
-}) {
-  const [copied, setCopied] = useState(false);
+function ArchitecturePage() {
+  return (
+    <div className="pt-32 pb-20 px-6 animate-in fade-in duration-500">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-16">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-solar-600/50 bg-solar-800/30 text-xs text-solar-400 mb-8">
+            <Icons.Server />
+            <span>SYSTEM TOPOLOGY V1.0</span>
+          </div>
+          <h2 className="text-4xl font-bold text-solar-300 mb-4 tracking-tight">
+            SYSTEM ARCHITECTURE
+          </h2>
+          <p className="text-solar-500 max-w-2xl text-lg">
+            A schema-aware reasoning layer bridging natural language intent and structured database
+            queries. Powered by the Vercel AI SDK.
+          </p>
+        </div>
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+        {/* Visual Diagram */}
+        <div className="bg-solar-900/30 border border-solar-800 p-8 rounded-xl mb-16 relative overflow-hidden">
+          <div className="absolute inset-0 grid-bg opacity-50"></div>
+          <div className="relative z-10 grid md:grid-cols-5 gap-4 items-center justify-center font-mono text-xs">
+            {/* Node 1 */}
+            <div className="p-6 border border-solar-600 bg-solar-900 rounded text-center shadow-lg">
+              <div className="text-solar-accent mb-2 font-bold">CLIENT</div>
+              <div className="text-solar-400">NL Query</div>
+            </div>
+            <div className="hidden md:flex justify-center text-solar-600">&rarr;</div>
+
+            {/* Node 2 */}
+            <div className="p-6 border border-solar-600 bg-solar-900 rounded text-center shadow-lg relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-solar-800 border border-solar-700 px-2 py-0.5 rounded text-[10px] text-solar-400">
+                Grounding
+              </div>
+              <div className="text-solar-300 mb-2 font-bold">SCHEMA</div>
+              <div className="text-solar-500">Introspection</div>
+            </div>
+            <div className="hidden md:flex justify-center text-solar-600">&rarr;</div>
+
+            {/* Node 3 (Core) */}
+            <div className="p-8 border-2 border-solar-accent bg-solar-900/90 rounded text-center shadow-[0_0_30px_rgba(238,187,46,0.15)] transform scale-110 z-20">
+              <div className="text-solar-accent mb-2 font-bold text-lg">AI MODEL</div>
+              <div className="text-solar-400 mb-2">Reasoning Engine</div>
+              <div className="text-[10px] bg-solar-accent/10 text-solar-accent px-2 py-1 rounded inline-block">
+                Vercel AI SDK
+              </div>
+            </div>
+            <div className="hidden md:flex justify-center text-solar-600">&rarr;</div>
+
+            {/* Node 4 */}
+            <div className="p-6 border border-solar-600 bg-solar-900 rounded text-center shadow-lg">
+              <div className="text-solar-300 mb-2 font-bold">DATABASE</div>
+              <div className="text-solar-500">PostgreSQL / SQLite / MSSQL</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Details Grid */}
+        <div className="grid md:grid-cols-2 gap-12">
+          <div>
+            <h3 className="text-xl font-bold text-solar-300 mb-4 flex items-center gap-2 border-b border-solar-800 pb-2">
+              <Icons.Code /> SCHEMA GROUNDING
+            </h3>
+            <p className="text-solar-500 mb-6 leading-relaxed">
+              The agent ingests schema definitions via automatic introspection. Tables, views,
+              indexes, constraints, and column statistics are tokenized and injected into the system
+              prompt to prevent hallucination.
+            </p>
+            <div className="bg-[#050604] p-4 border border-solar-800 rounded font-mono text-xs text-solar-400">
+              <div className="text-solar-600 mb-2">// 8 Grounding Functions</div>
+              <pre>{`grounding: [
+  tables(),      // Tables, columns, PKs
+  views(),       // Database views
+  info(),        // DB version info
+  indexes(),     // Index hints
+  constraints(), // Foreign keys
+  rowCount(),    // Table sizes
+  columnStats(), // Min/max/nulls
+  lowCardinality() // Enum values
+]`}</pre>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xl font-bold text-solar-300 mb-4 flex items-center gap-2 border-b border-solar-800 pb-2">
+              <Icons.Book /> TEACHABLES SYSTEM
+            </h3>
+            <p className="text-solar-500 mb-6 leading-relaxed">
+              Inject domain knowledge using 17 teachable types. Define business vocabulary,
+              guardrails, examples, workflows, and user preferences. The AI learns YOUR business.
+            </p>
+            <div className="bg-[#050604] p-4 border border-solar-800 rounded font-mono text-xs text-solar-400">
+              <div className="text-solar-600 mb-2">// Domain Knowledge</div>
+              <pre>{`text2sql.instruct(
+  term("ARR", "Annual Recurring Revenue"),
+  guardrail({ rule: "No PII" }),
+  hint("Exclude test accounts")
+);`}</pre>
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <h3 className="text-xl font-bold text-solar-300 mb-4 flex items-center gap-2 border-b border-solar-800 pb-2">
+              <Icons.Lock /> SECURITY & GOVERNANCE
+            </h3>
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="p-4 bg-solar-900/50 border border-solar-700 rounded">
+                <h4 className="text-solar-accent font-bold mb-2">Read-Only Default</h4>
+                <p className="text-xs text-solar-500">
+                  All generated queries are read-only by default. Write operations require explicit
+                  enablement.
+                </p>
+              </div>
+              <div className="p-4 bg-solar-900/50 border border-solar-700 rounded">
+                <h4 className="text-solar-accent font-bold mb-2">Guardrails</h4>
+                <p className="text-xs text-solar-500">
+                  Define hard boundaries the AI must never cross. Protect PII, enforce compliance
+                  rules.
+                </p>
+              </div>
+              <div className="p-4 bg-solar-900/50 border border-solar-700 rounded">
+                <h4 className="text-solar-accent font-bold mb-2">Query Validation</h4>
+                <p className="text-xs text-solar-500">
+                  All queries are validated before execution. Syntax errors caught and reported.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Page: Modules ---
+
+function ModulesPage() {
+  return (
+    <div className="pt-32 pb-20 px-6 animate-in fade-in duration-500">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-12">
+          <h2 className="text-4xl font-bold text-solar-300 mb-4">AGENT MODULES</h2>
+          <p className="text-solar-500 max-w-2xl">
+            A suite of specialized cognitive modules working in tandem to deliver production-grade
+            natural language to SQL capabilities.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-8">
+          <FeatureCard
+            expanded
+            title="Schema-Aware SQL Generation"
+            icon={<Icons.Brain />}
+            description="The core module that understands your database schema through automatic introspection. Maps tables, relationships, indexes, and constraints. Handles complex joins across multiple tables with high accuracy by grounding the AI in real schema metadata."
+            code={`// Grounding Configuration
+grounding: [
+  tables(),
+  views(),
+  info(),
+  indexes(),
+  constraints(),
+  lowCardinality()
+]`}
+          />
+
+          <div className="grid md:grid-cols-3 gap-8">
+            <FeatureCard
+              title="Teachable Knowledge"
+              icon={<Icons.Book />}
+              description="Encode domain expertise using 17 teachable types: terms, hints, guardrails, examples, workflows, glossaries, and 6 user-specific types for personalization."
+              code={`text2sql.instruct(
+  term("MRR", "Monthly Recurring Revenue"),
+  guardrail({ rule: "Never expose PII" }),
+  glossary({ "revenue": "SUM(amount)" })
+);`}
+            />
+            <FeatureCard
+              title="Streaming Conversations"
+              icon={<Icons.Cycle />}
+              description="Multi-turn conversations with streaming responses. Follow-up questions understand prior context. User preferences and corrections are remembered across sessions."
+              code={`const stream = await text2sql.chat(
+  messages,
+  { chatId, userId }
+);
+for await (const chunk of stream) { ... }`}
+            />
+            <FeatureCard
+              title="Explainable SQL"
+              icon={<Icons.MessageSquare />}
+              description="Convert SQL queries back to plain English explanations. Help users understand complex queries and validate the generated SQL matches their intent."
+              code={`const explanation = await text2sql.explain(
+  "SELECT dept, AVG(salary) FROM employees GROUP BY dept"
+);
+// "Average salary for each department..."`}
+            />
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            <FeatureCard
+              title="PostgreSQL Adapter"
+              icon={<Icons.Database />}
+              description="Full PostgreSQL support with schema introspection, index hints, and constraint awareness."
+              code={`import { Postgres } from '@deepagents/text2sql/postgres';`}
+            />
+            <FeatureCard
+              title="SQLite Adapter"
+              icon={<Icons.Database />}
+              description="Lightweight SQLite adapter perfect for embedded databases and local development."
+              code={`import { Sqlite } from '@deepagents/text2sql/sqlite';`}
+            />
+            <FeatureCard
+              title="SQL Server Adapter"
+              icon={<Icons.Database />}
+              description="Enterprise SQL Server support with T-SQL generation and MSSQL-specific optimizations."
+              code={`import { SqlServer } from '@deepagents/text2sql/sqlserver';`}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Terminal Demo Component ---
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  isSql?: boolean;
+}
+
+function TerminalDemo() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const mockResponses: Record<string, string> = {
+    'show me top customers by revenue': `SELECT
+  customer_id,
+  customer_name,
+  SUM(order_total) as total_revenue
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+WHERE o.created_at >= DATE_TRUNC('quarter', CURRENT_DATE)
+GROUP BY customer_id, customer_name
+ORDER BY total_revenue DESC
+LIMIT 10;`,
+    'how many orders last month': `SELECT COUNT(*) as order_count
+FROM orders
+WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+  AND created_at < DATE_TRUNC('month', CURRENT_DATE);`,
+    'average order value by product category': `SELECT
+  p.category,
+  AVG(oi.quantity * oi.unit_price) as avg_order_value
+FROM order_items oi
+JOIN products p ON oi.product_id = p.id
+GROUP BY p.category
+ORDER BY avg_order_value DESC;`,
+  };
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    setLoading(true);
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: input,
+      timestamp: Date.now(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    const query = input.toLowerCase().trim();
+    setInput('');
+
+    setTimeout(() => {
+      const response =
+        mockResponses[query] ||
+        `SELECT *
+FROM your_table
+WHERE condition = 'value'
+-- Generated from: "${query}"
+LIMIT 100;`;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: response,
+          timestamp: Date.now(),
+          isSql: true,
+        },
+      ]);
+      setLoading(false);
+    }, 800);
   };
 
   return (
-    <button
-      onClick={handleCopy}
-      className={`relative cursor-pointer transition-colors hover:text-[#00ff00] hover:drop-shadow-[0_0_8px_rgba(0,255,0,0.5)] ${className}`}
-      title="Copy to clipboard"
-    >
-      {copied ? (
-        <span className="text-[#00ff00] drop-shadow-[0_0_8px_rgba(0,255,0,0.5)]">
-          [COPIED]
-        </span>
-      ) : (
-        <span>[COPY]</span>
-      )}
-    </button>
-  );
-}
-
-function TerminalWindow({
-  children,
-  title = 'user@text2sql:~/analytics',
-}: {
-  children: React.ReactNode;
-  title?: string;
-}) {
-  return (
-    <div className="mx-auto max-w-3xl overflow-hidden rounded-lg border border-border bg-muted">
-      {/* Title bar */}
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
+    <div className="w-full h-full flex flex-col gap-4">
+      {/* Terminal Header */}
+      <div className="flex items-center justify-between border-b border-solar-700 pb-2">
         <div className="flex gap-2">
-          <div className="h-3 w-3 rounded-full bg-red-500" />
-          <div className="h-3 w-3 rounded-full bg-yellow-500" />
-          <div className="h-3 w-3 rounded-full bg-[#00ff00]" />
-        </div>
-        <span className="font-mono text-xs text-muted-foreground">{title}</span>
-      </div>
-      {/* Body */}
-      <div className="p-6 font-mono text-sm leading-relaxed">{children}</div>
-      {/* Status bar */}
-      <div className="flex items-center justify-between border-t border-border bg-card px-4 py-1 text-xs text-muted-foreground">
-        <span>INSERT</span>
-        <span>UTF-8</span>
-        <span>LF</span>
-      </div>
-    </div>
-  );
-}
-
-function FeatureCard({
-  icon,
-  title,
-  description,
-}: {
-  icon: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-6 transition-all hover:-translate-y-0.5 hover:border-[#00ff00]/50 hover:shadow-lg hover:shadow-[#00ff00]/10">
-      <div className="mb-4 font-mono text-2xl text-[#00ff00] drop-shadow-[0_0_8px_rgba(0,255,0,0.3)]">
-        {icon}
-      </div>
-      <h3 className="mb-3 text-lg font-bold text-foreground">{title}</h3>
-      <p className="leading-relaxed text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
-function CodeBlock({
-  filename,
-  children,
-  code,
-}: {
-  filename: string;
-  children: React.ReactNode;
-  code: string;
-}) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-border bg-muted">
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2 text-sm text-muted-foreground">
-        <span className="font-mono">── {filename} ──</span>
-        <CopyButton text={code} />
-      </div>
-      <div className="overflow-x-auto p-4 font-mono text-sm leading-relaxed">
-        <pre className="whitespace-pre-wrap">{children}</pre>
-      </div>
-    </div>
-  );
-}
-
-function TabGroup({
-  tabs,
-  activeTab,
-  onTabChange,
-}: {
-  tabs: string[];
-  activeTab: number;
-  onTabChange: (index: number) => void;
-}) {
-  return (
-    <div className="mb-6 flex gap-6 border-b border-border">
-      {tabs.map((tab, index) => (
-        <button
-          key={tab}
-          onClick={() => onTabChange(index)}
-          className={`cursor-pointer px-1 pb-3 font-mono text-sm transition-colors ${
-            activeTab === index
-              ? 'border-b-2 border-[#00ff00] text-[#00ff00] drop-shadow-[0_0_8px_rgba(0,255,0,0.5)]'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          [{tab}]
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function TeachableCard({
-  funcName,
-  category,
-  description,
-  example,
-}: {
-  funcName: string;
-  category: string;
-  description: string;
-  example: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-6 transition-all hover:border-[#00ff00]/30">
-      <div className="mb-3 flex items-start justify-between">
-        <span className="font-mono text-lg text-purple-400 drop-shadow-[0_0_6px_rgba(167,139,250,0.3)]">
-          {funcName}
-        </span>
-        <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground/50">
-          [{category}]
-        </span>
-      </div>
-      <div className="my-3 border-t border-border" />
-      <p className="mb-4 text-muted-foreground">{description}</p>
-      <code className="block rounded bg-muted p-3 font-mono text-sm text-foreground">
-        {example}
-      </code>
-    </div>
-  );
-}
-
-function ScrollReveal({
-  children,
-  delay = 0,
-}: {
-  children: React.ReactNode;
-  delay?: number;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setTimeout(() => setIsVisible(true), delay);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (ref.current) {
-      observer.observe(ref.current);
-    }
-
-    return () => observer.disconnect();
-  }, [delay]);
-
-  return (
-    <div
-      ref={ref}
-      className={`transition-all duration-500 ${
-        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'
-      }`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function SectionDivider() {
-  return (
-    <div className="py-8 text-center font-mono text-muted-foreground/30">
-      ════════════════════════════════════════════════════════════
-    </div>
-  );
-}
-
-// ===== Section Components =====
-
-function HeroSection() {
-  const [queryDone, setQueryDone] = useState(false);
-
-  return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center px-6 py-20">
-      {/* Glow effect - green tint */}
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[600px] w-[800px] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse_at_center,rgba(0,255,0,0.08)_0%,transparent_70%)]" />
-
-      <div className="relative z-10 mb-12 text-center">
-        <h1 className="mb-6 text-4xl font-bold leading-tight md:text-6xl">
-          <span className="bg-gradient-to-r from-[#00ff00] to-purple-400 bg-clip-text text-transparent drop-shadow-[0_0_30px_rgba(0,255,0,0.3)]">
-            Ask Questions. Get Queries.
+          <span className="text-xs px-3 py-1 border rounded border-solar-accent text-solar-accent bg-solar-accent/10">
+            SQL_MODE
           </span>
-        </h1>
-        <p className="mx-auto max-w-2xl font-mono text-xl text-muted-foreground">
-          {'>'} AI-powered SQL generation that learns your business_
-        </p>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] text-solar-600 uppercase">
+          <div
+            className={`w-2 h-2 rounded-full ${loading ? 'bg-solar-accent animate-ping' : 'bg-solar-500'}`}
+          ></div>
+          {loading ? 'GENERATING' : 'READY'}
+        </div>
       </div>
 
-      {/* Terminal Demo */}
-      <div className="relative z-10 mb-12 w-full max-w-3xl">
-        <TerminalWindow>
-          {/* Previous commands (grayed) */}
-          <div className="mb-2 text-muted-foreground/40">
-            <span className="text-[#00ff00]/40">❯</span> SELECT * FROM users LIMIT 5;
+      {/* Terminal Output */}
+      <div
+        ref={scrollRef}
+        className="flex-1 bg-[#050604] rounded border border-solar-800 p-4 overflow-y-auto min-h-[300px] max-h-[400px] font-mono text-sm relative"
+      >
+        {messages.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center flex-col text-solar-800 pointer-events-none select-none">
+            <div className="text-4xl mb-2 opacity-50">
+              <Icons.Terminal />
+            </div>
+            <p>TRY: "show me top customers by revenue"</p>
           </div>
-          <div className="mb-4 text-muted-foreground/40">
-            <span className="text-[#00ff00]/40">❯</span> DESCRIBE orders;
+        )}
+
+        {messages.map((msg, idx) => (
+          <div key={idx} className="mb-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-baseline gap-2 mb-1">
+              <span
+                className={`text-xs font-bold ${msg.role === 'user' ? 'text-solar-accent' : 'text-solar-500'}`}
+              >
+                {msg.role === 'user' ? 'USER@TEXT2SQL:~$' : 'SQL::OUTPUT>'}
+              </span>
+              <span className="text-[10px] text-solar-700">
+                {new Date(msg.timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+
+            <div
+              className={`pl-4 border-l ${msg.role === 'user' ? 'border-solar-800' : 'border-solar-600'}`}
+            >
+              <pre className="whitespace-pre-wrap text-solar-300 leading-relaxed font-mono">
+                {msg.content}
+              </pre>
+            </div>
           </div>
-          {/* Current command with typing */}
-          <div className="mb-4">
-            <span className="text-[#00ff00] drop-shadow-[0_0_8px_rgba(0,255,0,0.5)]">
-              ❯{' '}
-            </span>
-            <TypingText
-              text="Show me top customers by revenue last quarter"
-              speed={40}
-              onComplete={() => setQueryDone(true)}
+        ))}
+
+        {loading && (
+          <div className="pl-4 border-l border-solar-800 text-solar-600 animate-pulse">
+            <span className="inline-block w-2 h-4 bg-solar-600 align-middle"></span>
+          </div>
+        )}
+      </div>
+
+      {/* Terminal Input */}
+      <div className="flex gap-2 items-end bg-solar-900/50 p-2 rounded border border-solar-800">
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Ask a question about your data..."
+            className="w-full bg-transparent border-none text-solar-300 placeholder-solar-700 focus:ring-0 h-9 font-mono focus:outline-none"
+          />
+        </div>
+
+        <button
+          onClick={handleSend}
+          disabled={loading}
+          className="text-solar-400 hover:text-solar-accent disabled:opacity-50 transition-colors px-2"
+        >
+          <Icons.Send />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// --- Page: Home ---
+
+function Hero({ onNavigate }: { onNavigate: (p: Page) => void }) {
+  return (
+    <section className="pt-32 pb-20 px-6 border-b border-solar-700/30 relative overflow-hidden animate-in fade-in duration-500">
+      <div className="absolute top-20 right-0 opacity-10 pointer-events-none">
+        <pre className="text-[10px] leading-3 text-solar-500">
+          {`
+      .           .
+    /' \\         / \\
+   /   | .---.  |   \\
+  |    |/  _  \\|    |
+  |    |\\  _  /|    |
+   \\   | '---'  |   /
+    \\./         \\./
+      |   .---.   |
+      |  /  _  \\  |
+      | |  (_)  | |
+      |  \\  _  /  |
+      |   '---'   |
+`}
+        </pre>
+      </div>
+      <div className="max-w-7xl mx-auto">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-solar-600/50 bg-solar-800/30 text-xs text-solar-400 mb-8">
+          <span className="w-2 h-2 rounded-full bg-solar-accent animate-pulse"></span>
+          <span>OPENAI / ANTHROPIC / GOOGLE / GROQ</span>
+        </div>
+        <h1 className="text-5xl md:text-7xl font-bold tracking-tighter text-solar-300 mb-6 leading-[0.9]">
+          ASK QUESTIONS.
+          <br />
+          <span className="text-solar-accent">GET SQL.</span>
+        </h1>
+        <p className="text-xl text-solar-500 max-w-2xl mb-10 font-light leading-relaxed">
+          AI-powered natural language to SQL that learns your business. Schema-aware generation with
+          teachable domain knowledge. Multi-database support.
+        </p>
+        <div className="flex flex-col md:flex-row gap-4">
+          <button
+            onClick={() => document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' })}
+            className="h-14 px-8 bg-solar-accent text-solar-900 font-bold text-lg flex items-center justify-center gap-2 hover:bg-yellow-400 transition-colors border border-transparent hover:border-solar-300"
+          >
+            <Icons.Terminal /> TRY DEMO
+          </button>
+          <div className="h-14 px-8 border border-solar-600 text-solar-400 font-medium text-lg flex items-center justify-center gap-2 font-mono">
+            $ npm install @deepagents/text2sql
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DemoSection() {
+  return (
+    <section id="demo" className="py-24 px-6 bg-solar-900/30 border-b border-solar-700/30">
+      <div className="max-w-5xl mx-auto">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-solar-300 mb-4">INTERACTIVE PLAYGROUND</h2>
+          <p className="text-solar-500 max-w-2xl mx-auto">
+            Experience natural language to SQL generation. Ask questions in plain English and see
+            the generated queries.
+          </p>
+        </div>
+
+        <div className="glass-panel p-1 rounded-xl shadow-[0_0_50px_rgba(43,51,34,0.2)]">
+          <div className="bg-solar-900/90 rounded-lg p-6 border border-solar-700/50">
+            <TerminalDemo />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HomePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
+  return (
+    <>
+      <Hero onNavigate={onNavigate} />
+
+      {/* Teaser Features for Home */}
+      <section className="py-12 px-6 border-b border-solar-700/30 bg-solar-900/20">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-end justify-between mb-8">
+            <h2 className="text-2xl font-bold text-solar-300">CAPABILITIES</h2>
+            <button
+              onClick={() => onNavigate('MODULES')}
+              className="text-solar-accent text-sm hover:underline"
+            >
+              VIEW ALL MODULES &rarr;
+            </button>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6">
+            <FeatureCard
+              title="Schema-Aware Generation"
+              icon={<Icons.Brain />}
+              description="Automatic introspection of tables, relationships, indexes, and constraints for accurate query generation."
+              code="grounding: [tables(), indexes()]"
+            />
+            <FeatureCard
+              title="Teachable Knowledge"
+              icon={<Icons.Book />}
+              description="Encode domain expertise with 17 teachable types: terms, hints, guardrails, examples, glossaries, and more."
+              code='term("MRR", "Monthly Recurring Revenue")'
+            />
+            <FeatureCard
+              title="Multi-Database Support"
+              icon={<Icons.Database />}
+              description="PostgreSQL, SQLite, and SQL Server adapters with database-specific optimizations."
+              code='import { Postgres } from "@deepagents/text2sql/postgres"'
             />
           </div>
-          {/* SQL output with line-by-line reveal */}
-          {queryDone && (
-            <div className="mt-6 border-t border-border/30 pt-4 text-foreground">
-              <SQLReveal delay={200}>
-                <div>
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    SELECT
-                  </span>{' '}
-                  customer_id, <span className="text-purple-400">SUM</span>
-                  (amount) <span className="text-[#00ff00]">as</span> revenue
-                </div>
-              </SQLReveal>
-              <SQLReveal delay={400}>
-                <div>
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    FROM
-                  </span>{' '}
-                  orders
-                </div>
-              </SQLReveal>
-              <SQLReveal delay={600}>
-                <div>
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    WHERE
-                  </span>{' '}
-                  created_at {'>'} ={' '}
-                  <span className="text-lime-300">'2024-01-01'</span>
-                </div>
-              </SQLReveal>
-              <SQLReveal delay={800}>
-                <div>
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    GROUP BY
-                  </span>{' '}
-                  customer_id
-                </div>
-              </SQLReveal>
-              <SQLReveal delay={1000}>
-                <div>
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    ORDER BY
-                  </span>{' '}
-                  revenue{' '}
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    DESC
-                  </span>
-                </div>
-              </SQLReveal>
-              <SQLReveal delay={1200}>
-                <div>
-                  <span className="text-[#00ff00] drop-shadow-[0_0_6px_rgba(0,255,0,0.4)]">
-                    LIMIT
-                  </span>{' '}
-                  <span className="text-orange-400">10</span>;
-                </div>
-              </SQLReveal>
+        </div>
+      </section>
+
+      <DemoSection />
+
+      {/* Code Example Section */}
+      <section className="py-24 px-6 border-b border-solar-700/30">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-3xl font-bold text-solar-300 mb-4 text-center">QUICK START</h2>
+          <p className="text-solar-500 max-w-2xl mx-auto text-center mb-12">
+            Get up and running in minutes with a simple setup.
+          </p>
+
+          <div className="bg-[#050604] rounded-lg border border-solar-800 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-solar-800 bg-solar-900/50">
+              <span className="text-xs text-solar-500 font-mono">quick-start.ts</span>
+              <span className="text-[10px] text-solar-600">TypeScript</span>
             </div>
-          )}
-        </TerminalWindow>
-      </div>
+            <pre className="p-6 text-sm text-solar-400 font-mono overflow-x-auto">
+              <code>{`import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Postgres, tables, indexes, constraints } from '@deepagents/text2sql/postgres';
 
-      {/* CTAs */}
-      <div className="relative z-10 flex flex-col gap-4 sm:flex-row">
-        <div className="flex items-center gap-3 rounded-md border border-border bg-card px-6 py-3 transition-all hover:border-[#00ff00]/50">
-          <code className="font-mono text-foreground">
-            $ npm i @deepagents/text2sql
-          </code>
-          <CopyButton text="npm i @deepagents/text2sql" />
-        </div>
-        <a
-          href="https://github.com/JanuaryLabs/deepagents"
-          className="rounded-md border border-border bg-transparent px-6 py-3 text-center font-mono text-foreground transition-colors hover:border-[#00ff00] hover:text-[#00ff00] hover:drop-shadow-[0_0_8px_rgba(0,255,0,0.3)]"
-        >
-          [GitHub] →
-        </a>
-      </div>
-
-      {/* Scroll indicator */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-pulse font-mono text-[#00ff00]/50">
-        ↓ SCROLL ↓
-      </div>
-    </section>
-  );
-}
-
-function HowItWorksSection() {
-  const steps = [
-    {
-      number: '01',
-      title: 'Connect Your Database',
-      description:
-        'Point Text2SQL at your database. Works with SQLite, PostgreSQL, and SQL Server out of the box. Schema introspection is automatic.',
-    },
-    {
-      number: '02',
-      title: 'Teach Domain Knowledge',
-      description:
-        'Define your business vocabulary, rules, and metrics using teachables. The AI learns what "revenue" means in YOUR context.',
-    },
-    {
-      number: '03',
-      title: 'Ask in Plain English',
-      description:
-        'Ask business questions naturally. Get accurate, executable SQL that respects your domain rules and coding standards.',
-    },
-  ];
-
-  return (
-    <section className="px-6 py-24">
-      <SectionDivider />
-      <div className="mx-auto max-w-6xl">
-        <ScrollReveal>
-          <h2 className="mb-16 text-center font-mono text-3xl font-bold text-foreground md:text-4xl">
-            {'>'} HOW_IT_WORKS
-          </h2>
-        </ScrollReveal>
-
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-          {steps.map((step, index) => (
-            <ScrollReveal key={step.number} delay={index * 150}>
-              <div className="text-center">
-                <div className="mb-4 font-mono text-5xl font-bold text-[#00ff00] drop-shadow-[0_0_20px_rgba(0,255,0,0.4)]">
-                  {step.number}
-                </div>
-                <h3 className="mb-4 text-xl font-bold text-foreground md:text-2xl">
-                  {step.title}
-                </h3>
-                <p className="text-muted-foreground">{step.description}</p>
-              </div>
-            </ScrollReveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FeaturesSection() {
-  const features = [
-    {
-      icon: '┌─ >_ ─┐',
-      title: 'Natural Language → SQL',
-      description:
-        'Ask questions in plain English. Get accurate, executable queries. No more context-switching between business requirements and SQL syntax.',
-    },
-    {
-      icon: '╔═ {} ═╗',
-      title: 'Deep Schema Understanding',
-      description:
-        'Auto-introspects tables, relationships, indexes, and column cardinality. Understands your data structure before generating queries.',
-    },
-    {
-      icon: '┏━ λ ━┓',
-      title: 'Teachable System',
-      description:
-        '17 ways to encode domain knowledge: terms, rules, workflows, guardrails. Your AI learns what matters to YOUR business.',
-    },
-    {
-      icon: '╭─ ⟳ ─╮',
-      title: 'User Memory',
-      description:
-        'Remembers preferences, learns from corrections, personalizes responses. The more you use it, the smarter it gets.',
-    },
-    {
-      icon: '◇──◇──◇',
-      title: 'Multi-Database Support',
-      description:
-        'SQLite, PostgreSQL, SQL Server. Extensible adapter pattern lets you add any database with a simple interface.',
-    },
-    {
-      icon: '┌─ ✓ ─┐',
-      title: 'Production Ready',
-      description:
-        'Query validation, error handling, streaming, and chat history built in. Not a prototype—ready for real workloads.',
-    },
-  ];
-
-  return (
-    <section className="bg-card px-6 py-24">
-      <SectionDivider />
-      <div className="mx-auto max-w-6xl">
-        <ScrollReveal>
-          <h2 className="mb-16 text-center font-mono text-3xl font-bold text-foreground md:text-4xl">
-            {'>'} FEATURES
-          </h2>
-        </ScrollReveal>
-
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {features.map((feature, index) => (
-            <ScrollReveal key={feature.title} delay={index * 100}>
-              <FeatureCard {...feature} />
-            </ScrollReveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function CodeExamplesSection() {
-  const [activeTab, setActiveTab] = useState(0);
-
-  const tabs = ['Quick Start', 'Domain Knowledge', 'Chat Mode'];
-
-  const quickStartCode = `import { Text2Sql, Sqlite } from '@deepagents/text2sql';
-
-const adapter = new Sqlite({
-  execute: (sql) => db.prepare(sql).all()
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new Postgres({
+    execute: async (sql) => pool.query(sql).then(r => r.rows),
+    grounding: [tables(), indexes(), constraints()],
+  }),
+  history: new InMemoryHistory(),
 });
 
-const text2sql = new Text2Sql({ adapter });
-
 // Generate SQL from natural language
-const sql = await text2sql
-  .toSql("Show top 10 customers by revenue")
-  .generate();`;
-
-  const domainKnowledgeCode = `import { term, glossary, hint, guardrail } from '@deepagents/text2sql';
-
-// Teach business vocabulary
-text2sql.instruct(
-  term("ARR", "Annual Recurring Revenue"),
-  term("churn", "customers who cancelled in the period"),
-
-  // Map business terms to SQL expressions
-  glossary({
-    "revenue": "SUM(orders.amount)",
-    "active user": "last_login > NOW() - INTERVAL '30 days'"
-  }),
-
-  // Add behavioral rules
-  hint("Always exclude test accounts from metrics"),
-  guardrail({ rule: "Never return PII in results" })
-);`;
-
-  const chatModeCode = `// Multi-turn conversation with memory
-const stream = await text2sql.chat(
-  [{ role: 'user', content: 'What products are trending this week?' }],
-  { userId: 'analyst-42', chatId: 'session-001' }
-);
-
-for await (const chunk of stream) {
-  process.stdout.write(chunk);
-}
-
-// System remembers context for follow-up questions
-// "Break that down by region" - knows you mean trending products`;
-
-  const codeExamples = [quickStartCode, domainKnowledgeCode, chatModeCode];
-  const filenames = ['quick-start.ts', 'domain-knowledge.ts', 'chat-mode.ts'];
-
-  return (
-    <section className="px-6 py-24">
-      <SectionDivider />
-      <div className="mx-auto max-w-4xl">
-        <ScrollReveal>
-          <h2 className="mb-16 text-center font-mono text-3xl font-bold text-foreground md:text-4xl">
-            {'>'} CODE_EXAMPLES
-          </h2>
-        </ScrollReveal>
-
-        <ScrollReveal delay={100}>
-          <TabGroup tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
-          <CodeBlock filename={filenames[activeTab]} code={codeExamples[activeTab]}>
-            {activeTab === 0 && (
-              <>
-                <span className="text-[#00ff00]">import</span> {'{'} Text2Sql, Sqlite
-                {'}'} <span className="text-[#00ff00]">from</span>{' '}
-                <span className="text-lime-300">'@deepagents/text2sql'</span>;
-                {'\n\n'}
-                <span className="text-[#00ff00]">const</span> adapter ={' '}
-                <span className="text-[#00ff00]">new</span>{' '}
-                <span className="text-purple-400">Sqlite</span>({'{'}
-                {'\n'}  execute: (sql) {'=>'} db.
-                <span className="text-purple-400">prepare</span>(sql).
-                <span className="text-purple-400">all</span>()
-                {'\n'}
-                {'}'});
-                {'\n\n'}
-                <span className="text-[#00ff00]">const</span> text2sql ={' '}
-                <span className="text-[#00ff00]">new</span>{' '}
-                <span className="text-purple-400">Text2Sql</span>({'{'} adapter {'}'});
-                {'\n\n'}
-                <span className="italic text-muted-foreground">
-                  // Generate SQL from natural language
-                </span>
-                {'\n'}
-                <span className="text-[#00ff00]">const</span> sql ={' '}
-                <span className="text-[#00ff00]">await</span> text2sql
-                {'\n'}  .<span className="text-purple-400">toSql</span>(
-                <span className="text-lime-300">"Show top 10 customers by revenue"</span>
-                ){'\n'}  .<span className="text-purple-400">generate</span>();
-              </>
-            )}
-            {activeTab === 1 && (
-              <>
-                <span className="text-[#00ff00]">import</span> {'{'} term, glossary,
-                hint, guardrail {'}'} <span className="text-[#00ff00]">from</span>{' '}
-                <span className="text-lime-300">'@deepagents/text2sql'</span>;
-                {'\n\n'}
-                <span className="italic text-muted-foreground">
-                  // Teach business vocabulary
-                </span>
-                {'\n'}
-                text2sql.<span className="text-purple-400">instruct</span>(
-                {'\n'}  <span className="text-purple-400">term</span>(
-                <span className="text-lime-300">"ARR"</span>,{' '}
-                <span className="text-lime-300">"Annual Recurring Revenue"</span>
-                ),
-                {'\n'}  <span className="text-purple-400">term</span>(
-                <span className="text-lime-300">"churn"</span>,{' '}
-                <span className="text-lime-300">
-                  "customers who cancelled in the period"
-                </span>
-                ),
-                {'\n\n'}  <span className="italic text-muted-foreground">
-                  // Map business terms to SQL expressions
-                </span>
-                {'\n'}  <span className="text-purple-400">glossary</span>({'{'}
-                {'\n'}    <span className="text-lime-300">"revenue"</span>:{' '}
-                <span className="text-lime-300">"SUM(orders.amount)"</span>,
-                {'\n'}    <span className="text-lime-300">"active user"</span>:{' '}
-                <span className="text-lime-300">
-                  "last_login {'>'} NOW() - INTERVAL '30 days'"
-                </span>
-                {'\n'}  {'}'}),
-                {'\n\n'}  <span className="italic text-muted-foreground">
-                  // Add behavioral rules
-                </span>
-                {'\n'}  <span className="text-purple-400">hint</span>(
-                <span className="text-lime-300">
-                  "Always exclude test accounts from metrics"
-                </span>
-                ),
-                {'\n'}  <span className="text-purple-400">guardrail</span>({'{'} rule:{' '}
-                <span className="text-lime-300">"Never return PII in results"</span>{' '}
-                {'}'}){'\n'});
-              </>
-            )}
-            {activeTab === 2 && (
-              <>
-                <span className="italic text-muted-foreground">
-                  // Multi-turn conversation with memory
-                </span>
-                {'\n'}
-                <span className="text-[#00ff00]">const</span> stream ={' '}
-                <span className="text-[#00ff00]">await</span> text2sql.
-                <span className="text-purple-400">chat</span>({'\n'}  [{'{'} role:{' '}
-                <span className="text-lime-300">'user'</span>, content:{' '}
-                <span className="text-lime-300">
-                  'What products are trending this week?'
-                </span>{' '}
-                {'}'}],
-                {'\n'}  {'{'} userId:{' '}
-                <span className="text-lime-300">'analyst-42'</span>, chatId:{' '}
-                <span className="text-lime-300">'session-001'</span> {'}'}
-                {'\n'});
-                {'\n\n'}
-                <span className="text-[#00ff00]">for await</span> (
-                <span className="text-[#00ff00]">const</span> chunk{' '}
-                <span className="text-[#00ff00]">of</span> stream) {'{'}
-                {'\n'}  process.stdout.
-                <span className="text-purple-400">write</span>(chunk);
-                {'\n'}
-                {'}'}
-                {'\n\n'}
-                <span className="italic text-muted-foreground">
-                  // System remembers context for follow-up questions
-                </span>
-                {'\n'}
-                <span className="italic text-muted-foreground">
-                  // "Break that down by region" - knows you mean trending products
-                </span>
-              </>
-            )}
-          </CodeBlock>
-        </ScrollReveal>
-      </div>
-    </section>
+const sql = await text2sql.toSql(
+  "Show me the top 10 customers by revenue"
+);`}</code>
+            </pre>
+          </div>
+        </div>
+      </section>
+    </>
   );
 }
 
-function TeachablesSection() {
-  const [activeTab, setActiveTab] = useState(0);
-
-  const domainTeachables = [
-    {
-      funcName: 'term()',
-      category: 'VOCABULARY',
-      description:
-        'Define business vocabulary and acronyms that only your organization uses.',
-      example: 'term("NPL", "non-performing loan - past due 90+ days")',
-    },
-    {
-      funcName: 'guardrail()',
-      category: 'COMPLIANCE',
-      description: 'Set hard boundaries the AI must never cross.',
-      example:
-        'guardrail({ rule: "Never return SSN or MRN in results", reason: "HIPAA compliance" })',
-    },
-    {
-      funcName: 'glossary()',
-      category: 'MAPPING',
-      description: 'Map business terms directly to SQL expressions.',
-      example: 'glossary({ "revenue": "SUM(orders.amount)" })',
-    },
-    {
-      funcName: 'hint()',
-      category: 'BEHAVIOR',
-      description: 'Add behavioral rules that guide query generation.',
-      example: 'hint("Always exclude deleted records unless specifically asked")',
-    },
-  ];
-
-  const userTeachables = [
-    {
-      funcName: 'identity()',
-      category: 'PROFILE',
-      description: 'Define user profile and role for personalized responses.',
-      example: 'identity({ role: "analyst", department: "finance" })',
-    },
-    {
-      funcName: 'alias()',
-      category: 'TERMINOLOGY',
-      description: 'User-specific terminology and shortcuts.',
-      example: 'alias("my tables", ["orders", "customers", "products"])',
-    },
-    {
-      funcName: 'preference()',
-      category: 'OUTPUT',
-      description: 'Output formatting preferences.',
-      example: 'preference({ dateFormat: "YYYY-MM-DD", limit: 100 })',
-    },
-    {
-      funcName: 'correction()',
-      category: 'LEARNING',
-      description: 'Learn from user corrections to improve future queries.',
-      example: 'correction({ wrong: "users", right: "customers" })',
-    },
-  ];
-
-  const teachables = activeTab === 0 ? domainTeachables : userTeachables;
-
+function Footer({ onNavigate }: { onNavigate: (p: Page) => void }) {
   return (
-    <section className="bg-card px-6 py-24">
-      <SectionDivider />
-      <div className="mx-auto max-w-4xl">
-        <ScrollReveal>
-          <h2 className="mb-4 text-center font-mono text-3xl font-bold text-foreground md:text-4xl">
-            {'>'} TEACHABLES
-          </h2>
-          <p className="mb-12 text-center font-mono text-muted-foreground">
-            // 17 ways to encode domain expertise
+    <footer className="py-12 px-6 bg-[#050604] text-center md:text-left border-t border-solar-800">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+        <div>
+          <div className="flex items-center justify-center md:justify-start gap-2 text-solar-400 mb-2">
+            <Icons.Terminal />
+            <span className="font-bold tracking-tighter">@DEEPAGENTS/TEXT2SQL</span>
+          </div>
+          <p className="text-xs text-solar-600">
+            &copy; 2025 JanuaryLabs
+            <br />
+            MIT License
           </p>
-        </ScrollReveal>
-
-        <ScrollReveal delay={100}>
-          <TabGroup
-            tabs={['Domain Knowledge', 'User Personalization']}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          />
-
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            {teachables.map((teachable, index) => (
-              <ScrollReveal key={teachable.funcName} delay={index * 75}>
-                <TeachableCard {...teachable} />
-              </ScrollReveal>
-            ))}
-          </div>
-
-          <div className="mt-8 text-center">
-            <a
-              href="/docs/text2sql"
-              className="font-mono text-[#00ff00] transition-all hover:drop-shadow-[0_0_8px_rgba(0,255,0,0.5)] hover:underline"
-            >
-              [VIEW ALL 17] →
-            </a>
-          </div>
-        </ScrollReveal>
-      </div>
-    </section>
-  );
-}
-
-function StatsSection() {
-  const stats = [
-    { value: '17', label: 'Teachable Types' },
-    { value: '3', label: 'Databases Supported' },
-    { value: '∞', label: 'Queries Generated' },
-  ];
-
-  return (
-    <section className="px-6 py-24">
-      <SectionDivider />
-      <div className="mx-auto max-w-4xl">
-        <ScrollReveal>
-          <div className="grid grid-cols-3 gap-8 text-center">
-            {stats.map((stat) => (
-              <div key={stat.label}>
-                <div className="mb-2 font-mono text-5xl font-bold text-[#00ff00] drop-shadow-[0_0_20px_rgba(0,255,0,0.4)] md:text-6xl">
-                  <AnimatedCounter target={stat.value} />
-                </div>
-                <div className="font-mono text-muted-foreground">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </ScrollReveal>
-      </div>
-    </section>
-  );
-}
-
-function CTASection() {
-  return (
-    <section className="bg-card px-6 py-24">
-      <SectionDivider />
-      <div className="mx-auto max-w-2xl text-center">
-        <ScrollReveal>
-          <h2 className="mb-8 font-mono text-3xl font-bold text-foreground md:text-4xl">
-            {'>'} READY_TO_START?
-          </h2>
-
-          <div className="mb-8 flex items-center justify-between gap-4 rounded-lg border border-border bg-muted p-4 transition-all hover:border-[#00ff00]/50">
-            <code className="font-mono text-foreground">
-              $ npm install @deepagents/text2sql
-            </code>
-            <CopyButton text="npm install @deepagents/text2sql" />
-          </div>
-
-          <div className="flex justify-center gap-6 font-mono">
-            <a
-              href="/docs/text2sql"
-              className="text-muted-foreground transition-colors hover:text-[#00ff00] hover:drop-shadow-[0_0_8px_rgba(0,255,0,0.3)]"
-            >
-              [DOCS]
-            </a>
-            <a
-              href="https://github.com/JanuaryLabs/deepagents"
-              className="text-muted-foreground transition-colors hover:text-[#00ff00] hover:drop-shadow-[0_0_8px_rgba(0,255,0,0.3)]"
-            >
-              [GITHUB]
-            </a>
-          </div>
-        </ScrollReveal>
-      </div>
-    </section>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="border-t border-border px-6 py-12">
-      <div className="mx-auto max-w-4xl">
-        <div className="rounded-lg border border-border bg-muted p-6 font-mono text-sm">
-          <div className="mb-2 text-muted-foreground">
-            $ npm info @deepagents/text2sql
-          </div>
-          <div className="mb-4 text-foreground">
-            @deepagents/text2sql@1.0.0 | MIT | deps: 2 | versions: 1
-          </div>
-          <div className="flex flex-wrap justify-center gap-4 text-muted-foreground">
-            <a
-              href="https://github.com/JanuaryLabs/deepagents"
-              className="hover:text-[#00ff00]"
-            >
-              [GitHub]
-            </a>
-            <span>·</span>
-            <a
-              href="https://www.npmjs.com/package/@deepagents/text2sql"
-              className="hover:text-[#00ff00]"
-            >
-              [npm]
-            </a>
-            <span>·</span>
-            <a href="/docs/text2sql" className="hover:text-[#00ff00]">
-              [Docs]
-            </a>
-          </div>
-          <div className="mt-4 text-center text-muted-foreground/50">
-            MIT License · © 2024 JanuaryLabs
-          </div>
+        </div>
+        <div className="flex gap-6 text-xs text-solar-500 font-mono">
+          <button onClick={() => onNavigate('MODULES')} className="hover:text-solar-accent">
+            MODULES
+          </button>
+          <button onClick={() => onNavigate('ARCHITECTURE')} className="hover:text-solar-accent">
+            ARCHITECTURE
+          </button>
+          <a href="/docs/text2sql" className="hover:text-solar-accent">
+            DOCS
+          </a>
+          <a href="https://github.com/JanuaryLabs/deepagents" className="hover:text-solar-accent">
+            GITHUB
+          </a>
         </div>
       </div>
     </footer>
   );
 }
 
-// ===== Main App Component =====
+// --- Main Layout ---
 
-export function App() {
+export default function App() {
+  const [activePage, setActivePage] = useState<Page>('HOME');
+
   return (
-    <div className="min-h-screen bg-background font-mono">
-      <HeroSection />
-      <HowItWorksSection />
-      <FeaturesSection />
-      <CodeExamplesSection />
-      <TeachablesSection />
-      <StatsSection />
-      <CTASection />
-      <Footer />
+    <div className="min-h-screen flex flex-col bg-solar-900">
+      <Navbar activePage={activePage} onNavigate={setActivePage} />
+      <main className="flex-1">
+        {activePage === 'HOME' && <HomePage onNavigate={setActivePage} />}
+        {activePage === 'MODULES' && <ModulesPage />}
+        {activePage === 'ARCHITECTURE' && <ArchitecturePage />}
+      </main>
+      <Footer onNavigate={setActivePage} />
     </div>
   );
 }
-
-export default App;
