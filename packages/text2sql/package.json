@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/text2sql",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "eval": "evalite",
@@ -58,13 +58,13 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "2.0.26",
-    "@deepagents/agent": "0.2.3",
+    "@deepagents/agent": "0.3.0",
     "ai": "^5.0.102",
     "autoevals": "^0.0.131",
     "dedent": "1.7.0",
     "zod": "^3.25.76 || ^4.0.0",
     "evalite": "beta",
-    "@deepagents/toolbox": "0.2.3",
+    "@deepagents/toolbox": "0.3.0",
     "pluralize": "^8.0.0",
     "openai": "5.12.2",
     "uuid": "^13.0.0"
