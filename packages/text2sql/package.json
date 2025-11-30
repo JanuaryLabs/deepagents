@@ -2,6 +2,10 @@
   "name": "@deepagents/text2sql",
   "version": "0.2.3",
   "type": "module",
+  "scripts": {
+    "eval": "evalite",
+    "eval:dev": "evalite watch"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,6 +22,30 @@
       "types": "./dist/lib/instructions.d.ts",
       "import": "./dist/lib/instructions.js",
       "default": "./dist/lib/instructions.js"
+    },
+    "./grounding": {
+      "development": "./src/lib/adapters/groundings/grounding.ts",
+      "types": "./dist/lib/adapters/groundings/grounding.d.ts",
+      "import": "./dist/lib/adapters/groundings/grounding.js",
+      "default": "./dist/lib/adapters/groundings/grounding.js"
+    },
+    "./sqlite": {
+      "development": "./src/lib/adapters/sqlite/index.ts",
+      "types": "./dist/lib/adapters/sqlite/index.d.ts",
+      "import": "./dist/lib/adapters/sqlite/index.js",
+      "default": "./dist/lib/adapters/sqlite/index.js"
+    },
+    "./postgres": {
+      "development": "./src/lib/adapters/postgres/index.ts",
+      "types": "./dist/lib/adapters/postgres/index.d.ts",
+      "import": "./dist/lib/adapters/postgres/index.js",
+      "default": "./dist/lib/adapters/postgres/index.js"
+    },
+    "./sqlserver": {
+      "development": "./src/lib/adapters/sqlserver/index.ts",
+      "types": "./dist/lib/adapters/sqlserver/index.d.ts",
+      "import": "./dist/lib/adapters/sqlserver/index.js",
+      "default": "./dist/lib/adapters/sqlserver/index.js"
     }
   },
   "files": [
@@ -35,7 +63,7 @@
     "autoevals": "^0.0.131",
     "dedent": "1.7.0",
     "zod": "^3.25.76 || ^4.0.0",
-    "evalite": "^0.19.0",
+    "evalite": "beta",
     "@deepagents/toolbox": "0.2.3",
     "pluralize": "^8.0.0",
     "openai": "5.12.2",

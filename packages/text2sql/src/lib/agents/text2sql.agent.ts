@@ -10,10 +10,9 @@ import {
 } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
 
-import type { Adapter, Introspection } from '../adapters/adapter.ts';
+import type { Adapter } from '../adapters/adapter.ts';
 import memoryPrompt from '../memory/memory.prompt.ts';
 import type { TeachablesStore } from '../memory/store.ts';
-import { databaseSchemaPrompt } from '../prompt.ts';
 import type { GeneratedTeachable } from '../teach/teachables.ts';
 
 export type RenderingTools = Record<string, Tool<unknown, never>>;
@@ -34,14 +33,39 @@ const tools = {
     },
   }),
   get_sample_rows: tool({
-    description: `Get a few sample rows from a table to understand data formatting and values. Use this when you are unsure about the content of a column (e.g. date formats, status codes, string variations).`,
+    description: `Sample rows from a table to understand data formatting, codes, and value patterns. Use BEFORE writing queries when:
+- Column types in schema don't reveal format (e.g., "status" could be 'active'/'inactive' or 1/0)
+- Date/time formats are unclear (ISO, Unix timestamp, locale-specific)
+- You need to understand lookup table codes or enum values
+- Column names are ambiguous (e.g., "type", "category", "code")`,
     inputSchema: z.object({
       tableName: z.string().describe('The name of the table to sample.'),
+      columns: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Specific columns to sample. If omitted, samples all columns.',
+        ),
+      limit: z
+        .number()
+        .min(1)
+        .max(10)
+        .default(3)
+        .optional()
+        .describe('Number of rows to sample (1-10, default 3).'),
     }),
-    execute: ({ tableName }, options) => {
-      tableName = tableName.replace(/[^a-zA-Z0-9_.]/g, '');
+    execute: ({ tableName, columns, limit = 3 }, options) => {
+      const sanitize = (name: string) => name.replace(/[^a-zA-Z0-9_.]/g, '');
+      const safeTable = sanitize(tableName);
+      const columnList = columns?.length
+        ? columns.map(sanitize).join(', ')
+        : '*';
+      const safeLimit = Math.min(Math.max(1, limit), 10);
+
       const state = toState<{ adapter: Adapter }>(options);
-      return state.adapter.execute(`SELECT * FROM ${tableName} LIMIT 3`);
+      return state.adapter.execute(
+        `SELECT ${columnList} FROM ${safeTable} LIMIT ${safeLimit}`,
+      );
     },
   }),
   db_query: tool({
@@ -74,7 +98,7 @@ const tools = {
 };
 
 const userMemoryTypes = [
-  'role',
+  'identity',
   'alias',
   'preference',
   'context',
@@ -83,8 +107,8 @@ const userMemoryTypes = [
 
 const userMemorySchema = z.discriminatedUnion('type', [
   z.object({
-    type: z.literal('role'),
-    description: z.string().describe("The user's role or identity"),
+    type: z.literal('identity'),
+    description: z.string().describe("The user's identity: role or/and name"),
   }),
   z.object({
     type: z.literal('alias'),
@@ -175,27 +199,6 @@ export const memoryTools = {
   }),
 };
 
-const getRenderingGuidance = (renderingTools?: RenderingTools) => {
-  const renderingToolNames = Object.keys(renderingTools ?? {}).filter(
-    (toolName) => toolName.startsWith('render_'),
-  );
-
-  if (!renderingToolNames.length) {
-    return { constraint: undefined, section: '' };
-  }
-
-  return {
-    constraint:
-      '**Rendering**: Use a render_* visualization tool for trend/over time/monthly requests or explicit chart asks; otherwise provide the insight in text.',
-    section: `
-    <rendering_tools>
-      Rendering tools available: ${renderingToolNames.join(', ')}.
-      Use the matching render_* tool when the user requests a chart or mentions trends/over time/monthly performance. Prefer a line chart for those time-based requests. Always include a concise text insight alongside any visualization; if no suitable render_* tool fits, deliver the insight in text only.
-    </rendering_tools>
-    `,
-  };
-};
-
 const SQL_STEP_BACK_EXAMPLES: StepBackExample[] = [
   {
     originalQuestion: 'Who are our top 5 customers by spending?',
@@ -226,92 +229,54 @@ const SQL_STEP_BACK_EXAMPLES: StepBackExample[] = [
   },
 ];
 
-const text2sqlAgent = agent<
+export const sqlQueryAgent = agent({
+  name: 'text2sql',
+  model: groq('openai/gpt-oss-20b'),
+  tools,
+  // output: z.object({
+  //   sql: z
+  //     .string()
+  //     .describe('The SQL query generated to answer the user question.'),
+  // }),
+  prompt: (state) => {
+    return `
+    <agent>
+      <name>Freya</name>
+      <role>You are an expert SQL query generator, answering business questions with accurate queries.</role>
+      <tone>Your tone should be concise and business-friendly.</tone>
+    </agent>
+    ${state?.teachings || ''}
+    ${state?.introspection || ''}
+    <output>SQL query that can run directly without prose whatsoever</output>
+  `;
+  },
+});
+
+/**
+ * An agent that does Table Augmented Generation for Text-to-SQL tasks.
+ */
+export const t_a_g = agent<
   { sql: string },
   {
-    introspection: Introspection;
-    context: string;
-    adapterInfo: string;
-    renderingTools?: RenderingTools;
+    // FIXME: this should not be here after creating the context package
+    introspection: string;
     teachings: string;
     memory?: TeachablesStore;
     userId?: string;
   }
 >({
-  name: 'text2sql',
   model: groq('openai/gpt-oss-20b'),
+  tools,
+  name: 'text2sql',
   prompt: (state) => {
-    const renderingGuidance = getRenderingGuidance(state?.renderingTools);
     const hasMemory = !!state?.memory;
-    const constraints = [
-      '**Max Output Rows**: Never output more than 100 rows of raw data. Use aggregation or pagination otherwise.',
-      '**Validation**: You must validate your query before final execution. Follow the pattern: Draft Query → `validate_query` → Fix (if needed) → `db_query`.',
-      '**Data Inspection**: If you are unsure about column values (e.g. status codes, date formats), use `get_sample_rows` to inspect the data before writing the query.',
-      '**Tool Usage**: If you have not produced a SQL snippet, do not call `db_query`. First produce the query string, then validate.',
-      renderingGuidance.constraint,
-      '**Scratchpad**: Use the `scratchpad` tool for strategic reflection during SQL query generation.',
-    ].filter(Boolean);
-
-    const constraintsSection = constraints
-      .map((constraint, index) => `      ${index + 1}. ${constraint}`)
-      .join('\n');
 
     return `
-    <identity>
-      You are an expert SQL query generator, answering business questions with accurate queries.
-      Your tone should be concise and business-friendly.
-    </identity>
-
-    ${databaseSchemaPrompt(state!)}
 
     ${state?.teachings || ''}
+    ${state?.introspection || ''}
 
     ${hasMemory ? memoryPrompt : ''}
-
-    <query_reasoning_strategy>
-      ${stepBackPrompt('general', {
-        examples: SQL_STEP_BACK_EXAMPLES,
-        stepBackQuestionTemplate:
-          'What are the SQL patterns, database principles, and schema relationships needed to answer this question?',
-      })}
-
-      Skip Step-Back only if the question is a direct "SELECT * FROM …" or a simple aggregation with a clear target.
-    </query_reasoning_strategy>
-
-    <constraints>
-${constraintsSection}
-    </constraints>
-${renderingGuidance.section}
   `;
   },
-});
-
-export const text2sqlOnly = text2sqlAgent.clone({
-  tools: {},
-  output: z.object({
-    sql: z
-      .string()
-      .describe('The SQL query generated to answer the user question.'),
-  }),
-  prompt: (state) => {
-    return `
-    <identity>
-      You are an expert SQL query generator, answering business questions with accurate queries.
-      Your tone should be concise and business-friendly.
-    </identity>
-
-    ${databaseSchemaPrompt(state!)}
-
-    <constraints>
-      1. **Output**: Provide ONLY the SQL query. Do not include markdown formatting like \`\`\`sql ... \`\`\`.
-      2. **Dialect**: Use standard SQL compatible with SQLite unless specified otherwise.
-    </constraints>
-  `;
-  },
-});
-
-export const text2sqlMonolith = text2sqlAgent.clone({
-  model: groq('openai/gpt-oss-20b'),
-  // model: openai('gpt-5.1-codex'),
-  tools,
 });

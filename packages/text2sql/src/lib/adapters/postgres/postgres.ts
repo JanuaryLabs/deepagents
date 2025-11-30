@@ -1,28 +1,19 @@
 import {
   Adapter,
-  type AdapterInfo,
-  type AdapterInfoProvider,
-  type IntrospectOptions,
-  type Introspection,
+  type ExecuteFunction,
+  type GroundingFn,
   type OnProgress,
   type Relationship,
   type Table,
   type TableIndex,
-  type TablesFilter,
-  applyTablesFilter,
-} from './adapter.ts';
-
-type ExecuteFunction = (sql: string) => Promise<any> | any;
-type ValidateFunction = (sql: string) => Promise<string | void> | string | void;
-type IntrospectFunction = () => Promise<Introspection> | Introspection;
+  type ValidateFunction,
+} from '../adapter.ts';
 
 export type PostgresAdapterOptions = {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
-  introspect?: IntrospectFunction;
+  grounding: GroundingFn[];
   schemas?: string[];
-  info?: AdapterInfoProvider;
-  tables?: TablesFilter;
 };
 
 type TableRow = {
@@ -125,8 +116,9 @@ export function formatPostgresError(sql: string, error: unknown) {
 
 export class Postgres extends Adapter {
   #options: PostgresAdapterOptions;
-  #introspection: Introspection | null = null;
-  #info: AdapterInfo | null = null;
+  override readonly grounding: GroundingFn[];
+  override readonly defaultSchema = 'public';
+  override readonly systemSchemas = ['pg_catalog', 'information_schema'];
 
   constructor(options: PostgresAdapterOptions) {
     super();
@@ -137,56 +129,7 @@ export class Postgres extends Adapter {
       ...options,
       schemas: options.schemas?.length ? options.schemas : undefined,
     };
-  }
-
-  override async introspect(options?: IntrospectOptions): Promise<Introspection> {
-    const onProgress = options?.onProgress;
-
-    if (this.#introspection) {
-      return this.#introspection;
-    }
-
-    if (this.#options.introspect) {
-      this.#introspection = await this.#options.introspect();
-      return this.#introspection;
-    }
-
-    const allTables = await this.#loadTables();
-    const allRelationships = await this.#loadRelationships();
-    const { tables, relationships } = this.#applyTablesFilter(
-      allTables,
-      allRelationships,
-    );
-    onProgress?.({
-      phase: 'tables',
-      message: `Loaded ${tables.length} tables`,
-      total: tables.length,
-    });
-
-    onProgress?.({ phase: 'row_counts', message: 'Counting table rows...' });
-    await this.#annotateRowCounts(tables, onProgress);
-
-    onProgress?.({ phase: 'primary_keys', message: 'Detecting primary keys...' });
-    await this.#annotatePrimaryKeys(tables);
-    onProgress?.({ phase: 'primary_keys', message: 'Primary keys annotated' });
-
-    onProgress?.({ phase: 'indexes', message: 'Loading index information...' });
-    await this.#annotateIndexes(tables);
-    onProgress?.({ phase: 'indexes', message: 'Indexes annotated' });
-
-    onProgress?.({ phase: 'column_stats', message: 'Collecting column statistics...' });
-    await this.#annotateColumnStats(tables, onProgress);
-
-    onProgress?.({ phase: 'low_cardinality', message: 'Identifying low cardinality columns...' });
-    await this.#annotateLowCardinalityColumns(tables, onProgress);
-
-    onProgress?.({
-      phase: 'relationships',
-      message: `Loaded ${relationships.length} relationships`,
-    });
-
-    this.#introspection = { tables, relationships };
-    return this.#introspection;
+    this.grounding = options.grounding;
   }
 
   override async execute(sql: string) {
@@ -207,35 +150,16 @@ export class Postgres extends Adapter {
     }
   }
 
-  override async info(): Promise<AdapterInfo> {
-    if (this.#info) {
-      return this.#info;
-    }
-    this.#info = await this.#resolveInfo();
-    return this.#info;
+  override async runQuery<Row>(sql: string): Promise<Row[]> {
+    return this.#runIntrospectionQuery<Row>(sql);
   }
 
-  override formatInfo(info: AdapterInfo): string {
-    const lines = [`Dialect: ${info.dialect ?? 'unknown'}`];
-    if (info.version) {
-      lines.push(`Version: ${info.version}`);
-    }
-    if (info.database) {
-      lines.push(`Database: ${info.database}`);
-    }
-    if (info.host) {
-      lines.push(`Host: ${info.host}`);
-    }
-    if (info.details && Object.keys(info.details).length) {
-      lines.push(`Details: ${JSON.stringify(info.details)}`);
-    }
-    return lines.join('\n');
+  override quoteIdentifier(name: string): string {
+    return `"${name.replace(/"/g, '""')}"`;
   }
 
-  override async getTables(): Promise<Table[]> {
-    const allTables = await this.#loadTables();
-    const allRelationships = await this.#loadRelationships();
-    return this.#applyTablesFilter(allTables, allRelationships).tables;
+  override escape(value: string): string {
+    return value.replace(/"/g, '""');
   }
 
   async #loadTables(): Promise<Table[]> {
@@ -279,13 +203,10 @@ export class Postgres extends Adapter {
     return Array.from(tables.values());
   }
 
-  async getRelationships(): Promise<Relationship[]> {
-    const allTables = await this.#loadTables();
-    const allRelationships = await this.#loadRelationships();
-    return this.#applyTablesFilter(allTables, allRelationships).relationships;
-  }
-
-  async #loadRelationships(): Promise<Relationship[]> {
+  async #loadRelationships(
+    filterTableNames?: string[],
+  ): Promise<Relationship[]> {
+    const tableFilter = this.#buildTableNamesFilter(filterTableNames);
     const rows = await this.#runIntrospectionQuery<RelationshipRow>(`
       SELECT
         tc.constraint_name,
@@ -304,6 +225,7 @@ export class Postgres extends Adapter {
         AND ccu.table_schema = tc.table_schema
       WHERE tc.constraint_type = 'FOREIGN KEY'
         ${this.#buildSchemaFilter('tc.table_schema')}
+        ${tableFilter}
       ORDER BY tc.table_schema, tc.table_name, tc.constraint_name, kcu.ordinal_position
     `);
 
@@ -360,38 +282,13 @@ export class Postgres extends Adapter {
     }
   }
 
-  async #annotatePrimaryKeys(tables: Table[]) {
-    if (!tables.length) {
-      return;
-    }
-    const tableMap = new Map(tables.map((table) => [table.name, table]));
-    const rows = await this.#runIntrospectionQuery<PrimaryKeyRow>(`
-      SELECT
-        tc.table_schema,
-        tc.table_name,
-        kcu.column_name
-      FROM information_schema.table_constraints AS tc
-      JOIN information_schema.key_column_usage AS kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-      WHERE tc.constraint_type = 'PRIMARY KEY'
-        ${this.#buildSchemaFilter('tc.table_schema')}
-    `);
-    for (const row of rows) {
-      if (!row.table_name) {
-        continue;
-      }
-      const schema = row.table_schema ?? 'public';
-      const qualifiedName = `${schema}.${row.table_name}`;
-      const table = tableMap.get(qualifiedName);
-      if (!table) {
-        continue;
-      }
-      const column = table.columns.find((col) => col.name === row.column_name);
-      if (column) {
-        column.isPrimaryKey = true;
-      }
-    }
+  /**
+   * @deprecated Primary keys are now handled via constraints grounding.
+   * This method is kept for backward compatibility but does nothing.
+   */
+  async #annotatePrimaryKeys(_tables: Table[]) {
+    // Primary keys are now derived from constraints, not stored on columns.
+    // See ConstraintGrounding for the new approach.
   }
 
   async #annotateIndexes(tables: Table[]) {
@@ -440,7 +337,6 @@ export class Postgres extends Adapter {
           name: row.index_name,
           columns: [],
           unique: Boolean(row.indisunique ?? false),
-          primary: Boolean(row.indisprimary ?? false),
           type: row.indisclustered ? 'clustered' : (row.method ?? undefined),
         };
         indexMap.set(indexKey, index);
@@ -450,7 +346,7 @@ export class Postgres extends Adapter {
         table.indexes.push(index);
       }
       if (row.column_name) {
-        index.columns.push(row.column_name);
+        index!.columns.push(row.column_name);
         const column = table.columns.find(
           (col) => col.name === row.column_name,
         );
@@ -516,7 +412,10 @@ export class Postgres extends Adapter {
     }
   }
 
-  async #annotateLowCardinalityColumns(tables: Table[], onProgress?: OnProgress) {
+  async #annotateLowCardinalityColumns(
+    tables: Table[],
+    onProgress?: OnProgress,
+  ) {
     const total = tables.length;
     for (let i = 0; i < tables.length; i++) {
       const table = tables[i];
@@ -580,6 +479,42 @@ export class Postgres extends Adapter {
     return `AND ${columnName} NOT IN ('pg_catalog', 'information_schema')`;
   }
 
+  /**
+   * Build a filter for table names (qualified as schema.table).
+   * Matches if either the source table or referenced table is in the list.
+   */
+  #buildTableNamesFilter(tableNames?: string[]): string {
+    if (!tableNames || tableNames.length === 0) {
+      return '';
+    }
+
+    const conditions: string[] = [];
+
+    for (const name of tableNames) {
+      if (name.includes('.')) {
+        const [schema, ...rest] = name.split('.');
+        const tableName = rest.join('.');
+        const escapedSchema = schema.replace(/'/g, "''");
+        const escapedTable = tableName.replace(/'/g, "''");
+        // Match source table
+        conditions.push(
+          `(tc.table_schema = '${escapedSchema}' AND tc.table_name = '${escapedTable}')`,
+        );
+        // Match referenced table
+        conditions.push(
+          `(ccu.table_schema = '${escapedSchema}' AND ccu.table_name = '${escapedTable}')`,
+        );
+      } else {
+        // Unqualified name - match just the table name
+        const escaped = name.replace(/'/g, "''");
+        conditions.push(`tc.table_name = '${escaped}'`);
+        conditions.push(`ccu.table_name = '${escaped}'`);
+      }
+    }
+
+    return `AND (${conditions.join(' OR ')})`;
+  }
+
   async #runIntrospectionQuery<Row>(sql: string): Promise<Row[]> {
     const result = await this.#options.execute(sql);
 
@@ -603,10 +538,6 @@ export class Postgres extends Adapter {
 
   #quoteIdentifier(name: string) {
     return `"${name.replace(/"/g, '""')}"`;
-  }
-
-  #applyTablesFilter(tables: Table[], relationships: Relationship[]) {
-    return applyTablesFilter(tables, relationships, this.#options.tables);
   }
 
   #formatQualifiedTableName(table: Table) {
@@ -686,16 +617,5 @@ export class Postgres extends Adapter {
       return value.toString('utf-8');
     }
     return null;
-  }
-
-  async #resolveInfo(): Promise<AdapterInfo> {
-    const { info } = this.#options;
-    if (!info) {
-      return { dialect: 'postgresql' };
-    }
-    if (typeof info === 'function') {
-      return info();
-    }
-    return info;
   }
 }

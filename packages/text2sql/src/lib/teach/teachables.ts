@@ -12,9 +12,11 @@ export interface Teachables {
     | 'quirk'
     | 'styleGuide'
     | 'analogy'
+    | 'glossary'
     | 'user_profile'
     // User-specific teachable types
     | 'identity'
+    | 'persona'
     | 'alias'
     | 'preference'
     | 'context'
@@ -50,8 +52,10 @@ export type GeneratedTeachable =
       therefore?: string;
       pitfall?: string;
     }
+  | { type: 'glossary'; entries: Record<string, string> }
   // User-specific teachable types
   | { type: 'identity'; name?: string; role?: string }
+  | { type: 'persona'; name: string; role: string; tone: string }
   | { type: 'alias'; term: string; meaning: string }
   | { type: 'preference'; aspect: string; value: string }
   | { type: 'context'; description: string }
@@ -568,6 +572,43 @@ export function analogy(input: {
   };
 }
 
+/**
+ * Map business terms directly to SQL expressions or fragments.
+ *
+ * Use this to teach the system how to CALCULATE or QUERY specific business concepts.
+ * The system will substitute these SQL patterns when users mention the term.
+ *
+ * **Glossary vs Alias:**
+ * - `alias` = user vocabulary → table/column name ("the big table" → "orders table")
+ * - `glossary` = business term → SQL expression ("revenue" → "SUM(orders.total_amount)")
+ *
+ * In short: alias renames, glossary computes.
+ *
+ * @param entries - Record mapping business terms to their SQL expressions
+ *
+ * @example
+ * glossary({
+ *   "revenue": "SUM(orders.total_amount)",
+ *   "average order value": "AVG(orders.total_amount)",
+ *   "active user": "last_login > NOW() - INTERVAL '30 days'",
+ *   "churned": "status = 'churned'",
+ *   "power user": "order_count > 10",
+ *   "net revenue": "SUM(orders.total_amount) - SUM(refunds.amount)",
+ * })
+ */
+export function glossary(entries: Record<string, string>): Teachables {
+  return {
+    type: 'glossary',
+    format: () =>
+      wrapBlock(
+        'glossary',
+        Object.entries(entries).map(([term, sql]) =>
+          wrapBlock('entry', [leaf('term', term), leaf('sql', sql)]),
+        ),
+      ),
+  };
+}
+
 // =============================================================================
 // User-Specific Teachable Types
 // =============================================================================
@@ -595,6 +636,38 @@ export function identity(input: { name?: string; role?: string }): Teachables {
       wrapBlock('identity', [
         name ? leaf('name', name) : '',
         role ? leaf('role', role) : '',
+      ]),
+  };
+}
+
+/**
+ * Define an AI persona with a name, role, and communication tone.
+ *
+ * Use this to customize the assistant's personality and how it communicates.
+ * The persona influences the style and approach of responses.
+ *
+ * @param input.name - The persona's name
+ * @param input.role - The persona's role or expertise
+ * @param input.tone - The communication style (e.g., friendly, professional, concise)
+ *
+ * @example
+ * persona({ name: "DataBot", role: "SQL Expert", tone: "friendly and encouraging" })
+ * persona({ name: "QueryMaster", role: "Database Analyst", tone: "professional and concise" })
+ * persona({ name: "SQLHelper", role: "Data Assistant", tone: "casual and approachable" })
+ */
+export function persona(input: {
+  name: string;
+  role: string;
+  tone: string;
+}): Teachables {
+  const { name, role, tone } = input;
+  return {
+    type: 'persona',
+    format: () =>
+      wrapBlock('persona', [
+        leaf('name', name),
+        leaf('role', role),
+        leaf('tone', tone),
       ]),
   };
 }
@@ -761,7 +834,8 @@ export function toInstructions(
 
 const SECTION_ORDER: Array<{ type: Teachables['type']; tag: string }> = [
   // User context (render first - most important for personalization)
-  { type: 'identity', tag: 'user_identity' },
+  { type: 'identity', tag: 'identity' },
+  { type: 'persona', tag: 'persona' },
   { type: 'context', tag: 'user_context' },
   { type: 'preference', tag: 'user_preferences' },
   { type: 'alias', tag: 'user_vocabulary' },
@@ -776,12 +850,15 @@ const SECTION_ORDER: Array<{ type: Teachables['type']; tag: string }> = [
   { type: 'term', tag: 'terminology' },
   { type: 'explain', tag: 'explanations' },
   { type: 'analogy', tag: 'analogies' },
+  { type: 'glossary', tag: 'glossary' },
   { type: 'example', tag: 'examples' },
 ];
 
 export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
   return generated.map((item) => {
     switch (item.type) {
+      case 'persona':
+        return persona({ name: item.name, role: item.role, tone: item.tone });
       case 'term':
         return term(item.name, item.definition);
       case 'hint':
@@ -836,6 +913,8 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
           therefore: item.therefore,
           pitfall: item.pitfall,
         });
+      case 'glossary':
+        return glossary(item.entries);
       // User-specific teachable types
       case 'identity':
         return identity({ name: item.name, role: item.role });
@@ -856,6 +935,7 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
  * Excludes user-specific teachables (identity, alias, preference, context, correction).
  */
 export default {
+  persona,
   term,
   hint,
   guardrail,
@@ -866,5 +946,6 @@ export default {
   quirk,
   styleGuide,
   analogy,
+  glossary,
   teachable,
 };

@@ -1,238 +1,342 @@
 ---
 title: Grounding
-description: How Text2SQL understands your database schema
+description: Configure database introspection to provide rich context for SQL generation
 ---
 
+Grounding is Text2SQL's database introspection system. It extracts schema metadata, statistics, and relationships from your database to give the AI rich context for generating accurate SQL queries.
 
-Grounding is the process by which Text2SQL understands your database structure. Before generating SQL, the system introspects your schema and creates a contextual understanding.
+## Why Grounding Matters
 
-## How It Works
+Without grounding, the AI would need to guess table names, column types, and relationships. Grounding provides:
 
-```
-Database
-    │
-    ▼
-┌─────────────────┐
-│   Introspect    │ ← Tables, columns, relationships
-└─────────────────┘
-    │
-    ▼
-┌─────────────────┐
-│  Brief Agent    │ ← Analyzes and summarizes
-└─────────────────┘
-    │
-    ▼
-┌─────────────────┐
-│     Cache       │ ← Stores for reuse (keyed by version)
-└─────────────────┘
-    │
-    ▼
-  Context for SQL Generation
-```
+- **Schema awareness** - Tables, columns, and their types
+- **Relationship mapping** - Foreign keys and join paths
+- **Performance hints** - Indexes, row counts, and size classifications
+- **Data patterns** - Low cardinality values (enums) and column statistics
 
-## Schema Introspection
+## Quick Start
 
-When you create an adapter, it introspects your database to discover:
+Each database adapter (PostgreSQL, SQLite, SQL Server) exports grounding factory functions. Import them and pass to your adapter:
 
-### Tables
-- Table names and schemas
-- Column names and data types
-- Primary keys
-
-### Relationships
-- Foreign key constraints
-- Table linkages
-
-### Statistics
-- Row counts per table
-- Column value ranges (min/max)
-- Null percentages
-- Index information
-
-### Low Cardinality Detection
-Columns with 20 or fewer distinct values are flagged with their actual values:
-
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server']}>
+<Tab value="PostgreSQL">
 ```typescript
-{
-  name: 'status',
-  type: 'varchar',
-  kind: 'LowCardinality',
-  values: ['pending', 'active', 'completed', 'cancelled']
-}
-```
+import { Postgres, Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import * as postgres from '@deepagents/text2sql/postgres';
 
-This helps the AI understand valid filter values.
-
-## Size Hints
-
-Tables are classified by row count to help the AI understand query performance:
-
-| Size Hint | Row Count | Implication |
-|-----------|-----------|-------------|
-| tiny | < 100 | Full table scans are fine |
-| small | 100 - 999 | Indexes help but not critical |
-| medium | 1,000 - 9,999 | Should use indexes for large results |
-| large | 10,000 - 99,999 | Indexes important, consider pagination |
-| huge | >= 100,000 | Must use indexes, pagination recommended |
-
-## Caching
-
-Text2SQL automatically caches the generated database context using the `version` parameter:
-
-```typescript
 const text2sql = new Text2Sql({
-  version: 'v1', // Used for cache key
-  adapter: new Sqlite({ execute }),
-  history: new InMemoryHistory(),
-});
-```
-
-### How Caching Works
-
-1. **First query**: Brief agent analyzes the database, result is cached based on `version`
-2. **Subsequent queries**: Cached brief is reused
-3. **Schema changes**: Bump the `version` to invalidate cache
-
-### Cache Location
-
-Caches are stored as files in the system temp directory:
-
-```
-/tmp/text2sql-{md5-hash-of-version}.txt   # Brief cache
-/tmp/text2sql-{md5-hash-of-version}.json  # Introspection cache
-```
-
-### Cache Invalidation
-
-Bump the version when your schema changes:
-
-```typescript
-const text2sql = new Text2Sql({
-  version: 'v2', // Bumped version invalidates cache
-  adapter: new Sqlite({ execute }),
-  history: new InMemoryHistory(),
-});
-```
-
-## Brief Content
-
-The brief agent generates a 400-600 word summary including:
-
-- **Business context**: What the database represents
-- **Table purposes**: What each table stores
-- **Row counts**: Data volume understanding
-- **Sample data**: Concrete examples of data formats
-
-Example brief excerpt:
-
-```
-This database tracks a digital music store.
-
-The Customer table (59 rows) stores customer information including
-names like "Luís Gonçalves" and email addresses.
-
-The Invoice table (412 rows) records purchases, with totals
-typically ranging from $0.99 to $25.86.
-
-Tracks are priced at $0.99 or $1.99, stored in the Track table
-which has 3,503 entries across various genres.
-```
-
-## Streaming Brief Status
-
-When using streaming methods, brief cache status is emitted:
-
-```typescript
-const stream = await text2sql.single('Show me top customers');
-
-for await (const chunk of stream) {
-  if (chunk.type === 'data-brief-agent') {
-    console.log('Brief status:', chunk.data.cache);
-    // 'hit' - used cached brief
-    // 'miss' - generating new brief
-    // 'new' - new brief generated and cached
-    // 'forced' - cache was forcefully refreshed
-  }
-}
-```
-
-## Custom Introspection
-
-For complex databases, provide custom introspection:
-
-```typescript
-new Postgres({
-  execute: (sql) => pool.query(sql).then(r => r.rows),
-  introspect: async () => ({
-    tables: [
-      {
-        name: 'public.users',
-        schema: 'public',
-        rawName: 'users',
-        columns: [
-          { name: 'id', type: 'uuid', isPrimaryKey: true },
-          { name: 'email', type: 'varchar', isIndexed: true },
-          { name: 'status', type: 'varchar', kind: 'LowCardinality',
-            values: ['active', 'inactive', 'banned'] },
-        ],
-        rowCount: 50000,
-        sizeHint: 'large',
-      },
-    ],
-    relationships: [
-      {
-        table: 'public.orders',
-        from: ['user_id'],
-        referenced_table: 'public.users',
-        to: ['id'],
-      },
+  version: 'v1',
+  adapter: new Postgres({
+    execute: async (sql) => pool.query(sql).then(r => r.rows),
+    grounding: [
+      postgres.tables(),
+      postgres.views(),
+      postgres.info(),
+      postgres.indexes(),
+      postgres.constraints(),
+      postgres.rowCount(),
+      postgres.columnStats(),
+      postgres.lowCardinality(),
     ],
   }),
+  history: new InMemoryHistory(),
 });
 ```
+</Tab>
+<Tab value="SQLite">
+```typescript
+import { Sqlite, Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import * as sqlite from '@deepagents/text2sql/sqlite';
 
-## Database Schema Prompt Format
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new Sqlite({
+    execute: (sql) => db.prepare(sql).all(),
+    grounding: [
+      sqlite.tables(),
+      sqlite.views(),
+      sqlite.info(),
+      sqlite.indexes(),
+      sqlite.constraints(),
+      sqlite.rowCount(),
+      sqlite.columnStats(),
+      sqlite.lowCardinality(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+<Tab value="SQL Server">
+```typescript
+import { SqlServer, Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
-The introspection data is formatted into XML for the AI model. The `databaseSchemaPrompt()` function creates:
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new SqlServer({
+    execute: async (sql) => {
+      const result = await pool.request().query(sql);
+      return result.recordset;
+    },
+    grounding: [
+      sqlserver.tables(),
+      sqlserver.views(),
+      sqlserver.info(),
+      sqlserver.indexes(),
+      sqlserver.constraints(),
+      sqlserver.rowCount(),
+      sqlserver.columnStats(),
+      sqlserver.lowCardinality(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+</Tabs>
 
-```xml
-<schema_context>
-  <dialect_info>
-    SQLite-specific information about functions and syntax
-  </dialect_info>
+## Available Groundings
 
-  <context>
-    Business context summary from brief agent (400-600 words)
-  </context>
+### Core Groundings
 
-  <tables>
-    - Table: Customer [rows: 59]
-      Columns:
-        - CustomerId (INTEGER) [PK]
-        - FirstName (TEXT)
-        - LastName (TEXT)
-        - Country (TEXT) [LowCardinality: USA, Canada, Brazil, ...]
-        - Email (TEXT)
-  </tables>
+These groundings discover your database structure:
 
-  <relationships>
-    - Invoice (CustomerId) -> Customer (CustomerId) [many-to-one (≈412 vs 59)]
-    - InvoiceLine (InvoiceId) -> Invoice (InvoiceId) [many-to-one (≈2,240 vs 412)]
-  </relationships>
-</schema_context>
+#### `tables(config?)`
+
+Discovers tables and their relationships via foreign key traversal. This is the foundational grounding that other groundings depend on.
+
+```typescript
+tables({
+  // Filter tables - array of names, regex, or predicate function
+  filter: ['users', 'orders', 'products'],
+  // or
+  filter: /^app_/,
+  // or
+  filter: (name) => !name.startsWith('_'),
+
+  // Traverse forward (child → parent) following FK direction
+  // true = unlimited depth, number = max depth
+  forward: 2,
+
+  // Traverse backward (parent → child) finding referencing tables
+  backward: 1,
+})
 ```
 
-This structured format helps the AI understand:
-- Available tables and columns
-- Data types and constraints
-- Valid filter values (low cardinality columns)
-- Table relationships and cardinality
-- Business context for the domain
+| Option | Type | Description |
+|--------|------|-------------|
+| `filter` | `string[]` \| `RegExp` \| `(name: string) => boolean` | Select which tables to include |
+| `forward` | `boolean` \| `number` | Follow FKs from child to parent tables |
+| `backward` | `boolean` \| `number` | Find tables that reference these tables |
 
-## Best Practices
+#### `views(config?)`
 
-1. **Use meaningful versions** - Include schema version for cache invalidation (e.g., `v1`, `v2`)
-2. **Monitor cache hits** - Track cache efficiency in production
-3. **Update version on schema changes** - Always bump version when schema changes
-4. **Consider custom introspection** - For very large databases, provide pre-computed introspection
-5. **Provide business context** - The more context in your adapter info, the better the generated queries
+Discovers database views and their columns.
+
+```typescript
+views({
+  // Same filter options as tables()
+  filter: ['active_users', 'sales_summary'],
+})
+```
+
+#### `info()`
+
+Collects database dialect, version, and connection info. Helps the AI understand database-specific SQL syntax.
+
+```typescript
+info()
+// Returns: { dialect: 'postgresql', version: '15.0', database: 'mydb' }
+```
+
+### Metadata Groundings
+
+These groundings enhance the schema with performance-relevant metadata. They run after `tables()` and annotate the discovered tables.
+
+#### `indexes()`
+
+Marks which columns have indexes. Helps the AI generate queries that use indexed columns for filtering and sorting.
+
+```typescript
+indexes()
+// Annotates columns with isIndexed: true
+```
+
+#### `constraints()`
+
+Collects CHECK, UNIQUE, NOT NULL, DEFAULT, PRIMARY KEY, and FOREIGN KEY constraints.
+
+```typescript
+constraints()
+// Annotates tables with constraint information
+```
+
+#### `rowCount()`
+
+Counts rows per table and classifies by size. Helps the AI avoid expensive full table scans on large tables.
+
+```typescript
+rowCount()
+// Annotates tables with rowCount and sizeHint
+```
+
+Size classifications:
+
+| Size Hint | Row Count |
+|-----------|-----------|
+| tiny | < 100 |
+| small | 100 - 999 |
+| medium | 1,000 - 9,999 |
+| large | 10,000 - 99,999 |
+| huge | >= 100,000 |
+
+#### `columnStats()`
+
+Collects min/max values and null fraction for numeric and date columns.
+
+```typescript
+columnStats()
+// Annotates columns with stats: { min, max, nullFraction }
+```
+
+#### `lowCardinality()`
+
+Identifies columns with few distinct values (like status, type, or category columns) and caches their values.
+
+```typescript
+lowCardinality()
+// Annotates columns with kind: 'LowCardinality' and values: ['active', 'inactive', ...]
+```
+
+### Advanced Groundings
+
+#### `report(config)`
+
+Uses an LLM agent to analyze your database and generate a business context report. The agent queries each table's row count and sample data to understand what the database represents.
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+
+report({
+  model: groq('llama-3.3-70b-versatile'),
+  // Optional: cache the report
+  cache: {
+    get: async () => localStorage.getItem('db-report'),
+    set: async (value) => localStorage.setItem('db-report', value),
+  },
+  // Optional: regenerate even if cached
+  forceRefresh: false,
+})
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `model` | `AgentModel` | LLM model for generating the report |
+| `cache` | `{ get(): Promise<string \| null>, set(value: string): Promise<void> }` | Optional cache interface |
+| `forceRefresh` | `boolean` | Force regeneration even if cached |
+
+## Execution Order
+
+Groundings execute in the order you specify. Some groundings depend on others:
+
+1. **`tables()`** must run first - discovers the base schema
+2. **`views()`** can run independently
+3. **`info()`** can run independently
+4. **`indexes()`**, **`constraints()`**, **`rowCount()`** - run after `tables()`, annotate discovered tables
+5. **`columnStats()`**, **`lowCardinality()`** - run after `tables()`, annotate columns
+6. **`report()`** - typically runs last, uses the full context
+
+## Filtering Tables
+
+All filter options work the same way across `tables()` and `views()`:
+
+```typescript
+// Include specific tables by name
+tables({ filter: ['users', 'orders', 'products'] })
+
+// Include tables matching a pattern
+tables({ filter: /^public\./ })
+
+// Custom predicate
+tables({ filter: (name) => !name.includes('_archive') })
+```
+
+## Relationship Traversal
+
+The `forward` and `backward` options control how `tables()` discovers related tables:
+
+```typescript
+// Start with 'orders' and follow FKs to find 'users', 'products', etc.
+tables({
+  filter: ['orders'],
+  forward: 2,  // Follow FKs up to 2 levels deep
+})
+
+// Start with 'users' and find all tables that reference it
+tables({
+  filter: ['users'],
+  backward: 1,  // Find immediate children only
+})
+
+// Both directions
+tables({
+  filter: ['orders'],
+  forward: true,   // Unlimited forward traversal
+  backward: true,  // Unlimited backward traversal
+})
+```
+
+## Minimal Configuration
+
+For simple use cases, you can use a minimal grounding setup:
+
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server']}>
+<Tab value="PostgreSQL">
+```typescript
+import * as postgres from '@deepagents/text2sql/postgres';
+
+grounding: [
+  postgres.tables(),
+  postgres.info(),
+]
+```
+</Tab>
+<Tab value="SQLite">
+```typescript
+import * as sqlite from '@deepagents/text2sql/sqlite';
+
+grounding: [
+  sqlite.tables(),
+  sqlite.info(),
+]
+```
+</Tab>
+<Tab value="SQL Server">
+```typescript
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
+
+grounding: [
+  sqlserver.tables(),
+  sqlserver.info(),
+]
+```
+</Tab>
+</Tabs>
+
+## Empty Grounding
+
+Pass an empty array to disable all automatic introspection:
+
+```typescript
+grounding: []
+```
+
+This is useful when providing custom introspection via the adapter's `introspect` option.
+
+## Next Steps
+
+- [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific configuration
+- [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific configuration
+- [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific configuration
+- [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

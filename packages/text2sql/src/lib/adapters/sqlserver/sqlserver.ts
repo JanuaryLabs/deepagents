@@ -1,28 +1,19 @@
 import {
   Adapter,
-  type AdapterInfo,
-  type AdapterInfoProvider,
-  type IntrospectOptions,
-  type Introspection,
+  type ExecuteFunction,
+  type GroundingFn,
   type OnProgress,
   type Relationship,
   type Table,
   type TableIndex,
-  type TablesFilter,
-  applyTablesFilter,
-} from './adapter.ts';
-
-type ExecuteFunction = (sql: string) => Promise<any> | any;
-type ValidateFunction = (sql: string) => Promise<string | void> | string | void;
-type IntrospectFunction = () => Promise<Introspection> | Introspection;
+  type ValidateFunction,
+} from '../adapter.ts';
 
 export type SqlServerAdapterOptions = {
   execute: ExecuteFunction;
   validate?: ValidateFunction;
-  introspect?: IntrospectFunction;
+  grounding: GroundingFn[];
   schemas?: string[];
-  info?: AdapterInfoProvider;
-  tables?: TablesFilter;
 };
 
 type ColumnRow = {
@@ -136,8 +127,9 @@ export function formatSqlServerError(sql: string, error: unknown) {
 
 export class SqlServer extends Adapter {
   #options: SqlServerAdapterOptions;
-  #introspection: Introspection | null = null;
-  #info: AdapterInfo | null = null;
+  override readonly grounding: GroundingFn[];
+  override readonly defaultSchema = 'dbo';
+  override readonly systemSchemas = ['INFORMATION_SCHEMA', 'sys'];
 
   constructor(options: SqlServerAdapterOptions) {
     super();
@@ -148,56 +140,7 @@ export class SqlServer extends Adapter {
       ...options,
       schemas: options.schemas?.length ? options.schemas : undefined,
     };
-  }
-
-  override async introspect(options?: IntrospectOptions): Promise<Introspection> {
-    const onProgress = options?.onProgress;
-
-    if (this.#introspection) {
-      return this.#introspection;
-    }
-
-    if (this.#options.introspect) {
-      this.#introspection = await this.#options.introspect();
-      return this.#introspection;
-    }
-
-    const allTables = await this.#loadTables();
-    const allRelationships = await this.#loadRelationships();
-    const { tables, relationships } = this.#applyTablesFilter(
-      allTables,
-      allRelationships,
-    );
-    onProgress?.({
-      phase: 'tables',
-      message: `Loaded ${tables.length} tables`,
-      total: tables.length,
-    });
-
-    onProgress?.({ phase: 'row_counts', message: 'Counting table rows...' });
-    await this.#annotateRowCounts(tables, onProgress);
-
-    onProgress?.({ phase: 'primary_keys', message: 'Detecting primary keys...' });
-    await this.#annotatePrimaryKeys(tables);
-    onProgress?.({ phase: 'primary_keys', message: 'Primary keys annotated' });
-
-    onProgress?.({ phase: 'indexes', message: 'Loading index information...' });
-    await this.#annotateIndexes(tables);
-    onProgress?.({ phase: 'indexes', message: 'Indexes annotated' });
-
-    onProgress?.({ phase: 'column_stats', message: 'Collecting column statistics...' });
-    await this.#annotateColumnStats(tables, onProgress);
-
-    onProgress?.({ phase: 'low_cardinality', message: 'Identifying low cardinality columns...' });
-    await this.#annotateLowCardinalityColumns(tables, onProgress);
-
-    onProgress?.({
-      phase: 'relationships',
-      message: `Loaded ${relationships.length} relationships`,
-    });
-
-    this.#introspection = { tables, relationships };
-    return this.#introspection;
+    this.grounding = options.grounding;
   }
 
   override async execute(sql: string) {
@@ -220,35 +163,16 @@ export class SqlServer extends Adapter {
     }
   }
 
-  override async info(): Promise<AdapterInfo> {
-    if (this.#info) {
-      return this.#info;
-    }
-    this.#info = await this.#resolveInfo();
-    return this.#info;
+  override async runQuery<Row>(sql: string): Promise<Row[]> {
+    return this.#runIntrospectionQuery<Row>(sql);
   }
 
-  override formatInfo(info: AdapterInfo): string {
-    const lines = [`Dialect: ${info.dialect ?? 'unknown'}`];
-    if (info.version) {
-      lines.push(`Version: ${info.version}`);
-    }
-    if (info.database) {
-      lines.push(`Database: ${info.database}`);
-    }
-    if (info.host) {
-      lines.push(`Host: ${info.host}`);
-    }
-    if (info.details && Object.keys(info.details).length) {
-      lines.push(`Details: ${JSON.stringify(info.details)}`);
-    }
-    return lines.join('\n');
+  override quoteIdentifier(name: string): string {
+    return `[${name.replace(/]/g, ']]')}]`;
   }
 
-  override async getTables(): Promise<Table[]> {
-    const allTables = await this.#loadTables();
-    const allRelationships = await this.#loadRelationships();
-    return this.#applyTablesFilter(allTables, allRelationships).tables;
+  override escape(value: string): string {
+    return value.replace(/]/g, ']]');
   }
 
   async #loadTables(): Promise<Table[]> {
@@ -295,13 +219,10 @@ export class SqlServer extends Adapter {
     return Array.from(tables.values());
   }
 
-  override async getRelationships(): Promise<Relationship[]> {
-    const allTables = await this.#loadTables();
-    const allRelationships = await this.#loadRelationships();
-    return this.#applyTablesFilter(allTables, allRelationships).relationships;
-  }
-
-  async #loadRelationships(): Promise<Relationship[]> {
+  async #loadRelationships(
+    filterTableNames?: string[],
+  ): Promise<Relationship[]> {
+    const tableFilter = this.#buildTableNamesFilter(filterTableNames);
     const rows = await this.#runIntrospectionQuery<RelationshipRow>(`
       SELECT
         fk.CONSTRAINT_NAME AS constraint_name,
@@ -319,6 +240,7 @@ export class SqlServer extends Adapter {
         AND pk.ORDINAL_POSITION = fk.ORDINAL_POSITION
       WHERE 1 = 1
         ${this.#buildSchemaFilter('fk.TABLE_SCHEMA')}
+        ${tableFilter}
       ORDER BY fk.TABLE_SCHEMA, fk.TABLE_NAME, fk.CONSTRAINT_NAME, fk.ORDINAL_POSITION
     `);
 
@@ -379,38 +301,13 @@ export class SqlServer extends Adapter {
     }
   }
 
-  async #annotatePrimaryKeys(tables: Table[]) {
-    if (!tables.length) {
-      return;
-    }
-    const tableMap = new Map(tables.map((table) => [table.name, table]));
-    const rows = await this.#runIntrospectionQuery<PrimaryKeyRow>(`
-      SELECT
-        kc.TABLE_SCHEMA AS table_schema,
-        kc.TABLE_NAME AS table_name,
-        kc.COLUMN_NAME AS column_name
-      FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tc
-      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS kc
-        ON tc.CONSTRAINT_NAME = kc.CONSTRAINT_NAME
-        AND tc.TABLE_SCHEMA = kc.TABLE_SCHEMA
-      WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-        ${this.#buildSchemaFilter('kc.TABLE_SCHEMA')}
-    `);
-    for (const row of rows) {
-      if (!row.table_name || !row.column_name) {
-        continue;
-      }
-      const schema = row.table_schema ?? 'dbo';
-      const tableKey = `${schema}.${row.table_name}`;
-      const table = tableMap.get(tableKey);
-      if (!table) {
-        continue;
-      }
-      const column = table.columns.find((col) => col.name === row.column_name);
-      if (column) {
-        column.isPrimaryKey = true;
-      }
-    }
+  /**
+   * @deprecated Primary keys are now handled via constraints grounding.
+   * This method is kept for backward compatibility but does nothing.
+   */
+  async #annotatePrimaryKeys(_tables: Table[]) {
+    // Primary keys are now derived from constraints, not stored on columns.
+    // See ConstraintGrounding for the new approach.
   }
 
   async #annotateIndexes(tables: Table[]) {
@@ -462,7 +359,6 @@ export class SqlServer extends Adapter {
           name: row.index_name,
           columns: [],
           unique: Boolean(row.is_unique),
-          primary: Boolean(row.is_primary_key),
           type: row.type_desc ?? undefined,
         };
         indexMap.set(indexKey, index);
@@ -475,7 +371,7 @@ export class SqlServer extends Adapter {
         continue;
       }
       if (row.column_name) {
-        index.columns.push(row.column_name);
+        index!.columns.push(row.column_name);
         const column = table.columns.find(
           (col) => col.name === row.column_name,
         );
@@ -543,7 +439,10 @@ export class SqlServer extends Adapter {
     }
   }
 
-  async #annotateLowCardinalityColumns(tables: Table[], onProgress?: OnProgress) {
+  async #annotateLowCardinalityColumns(
+    tables: Table[],
+    onProgress?: OnProgress,
+  ) {
     const total = tables.length;
     for (let i = 0; i < tables.length; i++) {
       const table = tables[i];
@@ -606,6 +505,42 @@ export class SqlServer extends Adapter {
     return `AND ${columnName} NOT IN ('INFORMATION_SCHEMA', 'sys')`;
   }
 
+  /**
+   * Build a filter for table names (qualified as schema.table).
+   * Matches if either the source table or referenced table is in the list.
+   */
+  #buildTableNamesFilter(tableNames?: string[]): string {
+    if (!tableNames || tableNames.length === 0) {
+      return '';
+    }
+
+    // Parse qualified names (schema.table) and unqualified names
+    const conditions: string[] = [];
+
+    for (const name of tableNames) {
+      const escaped = name.replace(/'/g, "''");
+      if (name.includes('.')) {
+        const [schema, ...rest] = name.split('.');
+        const tableName = rest.join('.');
+        const escapedSchema = schema.replace(/'/g, "''");
+        const escapedTable = tableName.replace(/'/g, "''");
+        // Match source or target table
+        conditions.push(
+          `(fk.TABLE_SCHEMA = '${escapedSchema}' AND fk.TABLE_NAME = '${escapedTable}')`,
+        );
+        conditions.push(
+          `(pk.TABLE_SCHEMA = '${escapedSchema}' AND pk.TABLE_NAME = '${escapedTable}')`,
+        );
+      } else {
+        // Unqualified name - match just the table name
+        conditions.push(`fk.TABLE_NAME = '${escaped}'`);
+        conditions.push(`pk.TABLE_NAME = '${escaped}'`);
+      }
+    }
+
+    return `AND (${conditions.join(' OR ')})`;
+  }
+
   async #runIntrospectionQuery<Row>(sql: string): Promise<Row[]> {
     const result = await this.#options.execute(sql);
 
@@ -644,10 +579,6 @@ export class SqlServer extends Adapter {
 
   #quoteIdentifier(name: string) {
     return `[${name.replace(/]/g, ']]')}]`;
-  }
-
-  #applyTablesFilter(tables: Table[], relationships: Relationship[]) {
-    return applyTablesFilter(tables, relationships, this.#options.tables);
   }
 
   #formatQualifiedTableName(table: Table) {
@@ -727,16 +658,5 @@ export class SqlServer extends Adapter {
       return value.toString('utf-8');
     }
     return null;
-  }
-
-  async #resolveInfo(): Promise<AdapterInfo> {
-    const { info } = this.#options;
-    if (!info) {
-      return { dialect: 'sqlserver' };
-    }
-    if (typeof info === 'function') {
-      return info();
-    }
-    return info;
   }
 }

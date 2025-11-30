@@ -1,3 +1,14 @@
+import type { AbstractGrounding } from './grounding.ticket.ts';
+import { createGroundingContext } from './groundings/context.ts';
+
+/**
+ * Filter type for view/table names.
+ * - string[]: explicit list of view names
+ * - RegExp: pattern to match view names
+ * - function: predicate to filter view names
+ */
+export type Filter = string[] | RegExp | ((viewName: string) => boolean);
+
 export interface Table {
   name: string;
   schema?: string;
@@ -7,21 +18,30 @@ export interface Table {
     type: string;
     kind?: 'LowCardinality';
     values?: string[];
-    isPrimaryKey?: boolean;
     isIndexed?: boolean;
     stats?: ColumnStats;
   }[];
   rowCount?: number;
   sizeHint?: 'tiny' | 'small' | 'medium' | 'large' | 'huge';
   indexes?: TableIndex[];
+  constraints?: TableConstraint[];
 }
 
 export interface TableIndex {
   name: string;
   columns: string[];
   unique?: boolean;
-  primary?: boolean;
   type?: string;
+}
+
+export interface TableConstraint {
+  name: string;
+  type: 'CHECK' | 'UNIQUE' | 'NOT_NULL' | 'DEFAULT' | 'PRIMARY_KEY' | 'FOREIGN_KEY';
+  columns?: string[];
+  definition?: string;
+  defaultValue?: string;
+  referencedTable?: string;
+  referencedColumns?: string[];
 }
 
 export interface ColumnStats {
@@ -48,9 +68,12 @@ export interface AdapterInfo {
   dialect: string;
   version?: string;
   database?: string;
-  host?: string;
   details?: Record<string, unknown>;
 }
+
+export type AdapterInfoProvider =
+  | AdapterInfo
+  | (() => Promise<AdapterInfo> | AdapterInfo);
 
 export type IntrospectionPhase =
   | 'tables'
@@ -70,29 +93,123 @@ export interface IntrospectionProgress {
 
 export type OnProgress = (progress: IntrospectionProgress) => void;
 
-export type AdapterInfoProvider =
-  | AdapterInfo
-  | (() => Promise<AdapterInfo> | AdapterInfo);
-
 export interface IntrospectOptions {
   onProgress?: OnProgress;
 }
 
-export abstract class Adapter {
-  abstract introspect(options?: IntrospectOptions): Promise<Introspection> | Introspection;
+export type GroundingFn = (adapter: Adapter) => AbstractGrounding;
 
+export type ExecuteFunction = (sql: string) => Promise<any> | any;
+export type ValidateFunction = (
+  sql: string,
+) => Promise<string | void> | string | void;
+
+export abstract class Adapter {
+  abstract grounding: GroundingFn[];
+
+  /**
+   * Default schema name for this database.
+   * PostgreSQL: 'public', SQL Server: 'dbo', SQLite: undefined
+   */
+  abstract readonly defaultSchema: string | undefined;
+
+  /**
+   * System schemas to exclude from introspection by default.
+   */
+  abstract readonly systemSchemas: string[];
+
+  async introspect() {
+    const lines: { tag: string; fn: () => string | null }[] = [];
+    const ctx = createGroundingContext();
+    for (const fn of this.grounding) {
+      const grounding = fn(this);
+      lines.push({
+        tag: grounding.tag,
+        fn: await grounding.execute(ctx),
+      });
+    }
+    return lines
+      .map(({ fn, tag }) => {
+        const description = fn();
+        if (description === null) {
+          return '';
+        }
+        return `<${tag}>\n${description}\n</${tag}>`;
+      })
+      .join('\n');
+  }
   abstract execute(sql: string): Promise<any[]> | any[];
   abstract validate(sql: string): Promise<string | void> | string | void;
-  abstract info(): Promise<AdapterInfo> | AdapterInfo;
-  abstract formatInfo(info: AdapterInfo): string;
+  abstract runQuery<Row>(sql: string): Promise<Row[]> | Row[];
 
-  abstract getTables(): Promise<Table[]> | Table[];
-  abstract getRelationships(): Promise<Relationship[]> | Relationship[];
+  /**
+   * Quote an identifier (table/column name) for safe use in SQL.
+   * Each database uses different quoting styles.
+   */
+  abstract quoteIdentifier(name: string): string;
 
-  async resolveTables(filter: TablesFilter): Promise<string[]> {
-    const allTables = await this.getTables();
-    const relationships = await this.getRelationships();
-    return getTablesWithRelated(allTables, relationships, filter);
+  /**
+   * Escape a string value for safe use in SQL.
+   * Each database escapes different characters.
+   */
+  abstract escape(value: string): string;
+
+  /**
+   * Convert unknown database value to number.
+   * Handles number, bigint, and string types.
+   */
+  toNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'bigint') {
+      return Number(value);
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Parse a potentially qualified table name into schema and table parts.
+   */
+  parseTableName(name: string): { schema: string; table: string } {
+    if (name.includes('.')) {
+      const [schema, ...rest] = name.split('.');
+      return { schema, table: rest.join('.') };
+    }
+    return { schema: this.defaultSchema ?? '', table: name };
+  }
+
+  /**
+   * Escape a string value for use in SQL string literals (single quotes).
+   * Used in WHERE clauses like: WHERE name = '${escapeString(value)}'
+   */
+  escapeString(value: string): string {
+    return value.replace(/'/g, "''");
+  }
+
+  /**
+   * Build a SQL filter clause to include/exclude schemas.
+   * @param columnName - The schema column name (e.g., 'TABLE_SCHEMA')
+   * @param allowedSchemas - If provided, filter to these schemas only
+   */
+  buildSchemaFilter(columnName: string, allowedSchemas?: string[]): string {
+    if (allowedSchemas && allowedSchemas.length > 0) {
+      const values = allowedSchemas
+        .map((s) => `'${this.escapeString(s)}'`)
+        .join(', ');
+      return `AND ${columnName} IN (${values})`;
+    }
+    if (this.systemSchemas.length > 0) {
+      const values = this.systemSchemas
+        .map((s) => `'${this.escapeString(s)}'`)
+        .join(', ');
+      return `AND ${columnName} NOT IN (${values})`;
+    }
+    return '';
   }
 }
 

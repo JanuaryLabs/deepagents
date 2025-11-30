@@ -54,7 +54,7 @@ export default [
     steps: [
       'Translate the question into SQL patterns (aggregation, segmentation, time range, ranking).',
       'Choose tables/relations that satisfy those patterns; note lookup tables and filter values implied by schema hints.',
-      "Inspect samples with 'get_sample_rows' if column formats or codes are unclear.",
+      "Inspect samples with 'get_sample_rows' for any column you'll use in WHERE/JOIN conditions - target just those columns (e.g., get_sample_rows('orders', ['status', 'order_type'])).",
       'Sketch join/filter/aggregation order considering table sizes, indexes, and stats.',
       "Draft SQL, validate via 'validate_query', then execute via 'db_query' with a short reasoning note.",
     ],
@@ -63,4 +63,27 @@ export default [
     prefer:
       'Summaries should be concise, business-friendly, highlight key comparisons, and add a short helpful follow-up when useful.',
   }),
+  // Tool usage constraints
+  guardrail({
+    rule: 'Never output more than 100 rows of raw data.',
+    action: 'Use aggregation or pagination otherwise.',
+  }),
+  guardrail({
+    rule: 'You must validate your query before final execution.',
+    action:
+      "Follow the pattern: Draft Query → `validate_query` → Fix (if needed) → `db_query`.",
+  }),
+  guardrail({
+    rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
+    reason: 'Prevents SQL errors from wrong value formats.',
+    action:
+      "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
+  }),
+  guardrail({
+    rule: 'Do not call `db_query` without first producing and validating a SQL snippet.',
+    action: 'First produce the query string, then validate.',
+  }),
+  hint(
+    'Use the `scratchpad` tool for strategic reflection during SQL query generation.',
+  ),
 ] as Teachables[];

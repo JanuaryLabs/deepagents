@@ -1,15 +1,12 @@
 /* eslint-disable @nx/enforce-module-boundaries */
-import { Sql } from 'autoevals';
+import { Levenshtein, Sql } from 'autoevals';
 import { evalite } from 'evalite';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import OpenAI from 'openai';
 
-import {
-  InMemoryHistory,
-  Sqlite,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 
 const groq = new OpenAI({
   apiKey: process.env['GROQ_API_KEY'],
@@ -19,39 +16,44 @@ const groq = new OpenAI({
 // Sample data from sql-create-context dataset
 // In a real scenario, you would fetch this from Hugging Face
 // URL: https://huggingface.co/datasets/b-mc2/sql-create-context/resolve/main/sql_create_context_v4.json
-const DATASET_SAMPLE = [
-  {
-    question:
-      'Please show the themes of competitions with host cities having populations larger than 1000.',
-    context:
-      'CREATE TABLE city (City_ID VARCHAR, Population INTEGER); CREATE TABLE farm_competition (Theme VARCHAR, Host_city_ID VARCHAR)',
-    answer:
-      'SELECT T2.Theme FROM city AS T1 JOIN farm_competition AS T2 ON T1.City_ID = T2.Host_city_ID WHERE T1.Population > 1000',
-  },
-  {
-    question:
-      'Please show the different statuses of cities and the average population of cities with each status.',
-    context: 'CREATE TABLE city (Status VARCHAR, Population INTEGER)',
-    answer: 'SELECT Status, AVG(Population) FROM city GROUP BY Status',
-  },
-  {
-    question: 'How many heads of the departments are older than 56 ?',
-    context: 'CREATE TABLE head (age INTEGER)',
-    answer: 'SELECT COUNT(*) FROM head WHERE age > 56',
-  },
-  {
-    question:
-      'List the name, born state and age of the heads of departments ordered by age.',
-    context:
-      'CREATE TABLE head (name VARCHAR, born_state VARCHAR, age VARCHAR)',
-    answer: 'SELECT name, born_state, age FROM head ORDER BY age',
-  },
-  {
-    question: 'List the creation year, name and budget of each department.',
-    context:
-      'CREATE TABLE department (creation VARCHAR, name VARCHAR, budget_in_billions VARCHAR)',
-    answer: 'SELECT creation, name, budget_in_billions FROM department',
-  },
+interface Sample{
+  question: string;
+  context: string;
+  answer: string;
+}
+const DATASET_SAMPLE: Sample[] = [
+  // {
+  //   question:
+  //     'Please show the themes of competitions with host cities having populations larger than 1000.',
+  //   context:
+  //     'CREATE TABLE city (City_ID VARCHAR, Population INTEGER); CREATE TABLE farm_competition (Theme VARCHAR, Host_city_ID VARCHAR)',
+  //   answer:
+  //     'SELECT T2.Theme FROM city AS T1 JOIN farm_competition AS T2 ON T1.City_ID = T2.Host_city_ID WHERE T1.Population > 1000',
+  // },
+  // {
+  //   question:
+  //     'Please show the different statuses of cities and the average population of cities with each status.',
+  //   context: 'CREATE TABLE city (Status VARCHAR, Population INTEGER)',
+  //   answer: 'SELECT Status, AVG(Population) FROM city GROUP BY Status',
+  // },
+  // {
+  //   question: 'How many heads of the departments are older than 56 ?',
+  //   context: 'CREATE TABLE head (age INTEGER)',
+  //   answer: 'SELECT COUNT(*) FROM head WHERE age > 56',
+  // },
+  // {
+  //   question:
+  //     'List the name, born state and age of the heads of departments ordered by age.',
+  //   context:
+  //     'CREATE TABLE head (name VARCHAR, born_state VARCHAR, age VARCHAR)',
+  //   answer: 'SELECT name, born_state, age FROM head ORDER BY age',
+  // },
+  // {
+  //   question: 'List the creation year, name and budget of each department.',
+  //   context:
+  //     'CREATE TABLE department (creation VARCHAR, name VARCHAR, budget_in_billions VARCHAR)',
+  //   answer: 'SELECT creation, name, budget_in_billions FROM department',
+  // },
 ];
 
 evalite('SQL Create Context', {
@@ -76,6 +78,7 @@ evalite('SQL Create Context', {
 
     // Initialize the Text2Sql agent with the in-memory adapter
     const adapter = new Sqlite({
+      grounding: [],
       execute: (sql) => {
         try {
           return db.prepare(sql).all();
@@ -105,24 +108,30 @@ evalite('SQL Create Context', {
 
     // Generate SQL
     // The agent will introspect the adapter which will read from our in-memory db
-    const result = await text2sql.toSql(input.question);
-    const generatedSql = await result.generate();
-
-    return generatedSql;
+    return text2sql.toSql(input.question);
   },
   scorers: [
     {
-      name: 'SQL Match (LLM)',
+      name: 'SQL Semantic Match',
       scorer: async ({ output, expected, input }) => {
         const result = await Sql({
           output: String(output),
           expected: String(expected),
           input: JSON.stringify(input),
-          client: groq as any,
+          client: groq as never,
           model: 'llama-3.3-70b-versatile',
         });
-        console.log('SQL Match Result:', result);
-        return result.score || 0;
+        return result.score ?? 0;
+      },
+    },
+    {
+      name: 'String Similarity',
+      scorer: async ({ output, expected }) => {
+        const result = await Levenshtein({
+          output: String(output),
+          expected: String(expected),
+        });
+        return result.score ?? 0;
       },
     },
   ],

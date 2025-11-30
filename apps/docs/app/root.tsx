@@ -12,7 +12,11 @@ import {
 import '../styles.css';
 
 export const meta: MetaFunction = () => [
-  { title: 'Deep Agents Documentation' },
+  { title: 'Text2SQL - Natural Language to SQL | DeepAgents' },
+  { name: 'description', content: 'AI-powered SQL generation that learns your business. Convert natural language questions to accurate SQL queries with domain knowledge.' },
+  { property: 'og:title', content: 'Text2SQL - Ask Questions. Get Queries.' },
+  { property: 'og:description', content: 'AI-powered SQL generation with teachables for domain knowledge' },
+  { name: 'twitter:card', content: 'summary_large_image' },
 ];
 
 export const links: LinksFunction = () => [
@@ -25,6 +29,10 @@ export const links: LinksFunction = () => [
   {
     rel: 'stylesheet',
     href: 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap',
+  },
+  {
+    rel: 'stylesheet',
+    href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap',
   },
 ];
 

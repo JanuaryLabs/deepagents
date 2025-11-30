@@ -5,7 +5,6 @@ import z from 'zod';
 import { agent, thirdPersonPrompt } from '@deepagents/agent';
 
 import type { Introspection } from '../adapters/adapter.ts';
-import { databaseSchemaPrompt } from '../prompt.ts';
 import { type GeneratedTeachable } from '../teach/teachables.ts';
 
 const teachableSchema = z.discriminatedUnion('type', [
@@ -73,7 +72,6 @@ const teachableSchema = z.discriminatedUnion('type', [
 export const teachablesAuthorAgent = agent<
   { teachables: GeneratedTeachable[] },
   {
-    introspection: Introspection;
     context?: string;
     adapterInfo?: string;
   }
@@ -97,7 +95,6 @@ export const teachablesAuthorAgent = agent<
       Choose only high-impact items that improve accuracy, safety, or clarity for this database.
     </identity>
 
-    ${databaseSchemaPrompt(state!)}
 
     <teachables_catalog>
       term: name + definition for domain vocabulary.

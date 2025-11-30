@@ -8,7 +8,6 @@ import type { Introspection } from '../adapters/adapter.ts';
 import { databaseSchemaPrompt } from '../prompt.ts';
 
 type SuggestionsAgentContext = {
-  introspection: Introspection;
   context?: string;
   adapterInfo?: string;
 };
@@ -56,7 +55,6 @@ export const suggestionsAgent = agent<
         metrics that drive executive decisions.
       </identity>
 
-      ${databaseSchemaPrompt(state!)}
 
       <instructions>
         - Recommend one or two UNIQUE questions that go beyond simple counts or listings.
