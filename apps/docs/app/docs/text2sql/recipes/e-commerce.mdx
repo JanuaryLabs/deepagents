@@ -1,0 +1,175 @@
+---
+title: E-Commerce Recipe
+description: Pre-built teachables for e-commerce and retail databases
+---
+
+This recipe provides teachables for e-commerce databases covering orders, customers, products, and revenue analytics.
+
+## Quick Start
+
+```typescript
+import {
+  term,
+  hint,
+  guardrail,
+  example,
+  clarification,
+  quirk,
+} from '@deepagents/text2sql';
+
+text2sql.instruct(
+  // Terms
+  term('AOV', 'Average Order Value - total revenue divided by number of orders'),
+  term('GMV', 'Gross Merchandise Value - total value of all goods sold before deductions'),
+  term('LTV', 'Lifetime Value - predicted total revenue from a customer over their relationship'),
+  term('cart abandonment', 'when a user adds items to cart but does not complete checkout'),
+  term('churn', 'when a customer stops purchasing, typically no order in 90+ days'),
+  term('repeat customer', 'customer who has placed more than one order'),
+  term('conversion rate', 'percentage of visitors who complete a purchase'),
+
+  // Guardrails
+  guardrail({
+    rule: 'Never expose full credit card numbers, CVV, or payment tokens',
+    reason: 'PCI compliance',
+    action: 'Show only last 4 digits of card number if needed',
+  }),
+  guardrail({
+    rule: 'Exclude test and internal orders from analytics',
+    action: 'Filter where email NOT LIKE \'%@test.com\' AND email NOT LIKE \'%@internal.com\'',
+  }),
+  guardrail({
+    rule: 'Do not expose individual customer addresses or phone numbers',
+    action: 'Aggregate by city/region instead',
+  }),
+
+  // Hints
+  hint('Active customer means ordered within last 90 days unless otherwise specified'),
+  hint('Revenue typically means gross revenue unless net is explicitly requested'),
+  hint('When asked for "top products", default to ordering by revenue not quantity'),
+  hint('Order status values are typically: pending, processing, shipped, delivered, cancelled, refunded'),
+
+  // Clarifications
+  clarification({
+    when: 'user asks for revenue without specifying type',
+    ask: 'Do you want gross revenue (before discounts/refunds) or net revenue (after)?',
+    reason: 'These can differ significantly, especially during promotions',
+  }),
+  clarification({
+    when: 'user asks about customers without a time frame',
+    ask: 'What time period? All time, last 30 days, last 90 days, or this year?',
+    reason: 'Customer metrics vary greatly by time window',
+  }),
+
+  // Quirks
+  quirk({
+    issue: 'Cancelled orders may still appear in orders table',
+    workaround: 'Always filter by status != \'cancelled\' for revenue calculations',
+  }),
+  quirk({
+    issue: 'Refunds are stored as negative line items',
+    workaround: 'Use ABS() for quantity analysis, allow negatives for revenue',
+  }),
+
+  // Examples
+  example({
+    question: 'show me top 10 products by revenue',
+    sql: `SELECT p.name, SUM(oi.quantity * oi.unit_price) as revenue
+          FROM order_items oi
+          JOIN products p ON oi.product_id = p.id
+          JOIN orders o ON oi.order_id = o.id
+          WHERE o.status NOT IN ('cancelled', 'refunded')
+          GROUP BY p.id, p.name
+          ORDER BY revenue DESC
+          LIMIT 10`,
+  }),
+  example({
+    question: 'what is the average order value this month',
+    sql: `SELECT AVG(total_amount) as aov
+          FROM orders
+          WHERE status NOT IN ('cancelled', 'refunded')
+            AND created_at >= DATE_TRUNC('month', CURRENT_DATE)`,
+  }),
+  example({
+    question: 'show me customer lifetime value',
+    sql: `SELECT c.id, c.email,
+            COUNT(DISTINCT o.id) as order_count,
+            SUM(o.total_amount) as lifetime_value
+          FROM customers c
+          JOIN orders o ON c.id = o.customer_id
+          WHERE o.status NOT IN ('cancelled', 'refunded')
+          GROUP BY c.id, c.email
+          ORDER BY lifetime_value DESC
+          LIMIT 100`,
+  }),
+);
+```
+
+## Teachables Breakdown
+
+### Terms
+
+| Term | Definition |
+|------|------------|
+| AOV | Average Order Value - total revenue / number of orders |
+| GMV | Gross Merchandise Value - total value before deductions |
+| LTV | Lifetime Value - total predicted revenue from a customer |
+| Cart abandonment | User adds items but doesn't complete checkout |
+| Churn | Customer stops purchasing (no order in 90+ days) |
+| Repeat customer | Customer with more than one order |
+| Conversion rate | Percentage of visitors who purchase |
+
+### Guardrails
+
+| Rule | Reason |
+|------|--------|
+| No credit card data | PCI compliance |
+| Exclude test orders | Clean analytics |
+| No individual addresses | Privacy protection |
+
+### Common Order Statuses
+
+```
+pending → processing → shipped → delivered
+                    ↘ cancelled
+                    ↘ refunded
+```
+
+## Example Questions
+
+With this recipe, users can ask:
+
+- "Show me revenue by month"
+- "Top 10 customers by lifetime value"
+- "What's our cart abandonment rate?"
+- "Products frequently bought together"
+- "Average order value by customer segment"
+- "Repeat customer rate this quarter"
+- "Revenue by product category"
+- "Orders by status breakdown"
+
+## Customization
+
+### Add your product categories
+
+```typescript
+term('electronics', 'category_id = 1 in products table'),
+term('apparel', 'category_id = 2 in products table'),
+```
+
+### Define your customer segments
+
+```typescript
+term('VIP customer', 'customer with lifetime_value > 10000 OR order_count > 50'),
+term('at-risk customer', 'previously active customer with no order in 60-90 days'),
+```
+
+### Add company-specific metrics
+
+```typescript
+term('gross margin', '(revenue - COGS) / revenue * 100'),
+example({
+  question: 'gross margin by category',
+  sql: `SELECT category, (SUM(revenue) - SUM(cogs)) / SUM(revenue) * 100 as margin
+        FROM order_items GROUP BY category`,
+}),
+```

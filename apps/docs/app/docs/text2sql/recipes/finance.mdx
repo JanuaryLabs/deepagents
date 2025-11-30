@@ -1,0 +1,234 @@
+---
+title: Finance Recipe
+description: Pre-built teachables for banking and financial databases
+---
+
+This recipe provides teachables for financial databases covering loans, portfolios, transactions, and regulatory compliance.
+
+## Quick Start
+
+```typescript
+import {
+  term,
+  hint,
+  guardrail,
+  example,
+  clarification,
+  quirk,
+  workflow,
+} from '@deepagents/text2sql';
+
+text2sql.instruct(
+  // Terms
+  term('NPL', 'Non-Performing Loan - loan past due 90+ days with no expected recovery'),
+  term('AUM', 'Assets Under Management - total market value of investments managed'),
+  term('YTD', 'Year To Date - from January 1 to current date'),
+  term('QoQ', 'Quarter over Quarter - comparison to same metric in previous quarter'),
+  term('MoM', 'Month over Month - comparison to same metric in previous month'),
+  term('NAV', 'Net Asset Value - total assets minus liabilities'),
+  term('ROI', 'Return on Investment - (gain - cost) / cost * 100'),
+  term('P&L', 'Profit and Loss statement - revenue minus expenses'),
+  term('CAGR', 'Compound Annual Growth Rate'),
+  term('exposure', 'total amount at risk in a position or portfolio'),
+
+  // Guardrails
+  guardrail({
+    rule: 'Never expose individual account balances with customer names',
+    reason: 'Financial privacy regulations',
+    action: 'Show aggregates by segment, region, or anonymized cohorts',
+  }),
+  guardrail({
+    rule: 'Transaction queries require audit logging',
+    reason: 'Regulatory compliance and fraud prevention',
+    action: 'Include query timestamp and user context in results',
+  }),
+  guardrail({
+    rule: 'Do not expose SSN, full account numbers, or routing numbers',
+    reason: 'Identity theft prevention',
+    action: 'Use masked versions (last 4 digits) if identification needed',
+  }),
+  guardrail({
+    rule: 'Large transaction queries (>$100K) require date range filtering',
+    reason: 'Performance and audit requirements',
+    action: 'Ask for date range before executing',
+  }),
+
+  // Hints
+  hint('Always include currency code when displaying monetary values'),
+  hint('Default to reporting currency (USD) unless user specifies otherwise'),
+  hint('Interest rates are typically stored as decimals (0.05 = 5%)'),
+  hint('Account status values: active, dormant, closed, frozen, suspended'),
+
+  // Clarifications
+  clarification({
+    when: 'user asks for returns without specifying period',
+    ask: 'What time period: YTD, 1-year, 3-year, or since inception?',
+    reason: 'Return calculations vary significantly by period',
+  }),
+  clarification({
+    when: 'user mentions portfolio without specifying type',
+    ask: 'Which portfolio type: equity, fixed income, mixed, or all?',
+    reason: 'Different portfolios have different metrics and benchmarks',
+  }),
+  clarification({
+    when: 'user asks about risk without specifying measure',
+    ask: 'Which risk measure: VaR, standard deviation, beta, or max drawdown?',
+    reason: 'Multiple valid risk metrics exist',
+  }),
+
+  // Quirks
+  quirk({
+    issue: 'Fiscal year may not align with calendar year',
+    workaround: 'Check fiscal_year_start in config table, typically July 1 or October 1',
+  }),
+  quirk({
+    issue: 'Currency amounts may be stored in cents/minor units',
+    workaround: 'Divide by 100 for display (check amount_unit column)',
+  }),
+  quirk({
+    issue: 'Historical exchange rates needed for multi-currency portfolios',
+    workaround: 'Join with exchange_rates table on transaction_date',
+  }),
+
+  // Workflows
+  workflow({
+    task: 'P&L Analysis',
+    triggers: ['profit and loss', 'P&L', 'income statement'],
+    steps: [
+      'Sum all revenue line items for the period',
+      'Sum all expense line items for the period',
+      'Calculate gross profit (revenue - COGS)',
+      'Calculate operating income (gross profit - operating expenses)',
+      'Calculate net income (operating income - taxes - interest)',
+      'Compare to previous period for variance analysis',
+    ],
+  }),
+  workflow({
+    task: 'Loan Portfolio Risk Assessment',
+    triggers: ['loan risk', 'credit risk', 'NPL analysis'],
+    steps: [
+      'Segment loans by days past due (current, 30, 60, 90+)',
+      'Calculate NPL ratio (90+ days / total loans)',
+      'Analyze concentration by industry/geography',
+      'Review collateral coverage ratios',
+      'Identify trends in delinquency migration',
+    ],
+  }),
+
+  // Examples
+  example({
+    question: 'show me NPL ratio by region',
+    sql: `SELECT region,
+            SUM(CASE WHEN days_past_due >= 90 THEN outstanding_balance ELSE 0 END) as npl_amount,
+            SUM(outstanding_balance) as total_loans,
+            ROUND(SUM(CASE WHEN days_past_due >= 90 THEN outstanding_balance ELSE 0 END) * 100.0 /
+                  NULLIF(SUM(outstanding_balance), 0), 2) as npl_ratio
+          FROM loans
+          WHERE status = 'active'
+          GROUP BY region
+          ORDER BY npl_ratio DESC`,
+  }),
+  example({
+    question: 'portfolio returns YTD',
+    sql: `SELECT portfolio_name,
+            SUM(current_value) as current_value,
+            SUM(cost_basis) as cost_basis,
+            ROUND((SUM(current_value) - SUM(cost_basis)) * 100.0 / NULLIF(SUM(cost_basis), 0), 2) as return_pct
+          FROM positions p
+          JOIN portfolios pf ON p.portfolio_id = pf.id
+          WHERE p.as_of_date = CURRENT_DATE
+          GROUP BY portfolio_name
+          ORDER BY return_pct DESC`,
+  }),
+  example({
+    question: 'transaction volume by month',
+    sql: `SELECT DATE_TRUNC('month', transaction_date) as month,
+            COUNT(*) as transaction_count,
+            SUM(amount) as total_volume,
+            AVG(amount) as avg_transaction
+          FROM transactions
+          WHERE transaction_date >= DATE_TRUNC('year', CURRENT_DATE)
+          GROUP BY DATE_TRUNC('month', transaction_date)
+          ORDER BY month`,
+  }),
+);
+```
+
+## Teachables Breakdown
+
+### Terms
+
+| Term | Definition |
+|------|------------|
+| NPL | Non-Performing Loan - 90+ days past due |
+| AUM | Assets Under Management |
+| YTD | Year To Date (Jan 1 to now) |
+| QoQ | Quarter over Quarter comparison |
+| NAV | Net Asset Value |
+| ROI | Return on Investment |
+| P&L | Profit and Loss statement |
+| Exposure | Total amount at risk |
+
+### Guardrails
+
+| Rule | Reason |
+|------|--------|
+| No individual account balances with names | Financial privacy |
+| Transaction queries need audit logging | Regulatory compliance |
+| No SSN or full account numbers | Identity protection |
+| Large queries need date filters | Performance/audit |
+
+### Loan Status Flow
+
+```
+originated → current → 30 DPD → 60 DPD → 90+ DPD (NPL)
+                    ↘ paid off
+                    ↘ charged off
+                    ↘ restructured
+```
+
+## Example Questions
+
+With this recipe, users can ask:
+
+- "Show me NPL ratio by region"
+- "Portfolio performance YTD"
+- "P&L for Q3"
+- "Transaction volume trends"
+- "AUM by fund type"
+- "Largest exposures by counterparty"
+- "Delinquency migration this quarter"
+- "Fee revenue breakdown"
+
+## Customization
+
+### Add your asset classes
+
+```typescript
+term('equity', 'stocks and equity funds - asset_class = \'EQ\''),
+term('fixed income', 'bonds and debt instruments - asset_class = \'FI\''),
+term('alternatives', 'hedge funds, PE, real assets - asset_class = \'ALT\''),
+```
+
+### Define your risk thresholds
+
+```typescript
+guardrail({
+  rule: 'Flag concentration risk above 10% in single counterparty',
+  action: 'Include warning in results when exposure > 10% of portfolio',
+}),
+```
+
+### Add regulatory report formats
+
+```typescript
+workflow({
+  task: 'Basel III Capital Adequacy',
+  steps: [
+    'Calculate Risk-Weighted Assets (RWA)',
+    'Sum Tier 1 capital components',
+    'Compute CET1 ratio (CET1 / RWA)',
+    'Compare to minimum threshold (4.5%)',
+  ],
+}),
+```

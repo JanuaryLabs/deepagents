@@ -7,6 +7,8 @@ The SQLite adapter works with SQLite databases, supporting both file-based and i
 
 ## Basic Setup
 
+<Tabs groupId="sqlite-driver" items={['node:sqlite', 'better-sqlite3', 'sql.js']}>
+<Tab value="node:sqlite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
@@ -15,6 +17,7 @@ import {
   Sqlite,
   Text2Sql,
 } from '@deepagents/text2sql';
+import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
 
@@ -22,82 +25,137 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
+    grounding: [
+      sqlite.tables(),
+      sqlite.views(),
+      sqlite.info(),
+      sqlite.indexes(),
+      sqlite.constraints(),
+      sqlite.rowCount(),
+      sqlite.columnStats(),
+      sqlite.lowCardinality(),
+    ],
   }),
   history: new InMemoryHistory(),
 });
 ```
+</Tab>
+<Tab value="better-sqlite3">
+```typescript
+import Database from 'better-sqlite3';
+
+import {
+  InMemoryHistory,
+  Sqlite,
+  Text2Sql,
+} from '@deepagents/text2sql';
+import * as sqlite from '@deepagents/text2sql/sqlite';
+
+const db = new Database('./database.db', { readonly: true });
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new Sqlite({
+    execute: (sql) => db.prepare(sql).all(),
+    grounding: [
+      sqlite.tables(),
+      sqlite.views(),
+      sqlite.info(),
+      sqlite.indexes(),
+      sqlite.constraints(),
+      sqlite.rowCount(),
+      sqlite.columnStats(),
+      sqlite.lowCardinality(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+<Tab value="sql.js">
+```typescript
+import initSqlJs from 'sql.js';
+
+import {
+  InMemoryHistory,
+  Sqlite,
+  Text2Sql,
+} from '@deepagents/text2sql';
+import * as sqlite from '@deepagents/text2sql/sqlite';
+
+const SQL = await initSqlJs();
+const db = new SQL.Database(data);
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new Sqlite({
+    execute: (sql) => {
+      const stmt = db.prepare(sql);
+      const rows = [];
+      while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+      }
+      stmt.free();
+      return rows;
+    },
+    grounding: [
+      sqlite.tables(),
+      sqlite.views(),
+      sqlite.info(),
+      sqlite.indexes(),
+      sqlite.constraints(),
+      sqlite.rowCount(),
+      sqlite.columnStats(),
+      sqlite.lowCardinality(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+</Tabs>
 
 ## Configuration Options
 
 ```typescript
+import * as sqlite from '@deepagents/text2sql/sqlite';
+
 new Sqlite({
   // Required: Execute SQL queries
   execute: (sql) => db.prepare(sql).all(),
+
+  // Required: Grounding functions for schema introspection
+  grounding: [
+    sqlite.tables(),
+    sqlite.info(),
+    // Add more grounding functions as needed
+  ],
 
   // Optional: Custom validation function
   validate: (sql) => {
     // Return void if valid, or error string if invalid
   },
-
-  // Optional: Custom introspection function
-  introspect: () => {
-    // Return { tables, relationships }
-  },
-
-  // Optional: Database info provider
-  info: {
-    dialect: 'sqlite',
-    version: '3.45.0',
-    database: 'mydb.db',
-  },
 });
 ```
 
-## Using better-sqlite3
+See [Grounding](/docs/text2sql/grounding) for the full list of available grounding functions and their configuration options.
 
-```typescript
-import Database from 'better-sqlite3';
+## Available Grounding Functions
 
-const db = new Database('./database.db', { readonly: true });
+The following grounding functions are available for SQLite. Import them from `@deepagents/text2sql/sqlite`:
 
-new Sqlite({
-  execute: (sql) => db.prepare(sql).all(),
-});
-```
+| Function | Description |
+|----------|-------------|
+| `tables()` | Discovers tables from `sqlite_master`, extracts columns using `PRAGMA table_info`, detects primary keys |
+| `views()` | Discovers database views |
+| `info()` | Collects SQLite version and database info |
+| `indexes()` | Identifies indexes using `PRAGMA index_list` and `PRAGMA index_info` |
+| `constraints()` | Maps foreign keys using `PRAGMA foreign_key_list` |
+| `rowCount()` | Counts rows and classifies tables by size |
+| `columnStats()` | Collects min, max, null fraction for columns |
+| `lowCardinality()` | Detects columns with 20 or fewer distinct values |
 
-## Using sql.js (Browser/WASM)
-
-```typescript
-import initSqlJs from 'sql.js';
-
-const SQL = await initSqlJs();
-const db = new SQL.Database(data);
-
-new Sqlite({
-  execute: (sql) => {
-    const stmt = db.prepare(sql);
-    const rows = [];
-    while (stmt.step()) {
-      rows.push(stmt.getAsObject());
-    }
-    stmt.free();
-    return rows;
-  },
-});
-```
-
-## Automatic Features
-
-The SQLite adapter automatically:
-
-- **Discovers tables** from `sqlite_master` (excluding internal `sqlite_*` tables)
-- **Extracts columns** using `PRAGMA table_info`
-- **Detects primary keys** from the `pk` column flag
-- **Identifies indexes** using `PRAGMA index_list` and `PRAGMA index_info`
-- **Maps foreign keys** using `PRAGMA foreign_key_list`
-- **Collects column statistics** (min, max, null fraction)
-- **Detects low cardinality columns** (20 or fewer distinct values)
-- **Classifies tables by size** based on row count
+See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
 ## Error Handling
 

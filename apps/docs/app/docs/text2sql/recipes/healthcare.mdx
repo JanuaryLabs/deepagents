@@ -1,0 +1,275 @@
+---
+title: Healthcare Recipe
+description: Pre-built teachables for clinical and healthcare databases with HIPAA compliance
+---
+
+This recipe provides teachables for healthcare databases covering patient data, clinical metrics, and HIPAA-compliant analytics.
+
+## Quick Start
+
+```typescript
+import {
+  term,
+  hint,
+  guardrail,
+  example,
+  clarification,
+  quirk,
+  workflow,
+} from '@deepagents/text2sql';
+
+text2sql.instruct(
+  // Terms
+  term('LOS', 'Length of Stay - number of days from admission to discharge'),
+  term('ALOS', 'Average Length of Stay - mean LOS across a cohort'),
+  term('PHI', 'Protected Health Information - any individually identifiable health data'),
+  term('readmission', 'patient returning to hospital within 30 days of discharge'),
+  term('encounter', 'single patient visit or episode of care'),
+  term('admission', 'patient entering inpatient care'),
+  term('discharge', 'patient leaving hospital care'),
+  term('ED', 'Emergency Department'),
+  term('ICU', 'Intensive Care Unit'),
+  term('DRG', 'Diagnosis Related Group - classification for billing'),
+  term('ICD-10', 'International Classification of Diseases, 10th revision - diagnosis codes'),
+  term('CPT', 'Current Procedural Terminology - procedure codes'),
+  term('census', 'current count of inpatients at a point in time'),
+
+  // HIPAA Guardrails - Critical
+  guardrail({
+    rule: 'NEVER return PHI columns: SSN, MRN, DOB, full name, address, phone, email',
+    reason: 'HIPAA Privacy Rule compliance',
+    action: 'Return de-identified aggregates or use patient_id only',
+  }),
+  guardrail({
+    rule: 'Minimum cell size of 10 for any grouping',
+    reason: 'Prevent re-identification through small cell counts',
+    action: 'Suppress or combine groups with fewer than 10 patients',
+  }),
+  guardrail({
+    rule: 'No individual patient records without explicit authorization',
+    reason: 'HIPAA minimum necessary standard',
+    action: 'Ask if aggregate statistics would meet the need instead',
+  }),
+  guardrail({
+    rule: 'Date ranges required for patient-level queries',
+    reason: 'Limit exposure and ensure relevance',
+    action: 'Ask for date range before querying patient data',
+  }),
+  guardrail({
+    rule: 'Do not join patient data with external identifiers',
+    reason: 'Prevents unauthorized linking',
+    action: 'Use internal patient_id only',
+  }),
+
+  // Hints
+  hint('Always use de-identified data for research queries'),
+  hint('Age should be grouped (e.g., 18-30, 31-45) not exact'),
+  hint('Geographic data should be at ZIP3 level or broader, not full ZIP'),
+  hint('Encounter types: inpatient, outpatient, emergency, observation'),
+  hint('Discharge disposition: home, SNF, rehab, expired, AMA'),
+
+  // Clarifications
+  clarification({
+    when: 'user requests patient-level data',
+    ask: 'Do you need individual patient records (requires authorization) or aggregate statistics?',
+    reason: 'HIPAA minimum necessary principle',
+  }),
+  clarification({
+    when: 'user asks about readmissions without specifying type',
+    ask: 'All-cause readmissions or specific condition (e.g., heart failure, pneumonia)?',
+    reason: 'Different readmission measures have different clinical significance',
+  }),
+  clarification({
+    when: 'user mentions mortality without specifying timeframe',
+    ask: 'In-hospital mortality, 30-day mortality, or 90-day mortality?',
+    reason: 'These are distinct quality measures',
+  }),
+
+  // Quirks
+  quirk({
+    issue: 'Encounter dates may span midnight creating date calculation issues',
+    workaround: 'Use admission_datetime and discharge_datetime, not just dates',
+  }),
+  quirk({
+    issue: 'Some diagnoses are coded differently between ICD-9 and ICD-10',
+    workaround: 'Check diagnosis_code_version column, use crosswalk table if needed',
+  }),
+  quirk({
+    issue: 'ED visits may convert to inpatient admissions mid-encounter',
+    workaround: 'Check encounter_type_final, not initial encounter_type',
+  }),
+
+  // Workflows
+  workflow({
+    task: 'Readmission Analysis',
+    triggers: ['readmission rate', '30-day readmit', 'readmissions'],
+    steps: [
+      'Identify index admissions (exclude transfers, planned readmits)',
+      'Find subsequent admissions within 30 days',
+      'Exclude planned procedures and scheduled returns',
+      'Calculate rate: (readmissions / index admissions) * 100',
+      'Stratify by DRG, payer, or discharge disposition',
+    ],
+    notes: 'CMS readmission measures have specific inclusion/exclusion criteria',
+  }),
+  workflow({
+    task: 'Length of Stay Analysis',
+    triggers: ['LOS', 'length of stay', 'bed days'],
+    steps: [
+      'Calculate LOS as discharge_date - admission_date',
+      'Segment by service line, DRG, or payer',
+      'Identify outliers (typically > 2 standard deviations)',
+      'Compare to benchmark (geometric mean LOS by DRG)',
+      'Analyze drivers of extended stays',
+    ],
+  }),
+
+  // Examples (HIPAA-compliant aggregates)
+  example({
+    question: 'average length of stay by department',
+    sql: `SELECT department,
+            COUNT(*) as encounters,
+            ROUND(AVG(EXTRACT(DAY FROM discharge_datetime - admission_datetime)), 1) as avg_los,
+            ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY
+              EXTRACT(DAY FROM discharge_datetime - admission_datetime)), 1) as median_los
+          FROM encounters
+          WHERE discharge_datetime IS NOT NULL
+            AND encounter_type = 'inpatient'
+            AND admission_datetime >= CURRENT_DATE - INTERVAL '1 year'
+          GROUP BY department
+          HAVING COUNT(*) >= 10
+          ORDER BY avg_los DESC`,
+  }),
+  example({
+    question: 'readmission rate this quarter',
+    sql: `WITH index_admissions AS (
+            SELECT patient_id, discharge_datetime, encounter_id
+            FROM encounters
+            WHERE encounter_type = 'inpatient'
+              AND discharge_datetime >= DATE_TRUNC('quarter', CURRENT_DATE)
+              AND discharge_disposition NOT IN ('expired', 'transfer')
+          ),
+          readmits AS (
+            SELECT DISTINCT ia.encounter_id
+            FROM index_admissions ia
+            JOIN encounters e ON ia.patient_id = e.patient_id
+              AND e.admission_datetime > ia.discharge_datetime
+              AND e.admission_datetime <= ia.discharge_datetime + INTERVAL '30 days'
+              AND e.encounter_type = 'inpatient'
+          )
+          SELECT
+            COUNT(DISTINCT ia.encounter_id) as index_admissions,
+            COUNT(DISTINCT r.encounter_id) as readmissions,
+            ROUND(COUNT(DISTINCT r.encounter_id) * 100.0 /
+                  NULLIF(COUNT(DISTINCT ia.encounter_id), 0), 2) as readmit_rate
+          FROM index_admissions ia
+          LEFT JOIN readmits r ON ia.encounter_id = r.encounter_id`,
+  }),
+  example({
+    question: 'ED wait times trend',
+    sql: `SELECT DATE_TRUNC('week', arrival_datetime) as week,
+            COUNT(*) as ed_visits,
+            ROUND(AVG(EXTRACT(EPOCH FROM (seen_datetime - arrival_datetime)) / 60), 0) as avg_wait_mins,
+            ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY
+              EXTRACT(EPOCH FROM (seen_datetime - arrival_datetime)) / 60), 0) as p90_wait_mins
+          FROM ed_encounters
+          WHERE arrival_datetime >= CURRENT_DATE - INTERVAL '3 months'
+          GROUP BY DATE_TRUNC('week', arrival_datetime)
+          HAVING COUNT(*) >= 10
+          ORDER BY week`,
+  }),
+);
+```
+
+## Teachables Breakdown
+
+### Terms
+
+| Term | Definition |
+|------|------------|
+| LOS | Length of Stay - days from admission to discharge |
+| ALOS | Average Length of Stay |
+| PHI | Protected Health Information |
+| Readmission | Return within 30 days of discharge |
+| Encounter | Single patient visit/episode |
+| DRG | Diagnosis Related Group |
+| ICD-10 | Diagnosis code system |
+| CPT | Procedure code system |
+| Census | Current inpatient count |
+
+### HIPAA Guardrails
+
+| Rule | Impact |
+|------|--------|
+| No PHI columns (SSN, MRN, DOB, name, address) | Privacy Rule |
+| Minimum cell size of 10 | Prevent re-identification |
+| No individual records without authorization | Minimum necessary |
+| Date ranges required | Limit exposure |
+
+### Patient Flow
+
+```
+ED Arrival → Triage → Treatment → Admit/Discharge
+                              ↓
+Admission → Inpatient Care → Discharge → Home/SNF/Rehab
+                              ↓
+                         Readmission (within 30 days)
+```
+
+## Example Questions
+
+With this recipe, users can ask:
+
+- "Average length of stay by department"
+- "Readmission rate this quarter"
+- "ED wait times trend"
+- "Census by unit"
+- "Discharge disposition breakdown"
+- "Top DRGs by volume"
+- "Procedure counts by service line"
+- "Bed utilization rate"
+
+## Customization
+
+### Add your service lines
+
+```typescript
+term('cardiology', 'service_line = \'CARD\' or department LIKE \'%Cardio%\''),
+term('orthopedics', 'service_line = \'ORTH\' or department LIKE \'%Ortho%\''),
+```
+
+### Define your quality metrics
+
+```typescript
+workflow({
+  task: 'Sepsis Bundle Compliance',
+  triggers: ['sepsis', 'SEP-1'],
+  steps: [
+    'Identify sepsis encounters (ICD-10 codes A40.x, A41.x)',
+    'Check 3-hour bundle completion (lactate, cultures, antibiotics)',
+    'Check 6-hour bundle if applicable',
+    'Calculate compliance rate',
+  ],
+}),
+```
+
+### Add institution-specific codes
+
+```typescript
+quirk({
+  issue: 'Internal location codes differ from standard',
+  workaround: 'Use location_crosswalk table to map to standard units',
+}),
+```
+
+## HIPAA Compliance Notes
+
+This recipe includes guardrails for common HIPAA requirements but is not a substitute for:
+
+1. Proper access controls and audit logging
+2. Business Associate Agreements (BAAs)
+3. Institutional Review Board (IRB) approval for research
+4. Data Use Agreements (DUAs) for data sharing
+5. Regular compliance training
+
+Always consult your Privacy Officer and compliance team for specific requirements.

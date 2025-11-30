@@ -166,4 +166,15 @@ export class Sqlite extends Adapter {
   override escape(value: string): string {
     return value.replace(/"/g, '""');
   }
+
+  override buildSampleRowsQuery(
+    tableName: string,
+    columns: string[] | undefined,
+    limit: number,
+  ): string {
+    const columnList = columns?.length
+      ? columns.map((c) => this.quoteIdentifier(c)).join(', ')
+      : '*';
+    return `SELECT ${columnList} FROM ${this.quoteIdentifier(tableName)} LIMIT ${limit}`;
+  }
 }

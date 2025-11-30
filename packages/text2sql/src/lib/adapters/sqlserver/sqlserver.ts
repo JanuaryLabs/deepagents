@@ -175,6 +175,19 @@ export class SqlServer extends Adapter {
     return value.replace(/]/g, ']]');
   }
 
+  override buildSampleRowsQuery(
+    tableName: string,
+    columns: string[] | undefined,
+    limit: number,
+  ): string {
+    const { schema, table } = this.parseTableName(tableName);
+    const tableIdentifier = `${this.quoteIdentifier(schema)}.${this.quoteIdentifier(table)}`;
+    const columnList = columns?.length
+      ? columns.map((c) => this.quoteIdentifier(c)).join(', ')
+      : '*';
+    return `SELECT TOP ${limit} ${columnList} FROM ${tableIdentifier}`;
+  }
+
   async #loadTables(): Promise<Table[]> {
     const rows = await this.#runIntrospectionQuery<ColumnRow>(`
       SELECT

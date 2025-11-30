@@ -8,8 +8,11 @@ The SQL Server adapter supports Microsoft SQL Server databases with automatic sc
 
 ## Basic Setup
 
+<Tabs groupId="sqlserver-driver" items={['mssql', 'tedious']}>
+<Tab value="mssql">
 ```typescript
 import { Text2Sql, SqlServer, InMemoryHistory } from '@deepagents/text2sql';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
 import sql from 'mssql';
 
 const pool = await sql.connect({
@@ -30,39 +33,91 @@ const text2sql = new Text2Sql({
       const result = await pool.request().query(query);
       return result.recordset;
     },
+    grounding: [
+      sqlserver.tables(),
+      sqlserver.views(),
+      sqlserver.info(),
+      sqlserver.indexes(),
+      sqlserver.constraints(),
+      sqlserver.rowCount(),
+      sqlserver.columnStats(),
+      sqlserver.lowCardinality(),
+    ],
   }),
   history: new InMemoryHistory(),
 });
 ```
+</Tab>
+<Tab value="tedious">
+```typescript
+import { Text2Sql, SqlServer, InMemoryHistory } from '@deepagents/text2sql';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
+import { Connection, Request } from 'tedious';
+
+const connection = new Connection(config);
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new SqlServer({
+    execute: (sql) => new Promise((resolve, reject) => {
+      const rows = [];
+      const request = new Request(sql, (err) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+      request.on('row', (columns) => {
+        const row = {};
+        columns.forEach((col) => {
+          row[col.metadata.colName] = col.value;
+        });
+        rows.push(row);
+      });
+      connection.execSql(request);
+    }),
+    grounding: [
+      sqlserver.tables(),
+      sqlserver.views(),
+      sqlserver.info(),
+      sqlserver.indexes(),
+      sqlserver.constraints(),
+      sqlserver.rowCount(),
+      sqlserver.columnStats(),
+      sqlserver.lowCardinality(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+</Tabs>
 
 ## Configuration Options
 
 ```typescript
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
+
 new SqlServer({
   // Required: Execute SQL queries
   execute: async (sql) => pool.request().query(sql).then(r => r.recordset),
+
+  // Required: Grounding functions for schema introspection
+  grounding: [
+    sqlserver.tables(),
+    sqlserver.info(),
+    // Add more grounding functions as needed
+  ],
 
   // Optional: Custom validation function
   validate: async (sql) => {
     // Return void if valid, or error string if invalid
   },
 
-  // Optional: Custom introspection function
-  introspect: async () => {
-    // Return { tables, relationships }
-  },
-
   // Optional: Filter to specific schemas (default excludes sys, INFORMATION_SCHEMA)
   schemas: ['dbo', 'sales'],
-
-  // Optional: Database info provider
-  info: {
-    dialect: 'sqlserver',
-    version: '2022',
-    database: 'mydb',
-  },
 });
 ```
+
+See [Grounding](/docs/text2sql/grounding) for the full list of available grounding functions and their configuration options.
 
 ## Schema Filtering
 
@@ -75,18 +130,22 @@ new SqlServer({
 });
 ```
 
-## Automatic Features
+## Available Grounding Functions
 
-The SQL Server adapter automatically:
+The following grounding functions are available for SQL Server. Import them from `@deepagents/text2sql/sqlserver`:
 
-- **Uses INFORMATION_SCHEMA** for tables and columns
-- **Queries sys.indexes** for index information including clustered/nonclustered types
-- **Detects included columns** in indexes (excluded from key columns)
-- **Identifies primary keys** from constraint metadata
-- **Maps foreign key relationships** between tables
-- **Collects column statistics** using CONVERT for type-safe aggregation
-- **Detects low cardinality columns** using `SELECT DISTINCT TOP`
-- **Classifies tables by size** based on row count
+| Function | Description |
+|----------|-------------|
+| `tables()` | Discovers tables and columns using INFORMATION_SCHEMA, identifies primary keys |
+| `views()` | Discovers database views |
+| `info()` | Collects SQL Server version and database info |
+| `indexes()` | Queries sys.indexes for clustered/nonclustered types, detects included columns |
+| `constraints()` | Maps foreign key relationships between tables |
+| `rowCount()` | Counts rows and classifies tables by size |
+| `columnStats()` | Collects min, max, null fraction using CONVERT for type-safe aggregation |
+| `lowCardinality()` | Detects columns with few distinct values using `SELECT DISTINCT TOP` |
+
+See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
 ## Error Handling
 
@@ -138,32 +197,6 @@ new SqlServer({
   validate: async (sql) => {
     await pool.request().query(`SET PARSEONLY ON; ${sql}; SET PARSEONLY OFF;`);
   },
-});
-```
-
-## Using with tedious
-
-```typescript
-import { Connection, Request } from 'tedious';
-
-const connection = new Connection(config);
-
-new SqlServer({
-  execute: (sql) => new Promise((resolve, reject) => {
-    const rows = [];
-    const request = new Request(sql, (err) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-    request.on('row', (columns) => {
-      const row = {};
-      columns.forEach((col) => {
-        row[col.metadata.colName] = col.value;
-      });
-      rows.push(row);
-    });
-    connection.execSql(request);
-  }),
 });
 ```
 

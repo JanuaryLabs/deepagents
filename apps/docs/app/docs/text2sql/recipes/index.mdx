@@ -1,0 +1,100 @@
+---
+title: Recipes
+description: Pre-built teachable bundles for common domains and use cases
+---
+
+Recipes are curated collections of teachables designed for specific industries and use cases. Each recipe provides copy-paste ready code that teaches Text2SQL the terminology, rules, and patterns specific to your domain.
+
+## Available Recipes
+
+| Recipe | Domain | Key Focus |
+|--------|--------|-----------|
+| [E-Commerce](/docs/text2sql/recipes/e-commerce) | Retail, Orders, Customers | Revenue metrics, customer analytics, cart abandonment |
+| [Finance](/docs/text2sql/recipes/finance) | Banking, Investments | Loan analysis, portfolio metrics, compliance |
+| [Healthcare](/docs/text2sql/recipes/healthcare) | Clinical, Patient Data | HIPAA compliance, patient cohorts, clinical metrics |
+
+## How Recipes Work
+
+Each recipe provides:
+
+1. **Domain Terms** - Vocabulary specific to the industry (AOV, NPL, LOS, etc.)
+2. **Guardrails** - Safety rules and compliance requirements
+3. **Hints** - Default behaviors and assumptions
+4. **Examples** - Sample question → SQL pairs for pattern matching
+5. **Clarifications** - When to ask users for more information
+
+## Quick Start
+
+Copy the teachables bundle from any recipe into your code:
+
+```typescript
+import {
+  term,
+  hint,
+  guardrail,
+  example,
+  clarification,
+} from '@deepagents/text2sql';
+
+// Paste the recipe's teachables here
+text2sql.instruct(
+  term('AOV', 'Average Order Value - total revenue divided by number of orders'),
+  hint('Active customer = ordered in last 90 days unless specified'),
+  // ... more teachables from the recipe
+);
+```
+
+## Combining Recipes
+
+You can combine multiple recipes for cross-domain applications:
+
+```typescript
+// E-commerce + Finance for a retail analytics platform
+text2sql.instruct(
+  // E-commerce terms
+  term('AOV', 'Average Order Value'),
+  term('LTV', 'Lifetime Value'),
+
+  // Finance terms for payment processing
+  term('chargeback', 'disputed transaction returned to customer'),
+  term('settlement', 'transfer of funds from processor to merchant'),
+);
+```
+
+## Customizing Recipes
+
+Recipes are starting points. Customize them for your specific needs:
+
+```typescript
+// Override a term with your company's definition
+term('active customer', 'customer who purchased in the last 60 days'),
+
+// Add company-specific guardrails
+guardrail({
+  rule: 'Never query the legacy_orders table',
+  reason: 'Deprecated - use orders_v2 instead',
+}),
+
+// Add examples for your specific schema
+example({
+  question: 'show me VIP customers',
+  sql: 'SELECT * FROM customers WHERE tier = \'VIP\' ORDER BY lifetime_value DESC',
+}),
+```
+
+## Creating Your Own Recipe
+
+Use `teach()` to auto-generate teachables based on your schema:
+
+```typescript
+const result = await text2sql.teach(`
+  Our ${domain} database tracks:
+  - [describe your main entities]
+  - [explain key relationships]
+  - [define important business rules]
+`);
+
+console.log(result.teachables); // Generated teachables to review
+```
+
+Then refine the generated teachables and save them as your custom recipe.

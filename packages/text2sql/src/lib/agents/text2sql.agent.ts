@@ -55,17 +55,14 @@ const tools = {
         .describe('Number of rows to sample (1-10, default 3).'),
     }),
     execute: ({ tableName, columns, limit = 3 }, options) => {
-      const sanitize = (name: string) => name.replace(/[^a-zA-Z0-9_.]/g, '');
-      const safeTable = sanitize(tableName);
-      const columnList = columns?.length
-        ? columns.map(sanitize).join(', ')
-        : '*';
       const safeLimit = Math.min(Math.max(1, limit), 10);
-
       const state = toState<{ adapter: Adapter }>(options);
-      return state.adapter.execute(
-        `SELECT ${columnList} FROM ${safeTable} LIMIT ${safeLimit}`,
+      const sql = state.adapter.buildSampleRowsQuery(
+        tableName,
+        columns,
+        safeLimit,
       );
+      return state.adapter.execute(sql);
     },
   }),
   db_query: tool({

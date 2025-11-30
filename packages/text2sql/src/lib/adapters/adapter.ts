@@ -155,6 +155,16 @@ export abstract class Adapter {
   abstract escape(value: string): string;
 
   /**
+   * Build a SELECT query to sample rows from a table.
+   * Each database uses different syntax for limiting rows (LIMIT vs TOP).
+   */
+  abstract buildSampleRowsQuery(
+    tableName: string,
+    columns: string[] | undefined,
+    limit: number,
+  ): string;
+
+  /**
    * Convert unknown database value to number.
    * Handles number, bigint, and string types.
    */

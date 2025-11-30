@@ -7,12 +7,12 @@ The History interface manages conversation persistence, enabling multi-turn chat
 
 ## Available Implementations
 
-### SqliteHistory
-
+<Tabs groupId="history-type" items={['SqliteHistory', 'InMemoryHistory']}>
+<Tab value="SqliteHistory">
 Persistent storage using SQLite:
 
 ```typescript
-import { SqliteHistory } from '@deepagents/text2sql';
+import { SqliteHistory, Sqlite, Text2Sql } from '@deepagents/text2sql';
 
 const history = new SqliteHistory('./chat-history.sqlite');
 
@@ -22,18 +22,25 @@ const text2sql = new Text2Sql({
   history: history,
 });
 ```
-
-### InMemoryHistory
-
-Non-persistent storage for testing:
+</Tab>
+<Tab value="InMemoryHistory">
+Non-persistent storage for testing (data is lost when the process ends):
 
 ```typescript
-import { InMemoryHistory } from '@deepagents/text2sql';
+import { InMemoryHistory, Sqlite, Text2Sql } from '@deepagents/text2sql';
 
 const history = new InMemoryHistory();
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new Sqlite({ execute: (sql) => db.prepare(sql).all() }),
+  history: history,
+});
 ```
 
-`InMemoryHistory` extends `SqliteHistory` with `:memory:` path - data is lost when the process ends.
+`InMemoryHistory` extends `SqliteHistory` with `:memory:` path.
+</Tab>
+</Tabs>
 
 ## Data Model
 

@@ -31,7 +31,9 @@ export default [
   guardrail({
     rule: 'Do not return oversized raw result sets.',
     action:
-      'Keep raw outputs to ~100 rows; aggregate or paginate unless the user explicitly confirms a larger pull.',
+      'Keep raw limit strictly to ~100 rows even if users request more or coearced by hints.',
+    reason:
+      'Browser will time out or crash on huge datasets. Data overload harms usability.',
   }),
   guardrail({
     rule: 'Prevent cartesian or guesswork joins.',
@@ -65,13 +67,9 @@ export default [
   }),
   // Tool usage constraints
   guardrail({
-    rule: 'Never output more than 100 rows of raw data.',
-    action: 'Use aggregation or pagination otherwise.',
-  }),
-  guardrail({
     rule: 'You must validate your query before final execution.',
     action:
-      "Follow the pattern: Draft Query → `validate_query` → Fix (if needed) → `db_query`.",
+      'Follow the pattern: Draft Query → `validate_query` → Fix (if needed) → `db_query`.',
   }),
   guardrail({
     rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',

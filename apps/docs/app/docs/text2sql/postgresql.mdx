@@ -15,6 +15,7 @@ import {
   Postgres,
   Text2Sql,
 } from '@deepagents/text2sql';
+import * as postgres from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -27,6 +28,16 @@ const text2sql = new Text2Sql({
       const result = await pool.query(sql);
       return result.rows;
     },
+    grounding: [
+      postgres.tables(),
+      postgres.views(),
+      postgres.info(),
+      postgres.indexes(),
+      postgres.constraints(),
+      postgres.rowCount(),
+      postgres.columnStats(),
+      postgres.lowCardinality(),
+    ],
   }),
   history: new InMemoryHistory(),
 });
@@ -35,31 +46,30 @@ const text2sql = new Text2Sql({
 ## Configuration Options
 
 ```typescript
+import * as postgres from '@deepagents/text2sql/postgres';
+
 new Postgres({
   // Required: Execute SQL queries
   execute: async (sql) => pool.query(sql).then((r) => r.rows),
+
+  // Required: Grounding functions for schema introspection
+  grounding: [
+    postgres.tables(),
+    postgres.info(),
+    // Add more grounding functions as needed
+  ],
 
   // Optional: Custom validation function
   validate: async (sql) => {
     // Return void if valid, or error string if invalid
   },
 
-  // Optional: Custom introspection function
-  introspect: async () => {
-    // Return { tables, relationships }
-  },
-
   // Optional: Filter to specific schemas
   schemas: ['public', 'analytics'],
-
-  // Optional: Database info provider
-  info: {
-    dialect: 'postgresql',
-    version: '15.0',
-    database: 'mydb',
-  },
 });
 ```
+
+See [Grounding](/docs/text2sql/grounding) for the full list of available grounding functions and their configuration options.
 
 ## Schema Filtering
 
@@ -72,16 +82,22 @@ new Postgres({
 });
 ```
 
-## Automatic Features
+## Available Grounding Functions
 
-The PostgreSQL adapter automatically:
+The following grounding functions are available for PostgreSQL. Import them from `@deepagents/text2sql/postgres`:
 
-- **Detects primary keys** from table constraints
-- **Identifies indexes** including unique, clustered, and B-tree types
-- **Collects column statistics** (min, max, null fraction) for numeric/date columns
-- **Detects low cardinality columns** (columns with 20 or fewer distinct values)
-- **Counts rows** and classifies tables by size (tiny, small, medium, large, huge)
-- **Maps foreign key relationships** between tables
+| Function | Description |
+|----------|-------------|
+| `tables()` | Discovers tables and columns, detects primary keys from table constraints |
+| `views()` | Discovers database views |
+| `info()` | Collects PostgreSQL version and database info |
+| `indexes()` | Identifies indexes including unique, clustered, and B-tree types |
+| `constraints()` | Maps foreign key relationships and other constraints |
+| `rowCount()` | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
+| `columnStats()` | Collects min, max, null fraction for numeric/date columns |
+| `lowCardinality()` | Detects columns with 20 or fewer distinct values |
+
+See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 
 ## Error Handling
 
@@ -110,39 +126,6 @@ execute: async (sql) => {
 execute: async (sql) => {
   return await pool.query(sql); // { rows: [...] }
 };
-```
-
-## Custom Introspection
-
-For complex setups or performance optimization, provide custom introspection:
-
-```typescript
-new Postgres({
-  execute: async (sql) => pool.query(sql).then((r) => r.rows),
-  introspect: async () => ({
-    tables: [
-      {
-        name: 'public.users',
-        schema: 'public',
-        rawName: 'users',
-        columns: [
-          { name: 'id', type: 'integer', isPrimaryKey: true },
-          { name: 'email', type: 'varchar' },
-        ],
-        rowCount: 10000,
-        sizeHint: 'medium',
-      },
-    ],
-    relationships: [
-      {
-        table: 'public.orders',
-        from: ['user_id'],
-        referenced_table: 'public.users',
-        to: ['id'],
-      },
-    ],
-  }),
-});
 ```
 
 ## Size Hints

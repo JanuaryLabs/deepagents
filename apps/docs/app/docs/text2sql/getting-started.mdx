@@ -19,8 +19,8 @@ Text2SQL requires three components:
 2. **Version** - A string used to manage cache invalidation (bump when schema changes)
 3. **History** - Stores conversation history (optional for single queries)
 
-### SQLite Example
-
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server']}>
+<Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
@@ -42,9 +42,8 @@ const text2sql = new Text2Sql({
   history: new InMemoryHistory(),
 });
 ```
-
-### PostgreSQL Example
-
+</Tab>
+<Tab value="PostgreSQL">
 ```typescript
 import pg from 'pg';
 
@@ -69,6 +68,38 @@ const text2sql = new Text2Sql({
   history: new InMemoryHistory(),
 });
 ```
+</Tab>
+<Tab value="SQL Server">
+```typescript
+import sql from 'mssql';
+
+import {
+  InMemoryHistory,
+  SqlServer,
+  Text2Sql,
+} from '@deepagents/text2sql';
+
+const pool = await sql.connect({
+  server: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  options: { encrypt: true, trustServerCertificate: true },
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new SqlServer({
+    execute: async (query) => {
+      const result = await pool.request().query(query);
+      return result.recordset;
+    },
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+</Tabs>
 
 ## Your First Query
 

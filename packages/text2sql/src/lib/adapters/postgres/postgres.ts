@@ -162,6 +162,21 @@ export class Postgres extends Adapter {
     return value.replace(/"/g, '""');
   }
 
+  override buildSampleRowsQuery(
+    tableName: string,
+    columns: string[] | undefined,
+    limit: number,
+  ): string {
+    const { schema, table } = this.parseTableName(tableName);
+    const tableIdentifier = schema
+      ? `${this.quoteIdentifier(schema)}.${this.quoteIdentifier(table)}`
+      : this.quoteIdentifier(table);
+    const columnList = columns?.length
+      ? columns.map((c) => this.quoteIdentifier(c)).join(', ')
+      : '*';
+    return `SELECT ${columnList} FROM ${tableIdentifier} LIMIT ${limit}`;
+  }
+
   async #loadTables(): Promise<Table[]> {
     const rows = await this.#runIntrospectionQuery<TableRow>(`
       SELECT
