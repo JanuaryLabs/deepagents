@@ -12,6 +12,7 @@ import {
   type UIDataTypes,
   type UIMessage,
   type UIMessagePart,
+  type UIMessageStreamWriter,
   type UITools,
   convertToModelMessages,
   createUIMessageStream,
@@ -178,6 +179,203 @@ export function execute<O, CIn, COut = CIn>(
 }
 
 export const stream = execute;
+
+export interface ExecuteWithRetryConfig {
+  maxRetries?: number;
+  abortSignal?: AbortSignal;
+  providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
+  /** Called when an error is caught and will be retried */
+  onRetry?: (error: unknown, attempt: number) => void;
+}
+
+/**
+ * Executes an agent with automatic error recovery.
+ * When streamText encounters an error, this function catches it,
+ * injects the error context into messages, and retries.
+ * Returns a UIMessageStream so the UI continues to function.
+ */
+export function executeWithRetry<O, CIn, COut = CIn>(
+  agent: Agent<O, CIn, COut>,
+  messages: UIMessage[] | string,
+  contextVariables: CIn,
+  config?: ExecuteWithRetryConfig,
+) {
+  const maxRetries = config?.maxRetries ?? 3;
+  const originalMessages = Array.isArray(messages)
+    ? messages
+    : [messageToUiMessage(messages)];
+
+  return createUIMessageStream({
+    originalMessages,
+    generateId,
+    onError: (error) => {
+      console.error('UIMessageStream error:', error);
+      return error instanceof Error ? error.message : String(error);
+    },
+    execute: async ({ writer }) => {
+      let attempt = 0;
+      let currentMessages = [...originalMessages];
+      let lastError: string | null = null;
+
+      while (attempt < maxRetries) {
+        attempt++;
+        const runId = generateId();
+
+        // If we have a previous error, inject it as context for the LLM
+        if (lastError) {
+          const errorMessage: UIMessage = {
+            id: generateId(),
+            role: 'user',
+            parts: [
+              {
+                type: 'text',
+                text: `The previous attempt encountered an error: ${lastError}. Please try again or use a different approach.`,
+              },
+            ],
+          };
+          currentMessages = [...currentMessages, errorMessage];
+          // Write retry notification to stream for UI feedback
+          writer.write({ type: 'text-start', id: generateId() });
+          writer.write({
+            type: 'text-delta',
+            id: generateId(),
+            delta: `\n[Retrying after error: ${lastError}]\n`,
+          });
+          writer.write({ type: 'text-end', id: generateId() });
+        }
+
+        try {
+          const streamResult = await executeStreamWithErrorDetection(
+            agent,
+            currentMessages,
+            contextVariables,
+            writer,
+            runId,
+            config,
+          );
+
+          if (streamResult.success) {
+            // Stream completed successfully
+            return;
+          }
+
+          // Stream had an error, prepare for retry
+          lastError = streamResult.error;
+          config?.onRetry?.(streamResult.error, attempt);
+
+          console.warn(
+            chalk.yellow(
+              `[executeWithRetry] Attempt ${attempt}/${maxRetries} failed: ${lastError}`,
+            ),
+          );
+        } catch (error) {
+          // Unexpected error during stream setup
+          lastError =
+            error instanceof Error ? error.message : JSON.stringify(error);
+          config?.onRetry?.(error, attempt);
+
+          console.error(
+            chalk.red(
+              `[executeWithRetry] Attempt ${attempt}/${maxRetries} threw: ${lastError}`,
+            ),
+          );
+        }
+      }
+
+      // All retries exhausted
+      writer.write({
+        type: 'error',
+        errorText: `Failed after ${maxRetries} attempts. Last error: ${lastError}`,
+      });
+    },
+  });
+}
+
+async function executeStreamWithErrorDetection<O, CIn, COut>(
+  agent: Agent<O, CIn, COut>,
+  messages: UIMessage[],
+  contextVariables: CIn,
+  writer: UIMessageStreamWriter,
+  runId: string,
+  config?: ExecuteWithRetryConfig,
+): Promise<{ success: true } | { success: false; error: string }> {
+  let detectedError: string | null = null;
+
+  const stream = streamText({
+    abortSignal: config?.abortSignal,
+    providerOptions: config?.providerOptions,
+    model: agent.model,
+    system: agent.instructions(contextVariables),
+    messages: convertToModelMessages(messages),
+    temperature: agent.temperature,
+    stopWhen: stepCountIs(25),
+    experimental_transform: smoothStream(),
+    tools: agent.toToolset(),
+    activeTools: agent.toolsNames,
+    experimental_context: contextVariables,
+    toolChoice: agent.toolChoice,
+    experimental_repairToolCall: repairToolCall,
+    onError: (error) => {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(
+        chalk.red(`[executeWithRetry] (${runId}) Stream error: ${errorMsg}`),
+      );
+      detectedError = errorMsg;
+    },
+    experimental_output: agent.output
+      ? Output.object({ schema: agent.output })
+      : undefined,
+    onStepFinish: (step) => {
+      // Check for tool errors in step content (tool-error parts appear in content array)
+      for (const content of step.content) {
+        if (content.type === 'tool-result' && 'isError' in content && content.isError) {
+          console.warn(
+            chalk.yellow(`[executeWithRetry] (${runId}) Tool error detected in: ${content.toolName}`),
+          );
+        }
+      }
+
+      const toolCall = step.toolCalls.at(-1);
+      if (toolCall) {
+        console.log(
+          `Debug: (${runId}) ${chalk.bold.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
+        );
+      }
+    },
+    prepareStep: prepareStep(agent, agent.model, contextVariables),
+  });
+
+  // Merge the stream to the writer while monitoring for errors
+  writer.merge(
+    stream.toUIMessageStream({
+      generateMessageId: generateId,
+      originalMessages: messages,
+    }),
+  );
+
+  // Consume the stream and check for errors in fullStream
+  try {
+    for await (const part of stream.fullStream) {
+      if (part.type === 'error') {
+        detectedError = part.error instanceof Error
+          ? part.error.message
+          : String(part.error);
+        break;
+      }
+    }
+  } catch (consumeError) {
+    detectedError =
+      consumeError instanceof Error
+        ? consumeError.message
+        : String(consumeError);
+  }
+
+  if (detectedError) {
+    return { success: false, error: detectedError };
+  }
+
+  return { success: true };
+}
 
 export const prepareStep = <CIn>(
   agent: Agent<unknown, CIn, any>,
