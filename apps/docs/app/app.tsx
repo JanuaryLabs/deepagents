@@ -55,6 +55,11 @@ const Icons = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
     </svg>
   ),
+  MessageSquare: () => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  ),
 };
 
 // --- Navigation ---
@@ -213,14 +218,16 @@ function ArchitecturePage() {
               prompt to prevent hallucination.
             </p>
             <div className="bg-[#050604] p-4 border border-solar-800 rounded font-mono text-xs text-solar-400">
-              <div className="text-solar-600 mb-2">// Grounding Config</div>
+              <div className="text-solar-600 mb-2">// 8 Grounding Functions</div>
               <pre>{`grounding: [
-  tables(),
-  views(),
-  indexes(),
-  constraints(),
-  lowCardinality(),
-  columnStats()
+  tables(),      // Tables, columns, PKs
+  views(),       // Database views
+  info(),        // DB version info
+  indexes(),     // Index hints
+  constraints(), // Foreign keys
+  rowCount(),    // Table sizes
+  columnStats(), // Min/max/nulls
+  lowCardinality() // Enum values
 ]`}</pre>
             </div>
           </div>
@@ -230,8 +237,8 @@ function ArchitecturePage() {
               <Icons.Book /> TEACHABLES SYSTEM
             </h3>
             <p className="text-solar-500 mb-6 leading-relaxed">
-              Inject domain knowledge using 10 teachable types. Define business vocabulary,
-              guardrails, examples, and query patterns. The AI learns what matters to YOUR business.
+              Inject domain knowledge using 17 teachable types. Define business vocabulary,
+              guardrails, examples, workflows, and user preferences. The AI learns YOUR business.
             </p>
             <div className="bg-[#050604] p-4 border border-solar-800 rounded font-mono text-xs text-solar-400">
               <div className="text-solar-600 mb-2">// Domain Knowledge</div>
@@ -307,25 +314,35 @@ grounding: [
 ]`}
           />
 
-          <div className="grid md:grid-cols-2 gap-8">
+          <div className="grid md:grid-cols-3 gap-8">
             <FeatureCard
               title="Teachable Knowledge"
               icon={<Icons.Book />}
-              description="Encode domain expertise using 10 teachable types: terms, hints, guardrails, examples, explanations, clarifications, workflows, quirks, style guides, and analogies."
+              description="Encode domain expertise using 17 teachable types: terms, hints, guardrails, examples, workflows, glossaries, and 6 user-specific types for personalization."
               code={`text2sql.instruct(
   term("MRR", "Monthly Recurring Revenue"),
   guardrail({ rule: "Never expose PII" }),
-  example({ question, sql })
+  glossary({ "revenue": "SUM(amount)" })
 );`}
             />
             <FeatureCard
-              title="Conversational Memory"
+              title="Streaming Conversations"
               icon={<Icons.Cycle />}
-              description="Multi-turn conversations with context retention. Follow-up questions understand prior context. User preferences and corrections are remembered across sessions."
+              description="Multi-turn conversations with streaming responses. Follow-up questions understand prior context. User preferences and corrections are remembered across sessions."
               code={`const stream = await text2sql.chat(
   messages,
   { chatId, userId }
-);`}
+);
+for await (const chunk of stream) { ... }`}
+            />
+            <FeatureCard
+              title="Explainable SQL"
+              icon={<Icons.MessageSquare />}
+              description="Convert SQL queries back to plain English explanations. Help users understand complex queries and validate the generated SQL matches their intent."
+              code={`const explanation = await text2sql.explain(
+  "SELECT dept, AVG(salary) FROM employees GROUP BY dept"
+);
+// "Average salary for each department..."`}
             />
           </div>
 
@@ -548,7 +565,7 @@ function Hero({ onNavigate }: { onNavigate: (p: Page) => void }) {
       <div className="max-w-7xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-solar-600/50 bg-solar-800/30 text-xs text-solar-400 mb-8">
           <span className="w-2 h-2 rounded-full bg-solar-accent animate-pulse"></span>
-          <span>VERCEL AI SDK POWERED</span>
+          <span>OPENAI / ANTHROPIC / GOOGLE / GROQ</span>
         </div>
         <h1 className="text-5xl md:text-7xl font-bold tracking-tighter text-solar-300 mb-6 leading-[0.9]">
           ASK QUESTIONS.
@@ -624,7 +641,7 @@ function HomePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
             <FeatureCard
               title="Teachable Knowledge"
               icon={<Icons.Book />}
-              description="Encode domain expertise with 10 teachable types: terms, hints, guardrails, examples, and more."
+              description="Encode domain expertise with 17 teachable types: terms, hints, guardrails, examples, glossaries, and more."
               code='term("MRR", "Monthly Recurring Revenue")'
             />
             <FeatureCard
@@ -654,12 +671,13 @@ function HomePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
             </div>
             <pre className="p-6 text-sm text-solar-400 font-mono overflow-x-auto">
               <code>{`import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
-import { Postgres, tables, indexes } from '@deepagents/text2sql/postgres';
+import { Postgres, tables, indexes, constraints } from '@deepagents/text2sql/postgres';
 
 const text2sql = new Text2Sql({
+  version: 'v1',
   adapter: new Postgres({
     execute: async (sql) => pool.query(sql).then(r => r.rows),
-    grounding: [tables(), indexes()],
+    grounding: [tables(), indexes(), constraints()],
   }),
   history: new InMemoryHistory(),
 });
