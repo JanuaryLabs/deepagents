@@ -24,12 +24,16 @@ Requires Node.js LTS (20+).
 
 ```typescript
 import pg from 'pg';
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
 import {
-  Text2Sql,
   Postgres,
-  InMemoryHistory,
-} from '@deepagents/text2sql';
-import * as postgres from '@deepagents/text2sql/postgres';
+  tables,
+  views,
+  info,
+  indexes,
+  constraints,
+  lowCardinality,
+} from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -43,12 +47,12 @@ const text2sql = new Text2Sql({
       return result.rows;
     },
     grounding: [
-      postgres.tables(),
-      postgres.views(),
-      postgres.info(),
-      postgres.indexes(),
-      postgres.constraints(),
-      postgres.lowCardinality(),
+      tables(),
+      views(),
+      info(),
+      indexes(),
+      constraints(),
+      lowCardinality(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -77,7 +81,7 @@ Text2SQL works with any model provider supported by the [Vercel AI SDK](https://
 Inject domain knowledge to improve query accuracy:
 
 ```typescript
-import { term, hint, guardrail, example } from '@deepagents/text2sql';
+import { term, hint, guardrail, example } from '@deepagents/text2sql/instructions';
 
 text2sql.instruct(
   term('MRR', 'monthly recurring revenue'),
