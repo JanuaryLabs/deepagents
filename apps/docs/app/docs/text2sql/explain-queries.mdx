@@ -42,8 +42,7 @@ The explainer is designed for non-technical users - it translates SQL syntax int
 Verify that generated SQL matches your intent:
 
 ```typescript
-const { generate } = await text2sql.toSql('Show revenue by month');
-const sql = await generate();
+const sql = await text2sql.toSql('Show revenue by month');
 
 // Verify the query does what you expect
 const explanation = await text2sql.explain(sql);

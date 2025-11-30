@@ -11,9 +11,11 @@ The SQL Server adapter supports Microsoft SQL Server databases with automatic sc
 <Tabs groupId="sqlserver-driver" items={['mssql', 'tedious']}>
 <Tab value="mssql">
 ```typescript
-import { Text2Sql, SqlServer, InMemoryHistory } from '@deepagents/text2sql';
-import * as sqlserver from '@deepagents/text2sql/sqlserver';
 import sql from 'mssql';
+
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 const pool = await sql.connect({
   server: process.env.DB_HOST,
@@ -50,9 +52,11 @@ const text2sql = new Text2Sql({
 </Tab>
 <Tab value="tedious">
 ```typescript
-import { Text2Sql, SqlServer, InMemoryHistory } from '@deepagents/text2sql';
-import * as sqlserver from '@deepagents/text2sql/sqlserver';
 import { Connection, Request } from 'tedious';
+
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 const connection = new Connection(config);
 
@@ -144,6 +148,7 @@ The following grounding functions are available for SQL Server. Import them from
 | `rowCount()` | Counts rows and classifies tables by size |
 | `columnStats()` | Collects min, max, null fraction using CONVERT for type-safe aggregation |
 | `lowCardinality()` | Detects columns with few distinct values using `SELECT DISTINCT TOP` |
+| `report()` | Uses an LLM to generate a business context report from your database |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

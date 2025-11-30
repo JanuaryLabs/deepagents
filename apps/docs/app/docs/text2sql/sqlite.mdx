@@ -12,11 +12,8 @@ The SQLite adapter works with SQLite databases, supporting both file-based and i
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import {
-  InMemoryHistory,
-  Sqlite,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
@@ -44,11 +41,8 @@ const text2sql = new Text2Sql({
 ```typescript
 import Database from 'better-sqlite3';
 
-import {
-  InMemoryHistory,
-  Sqlite,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new Database('./database.db', { readonly: true });
@@ -76,11 +70,8 @@ const text2sql = new Text2Sql({
 ```typescript
 import initSqlJs from 'sql.js';
 
-import {
-  InMemoryHistory,
-  Sqlite,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const SQL = await initSqlJs();
@@ -154,6 +145,7 @@ The following grounding functions are available for SQLite. Import them from `@d
 | `rowCount()` | Counts rows and classifies tables by size |
 | `columnStats()` | Collects min, max, null fraction for columns |
 | `lowCardinality()` | Detects columns with 20 or fewer distinct values |
+| `report()` | Uses an LLM to generate a business context report from your database |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

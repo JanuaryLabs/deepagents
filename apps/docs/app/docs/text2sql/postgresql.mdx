@@ -10,11 +10,8 @@ The PostgreSQL adapter provides full support for PostgreSQL databases with autom
 ```typescript
 import pg from 'pg';
 
-import {
-  InMemoryHistory,
-  Postgres,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
@@ -96,6 +93,7 @@ The following grounding functions are available for PostgreSQL. Import them from
 | `rowCount()` | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
 | `columnStats()` | Collects min, max, null fraction for numeric/date columns |
 | `lowCardinality()` | Detects columns with 20 or fewer distinct values |
+| `report()` | Uses an LLM to generate a business context report from your database |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

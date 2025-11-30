@@ -12,14 +12,14 @@ Text2SQL can be taught domain-specific knowledge through **teachables** - struct
 Add teachables directly in code:
 
 ```typescript
-import { example, hint, term } from '@deepagents/text2sql';
+import { example, hint, term } from '@deepagents/text2sql/instructions';
 
 text2sql.instruct(
   term('NPL', 'non-performing loan - loan past due 90+ days'),
   hint('Always exclude test accounts with email ending in @test.com'),
   example({
     question: 'show me top customers',
-    sql: 'SELECT * FROM customers ORDER BY lifetime_value DESC LIMIT 10',
+    answer: 'SELECT * FROM customers ORDER BY lifetime_value DESC LIMIT 10',
   }),
 );
 ```
@@ -118,7 +118,7 @@ Question → SQL pairs for pattern matching:
 ```typescript
 example({
   question: 'show me peak demand hours',
-  sql: `SELECT DATE_TRUNC('hour', reading_timestamp) as hour,
+  answer: `SELECT DATE_TRUNC('hour', reading_timestamp) as hour,
         MAX(consumption_kwh) as peak_demand
         FROM meter_readings
         WHERE reading_timestamp >= CURRENT_DATE - INTERVAL '7 days'
@@ -127,7 +127,7 @@ example({
 
 example({
   question: 'hotel occupancy rate this month',
-  sql: `SELECT hotel_name,
+  answer: `SELECT hotel_name,
         (SUM(occupied_rooms) / SUM(total_rooms)) * 100 as occupancy_rate
         FROM daily_occupancy
         WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
@@ -335,7 +335,7 @@ Example output:
   <examples>
     <example>
       <question>show me top customers</question>
-      <sql>SELECT * FROM customers ORDER BY lifetime_value DESC LIMIT 10</sql>
+      <answer>SELECT * FROM customers ORDER BY lifetime_value DESC LIMIT 10</answer>
     </example>
   </examples>
 </teachings>

@@ -16,10 +16,7 @@ description: Text2SQL provides multiple methods to convert natural language into
 Use `toSql()` when you need just the SQL query without execution:
 
 ```typescript
-const { generate } = await text2sql.toSql(
-  'Show me top 10 customers by revenue',
-);
-const sql = await generate();
+const sql = await text2sql.toSql('Show me top 10 customers by revenue');
 
 console.log(sql);
 // SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as Revenue
@@ -135,6 +132,9 @@ Add visualization capabilities by providing render tools:
 ```typescript
 import { tool } from 'ai';
 import z from 'zod';
+
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 
 const text2sql = new Text2Sql({
   version: 'v1',
