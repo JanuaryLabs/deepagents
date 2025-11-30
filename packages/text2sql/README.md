@@ -58,18 +58,9 @@ const text2sql = new Text2Sql({
   history: new InMemoryHistory(),
 });
 
-// Generate SQL without executing
-const { generate } = await text2sql.toSql('Show me the top 10 customers by revenue');
-const sql = await generate();
+// Generate SQL
+const sql = await text2sql.toSql('Show me the top 10 customers by revenue');
 console.log(sql);
-
-// Generate and execute with streaming
-const stream = await text2sql.single('What are the most popular products?');
-for await (const chunk of stream) {
-  if (chunk.type === 'text-delta') {
-    process.stdout.write(chunk.textDelta);
-  }
-}
 ```
 
 ## AI Model Providers
@@ -120,18 +111,23 @@ Control what schema metadata the AI receives:
 Build multi-turn conversations with context:
 
 ```typescript
-const chat = text2sql.chat([
-  { role: 'user', content: 'Show me orders from last month' },
-]);
+const chatId = 'chat-123';
+const userId = 'user-456';
 
-for await (const chunk of chat) {
+const stream = await text2sql.chat(
+  [{ role: 'user', content: 'Show me orders from last month' }],
+  { chatId, userId },
+);
+
+for await (const chunk of stream) {
   // handle streaming response
 }
 
-// Continue the conversation
-const followUp = text2sql.chat([
-  { role: 'user', content: 'Now filter to only completed ones' },
-], { chatId: chat.id });
+// Continue the conversation with the same chatId
+const followUp = await text2sql.chat(
+  [{ role: 'user', content: 'Now filter to only completed ones' }],
+  { chatId, userId },
+);
 ```
 
 ## Explain Queries
