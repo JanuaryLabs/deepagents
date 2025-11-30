@@ -112,12 +112,15 @@ console.log(sql);
 // LIMIT 10
 ```
 
-### Generate and Execute
+### Chat with Streaming
 
-Use `single()` for streaming SQL generation with execution:
+Use `chat()` for streaming responses with conversation history:
 
 ```typescript
-const stream = await text2sql.single('What are the most popular genres?');
+const stream = await text2sql.chat(
+  [{ role: 'user', content: 'What are the most popular genres?' }],
+  { chatId: 'chat-123', userId: 'user-456' },
+);
 
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {

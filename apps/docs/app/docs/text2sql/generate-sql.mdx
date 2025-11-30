@@ -5,11 +5,10 @@ description: Text2SQL provides multiple methods to convert natural language into
 
 ## Methods Overview
 
-| Method     | Returns                    | Use Case                            |
-| ---------- | -------------------------- | ----------------------------------- |
-| `toSql()`  | SQL string only            | Code generation, previewing queries |
-| `single()` | Streaming response         | Interactive execution with progress |
-| `chat()`   | Streaming with history     | Multi-turn conversations            |
+| Method    | Returns                | Use Case                            |
+| --------- | ---------------------- | ----------------------------------- |
+| `toSql()` | SQL string only        | Code generation, previewing queries |
+| `chat()`  | Streaming with history | Multi-turn conversations            |
 
 ## Pure SQL Generation with toSql()
 
@@ -34,12 +33,15 @@ console.log(sql);
 - Integration with existing query execution pipelines
 - Testing query generation without database access
 
-## Streaming Execution with single()
+## Streaming with chat()
 
-Use `single()` for interactive queries with real-time progress:
+Use `chat()` for interactive queries with streaming responses and conversation history:
 
 ```typescript
-const stream = await text2sql.single('What genres have the most tracks?');
+const stream = await text2sql.chat(
+  [{ role: 'user', content: 'What genres have the most tracks?' }],
+  { chatId: 'chat-123', userId: 'user-456' },
+);
 
 for await (const chunk of stream) {
   switch (chunk.type) {
@@ -56,9 +58,9 @@ for await (const chunk of stream) {
 }
 ```
 
-### Available Tools in single()
+### Available Tools
 
-The streaming agent (text2sqlMonolith) has access to these built-in tools:
+The chat agent has access to these built-in tools:
 
 | Tool              | Purpose                                  |
 | ----------------- | ---------------------------------------- |
@@ -67,7 +69,7 @@ The streaming agent (text2sqlMonolith) has access to these built-in tools:
 | `db_query`        | Execute the final SQL query (read-only)  |
 | `scratchpad`      | Strategic reflection during generation   |
 
-Plus any custom rendering tools you provide.
+Plus memory tools (`remember_memory`, `recall_memory`, etc.) and any custom rendering tools you provide.
 
 The `db_query` tool enforces read-only access - only `SELECT` and `WITH` statements are allowed.
 
@@ -182,7 +184,10 @@ When queries fail, the adapter provides helpful error messages:
 
 ```typescript
 try {
-  const stream = await text2sql.single('invalid query here');
+  const stream = await text2sql.chat(
+    [{ role: 'user', content: 'invalid query here' }],
+    { chatId: 'chat-123', userId: 'user-456' },
+  );
   // Process stream
 } catch (error) {
   // Error includes:

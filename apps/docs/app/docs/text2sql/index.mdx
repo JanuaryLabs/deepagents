@@ -44,13 +44,11 @@ const sql = await text2sql.toSql('Show me top 10 customers by total purchases');
 | Method                    | Description                                            |
 | ------------------------- | ------------------------------------------------------ |
 | `toSql(input)`            | Generate SQL without executing                         |
-| `single(input)`           | Stream SQL generation with execution                   |
 | `chat(messages, params)`  | Multi-turn conversation with history and user profiles |
 | `explain(sql)`            | Explain SQL in plain English                           |
-| `teach(input)`            | Auto-generate teachables from context                  |
 | `instruct(...teachables)` | Manually add teachables to the system                  |
-| `suggest()`               | Get suggested questions for your database              |
-| `inspect()`               | View the full system prompt with all context           |
+| `inspect(agent)`          | View the full system prompt with all context           |
+| `index()`                 | Introspect database schema (cached)                    |
 
 ## When to Use Text2SQL
 
