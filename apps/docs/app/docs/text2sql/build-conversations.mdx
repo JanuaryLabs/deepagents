@@ -56,70 +56,88 @@ await text2sql.chat(
 
 ## User Profiles
 
-User profiles enable personalization and persistent memory across conversations. Text2SQL uses a `UserProfileStore` to maintain three types of user information:
+User profiles enable personalization and persistent memory across conversations. Text2SQL uses a `TeachablesStore` to maintain five types of user information:
 
-### Profile Item Types
+### Memory Types
 
-| Type         | Purpose             | Example                        |
-| ------------ | ------------------- | ------------------------------ |
-| `fact`       | Identity/background | "I work in supply chain"       |
-| `preference` | User preferences    | "I prefer weekly aggregations" |
-| `present`    | Current context     | "I'm analyzing Q4 data"        |
+| Type         | Purpose                     | Schema Fields                         |
+| ------------ | --------------------------- | ------------------------------------- |
+| `identity`   | User's name and/or role     | `description`                         |
+| `alias`      | User-specific term meanings | `term`, `meaning`                     |
+| `preference` | Output and style preferences| `aspect`, `value`                     |
+| `context`    | Current working focus       | `description`                         |
+| `correction` | Corrections to prior errors | `subject`, `clarification`            |
 
 The user profile is stored per userId and automatically injected into the chat context.
 
-### Automatic Profile Updates
+### Automatic Memory Updates
 
-During chat, the `update_user_profile` tool is automatically available. The AI recognizes when users share facts, preferences, or context and updates the profile:
+During chat, memory tools are automatically available. The AI recognizes when users share facts, preferences, or context and stores them:
 
 ```typescript
 // User says: "I'm the sales manager for West region"
 // AI automatically calls:
-update_user_profile({
-  type: 'fact',
-  text: 'Sales manager for West region',
-  action: 'add',
+remember_memory({
+  memory: {
+    type: 'identity',
+    description: 'Sales manager for West region',
+  },
 });
 
-// User says: "Call me Ezz"
+// User says: "When I say 'revenue', I mean gross revenue"
 // AI calls:
-update_user_profile({
-  type: 'preference',
-  text: 'Prefers to be called Ezz',
-  action: 'add',
+remember_memory({
+  memory: {
+    type: 'alias',
+    term: 'revenue',
+    meaning: 'gross revenue before deductions',
+  },
 });
 
-// You can also remove items
-update_user_profile({
-  type: 'present',
-  text: 'Analyzing Q4 data',
-  action: 'remove',
+// User says: "I prefer weekly aggregations"
+// AI calls:
+remember_memory({
+  memory: {
+    type: 'preference',
+    aspect: 'aggregation',
+    value: 'weekly',
+  },
 });
 ```
 
-The tool description guides the AI to use it when:
+Available memory tools:
 
-- Users explicitly state preferences
-- Users share identity or background information
-- Working context changes
+| Tool | Description |
+|------|-------------|
+| `remember_memory` | Store something about the user for future conversations |
+| `recall_memory` | List stored memories for the current user |
+| `update_memory` | Update an existing memory |
+| `forget_memory` | Remove a specific memory |
 
 ### Profile Injection
 
-Profiles are injected into the system prompt:
+User profiles are injected into the system prompt as teachables:
 
 ```xml
 <user_profile>
   <identity>
-    - Sales manager for West region
-    - Works with retail accounts
+    <description>Sales manager for West region</description>
   </identity>
-  <preferences>
-    - Prefers weekly aggregations
-    - Likes visual charts
-  </preferences>
-  <working_context>
-    - Analyzing Q4 2024 performance
-  </working_context>
+  <user_vocabulary>
+    <alias>
+      <term>revenue</term>
+      <meaning>gross revenue before deductions</meaning>
+    </alias>
+  </user_vocabulary>
+  <user_preferences>
+    <preference>
+      <aspect>aggregation</aspect>
+      <value>weekly</value>
+    </preference>
+  </user_preferences>
+  <user_context>
+    <context>Analyzing Q4 2024 performance</context>
+  </user_context>
 </user_profile>
 ```
 

@@ -19,7 +19,8 @@ Text2SQL is a package that converts natural language questions into SQL queries.
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryHistory, Sqlite, Text2Sql } from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./chinook.db', { readOnly: true });
 
@@ -32,10 +33,7 @@ const text2sql = new Text2Sql({
 });
 
 // Generate SQL from natural language
-const { generate } = await text2sql.toSql(
-  'Show me top 10 customers by total purchases',
-);
-const sql = await generate();
+const sql = await text2sql.toSql('Show me top 10 customers by total purchases');
 // SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
 // FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId
 // GROUP BY c.CustomerId ORDER BY TotalPurchases DESC LIMIT 10
@@ -46,13 +44,11 @@ const sql = await generate();
 | Method                    | Description                                            |
 | ------------------------- | ------------------------------------------------------ |
 | `toSql(input)`            | Generate SQL without executing                         |
-| `single(input)`           | Stream SQL generation with execution                   |
 | `chat(messages, params)`  | Multi-turn conversation with history and user profiles |
 | `explain(sql)`            | Explain SQL in plain English                           |
-| `teach(input)`            | Auto-generate teachables from context                  |
 | `instruct(...teachables)` | Manually add teachables to the system                  |
-| `suggest()`               | Get suggested questions for your database              |
-| `inspect()`               | View the full system prompt with all context           |
+| `inspect(agent)`          | View the full system prompt with all context           |
+| `index()`                 | Introspect database schema (cached)                    |
 
 ## When to Use Text2SQL
 

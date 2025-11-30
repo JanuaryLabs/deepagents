@@ -24,11 +24,8 @@ Text2SQL requires three components:
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import {
-  InMemoryHistory,
-  Sqlite,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 
 // Connect to your database
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
@@ -47,11 +44,8 @@ const text2sql = new Text2Sql({
 ```typescript
 import pg from 'pg';
 
-import {
-  InMemoryHistory,
-  Postgres,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Postgres } from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -73,11 +67,8 @@ const text2sql = new Text2Sql({
 ```typescript
 import sql from 'mssql';
 
-import {
-  InMemoryHistory,
-  SqlServer,
-  Text2Sql,
-} from '@deepagents/text2sql';
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
 
 const pool = await sql.connect({
   server: process.env.DB_HOST,
@@ -108,10 +99,9 @@ const text2sql = new Text2Sql({
 Use `toSql()` to generate SQL without executing it:
 
 ```typescript
-const { generate } = await text2sql.toSql(
+const sql = await text2sql.toSql(
   'Show me the top 10 customers by total purchases',
 );
-const sql = await generate();
 
 console.log(sql);
 // SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
@@ -122,12 +112,15 @@ console.log(sql);
 // LIMIT 10
 ```
 
-### Generate and Execute
+### Chat with Streaming
 
-Use `single()` for streaming SQL generation with execution:
+Use `chat()` for streaming responses with conversation history:
 
 ```typescript
-const stream = await text2sql.single('What are the most popular genres?');
+const stream = await text2sql.chat(
+  [{ role: 'user', content: 'What are the most popular genres?' }],
+  { chatId: 'chat-123', userId: 'user-456' },
+);
 
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {

@@ -21,7 +21,8 @@ Each database adapter (PostgreSQL, SQLite, SQL Server) exports grounding factory
 <Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server']}>
 <Tab value="PostgreSQL">
 ```typescript
-import { Postgres, Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
 const text2sql = new Text2Sql({
@@ -45,7 +46,8 @@ const text2sql = new Text2Sql({
 </Tab>
 <Tab value="SQLite">
 ```typescript
-import { Sqlite, Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const text2sql = new Text2Sql({
@@ -69,7 +71,8 @@ const text2sql = new Text2Sql({
 </Tab>
 <Tab value="SQL Server">
 ```typescript
-import { SqlServer, Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 const text2sql = new Text2Sql({
