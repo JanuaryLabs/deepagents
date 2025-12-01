@@ -103,15 +103,14 @@ const text2sql = new Text2Sql({
 
 ## Your First Query
 
-### Generate SQL Only
+### Generate SQL
 
-Use `toSql()` to generate SQL without executing it:
+Use `toSql()` to generate SQL:
 
 ```typescript
-const { generate } = await text2sql.toSql(
+const sql = await text2sql.toSql(
   'Show me the top 10 customers by total purchases',
 );
-const sql = await generate();
 
 console.log(sql);
 // SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as TotalPurchases
@@ -122,30 +121,15 @@ console.log(sql);
 // LIMIT 10
 ```
 
-### Generate and Execute
-
-Use `single()` for streaming SQL generation with execution:
-
-```typescript
-const stream = await text2sql.single('What are the most popular genres?');
-
-for await (const chunk of stream) {
-  if (chunk.type === 'text-delta') {
-    process.stdout.write(chunk.textDelta);
-  }
-}
-```
-
 ## Understanding the Response
 
 When Text2SQL processes a query, it:
 
-1. **Analyzes your schema** - Examines tables, columns, relationships, and data patterns
-2. **Generates a brief** - Creates a business context summary (cached for reuse)
-3. **Applies teachables** - Uses domain knowledge (terms, hints, guardrails, examples)
-4. **Applies step-back prompting** - Considers the broader question before generating SQL
-5. **Validates the query** - Ensures the SQL is syntactically correct using `validate_query` tool
-6. **Returns results** - Either raw SQL or executed results
+1. **Loads grounding context** - Uses cached schema metadata (tables, columns, relationships, indexes, constraints)
+2. **Applies teachables** - Uses domain knowledge (terms, hints, guardrails, examples)
+3. **Applies step-back prompting** - Considers the broader question before generating SQL
+4. **Validates the query** - Ensures the SQL is syntactically correct using `validate_query` tool
+5. **Returns results** - Either raw SQL or executed results
 
 Text2SQL includes default teachables that enforce best practices like read-only queries, row limits, and proper validation workflows.
 
