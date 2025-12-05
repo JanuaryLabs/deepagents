@@ -49,9 +49,6 @@ export function columnValues(config: ColumnValuesGroundingConfig = {}) {
   };
 }
 
-/** @deprecated Use columnValues() instead */
-export const lowCardinality = columnValues;
-
 export function indexes(config: IndexesGroundingConfig = {}) {
   return (adapter: Adapter) => {
     return new SqliteIndexesGrounding(adapter, config);
@@ -80,7 +77,6 @@ export default {
   views,
   columnStats,
   columnValues,
-  lowCardinality,
   indexes,
   rowCount,
   constraints,

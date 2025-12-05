@@ -82,13 +82,15 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
     }
 
     const def = constraint.definition;
+    const escapedCol = this.escapeRegex(columnName);
+
+    // Column pattern: matches column name with optional parens and type cast
+    // e.g., "status", "(status)", "((status)::text)"
+    const colPattern = `(?:\\(?\\(?${escapedCol}\\)?(?:::(?:text|varchar|character varying))?\\)?)`;
 
     // Pattern 1: column IN ('val1', 'val2', ...)
     const inMatch = def.match(
-      new RegExp(
-        `\\b${this.escapeRegex(columnName)}\\b[^)]*\\bIN\\s*\\(([^)]+)\\)`,
-        'i',
-      ),
+      new RegExp(`${colPattern}\\s+IN\\s*\\(([^)]+)\\)`, 'i'),
     );
     if (inMatch) {
       return this.extractStringValues(inMatch[1]);
@@ -97,7 +99,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
     // Pattern 2: PostgreSQL ANY(ARRAY[...])
     const anyMatch = def.match(
       new RegExp(
-        `\\b${this.escapeRegex(columnName)}\\b[^)]*=\\s*ANY\\s*\\(\\s*(?:ARRAY)?\\[([^\\]]+)\\]`,
+        `${colPattern}\\s*=\\s*ANY\\s*\\(\\s*(?:ARRAY)?\\s*\\[([^\\]]+)\\]`,
         'i',
       ),
     );
