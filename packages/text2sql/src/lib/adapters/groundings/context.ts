@@ -8,7 +8,7 @@ import type { View } from './view.grounding.ts';
 export interface Column {
   name: string;
   type: string;
-  kind?: 'LowCardinality';
+  kind?: 'LowCardinality' | 'Enum';
   values?: string[];
   stats?: ColumnStats;
 }
