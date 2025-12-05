@@ -3,7 +3,7 @@ import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grou
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
-import { type LowCardinalityGroundingConfig } from '../groundings/low-cardinality.grounding.ts';
+import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import {
   ReportGrounding,
   type ReportGroundingConfig,
@@ -15,7 +15,7 @@ import { SqlServerColumnStatsGrounding } from './column-stats.sqlserver.groundin
 import { SqlServerConstraintGrounding } from './constraint.sqlserver.grounding.ts';
 import { SqlServerIndexesGrounding } from './indexes.sqlserver.grounding.ts';
 import { SqlServerInfoGrounding } from './info.sqlserver.grounding.ts';
-import { SqlServerLowCardinalityGrounding } from './low-cardinality.sqlserver.grounding.ts';
+import { SqlServerColumnValuesGrounding } from './column-values.sqlserver.grounding.ts';
 import { SqlServerRowCountGrounding } from './row-count.sqlserver.grounding.ts';
 import { SqlServer } from './sqlserver.ts';
 import { SqlServerTableGrounding } from './table.sqlserver.grounding.ts';
@@ -43,11 +43,14 @@ export function columnStats(config: ColumnStatsGroundingConfig = {}) {
   };
 }
 
-export function lowCardinality(config: LowCardinalityGroundingConfig = {}) {
+export function columnValues(config: ColumnValuesGroundingConfig = {}) {
   return (adapter: Adapter) => {
-    return new SqlServerLowCardinalityGrounding(adapter, config);
+    return new SqlServerColumnValuesGrounding(adapter, config);
   };
 }
+
+/** @deprecated Use columnValues() instead */
+export const lowCardinality = columnValues;
 
 export function indexes(config: IndexesGroundingConfig = {}) {
   return (adapter: Adapter) => {
@@ -76,6 +79,7 @@ export default {
   info,
   views,
   columnStats,
+  columnValues,
   lowCardinality,
   indexes,
   rowCount,

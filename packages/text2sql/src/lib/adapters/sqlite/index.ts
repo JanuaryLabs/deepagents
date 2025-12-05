@@ -3,7 +3,7 @@ import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grou
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
-import { type LowCardinalityGroundingConfig } from '../groundings/low-cardinality.grounding.ts';
+import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import {
   ReportGrounding,
   type ReportGroundingConfig,
@@ -15,7 +15,7 @@ import { SqliteColumnStatsGrounding } from './column-stats.sqlite.grounding.ts';
 import { SqliteConstraintGrounding } from './constraint.sqlite.grounding.ts';
 import { SqliteIndexesGrounding } from './indexes.sqlite.grounding.ts';
 import { SqliteInfoGrounding } from './info.sqlite.grounding.ts';
-import { SqliteLowCardinalityGrounding } from './low-cardinality.sqlite.grounding.ts';
+import { SqliteColumnValuesGrounding } from './column-values.sqlite.grounding.ts';
 import { SqliteRowCountGrounding } from './row-count.sqlite.grounding.ts';
 import { Sqlite } from './sqlite.ts';
 import { SqliteTableGrounding } from './table.sqlite.grounding.ts';
@@ -43,11 +43,14 @@ export function columnStats(config: ColumnStatsGroundingConfig = {}) {
   };
 }
 
-export function lowCardinality(config: LowCardinalityGroundingConfig = {}) {
+export function columnValues(config: ColumnValuesGroundingConfig = {}) {
   return (adapter: Adapter) => {
-    return new SqliteLowCardinalityGrounding(adapter, config);
+    return new SqliteColumnValuesGrounding(adapter, config);
   };
 }
+
+/** @deprecated Use columnValues() instead */
+export const lowCardinality = columnValues;
 
 export function indexes(config: IndexesGroundingConfig = {}) {
   return (adapter: Adapter) => {
@@ -76,6 +79,7 @@ export default {
   info,
   views,
   columnStats,
+  columnValues,
   lowCardinality,
   indexes,
   rowCount,

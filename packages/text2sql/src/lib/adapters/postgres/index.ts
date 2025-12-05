@@ -3,7 +3,7 @@ import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grou
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
-import { type LowCardinalityGroundingConfig } from '../groundings/low-cardinality.grounding.ts';
+import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import {
   ReportGrounding,
   type ReportGroundingConfig,
@@ -15,7 +15,7 @@ import { PostgresColumnStatsGrounding } from './column-stats.postgres.grounding.
 import { PostgresConstraintGrounding } from './constraint.postgres.grounding.ts';
 import { PostgresIndexesGrounding } from './indexes.postgres.grounding.ts';
 import { PostgresInfoGrounding } from './info.postgres.grounding.ts';
-import { PostgresLowCardinalityGrounding } from './low-cardinality.postgres.grounding.ts';
+import { PostgresColumnValuesGrounding } from './column-values.postgres.grounding.ts';
 import { Postgres } from './postgres.ts';
 import { PostgresRowCountGrounding } from './row-count.postgres.grounding.ts';
 import { PostgresTableGrounding } from './table.postgres.grounding.ts';
@@ -43,11 +43,14 @@ export function columnStats(config: ColumnStatsGroundingConfig = {}) {
   };
 }
 
-export function lowCardinality(config: LowCardinalityGroundingConfig = {}) {
+export function columnValues(config: ColumnValuesGroundingConfig = {}) {
   return (adapter: Adapter) => {
-    return new PostgresLowCardinalityGrounding(adapter, config);
+    return new PostgresColumnValuesGrounding(adapter, config);
   };
 }
+
+/** @deprecated Use columnValues() instead */
+export const lowCardinality = columnValues;
 
 export function indexes(config: IndexesGroundingConfig = {}) {
   return (adapter: Adapter) => {
@@ -76,6 +79,7 @@ export default {
   info,
   views,
   columnStats,
+  columnValues,
   lowCardinality,
   indexes,
   rowCount,
