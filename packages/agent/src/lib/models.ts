@@ -14,6 +14,14 @@ export const glm = createOpenAICompatible({
   apiKey: process.env.ZAI_API_KEY,
 });
 
+export const cerebras = createOpenAICompatible({
+  name: 'cerebras',
+  baseURL: 'https://api.cerebras.ai/v1',
+  apiKey: process.env.CEREBRAS_API_KEY,
+  includeUsage: true,
+  supportsStructuredOutputs: true,
+});
+
 export async function embed(documents: string[]): Promise<{
   embeddings: number[][];
   dimensions: number;

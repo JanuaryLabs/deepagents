@@ -1,6 +1,7 @@
 import {
   InvalidToolInputError,
   NoSuchToolError,
+  type Tool,
   ToolCallRepairError,
   type UIMessage,
   generateId,
@@ -35,6 +36,12 @@ import {
   toInstructions,
 } from './teach/teachables.ts';
 import teachings from './teach/teachings.ts';
+
+/** Extract SQL from markdown fenced code block if present */
+function extractSql(output: string): string {
+  const match = output.match(/```sql\n?([\s\S]*?)```/);
+  return match ? match[1].trim() : output.trim();
+}
 
 export interface InspectionResult {
   /** The grounding/introspection data (database schema context as XML) */
@@ -97,17 +104,35 @@ export class Text2Sql {
 
   public async toSql(
     query: string,
-    options?: { tools?: RenderingTools },
+    options?: {
+      tools?: RenderingTools;
+      /** Enable db_query tool (default: false). When false, agent cannot execute queries. */
+      enableDbQuery?: boolean;
+      /** Enable get_sample_rows tool (default: true). Helps agent understand data formats. */
+      enableSampleRows?: boolean;
+    },
   ): Promise<string> {
     const introspection = await this.index();
+
+    // Build tools based on options - exclude db_query by default to force SQL-only output
+    const baseTools = t_a_g.handoff.tools;
+    const toolsConfig: Record<string, Tool> = {
+      validate_query: baseTools.validate_query,
+      scratchpad: baseTools.scratchpad,
+    };
+
+    if (options?.enableSampleRows !== false) {
+      toolsConfig.get_sample_rows = baseTools.get_sample_rows;
+    }
+
+    if (options?.enableDbQuery) {
+      toolsConfig.db_query = baseTools.db_query;
+    }
 
     const { text } = await generate(
       sqlQueryAgent.clone({
         model: this.#config.model,
-        tools: {
-          ...t_a_g.handoff.tools,
-          ...(options?.tools ?? this.#config.tools),
-        },
+        tools: toolsConfig,
       }),
       [user(query)],
       {
@@ -125,7 +150,7 @@ export class Text2Sql {
       },
     );
 
-    return text;
+    return extractSql(text);
   }
 
   public instruct(...dataset: Teachables[]) {
@@ -241,7 +266,10 @@ export class Text2Sql {
           ]
         : []),
     ];
-
+    const originalMessage = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
     const result = stream(
       t_a_g.clone({
         model: this.#config.model,
@@ -251,7 +279,7 @@ export class Text2Sql {
           ...this.#config.tools,
         },
       }),
-      [...chat.messages.map((it) => it.content), ...messages],
+      originalMessage,
       {
         teachings: toInstructions(
           'instructions',
@@ -286,25 +314,31 @@ export class Text2Sql {
       sendFinish: true,
       sendReasoning: true,
       sendSources: true,
-      originalMessages: messages,
+      originalMessages: originalMessage,
       generateMessageId: generateId,
-      onFinish: async ({ messages }) => {
-        const userMessage = messages.at(-2);
-        const botMessage = messages.at(-1);
-        if (!userMessage || !botMessage) {
-          throw new Error('Not implemented yet');
+      onFinish: async ({ responseMessage, isContinuation }) => {
+        // Get user message from the input array (already known before the call)
+        // Don't save if this is a continuation of an existing message
+        const userMessage = messages.at(-1);
+        if (!isContinuation && userMessage) {
+          console.log(
+            'Saving user message to history:',
+            JSON.stringify(userMessage),
+          );
+          await this.#config.history.addMessage({
+            id: v7(),
+            chatId: params.chatId,
+            role: userMessage.role,
+            content: userMessage,
+          });
         }
+
+        // Use responseMessage directly - guaranteed to have the assistant's reply
         await this.#config.history.addMessage({
           id: v7(),
           chatId: params.chatId,
-          role: userMessage.role,
-          content: userMessage,
-        });
-        await this.#config.history.addMessage({
-          id: v7(),
-          chatId: params.chatId,
-          role: botMessage.role,
-          content: botMessage,
+          role: responseMessage.role,
+          content: responseMessage,
         });
       },
     });

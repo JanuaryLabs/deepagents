@@ -9,21 +9,30 @@ This recipe provides teachables for financial databases covering loans, portfoli
 
 ```typescript
 import {
-  term,
-  hint,
-  guardrail,
-  example,
   clarification,
+  example,
+  guardrail,
+  hint,
   quirk,
+  term,
   workflow,
 } from '@deepagents/text2sql';
 
 text2sql.instruct(
   // Terms
-  term('NPL', 'Non-Performing Loan - loan past due 90+ days with no expected recovery'),
-  term('AUM', 'Assets Under Management - total market value of investments managed'),
+  term(
+    'NPL',
+    'Non-Performing Loan - loan past due 90+ days with no expected recovery',
+  ),
+  term(
+    'AUM',
+    'Assets Under Management - total market value of investments managed',
+  ),
   term('YTD', 'Year To Date - from January 1 to current date'),
-  term('QoQ', 'Quarter over Quarter - comparison to same metric in previous quarter'),
+  term(
+    'QoQ',
+    'Quarter over Quarter - comparison to same metric in previous quarter',
+  ),
   term('MoM', 'Month over Month - comparison to same metric in previous month'),
   term('NAV', 'Net Asset Value - total assets minus liabilities'),
   term('ROI', 'Return on Investment - (gain - cost) / cost * 100'),
@@ -79,7 +88,8 @@ text2sql.instruct(
   // Quirks
   quirk({
     issue: 'Fiscal year may not align with calendar year',
-    workaround: 'Check fiscal_year_start in config table, typically July 1 or October 1',
+    workaround:
+      'Check fiscal_year_start in config table, typically July 1 or October 1',
   }),
   quirk({
     issue: 'Currency amounts may be stored in cents/minor units',
@@ -118,7 +128,7 @@ text2sql.instruct(
   // Examples
   example({
     question: 'show me NPL ratio by region',
-    sql: `SELECT region,
+    answer: `SELECT region,
             SUM(CASE WHEN days_past_due >= 90 THEN outstanding_balance ELSE 0 END) as npl_amount,
             SUM(outstanding_balance) as total_loans,
             ROUND(SUM(CASE WHEN days_past_due >= 90 THEN outstanding_balance ELSE 0 END) * 100.0 /
@@ -130,7 +140,7 @@ text2sql.instruct(
   }),
   example({
     question: 'portfolio returns YTD',
-    sql: `SELECT portfolio_name,
+    answer: `SELECT portfolio_name,
             SUM(current_value) as current_value,
             SUM(cost_basis) as cost_basis,
             ROUND((SUM(current_value) - SUM(cost_basis)) * 100.0 / NULLIF(SUM(cost_basis), 0), 2) as return_pct
@@ -142,7 +152,7 @@ text2sql.instruct(
   }),
   example({
     question: 'transaction volume by month',
-    sql: `SELECT DATE_TRUNC('month', transaction_date) as month,
+    answer: `SELECT DATE_TRUNC('month', transaction_date) as month,
             COUNT(*) as transaction_count,
             SUM(amount) as total_volume,
             AVG(amount) as avg_transaction
@@ -158,25 +168,25 @@ text2sql.instruct(
 
 ### Terms
 
-| Term | Definition |
-|------|------------|
-| NPL | Non-Performing Loan - 90+ days past due |
-| AUM | Assets Under Management |
-| YTD | Year To Date (Jan 1 to now) |
-| QoQ | Quarter over Quarter comparison |
-| NAV | Net Asset Value |
-| ROI | Return on Investment |
-| P&L | Profit and Loss statement |
-| Exposure | Total amount at risk |
+| Term     | Definition                              |
+| -------- | --------------------------------------- |
+| NPL      | Non-Performing Loan - 90+ days past due |
+| AUM      | Assets Under Management                 |
+| YTD      | Year To Date (Jan 1 to now)             |
+| QoQ      | Quarter over Quarter comparison         |
+| NAV      | Net Asset Value                         |
+| ROI      | Return on Investment                    |
+| P&L      | Profit and Loss statement               |
+| Exposure | Total amount at risk                    |
 
 ### Guardrails
 
-| Rule | Reason |
-|------|--------|
-| No individual account balances with names | Financial privacy |
-| Transaction queries need audit logging | Regulatory compliance |
-| No SSN or full account numbers | Identity protection |
-| Large queries need date filters | Performance/audit |
+| Rule                                      | Reason                |
+| ----------------------------------------- | --------------------- |
+| No individual account balances with names | Financial privacy     |
+| Transaction queries need audit logging    | Regulatory compliance |
+| No SSN or full account numbers            | Identity protection   |
+| Large queries need date filters           | Performance/audit     |
 
 ### Loan Status Flow
 

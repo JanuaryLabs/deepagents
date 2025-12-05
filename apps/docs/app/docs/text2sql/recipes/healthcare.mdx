@@ -9,12 +9,12 @@ This recipe provides teachables for healthcare databases covering patient data, 
 
 ```typescript
 import {
-  term,
-  hint,
-  guardrail,
-  example,
   clarification,
+  example,
+  guardrail,
+  hint,
   quirk,
+  term,
   workflow,
 } from '@deepagents/text2sql';
 
@@ -22,15 +22,24 @@ text2sql.instruct(
   // Terms
   term('LOS', 'Length of Stay - number of days from admission to discharge'),
   term('ALOS', 'Average Length of Stay - mean LOS across a cohort'),
-  term('PHI', 'Protected Health Information - any individually identifiable health data'),
-  term('readmission', 'patient returning to hospital within 30 days of discharge'),
+  term(
+    'PHI',
+    'Protected Health Information - any individually identifiable health data',
+  ),
+  term(
+    'readmission',
+    'patient returning to hospital within 30 days of discharge',
+  ),
   term('encounter', 'single patient visit or episode of care'),
   term('admission', 'patient entering inpatient care'),
   term('discharge', 'patient leaving hospital care'),
   term('ED', 'Emergency Department'),
   term('ICU', 'Intensive Care Unit'),
   term('DRG', 'Diagnosis Related Group - classification for billing'),
-  term('ICD-10', 'International Classification of Diseases, 10th revision - diagnosis codes'),
+  term(
+    'ICD-10',
+    'International Classification of Diseases, 10th revision - diagnosis codes',
+  ),
   term('CPT', 'Current Procedural Terminology - procedure codes'),
   term('census', 'current count of inpatients at a point in time'),
 
@@ -77,7 +86,8 @@ text2sql.instruct(
   clarification({
     when: 'user asks about readmissions without specifying type',
     ask: 'All-cause readmissions or specific condition (e.g., heart failure, pneumonia)?',
-    reason: 'Different readmission measures have different clinical significance',
+    reason:
+      'Different readmission measures have different clinical significance',
   }),
   clarification({
     when: 'user mentions mortality without specifying timeframe',
@@ -92,7 +102,8 @@ text2sql.instruct(
   }),
   quirk({
     issue: 'Some diagnoses are coded differently between ICD-9 and ICD-10',
-    workaround: 'Check diagnosis_code_version column, use crosswalk table if needed',
+    workaround:
+      'Check diagnosis_code_version column, use crosswalk table if needed',
   }),
   quirk({
     issue: 'ED visits may convert to inpatient admissions mid-encounter',
@@ -110,7 +121,8 @@ text2sql.instruct(
       'Calculate rate: (readmissions / index admissions) * 100',
       'Stratify by DRG, payer, or discharge disposition',
     ],
-    notes: 'CMS readmission measures have specific inclusion/exclusion criteria',
+    notes:
+      'CMS readmission measures have specific inclusion/exclusion criteria',
   }),
   workflow({
     task: 'Length of Stay Analysis',
@@ -127,7 +139,7 @@ text2sql.instruct(
   // Examples (HIPAA-compliant aggregates)
   example({
     question: 'average length of stay by department',
-    sql: `SELECT department,
+    answer: `SELECT department,
             COUNT(*) as encounters,
             ROUND(AVG(EXTRACT(DAY FROM discharge_datetime - admission_datetime)), 1) as avg_los,
             ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY
@@ -142,7 +154,7 @@ text2sql.instruct(
   }),
   example({
     question: 'readmission rate this quarter',
-    sql: `WITH index_admissions AS (
+    answer: `WITH index_admissions AS (
             SELECT patient_id, discharge_datetime, encounter_id
             FROM encounters
             WHERE encounter_type = 'inpatient'
@@ -167,7 +179,7 @@ text2sql.instruct(
   }),
   example({
     question: 'ED wait times trend',
-    sql: `SELECT DATE_TRUNC('week', arrival_datetime) as week,
+    answer: `SELECT DATE_TRUNC('week', arrival_datetime) as week,
             COUNT(*) as ed_visits,
             ROUND(AVG(EXTRACT(EPOCH FROM (seen_datetime - arrival_datetime)) / 60), 0) as avg_wait_mins,
             ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY
@@ -185,26 +197,26 @@ text2sql.instruct(
 
 ### Terms
 
-| Term | Definition |
-|------|------------|
-| LOS | Length of Stay - days from admission to discharge |
-| ALOS | Average Length of Stay |
-| PHI | Protected Health Information |
-| Readmission | Return within 30 days of discharge |
-| Encounter | Single patient visit/episode |
-| DRG | Diagnosis Related Group |
-| ICD-10 | Diagnosis code system |
-| CPT | Procedure code system |
-| Census | Current inpatient count |
+| Term        | Definition                                        |
+| ----------- | ------------------------------------------------- |
+| LOS         | Length of Stay - days from admission to discharge |
+| ALOS        | Average Length of Stay                            |
+| PHI         | Protected Health Information                      |
+| Readmission | Return within 30 days of discharge                |
+| Encounter   | Single patient visit/episode                      |
+| DRG         | Diagnosis Related Group                           |
+| ICD-10      | Diagnosis code system                             |
+| CPT         | Procedure code system                             |
+| Census      | Current inpatient count                           |
 
 ### HIPAA Guardrails
 
-| Rule | Impact |
-|------|--------|
-| No PHI columns (SSN, MRN, DOB, name, address) | Privacy Rule |
-| Minimum cell size of 10 | Prevent re-identification |
-| No individual records without authorization | Minimum necessary |
-| Date ranges required | Limit exposure |
+| Rule                                          | Impact                    |
+| --------------------------------------------- | ------------------------- |
+| No PHI columns (SSN, MRN, DOB, name, address) | Privacy Rule              |
+| Minimum cell size of 10                       | Prevent re-identification |
+| No individual records without authorization   | Minimum necessary         |
+| Date ranges required                          | Limit exposure            |
 
 ### Patient Flow
 

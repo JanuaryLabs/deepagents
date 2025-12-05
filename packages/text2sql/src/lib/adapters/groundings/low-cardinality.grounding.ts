@@ -7,7 +7,8 @@ export type { Column, ColumnContainer };
  * Configuration for LowCardinalityGrounding.
  */
 export interface LowCardinalityGroundingConfig {
-  // Future: filter which tables/columns to collect low cardinality values for
+  /** Maximum number of distinct values to consider "low cardinality". Default: 20 */
+  limit?: number;
 }
 
 /**
@@ -20,8 +21,11 @@ export interface LowCardinalityGroundingConfig {
  * - `collectLowCardinality()` - collect distinct values for low cardinality columns
  */
 export abstract class LowCardinalityGrounding extends AbstractGrounding {
+  protected readonly limit: number;
+
   constructor(config: LowCardinalityGroundingConfig = {}) {
     super('low_cardinality');
+    this.limit = config.limit ?? 20;
   }
 
   /**

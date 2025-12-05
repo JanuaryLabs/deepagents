@@ -229,6 +229,7 @@ const SQL_STEP_BACK_EXAMPLES: StepBackExample[] = [
 export const sqlQueryAgent = agent({
   name: 'text2sql',
   model: groq('openai/gpt-oss-20b'),
+  logging: process.env.AGENT_LOGGING === 'true',
   tools,
   // output: z.object({
   //   sql: z
@@ -244,7 +245,15 @@ export const sqlQueryAgent = agent({
     </agent>
     ${state?.teachings || ''}
     ${state?.introspection || ''}
-    <output>SQL query that can run directly without prose whatsoever</output>
+    <output>
+CRITICAL: Your final response must be ONLY the executable SQL query.
+- No markdown code blocks (no \`\`\` or \`\`\`sql)
+- No explanations, commentary, or preamble
+- No "Here is the query" or similar text
+- No execution results or data summaries
+- Do NOT execute the query - just generate and return it
+- Just the raw SQL statement that can be copied and run directly
+</output>
   `;
   },
 });

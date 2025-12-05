@@ -5,8 +5,6 @@ import {
   type LowCardinalityGroundingConfig,
 } from '../groundings/low-cardinality.grounding.ts';
 
-const LOW_CARDINALITY_LIMIT = 20;
-
 /**
  * SQLite implementation of LowCardinalityGrounding.
  */
@@ -25,18 +23,18 @@ export class SqliteLowCardinalityGrounding extends LowCardinalityGrounding {
     const tableIdentifier = this.#adapter.quoteIdentifier(tableName);
     const columnIdentifier = this.#adapter.quoteIdentifier(column.name);
     // Add one to limit to detect if it exceeds the threshold
-    const limit = LOW_CARDINALITY_LIMIT + 1;
+    const queryLimit = this.limit + 1;
 
     const sql = `
       SELECT DISTINCT ${columnIdentifier} AS value
       FROM ${tableIdentifier}
       WHERE ${columnIdentifier} IS NOT NULL
-      LIMIT ${limit}
+      LIMIT ${queryLimit}
     `;
 
     const rows = await this.#adapter.runQuery<{ value: unknown }>(sql);
 
-    if (!rows.length || rows.length > LOW_CARDINALITY_LIMIT) {
+    if (!rows.length || rows.length > this.limit) {
       return undefined;
     }
 

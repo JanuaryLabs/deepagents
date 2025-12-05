@@ -17,6 +17,24 @@
           "packages/text2sql/src/lib/adapters/sqlserver/index.ts"
         ]
       }
+    },
+    "eval": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "evalite",
+        "cwd": "{projectRoot}",
+        "envFile": ".env"
+      }
+    },
+    "eval-serve": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "evalite serve",
+        "cwd": "{projectRoot}",
+        "envFile": ".env"
+      }
     }
   }
 }

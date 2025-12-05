@@ -13,11 +13,12 @@ npm install @deepagents/text2sql
 
 ## Basic Setup
 
-Text2SQL requires three components:
+Text2SQL requires four components:
 
 1. **Adapter** - Connects to your database (PostgreSQL, SQLite, or SQL Server)
-2. **Version** - A string used to manage cache invalidation (bump when schema changes)
-3. **History** - Stores conversation history (optional for single queries)
+2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
+3. **Version** - A string used to manage cache invalidation (bump when schema changes)
+4. **History** - Stores conversation history (optional for single queries)
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server']}>
 <Tab value="SQLite">
@@ -26,6 +27,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
+import * as sqlite from '@deepagents/text2sql/sqlite';
 
 // Connect to your database
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
@@ -35,6 +37,7 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
+    grounding: [sqlite.tables(), sqlite.info()],
   }),
   history: new InMemoryHistory(),
 });
@@ -46,6 +49,7 @@ import pg from 'pg';
 
 import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
+import * as postgres from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -58,6 +62,7 @@ const text2sql = new Text2Sql({
       const result = await pool.query(sql);
       return result.rows;
     },
+    grounding: [postgres.tables(), postgres.info()],
   }),
   history: new InMemoryHistory(),
 });
@@ -69,6 +74,7 @@ import sql from 'mssql';
 
 import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
 const pool = await sql.connect({
   server: process.env.DB_HOST,
@@ -85,6 +91,7 @@ const text2sql = new Text2Sql({
       const result = await pool.request().query(query);
       return result.recordset;
     },
+    grounding: [sqlserver.tables(), sqlserver.info()],
   }),
   history: new InMemoryHistory(),
 });
@@ -133,12 +140,11 @@ for await (const chunk of stream) {
 
 When Text2SQL processes a query, it:
 
-1. **Analyzes your schema** - Examines tables, columns, relationships, and data patterns
-2. **Generates a brief** - Creates a business context summary (cached for reuse)
-3. **Applies teachables** - Uses domain knowledge (terms, hints, guardrails, examples)
-4. **Applies step-back prompting** - Considers the broader question before generating SQL
-5. **Validates the query** - Ensures the SQL is syntactically correct using `validate_query` tool
-6. **Returns results** - Either raw SQL or executed results
+1. **Runs grounding** - Introspects your database schema (tables, columns, relationships, indexes, constraints)
+2. **Applies teachables** - Injects domain knowledge (terms, hints, guardrails, examples) into the prompt
+3. **Assembles context** - Builds the agent prompt with schema + teachables + step-back reasoning examples
+4. **Generates & validates SQL** - Drafts SQL, validates syntax with `validate_query` tool
+5. **Returns results** - `toSql()` returns the SQL string; `chat()` streams the response with explanation
 
 Text2SQL includes default teachables that enforce best practices like read-only queries, row limits, and proper validation workflows.
 
@@ -152,6 +158,7 @@ export GROQ_API_KEY=your-api-key
 
 ## Next Steps
 
+- [Grounding](/docs/text2sql/grounding) - Configure database introspection for richer context
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific features
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific features

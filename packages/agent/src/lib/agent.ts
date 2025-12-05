@@ -83,6 +83,7 @@ export interface CreateAgent<Output, CIn, COut = CIn> {
   toolChoice?: ToolChoice<Record<string, COut>>;
   output?: z.Schema<Output>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  logging?: boolean;
 }
 export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   model: AgentModel;
@@ -98,6 +99,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   readonly output?: z.Schema<Output>;
   readonly temperature?: number;
   readonly providerOptions?: CreateAgent<Output, CIn, COut>['providerOptions'];
+  readonly logging?: boolean;
   constructor(config: CreateAgent<Output, CIn, COut>) {
     this.model = config.model;
     this.toolChoice = config.toolChoice || 'auto';
@@ -108,6 +110,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
     this.temperature = config.temperature;
     this.internalName = snakecase(config.name);
     this.providerOptions = config.providerOptions;
+    this.logging = config.logging;
     this.handoff = {
       name: this.internalName,
       instructions: config.prompt,
@@ -235,7 +238,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
               : undefined,
             onStepFinish: (step) => {
               const toolCall = step.toolCalls.at(-1);
-              if (toolCall) {
+              if (toolCall && this.logging) {
                 console.log(
                   `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
                 );
@@ -266,7 +269,10 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
     return { [this.handoffToolName]: this.asTool(props) };
   }
 
-  debug(prefix = '') {
+  debug() {
+    if (!this.logging) {
+      return;
+    }
     console.log(
       `Debug: ${chalk.bgMagenta('Agent')}: ${chalk.dim.black(this.handoff.name)}`,
     );

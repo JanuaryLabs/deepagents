@@ -9,21 +9,36 @@ This recipe provides teachables for e-commerce databases covering orders, custom
 
 ```typescript
 import {
-  term,
-  hint,
-  guardrail,
-  example,
   clarification,
+  example,
+  guardrail,
+  hint,
   quirk,
+  term,
 } from '@deepagents/text2sql';
 
 text2sql.instruct(
   // Terms
-  term('AOV', 'Average Order Value - total revenue divided by number of orders'),
-  term('GMV', 'Gross Merchandise Value - total value of all goods sold before deductions'),
-  term('LTV', 'Lifetime Value - predicted total revenue from a customer over their relationship'),
-  term('cart abandonment', 'when a user adds items to cart but does not complete checkout'),
-  term('churn', 'when a customer stops purchasing, typically no order in 90+ days'),
+  term(
+    'AOV',
+    'Average Order Value - total revenue divided by number of orders',
+  ),
+  term(
+    'GMV',
+    'Gross Merchandise Value - total value of all goods sold before deductions',
+  ),
+  term(
+    'LTV',
+    'Lifetime Value - predicted total revenue from a customer over their relationship',
+  ),
+  term(
+    'cart abandonment',
+    'when a user adds items to cart but does not complete checkout',
+  ),
+  term(
+    'churn',
+    'when a customer stops purchasing, typically no order in 90+ days',
+  ),
   term('repeat customer', 'customer who has placed more than one order'),
   term('conversion rate', 'percentage of visitors who complete a purchase'),
 
@@ -35,7 +50,8 @@ text2sql.instruct(
   }),
   guardrail({
     rule: 'Exclude test and internal orders from analytics',
-    action: 'Filter where email NOT LIKE \'%@test.com\' AND email NOT LIKE \'%@internal.com\'',
+    action:
+      "Filter where email NOT LIKE '%@test.com' AND email NOT LIKE '%@internal.com'",
   }),
   guardrail({
     rule: 'Do not expose individual customer addresses or phone numbers',
@@ -43,10 +59,18 @@ text2sql.instruct(
   }),
 
   // Hints
-  hint('Active customer means ordered within last 90 days unless otherwise specified'),
-  hint('Revenue typically means gross revenue unless net is explicitly requested'),
-  hint('When asked for "top products", default to ordering by revenue not quantity'),
-  hint('Order status values are typically: pending, processing, shipped, delivered, cancelled, refunded'),
+  hint(
+    'Active customer means ordered within last 90 days unless otherwise specified',
+  ),
+  hint(
+    'Revenue typically means gross revenue unless net is explicitly requested',
+  ),
+  hint(
+    'When asked for "top products", default to ordering by revenue not quantity',
+  ),
+  hint(
+    'Order status values are typically: pending, processing, shipped, delivered, cancelled, refunded',
+  ),
 
   // Clarifications
   clarification({
@@ -63,7 +87,8 @@ text2sql.instruct(
   // Quirks
   quirk({
     issue: 'Cancelled orders may still appear in orders table',
-    workaround: 'Always filter by status != \'cancelled\' for revenue calculations',
+    workaround:
+      "Always filter by status != 'cancelled' for revenue calculations",
   }),
   quirk({
     issue: 'Refunds are stored as negative line items',
@@ -73,7 +98,7 @@ text2sql.instruct(
   // Examples
   example({
     question: 'show me top 10 products by revenue',
-    sql: `SELECT p.name, SUM(oi.quantity * oi.unit_price) as revenue
+    answer: `SELECT p.name, SUM(oi.quantity * oi.unit_price) as revenue
           FROM order_items oi
           JOIN products p ON oi.product_id = p.id
           JOIN orders o ON oi.order_id = o.id
@@ -84,14 +109,14 @@ text2sql.instruct(
   }),
   example({
     question: 'what is the average order value this month',
-    sql: `SELECT AVG(total_amount) as aov
+    answer: `SELECT AVG(total_amount) as aov
           FROM orders
           WHERE status NOT IN ('cancelled', 'refunded')
             AND created_at >= DATE_TRUNC('month', CURRENT_DATE)`,
   }),
   example({
     question: 'show me customer lifetime value',
-    sql: `SELECT c.id, c.email,
+    answer: `SELECT c.id, c.email,
             COUNT(DISTINCT o.id) as order_count,
             SUM(o.total_amount) as lifetime_value
           FROM customers c
@@ -108,22 +133,22 @@ text2sql.instruct(
 
 ### Terms
 
-| Term | Definition |
-|------|------------|
-| AOV | Average Order Value - total revenue / number of orders |
-| GMV | Gross Merchandise Value - total value before deductions |
-| LTV | Lifetime Value - total predicted revenue from a customer |
-| Cart abandonment | User adds items but doesn't complete checkout |
-| Churn | Customer stops purchasing (no order in 90+ days) |
-| Repeat customer | Customer with more than one order |
-| Conversion rate | Percentage of visitors who purchase |
+| Term             | Definition                                               |
+| ---------------- | -------------------------------------------------------- |
+| AOV              | Average Order Value - total revenue / number of orders   |
+| GMV              | Gross Merchandise Value - total value before deductions  |
+| LTV              | Lifetime Value - total predicted revenue from a customer |
+| Cart abandonment | User adds items but doesn't complete checkout            |
+| Churn            | Customer stops purchasing (no order in 90+ days)         |
+| Repeat customer  | Customer with more than one order                        |
+| Conversion rate  | Percentage of visitors who purchase                      |
 
 ### Guardrails
 
-| Rule | Reason |
-|------|--------|
-| No credit card data | PCI compliance |
-| Exclude test orders | Clean analytics |
+| Rule                    | Reason             |
+| ----------------------- | ------------------ |
+| No credit card data     | PCI compliance     |
+| Exclude test orders     | Clean analytics    |
 | No individual addresses | Privacy protection |
 
 ### Common Order Statuses
@@ -169,7 +194,7 @@ term('at-risk customer', 'previously active customer with no order in 60-90 days
 term('gross margin', '(revenue - COGS) / revenue * 100'),
 example({
   question: 'gross margin by category',
-  sql: `SELECT category, (SUM(revenue) - SUM(cogs)) / SUM(revenue) * 100 as margin
+  answer: `SELECT category, (SUM(revenue) - SUM(cogs)) / SUM(revenue) * 100 as margin
         FROM order_items GROUP BY category`,
 }),
 ```
