@@ -114,42 +114,74 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     );
 
     if (ddlRows[0]?.sql) {
-      const checkConstraints = this.#parseCheckConstraints(ddlRows[0].sql, tableName);
+      const columnNames = columns.map((c) => c.name);
+      const checkConstraints = this.#parseCheckConstraints(
+        ddlRows[0].sql,
+        tableName,
+        columnNames,
+      );
       constraints.push(...checkConstraints);
     }
 
     return constraints;
   }
 
-  #parseCheckConstraints(ddl: string, tableName: string): TableConstraint[] {
+  #parseCheckConstraints(
+    ddl: string,
+    tableName: string,
+    columnNames: string[],
+  ): TableConstraint[] {
     const constraints: TableConstraint[] = [];
 
-    // Match CHECK constraints: CHECK (expression) or CONSTRAINT name CHECK (expression)
-    const checkRegex = /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?CHECK\s*\(([^)]+)\)/gi;
-    let match;
+    // Find CHECK constraints with proper parenthesis matching
+    // Match: CONSTRAINT name CHECK or just CHECK
+    const checkStartRegex =
+      /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?CHECK\s*\(/gi;
+    let startMatch;
     let index = 0;
 
-    while ((match = checkRegex.exec(ddl)) !== null) {
-      const name = match[1] || `${tableName}_check_${index}`;
-      const definition = match[2]?.trim();
+    while ((startMatch = checkStartRegex.exec(ddl)) !== null) {
+      const name = startMatch[1] || `${tableName}_check_${index}`;
+      const startPos = startMatch.index + startMatch[0].length;
 
-      if (definition) {
-        constraints.push({
-          name,
-          type: 'CHECK',
-          definition,
-        });
-        index++;
+      // Find the matching closing parenthesis
+      let depth = 1;
+      let endPos = startPos;
+      while (endPos < ddl.length && depth > 0) {
+        if (ddl[endPos] === '(') depth++;
+        else if (ddl[endPos] === ')') depth--;
+        endPos++;
+      }
+
+      if (depth === 0) {
+        const definition = ddl.slice(startPos, endPos - 1).trim();
+        if (definition) {
+          // Try to identify which columns this constraint applies to
+          const constraintColumns = columnNames.filter((col) => {
+            // Match column name as a word boundary
+            const colRegex = new RegExp(`\\b${col}\\b`, 'i');
+            return colRegex.test(definition);
+          });
+
+          constraints.push({
+            name,
+            type: 'CHECK',
+            definition,
+            columns: constraintColumns.length > 0 ? constraintColumns : undefined,
+          });
+          index++;
+        }
       }
     }
 
     // Match UNIQUE constraints at table level
     const uniqueRegex = /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?UNIQUE\s*\(([^)]+)\)/gi;
     let uniqueIndex = 0;
+    let uniqueMatch;
 
-    while ((match = uniqueRegex.exec(ddl)) !== null) {
-      const name = match[1] || `${tableName}_unique_${uniqueIndex}`;
-      const columnsStr = match[2]?.trim();
+    while ((uniqueMatch = uniqueRegex.exec(ddl)) !== null) {
+      const name = uniqueMatch[1] || `${tableName}_unique_${uniqueIndex}`;
+      const columnsStr = uniqueMatch[2]?.trim();
 
       if (columnsStr) {
         const columns = columnsStr.split(',').map((c) => c.trim().replace(/["'`]/g, ''));

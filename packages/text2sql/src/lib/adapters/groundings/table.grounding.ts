@@ -214,7 +214,9 @@ export abstract class TableGrounding extends AbstractGrounding {
             if (column.isIndexed && !isPrimaryKey) {
               annotations.push('Indexed');
             }
-            if (column.kind === 'LowCardinality' && column.values?.length) {
+            if (column.kind === 'Enum' && column.values?.length) {
+              annotations.push(`Enum: ${column.values.join(', ')}`);
+            } else if (column.kind === 'LowCardinality' && column.values?.length) {
               annotations.push(`LowCardinality: ${column.values.join(', ')}`);
             }
             if (column.stats) {
