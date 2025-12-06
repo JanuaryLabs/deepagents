@@ -1,8 +1,10 @@
 import { defineConfig } from 'evalite/config';
-import { createSqliteStorage } from 'evalite/sqlite-storage';
 
+const trialCount = process.env.EVALITE_TRIAL_COUNT
+  ? Number.parseInt(process.env.EVALITE_TRIAL_COUNT)
+  : 1;
 export default defineConfig({
-  maxConcurrency: 1, // Run one test at a time
+  trialCount,
   testTimeout: 60000, // Increase timeout for LLM calls (60 seconds)
-  storage: () => createSqliteStorage('evalite.sqlite'),
+  maxConcurrency: 16,
 });

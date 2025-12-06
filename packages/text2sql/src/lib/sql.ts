@@ -29,13 +29,14 @@ import { History } from './history/history.ts';
 import type { TeachablesStore } from './memory/store.ts';
 import {
   type Teachables,
+  guardrail,
   hint,
   persona,
   styleGuide,
   teachable,
   toInstructions,
 } from './teach/teachables.ts';
-import teachings from './teach/teachings.ts';
+import { type TeachingsOptions, guidelines } from './teach/teachings.ts';
 
 /** Extract SQL from markdown fenced code block if present */
 function extractSql(output: string): string {
@@ -64,7 +65,6 @@ export class Text2Sql {
   #config: {
     model?: AgentModel;
     adapter: Adapter;
-    briefCache: FileCache;
     history: History;
     tools?: RenderingTools;
     instructions: Teachables[];
@@ -80,12 +80,19 @@ export class Text2Sql {
     instructions?: Teachables[];
     model?: AgentModel;
     memory?: TeachablesStore;
+    /**
+     * Configure teachings behavior
+     * @see TeachingsOptions
+     */
+    teachingsOptions?: TeachingsOptions;
   }) {
     this.#config = {
       adapter: config.adapter,
-      briefCache: new FileCache('brief-' + config.version),
       history: config.history,
-      instructions: [...teachings, ...(config.instructions ?? [])],
+      instructions: [
+        ...guidelines(config.teachingsOptions),
+        ...(config.instructions ?? []),
+      ],
       tools: config.tools ?? {},
       model: config.model,
       memory: config.memory,
@@ -118,7 +125,7 @@ export class Text2Sql {
     const baseTools = t_a_g.handoff.tools;
     const toolsConfig: Record<string, Tool> = {
       validate_query: baseTools.validate_query,
-      scratchpad: baseTools.scratchpad,
+      // scratchpad: baseTools.scratchpad,
     };
 
     if (options?.enableSampleRows !== false) {
@@ -140,8 +147,7 @@ export class Text2Sql {
           'instructions',
           persona({
             name: 'Freya',
-            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
-            tone: 'Your tone should be concise and business-friendly.',
+            role: 'You are an expert SQL query generator.',
           }),
           ...this.#config.instructions,
         ),
@@ -165,6 +171,12 @@ export class Text2Sql {
     );
     const allInstructions = [
       ...this.#config.instructions,
+      guardrail({
+        rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
+        reason: 'Prevents SQL errors from wrong value formats.',
+        action:
+          "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
+      }),
       ...(renderToolNames.length
         ? [
             hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
@@ -188,15 +200,7 @@ export class Text2Sql {
       tools,
       prompt: agent.instructions({
         introspection: grounding,
-        teachings: toInstructions(
-          'instructions',
-          persona({
-            name: 'Freya',
-            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
-            tone: 'Your tone should be concise and business-friendly.',
-          }),
-          ...allInstructions,
-        ),
+        teachings: toInstructions('instructions', ...allInstructions),
       }),
     };
   }
@@ -254,6 +258,12 @@ export class Text2Sql {
     );
     const instructions = [
       ...this.#config.instructions,
+      guardrail({
+        rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
+        reason: 'Prevents SQL errors from wrong value formats.',
+        action:
+          "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
+      }),
       ...(renderToolNames.length
         ? [
             hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),

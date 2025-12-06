@@ -1,3 +1,4 @@
+export * from './lib/adapters/adapter.ts';
 export * from './lib/agents/suggestions.agents.ts';
 export * from './lib/agents/text2sql.agent.ts';
 export * from './lib/file-cache.ts';
@@ -8,6 +9,7 @@ export * from './lib/memory/memory.store.ts';
 export * from './lib/memory/sqlite.store.ts';
 export * from './lib/memory/store.ts';
 export * from './lib/sql.ts';
+export * from './lib/teach/teachings.ts';
 
 if (import.meta.main) {
   // const { DatabaseSync } = await import('node:sqlite');

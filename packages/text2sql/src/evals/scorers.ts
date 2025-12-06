@@ -16,6 +16,7 @@ export const sqlSemanticMatch = createScorer<unknown, string, string>({
   scorer: async ({ output, expected, input }) => {
     const result = await Sql({
       output: output,
+      useCoT: true,
       expected: expected,
       input: typeof input === 'string' ? input : JSON.stringify(input),
       client: openai as never,

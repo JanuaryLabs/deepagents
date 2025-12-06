@@ -2,12 +2,7 @@ import { groq } from '@ai-sdk/groq';
 import { type Tool, tool } from 'ai';
 import z from 'zod';
 
-import {
-  type StepBackExample,
-  agent,
-  stepBackPrompt,
-  toState,
-} from '@deepagents/agent';
+import { agent, toState } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
 
 import type { Adapter } from '../adapters/adapter.ts';
@@ -196,53 +191,13 @@ export const memoryTools = {
   }),
 };
 
-const SQL_STEP_BACK_EXAMPLES: StepBackExample[] = [
-  {
-    originalQuestion: 'Who are our top 5 customers by spending?',
-    stepBackQuestion:
-      'What are the SQL principles for ranking and aggregation queries?',
-    stepBackAnswer:
-      'Ranking queries require: 1) Aggregation functions (SUM, COUNT, AVG) grouped by the entity to rank, 2) JOINs to connect related data across tables (e.g., Customer to Invoice), 3) ORDER BY to sort by the aggregated metric, 4) LIMIT to restrict to top N results. For customer spending, join Customer and Invoice tables, sum invoice totals, group by customer identifier, order by total descending.',
-    finalAnswer:
-      'SELECT c.FirstName, c.LastName, SUM(i.Total) as total_spent FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId ORDER BY total_spent DESC LIMIT 5',
-  },
-  {
-    originalQuestion: 'Show me sales by month for 2013',
-    stepBackQuestion:
-      'What are the principles of time-based grouping and aggregation in SQL?',
-    stepBackAnswer:
-      'Time-based queries require: 1) Date extraction functions (e.g., DATE_TRUNC, strftime, YEAR/FORMAT) to bucket timestamps, 2) WHERE clauses to filter the date range, 3) GROUP BY the derived period, 4) Aggregations such as SUM for revenue and COUNT for transactions, 5) ORDER BY the period chronologically.',
-    finalAnswer:
-      "SELECT date_trunc('month', InvoiceDate) as month, COUNT(*) as sales_count, SUM(Total) as revenue FROM Invoice WHERE EXTRACT(year FROM InvoiceDate) = 2013 GROUP BY month ORDER BY month -- replace date_trunc/EXTRACT with your dialect's month/year helpers",
-  },
-  {
-    originalQuestion: 'What are the best-selling tracks by genre?',
-    stepBackQuestion:
-      'What are the SQL principles for multi-dimensional aggregation with categories?',
-    stepBackAnswer:
-      'Multi-dimensional queries require: 1) Multiple JOINs to connect entities through foreign key relationships (Genre → Track → InvoiceLine), 2) GROUP BY all categorical dimensions you want to analyze (GenreId, TrackId), 3) Aggregation at the intersection of these dimensions (COUNT of sales per track per genre), 4) Proper table aliasing for query readability, 5) Understanding the data model relationships (which tables link to which).',
-    finalAnswer:
-      'SELECT g.Name as genre, t.Name as track, COUNT(*) as times_sold FROM Genre g JOIN Track t ON g.GenreId = t.GenreId JOIN InvoiceLine il ON t.TrackId = il.TrackId GROUP BY g.GenreId, t.TrackId ORDER BY times_sold DESC LIMIT 10',
-  },
-];
-
 export const sqlQueryAgent = agent({
   name: 'text2sql',
   model: groq('openai/gpt-oss-20b'),
   logging: process.env.AGENT_LOGGING === 'true',
   tools,
-  // output: z.object({
-  //   sql: z
-  //     .string()
-  //     .describe('The SQL query generated to answer the user question.'),
-  // }),
   prompt: (state) => {
     return `
-    <agent>
-      <name>Freya</name>
-      <role>You are an expert SQL query generator, answering business questions with accurate queries.</role>
-      <tone>Your tone should be concise and business-friendly.</tone>
-    </agent>
     ${state?.teachings || ''}
     ${state?.introspection || ''}
     <output>

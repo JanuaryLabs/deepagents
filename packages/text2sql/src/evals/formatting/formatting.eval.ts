@@ -3,10 +3,10 @@ import { evalite } from 'evalite';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import { cerebras } from '@deepagents/agent';
 import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
+import { filterByIndex } from '../utils';
 import TESTS from './formatting.json' with { type: 'json' };
 
 /**
@@ -17,10 +17,12 @@ import TESTS from './formatting.json' with { type: 'json' };
  */
 evalite('SQL Output Formatting', {
   data: () =>
-    TESTS.map((it) => ({
-      input: { question: it.input, ddl: it.ddl },
-      expected: it.expected,
-    })),
+    filterByIndex(
+      TESTS.map((it) => ({
+        input: { question: it.input, ddl: it.ddl },
+        expected: it.expected,
+      })),
+    ),
   task: async ({ question, ddl }) => {
     const db = new DatabaseSync(':memory:');
     db.exec(ddl);
@@ -28,15 +30,13 @@ evalite('SQL Output Formatting', {
     const text2sql = new Text2Sql({
       version: randomUUID(), // Use unique version per run for cache isolation
       history: new InMemoryHistory(),
-      model: cerebras('gpt-oss-120b'),
-      // model: groq('openai/gpt-oss-20b'),
       adapter: new sqlite.Sqlite({
         grounding: [sqlite.info(), sqlite.tables()],
         execute: (sql) => db.prepare(sql).all(),
       }),
     });
 
-    const result = await text2sql.toSql(question);
+    const result = await text2sql.toSql(question, { enableSampleRows: false });
     db.close();
     return result;
   },

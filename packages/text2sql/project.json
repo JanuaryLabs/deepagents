@@ -28,10 +28,19 @@
       }
     },
     "eval-serve": {
-      "executor": "nx:run-commands",
       "dependsOn": ["build"],
+      "executor": "nx:run-commands",
       "options": {
         "command": "evalite serve",
+        "cwd": "{projectRoot}",
+        "envFile": ".env"
+      }
+    },
+    "eval-debug": {
+      "dependsOn": ["build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --no-warnings src/evals/debug-eval.ts",
         "cwd": "{projectRoot}",
         "envFile": ".env"
       }

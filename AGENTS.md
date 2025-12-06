@@ -1,3 +1,17 @@
+### General Rules
+
+- Early development, no users. No backwards compatibility concerns. Do things RIGHT: clean,
+  organized, zero tech debt. Never create compatibility shims.
+
+- WE NEVER WANT WORKAROUNDS. we always want FULL implementations that are long term
+  suistainable for many >1000 users. so dont come up with half baked solutions
+
+- Important: Do not remove, hide, or rename any existing features or UI options (even
+  temporarily) unless I explicitly ask for it. If something isn’t fully wired yet, keep the UX
+  surface intact and stub/annotate it instead of deleting it.
+
+- Always ask more questions until you have enough context to give an accurate & confident answer.
+
 ### Building packages
 
 To build a package, use the following command:
@@ -30,3 +44,21 @@ To run unit tests for a specific package, use the following command:
 node --test path/to/package/test/file.test.ts
 ```
 
+### Running Evals
+
+```bash
+nx run text2sql:eval                    # Run all evals
+nx run text2sql:eval path/to/eval.ts    # Run specific eval file
+```
+
+To debug failing evals test cases
+
+```bash
+nx run text2sql:eval-debug --list
+```
+
+To run a specific eval test case
+
+```bash
+EVAL_INDEX=<test-case-index> nx run text2sql:eval path/to/eval.ts
+```
