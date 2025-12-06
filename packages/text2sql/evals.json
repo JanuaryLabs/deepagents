@@ -1,0 +1,1372 @@
+{
+  "run": {
+    "id": 215,
+    "runType": "full",
+    "createdAt": "2025-12-05 17:04:23"
+  },
+  "evals": [
+    {
+      "id": 236,
+      "name": "SQL Create Context [Groq GPT-OSS-20B]",
+      "filepath": "/Users/ezzabuzaid/Desktop/January/deepagents/packages/text2sql/src/evals/sql-create-context/sql-create-context.eval.ts",
+      "duration": 0,
+      "status": "success",
+      "variantName": "Groq GPT-OSS-20B",
+      "variantGroup": "SQL Create Context",
+      "createdAt": "2025-12-05 17:04:23",
+      "averageScore": 0.8,
+      "results": [
+        {
+          "id": 3255,
+          "duration": 4353,
+          "input": {
+            "question": "Which start station had the most trips starting from August? Give me the name and id of the station.",
+            "context": "CREATE TABLE trip (start_station_name VARCHAR, start_station_id VARCHAR, start_date VARCHAR)"
+          },
+          "output": "Which August would you like to examine? (e.g., August 2023, last 30 days starting from the most recent August, etc.)",
+          "expected": "SELECT start_station_name, start_station_id FROM trip WHERE start_date LIKE \"8/%\" GROUP BY start_station_name ORDER BY COUNT(*) DESC LIMIT 1",
+          "status": "success",
+          "colOrder": 0,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (start_station_name VARCHAR, start_station_id VARCHAR, start_date VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "Which start station had the most trips starting from August? Give me the name and id of the station."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT start_station_name, start_station_id FROM trip WHERE start_date LIKE \"8/%\" GROUP BY start_station_name ORDER BY COUNT(*) DESC LIMIT 1"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "Which August would you like to examine? (e.g., August 2023, last 30 days starting from the most recent August, etc.)"
+            },
+            {
+              "label": "Score",
+              "value": 0
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert SQL query selects the start station name and id from the trip table where the start date is in August, groups the results by start station name, orders by the count of trips in descending order, and limits to the top result. The submission, however, is a question asking which August to examine, not an SQL query. Since the submission is not an SQL query at all, it cannot be equivalent to the expert's SQL query. Therefore, the submission is not a correct answer to the question, and it is semantically different."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 0,
+          "scores": [
+            {
+              "id": 2104,
+              "name": "SQLSemanticMatch",
+              "score": 0,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert SQL query selects the start station name and id from the trip table where the start date is in August, groups the results by start station name, orders by the count of trips in descending order, and limits to the top result. The submission, however, is a question asking which August to examine, not an SQL query. Since the submission is not an SQL query at all, it cannot be equivalent to the expert's SQL query. Therefore, the submission is not a correct answer to the question, and it is semantically different.",
+                "choice": "Incorrect"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3256,
+          "duration": 5675,
+          "input": {
+            "question": "Which bike traveled the most often in zip code 94002?",
+            "context": "CREATE TABLE trip (bike_id VARCHAR, zip_code VARCHAR)"
+          },
+          "output": "SELECT bike_id, COUNT(*) AS trip_count FROM trip WHERE zip_code = '94002' GROUP BY bike_id ORDER BY trip_count DESC LIMIT 1;",
+          "expected": "SELECT bike_id FROM trip WHERE zip_code = 94002 GROUP BY bike_id ORDER BY COUNT(*) DESC LIMIT 1",
+          "status": "success",
+          "colOrder": 1,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (bike_id VARCHAR, zip_code VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "Which bike traveled the most often in zip code 94002?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT bike_id FROM trip WHERE zip_code = 94002 GROUP BY bike_id ORDER BY COUNT(*) DESC LIMIT 1"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT bike_id, COUNT(*) AS trip_count FROM trip WHERE zip_code = '94002' GROUP BY bike_id ORDER BY trip_count DESC LIMIT 1;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "Both SQL queries aim to find the bike_id that traveled the most often in zip code 94002. The expert query selects only the bike_id, ordering by the count of trips in descending order, and limits the result to one, which returns the bike_id with the highest trip count. The submitted query also filters by zip code 94002, groups by bike_id, orders by the trip count in descending order, and limits to one, but it also includes the trip count as a column in the output. Since the main goal is to identify the bike_id with the most trips, both queries will return the same bike_id. The difference in output columns (one with only bike_id, the other with bike_id and trip_count) does not affect the correctness of the query's purpose or result. Therefore, the submitted answer is semantically equivalent to the expert answer."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2113,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "Both SQL queries aim to find the bike_id that traveled the most often in zip code 94002. The expert query selects only the bike_id, ordering by the count of trips in descending order, and limits the result to one, which returns the bike_id with the highest trip count. The submitted query also filters by zip code 94002, groups by bike_id, orders by the trip count in descending order, and limits to one, but it also includes the trip count as a column in the output. Since the main goal is to identify the bike_id with the most trips, both queries will return the same bike_id. The difference in output columns (one with only bike_id, the other with bike_id and trip_count) does not affect the correctness of the query's purpose or result. Therefore, the submitted answer is semantically equivalent to the expert answer.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:29"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3257,
+          "duration": 4762,
+          "input": {
+            "question": "How many days had both mean humidity above 50 and mean visibility above 8?",
+            "context": "CREATE TABLE weather (mean_humidity VARCHAR, mean_visibility_miles VARCHAR)"
+          },
+          "output": "SELECT COUNT(*) AS days_count\nFROM weather\nWHERE CAST(mean_humidity AS REAL) > 50\n  AND CAST(mean_visibility_miles AS REAL) > 8;",
+          "expected": "SELECT COUNT(*) FROM weather WHERE mean_humidity > 50 AND mean_visibility_miles > 8",
+          "status": "success",
+          "colOrder": 2,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (mean_humidity VARCHAR, mean_visibility_miles VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "How many days had both mean humidity above 50 and mean visibility above 8?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT COUNT(*) FROM weather WHERE mean_humidity > 50 AND mean_visibility_miles > 8"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT COUNT(*) AS days_count\nFROM weather\nWHERE CAST(mean_humidity AS REAL) > 50\n  AND CAST(mean_visibility_miles AS REAL) > 8;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer compares 'mean_humidity' and 'mean_visibility_miles' directly as numeric values, assuming they are stored as numbers. The submitted answer explicitly casts these columns to REAL before comparison, which is necessary because the table schema shows these columns as VARCHAR. If the columns are stored as strings, direct comparison without casting may lead to incorrect results or errors. Therefore, the submitted answer is more robust and correct in handling data types. Since the expert answer does not perform casting, it may be incorrect if the data is stored as strings. The submitted answer correctly handles data type conversion, making it the correct approach."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2109,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer compares 'mean_humidity' and 'mean_visibility_miles' directly as numeric values, assuming they are stored as numbers. The submitted answer explicitly casts these columns to REAL before comparison, which is necessary because the table schema shows these columns as VARCHAR. If the columns are stored as strings, direct comparison without casting may lead to incorrect results or errors. Therefore, the submitted answer is more robust and correct in handling data types. Since the expert answer does not perform casting, it may be incorrect if the data is stored as strings. The submitted answer correctly handles data type conversion, making it the correct approach.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3258,
+          "duration": 4798,
+          "input": {
+            "question": "What is the latitude, longitude, city of the station from which the shortest trip started?",
+            "context": "CREATE TABLE trip (start_station_id VARCHAR, duration VARCHAR); CREATE TABLE station (lat VARCHAR, long VARCHAR, city VARCHAR, id VARCHAR)"
+          },
+          "output": "SELECT s.lat, s.long, s.city\nFROM trip t\nJOIN station s ON t.start_station_id = s.id\nORDER BY CAST(t.duration AS INTEGER) ASC\nLIMIT 1;",
+          "expected": "SELECT T1.lat, T1.long, T1.city FROM station AS T1 JOIN trip AS T2 ON T1.id = T2.start_station_id ORDER BY T2.duration LIMIT 1",
+          "status": "success",
+          "colOrder": 3,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (start_station_id VARCHAR, duration VARCHAR); CREATE TABLE station (lat VARCHAR, long VARCHAR, city VARCHAR, id VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "What is the latitude, longitude, city of the station from which the shortest trip started?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT T1.lat, T1.long, T1.city FROM station AS T1 JOIN trip AS T2 ON T1.id = T2.start_station_id ORDER BY T2.duration LIMIT 1"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT s.lat, s.long, s.city\nFROM trip t\nJOIN station s ON t.start_station_id = s.id\nORDER BY CAST(t.duration AS INTEGER) ASC\nLIMIT 1;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query joins the station and trip tables on the start station ID and orders by trip duration to find the shortest trip, then selects the station details. The submitted query also joins the same tables on start station ID, but it orders by the trip duration cast to an integer, which is necessary because the duration is stored as a VARCHAR. Both queries aim to find the station details for the shortest trip. Since the main difference is the casting of duration to an integer, which is a necessary step given the data type, and both queries select the same columns, they are functionally equivalent in their intent and output. Therefore, the submitted answer is correct."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2110,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query joins the station and trip tables on the start station ID and orders by trip duration to find the shortest trip, then selects the station details. The submitted query also joins the same tables on start station ID, but it orders by the trip duration cast to an integer, which is necessary because the duration is stored as a VARCHAR. Both queries aim to find the station details for the shortest trip. Since the main difference is the casting of duration to an integer, which is a necessary step given the data type, and both queries select the same columns, they are functionally equivalent in their intent and output. Therefore, the submitted answer is correct.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3259,
+          "duration": 4182,
+          "input": {
+            "question": "What are the station_ids that are located in San Francisco and have average bike availability above 10.",
+            "context": "CREATE TABLE status (station_id VARCHAR, city VARCHAR, bikes_available INTEGER)"
+          },
+          "output": "SELECT station_id\nFROM status\nWHERE city = 'San Francisco'\nGROUP BY station_id\nHAVING AVG(bikes_available) > 10;",
+          "expected": "SELECT station_id FROM status WHERE city = 'San Francisco' GROUP BY station_id HAVING AVG(bikes_available) > 10",
+          "status": "success",
+          "colOrder": 4,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE status (station_id VARCHAR, city VARCHAR, bikes_available INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "What are the station_ids that are located in San Francisco and have average bike availability above 10."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT station_id FROM status WHERE city = 'San Francisco' GROUP BY station_id HAVING AVG(bikes_available) > 10"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT station_id\nFROM status\nWHERE city = 'San Francisco'\nGROUP BY station_id\nHAVING AVG(bikes_available) > 10;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The submitted SQL query matches the expert answer exactly, including the SELECT clause, FROM clause, WHERE clause, GROUP BY clause, and HAVING clause. Both queries are intended to find station_ids in San Francisco with an average bike availability above 10. Since there are no differences in the SQL syntax or logic, and the queries are identical, they will produce the same result when executed on the same database. Therefore, the submitted answer is correct."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2103,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The submitted SQL query matches the expert answer exactly, including the SELECT clause, FROM clause, WHERE clause, GROUP BY clause, and HAVING clause. Both queries are intended to find station_ids in San Francisco with an average bike availability above 10. Since there are no differences in the SQL syntax or logic, and the queries are identical, they will produce the same result when executed on the same database. Therefore, the submitted answer is correct.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3260,
+          "duration": 7063,
+          "input": {
+            "question": "What are the names and ids of stations that had more than 14 bikes available on average or were installed in December?",
+            "context": "CREATE TABLE station (name VARCHAR, id VARCHAR, installation_date VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available INTEGER)"
+          },
+          "output": "SELECT s.name, s.id\nFROM station s\nLEFT JOIN (\n    SELECT station_id, AVG(bikes_available) AS avg_bikes\n    FROM status\n    GROUP BY station_id\n) a ON a.station_id = s.id\nWHERE (a.avg_bikes > 14)\n   OR (strftime('%m', s.installation_date) = '12');",
+          "expected": "SELECT T1.name, T1.id FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id GROUP BY T2.station_id HAVING AVG(T2.bikes_available) > 14 UNION SELECT name, id FROM station WHERE installation_date LIKE \"12/%\"",
+          "status": "success",
+          "colOrder": 5,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE station (name VARCHAR, id VARCHAR, installation_date VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "What are the names and ids of stations that had more than 14 bikes available on average or were installed in December?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT T1.name, T1.id FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id GROUP BY T2.station_id HAVING AVG(T2.bikes_available) > 14 UNION SELECT name, id FROM station WHERE installation_date LIKE \"12/%\""
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT s.name, s.id\nFROM station s\nLEFT JOIN (\n    SELECT station_id, AVG(bikes_available) AS avg_bikes\n    FROM status\n    GROUP BY station_id\n) a ON a.station_id = s.id\nWHERE (a.avg_bikes > 14)\n   OR (strftime('%m', s.installation_date) = '12');"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer selects stations with an average of bikes available greater than 14 by joining the station and status tables, grouping by station ID, and filtering with HAVING. It also includes stations installed in December by filtering installation_date with LIKE '12/%'. The submission also joins station with an aggregated subquery on status to compute average bikes, then filters with OR for average bikes > 14 or installation in December using strftime('%m', s.installation_date) = '12'. Both queries aim to find stations with more than 14 bikes on average or installed in December. The main difference is that the expert query uses a JOIN and GROUP BY on status, then filters with HAVING, while the submission uses a LEFT JOIN with a subquery and filters with WHERE. The use of LEFT JOIN in the submission is acceptable because it ensures all stations are included, and the condition on average bikes > 14 is applied only when the subquery has a matching record. The OR condition on installation_date is also equivalent to the expert's LIKE '12/%'. Both queries should produce the same set of station IDs and names, assuming the data is consistent. Therefore, the submission is semantically equivalent to the expert answer."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2117,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer selects stations with an average of bikes available greater than 14 by joining the station and status tables, grouping by station ID, and filtering with HAVING. It also includes stations installed in December by filtering installation_date with LIKE '12/%'. The submission also joins station with an aggregated subquery on status to compute average bikes, then filters with OR for average bikes > 14 or installation in December using strftime('%m', s.installation_date) = '12'. Both queries aim to find stations with more than 14 bikes on average or installed in December. The main difference is that the expert query uses a JOIN and GROUP BY on status, then filters with HAVING, while the submission uses a LEFT JOIN with a subquery and filters with WHERE. The use of LEFT JOIN in the submission is acceptable because it ensures all stations are included, and the condition on average bikes > 14 is applied only when the subquery has a matching record. The OR condition on installation_date is also equivalent to the expert's LIKE '12/%'. Both queries should produce the same set of station IDs and names, assuming the data is consistent. Therefore, the submission is semantically equivalent to the expert answer.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:30"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3261,
+          "duration": 4804,
+          "input": {
+            "question": "What is the 3 most common cloud cover rates in the region of zip code 94107?",
+            "context": "CREATE TABLE weather (cloud_cover VARCHAR, zip_code VARCHAR)"
+          },
+          "output": "SELECT cloud_cover, COUNT(*) AS count FROM weather WHERE zip_code = '94107' GROUP BY cloud_cover ORDER BY count DESC LIMIT 3",
+          "expected": "SELECT cloud_cover FROM weather WHERE zip_code = 94107 GROUP BY cloud_cover ORDER BY COUNT(*) DESC LIMIT 3",
+          "status": "success",
+          "colOrder": 6,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (cloud_cover VARCHAR, zip_code VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "What is the 3 most common cloud cover rates in the region of zip code 94107?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT cloud_cover FROM weather WHERE zip_code = 94107 GROUP BY cloud_cover ORDER BY COUNT(*) DESC LIMIT 3"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT cloud_cover, COUNT(*) AS count FROM weather WHERE zip_code = '94107' GROUP BY cloud_cover ORDER BY count DESC LIMIT 3"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "Both SQL queries select the 'cloud_cover' column from the 'weather' table where 'zip_code' is '94107'. They both group the results by 'cloud_cover' and order by the count of records in descending order, limiting the results to the top 3. The only difference is that the submitted query explicitly names the count column as 'count', but this does not affect the semantics of the query, as the grouping and ordering are based on the count. Therefore, both queries will return the same set of 'cloud_cover' values that are most common in zip code 94107, which is what the question asks for."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2111,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "Both SQL queries select the 'cloud_cover' column from the 'weather' table where 'zip_code' is '94107'. They both group the results by 'cloud_cover' and order by the count of records in descending order, limiting the results to the top 3. The only difference is that the submitted query explicitly names the count column as 'count', but this does not affect the semantics of the query, as the grouping and ordering are based on the count. Therefore, both queries will return the same set of 'cloud_cover' values that are most common in zip code 94107, which is what the question asks for.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3262,
+          "duration": 4386,
+          "input": {
+            "question": "What is the zip code in which the average mean sea level pressure is the lowest?",
+            "context": "CREATE TABLE weather (zip_code VARCHAR, mean_sea_level_pressure_inches INTEGER)"
+          },
+          "output": "SELECT zip_code, mean_sea_level_pressure_inches\nFROM weather\nORDER BY mean_sea_level_pressure_inches ASC\nLIMIT 1;",
+          "expected": "SELECT zip_code FROM weather GROUP BY zip_code ORDER BY AVG(mean_sea_level_pressure_inches) LIMIT 1",
+          "status": "success",
+          "colOrder": 7,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (zip_code VARCHAR, mean_sea_level_pressure_inches INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "What is the zip code in which the average mean sea level pressure is the lowest?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT zip_code FROM weather GROUP BY zip_code ORDER BY AVG(mean_sea_level_pressure_inches) LIMIT 1"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT zip_code, mean_sea_level_pressure_inches\nFROM weather\nORDER BY mean_sea_level_pressure_inches ASC\nLIMIT 1;"
+            },
+            {
+              "label": "Score",
+              "value": 0
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query groups the data by zip_code and then orders the groups by the average mean_sea_level_pressure_inches, selecting the zip_code with the lowest average pressure. The submitted query orders individual rows by mean_sea_level_pressure_inches and selects the single row with the lowest pressure, which may not correspond to the zip code with the lowest average pressure if multiple entries per zip code exist. Therefore, the submitted query does not necessarily return the zip code with the lowest average pressure, making it semantically different from the expert query."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 0,
+          "scores": [
+            {
+              "id": 2105,
+              "name": "SQLSemanticMatch",
+              "score": 0,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query groups the data by zip_code and then orders the groups by the average mean_sea_level_pressure_inches, selecting the zip_code with the lowest average pressure. The submitted query orders individual rows by mean_sea_level_pressure_inches and selects the single row with the lowest pressure, which may not correspond to the zip code with the lowest average pressure if multiple entries per zip code exist. Therefore, the submitted query does not necessarily return the zip code with the lowest average pressure, making it semantically different from the expert query.",
+                "choice": "Incorrect"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3263,
+          "duration": 5841,
+          "input": {
+            "question": "What is the average bike availability in stations that are not located in Palo Alto?",
+            "context": "CREATE TABLE status (bikes_available INTEGER, station_id VARCHAR, id VARCHAR, city VARCHAR); CREATE TABLE station (bikes_available INTEGER, station_id VARCHAR, id VARCHAR, city VARCHAR)"
+          },
+          "output": "SELECT AVG(bikes_available) FROM station WHERE city <> 'Palo Alto';",
+          "expected": "SELECT AVG(bikes_available) FROM status WHERE NOT station_id IN (SELECT id FROM station WHERE city = \"Palo Alto\")",
+          "status": "success",
+          "colOrder": 8,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE status (bikes_available INTEGER, station_id VARCHAR, id VARCHAR, city VARCHAR); CREATE TABLE station (bikes_available INTEGER, station_id VARCHAR, id VARCHAR, city VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "What is the average bike availability in stations that are not located in Palo Alto?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT AVG(bikes_available) FROM status WHERE NOT station_id IN (SELECT id FROM station WHERE city = \"Palo Alto\")"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT AVG(bikes_available) FROM station WHERE city <> 'Palo Alto';"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query calculates the average number of bikes available in stations that are not located in Palo Alto by filtering out stations with city = 'Palo Alto' in the 'status' table. The submitted query calculates the average number of bikes available in stations where the city is not 'Palo Alto' by filtering directly on the 'station' table. Both queries aim to exclude stations in Palo Alto and compute the average bikes available. However, the expert's approach filters based on station IDs in the 'status' table, which may include multiple entries per station, and then excludes those stations in Palo Alto. The submitted approach filters directly on the 'station' table, assuming each station has a single entry, which is consistent with the table structure. Since both approaches effectively exclude stations in Palo Alto and compute the average bikes available in the remaining stations, they are semantically equivalent, assuming the data is consistent and each station has a single entry. Therefore, the submitted answer is correct."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2114,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query calculates the average number of bikes available in stations that are not located in Palo Alto by filtering out stations with city = 'Palo Alto' in the 'status' table. The submitted query calculates the average number of bikes available in stations where the city is not 'Palo Alto' by filtering directly on the 'station' table. Both queries aim to exclude stations in Palo Alto and compute the average bikes available. However, the expert's approach filters based on station IDs in the 'status' table, which may include multiple entries per station, and then excludes those stations in Palo Alto. The submitted approach filters directly on the 'station' table, assuming each station has a single entry, which is consistent with the table structure. Since both approaches effectively exclude stations in Palo Alto and compute the average bikes available in the remaining stations, they are semantically equivalent, assuming the data is consistent and each station has a single entry. Therefore, the submitted answer is correct.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:29"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3264,
+          "duration": 6710,
+          "input": {
+            "question": "What is the average longitude of stations that never had bike availability more than 10?",
+            "context": "CREATE TABLE station (long INTEGER, id VARCHAR, station_id VARCHAR, bikes_available INTEGER); CREATE TABLE status (long INTEGER, id VARCHAR, station_id VARCHAR, bikes_available INTEGER)"
+          },
+          "output": "SELECT AVG(long) AS avg_longitude\nFROM (\n    SELECT DISTINCT station_id, long\n    FROM station\n    WHERE station_id IN (\n        SELECT station_id\n        FROM station\n        GROUP BY station_id\n        HAVING MAX(bikes_available) <= 10\n    )\n);",
+          "expected": "SELECT AVG(long) FROM station WHERE NOT id IN (SELECT station_id FROM status GROUP BY station_id HAVING MAX(bikes_available) > 10)",
+          "status": "success",
+          "colOrder": 9,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE station (long INTEGER, id VARCHAR, station_id VARCHAR, bikes_available INTEGER); CREATE TABLE status (long INTEGER, id VARCHAR, station_id VARCHAR, bikes_available INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "What is the average longitude of stations that never had bike availability more than 10?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT AVG(long) FROM station WHERE NOT id IN (SELECT station_id FROM status GROUP BY station_id HAVING MAX(bikes_available) > 10)"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT AVG(long) AS avg_longitude\nFROM (\n    SELECT DISTINCT station_id, long\n    FROM station\n    WHERE station_id IN (\n        SELECT station_id\n        FROM station\n        GROUP BY station_id\n        HAVING MAX(bikes_available) <= 10\n    )\n);"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query calculates the average longitude of stations that have never had bike availability more than 10 by filtering stations where the maximum bikes_available is not greater than 10. The submitted query also aims to find the average longitude of stations that have always had bikes_available less than or equal to 10, by selecting stations where the maximum bikes_available is less than or equal to 10. Both queries are effectively selecting the same set of stations: those that have never exceeded 10 bikes available at any time. The expert query uses a direct NOT IN with a subquery that finds stations with a maximum bikes_available > 10, while the submitted query uses a subquery with HAVING MAX(bikes_available) <= 10 to find stations that never exceeded 10 bikes. The main difference is that the submitted query uses DISTINCT and a nested SELECT, but the logic of filtering stations based on their maximum bikes_available is equivalent. Therefore, both queries should produce the same set of stations and thus the same average longitude."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2116,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query calculates the average longitude of stations that have never had bike availability more than 10 by filtering stations where the maximum bikes_available is not greater than 10. The submitted query also aims to find the average longitude of stations that have always had bikes_available less than or equal to 10, by selecting stations where the maximum bikes_available is less than or equal to 10. Both queries are effectively selecting the same set of stations: those that have never exceeded 10 bikes available at any time. The expert query uses a direct NOT IN with a subquery that finds stations with a maximum bikes_available > 10, while the submitted query uses a subquery with HAVING MAX(bikes_available) <= 10 to find stations that never exceeded 10 bikes. The main difference is that the submitted query uses DISTINCT and a nested SELECT, but the logic of filtering stations based on their maximum bikes_available is equivalent. Therefore, both queries should produce the same set of stations and thus the same average longitude.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:30"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3265,
+          "duration": 4587,
+          "input": {
+            "question": "When and in what zip code did max temperature reach at least 80?",
+            "context": "CREATE TABLE weather (date VARCHAR, zip_code VARCHAR, max_temperature_f VARCHAR)"
+          },
+          "output": "SELECT date, zip_code\nFROM weather\nWHERE CAST(max_temperature_f AS REAL) >= 80;",
+          "expected": "SELECT date, zip_code FROM weather WHERE max_temperature_f >= 80",
+          "status": "success",
+          "colOrder": 10,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (date VARCHAR, zip_code VARCHAR, max_temperature_f VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "When and in what zip code did max temperature reach at least 80?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT date, zip_code FROM weather WHERE max_temperature_f >= 80"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT date, zip_code\nFROM weather\nWHERE CAST(max_temperature_f AS REAL) >= 80;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer compares max_temperature_f directly as a number, assuming it is stored as a numeric type. The submitted answer casts max_temperature_f to REAL before comparison, which is necessary if max_temperature_f is stored as a string. The table creation statement indicates max_temperature_f is stored as VARCHAR, so the cast in the submitted answer is required for correct comparison. Both queries filter for max_temperature_f >= 80, and select date and zip_code. Since the cast ensures correct comparison, the submitted query is equivalent in intent and result to the expert query, which would not work correctly without casting. Therefore, the submitted answer is correct."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2107,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer compares max_temperature_f directly as a number, assuming it is stored as a numeric type. The submitted answer casts max_temperature_f to REAL before comparison, which is necessary if max_temperature_f is stored as a string. The table creation statement indicates max_temperature_f is stored as VARCHAR, so the cast in the submitted answer is required for correct comparison. Both queries filter for max_temperature_f >= 80, and select date and zip_code. Since the cast ensures correct comparison, the submitted query is equivalent in intent and result to the expert query, which would not work correctly without casting. Therefore, the submitted answer is correct.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3266,
+          "duration": 4599,
+          "input": {
+            "question": "Give me ids for all the trip that took place in a zip code area with average mean temperature above 60.",
+            "context": "CREATE TABLE trip (id VARCHAR, zip_code VARCHAR); CREATE TABLE weather (zip_code VARCHAR, mean_temperature_f INTEGER)"
+          },
+          "output": "SELECT t.id\nFROM trip AS t\nJOIN weather AS w ON t.zip_code = w.zip_code\nWHERE w.mean_temperature_f > 60;",
+          "expected": "SELECT T1.id FROM trip AS T1 JOIN weather AS T2 ON T1.zip_code = T2.zip_code GROUP BY T2.zip_code HAVING AVG(T2.mean_temperature_f) > 60",
+          "status": "success",
+          "colOrder": 11,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (id VARCHAR, zip_code VARCHAR); CREATE TABLE weather (zip_code VARCHAR, mean_temperature_f INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "Give me ids for all the trip that took place in a zip code area with average mean temperature above 60."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT T1.id FROM trip AS T1 JOIN weather AS T2 ON T1.zip_code = T2.zip_code GROUP BY T2.zip_code HAVING AVG(T2.mean_temperature_f) > 60"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT t.id\nFROM trip AS t\nJOIN weather AS w ON t.zip_code = w.zip_code\nWHERE w.mean_temperature_f > 60;"
+            },
+            {
+              "label": "Score",
+              "value": 0
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query calculates the average temperature per zip code and filters for zip codes with an average temperature above 60, then retrieves trip IDs for those zip codes. The submitted query filters trips directly where the weather temperature is above 60, which does not necessarily correspond to zip codes with an average temperature above 60. Therefore, the submitted query may include trips from zip codes with a single temperature reading above 60, but not necessarily with an average above 60. This means the submitted query does not correctly implement the requirement of the question, which is based on the average temperature."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 0,
+          "scores": [
+            {
+              "id": 2108,
+              "name": "SQLSemanticMatch",
+              "score": 0,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query calculates the average temperature per zip code and filters for zip codes with an average temperature above 60, then retrieves trip IDs for those zip codes. The submitted query filters trips directly where the weather temperature is above 60, which does not necessarily correspond to zip codes with an average temperature above 60. Therefore, the submitted query may include trips from zip codes with a single temperature reading above 60, but not necessarily with an average above 60. This means the submitted query does not correctly implement the requirement of the question, which is based on the average temperature.",
+                "choice": "Incorrect"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3267,
+          "duration": 5199,
+          "input": {
+            "question": "For each zip code, return how many times max wind speed reached at least 25?",
+            "context": "CREATE TABLE weather (zip_code VARCHAR, max_wind_Speed_mph VARCHAR)"
+          },
+          "output": "SELECT zip_code, COUNT(*) AS wind_count\nFROM weather\nWHERE CAST(max_wind_Speed_mph AS REAL) >= 25\nGROUP BY zip_code;",
+          "expected": "SELECT zip_code, COUNT(*) FROM weather WHERE max_wind_Speed_mph >= 25 GROUP BY zip_code",
+          "status": "success",
+          "colOrder": 12,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (zip_code VARCHAR, max_wind_Speed_mph VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "For each zip code, return how many times max wind speed reached at least 25?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT zip_code, COUNT(*) FROM weather WHERE max_wind_Speed_mph >= 25 GROUP BY zip_code"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT zip_code, COUNT(*) AS wind_count\nFROM weather\nWHERE CAST(max_wind_Speed_mph AS REAL) >= 25\nGROUP BY zip_code;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer filters rows where max_wind_Speed_mph is greater than or equal to 25 without any casting, assuming max_wind_Speed_mph is stored as a numeric type. The submitted answer casts max_wind_Speed_mph to REAL before comparison, which is necessary because max_wind_Speed_mph is stored as VARCHAR. Without casting, the comparison might be lexicographical, leading to incorrect results. Since the data type of max_wind_Speed_mph is VARCHAR, the submitted answer's casting ensures correct numerical comparison. Therefore, the submitted answer is functionally equivalent to the expert answer, as both count the number of records per zip code where wind speed is at least 25, but the submitted answer is more robust due to explicit casting."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2112,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer filters rows where max_wind_Speed_mph is greater than or equal to 25 without any casting, assuming max_wind_Speed_mph is stored as a numeric type. The submitted answer casts max_wind_Speed_mph to REAL before comparison, which is necessary because max_wind_Speed_mph is stored as VARCHAR. Without casting, the comparison might be lexicographical, leading to incorrect results. Since the data type of max_wind_Speed_mph is VARCHAR, the submitted answer's casting ensures correct numerical comparison. Therefore, the submitted answer is functionally equivalent to the expert answer, as both count the number of records per zip code where wind speed is at least 25, but the submitted answer is more robust due to explicit casting.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:29"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3268,
+          "duration": 4475,
+          "input": {
+            "question": "On which day and in which zip code was the min dew point lower than any day in zip code 94107?",
+            "context": "CREATE TABLE weather (date VARCHAR, zip_code VARCHAR, min_dew_point_f INTEGER)"
+          },
+          "output": "SELECT date, zip_code\nFROM weather\nWHERE min_dew_point_f < (SELECT MIN(min_dew_point_f) FROM weather WHERE zip_code = '94107');",
+          "expected": "SELECT date, zip_code FROM weather WHERE min_dew_point_f < (SELECT MIN(min_dew_point_f) FROM weather WHERE zip_code = 94107)",
+          "status": "success",
+          "colOrder": 13,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (date VARCHAR, zip_code VARCHAR, min_dew_point_f INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "On which day and in which zip code was the min dew point lower than any day in zip code 94107?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT date, zip_code FROM weather WHERE min_dew_point_f < (SELECT MIN(min_dew_point_f) FROM weather WHERE zip_code = 94107)"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT date, zip_code\nFROM weather\nWHERE min_dew_point_f < (SELECT MIN(min_dew_point_f) FROM weather WHERE zip_code = '94107');"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "Both the expert and submitted SQL queries select the date and zip_code from the weather table where the min_dew_point_f is less than the minimum min_dew_point_f in zip code 94107. The only difference is that the zip code in the subquery is written as a string '94107' in the submission, which is consistent with the context that zip_code is a VARCHAR. Since the logic and intent are the same, and the string literal matches the data type, the queries are semantically equivalent."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2106,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "Both the expert and submitted SQL queries select the date and zip_code from the weather table where the min_dew_point_f is less than the minimum min_dew_point_f in zip code 94107. The only difference is that the zip code in the subquery is written as a string '94107' in the submission, which is consistent with the context that zip_code is a VARCHAR. Since the logic and intent are the same, and the string literal matches the data type, the queries are semantically equivalent.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3269,
+          "duration": 4181,
+          "input": {
+            "question": "For each trip, return its ending station's installation date.",
+            "context": "CREATE TABLE station (installation_date VARCHAR, id VARCHAR); CREATE TABLE trip (id VARCHAR, end_station_id VARCHAR)"
+          },
+          "output": "SELECT trip.id, station.installation_date\nFROM trip\nJOIN station ON trip.end_station_id = station.id;",
+          "expected": "SELECT T1.id, T2.installation_date FROM trip AS T1 JOIN station AS T2 ON T1.end_station_id = T2.id",
+          "status": "success",
+          "colOrder": 14,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE station (installation_date VARCHAR, id VARCHAR); CREATE TABLE trip (id VARCHAR, end_station_id VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "For each trip, return its ending station's installation date."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT T1.id, T2.installation_date FROM trip AS T1 JOIN station AS T2 ON T1.end_station_id = T2.id"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT trip.id, station.installation_date\nFROM trip\nJOIN station ON trip.end_station_id = station.id;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "Both the expert answer and the submitted answer perform an SQL JOIN between the 'trip' and 'station' tables on the 'end_station_id' and 'id' columns, respectively. They select the trip's 'id' and the 'installation_date' of the end station. The only difference is in the aliasing of tables and columns, which does not affect the correctness or the result of the query. Therefore, the two queries are semantically equivalent and will produce the same result when executed."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2102,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "Both the expert answer and the submitted answer perform an SQL JOIN between the 'trip' and 'station' tables on the 'end_station_id' and 'id' columns, respectively. They select the trip's 'id' and the 'installation_date' of the end station. The only difference is in the aliasing of tables and columns, which does not affect the correctness or the result of the query. Therefore, the two queries are semantically equivalent and will produce the same result when executed.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:28"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3270,
+          "duration": 6388,
+          "input": {
+            "question": "Which trip started from the station with the largest dock count? Give me the trip id.",
+            "context": "CREATE TABLE trip (id VARCHAR, start_station_id VARCHAR); CREATE TABLE station (id VARCHAR, dock_count VARCHAR)"
+          },
+          "output": "SELECT trip.id\nFROM trip\nJOIN station ON trip.start_station_id = station.id\nWHERE CAST(station.dock_count AS INTEGER) = (SELECT MAX(CAST(dock_count AS INTEGER)) FROM station)\nLIMIT 1;",
+          "expected": "SELECT T1.id FROM trip AS T1 JOIN station AS T2 ON T1.start_station_id = T2.id ORDER BY T2.dock_count DESC LIMIT 1",
+          "status": "success",
+          "colOrder": 15,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (id VARCHAR, start_station_id VARCHAR); CREATE TABLE station (id VARCHAR, dock_count VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "Which trip started from the station with the largest dock count? Give me the trip id."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT T1.id FROM trip AS T1 JOIN station AS T2 ON T1.start_station_id = T2.id ORDER BY T2.dock_count DESC LIMIT 1"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT trip.id\nFROM trip\nJOIN station ON trip.start_station_id = station.id\nWHERE CAST(station.dock_count AS INTEGER) = (SELECT MAX(CAST(dock_count AS INTEGER)) FROM station)\nLIMIT 1;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer joins the 'trip' and 'station' tables on the start station ID and orders the results by the dock count in descending order, then limits the result to the top record. The submitted answer also joins the same tables on the same condition, but it filters the stations to those with the maximum dock count using a subquery, and then limits the result to one record. Both approaches aim to find the trip that started from the station with the largest dock count. The main difference is that the expert answer orders all trips by dock count and takes the top one, which is straightforward and efficient. The submitted answer finds the maximum dock count first, then filters trips to those starting at stations with that dock count, which is also correct. Both queries should return the same trip id, assuming dock_count is stored as a string that needs casting to integer. Therefore, both queries are semantically equivalent and will produce the same result."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:23",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2115,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer joins the 'trip' and 'station' tables on the start station ID and orders the results by the dock count in descending order, then limits the result to the top record. The submitted answer also joins the same tables on the same condition, but it filters the stations to those with the maximum dock count using a subquery, and then limits the result to one record. Both approaches aim to find the trip that started from the station with the largest dock count. The main difference is that the expert answer orders all trips by dock count and takes the top one, which is straightforward and efficient. The submitted answer finds the maximum dock count first, then filters trips to those starting at stations with that dock count, which is also correct. Both queries should return the same trip id, assuming dock_count is stored as a string that needs casting to integer. Therefore, both queries are semantically equivalent and will produce the same result.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:30"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3271,
+          "duration": 3754,
+          "input": {
+            "question": "Count the number of trips that did not end in San Francisco city.",
+            "context": "CREATE TABLE trip (end_station_id VARCHAR); CREATE TABLE station (id VARCHAR, city VARCHAR)"
+          },
+          "output": "SELECT COUNT(*) FROM trip t JOIN station s ON t.end_station_id = s.id WHERE s.city <> 'San Francisco' OR s.city IS NULL;",
+          "expected": "SELECT COUNT(*) FROM trip AS T1 JOIN station AS T2 ON T1.end_station_id = T2.id WHERE T2.city <> \"San Francisco\"",
+          "status": "success",
+          "colOrder": 16,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (end_station_id VARCHAR); CREATE TABLE station (id VARCHAR, city VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "Count the number of trips that did not end in San Francisco city."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT COUNT(*) FROM trip AS T1 JOIN station AS T2 ON T1.end_station_id = T2.id WHERE T2.city <> \"San Francisco\""
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT COUNT(*) FROM trip t JOIN station s ON t.end_station_id = s.id WHERE s.city <> 'San Francisco' OR s.city IS NULL;"
+            },
+            {
+              "label": "Score",
+              "value": 0
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query counts trips where the end station's city is not 'San Francisco'. The submitted query counts trips where the end station's city is not 'San Francisco' or is NULL. If there are any trips with a NULL city for the end station, the submitted query will include them in the count, whereas the expert query will not. Therefore, the submitted query may include additional trips with NULL city values, making the results potentially different. Since the question asks for trips that did not end in San Francisco, trips with NULL city should not be included, as they do not end in San Francisco either. The expert query correctly excludes NULLs, while the submitted query does not. Hence, the submitted query is not semantically equivalent to the expert query and is incorrect."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 0,
+          "scores": [
+            {
+              "id": 2121,
+              "name": "SQLSemanticMatch",
+              "score": 0,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query counts trips where the end station's city is not 'San Francisco'. The submitted query counts trips where the end station's city is not 'San Francisco' or is NULL. If there are any trips with a NULL city for the end station, the submitted query will include them in the count, whereas the expert query will not. Therefore, the submitted query may include additional trips with NULL city values, making the results potentially different. Since the question asks for trips that did not end in San Francisco, trips with NULL city should not be included, as they do not end in San Francisco either. The expert query correctly excludes NULLs, while the submitted query does not. Hence, the submitted query is not semantically equivalent to the expert query and is incorrect.",
+                "choice": "Incorrect"
+              },
+              "createdAt": "2025-12-05 17:04:31"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3272,
+          "duration": 3549,
+          "input": {
+            "question": "In zip code 94107, on which day was neither Fog nor Rain observed?",
+            "context": "CREATE TABLE weather (date VARCHAR, EVENTS VARCHAR, zip_code VARCHAR)"
+          },
+          "output": "SELECT date FROM weather WHERE zip_code = '94107' AND EVENTS NOT LIKE '%Fog%' AND EVENTS NOT LIKE '%Rain%';",
+          "expected": "SELECT date FROM weather WHERE zip_code = 94107 AND EVENTS <> \"Fog\" AND EVENTS <> \"Rain\"",
+          "status": "success",
+          "colOrder": 17,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (date VARCHAR, EVENTS VARCHAR, zip_code VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "In zip code 94107, on which day was neither Fog nor Rain observed?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT date FROM weather WHERE zip_code = 94107 AND EVENTS <> \"Fog\" AND EVENTS <> \"Rain\""
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT date FROM weather WHERE zip_code = '94107' AND EVENTS NOT LIKE '%Fog%' AND EVENTS NOT LIKE '%Rain%';"
+            },
+            {
+              "label": "Score",
+              "value": 0
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query uses `<>` to exclude 'Fog' and 'Rain' exactly, which means it filters out rows where EVENTS are exactly 'Fog' or 'Rain'. The submitted query uses `NOT LIKE '%Fog%'` and `NOT LIKE '%Rain%'`, which excludes any EVENTS containing 'Fog' or 'Rain' as substrings. This means the submitted query will exclude more rows, including those with events like 'Foggy' or 'Rainstorm', which the expert's query would include. Therefore, the two queries are not semantically equivalent, and the submitted answer is incorrect."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 0,
+          "scores": [
+            {
+              "id": 2120,
+              "name": "SQLSemanticMatch",
+              "score": 0,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query uses `<>` to exclude 'Fog' and 'Rain' exactly, which means it filters out rows where EVENTS are exactly 'Fog' or 'Rain'. The submitted query uses `NOT LIKE '%Fog%'` and `NOT LIKE '%Rain%'`, which excludes any EVENTS containing 'Fog' or 'Rain' as substrings. This means the submitted query will exclude more rows, including those with events like 'Foggy' or 'Rainstorm', which the expert's query would include. Therefore, the two queries are not semantically equivalent, and the submitted answer is incorrect.",
+                "choice": "Incorrect"
+              },
+              "createdAt": "2025-12-05 17:04:31"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3273,
+          "duration": 4568,
+          "input": {
+            "question": "What are the ids of stations that have latitude above 37.4 and never had bike availability below 7?",
+            "context": "CREATE TABLE status (id VARCHAR, station_id VARCHAR, lat INTEGER, bikes_available INTEGER); CREATE TABLE station (id VARCHAR, station_id VARCHAR, lat INTEGER, bikes_available INTEGER)"
+          },
+          "output": "SELECT s.id\nFROM station s\nWHERE s.lat > 37.4\n  AND NOT EXISTS (\n    SELECT 1\n    FROM status st\n    WHERE st.station_id = s.station_id\n      AND st.bikes_available < 7\n  );",
+          "expected": "SELECT id FROM station WHERE lat > 37.4 EXCEPT SELECT station_id FROM status GROUP BY station_id HAVING MIN(bikes_available) < 7",
+          "status": "success",
+          "colOrder": 18,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE status (id VARCHAR, station_id VARCHAR, lat INTEGER, bikes_available INTEGER); CREATE TABLE station (id VARCHAR, station_id VARCHAR, lat INTEGER, bikes_available INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "What are the ids of stations that have latitude above 37.4 and never had bike availability below 7?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT id FROM station WHERE lat > 37.4 EXCEPT SELECT station_id FROM status GROUP BY station_id HAVING MIN(bikes_available) < 7"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT s.id\nFROM station s\nWHERE s.lat > 37.4\n  AND NOT EXISTS (\n    SELECT 1\n    FROM status st\n    WHERE st.station_id = s.station_id\n      AND st.bikes_available < 7\n  );"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer selects station IDs with latitude above 37.4 and excludes those that have ever had bikes_available below 7 by using EXCEPT with a grouped subquery. The submitted answer also filters stations with latitude above 37.4 and uses a NOT EXISTS subquery to exclude stations that have any record in the status table with bikes_available below 7. Both queries aim to find stations with latitude above 37.4 that have never had bikes_available below 7. The main difference is that the expert's query uses the station table and the status table with an EXCEPT clause, while the submitted query uses the station table and a NOT EXISTS clause to check for any such record in the status table. Both approaches are logically equivalent in this context, as they both exclude stations that have ever had bikes_available below 7. The subqueries are correctly correlated and should produce the same set of station IDs. Therefore, the submitted answer is semantically equivalent to the expert answer."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2125,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer selects station IDs with latitude above 37.4 and excludes those that have ever had bikes_available below 7 by using EXCEPT with a grouped subquery. The submitted answer also filters stations with latitude above 37.4 and uses a NOT EXISTS subquery to exclude stations that have any record in the status table with bikes_available below 7. Both queries aim to find stations with latitude above 37.4 that have never had bikes_available below 7. The main difference is that the expert's query uses the station table and the status table with an EXCEPT clause, while the submitted query uses the station table and a NOT EXISTS clause to check for any such record in the status table. Both approaches are logically equivalent in this context, as they both exclude stations that have ever had bikes_available below 7. The subqueries are correctly correlated and should produce the same set of station IDs. Therefore, the submitted answer is semantically equivalent to the expert answer.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:32"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3274,
+          "duration": 4107,
+          "input": {
+            "question": "What are names of stations that have average bike availability above 10 and are not located in San Jose city?",
+            "context": "CREATE TABLE station (name VARCHAR, id VARCHAR, city VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available INTEGER)"
+          },
+          "output": "SELECT s.name\nFROM station s\nJOIN status st ON s.id = st.station_id\nWHERE s.city <> 'San Jose'\nGROUP BY s.id, s.name\nHAVING AVG(st.bikes_available) > 10;",
+          "expected": "SELECT T1.name FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id GROUP BY T2.station_id HAVING AVG(bikes_available) > 10 EXCEPT SELECT name FROM station WHERE city = \"San Jose\"",
+          "status": "success",
+          "colOrder": 19,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE station (name VARCHAR, id VARCHAR, city VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "What are names of stations that have average bike availability above 10 and are not located in San Jose city?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT T1.name FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id GROUP BY T2.station_id HAVING AVG(bikes_available) > 10 EXCEPT SELECT name FROM station WHERE city = \"San Jose\""
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT s.name\nFROM station s\nJOIN status st ON s.id = st.station_id\nWHERE s.city <> 'San Jose'\nGROUP BY s.id, s.name\nHAVING AVG(st.bikes_available) > 10;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query selects station names with an average bike availability above 10, excluding stations in San Jose, by joining 'station' and 'status' tables, grouping by station ID, and filtering with HAVING. The submission query joins the same tables, filters out San Jose stations in the WHERE clause, groups by station ID and name, and filters with HAVING. Both queries aim to find station names with average bikes available > 10, excluding San Jose stations. The key difference is that the expert query explicitly excludes San Jose stations after grouping, while the submission filters out San Jose stations before grouping. Since the submission groups by station ID and name, and filters out San Jose stations beforehand, it should produce the same set of station names with average bikes > 10 that are not in San Jose. Therefore, both queries are semantically equivalent and will produce the same result."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2123,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query selects station names with an average bike availability above 10, excluding stations in San Jose, by joining 'station' and 'status' tables, grouping by station ID, and filtering with HAVING. The submission query joins the same tables, filters out San Jose stations in the WHERE clause, groups by station ID and name, and filters with HAVING. Both queries aim to find station names with average bikes available > 10, excluding San Jose stations. The key difference is that the expert query explicitly excludes San Jose stations after grouping, while the submission filters out San Jose stations before grouping. Since the submission groups by station ID and name, and filters out San Jose stations beforehand, it should produce the same set of station names with average bikes > 10 that are not in San Jose. Therefore, both queries are semantically equivalent and will produce the same result.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:32"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3275,
+          "duration": 3958,
+          "input": {
+            "question": "What are the name, latitude, and city of the station with the lowest latitude?",
+            "context": "CREATE TABLE station (name VARCHAR, lat VARCHAR, city VARCHAR)"
+          },
+          "output": "SELECT name, lat, city FROM station ORDER BY CAST(lat AS REAL) ASC LIMIT 1",
+          "expected": "SELECT name, lat, city FROM station ORDER BY lat LIMIT 1",
+          "status": "success",
+          "colOrder": 20,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE station (name VARCHAR, lat VARCHAR, city VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "What are the name, latitude, and city of the station with the lowest latitude?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT name, lat, city FROM station ORDER BY lat LIMIT 1"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT name, lat, city FROM station ORDER BY CAST(lat AS REAL) ASC LIMIT 1"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer orders the stations by the 'lat' column directly, assuming 'lat' is stored as a numeric type or comparable string. The submission casts 'lat' to REAL before ordering, which is necessary if 'lat' is stored as VARCHAR, as indicated in the table creation statement. Since the table defines 'lat' as VARCHAR, the default ordering would be lexicographical, which could lead to incorrect results for numeric comparisons. Casting 'lat' to REAL ensures numeric comparison, matching the intent of finding the station with the lowest latitude numerically. Therefore, the submission's approach is more robust and correct given the schema, and both queries ultimately aim to find the station with the lowest latitude. The only difference is the casting, which is necessary due to the data type. Hence, the submission is correct."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2122,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer orders the stations by the 'lat' column directly, assuming 'lat' is stored as a numeric type or comparable string. The submission casts 'lat' to REAL before ordering, which is necessary if 'lat' is stored as VARCHAR, as indicated in the table creation statement. Since the table defines 'lat' as VARCHAR, the default ordering would be lexicographical, which could lead to incorrect results for numeric comparisons. Casting 'lat' to REAL ensures numeric comparison, matching the intent of finding the station with the lowest latitude numerically. Therefore, the submission's approach is more robust and correct given the schema, and both queries ultimately aim to find the station with the lowest latitude. The only difference is the casting, which is necessary due to the data type. Hence, the submission is correct.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:32"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3276,
+          "duration": 3972,
+          "input": {
+            "question": "What are the date, mean temperature and mean humidity for the top 3 days with the largest max gust speeds?",
+            "context": "CREATE TABLE weather (date VARCHAR, mean_temperature_f VARCHAR, mean_humidity VARCHAR, max_gust_speed_mph VARCHAR)"
+          },
+          "output": "SELECT date, mean_temperature_f, mean_humidity\nFROM weather\nORDER BY CAST(max_gust_speed_mph AS REAL) DESC\nLIMIT 3;",
+          "expected": "SELECT date, mean_temperature_f, mean_humidity FROM weather ORDER BY max_gust_speed_mph DESC LIMIT 3",
+          "status": "success",
+          "colOrder": 21,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (date VARCHAR, mean_temperature_f VARCHAR, mean_humidity VARCHAR, max_gust_speed_mph VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "What are the date, mean temperature and mean humidity for the top 3 days with the largest max gust speeds?"
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT date, mean_temperature_f, mean_humidity FROM weather ORDER BY max_gust_speed_mph DESC LIMIT 3"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT date, mean_temperature_f, mean_humidity\nFROM weather\nORDER BY CAST(max_gust_speed_mph AS REAL) DESC\nLIMIT 3;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert answer orders the data by 'max_gust_speed_mph' directly, assuming it is stored as a numeric type, which would work correctly. The submitted answer casts 'max_gust_speed_mph' to REAL before ordering, which is necessary if 'max_gust_speed_mph' is stored as a string. The table schema indicates 'max_gust_speed_mph' is VARCHAR, so casting is required for correct numeric ordering. Both queries select the same columns and limit to 3 rows, and both order by the maximum gust speed in descending order. Therefore, the submitted answer is functionally equivalent to the expert answer, with the added casting to handle string storage. This makes the submitted SQL correct and equivalent in result to the expert answer."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2124,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert answer orders the data by 'max_gust_speed_mph' directly, assuming it is stored as a numeric type, which would work correctly. The submitted answer casts 'max_gust_speed_mph' to REAL before ordering, which is necessary if 'max_gust_speed_mph' is stored as a string. The table schema indicates 'max_gust_speed_mph' is VARCHAR, so casting is required for correct numeric ordering. Both queries select the same columns and limit to 3 rows, and both order by the maximum gust speed in descending order. Therefore, the submitted answer is functionally equivalent to the expert answer, with the added casting to handle string storage. This makes the submitted SQL correct and equivalent in result to the expert answer.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:32"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3277,
+          "duration": 2663,
+          "input": {
+            "question": "List the name and the number of stations for all the cities that have at least 15 stations.",
+            "context": "CREATE TABLE station (city VARCHAR)"
+          },
+          "output": "SELECT city AS name, COUNT(*) AS number_of_stations FROM station GROUP BY city HAVING COUNT(*) >= 15;",
+          "expected": "SELECT city, COUNT(*) FROM station GROUP BY city HAVING COUNT(*) >= 15",
+          "status": "success",
+          "colOrder": 22,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE station (city VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "List the name and the number of stations for all the cities that have at least 15 stations."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT city, COUNT(*) FROM station GROUP BY city HAVING COUNT(*) >= 15"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT city AS name, COUNT(*) AS number_of_stations FROM station GROUP BY city HAVING COUNT(*) >= 15;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query selects 'city' and counts the number of stations, filtering for cities with at least 15 stations. The submitted query does the same but renames the output columns to 'name' and 'number_of_stations'. Since the question states to ignore differences in output column names, both queries are functionally equivalent and will produce the same result set when executed on the database."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2118,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query selects 'city' and counts the number of stations, filtering for cities with at least 15 stations. The submitted query does the same but renames the output columns to 'name' and 'number_of_stations'. Since the question states to ignore differences in output column names, both queries are functionally equivalent and will produce the same result set when executed on the database.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:31"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3278,
+          "duration": 4380,
+          "input": {
+            "question": "Find the ids and names of stations from which at least 200 trips started.",
+            "context": "CREATE TABLE trip (start_station_id VARCHAR, start_station_name VARCHAR)"
+          },
+          "output": "SELECT start_station_id, start_station_name\nFROM trip\nGROUP BY start_station_id, start_station_name\nHAVING COUNT(*) >= 200;",
+          "expected": "SELECT start_station_id, start_station_name FROM trip GROUP BY start_station_name HAVING COUNT(*) >= 200",
+          "status": "success",
+          "colOrder": 23,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE trip (start_station_id VARCHAR, start_station_name VARCHAR)"
+            },
+            {
+              "label": "Question",
+              "value": "Find the ids and names of stations from which at least 200 trips started."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT start_station_id, start_station_name FROM trip GROUP BY start_station_name HAVING COUNT(*) >= 200"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT start_station_id, start_station_name\nFROM trip\nGROUP BY start_station_id, start_station_name\nHAVING COUNT(*) >= 200;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The expert query groups by start_station_name and filters for stations with at least 200 trips, returning the station id and name. The submitted query groups by both start_station_id and start_station_name and applies the same filter. Since the question asks for station ids and names where at least 200 trips started, grouping by start_station_id and start_station_name is more precise, ensuring the count is per station. The expert's grouping by start_station_name alone could combine multiple stations with the same name but different ids, potentially leading to incorrect results. Therefore, the submitted query correctly groups by both id and name, matching the intent of the question, and is semantically equivalent to the expert's intent, but more precise. The difference in grouping does not change the correctness in this context, as both groupings will produce the same counts for each station, assuming station names are unique. Given that, the submitted query is correct."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2126,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The expert query groups by start_station_name and filters for stations with at least 200 trips, returning the station id and name. The submitted query groups by both start_station_id and start_station_name and applies the same filter. Since the question asks for station ids and names where at least 200 trips started, grouping by start_station_id and start_station_name is more precise, ensuring the count is per station. The expert's grouping by start_station_name alone could combine multiple stations with the same name but different ids, potentially leading to incorrect results. Therefore, the submitted query correctly groups by both id and name, matching the intent of the question, and is semantically equivalent to the expert's intent, but more precise. The difference in grouping does not change the correctness in this context, as both groupings will produce the same counts for each station, assuming station names are unique. Given that, the submitted query is correct.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:32"
+            }
+          ],
+          "traces": []
+        },
+        {
+          "id": 3279,
+          "duration": 2913,
+          "input": {
+            "question": "Find the zip code in which the average mean visibility is lower than 10.",
+            "context": "CREATE TABLE weather (zip_code VARCHAR, mean_visibility_miles INTEGER)"
+          },
+          "output": "SELECT zip_code FROM weather GROUP BY zip_code HAVING AVG(mean_visibility_miles) < 10;",
+          "expected": "SELECT zip_code FROM weather GROUP BY zip_code HAVING AVG(mean_visibility_miles) < 10",
+          "status": "success",
+          "colOrder": 24,
+          "renderedColumns": [
+            {
+              "label": "Context",
+              "value": "CREATE TABLE weather (zip_code VARCHAR, mean_visibility_miles INTEGER)"
+            },
+            {
+              "label": "Question",
+              "value": "Find the zip code in which the average mean visibility is lower than 10."
+            },
+            {
+              "label": "Expected Answer",
+              "value": "SELECT zip_code FROM weather GROUP BY zip_code HAVING AVG(mean_visibility_miles) < 10"
+            },
+            {
+              "label": "Generated SQL",
+              "value": "SELECT zip_code FROM weather GROUP BY zip_code HAVING AVG(mean_visibility_miles) < 10;"
+            },
+            {
+              "label": "Score",
+              "value": 1
+            },
+            {
+              "label": "Rationale",
+              "value": "The submitted SQL query is identical to the expert answer, with the same SELECT clause, FROM clause, GROUP BY clause, and HAVING condition. There are no differences in syntax, and both queries aim to find zip codes where the average mean_visibility_miles is less than 10. Since the queries are the same, they will produce the same result when executed on the database, ignoring superficial differences such as whitespace or column aliases."
+            }
+          ],
+          "createdAt": "2025-12-05 17:04:28",
+          "averageScore": 1,
+          "scores": [
+            {
+              "id": 2119,
+              "name": "SQLSemanticMatch",
+              "score": 1,
+              "description": "Evaluates semantic equivalence of SQL queries using LLM judge",
+              "metadata": {
+                "rationale": "The submitted SQL query is identical to the expert answer, with the same SELECT clause, FROM clause, GROUP BY clause, and HAVING condition. There are no differences in syntax, and both queries aim to find zip codes where the average mean_visibility_miles is less than 10. Since the queries are the same, they will produce the same result when executed on the database, ignoring superficial differences such as whitespace or column aliases.",
+                "choice": "Correct"
+              },
+              "createdAt": "2025-12-05 17:04:31"
+            }
+          ],
+          "traces": []
+        }
+      ]
+    }
+  ]
+}

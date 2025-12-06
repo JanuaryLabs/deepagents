@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import { snakeCase } from 'lodash-es';
 import { writeFile } from 'node:fs/promises';
 
@@ -23,9 +24,13 @@ type SectionAgentContext = {
 // Agent for writing leaf sections
 const sectionWriterAgent = agent<SectionAgentContext>({
   name: 'Section Writer',
-  // model: groq('moonshotai/kimi-k2-instruct-0905'),
-  model: lmstudio('openai/gpt-oss-20b'),
-  temperature: 0.5,
+  model: wrapLanguageModel({
+    // model: groq('moonshotai/kimi-k2-instruct-0905'),
+    model: lmstudio('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.5 },
+    }),
+  }),
   tools: {
     read_file: read_file_tool,
     search_content: search_content_tool,
@@ -36,8 +41,12 @@ const sectionWriterAgent = agent<SectionAgentContext>({
 // Agent for writing parent TOC pages
 const tocPageAgent = agent<SectionAgentContext>({
   name: 'TOC Page Writer',
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
-  temperature: 0.1,
+  model: wrapLanguageModel({
+    model: groq('moonshotai/kimi-k2-instruct-0905'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.1 },
+    }),
+  }),
   prompt: instructions({
     purpose: [
       'You create table-of-contents style pages for wiki parent sections.',

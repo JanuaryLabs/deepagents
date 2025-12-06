@@ -78,11 +78,11 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^2.0.45",
-    "@ai-sdk/google": "^2.0.39",
-    "@ai-sdk/groq": "2.0.29",
-    "@ai-sdk/openai": "2.0.69",
-    "@ai-sdk/openai-compatible": "^1.0.27",
+    "@ai-sdk/anthropic": "^2.0.53",
+    "@ai-sdk/google": "^2.0.44",
+    "@ai-sdk/groq": "2.0.32",
+    "@ai-sdk/openai": "2.0.76",
+    "@ai-sdk/openai-compatible": "^1.0.28",
     "@huggingface/transformers": "^3.7.6",
     "@langchain/core": "^1.0.2",
     "@linear/sdk": "^63.0.0",

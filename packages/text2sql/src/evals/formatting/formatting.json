@@ -1,0 +1,27 @@
+[
+  {
+    "ddl": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);",
+    "input": "Count all users",
+    "expected": "SELECT COUNT(*) FROM users;"
+  },
+  {
+    "ddl": "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price DECIMAL);",
+    "input": "Show all products",
+    "expected": "SELECT * FROM products;"
+  },
+  {
+    "ddl": "CREATE TABLE orders (id INTEGER PRIMARY KEY, total DECIMAL, created_at DATE);",
+    "input": "What is the total revenue in 2023?",
+    "expected": "SELECT SUM(total) FROM orders WHERE created_at BETWEEN '2023-01-01' AND '2023-12-31';"
+  },
+  {
+    "ddl": "CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT, department TEXT, salary INTEGER);",
+    "input": "Find employees earning more than 50000",
+    "expected": "SELECT * FROM employees WHERE salary > 50000;"
+  },
+  {
+    "ddl": "CREATE TABLE articles (id INTEGER PRIMARY KEY, title TEXT, views INTEGER, author_id INTEGER);",
+    "input": "List top 10 articles by views",
+    "expected": "SELECT * FROM articles ORDER BY views DESC LIMIT 10;"
+  }
+]

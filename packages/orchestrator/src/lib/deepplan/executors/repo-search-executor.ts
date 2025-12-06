@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import { agent } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
@@ -16,8 +17,12 @@ import { search_content_tool } from '../../deepwiki/tools.ts';
  */
 export const repoSearchExecutor = agent({
   name: 'repository_search_executor',
-  model: groq('openai/gpt-oss-20b'),
-  temperature: 0,
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0 },
+    }),
+  }),
   prompt: `
     <SystemContext>
       You are a meticulous repository analyst. You answer questions about a local codebase by gathering direct evidence

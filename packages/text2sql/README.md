@@ -24,15 +24,16 @@ Requires Node.js LTS (20+).
 
 ```typescript
 import pg from 'pg';
-import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
 import {
   Postgres,
+  constraints,
+  indexes,
+  info,
+  lowCardinality,
   tables,
   views,
-  info,
-  indexes,
-  constraints,
-  lowCardinality,
 } from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
@@ -72,7 +73,12 @@ Text2SQL works with any model provider supported by the [Vercel AI SDK](https://
 Inject domain knowledge to improve query accuracy:
 
 ```typescript
-import { term, hint, guardrail, example } from '@deepagents/text2sql/instructions';
+import {
+  example,
+  guardrail,
+  hint,
+  term,
+} from '@deepagents/text2sql/instructions';
 
 text2sql.instruct(
   term('MRR', 'monthly recurring revenue'),
@@ -84,7 +90,7 @@ text2sql.instruct(
   }),
   example({
     question: 'show me churned customers',
-    sql: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
+    answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
   }),
 );
 ```
@@ -95,16 +101,16 @@ text2sql.instruct(
 
 Control what schema metadata the AI receives:
 
-| Function | Description |
-|----------|-------------|
-| `tables()` | Tables, columns, and primary keys |
-| `views()` | Database views |
-| `info()` | Database version and info |
-| `indexes()` | Index information for performance hints |
-| `constraints()` | Foreign keys and other constraints |
-| `rowCount()` | Table sizes (tiny, small, medium, large, huge) |
-| `columnStats()` | Min/max/null distribution for columns |
-| `lowCardinality()` | Enum-like columns with distinct values |
+| Function           | Description                                    |
+| ------------------ | ---------------------------------------------- |
+| `tables()`         | Tables, columns, and primary keys              |
+| `views()`          | Database views                                 |
+| `info()`           | Database version and info                      |
+| `indexes()`        | Index information for performance hints        |
+| `constraints()`    | Foreign keys and other constraints             |
+| `rowCount()`       | Table sizes (tiny, small, medium, large, huge) |
+| `columnStats()`    | Min/max/null distribution for columns          |
+| `lowCardinality()` | Enum-like columns with distinct values         |
 
 ## Conversations
 

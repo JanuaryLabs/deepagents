@@ -93,7 +93,7 @@ function Navbar({ activePage, onNavigate }: { activePage: Page; onNavigate: (p: 
             ARCHITECTURE
           </button>
           <a
-            href="/docs/text2sql"
+            href="docs/text2sql"
             className="text-solar-300 border border-solar-500 px-4 py-1.5 hover:bg-solar-500 hover:text-solar-900 transition-colors"
           >
             DOCS
@@ -716,7 +716,7 @@ function Footer({ onNavigate }: { onNavigate: (p: Page) => void }) {
           <button onClick={() => onNavigate('ARCHITECTURE')} className="hover:text-solar-accent">
             ARCHITECTURE
           </button>
-          <a href="/docs/text2sql" className="hover:text-solar-accent">
+          <a href="docs/text2sql" className="hover:text-solar-accent">
             DOCS
           </a>
           <a href="https://github.com/JanuaryLabs/deepagents" className="hover:text-solar-accent">

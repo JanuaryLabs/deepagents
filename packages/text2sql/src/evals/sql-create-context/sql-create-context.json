@@ -1,0 +1,924 @@
+{
+  "features": [
+    {
+      "feature_idx": 0,
+      "name": "answer",
+      "type": { "dtype": "string", "_type": "Value" }
+    },
+    {
+      "feature_idx": 1,
+      "name": "question",
+      "type": { "dtype": "string", "_type": "Value" }
+    },
+    {
+      "feature_idx": 2,
+      "name": "context",
+      "type": { "dtype": "string", "_type": "Value" }
+    }
+  ],
+  "rows": [
+    {
+      "row_idx": 0,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM head WHERE age > 56",
+        "question": "How many heads of the departments are older than 56 ?",
+        "context": "CREATE TABLE head (age INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 1,
+      "row": {
+        "answer": "SELECT name, born_state, age FROM head ORDER BY age",
+        "question": "List the name, born state and age of the heads of departments ordered by age.",
+        "context": "CREATE TABLE head (name VARCHAR, born_state VARCHAR, age VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 2,
+      "row": {
+        "answer": "SELECT creation, name, budget_in_billions FROM department",
+        "question": "List the creation year, name and budget of each department.",
+        "context": "CREATE TABLE department (creation VARCHAR, name VARCHAR, budget_in_billions VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 3,
+      "row": {
+        "answer": "SELECT MAX(budget_in_billions), MIN(budget_in_billions) FROM department",
+        "question": "What are the maximum and minimum budget of the departments?",
+        "context": "CREATE TABLE department (budget_in_billions INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 4,
+      "row": {
+        "answer": "SELECT AVG(num_employees) FROM department WHERE ranking BETWEEN 10 AND 15",
+        "question": "What is the average number of employees of the departments whose rank is between 10 and 15?",
+        "context": "CREATE TABLE department (num_employees INTEGER, ranking INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 5,
+      "row": {
+        "answer": "SELECT name FROM head WHERE born_state <> 'California'",
+        "question": "What are the names of the heads who are born outside the California state?",
+        "context": "CREATE TABLE head (name VARCHAR, born_state VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 6,
+      "row": {
+        "answer": "SELECT DISTINCT T1.creation FROM department AS T1 JOIN management AS T2 ON T1.department_id = T2.department_id JOIN head AS T3 ON T2.head_id = T3.head_id WHERE T3.born_state = 'Alabama'",
+        "question": "What are the distinct creation years of the departments managed by a secretary born in state 'Alabama'?",
+        "context": "CREATE TABLE department (creation VARCHAR, department_id VARCHAR); CREATE TABLE management (department_id VARCHAR, head_id VARCHAR); CREATE TABLE head (head_id VARCHAR, born_state VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 7,
+      "row": {
+        "answer": "SELECT born_state FROM head GROUP BY born_state HAVING COUNT(*) >= 3",
+        "question": "What are the names of the states where at least 3 heads were born?",
+        "context": "CREATE TABLE head (born_state VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 8,
+      "row": {
+        "answer": "SELECT creation FROM department GROUP BY creation ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "In which year were most departments established?",
+        "context": "CREATE TABLE department (creation VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 9,
+      "row": {
+        "answer": "SELECT T1.name, T1.num_employees FROM department AS T1 JOIN management AS T2 ON T1.department_id = T2.department_id WHERE T2.temporary_acting = 'Yes'",
+        "question": "Show the name and number of employees for the departments managed by heads whose temporary acting value is 'Yes'?",
+        "context": "CREATE TABLE management (department_id VARCHAR, temporary_acting VARCHAR); CREATE TABLE department (name VARCHAR, num_employees VARCHAR, department_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 10,
+      "row": {
+        "answer": "SELECT COUNT(DISTINCT temporary_acting) FROM management",
+        "question": "How many acting statuses are there?",
+        "context": "CREATE TABLE management (temporary_acting VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 11,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM department WHERE NOT department_id IN (SELECT department_id FROM management)",
+        "question": "How many departments are led by heads who are not mentioned?",
+        "context": "CREATE TABLE management (department_id VARCHAR); CREATE TABLE department (department_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 12,
+      "row": {
+        "answer": "SELECT DISTINCT T1.age FROM management AS T2 JOIN head AS T1 ON T1.head_id = T2.head_id WHERE T2.temporary_acting = 'Yes'",
+        "question": "What are the distinct ages of the heads who are acting?",
+        "context": "CREATE TABLE head (age VARCHAR, head_id VARCHAR); CREATE TABLE management (head_id VARCHAR, temporary_acting VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 13,
+      "row": {
+        "answer": "SELECT T3.born_state FROM department AS T1 JOIN management AS T2 ON T1.department_id = T2.department_id JOIN head AS T3 ON T2.head_id = T3.head_id WHERE T1.name = 'Treasury' INTERSECT SELECT T3.born_state FROM department AS T1 JOIN management AS T2 ON T1.department_id = T2.department_id JOIN head AS T3 ON T2.head_id = T3.head_id WHERE T1.name = 'Homeland Security'",
+        "question": "List the states where both the secretary of 'Treasury' department and the secretary of 'Homeland Security' were born.",
+        "context": "CREATE TABLE management (department_id VARCHAR, head_id VARCHAR); CREATE TABLE head (born_state VARCHAR, head_id VARCHAR); CREATE TABLE department (department_id VARCHAR, name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 14,
+      "row": {
+        "answer": "SELECT T1.department_id, T1.name, COUNT(*) FROM management AS T2 JOIN department AS T1 ON T1.department_id = T2.department_id GROUP BY T1.department_id HAVING COUNT(*) > 1",
+        "question": "Which department has more than 1 head at a time? List the id, name and the number of heads.",
+        "context": "CREATE TABLE management (department_id VARCHAR); CREATE TABLE department (department_id VARCHAR, name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 15,
+      "row": {
+        "answer": "SELECT head_id, name FROM head WHERE name LIKE '%Ha%'",
+        "question": "Which head's name has the substring 'Ha'? List the id and name.",
+        "context": "CREATE TABLE head (head_id VARCHAR, name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 16,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM farm",
+        "question": "How many farms are there?",
+        "context": "CREATE TABLE farm (Id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 17,
+      "row": {
+        "answer": "SELECT Total_Horses FROM farm ORDER BY Total_Horses",
+        "question": "List the total number of horses on farms in ascending order.",
+        "context": "CREATE TABLE farm (Total_Horses VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 18,
+      "row": {
+        "answer": "SELECT Hosts FROM farm_competition WHERE Theme <> 'Aliens'",
+        "question": "What are the hosts of competitions whose theme is not \"Aliens\"?",
+        "context": "CREATE TABLE farm_competition (Hosts VARCHAR, Theme VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 19,
+      "row": {
+        "answer": "SELECT Theme FROM farm_competition ORDER BY YEAR",
+        "question": "What are the themes of farm competitions sorted by year in ascending order?",
+        "context": "CREATE TABLE farm_competition (Theme VARCHAR, YEAR VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 20,
+      "row": {
+        "answer": "SELECT AVG(Working_Horses) FROM farm WHERE Total_Horses > 5000",
+        "question": "What is the average number of working horses of farms with more than 5000 total number of horses?",
+        "context": "CREATE TABLE farm (Working_Horses INTEGER, Total_Horses INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 21,
+      "row": {
+        "answer": "SELECT MAX(Cows), MIN(Cows) FROM farm",
+        "question": "What are the maximum and minimum number of cows across all farms.",
+        "context": "CREATE TABLE farm (Cows INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 22,
+      "row": {
+        "answer": "SELECT COUNT(DISTINCT Status) FROM city",
+        "question": "How many different statuses do cities have?",
+        "context": "CREATE TABLE city (Status VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 23,
+      "row": {
+        "answer": "SELECT Official_Name FROM city ORDER BY Population DESC",
+        "question": "List official names of cities in descending order of population.",
+        "context": "CREATE TABLE city (Official_Name VARCHAR, Population VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 24,
+      "row": {
+        "answer": "SELECT Official_Name, Status FROM city ORDER BY Population DESC LIMIT 1",
+        "question": "List the official name and status of the city with the largest population.",
+        "context": "CREATE TABLE city (Official_Name VARCHAR, Status VARCHAR, Population VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 25,
+      "row": {
+        "answer": "SELECT T2.Year, T1.Official_Name FROM city AS T1 JOIN farm_competition AS T2 ON T1.City_ID = T2.Host_city_ID",
+        "question": "Show the years and the official names of the host cities of competitions.",
+        "context": "CREATE TABLE city (Official_Name VARCHAR, City_ID VARCHAR); CREATE TABLE farm_competition (Year VARCHAR, Host_city_ID VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 26,
+      "row": {
+        "answer": "SELECT T1.Official_Name FROM city AS T1 JOIN farm_competition AS T2 ON T1.City_ID = T2.Host_city_ID GROUP BY T2.Host_city_ID HAVING COUNT(*) > 1",
+        "question": "Show the official names of the cities that have hosted more than one competition.",
+        "context": "CREATE TABLE farm_competition (Host_city_ID VARCHAR); CREATE TABLE city (Official_Name VARCHAR, City_ID VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 27,
+      "row": {
+        "answer": "SELECT T1.Status FROM city AS T1 JOIN farm_competition AS T2 ON T1.City_ID = T2.Host_city_ID GROUP BY T2.Host_city_ID ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "Show the status of the city that has hosted the greatest number of competitions.",
+        "context": "CREATE TABLE city (Status VARCHAR, City_ID VARCHAR); CREATE TABLE farm_competition (Host_city_ID VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 28,
+      "row": {
+        "answer": "SELECT T2.Theme FROM city AS T1 JOIN farm_competition AS T2 ON T1.City_ID = T2.Host_city_ID WHERE T1.Population > 1000",
+        "question": "Please show the themes of competitions with host cities having populations larger than 1000.",
+        "context": "CREATE TABLE city (City_ID VARCHAR, Population INTEGER); CREATE TABLE farm_competition (Theme VARCHAR, Host_city_ID VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 29,
+      "row": {
+        "answer": "SELECT Status, AVG(Population) FROM city GROUP BY Status",
+        "question": "Please show the different statuses of cities and the average population of cities with each status.",
+        "context": "CREATE TABLE city (Status VARCHAR, Population INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 30,
+      "row": {
+        "answer": "SELECT Status FROM city GROUP BY Status ORDER BY COUNT(*)",
+        "question": "Please show the different statuses, ordered by the number of cities that have each.",
+        "context": "CREATE TABLE city (Status VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 31,
+      "row": {
+        "answer": "SELECT Status FROM city GROUP BY Status ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "List the most common type of Status across cities.",
+        "context": "CREATE TABLE city (Status VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 32,
+      "row": {
+        "answer": "SELECT Official_Name FROM city WHERE NOT City_ID IN (SELECT Host_city_ID FROM farm_competition)",
+        "question": "List the official names of cities that have not held any competition.",
+        "context": "CREATE TABLE farm_competition (Official_Name VARCHAR, City_ID VARCHAR, Host_city_ID VARCHAR); CREATE TABLE city (Official_Name VARCHAR, City_ID VARCHAR, Host_city_ID VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 33,
+      "row": {
+        "answer": "SELECT Status FROM city WHERE Population > 1500 INTERSECT SELECT Status FROM city WHERE Population < 500",
+        "question": "Show the status shared by cities with population bigger than 1500 and smaller than 500.",
+        "context": "CREATE TABLE city (Status VARCHAR, Population INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 34,
+      "row": {
+        "answer": "SELECT Official_Name FROM city WHERE Population > 1500 OR Population < 500",
+        "question": "Find the official names of cities with population bigger than 1500 or smaller than 500.",
+        "context": "CREATE TABLE city (Official_Name VARCHAR, Population VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 35,
+      "row": {
+        "answer": "SELECT Census_Ranking FROM city WHERE Status <> \"Village\"",
+        "question": "Show the census ranking of cities whose status are not \"Village\".",
+        "context": "CREATE TABLE city (Census_Ranking VARCHAR, Status VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 36,
+      "row": {
+        "answer": "SELECT T1.course_name FROM courses AS T1 JOIN student_course_registrations AS T2 ON T1.course_id = T2.course_Id GROUP BY T1.course_id ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "which course has most number of registered students?",
+        "context": "CREATE TABLE courses (course_name VARCHAR, course_id VARCHAR); CREATE TABLE student_course_registrations (course_Id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 37,
+      "row": {
+        "answer": "SELECT student_id FROM student_course_registrations GROUP BY student_id ORDER BY COUNT(*) LIMIT 1",
+        "question": "what is id of students who registered some courses but the least number of courses in these students?",
+        "context": "CREATE TABLE student_course_registrations (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 38,
+      "row": {
+        "answer": "SELECT T2.first_name, T2.last_name FROM candidates AS T1 JOIN people AS T2 ON T1.candidate_id = T2.person_id",
+        "question": "what are the first name and last name of all candidates?",
+        "context": "CREATE TABLE candidates (candidate_id VARCHAR); CREATE TABLE people (first_name VARCHAR, last_name VARCHAR, person_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 39,
+      "row": {
+        "answer": "SELECT student_id FROM students WHERE NOT student_id IN (SELECT student_id FROM student_course_attendance)",
+        "question": "List the id of students who never attends courses?",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR); CREATE TABLE students (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 40,
+      "row": {
+        "answer": "SELECT student_id FROM student_course_attendance",
+        "question": "List the id of students who attended some courses?",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 41,
+      "row": {
+        "answer": "SELECT T1.student_id, T2.course_name FROM student_course_registrations AS T1 JOIN courses AS T2 ON T1.course_id = T2.course_id",
+        "question": "What are the ids of all students for courses and what are the names of those courses?",
+        "context": "CREATE TABLE courses (course_name VARCHAR, course_id VARCHAR); CREATE TABLE student_course_registrations (student_id VARCHAR, course_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 42,
+      "row": {
+        "answer": "SELECT T2.student_details FROM student_course_registrations AS T1 JOIN students AS T2 ON T1.student_id = T2.student_id ORDER BY T1.registration_date DESC LIMIT 1",
+        "question": "What is detail of the student who most recently registered course?",
+        "context": "CREATE TABLE student_course_registrations (student_id VARCHAR, registration_date VARCHAR); CREATE TABLE students (student_details VARCHAR, student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 43,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM courses AS T1 JOIN student_course_attendance AS T2 ON T1.course_id = T2.course_id WHERE T1.course_name = \"English\"",
+        "question": "How many students attend course English?",
+        "context": "CREATE TABLE student_course_attendance (course_id VARCHAR); CREATE TABLE courses (course_id VARCHAR, course_name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 44,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM courses AS T1 JOIN student_course_attendance AS T2 ON T1.course_id = T2.course_id WHERE T2.student_id = 171",
+        "question": "How many courses do the student whose id is 171 attend?",
+        "context": "CREATE TABLE courses (course_id VARCHAR); CREATE TABLE student_course_attendance (course_id VARCHAR, student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 45,
+      "row": {
+        "answer": "SELECT T2.candidate_id FROM people AS T1 JOIN candidates AS T2 ON T1.person_id = T2.candidate_id WHERE T1.email_address = \"stanley.monahan@example.org\"",
+        "question": "Find id of the candidate whose email is stanley.monahan@example.org?",
+        "context": "CREATE TABLE candidates (candidate_id VARCHAR); CREATE TABLE people (person_id VARCHAR, email_address VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 46,
+      "row": {
+        "answer": "SELECT candidate_id FROM candidate_assessments ORDER BY assessment_date DESC LIMIT 1",
+        "question": "Find id of the candidate who most recently accessed the course?",
+        "context": "CREATE TABLE candidate_assessments (candidate_id VARCHAR, assessment_date VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 47,
+      "row": {
+        "answer": "SELECT T1.student_details FROM students AS T1 JOIN student_course_registrations AS T2 ON T1.student_id = T2.student_id GROUP BY T1.student_id ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "What is detail of the student who registered the most number of courses?",
+        "context": "CREATE TABLE students (student_details VARCHAR, student_id VARCHAR); CREATE TABLE student_course_registrations (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 48,
+      "row": {
+        "answer": "SELECT T1.student_id, COUNT(*) FROM students AS T1 JOIN student_course_registrations AS T2 ON T1.student_id = T2.student_id GROUP BY T1.student_id",
+        "question": "List the id of students who registered some courses and the number of their registered courses?",
+        "context": "CREATE TABLE students (student_id VARCHAR); CREATE TABLE student_course_registrations (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 49,
+      "row": {
+        "answer": "SELECT T3.course_name, COUNT(*) FROM students AS T1 JOIN student_course_registrations AS T2 ON T1.student_id = T2.student_id JOIN courses AS T3 ON T2.course_id = T3.course_id GROUP BY T2.course_id",
+        "question": "How many registed students do each course have? List course name and the number of their registered students?",
+        "context": "CREATE TABLE students (student_id VARCHAR); CREATE TABLE courses (course_name VARCHAR, course_id VARCHAR); CREATE TABLE student_course_registrations (course_id VARCHAR, student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 50,
+      "row": {
+        "answer": "SELECT candidate_id FROM candidate_assessments WHERE asessment_outcome_code = \"Pass\"",
+        "question": "Find id of candidates whose assessment code is \"Pass\"?",
+        "context": "CREATE TABLE candidate_assessments (candidate_id VARCHAR, asessment_outcome_code VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 51,
+      "row": {
+        "answer": "SELECT T3.cell_mobile_number FROM candidates AS T1 JOIN candidate_assessments AS T2 ON T1.candidate_id = T2.candidate_id JOIN people AS T3 ON T1.candidate_id = T3.person_id WHERE T2.asessment_outcome_code = \"Fail\"",
+        "question": "Find the cell mobile number of the candidates whose assessment code is \"Fail\"?",
+        "context": "CREATE TABLE candidates (candidate_id VARCHAR); CREATE TABLE people (cell_mobile_number VARCHAR, person_id VARCHAR); CREATE TABLE candidate_assessments (candidate_id VARCHAR, asessment_outcome_code VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 52,
+      "row": {
+        "answer": "SELECT student_id FROM student_course_attendance WHERE course_id = 301",
+        "question": "What are the id of students who registered course 301?",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR, course_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 53,
+      "row": {
+        "answer": "SELECT student_id FROM student_course_attendance WHERE course_id = 301 ORDER BY date_of_attendance DESC LIMIT 1",
+        "question": "What is the id of the student who most recently registered course 301?",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR, course_id VARCHAR, date_of_attendance VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 54,
+      "row": {
+        "answer": "SELECT DISTINCT T1.city FROM addresses AS T1 JOIN people_addresses AS T2 ON T1.address_id = T2.address_id",
+        "question": "Find distinct cities of addresses of people?",
+        "context": "CREATE TABLE addresses (city VARCHAR, address_id VARCHAR); CREATE TABLE people_addresses (address_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 55,
+      "row": {
+        "answer": "SELECT DISTINCT T1.city FROM addresses AS T1 JOIN people_addresses AS T2 ON T1.address_id = T2.address_id JOIN students AS T3 ON T2.person_id = T3.student_id",
+        "question": "Find distinct cities of address of students?",
+        "context": "CREATE TABLE students (student_id VARCHAR); CREATE TABLE addresses (city VARCHAR, address_id VARCHAR); CREATE TABLE people_addresses (address_id VARCHAR, person_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 56,
+      "row": {
+        "answer": "SELECT course_name FROM courses ORDER BY course_name",
+        "question": "List the names of courses in alphabetical order?",
+        "context": "CREATE TABLE courses (course_name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 57,
+      "row": {
+        "answer": "SELECT first_name FROM people ORDER BY first_name",
+        "question": "List the first names of people in alphabetical order?",
+        "context": "CREATE TABLE people (first_name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 58,
+      "row": {
+        "answer": "SELECT student_id FROM student_course_registrations UNION SELECT student_id FROM student_course_attendance",
+        "question": "What are the id of students who registered courses or attended courses?",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR); CREATE TABLE student_course_registrations (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 59,
+      "row": {
+        "answer": "SELECT course_id FROM student_course_registrations WHERE student_id = 121 UNION SELECT course_id FROM student_course_attendance WHERE student_id = 121",
+        "question": "Find the id of courses which are registered or attended by student whose id is 121?",
+        "context": "CREATE TABLE student_course_attendance (course_id VARCHAR, student_id VARCHAR); CREATE TABLE student_course_registrations (course_id VARCHAR, student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 60,
+      "row": {
+        "answer": "SELECT * FROM student_course_registrations WHERE NOT student_id IN (SELECT student_id FROM student_course_attendance)",
+        "question": "What are all info of students who registered courses but not attended courses?",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR); CREATE TABLE student_course_registrations (student_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 61,
+      "row": {
+        "answer": "SELECT T2.student_id FROM courses AS T1 JOIN student_course_registrations AS T2 ON T1.course_id = T2.course_id WHERE T1.course_name = \"statistics\" ORDER BY T2.registration_date",
+        "question": "List the id of students who registered course statistics in the order of registration date.",
+        "context": "CREATE TABLE student_course_registrations (student_id VARCHAR, course_id VARCHAR, registration_date VARCHAR); CREATE TABLE courses (course_id VARCHAR, course_name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 62,
+      "row": {
+        "answer": "SELECT T2.student_id FROM courses AS T1 JOIN student_course_attendance AS T2 ON T1.course_id = T2.course_id WHERE T1.course_name = \"statistics\" ORDER BY T2.date_of_attendance",
+        "question": "List the id of students who attended  statistics courses in the order of attendance date.",
+        "context": "CREATE TABLE student_course_attendance (student_id VARCHAR, course_id VARCHAR, date_of_attendance VARCHAR); CREATE TABLE courses (course_id VARCHAR, course_name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 63,
+      "row": {
+        "answer": "SELECT date FROM weather WHERE max_temperature_f > 85",
+        "question": "Give me the dates when the max temperature was higher than 85.",
+        "context": "CREATE TABLE weather (date VARCHAR, max_temperature_f INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 64,
+      "row": {
+        "answer": "SELECT name FROM station WHERE lat < 37.5",
+        "question": "What are the names of stations that have latitude lower than 37.5?",
+        "context": "CREATE TABLE station (name VARCHAR, lat INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 65,
+      "row": {
+        "answer": "SELECT city, MAX(lat) FROM station GROUP BY city",
+        "question": "For each city, return the highest latitude among its stations.",
+        "context": "CREATE TABLE station (city VARCHAR, lat INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 66,
+      "row": {
+        "answer": "SELECT start_station_name, end_station_name FROM trip ORDER BY id LIMIT 3",
+        "question": "Give me the start station and end station for the trips with the three oldest id.",
+        "context": "CREATE TABLE trip (start_station_name VARCHAR, end_station_name VARCHAR, id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 67,
+      "row": {
+        "answer": "SELECT AVG(lat), AVG(long) FROM station WHERE city = \"San Jose\"",
+        "question": "What is the average latitude and longitude of stations located in San Jose city?",
+        "context": "CREATE TABLE station (lat INTEGER, long INTEGER, city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 68,
+      "row": {
+        "answer": "SELECT id FROM trip ORDER BY duration LIMIT 1",
+        "question": "What is the id of the trip that has the shortest duration?",
+        "context": "CREATE TABLE trip (id VARCHAR, duration VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 69,
+      "row": {
+        "answer": "SELECT SUM(duration), MAX(duration) FROM trip WHERE bike_id = 636",
+        "question": "What is the total and maximum duration of trips with bike id 636?",
+        "context": "CREATE TABLE trip (duration INTEGER, bike_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 70,
+      "row": {
+        "answer": "SELECT zip_code, AVG(mean_temperature_f) FROM weather WHERE date LIKE \"8/%\" GROUP BY zip_code",
+        "question": "For each zip code, return the average mean temperature of August there.",
+        "context": "CREATE TABLE weather (zip_code VARCHAR, mean_temperature_f INTEGER, date VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 71,
+      "row": {
+        "answer": "SELECT COUNT(DISTINCT bike_id) FROM trip",
+        "question": "From the trip record, find the number of unique bikes.",
+        "context": "CREATE TABLE trip (bike_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 72,
+      "row": {
+        "answer": "SELECT COUNT(DISTINCT city) FROM station",
+        "question": "What is the number of distinct cities the stations are located at?",
+        "context": "CREATE TABLE station (city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 73,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM station WHERE city = \"Mountain View\"",
+        "question": "How many stations does Mountain View city has?",
+        "context": "CREATE TABLE station (city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 74,
+      "row": {
+        "answer": "SELECT DISTINCT T1.name FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id WHERE T2.bikes_available = 7",
+        "question": "Return the unique name for stations that have ever had 7 bikes available.",
+        "context": "CREATE TABLE station (name VARCHAR, id VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 75,
+      "row": {
+        "answer": "SELECT start_station_name, start_station_id FROM trip WHERE start_date LIKE \"8/%\" GROUP BY start_station_name ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "Which start station had the most trips starting from August? Give me the name and id of the station.",
+        "context": "CREATE TABLE trip (start_station_name VARCHAR, start_station_id VARCHAR, start_date VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 76,
+      "row": {
+        "answer": "SELECT bike_id FROM trip WHERE zip_code = 94002 GROUP BY bike_id ORDER BY COUNT(*) DESC LIMIT 1",
+        "question": "Which bike traveled the most often in zip code 94002?",
+        "context": "CREATE TABLE trip (bike_id VARCHAR, zip_code VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 77,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM weather WHERE mean_humidity > 50 AND mean_visibility_miles > 8",
+        "question": "How many days had both mean humidity above 50 and mean visibility above 8?",
+        "context": "CREATE TABLE weather (mean_humidity VARCHAR, mean_visibility_miles VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 78,
+      "row": {
+        "answer": "SELECT T1.lat, T1.long, T1.city FROM station AS T1 JOIN trip AS T2 ON T1.id = T2.start_station_id ORDER BY T2.duration LIMIT 1",
+        "question": "What is the latitude, longitude, city of the station from which the shortest trip started?",
+        "context": "CREATE TABLE trip (start_station_id VARCHAR, duration VARCHAR); CREATE TABLE station (lat VARCHAR, long VARCHAR, city VARCHAR, id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 79,
+      "row": {
+        "answer": "SELECT station_id FROM status WHERE city = 'San Francisco' GROUP BY station_id HAVING AVG(bikes_available) > 10",
+        "question": "What are the station_ids that are located in San Francisco and have average bike availability above 10.",
+        "context": "CREATE TABLE status (station_id VARCHAR, city VARCHAR, bikes_available INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 80,
+      "row": {
+        "answer": "SELECT T1.name, T1.id FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id GROUP BY T2.station_id HAVING AVG(T2.bikes_available) > 14 UNION SELECT name, id FROM station WHERE installation_date LIKE \"12/%\"",
+        "question": "What are the names and ids of stations that had more than 14 bikes available on average or were installed in December?",
+        "context": "CREATE TABLE station (name VARCHAR, id VARCHAR, installation_date VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 81,
+      "row": {
+        "answer": "SELECT cloud_cover FROM weather WHERE zip_code = 94107 GROUP BY cloud_cover ORDER BY COUNT(*) DESC LIMIT 3",
+        "question": "What is the 3 most common cloud cover rates in the region of zip code 94107?",
+        "context": "CREATE TABLE weather (cloud_cover VARCHAR, zip_code VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 82,
+      "row": {
+        "answer": "SELECT zip_code FROM weather GROUP BY zip_code ORDER BY AVG(mean_sea_level_pressure_inches) LIMIT 1",
+        "question": "What is the zip code in which the average mean sea level pressure is the lowest?",
+        "context": "CREATE TABLE weather (zip_code VARCHAR, mean_sea_level_pressure_inches INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 83,
+      "row": {
+        "answer": "SELECT AVG(bikes_available) FROM status WHERE NOT station_id IN (SELECT id FROM station WHERE city = \"Palo Alto\")",
+        "question": "What is the average bike availability in stations that are not located in Palo Alto?",
+        "context": "CREATE TABLE status (bikes_available INTEGER, station_id VARCHAR, id VARCHAR, city VARCHAR); CREATE TABLE station (bikes_available INTEGER, station_id VARCHAR, id VARCHAR, city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 84,
+      "row": {
+        "answer": "SELECT AVG(long) FROM station WHERE NOT id IN (SELECT station_id FROM status GROUP BY station_id HAVING MAX(bikes_available) > 10)",
+        "question": "What is the average longitude of stations that never had bike availability more than 10?",
+        "context": "CREATE TABLE station (long INTEGER, id VARCHAR, station_id VARCHAR, bikes_available INTEGER); CREATE TABLE status (long INTEGER, id VARCHAR, station_id VARCHAR, bikes_available INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 85,
+      "row": {
+        "answer": "SELECT date, zip_code FROM weather WHERE max_temperature_f >= 80",
+        "question": "When and in what zip code did max temperature reach at least 80?",
+        "context": "CREATE TABLE weather (date VARCHAR, zip_code VARCHAR, max_temperature_f VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 86,
+      "row": {
+        "answer": "SELECT T1.id FROM trip AS T1 JOIN weather AS T2 ON T1.zip_code = T2.zip_code GROUP BY T2.zip_code HAVING AVG(T2.mean_temperature_f) > 60",
+        "question": "Give me ids for all the trip that took place in a zip code area with average mean temperature above 60.",
+        "context": "CREATE TABLE trip (id VARCHAR, zip_code VARCHAR); CREATE TABLE weather (zip_code VARCHAR, mean_temperature_f INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 87,
+      "row": {
+        "answer": "SELECT zip_code, COUNT(*) FROM weather WHERE max_wind_Speed_mph >= 25 GROUP BY zip_code",
+        "question": "For each zip code, return how many times max wind speed reached at least 25?",
+        "context": "CREATE TABLE weather (zip_code VARCHAR, max_wind_Speed_mph VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 88,
+      "row": {
+        "answer": "SELECT date, zip_code FROM weather WHERE min_dew_point_f < (SELECT MIN(min_dew_point_f) FROM weather WHERE zip_code = 94107)",
+        "question": "On which day and in which zip code was the min dew point lower than any day in zip code 94107?",
+        "context": "CREATE TABLE weather (date VARCHAR, zip_code VARCHAR, min_dew_point_f INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 89,
+      "row": {
+        "answer": "SELECT T1.id, T2.installation_date FROM trip AS T1 JOIN station AS T2 ON T1.end_station_id = T2.id",
+        "question": "For each trip, return its ending station's installation date.",
+        "context": "CREATE TABLE station (installation_date VARCHAR, id VARCHAR); CREATE TABLE trip (id VARCHAR, end_station_id VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 90,
+      "row": {
+        "answer": "SELECT T1.id FROM trip AS T1 JOIN station AS T2 ON T1.start_station_id = T2.id ORDER BY T2.dock_count DESC LIMIT 1",
+        "question": "Which trip started from the station with the largest dock count? Give me the trip id.",
+        "context": "CREATE TABLE trip (id VARCHAR, start_station_id VARCHAR); CREATE TABLE station (id VARCHAR, dock_count VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 91,
+      "row": {
+        "answer": "SELECT COUNT(*) FROM trip AS T1 JOIN station AS T2 ON T1.end_station_id = T2.id WHERE T2.city <> \"San Francisco\"",
+        "question": "Count the number of trips that did not end in San Francisco city.",
+        "context": "CREATE TABLE trip (end_station_id VARCHAR); CREATE TABLE station (id VARCHAR, city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 92,
+      "row": {
+        "answer": "SELECT date FROM weather WHERE zip_code = 94107 AND EVENTS <> \"Fog\" AND EVENTS <> \"Rain\"",
+        "question": "In zip code 94107, on which day was neither Fog nor Rain observed?",
+        "context": "CREATE TABLE weather (date VARCHAR, EVENTS VARCHAR, zip_code VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 93,
+      "row": {
+        "answer": "SELECT id FROM station WHERE lat > 37.4 EXCEPT SELECT station_id FROM status GROUP BY station_id HAVING MIN(bikes_available) < 7",
+        "question": "What are the ids of stations that have latitude above 37.4 and never had bike availability below 7?",
+        "context": "CREATE TABLE status (id VARCHAR, station_id VARCHAR, lat INTEGER, bikes_available INTEGER); CREATE TABLE station (id VARCHAR, station_id VARCHAR, lat INTEGER, bikes_available INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 94,
+      "row": {
+        "answer": "SELECT T1.name FROM station AS T1 JOIN status AS T2 ON T1.id = T2.station_id GROUP BY T2.station_id HAVING AVG(bikes_available) > 10 EXCEPT SELECT name FROM station WHERE city = \"San Jose\"",
+        "question": "What are names of stations that have average bike availability above 10 and are not located in San Jose city?",
+        "context": "CREATE TABLE station (name VARCHAR, id VARCHAR, city VARCHAR); CREATE TABLE status (station_id VARCHAR, bikes_available INTEGER)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 95,
+      "row": {
+        "answer": "SELECT name, lat, city FROM station ORDER BY lat LIMIT 1",
+        "question": "What are the name, latitude, and city of the station with the lowest latitude?",
+        "context": "CREATE TABLE station (name VARCHAR, lat VARCHAR, city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 96,
+      "row": {
+        "answer": "SELECT date, mean_temperature_f, mean_humidity FROM weather ORDER BY max_gust_speed_mph DESC LIMIT 3",
+        "question": "What are the date, mean temperature and mean humidity for the top 3 days with the largest max gust speeds?",
+        "context": "CREATE TABLE weather (date VARCHAR, mean_temperature_f VARCHAR, mean_humidity VARCHAR, max_gust_speed_mph VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 97,
+      "row": {
+        "answer": "SELECT city, COUNT(*) FROM station GROUP BY city HAVING COUNT(*) >= 15",
+        "question": "List the name and the number of stations for all the cities that have at least 15 stations.",
+        "context": "CREATE TABLE station (city VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 98,
+      "row": {
+        "answer": "SELECT start_station_id, start_station_name FROM trip GROUP BY start_station_name HAVING COUNT(*) >= 200",
+        "question": "Find the ids and names of stations from which at least 200 trips started.",
+        "context": "CREATE TABLE trip (start_station_id VARCHAR, start_station_name VARCHAR)"
+      },
+      "truncated_cells": []
+    },
+    {
+      "row_idx": 99,
+      "row": {
+        "answer": "SELECT zip_code FROM weather GROUP BY zip_code HAVING AVG(mean_visibility_miles) < 10",
+        "question": "Find the zip code in which the average mean visibility is lower than 10.",
+        "context": "CREATE TABLE weather (zip_code VARCHAR, mean_visibility_miles INTEGER)"
+      },
+      "truncated_cells": []
+    }
+  ],
+  "num_rows_total": 78577,
+  "num_rows_per_page": 100,
+  "partial": false
+}

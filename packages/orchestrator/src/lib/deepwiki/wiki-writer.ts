@@ -1,4 +1,8 @@
-import { type UIMessage } from 'ai';
+import {
+  type UIMessage,
+  defaultSettingsMiddleware,
+  wrapLanguageModel,
+} from 'ai';
 import { writeFile } from 'node:fs/promises';
 
 import {
@@ -23,9 +27,13 @@ type SectionAgentContext = {
 
 const sectionWriter = agent<SectionAgentContext>({
   name: 'wiki-section-writer',
-  // model: lmstudio('openai/gpt-oss-20b'),
-  model: lmstudio('qwen/qwen3-4b-2507'),
-  temperature: 0,
+  model: wrapLanguageModel({
+    // model: lmstudio('openai/gpt-oss-20b'),
+    model: lmstudio('qwen/qwen3-4b-2507'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0 },
+    }),
+  }),
   prompt: instructions({
     purpose: [
       'You write comprehensive, accurate, and actionable documentation sections for a repository wiki.',

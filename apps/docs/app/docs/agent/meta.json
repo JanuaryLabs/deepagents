@@ -1,4 +1,5 @@
 {
   "title": "Agent",
-  "root": true
+  "root": true,
+  "pages": ["index", "configure-models"]
 }

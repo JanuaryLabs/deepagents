@@ -1,5 +1,11 @@
 import { groq } from '@ai-sdk/groq';
-import { type UIMessage, generateId, tool } from 'ai';
+import {
+  type UIMessage,
+  defaultSettingsMiddleware,
+  generateId,
+  tool,
+  wrapLanguageModel,
+} from 'ai';
 import z from 'zod';
 
 import {
@@ -107,9 +113,13 @@ export const outlineAgent = agent<unknown, OutlineAgentContext>({
 
 export const outlineCondensedAgent = agent<unknown, OutlineAgentContext>({
   name: 'Outline Condensed Agent',
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
-  // model: lmstudio('openai/gpt-oss-20b'),
-  temperature: 0,
+  model: wrapLanguageModel({
+    model: groq('moonshotai/kimi-k2-instruct-0905'),
+    // model: lmstudio('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0 },
+    }),
+  }),
   prompt: instructions({
     purpose: [
       'To intelligently condense and optimize an existing outline by merging redundant sections, removing overly granular subdivisions, and creating a more streamlined, maintainable documentation structure.',

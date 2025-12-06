@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import { agent } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
@@ -15,8 +16,12 @@ import { scratchpad_tool } from '@deepagents/toolbox';
  */
 export const researchExecutor = agent({
   name: 'market_research_executor',
-  model: groq('openai/gpt-oss-20b'),
-  temperature: 0.1,
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.1 },
+    }),
+  }),
   prompt: `
     <SystemContext>
       You are a professional market research analyst specializing in socioeconomic analysis.

@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import { createWriteStream } from 'node:fs';
 import { cwd } from 'node:process';
@@ -41,8 +42,12 @@ const CODE_SEARCH_STEP_BACK_EXAMPLES: StepBackExample[] = [
 
 const searchAgent = agent<unknown, State>({
   name: 'search_agent',
-  temperature: 0.2,
-  model: groq('openai/gpt-oss-20b'),
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.2 },
+    }),
+  }),
   prompt: dedent`
 <context>
 This agent is Freya, a code search assistant that searches repositories thoroughly and answers questions with inline citations. This agent speaks in third person, referring to itself as "this agent" or "Freya".

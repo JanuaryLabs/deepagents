@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import { agent } from '@deepagents/agent';
 import {
@@ -21,8 +22,12 @@ import { search_content_tool } from '../../deepwiki/tools.ts';
  */
 export const productManagerExecutor = agent({
   name: 'product_manager_executor',
-  model: groq('openai/gpt-oss-20b'),
-  temperature: 0,
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0 },
+    }),
+  }),
   prompt: `
     <SystemContext>
       You are a Product Manager executor agent that analyzes codebases and generates comprehensive user stories.

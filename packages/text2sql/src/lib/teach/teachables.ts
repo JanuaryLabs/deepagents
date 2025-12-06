@@ -658,7 +658,7 @@ export function identity(input: { name?: string; role?: string }): Teachables {
 export function persona(input: {
   name: string;
   role: string;
-  tone: string;
+  tone?: string;
 }): Teachables {
   const { name, role, tone } = input;
   return {
@@ -667,7 +667,7 @@ export function persona(input: {
       wrapBlock('persona', [
         leaf('name', name),
         leaf('role', role),
-        leaf('tone', tone),
+        tone ? leaf('tone', tone) : '',
       ]),
   };
 }
