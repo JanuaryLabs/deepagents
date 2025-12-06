@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import {
   type IngestionConfig,
@@ -46,12 +47,16 @@ import { execute } from './swarm.ts';
  */
 async function rag(query: string, config: IngestionConfig) {
   const results = await similaritySearch(query, config);
+
   const kafka = agent({
     name: 'Kafka',
-    model: groq('moonshotai/kimi-k2-instruct-0905'),
-    // model: lmstudio('qwen3-0.6b'),
+    model: wrapLanguageModel({
+      model: groq('moonshotai/kimi-k2-instruct-0905'),
+      middleware: defaultSettingsMiddleware({
+        settings: { temperature: 0.2 },
+      }),
+    }),
     prompt: `${results.map((r, index) => `Source: ${index}\nContent: ${r.content}`).join('\n\n')}`,
-    temperature: 0.2,
   });
   return execute(kafka, query, {});
 }

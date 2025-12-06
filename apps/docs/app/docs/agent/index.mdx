@@ -48,7 +48,6 @@ interface CreateAgent<Output, CIn, COut = CIn> {
   name: string;
   prompt: Instruction<CIn>;
   model: AgentModel;
-  temperature?: number;
   handoffDescription?: string;
   prepareHandoff?: PrepareHandoffFn;
   prepareEnd?: PrepareEndFn<COut, Output>;
@@ -64,11 +63,10 @@ interface CreateAgent<Output, CIn, COut = CIn> {
 
 - **name**: Unique identifier for the agent (will be converted to snake_case internally)
 - **prompt**: Instructions for the agent, can be a string, string array, or function
-- **model**: The language model to use (must be a LanguageModel from Vercel AI SDK)
+- **model**: The language model to use (must be a LanguageModel from Vercel AI SDK). See [Configure Models](/docs/agent/configure-models) for setting temperature, topK, and other model parameters.
 
 #### Optional Properties
 
-- **temperature**: Controls randomness in model responses (0-1)
 - **handoffDescription**: Description shown to other agents when this agent is available as a handoff
 - **prepareHandoff**: Callback executed before control is transferred to this agent
 - **prepareEnd**: Callback executed after this agent completes its work
@@ -201,12 +199,11 @@ Creates a copy of the agent with optional overrides:
 
 ```typescript
 const clonedAgent = myAgent.clone({
-  temperature: 0.5,
   prompt: 'Modified instructions',
 });
 ```
 
-Note: The `clone()` method preserves all properties including `temperature` and `providerOptions`.
+Note: The `clone()` method preserves all properties including `providerOptions`.
 
 ### debug(prefix?)
 
@@ -225,7 +222,6 @@ myAgent.debug();
 - **handoffToolName**: Generated transfer tool name (e.g., `transfer_to_agent_name`)
 - **handoffTool**: The transfer tool for this agent
 - **output**: Zod schema for structured output
-- **temperature**: Temperature setting
 - **prepareHandoff**: Handoff preparation callback
 - **prepareEnd**: End preparation callback
 - **providerOptions**: Provider-specific options

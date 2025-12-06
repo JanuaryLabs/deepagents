@@ -1,3 +1,5 @@
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
+
 import { agent, execute, lmstudio, user } from '@deepagents/agent';
 
 /**
@@ -6,8 +8,12 @@ import { agent, execute, lmstudio, user } from '@deepagents/agent';
  */
 const synthesizer = agent({
   name: 'synthesizer_agent',
-  model: lmstudio('google/gemma-3-12b'),
-  temperature: 0.4,
+  model: wrapLanguageModel({
+    model: lmstudio('google/gemma-3-12b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.4 },
+    }),
+  }),
   prompt: `
 		<SystemContext>
 			You are a synthesizer agent that compiles the results of executed plan steps into a final answer.

@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import { tool } from 'ai';
+import { defaultSettingsMiddleware, tool, wrapLanguageModel } from 'ai';
 import { snakeCase } from 'lodash-es';
 import { readFile, writeFile } from 'node:fs/promises';
 import z from 'zod';
@@ -230,8 +230,12 @@ type StitchAgentContext = {
 };
 const stitchAgent = agent<StitchAgentContext>({
   name: 'Stitch Agent',
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
-  temperature: 0.1,
+  model: wrapLanguageModel({
+    model: groq('moonshotai/kimi-k2-instruct-0905'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.1 },
+    }),
+  }),
   prompt: instructions({
     purpose: [
       'You synthesize and stitch together child subsections into a cohesive parent section for a wiki.',

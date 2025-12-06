@@ -1,3 +1,4 @@
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import z from 'zod';
 
 import { agent, generate, lmstudio, user } from '@deepagents/agent';
@@ -83,9 +84,13 @@ export const plannerAgent = agent<
   { environment?: PlanEnvironment }
 >({
   name: 'planner_agent',
-  model: lmstudio('google/gemma-3-12b'),
-  // model: groq('moonshotai/kimi-k2-instruct-0905'),
-  temperature: 0.3, // Slightly creative for better planning
+  model: wrapLanguageModel({
+    model: lmstudio('google/gemma-3-12b'),
+    // model: groq('moonshotai/kimi-k2-instruct-0905'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.3 }, // Slightly creative for better planning
+    }),
+  }),
   prompt: (context) => `
     <SystemContext>
       You are an expert planning agent that creates adaptive, well-structured plans.

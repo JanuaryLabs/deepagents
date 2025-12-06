@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import z from 'zod';
 
 import { agent, generate, lmstudio, user } from '@deepagents/agent';
@@ -41,9 +42,13 @@ export type ReplanDecision = z.infer<typeof ReplanDecisionSchema>;
  */
 export const replannerAgent = agent({
   name: 'replanner_agent',
-  // model: groq('moonshotai/kimi-k2-instruct-0905'),
-  model: lmstudio('google/gemma-3-12b'),
-  temperature: 0.1,
+  model: wrapLanguageModel({
+    // model: groq('moonshotai/kimi-k2-instruct-0905'),
+    model: lmstudio('google/gemma-3-12b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.1 },
+    }),
+  }),
   prompt: `
     <SystemContext>
       You are an adaptive replanning agent.

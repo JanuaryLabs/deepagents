@@ -1,12 +1,17 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import { agent } from '@deepagents/agent';
 import { hackernewsTools, scratchpad_tool } from '@deepagents/toolbox';
 
 export const hackerNewsExecutor = agent({
   name: 'hackernews_research_executor',
-  model: groq('openai/gpt-oss-20b'),
-  temperature: 0,
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0 },
+    }),
+  }),
   prompt: `
     <SystemContext>
       You are a HackerNews research specialist that uses the HN Algolia API to gather insights,

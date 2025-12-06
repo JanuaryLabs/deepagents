@@ -96,7 +96,6 @@ export function generate<O, CIn, COut = CIn>(
     messages: convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
     ),
-    temperature: agent.temperature,
     stopWhen: stepCountIs(25),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
@@ -140,7 +139,6 @@ export function execute<O, CIn, COut = CIn>(
     messages: convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
     ),
-    temperature: agent.temperature,
     stopWhen: stepCountIs(25),
     experimental_transform: smoothStream(),
     tools: agent.toToolset(),

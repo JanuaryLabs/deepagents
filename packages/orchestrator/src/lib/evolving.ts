@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import { tool } from 'ai';
+import { defaultSettingsMiddleware, tool, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
@@ -174,9 +174,13 @@ async function runAdaptationCycle() {
     // Create executor with current prompt
     const executor = agent({
       name: 'executor_agent',
-      model: groq('openai/gpt-oss-120b'),
+      model: wrapLanguageModel({
+        model: groq('openai/gpt-oss-120b'),
+        middleware: defaultSettingsMiddleware({
+          settings: { temperature: 0 },
+        }),
+      }),
       prompt: currentPrompt,
-      temperature: 0,
       tools: executorTools,
     });
 

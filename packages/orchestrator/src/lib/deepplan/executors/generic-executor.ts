@@ -1,4 +1,5 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import { agent } from '@deepagents/agent';
 import { scratchpad_tool } from '@deepagents/toolbox';
@@ -19,8 +20,12 @@ import type { PlanStep, PlannerOutput } from '../planner-agent.ts';
  */
 export const executorAgent = agent({
   name: 'executor_agent',
-  model: groq('openai/gpt-oss-20b'),
-  temperature: 0,
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0 },
+    }),
+  }),
   prompt: `
     <SystemContext>
       You are a precise execution agent that follows plans and gathers information systematically.

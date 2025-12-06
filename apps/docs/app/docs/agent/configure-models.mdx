@@ -1,0 +1,177 @@
+---
+title: Configure Models
+description: How to configure model-specific parameters like temperature, topK, and other settings using AI SDK middleware
+---
+
+# Configure Models
+
+Model-specific parameters like `temperature`, `topK`, `topP`, and `presencePenalty` are configured at the model level, not the agent level. This approach keeps agents focused on their purpose and behavior while model configuration remains with the model itself.
+
+## Using defaultSettingsMiddleware
+
+The AI SDK provides `defaultSettingsMiddleware` to apply default settings to language model calls. This middleware ensures consistent parameter values across all invocations of a model.
+
+```typescript
+import { wrapLanguageModel, defaultSettingsMiddleware } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const creativeModel = wrapLanguageModel({
+  model: openai('gpt-4'),
+  middleware: defaultSettingsMiddleware({
+    settings: {
+      temperature: 0.9,
+      topP: 0.95,
+    },
+  }),
+});
+```
+
+## Using with Agents
+
+Pass the configured model directly to your agent:
+
+```typescript
+import { agent } from '@deepagents/agent';
+import { wrapLanguageModel, defaultSettingsMiddleware } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const preciseModel = wrapLanguageModel({
+  model: openai('gpt-4'),
+  middleware: defaultSettingsMiddleware({
+    settings: {
+      temperature: 0.1,
+      topK: 10,
+    },
+  }),
+});
+
+const analyzerAgent = agent({
+  name: 'analyzer',
+  model: preciseModel,
+  prompt: 'You analyze data with precision.',
+});
+```
+
+## Creating Model Presets
+
+Define reusable model configurations for different use cases:
+
+```typescript
+import { wrapLanguageModel, defaultSettingsMiddleware } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+function withSettings(
+  model: LanguageModel,
+  settings: Parameters<typeof defaultSettingsMiddleware>[0]['settings'],
+) {
+  return wrapLanguageModel({
+    model,
+    middleware: defaultSettingsMiddleware({ settings }),
+  });
+}
+
+// Presets
+const models = {
+  creative: withSettings(openai('gpt-4'), {
+    temperature: 0.9,
+    topP: 0.95,
+  }),
+  precise: withSettings(openai('gpt-4'), {
+    temperature: 0.1,
+    topK: 10,
+  }),
+  balanced: withSettings(openai('gpt-4'), {
+    temperature: 0.5,
+  }),
+};
+
+// Usage
+const writerAgent = agent({
+  name: 'writer',
+  model: models.creative,
+  prompt: 'You write creative content.',
+});
+
+const reviewerAgent = agent({
+  name: 'reviewer',
+  model: models.precise,
+  prompt: 'You review content for accuracy.',
+});
+```
+
+## Provider-Specific Options
+
+For provider-specific settings, use the `providerOptions` field in the settings:
+
+```typescript
+const reasoningModel = wrapLanguageModel({
+  model: openai('o1'),
+  middleware: defaultSettingsMiddleware({
+    settings: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: 'high',
+        },
+      },
+    },
+  }),
+});
+```
+
+## How Settings Merge
+
+When you call `generateText` or `streamText`, explicitly provided parameters take precedence over the middleware defaults:
+
+```typescript
+const modelWithDefaults = wrapLanguageModel({
+  model: openai('gpt-4'),
+  middleware: defaultSettingsMiddleware({
+    settings: {
+      temperature: 0.7, // default
+    },
+  }),
+});
+
+// This call uses temperature: 0.2 (explicit overrides default)
+await generateText({
+  model: modelWithDefaults,
+  prompt: 'Hello',
+  temperature: 0.2,
+});
+```
+
+## Combining Multiple Middlewares
+
+You can combine `defaultSettingsMiddleware` with other middlewares:
+
+```typescript
+import {
+  wrapLanguageModel,
+  defaultSettingsMiddleware,
+  extractReasoningMiddleware,
+} from 'ai';
+
+const model = wrapLanguageModel({
+  model: openai('gpt-4'),
+  middleware: [
+    defaultSettingsMiddleware({
+      settings: { temperature: 0.5 },
+    }),
+    extractReasoningMiddleware({ tagName: 'think' }),
+  ],
+});
+```
+
+## Available Settings
+
+Common settings you can configure:
+
+| Setting | Type | Description |
+| --- | --- | --- |
+| `temperature` | number | Controls randomness (0-2, lower = more deterministic) |
+| `topP` | number | Nucleus sampling threshold (0-1) |
+| `topK` | number | Limits token selection to top K options |
+| `presencePenalty` | number | Penalizes repeated topics (-2 to 2) |
+| `frequencyPenalty` | number | Penalizes repeated tokens (-2 to 2) |
+| `maxOutputTokens` | number | Maximum tokens in response |
+| `providerOptions` | object | Provider-specific options |
