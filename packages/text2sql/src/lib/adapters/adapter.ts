@@ -16,7 +16,7 @@ export interface Table {
   columns: {
     name: string;
     type: string;
-    kind?: 'LowCardinality';
+    kind?: 'LowCardinality' | 'Enum';
     values?: string[];
     isIndexed?: boolean;
     stats?: ColumnStats;

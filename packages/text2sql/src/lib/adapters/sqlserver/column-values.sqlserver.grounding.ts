@@ -1,19 +1,23 @@
 import type { Adapter } from '../adapter.ts';
 import {
   type Column,
-  LowCardinalityGrounding,
-  type LowCardinalityGroundingConfig,
-} from '../groundings/low-cardinality.grounding.ts';
-
-const LOW_CARDINALITY_LIMIT = 20;
+  ColumnValuesGrounding,
+  type ColumnValuesGroundingConfig,
+} from '../groundings/column-values.grounding.ts';
 
 /**
- * SQL Server implementation of LowCardinalityGrounding.
+ * SQL Server implementation of ColumnValuesGrounding.
+ *
+ * Supports:
+ * - CHECK constraints with IN clauses (inherited from base)
+ * - Low cardinality data scan
+ *
+ * Note: SQL Server does not have native ENUM types.
  */
-export class SqlServerLowCardinalityGrounding extends LowCardinalityGrounding {
+export class SqlServerColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
 
-  constructor(adapter: Adapter, config: LowCardinalityGroundingConfig = {}) {
+  constructor(adapter: Adapter, config: ColumnValuesGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
   }
@@ -21,11 +25,11 @@ export class SqlServerLowCardinalityGrounding extends LowCardinalityGrounding {
   protected override async collectLowCardinality(
     tableName: string,
     column: Column,
-  ): Promise<{ kind: 'LowCardinality'; values: string[] } | undefined> {
+  ): Promise<string[] | undefined> {
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const tableIdentifier = `[${this.#adapter.escape(schema)}].[${this.#adapter.escape(table)}]`;
     const columnIdentifier = `[${this.#adapter.escape(column.name)}]`;
-    const limit = LOW_CARDINALITY_LIMIT + 1;
+    const limit = this.lowCardinalityLimit + 1;
 
     const sql = `
       SELECT DISTINCT TOP ${limit} CAST(${columnIdentifier} AS NVARCHAR(MAX)) AS value
@@ -35,7 +39,7 @@ export class SqlServerLowCardinalityGrounding extends LowCardinalityGrounding {
 
     const rows = await this.#adapter.runQuery<{ value: string | null }>(sql);
 
-    if (!rows.length || rows.length > LOW_CARDINALITY_LIMIT) {
+    if (!rows.length || rows.length > this.lowCardinalityLimit) {
       return undefined;
     }
 
@@ -47,10 +51,6 @@ export class SqlServerLowCardinalityGrounding extends LowCardinalityGrounding {
       values.push(row.value);
     }
 
-    if (!values.length) {
-      return undefined;
-    }
-
-    return { kind: 'LowCardinality', values };
+    return values.length ? values : undefined;
   }
 }

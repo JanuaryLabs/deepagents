@@ -1,17 +1,23 @@
 import type { Adapter } from '../adapter.ts';
 import {
   type Column,
-  LowCardinalityGrounding,
-  type LowCardinalityGroundingConfig,
-} from '../groundings/low-cardinality.grounding.ts';
+  ColumnValuesGrounding,
+  type ColumnValuesGroundingConfig,
+} from '../groundings/column-values.grounding.ts';
 
 /**
- * SQLite implementation of LowCardinalityGrounding.
+ * SQLite implementation of ColumnValuesGrounding.
+ *
+ * Supports:
+ * - CHECK constraints with IN clauses (inherited from base)
+ * - Low cardinality data scan
+ *
+ * Note: SQLite does not have native ENUM types.
  */
-export class SqliteLowCardinalityGrounding extends LowCardinalityGrounding {
+export class SqliteColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
 
-  constructor(adapter: Adapter, config: LowCardinalityGroundingConfig = {}) {
+  constructor(adapter: Adapter, config: ColumnValuesGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
   }
@@ -19,22 +25,21 @@ export class SqliteLowCardinalityGrounding extends LowCardinalityGrounding {
   protected override async collectLowCardinality(
     tableName: string,
     column: Column,
-  ): Promise<{ kind: 'LowCardinality'; values: string[] } | undefined> {
+  ): Promise<string[] | undefined> {
     const tableIdentifier = this.#adapter.quoteIdentifier(tableName);
     const columnIdentifier = this.#adapter.quoteIdentifier(column.name);
-    // Add one to limit to detect if it exceeds the threshold
-    const queryLimit = this.limit + 1;
+    const limit = this.lowCardinalityLimit + 1;
 
     const sql = `
       SELECT DISTINCT ${columnIdentifier} AS value
       FROM ${tableIdentifier}
       WHERE ${columnIdentifier} IS NOT NULL
-      LIMIT ${queryLimit}
+      LIMIT ${limit}
     `;
 
     const rows = await this.#adapter.runQuery<{ value: unknown }>(sql);
 
-    if (!rows.length || rows.length > this.limit) {
+    if (!rows.length || rows.length > this.lowCardinalityLimit) {
       return undefined;
     }
 
@@ -42,17 +47,12 @@ export class SqliteLowCardinalityGrounding extends LowCardinalityGrounding {
     for (const row of rows) {
       const formatted = this.#normalizeValue(row.value);
       if (formatted == null) {
-        // Skip columns with non-normalizable values
         return undefined;
       }
       values.push(formatted);
     }
 
-    if (!values.length) {
-      return undefined;
-    }
-
-    return { kind: 'LowCardinality', values };
+    return values.length ? values : undefined;
   }
 
   #normalizeValue(value: unknown): string | null {
