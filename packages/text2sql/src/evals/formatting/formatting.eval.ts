@@ -36,7 +36,7 @@ evalite('SQL Output Formatting', {
       }),
     });
 
-    const result = await text2sql.toSql(question, { enableSampleRows: false });
+    const result = await text2sql.toSql(question);
     db.close();
     return result;
   },

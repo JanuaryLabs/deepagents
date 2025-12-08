@@ -1,7 +1,6 @@
 import {
   InvalidToolInputError,
   NoSuchToolError,
-  type Tool,
   ToolCallRepairError,
   type UIMessage,
   generateId,
@@ -18,10 +17,10 @@ import {
 
 import type { Adapter, IntrospectOptions } from './adapters/adapter.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
+import { toSql as agentToSql } from './agents/synthetic/sql.agent.ts';
 import {
   type RenderingTools,
   memoryTools,
-  sqlQueryAgent,
   t_a_g,
 } from './agents/text2sql.agent.ts';
 import { FileCache } from './file-cache.ts';
@@ -37,12 +36,6 @@ import {
   toInstructions,
 } from './teach/teachables.ts';
 import { type TeachingsOptions, guidelines } from './teach/teachings.ts';
-
-/** Extract SQL from markdown fenced code block if present */
-function extractSql(output: string): string {
-  const match = output.match(/```sql\n?([\s\S]*?)```/);
-  return match ? match[1].trim() : output.trim();
-}
 
 export interface InspectionResult {
   /** The grounding/introspection data (database schema context as XML) */
@@ -109,54 +102,18 @@ export class Text2Sql {
     return experimental_output.explanation;
   }
 
-  public async toSql(
-    query: string,
-    options?: {
-      tools?: RenderingTools;
-      /** Enable db_query tool (default: false). When false, agent cannot execute queries. */
-      enableDbQuery?: boolean;
-      /** Enable get_sample_rows tool (default: true). Helps agent understand data formats. */
-      enableSampleRows?: boolean;
-    },
-  ): Promise<string> {
+  public async toSql(input: string): Promise<string> {
     const introspection = await this.index();
 
-    // Build tools based on options - exclude db_query by default to force SQL-only output
-    const baseTools = t_a_g.handoff.tools;
-    const toolsConfig: Record<string, Tool> = {
-      validate_query: baseTools.validate_query,
-      // scratchpad: baseTools.scratchpad,
-    };
+    const result = await agentToSql({
+      input,
+      adapter: this.#config.adapter,
+      introspection,
+      instructions: this.#config.instructions,
+      model: this.#config.model,
+    });
 
-    if (options?.enableSampleRows !== false) {
-      toolsConfig.get_sample_rows = baseTools.get_sample_rows;
-    }
-
-    if (options?.enableDbQuery) {
-      toolsConfig.db_query = baseTools.db_query;
-    }
-
-    const { text } = await generate(
-      sqlQueryAgent.clone({
-        model: this.#config.model,
-        tools: toolsConfig,
-      }),
-      [user(query)],
-      {
-        teachings: toInstructions(
-          'instructions',
-          persona({
-            name: 'Freya',
-            role: 'You are an expert SQL query generator.',
-          }),
-          ...this.#config.instructions,
-        ),
-        adapter: this.#config.adapter,
-        introspection,
-      },
-    );
-
-    return extractSql(text);
+    return result.sql;
   }
 
   public instruct(...dataset: Teachables[]) {
@@ -213,6 +170,10 @@ export class Text2Sql {
     const introspection = await this.#config.adapter.introspect();
     await this.#config.introspection.set(introspection);
     return introspection;
+  }
+
+  public async toQuestion(sql: string) {
+    return;
   }
 
   // public async suggest() {

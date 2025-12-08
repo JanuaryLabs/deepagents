@@ -23,11 +23,11 @@ evalite.each(EVAL_MODELS)('Chinook Text2SQL', {
       history: new InMemoryHistory(),
       model: variant.model,
       adapter: new sqlite.Sqlite({
-        grounding: [sqlite.tables(), sqlite.lowCardinality()],
+        grounding: [sqlite.tables(), sqlite.columnValues()],
         execute: (sql) => sqliteClient.prepare(sql).all(),
       }),
     });
-    return text2sql.toSql(question, { enableSampleRows: false });
+    return text2sql.toSql(question);
   },
   scorers: [sqlSemanticMatch],
 });

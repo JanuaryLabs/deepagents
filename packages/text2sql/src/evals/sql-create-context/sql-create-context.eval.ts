@@ -18,7 +18,6 @@ const DATASET = Array.from(TESTS.rows).map((item) => ({
   answer: item.row.answer,
 }));
 
-
 evalite.each(EVAL_MODELS)('SQL Create Context', {
   data: () =>
     filterByIndex(
@@ -72,9 +71,7 @@ evalite.each(EVAL_MODELS)('SQL Create Context', {
       }),
     });
 
-    const result = await text2sql.toSql(input.question, {
-      enableSampleRows: false,
-    });
+    const result = await text2sql.toSql(input.question);
     db.close();
     return result;
   },
