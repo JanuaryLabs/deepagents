@@ -200,9 +200,51 @@ export abstract class TableGrounding extends AbstractGrounding {
           table.rowCount != null
             ? ` [rows: ${table.rowCount}${table.sizeHint ? `, size: ${table.sizeHint}` : ''}]`
             : '';
-        // Get primary key columns from constraints
-        const pkConstraint = table.constraints?.find((c) => c.type === 'PRIMARY_KEY');
+
+        // Build constraint lookup maps for column-level annotations
+        const pkConstraint = table.constraints?.find(
+          (c) => c.type === 'PRIMARY_KEY',
+        );
         const pkColumns = new Set(pkConstraint?.columns ?? []);
+
+        const notNullColumns = new Set(
+          table.constraints
+            ?.filter((c) => c.type === 'NOT_NULL')
+            .flatMap((c) => c.columns ?? []) ?? [],
+        );
+
+        const defaultByColumn = new Map<string, string>();
+        for (const c of table.constraints?.filter(
+          (c) => c.type === 'DEFAULT',
+        ) ?? []) {
+          for (const col of c.columns ?? []) {
+            if (c.defaultValue != null) {
+              defaultByColumn.set(col, c.defaultValue);
+            }
+          }
+        }
+
+        // Single-column UNIQUE constraints
+        const uniqueColumns = new Set(
+          table.constraints
+            ?.filter(
+              (c) => c.type === 'UNIQUE' && c.columns?.length === 1,
+            )
+            .flatMap((c) => c.columns ?? []) ?? [],
+        );
+
+        // Foreign key lookup: column -> referenced table.column
+        const fkByColumn = new Map<string, string>();
+        for (const c of table.constraints?.filter(
+          (c) => c.type === 'FOREIGN_KEY',
+        ) ?? []) {
+          const cols = c.columns ?? [];
+          const refCols = c.referencedColumns ?? [];
+          for (let i = 0; i < cols.length; i++) {
+            const refCol = refCols[i] ?? refCols[0] ?? cols[i];
+            fkByColumn.set(cols[i], `${c.referencedTable}.${refCol}`);
+          }
+        }
 
         const columns = table.columns
           .map((column) => {
@@ -210,6 +252,18 @@ export abstract class TableGrounding extends AbstractGrounding {
             const isPrimaryKey = pkColumns.has(column.name);
             if (isPrimaryKey) {
               annotations.push('PK');
+            }
+            if (fkByColumn.has(column.name)) {
+              annotations.push(`FK -> ${fkByColumn.get(column.name)}`);
+            }
+            if (uniqueColumns.has(column.name)) {
+              annotations.push('UNIQUE');
+            }
+            if (notNullColumns.has(column.name)) {
+              annotations.push('NOT NULL');
+            }
+            if (defaultByColumn.has(column.name)) {
+              annotations.push(`DEFAULT: ${defaultByColumn.get(column.name)}`);
             }
             if (column.isIndexed && !isPrimaryKey) {
               annotations.push('Indexed');
@@ -242,6 +296,8 @@ export abstract class TableGrounding extends AbstractGrounding {
             return `    - ${column.name} (${column.type})${annotationText}`;
           })
           .join('\n');
+
+        // Indexes section
         const indexes = table.indexes?.length
           ? `\n  Indexes:\n${table.indexes
               .map((index) => {
@@ -260,7 +316,28 @@ export abstract class TableGrounding extends AbstractGrounding {
               })
               .join('\n')}`
           : '';
-        return `- Table: ${table.name}${rowCountInfo}\n  Columns:\n${columns}${indexes}`;
+
+        // Multi-column UNIQUE constraints (not already shown in indexes)
+        const multiColumnUniques =
+          table.constraints?.filter(
+            (c) => c.type === 'UNIQUE' && (c.columns?.length ?? 0) > 1,
+          ) ?? [];
+        const uniqueConstraints = multiColumnUniques.length
+          ? `\n  Unique Constraints:\n${multiColumnUniques
+              .map((c) => `    - ${c.name}: (${c.columns?.join(', ')})`)
+              .join('\n')}`
+          : '';
+
+        // CHECK constraints
+        const checkConstraints =
+          table.constraints?.filter((c) => c.type === 'CHECK') ?? [];
+        const checks = checkConstraints.length
+          ? `\n  Check Constraints:\n${checkConstraints
+              .map((c) => `    - ${c.name}: ${c.definition}`)
+              .join('\n')}`
+          : '';
+
+        return `- Table: ${table.name}${rowCountInfo}\n  Columns:\n${columns}${indexes}${uniqueConstraints}${checks}`;
       })
       .join('\n\n');
   }

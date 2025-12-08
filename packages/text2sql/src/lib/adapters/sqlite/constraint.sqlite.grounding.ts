@@ -40,7 +40,9 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     this.#adapter = adapter;
   }
 
-  protected override async getConstraints(tableName: string): Promise<TableConstraint[]> {
+  protected override async getConstraints(
+    tableName: string,
+  ): Promise<TableConstraint[]> {
     const constraints: TableConstraint[] = [];
 
     // Get column info for NOT NULL, DEFAULT, and PRIMARY KEY constraints
@@ -114,7 +116,10 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     );
 
     if (ddlRows[0]?.sql) {
-      const checkConstraints = this.#parseCheckConstraints(ddlRows[0].sql, tableName);
+      const checkConstraints = this.#parseCheckConstraints(
+        ddlRows[0].sql,
+        tableName,
+      );
       constraints.push(...checkConstraints);
     }
 
@@ -125,7 +130,8 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     const constraints: TableConstraint[] = [];
 
     // Match CHECK constraints: CHECK (expression) or CONSTRAINT name CHECK (expression)
-    const checkRegex = /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?CHECK\s*\(([^)]+)\)/gi;
+    const checkRegex =
+      /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?CHECK\s*\(([^)]+)\)/gi;
     let match;
     let index = 0;
 
@@ -144,7 +150,8 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
     }
 
     // Match UNIQUE constraints at table level
-    const uniqueRegex = /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?UNIQUE\s*\(([^)]+)\)/gi;
+    const uniqueRegex =
+      /(?:CONSTRAINT\s+["'`]?(\w+)["'`]?\s+)?UNIQUE\s*\(([^)]+)\)/gi;
     let uniqueIndex = 0;
 
     while ((match = uniqueRegex.exec(ddl)) !== null) {
@@ -152,7 +159,9 @@ export class SqliteConstraintGrounding extends ConstraintGrounding {
       const columnsStr = match[2]?.trim();
 
       if (columnsStr) {
-        const columns = columnsStr.split(',').map((c) => c.trim().replace(/["'`]/g, ''));
+        const columns = columnsStr
+          .split(',')
+          .map((c) => c.trim().replace(/["'`]/g, ''));
         constraints.push({
           name,
           type: 'UNIQUE',

@@ -66,3 +66,9 @@ local_cache/
 **/.vitepress/cache/
 deepsearch.sqlite*
 .source
+
+# Python virtual environments
+.venv/
+__pycache__/
+*.pyc
+.cache/

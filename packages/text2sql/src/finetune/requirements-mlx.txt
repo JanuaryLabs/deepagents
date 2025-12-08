@@ -1,0 +1,8 @@
+# MLX requirements (Apple Silicon only)
+# Install with: pip install -r requirements-mlx.txt
+
+# MLX LM with training support
+mlx-lm[train]>=0.20.0
+
+# For loading datasets
+datasets>=3.0.0

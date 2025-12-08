@@ -18,7 +18,6 @@ const DATASET = Array.from(TESTS.rows).map((item) => ({
   answer: item.row.answer,
 }));
 
-// URL: https://huggingface.co/datasets/b-mc2/sql-create-context/resolve/main/sql_create_context_v4.json
 
 evalite.each(EVAL_MODELS)('SQL Create Context', {
   data: () =>

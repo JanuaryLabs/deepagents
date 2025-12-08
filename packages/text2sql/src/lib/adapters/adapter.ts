@@ -36,7 +36,13 @@ export interface TableIndex {
 
 export interface TableConstraint {
   name: string;
-  type: 'CHECK' | 'UNIQUE' | 'NOT_NULL' | 'DEFAULT' | 'PRIMARY_KEY' | 'FOREIGN_KEY';
+  type:
+    | 'CHECK'
+    | 'UNIQUE'
+    | 'NOT_NULL'
+    | 'DEFAULT'
+    | 'PRIMARY_KEY'
+    | 'FOREIGN_KEY';
   columns?: string[];
   definition?: string;
   defaultValue?: string;
@@ -118,9 +124,8 @@ export abstract class Adapter {
    */
   abstract readonly systemSchemas: string[];
 
-  async introspect() {
+  async introspect(ctx = createGroundingContext()) {
     const lines: { tag: string; fn: () => string | null }[] = [];
-    const ctx = createGroundingContext();
     for (const fn of this.grounding) {
       const grounding = fn(this);
       lines.push({

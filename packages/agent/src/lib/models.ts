@@ -8,6 +8,12 @@ export const lmstudio = createOpenAICompatible({
   includeUsage: true,
 });
 
+export const ollama = createOpenAICompatible({
+  name: 'ollama',
+  baseURL: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1',
+  supportsStructuredOutputs: true,
+});
+
 export const glm = createOpenAICompatible({
   name: 'z.ai',
   baseURL: 'https://api.z.ai/api/paas/v4/',
