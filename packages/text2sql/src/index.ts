@@ -1,4 +1,3 @@
-import { createGroundingContext } from './lib/adapters/groundings/context.ts';
 import { synthetic } from './lib/agents/synthetic/index.ts';
 
 export * from './lib/adapters/adapter.ts';
@@ -12,6 +11,7 @@ export * from './lib/memory/memory.store.ts';
 export * from './lib/memory/sqlite.store.ts';
 export * from './lib/memory/store.ts';
 export * from './lib/sql.ts';
+export * from './lib/synthesis/extractors/index.ts';
 export * from './lib/teach/teachings.ts';
 
 if (import.meta.main) {
