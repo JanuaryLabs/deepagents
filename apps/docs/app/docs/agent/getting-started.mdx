@@ -1,0 +1,380 @@
+---
+title: Getting Started
+description: Install the agent package and build your first multi-agent system
+---
+
+## Installation
+
+```bash
+npm install @deepagents/agent ai zod
+```
+
+You'll also need a model provider. We recommend starting with Groq for its speed:
+
+```bash
+npm install @ai-sdk/groq
+```
+
+Or OpenAI:
+
+```bash
+npm install @ai-sdk/openai
+```
+
+## Environment Setup
+
+Set your API key:
+
+```bash
+# For Groq (recommended for getting started)
+export GROQ_API_KEY=your-api-key
+
+# For OpenAI
+export OPENAI_API_KEY=your-api-key
+```
+
+## Your First Agent
+
+Let's create a simple agent that can search the web and answer questions:
+
+```typescript
+import { agent, instructions, execute } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+
+const assistant = agent({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You are a helpful assistant that answers questions.'],
+    routine: [
+      'Understand the user question',
+      'Search for relevant information if needed',
+      'Provide a clear, accurate answer',
+    ],
+  }),
+  tools: {
+    browserSearch: groq.tools.browserSearch({}),
+  },
+});
+
+// Run the agent
+const stream = execute(assistant, 'What is the weather in Tokyo?', {});
+
+// Stream the response
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Understanding the Code
+
+### The `agent()` Factory
+
+The `agent()` function creates an agent instance:
+
+```typescript
+const myAgent = agent({
+  name: 'MyAgent',        // Unique identifier
+  model: groq('gpt-oss-20b'),  // Language model
+  prompt: '...',          // Instructions
+  tools: { ... },         // Available tools
+});
+```
+
+### Instructions Helper
+
+The `instructions()` helper structures prompts with purpose and routine:
+
+```typescript
+instructions({
+  purpose: ['What this agent does'],
+  routine: ['Step 1', 'Step 2', 'Step 3'],
+})
+```
+
+This generates a well-structured prompt that helps the model understand its role and follow a consistent process.
+
+You can also use plain strings:
+
+```typescript
+prompt: 'You are a helpful assistant. Answer questions clearly.',
+```
+
+Or dynamic functions that use context:
+
+```typescript
+prompt: (ctx) => `You are helping user ${ctx.userId}...`,
+```
+
+### Execution Functions
+
+Three ways to run agents:
+
+#### `execute()` - Streaming
+
+Best for real-time responses in chat interfaces:
+
+```typescript
+const stream = execute(agent, 'Hello', {});
+
+// Get text incrementally
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+
+// Or get the full response
+const text = await stream.text;
+```
+
+#### `generate()` - Non-streaming
+
+Best for pipelines where you need the complete result:
+
+```typescript
+const result = await generate(agent, 'Analyze this data', {});
+
+console.log(result.text);
+console.log(result.experimental_output); // If using structured output
+```
+
+#### `swarm()` - UI Message Stream
+
+Best for UI frameworks that consume message streams:
+
+```typescript
+const uiStream = swarm(agent, messages, {});
+
+// Works with AI SDK UI utilities
+```
+
+## Adding Tools
+
+Tools give agents capabilities beyond text generation:
+
+```typescript
+import { tool } from 'ai';
+import z from 'zod';
+
+const calculator = tool({
+  description: 'Perform mathematical calculations',
+  inputSchema: z.object({
+    expression: z.string().describe('Math expression to evaluate'),
+  }),
+  execute: async ({ expression }) => {
+    return eval(expression); // Use a proper math library in production
+  },
+});
+
+const mathAgent = agent({
+  name: 'MathAgent',
+  model: groq('gpt-oss-20b'),
+  prompt: 'You help with math problems.',
+  tools: { calculator },
+});
+```
+
+## Structured Output
+
+Get typed responses using Zod schemas:
+
+```typescript
+import z from 'zod';
+
+const AnalysisSchema = z.object({
+  sentiment: z.enum(['positive', 'negative', 'neutral']),
+  confidence: z.number(),
+  summary: z.string(),
+});
+
+const analyzer = agent({
+  name: 'Analyzer',
+  model: groq('gpt-oss-20b'),
+  prompt: 'Analyze the sentiment of text.',
+  output: AnalysisSchema,
+});
+
+const { experimental_output } = await generate(
+  analyzer,
+  'I love this product!',
+  {}
+);
+
+console.log(experimental_output.sentiment);  // 'positive'
+console.log(experimental_output.confidence); // 0.95
+```
+
+## Multi-Agent with Handoffs
+
+The real power comes from composing agents:
+
+```typescript
+const researcher = agent({
+  name: 'Researcher',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You research topics using web search.'],
+    routine: ['Search for information', 'Summarize findings'],
+  }),
+  tools: {
+    browserSearch: groq.tools.browserSearch({}),
+  },
+  handoffDescription: 'Delegate here for research tasks',
+});
+
+const writer = agent({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You write clear content based on research.'],
+    routine: ['Structure the content', 'Write engagingly'],
+  }),
+  handoffDescription: 'Delegate here for writing tasks',
+});
+
+const coordinator = agent({
+  name: 'Coordinator',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You coordinate research and writing.'],
+    routine: [
+      'Understand the request',
+      'Delegate research to researcher',
+      'Delegate writing to writer',
+    ],
+  }),
+  handoffs: [researcher, writer],
+});
+
+// The coordinator can now transfer to specialists
+const stream = execute(
+  coordinator,
+  'Write a blog post about TypeScript best practices',
+  {}
+);
+```
+
+When executed, the coordinator's system prompt includes a table of available specialists. It can call `transfer_to_researcher` or `transfer_to_writer` to delegate.
+
+## Context Variables
+
+Pass typed state through the agent chain:
+
+```typescript
+type Context = {
+  userId: string;
+  preferences: { tone: 'formal' | 'casual' };
+};
+
+const assistant = agent<unknown, Context>({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: (ctx) => `
+    You're helping user ${ctx.userId}.
+    Use a ${ctx.preferences.tone} tone.
+  `,
+});
+
+execute(assistant, 'Hello', {
+  userId: 'user-123',
+  preferences: { tone: 'casual' },
+});
+```
+
+## Complete Example
+
+Here's a complete research assistant:
+
+```typescript
+import { agent, instructions, generate, execute } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Schema for research plan
+const PlanSchema = z.object({
+  searches: z.array(z.object({
+    query: z.string(),
+    reason: z.string(),
+  })),
+});
+
+// Schema for final report
+const ReportSchema = z.object({
+  summary: z.string(),
+  findings: z.array(z.string()),
+  sources: z.array(z.string()),
+});
+
+// Planner decides what to search
+const planner = agent({
+  name: 'Planner',
+  model: groq('gpt-oss-20b'),
+  output: PlanSchema,
+  prompt: instructions({
+    purpose: ['Plan web searches to answer a research question.'],
+    routine: ['Generate 3-5 diverse search queries'],
+  }),
+});
+
+// Researcher executes searches
+const researcher = agent({
+  name: 'Researcher',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['Search the web and summarize findings.'],
+    routine: ['Execute search', 'Extract key information'],
+  }),
+  tools: {
+    browserSearch: groq.tools.browserSearch({}),
+  },
+});
+
+// Writer creates the report
+const writer = agent({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  output: ReportSchema,
+  prompt: instructions({
+    purpose: ['Write a research report from gathered data.'],
+    routine: ['Synthesize findings', 'Create structured report'],
+  }),
+});
+
+// Run the pipeline
+async function research(question: string) {
+  // Step 1: Plan searches
+  const { experimental_output: plan } = await generate(
+    planner,
+    question,
+    {}
+  );
+
+  // Step 2: Execute searches in parallel
+  const results = await Promise.all(
+    plan.searches.map(async (s) => {
+      const stream = execute(researcher, s.query, {});
+      return stream.text;
+    })
+  );
+
+  // Step 3: Generate report
+  const { experimental_output: report } = await generate(
+    writer,
+    `Question: ${question}\nResearch: ${results.join('\n')}`,
+    {}
+  );
+
+  return report;
+}
+
+// Usage
+const report = await research('What are the latest AI agent frameworks?');
+console.log(report.summary);
+```
+
+## Next Steps
+
+- [Anatomy of an Agent](/docs/agent/anatomy-of-an-agent) - Every configuration option explained
+- [Execution Model](/docs/agent/execution-model) - How agents run under the hood
+- [Handoffs](/docs/agent/handoffs) - Deep dive into agent delegation
+- [Tools](/docs/agent/tools) - Building agent capabilities
+- [Structured Output](/docs/agent/structured-output) - Type-safe responses

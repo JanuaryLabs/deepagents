@@ -1,0 +1,492 @@
+---
+title: Financial Analysis Recipe
+description: Multi-agent system with specialists, agents-as-tools, and verification
+---
+
+Build a sophisticated financial analysis system with six specialized agents: a planner, parallel searchers, specialist analysts (fundamentals + risk), a report writer that calls analysts as tools, and a verification agent for quality control.
+
+## Architecture
+
+```
+                         User Query
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │    Planner      │
+                    │  (search plan)  │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐   ┌──────────┐   ┌──────────┐
+        │ Search 1 │   │ Search 2 │   │ Search N │  (parallel)
+        └────┬─────┘   └────┬─────┘   └────┬─────┘
+             └──────────────┼──────────────┘
+                            ▼
+                    ┌─────────────────┐
+                    │     Writer      │──┬── calls ──► Fundamentals Analyst
+                    │  (synthesize)   │  │
+                    └────────┬────────┘  └── calls ──► Risk Analyst
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │    Verifier     │
+                    │  (quality check)│
+                    └─────────────────┘
+                             │
+                             ▼
+                       Final Report
+```
+
+## Key Patterns
+
+This recipe demonstrates several advanced patterns:
+
+1. **Agents as Tools** - Specialist agents called as tools by the writer
+2. **Output Extraction** - Custom extractors to transform agent output for tool results
+3. **Parallel Execution** - Multiple searches run concurrently
+4. **Verification Loop** - Quality control agent validates the final output
+5. **Context Accumulation** - State flows through the pipeline
+
+## Quick Start
+
+```typescript
+import { agent, instructions, generate, execute } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// ============ Schemas ============
+
+const SearchPlanSchema = z.object({
+  searches: z.array(z.object({
+    reason: z.string().describe('Why this search is relevant'),
+    query: z.string().describe('The search term'),
+  })),
+});
+
+const AnalysisSummarySchema = z.object({
+  summary: z.string().describe('Short analysis summary'),
+});
+
+const ReportSchema = z.object({
+  short_summary: z.string().describe('2-3 sentence executive summary'),
+  markdown_report: z.string().describe('Full markdown report'),
+  follow_up_questions: z.array(z.string()).describe('Suggested follow-ups'),
+});
+
+const VerificationSchema = z.object({
+  verified: z.boolean().describe('Whether the report is coherent'),
+  issues: z.string().describe('Issues found, if any'),
+});
+
+// ============ Agents ============
+
+// Plans what searches to perform
+const planner = agent({
+  name: 'FinancialPlanner',
+  model: groq('gpt-oss-20b'),
+  output: SearchPlanSchema,
+  prompt: instructions({
+    purpose: [
+      'You plan financial research by identifying key searches.',
+      'Target: earnings data, analyst commentary, industry trends, risks.',
+    ],
+    routine: ['Generate 5-15 targeted search queries.'],
+  }),
+});
+
+// Executes web searches
+const searcher = agent({
+  name: 'FinancialSearcher',
+  model: groq('gpt-oss-20b'),
+  toolChoice: 'required',
+  prompt: instructions({
+    purpose: ['Search for financial information and summarize findings.'],
+    routine: ['Focus on numbers, events, and quotes useful for analysis.'],
+  }),
+  tools: {
+    browser_search: groq.tools.browserSearch({}),
+  },
+});
+
+// Analyzes financial fundamentals
+const fundamentalsAnalyst = agent({
+  name: 'FundamentalsAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      'You analyze company fundamentals: revenue, profit, margins, growth.',
+    ],
+    routine: ['Pull out key metrics.', 'Keep under 2 paragraphs.'],
+  }),
+});
+
+// Analyzes risks
+const riskAnalyst = agent({
+  name: 'RiskAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      'You identify risks: competitive threats, regulatory issues, supply chain.',
+    ],
+    routine: ['Focus on red flags.', 'Keep under 2 paragraphs.'],
+  }),
+});
+
+// Writes the final report (calls analysts as tools)
+const writer = agent({
+  name: 'FinancialWriter',
+  model: groq('gpt-oss-20b'),
+  output: ReportSchema,
+  prompt: instructions({
+    purpose: [
+      'You synthesize research into a comprehensive financial report.',
+      'You can call specialist tools for fundamentals and risk analysis.',
+    ],
+    routine: [
+      'Review all search results',
+      'Call fundamentals_analysis for metrics writeup',
+      'Call risk_analysis for risk assessment',
+      'Synthesize into full markdown report',
+    ],
+  }),
+});
+
+// Verifies report quality
+const verifier = agent({
+  name: 'Verifier',
+  model: groq('gpt-oss-20b'),
+  output: VerificationSchema,
+  prompt: instructions({
+    purpose: [
+      'You audit financial reports for consistency and accuracy.',
+      'Check that claims are supported and sources are clear.',
+    ],
+    routine: ['Identify any issues or unsupported claims.'],
+  }),
+});
+
+// ============ Pipeline ============
+
+async function analyzeCompany(query: string) {
+  // Step 1: Plan searches
+  console.log('Planning research...');
+  const { experimental_output: plan } = await generate(
+    planner,
+    `Analyze: ${query}`,
+    {}
+  );
+  console.log(`Planned ${plan.searches.length} searches`);
+
+  // Step 2: Execute searches in parallel
+  console.log('Searching...');
+  const searchResults = await Promise.all(
+    plan.searches.map(async (item) => {
+      const result = execute(
+        searcher,
+        `Search: ${item.query}\nReason: ${item.reason}`,
+        {}
+      );
+      return result.text;
+    })
+  );
+
+  // Step 3: Write report with analyst tools
+  console.log('Writing report...');
+
+  // Convert analysts to tools with output extraction
+  const outputExtractor = async (result: any) => {
+    return result.experimental_output.summary;
+  };
+
+  const writerWithTools = writer.clone({
+    tools: {
+      fundamentals_analysis: fundamentalsAnalyst.asTool({
+        toolDescription: 'Get fundamentals analysis (revenue, profit, growth)',
+        outputExtractor,
+      }),
+      risk_analysis: riskAnalyst.asTool({
+        toolDescription: 'Get risk analysis (threats, regulatory, supply chain)',
+        outputExtractor,
+      }),
+    },
+  });
+
+  const { experimental_output: report } = await generate(
+    writerWithTools,
+    `Query: ${query}\nResearch:\n${searchResults.join('\n\n')}`,
+    {}
+  );
+
+  // Step 4: Verify
+  console.log('Verifying...');
+  const { experimental_output: verification } = await generate(
+    verifier,
+    report.markdown_report,
+    {}
+  );
+
+  return { report, verification };
+}
+
+// Usage
+const { report, verification } = await analyzeCompany('Apple Inc Q4 2024 outlook');
+
+console.log('Summary:', report.short_summary);
+console.log('Verified:', verification.verified);
+if (!verification.verified) {
+  console.log('Issues:', verification.issues);
+}
+```
+
+## Agent Breakdown
+
+### Planner
+
+Generates a structured search plan:
+
+```typescript
+const planner = agent({
+  name: 'FinancialPlanner',
+  output: SearchPlanSchema,  // Structured plan output
+  prompt: instructions({
+    purpose: ['Plan financial research by identifying key searches.'],
+    routine: ['Generate 5-15 targeted search queries.'],
+  }),
+});
+```
+
+**Output example:**
+```json
+{
+  "searches": [
+    { "reason": "Recent earnings", "query": "Apple Q4 2024 earnings report" },
+    { "reason": "Analyst sentiment", "query": "Apple stock analyst ratings 2024" }
+  ]
+}
+```
+
+### Searcher
+
+Executes web searches with required tool use:
+
+```typescript
+const searcher = agent({
+  name: 'FinancialSearcher',
+  toolChoice: 'required',  // Must use tool
+  tools: {
+    browser_search: groq.tools.browserSearch({}),
+  },
+});
+```
+
+### Specialist Analysts
+
+Focused agents with structured output:
+
+```typescript
+const fundamentalsAnalyst = agent({
+  name: 'FundamentalsAnalyst',
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: ['Analyze revenue, profit, margins, growth.'],
+    routine: ['Keep under 2 paragraphs.'],
+  }),
+});
+```
+
+### Writer with Agents-as-Tools
+
+The key pattern—specialists become tools the writer can call:
+
+```typescript
+// Convert agent to tool
+const fundamentalsTool = fundamentalsAnalyst.asTool({
+  toolDescription: 'Get fundamentals analysis',
+  outputExtractor: async (result) => result.experimental_output.summary,
+});
+
+// Clone writer with tools
+const writerWithTools = writer.clone({
+  tools: {
+    fundamentals_analysis: fundamentalsTool,
+    risk_analysis: riskTool,
+  },
+});
+```
+
+When the writer calls `fundamentals_analysis`, it:
+1. Invokes the `fundamentalsAnalyst` agent
+2. Passes the input to the agent
+3. Extracts just the `summary` field via `outputExtractor`
+4. Returns that string as the tool result
+
+### Verifier
+
+Quality control with boolean verdict:
+
+```typescript
+const verifier = agent({
+  name: 'Verifier',
+  output: VerificationSchema,  // { verified: boolean, issues: string }
+});
+```
+
+## How It Works
+
+1. **Planning** → Planner analyzes query, outputs search plan
+2. **Parallel Search** → All searches execute concurrently via `Promise.all`
+3. **Report Writing** → Writer receives search results, calls analyst tools as needed
+4. **Specialist Analysis** → When writer calls `fundamentals_analysis`, the analyst agent runs
+5. **Output Extraction** → Analyst's full output is transformed to just the summary
+6. **Verification** → Verifier checks the report for consistency
+7. **Final Output** → Report + verification status returned
+
+## Output Extraction Deep Dive
+
+The `outputExtractor` function transforms structured agent output into tool-friendly strings:
+
+```typescript
+type OutputExtractorFn = (
+  output: GenerateTextResult<ToolSet, any>
+) => string | Promise<string>;
+
+// Example: Extract just the summary field
+const summaryExtractor: OutputExtractorFn = async (result) => {
+  return result.experimental_output.summary;
+};
+
+// Use with asTool
+const tool = agent.asTool({
+  toolDescription: 'Analyze financials',
+  outputExtractor: summaryExtractor,
+});
+```
+
+Without an extractor, the tool returns the full agent output (all tool results). With an extractor, you control exactly what the calling agent receives.
+
+## With Context Variables
+
+Track state across the pipeline:
+
+```typescript
+type AnalysisContext = {
+  company: string;
+  timeframe: string;
+  searchResults: string[];
+  report?: ReportSchema;
+  verification?: VerificationSchema;
+};
+
+// Planner uses context
+const planner = agent<typeof SearchPlanSchema, AnalysisContext>({
+  prompt: (ctx) => instructions({
+    purpose: [`Plan research for ${ctx.company} (${ctx.timeframe})`],
+    routine: ['Generate targeted searches.'],
+  }),
+});
+
+// Execute with context
+const context: AnalysisContext = {
+  company: 'Apple Inc',
+  timeframe: 'Q4 2024',
+  searchResults: [],
+};
+
+const { experimental_output: plan } = await generate(
+  planner,
+  'Analyze company outlook',
+  context
+);
+```
+
+## Customization
+
+### Add more specialists
+
+```typescript
+const competitorAnalyst = agent({
+  name: 'CompetitorAnalyst',
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: ['Analyze competitive landscape and market position.'],
+    routine: ['Identify key competitors and relative strengths.'],
+  }),
+});
+
+const writerWithMoreTools = writer.clone({
+  tools: {
+    fundamentals_analysis: fundamentalsAnalyst.asTool({ outputExtractor }),
+    risk_analysis: riskAnalyst.asTool({ outputExtractor }),
+    competitor_analysis: competitorAnalyst.asTool({ outputExtractor }),
+  },
+});
+```
+
+### Add retry on verification failure
+
+```typescript
+async function analyzeWithRetry(query: string, maxRetries = 2) {
+  let attempt = 0;
+  let report, verification;
+
+  while (attempt < maxRetries) {
+    const result = await analyzeCompany(query);
+    report = result.report;
+    verification = result.verification;
+
+    if (verification.verified) {
+      return { report, verification, attempts: attempt + 1 };
+    }
+
+    console.log(`Attempt ${attempt + 1} failed: ${verification.issues}`);
+    attempt++;
+  }
+
+  return { report, verification, attempts: attempt };
+}
+```
+
+### Add source tracking
+
+```typescript
+const SearchResultSchema = z.object({
+  content: z.string(),
+  sources: z.array(z.object({
+    title: z.string(),
+    url: z.string(),
+  })),
+});
+
+const searcher = agent({
+  output: SearchResultSchema,
+  // Now captures sources for citation
+});
+```
+
+### Different report formats
+
+```typescript
+const BriefReportSchema = z.object({
+  headline: z.string().max(100),
+  key_points: z.array(z.string()).max(5),
+  recommendation: z.enum(['buy', 'hold', 'sell', 'neutral']),
+});
+
+const briefWriter = writer.clone({
+  output: BriefReportSchema,
+  prompt: instructions({
+    purpose: ['Create a brief executive summary with recommendation.'],
+    routine: ['Be concise. Max 5 key points.'],
+  }),
+});
+```
+
+## Next Steps
+
+- [Structured Output](/docs/agent/structured-output) - Schema design for agents
+- [Tools](/docs/agent/tools) - Agent.asTool() and output extraction
+- [Content Pipeline](/docs/agent/recipes/content-pipeline) - Sequential pattern
+- [Code Review](/docs/agent/recipes/code-review) - Parallel specialists

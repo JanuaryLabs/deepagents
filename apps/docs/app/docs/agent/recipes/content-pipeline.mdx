@@ -1,0 +1,383 @@
+---
+title: Content Pipeline Recipe
+description: Sequential agent chain that researches, writes, and edits content
+---
+
+Build a content creation pipeline where a researcher gathers information, a writer creates a draft, and an editor polishes the final result.
+
+## Architecture
+
+```
+┌────────────────┐     ┌────────────────┐     ┌────────────────┐
+│   Researcher   │ ──► │     Writer     │ ──► │     Editor     │
+│                │     │                │     │                │
+│ Gathers info   │     │ Creates draft  │     │ Polishes final │
+│ via web search │     │ from research  │     │ version        │
+└────────────────┘     └────────────────┘     └────────────────┘
+```
+
+## Quick Start
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Schema for structured research output
+const ResearchSchema = z.object({
+  topic: z.string(),
+  keyPoints: z.array(z.string()).describe('Main points discovered'),
+  sources: z.array(z.string()).describe('Source descriptions'),
+  suggestedAngle: z.string().describe('Recommended angle for the article'),
+});
+
+// Schema for the draft
+const DraftSchema = z.object({
+  title: z.string(),
+  outline: z.array(z.string()),
+  content: z.string(),
+  wordCount: z.number(),
+});
+
+// Schema for the final article
+const ArticleSchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  summary: z.string().describe('2-3 sentence summary'),
+  seoKeywords: z.array(z.string()),
+});
+
+// Researcher gathers information
+const researcher = agent({
+  name: 'Researcher',
+  model: groq('gpt-oss-20b'),
+  output: ResearchSchema,
+  prompt: instructions({
+    purpose: [
+      'You research topics thoroughly and gather relevant information.',
+      'Focus on finding accurate, current, and comprehensive data.',
+    ],
+    routine: [
+      'Search for information on the given topic',
+      'Identify 5-7 key points',
+      'Note your sources',
+      'Suggest an angle for the article',
+    ],
+  }),
+  tools: {
+    browserSearch: groq.tools.browserSearch({}),
+  },
+});
+
+// Writer creates the draft
+const writer = agent({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  output: DraftSchema,
+  prompt: instructions({
+    purpose: [
+      'You write clear, engaging content based on research.',
+      'Create well-structured articles that inform and engage readers.',
+    ],
+    routine: [
+      'Review the research provided',
+      'Create an outline',
+      'Write the full draft',
+      'Aim for 800-1200 words',
+    ],
+  }),
+});
+
+// Editor polishes the final version
+const editor = agent({
+  name: 'Editor',
+  model: groq('gpt-oss-20b'),
+  output: ArticleSchema,
+  prompt: instructions({
+    purpose: [
+      'You edit and polish written content.',
+      'Improve clarity, flow, grammar, and engagement.',
+    ],
+    routine: [
+      'Review the draft for clarity and flow',
+      'Fix grammar and style issues',
+      'Strengthen the opening and closing',
+      'Add SEO keywords',
+      'Write a compelling summary',
+    ],
+  }),
+});
+
+// Run the pipeline
+async function createContent(topic: string) {
+  // Step 1: Research
+  console.log('Researching...');
+  const { experimental_output: research } = await generate(
+    researcher,
+    `Research this topic: ${topic}`,
+    {}
+  );
+
+  // Step 2: Write
+  console.log('Writing draft...');
+  const { experimental_output: draft } = await generate(
+    writer,
+    `Write an article based on this research:\n${JSON.stringify(research, null, 2)}`,
+    {}
+  );
+
+  // Step 3: Edit
+  console.log('Editing...');
+  const { experimental_output: article } = await generate(
+    editor,
+    `Edit and polish this draft:\n${draft.content}`,
+    {}
+  );
+
+  return article;
+}
+
+// Usage
+const article = await createContent('The future of AI agents in 2025');
+console.log(article.title);
+console.log(article.content);
+```
+
+## Agent Breakdown
+
+### Researcher
+
+Gathers information with web search and outputs structured findings:
+
+```typescript
+const researcher = agent({
+  name: 'Researcher',
+  output: ResearchSchema,  // Structured output
+  tools: {
+    browserSearch: groq.tools.browserSearch({}),  // Web search capability
+  },
+  // ...
+});
+```
+
+**Output structure:**
+```typescript
+{
+  topic: "AI agents",
+  keyPoints: ["Point 1", "Point 2", ...],
+  sources: ["Source 1", "Source 2", ...],
+  suggestedAngle: "Focus on practical applications"
+}
+```
+
+### Writer
+
+Takes research and creates a structured draft:
+
+```typescript
+const writer = agent({
+  name: 'Writer',
+  output: DraftSchema,
+  // No tools needed - works from provided research
+});
+```
+
+### Editor
+
+Polishes the draft and adds SEO optimization:
+
+```typescript
+const editor = agent({
+  name: 'Editor',
+  output: ArticleSchema,
+  // Produces final article with keywords and summary
+});
+```
+
+## How It Works
+
+1. **Research phase** → Researcher searches web, extracts key points
+2. **Writing phase** → Writer receives research JSON, creates draft
+3. **Editing phase** → Editor receives draft, produces polished article
+
+Each agent's structured output becomes the next agent's input, creating a clean data flow.
+
+## With Context Variables
+
+Share context across the pipeline:
+
+```typescript
+type ContentContext = {
+  targetAudience: 'technical' | 'general' | 'executive';
+  tone: 'formal' | 'casual' | 'professional';
+  maxWords: number;
+};
+
+const writer = agent<typeof DraftSchema, ContentContext>({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  output: DraftSchema,
+  prompt: (ctx) => instructions({
+    purpose: [
+      `You write for a ${ctx.targetAudience} audience.`,
+      `Use a ${ctx.tone} tone.`,
+    ],
+    routine: [
+      'Review the research provided',
+      'Create an outline appropriate for the audience',
+      `Write ${ctx.maxWords} words or less`,
+    ],
+  }),
+});
+
+// Run with context
+const context: ContentContext = {
+  targetAudience: 'technical',
+  tone: 'professional',
+  maxWords: 1000,
+};
+
+const { experimental_output: draft } = await generate(
+  writer,
+  researchJson,
+  context
+);
+```
+
+## Streaming Version
+
+For real-time feedback during long content generation:
+
+```typescript
+import { execute } from '@deepagents/agent';
+
+async function createContentStreaming(topic: string) {
+  // Research (non-streaming for structured output)
+  const { experimental_output: research } = await generate(
+    researcher,
+    `Research: ${topic}`,
+    {}
+  );
+
+  // Write with streaming
+  console.log('\n--- Writing Draft ---\n');
+  const writeStream = execute(
+    writer,
+    `Write based on: ${JSON.stringify(research)}`,
+    {}
+  );
+
+  for await (const chunk of writeStream.textStream) {
+    process.stdout.write(chunk);
+  }
+
+  const draft = await writeStream.experimental_output;
+
+  // Edit with streaming
+  console.log('\n--- Editing ---\n');
+  const editStream = execute(
+    editor,
+    `Edit: ${draft.content}`,
+    {}
+  );
+
+  for await (const chunk of editStream.textStream) {
+    process.stdout.write(chunk);
+  }
+
+  return editStream.experimental_output;
+}
+```
+
+## Customization
+
+### Add an SEO specialist
+
+```typescript
+const SeoSchema = z.object({
+  metaTitle: z.string().max(60),
+  metaDescription: z.string().max(160),
+  keywords: z.array(z.string()),
+  headings: z.array(z.string()),
+});
+
+const seoSpecialist = agent({
+  name: 'SeoSpecialist',
+  model: groq('gpt-oss-20b'),
+  output: SeoSchema,
+  prompt: instructions({
+    purpose: ['You optimize content for search engines.'],
+    routine: [
+      'Analyze the article content',
+      'Generate SEO metadata',
+      'Suggest keyword placement',
+    ],
+  }),
+});
+
+// Add to pipeline after editor
+const { experimental_output: seo } = await generate(
+  seoSpecialist,
+  article.content,
+  {}
+);
+```
+
+### Add fact-checking
+
+```typescript
+const FactCheckSchema = z.object({
+  claims: z.array(z.object({
+    claim: z.string(),
+    verified: z.boolean(),
+    source: z.string().optional(),
+  })),
+  overallAccuracy: z.number().min(0).max(100),
+});
+
+const factChecker = agent({
+  name: 'FactChecker',
+  model: groq('gpt-oss-20b'),
+  output: FactCheckSchema,
+  tools: {
+    browserSearch: groq.tools.browserSearch({}),
+  },
+  prompt: instructions({
+    purpose: ['You verify factual claims in content.'],
+    routine: [
+      'Identify factual claims in the content',
+      'Verify each claim via search',
+      'Report accuracy assessment',
+    ],
+  }),
+});
+```
+
+### Parallel research
+
+Research multiple subtopics simultaneously:
+
+```typescript
+async function parallelResearch(subtopics: string[]) {
+  const results = await Promise.all(
+    subtopics.map((topic) =>
+      generate(researcher, `Research: ${topic}`, {})
+    )
+  );
+
+  return results.map((r) => r.experimental_output);
+}
+
+// Usage
+const research = await parallelResearch([
+  'AI agent architectures',
+  'Multi-agent coordination',
+  'Real-world agent applications',
+]);
+```
+
+## Next Steps
+
+- [Structured Output](/docs/agent/structured-output) - Type-safe agent responses
+- [Execution Model](/docs/agent/execution-model) - Streaming vs non-streaming
+- [Code Review](/docs/agent/recipes/code-review) - Parallel specialist pattern

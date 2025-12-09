@@ -1,0 +1,383 @@
+---
+title: Execution Model
+description: How agents run - streaming, non-streaming, and the execution loop explained
+---
+
+## Three Execution Functions
+
+### `execute()` - Streaming
+
+`execute()` returns a `StreamTextResult` that you can consume incrementally:
+
+```typescript
+import { execute } from '@deepagents/agent';
+
+const stream = execute(agent, 'Hello', contextVariables);
+
+// Stream text chunks
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+
+// Or get the full response
+const text = await stream.text;
+
+// Access tool results
+const steps = await stream.steps;
+```
+
+**Use when:**
+- Building chat interfaces with real-time feedback
+- Users need to see responses as they generate
+- Long-running tasks where progress matters
+
+### `generate()` - Non-streaming
+
+`generate()` returns a `GenerateTextResult` after completion:
+
+```typescript
+import { generate } from '@deepagents/agent';
+
+const result = await generate(agent, 'Analyze this', contextVariables);
+
+console.log(result.text);
+console.log(result.experimental_output); // Structured output
+console.log(result.steps);               // All execution steps
+```
+
+**Use when:**
+- Building pipelines where you need complete results
+- Processing in batches
+- Working with structured output
+
+### `swarm()` - UI Message Stream
+
+`swarm()` returns a `UIMessageStream` compatible with AI SDK UI utilities:
+
+```typescript
+import { swarm } from '@deepagents/agent';
+
+const uiStream = swarm(agent, messages, contextVariables);
+
+// Works with createUIMessageStream consumers
+```
+
+**Key difference:** `swarm()` supports the `prepareEnd` lifecycle hook, allowing parent agents to re-engage after specialists complete.
+
+**Use when:**
+- Integrating with frontend frameworks
+- Building conversational UIs
+- Need lifecycle hooks for multi-agent coordination
+
+## The Execution Loop
+
+When you call `execute()` or `generate()`, here's what happens:
+
+```
+1. Build system prompt from agent.instructions(contextVariables)
+2. Collect tools from agent.toToolset()
+3. Start streaming/generating
+4. For each step:
+   a. Model generates response (text or tool calls)
+   b. If tool call: execute tool, add result to messages
+   c. If transfer tool: switch to target agent via prepareStep
+   d. Continue until model stops or step limit reached
+5. Return final result
+```
+
+### prepareStep: Dynamic Agent Switching
+
+The `prepareStep` function runs before each model invocation:
+
+```typescript
+// From swarm.ts (simplified)
+const prepareStep = (agent, model, contextVariables) => {
+  return async ({ steps, messages }) => {
+    const agentName = contextVariables.currentActiveAgent;
+
+    if (!agentName) {
+      return prepareAgent(model, agent, messages, contextVariables);
+    }
+
+    // Find and switch to the target agent
+    const nextAgent = findAgent(agent, agentName);
+    return prepareAgent(model, nextAgent, messages, contextVariables);
+  };
+};
+```
+
+When a transfer tool executes, it sets `currentActiveAgent` in the context. The next `prepareStep` call detects this and switches the active agent, providing its instructions and tools.
+
+### Step Limits
+
+By default, execution stops after 25 steps to prevent infinite loops:
+
+```typescript
+stopWhen: stepCountIs(25)
+```
+
+A step is one model invocation. If you have complex workflows with many tool calls, you may need to adjust:
+
+```typescript
+import { stepCountIs } from 'ai';
+
+// In your agent configuration or execution options
+stopWhen: stepCountIs(50)
+```
+
+## Tool Call Repair
+
+Invalid tool calls happen when models generate malformed arguments. DeepAgents automatically repairs them:
+
+```typescript
+// From swarm.ts
+const repairToolCall = async ({ toolCall, tools, inputSchema, error }) => {
+  if (NoSuchToolError.isInstance(error)) {
+    return null; // Can't fix non-existent tools
+  }
+
+  const tool = tools[toolCall.toolName];
+
+  const { experimental_output } = await generateText({
+    model: groq('gpt-oss-20b'),
+    experimental_output: Output.object({ schema: tool.inputSchema }),
+    prompt: [
+      `The model tried to call "${toolCall.toolName}" with:`,
+      JSON.stringify(toolCall.input),
+      `The tool accepts:`,
+      JSON.stringify(inputSchema(toolCall)),
+      'Please fix the inputs.',
+    ].join('\n'),
+  });
+
+  return { ...toolCall, input: JSON.stringify(experimental_output) };
+};
+```
+
+This runs automatically when tool validation fails, using a fast model to fix the input.
+
+## Output Modes
+
+The `outputMode` option controls what messages are returned:
+
+### `full_history` (default)
+
+Returns all messages generated during execution:
+
+```typescript
+const result = await generate(agent, input, context, {
+  outputMode: 'full_history'
+});
+// result includes all intermediate messages
+```
+
+### `last_message`
+
+Returns only the final message:
+
+```typescript
+const result = await generate(agent, input, context, {
+  outputMode: 'last_message'
+});
+// result includes only the last assistant message
+```
+
+This matches LangChain's behavior for compatibility.
+
+## Return Types
+
+### From `execute()`
+
+```typescript
+interface StreamTextResult {
+  // Core streams
+  textStream: AsyncIterable<string>;
+  fullStream: AsyncIterable<StreamPart>;
+
+  // Awaitable results
+  text: Promise<string>;
+  steps: Promise<StepResult[]>;
+  toolCalls: Promise<ToolCall[]>;
+  toolResults: Promise<ToolResult[]>;
+
+  // UI integration
+  toUIMessageStream(options): UIMessageStream;
+
+  // Consumption
+  consumeStream(): Promise<void>;
+
+  // Extended by DeepAgents
+  state: COut;  // Output context
+}
+```
+
+### From `generate()`
+
+```typescript
+interface GenerateTextResult {
+  text: string;
+  experimental_output: Output;  // Typed if using output schema
+  steps: StepResult[];
+  toolCalls: ToolCall[];
+  toolResults: ToolResult[];
+  usage: TokenUsage;
+  finishReason: FinishReason;
+
+  // Extended by DeepAgents
+  state: COut;  // Output context
+}
+```
+
+### From `swarm()`
+
+```typescript
+interface UIMessageStream {
+  // Async iterable of UI message parts
+  [Symbol.asyncIterator](): AsyncIterator<UIMessagePart>;
+}
+```
+
+## Error Handling
+
+### Stream Errors
+
+Handle errors during streaming:
+
+```typescript
+const stream = execute(agent, input, context);
+
+stream.consumeStream({
+  onError: (error) => {
+    console.error('Stream error:', error);
+  }
+});
+```
+
+### Abort Signals
+
+Cancel execution with an abort signal:
+
+```typescript
+const controller = new AbortController();
+
+const stream = execute(agent, input, context, {
+  abortSignal: controller.signal
+});
+
+// Later, to cancel:
+controller.abort();
+```
+
+### Try-Catch for Generate
+
+```typescript
+try {
+  const result = await generate(agent, input, context);
+} catch (error) {
+  if (error.name === 'AbortError') {
+    console.log('Generation was cancelled');
+  } else {
+    console.error('Generation failed:', error);
+  }
+}
+```
+
+## Consuming Streams
+
+Several patterns for consuming `execute()` results:
+
+### Text Stream
+
+```typescript
+const stream = execute(agent, input, {});
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+### Full Stream
+
+Access all events including tool calls:
+
+```typescript
+for await (const part of stream.fullStream) {
+  switch (part.type) {
+    case 'text-delta':
+      console.log('Text:', part.textDelta);
+      break;
+    case 'tool-call':
+      console.log('Tool:', part.toolName);
+      break;
+    case 'tool-result':
+      console.log('Result:', part.result);
+      break;
+  }
+}
+```
+
+### Await Full Result
+
+```typescript
+const stream = execute(agent, input, {});
+
+// Wait for completion
+await stream.consumeStream();
+
+// Then access results
+const text = await stream.text;
+const steps = await stream.steps;
+```
+
+## Real-World Example
+
+From `finanicals_bot.ts`, parallel search execution:
+
+```typescript
+const results = await Promise.all(
+  plan.searches.map(async (item, idx) => {
+    const result = execute(
+      searchAgent,
+      `Search term: ${item.query}\nReason: ${item.reason}`,
+      {}
+    );
+
+    // Stream each search independently
+    return result.text;
+  })
+);
+```
+
+Sequential orchestration with `generate()`:
+
+```typescript
+// Step 1: Plan
+const { experimental_output: plan } = await generate(
+  plannerAgent,
+  `Query: ${query}`,
+  {}
+);
+
+// Step 2: Search (parallel)
+const searchResults = await Promise.all(/* ... */);
+
+// Step 3: Write report
+const { experimental_output: report } = await generate(
+  writerAgent,
+  `Query: ${query}\nResults: ${searchResults}`,
+  {}
+);
+
+// Step 4: Verify
+const { experimental_output: verification } = await generate(
+  verifierAgent,
+  report.markdown_report,
+  {}
+);
+```
+
+## Next Steps
+
+- [Handoffs](/docs/agent/handoffs) - How agents delegate to each other
+- [Context Variables](/docs/agent/context-variables) - State flow through execution
+- [Structured Output](/docs/agent/structured-output) - Type-safe responses

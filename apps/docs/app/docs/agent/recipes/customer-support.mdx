@@ -1,0 +1,272 @@
+---
+title: Customer Support Recipe
+description: Multi-agent system that routes support inquiries to specialist agents
+---
+
+Build a support system where a triage agent analyzes customer inquiries and routes them to the appropriate specialist—billing, technical, or general support.
+
+## Architecture
+
+```
+                         User Message
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  Triage Agent   │
+                    │  (Coordinator)  │
+                    └────────┬────────┘
+                             │
+            ┌────────────────┼────────────────┐
+            ▼                ▼                ▼
+     ┌────────────┐   ┌────────────┐   ┌────────────┐
+     │  Billing   │   │ Technical  │   │  General   │
+     │ Specialist │   │ Specialist │   │ Specialist │
+     └────────────┘   └────────────┘   └────────────┘
+```
+
+## Quick Start
+
+```typescript
+import { agent, instructions, swarm } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+
+// Billing specialist handles payment and subscription issues
+const billingSpecialist = agent({
+  name: 'BillingSpecialist',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You handle billing, payment, and subscription inquiries.',
+      'You can help with invoices, refunds, payment methods, and plan changes.',
+    ],
+    routine: [
+      'Acknowledge the billing concern',
+      'Ask clarifying questions if needed',
+      'Provide clear steps to resolve the issue',
+      'Offer to escalate to a human if unable to resolve',
+    ],
+  }),
+  handoffDescription: 'Handles billing, payments, invoices, refunds, subscriptions, and pricing questions',
+});
+
+// Technical specialist handles product and technical issues
+const technicalSpecialist = agent({
+  name: 'TechnicalSpecialist',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You handle technical issues and product questions.',
+      'You help with bugs, errors, setup problems, and feature usage.',
+    ],
+    routine: [
+      'Understand the technical issue',
+      'Ask for error messages or steps to reproduce',
+      'Provide troubleshooting steps',
+      'Suggest workarounds if the issue cannot be resolved immediately',
+    ],
+  }),
+  handoffDescription: 'Handles technical issues, bugs, errors, setup problems, and product feature questions',
+});
+
+// General specialist handles everything else
+const generalSpecialist = agent({
+  name: 'GeneralSpecialist',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You handle general inquiries and questions.',
+      'You help with account settings, company info, and general support.',
+    ],
+    routine: [
+      'Listen to the customer concern',
+      'Provide helpful information',
+      'Direct to appropriate resources if needed',
+    ],
+  }),
+  handoffDescription: 'Handles general inquiries, account questions, company info, and anything not billing or technical',
+});
+
+// Triage agent routes to the appropriate specialist
+const triageAgent = agent({
+  name: 'TriageAgent',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You are the first point of contact for customer support.',
+      'Your job is to understand the customer issue and route to the right specialist.',
+    ],
+    routine: [
+      'Greet the customer warmly',
+      'Analyze their message to understand the issue type',
+      'Transfer to the appropriate specialist immediately',
+    ],
+  }),
+  handoffs: [billingSpecialist, technicalSpecialist, generalSpecialist],
+});
+
+// Run the support system
+const stream = swarm(
+  triageAgent,
+  'I was charged twice for my subscription last month',
+  {}
+);
+
+for await (const part of stream) {
+  if (part.type === 'text-delta') {
+    process.stdout.write(part.textDelta);
+  }
+}
+```
+
+## Agent Breakdown
+
+### Triage Agent (Coordinator)
+
+The entry point that analyzes intent and routes to specialists:
+
+```typescript
+const triageAgent = agent({
+  name: 'TriageAgent',
+  handoffs: [billingSpecialist, technicalSpecialist, generalSpecialist],
+  // ...
+});
+```
+
+**Key aspects:**
+- Has `handoffs` array with all specialists
+- System prompt includes a table of available specialists
+- Can call `transfer_to_billing_specialist`, `transfer_to_technical_specialist`, or `transfer_to_general_specialist`
+
+### Specialists
+
+Each specialist has a focused `handoffDescription` that helps the triage agent decide when to route:
+
+```typescript
+handoffDescription: 'Handles billing, payments, invoices, refunds...'
+```
+
+The triage agent's system prompt automatically includes:
+
+| Agent Name | Agent Description |
+| --- | --- |
+| billing_specialist | Handles billing, payments, invoices, refunds... |
+| technical_specialist | Handles technical issues, bugs, errors... |
+| general_specialist | Handles general inquiries, account questions... |
+
+## How It Works
+
+1. **User sends message** → Triage agent receives it
+2. **Triage analyzes** → Determines issue type from content
+3. **Triage transfers** → Calls `transfer_to_<specialist>`
+4. **Specialist responds** → Handles the specific issue
+
+The transfer is seamless—the specialist sees the full conversation history and responds directly to the user.
+
+## With Context Variables
+
+Track customer information across the conversation:
+
+```typescript
+type SupportContext = {
+  customerId?: string;
+  customerTier?: 'free' | 'pro' | 'enterprise';
+  previousIssues?: string[];
+};
+
+const triageAgent = agent<unknown, SupportContext>({
+  name: 'TriageAgent',
+  model: groq('gpt-oss-20b'),
+  prompt: (ctx) => instructions({
+    purpose: [
+      'You are the first point of contact for customer support.',
+      ctx.customerTier === 'enterprise'
+        ? 'This is an enterprise customer - prioritize their issue.'
+        : 'Route to the appropriate specialist.',
+    ],
+    routine: [
+      'Greet the customer warmly',
+      'Analyze their message to understand the issue type',
+      'Transfer to the appropriate specialist immediately',
+    ],
+  }),
+  handoffs: [billingSpecialist, technicalSpecialist, generalSpecialist],
+});
+
+// Execute with customer context
+swarm(triageAgent, message, {
+  customerId: 'cust_123',
+  customerTier: 'enterprise',
+  previousIssues: ['billing-2024-01', 'technical-2024-02'],
+});
+```
+
+## Customization
+
+### Add more specialists
+
+```typescript
+const shippingSpecialist = agent({
+  name: 'ShippingSpecialist',
+  handoffDescription: 'Handles shipping, delivery, and returns',
+  // ...
+});
+
+const triageAgent = agent({
+  handoffs: [
+    billingSpecialist,
+    technicalSpecialist,
+    shippingSpecialist,  // Added
+    generalSpecialist,
+  ],
+});
+```
+
+### Add escalation to human
+
+```typescript
+import { tool } from 'ai';
+import z from 'zod';
+
+const escalateToHuman = tool({
+  description: 'Escalate to a human agent when unable to resolve',
+  inputSchema: z.object({
+    reason: z.string(),
+    urgency: z.enum(['low', 'medium', 'high']),
+  }),
+  execute: async ({ reason, urgency }) => {
+    // Integration with your ticketing system
+    await createTicket({ reason, urgency });
+    return 'Escalated to human support. A representative will contact you shortly.';
+  },
+});
+
+const billingSpecialist = agent({
+  tools: { escalateToHuman },
+  // ...
+});
+```
+
+### Add sentiment detection
+
+```typescript
+const triageAgent = agent({
+  prompt: instructions({
+    purpose: [
+      'You are the first point of contact for customer support.',
+      'Detect customer sentiment and urgency.',
+    ],
+    routine: [
+      'Assess customer tone (frustrated, neutral, happy)',
+      'If frustrated, acknowledge their feelings first',
+      'Route to appropriate specialist with context',
+    ],
+  }),
+  // ...
+});
+```
+
+## Next Steps
+
+- [Handoffs](/docs/agent/handoffs) - Deep dive into agent delegation
+- [Context Variables](/docs/agent/context-variables) - Passing state through agents
+- [Content Pipeline](/docs/agent/recipes/content-pipeline) - Sequential agent pattern

@@ -1,0 +1,413 @@
+---
+title: Structured Output
+description: Type-safe responses from agents using Zod schemas
+---
+
+## Why Structured Output?
+
+Free-form text responses have limitations:
+
+```typescript
+// Without structured output
+const text = await generate(agent, 'Analyze sentiment', {}).text;
+// text = "The sentiment appears to be positive with high confidence..."
+// Now you need to parse this somehow
+```
+
+With structured output:
+
+```typescript
+const SentimentSchema = z.object({
+  sentiment: z.enum(['positive', 'negative', 'neutral']),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string(),
+});
+
+const { experimental_output } = await generate(agent, 'Analyze sentiment', {});
+// experimental_output is typed as:
+// { sentiment: 'positive' | 'negative' | 'neutral'; confidence: number; reasoning: string }
+```
+
+Benefits:
+- **Type safety**: TypeScript knows the response shape
+- **Validation**: Invalid responses are rejected
+- **Reliability**: Consistent format every time
+- **Composability**: Chain agents with predictable interfaces
+
+## Defining Schemas
+
+Use Zod to define output schemas:
+
+```typescript
+import z from 'zod';
+
+// Simple schema
+const AnalysisSchema = z.object({
+  summary: z.string(),
+  score: z.number(),
+});
+
+// With descriptions (helps the model)
+const DetailedSchema = z.object({
+  summary: z.string().describe('A 2-3 sentence summary'),
+  findings: z.array(z.string()).describe('Key findings as bullet points'),
+  confidence: z.number().min(0).max(1).describe('Confidence from 0 to 1'),
+});
+
+// With enums
+const ClassificationSchema = z.object({
+  category: z.enum(['bug', 'feature', 'question', 'other']),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+});
+
+// With optional fields
+const FlexibleSchema = z.object({
+  required: z.string(),
+  optional: z.string().optional(),
+  withDefault: z.string().default('default value'),
+});
+```
+
+## Using Output in Agents
+
+Pass the schema to the `output` field:
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+const ReportSchema = z.object({
+  summary: z.string(),
+  findings: z.array(z.string()),
+  recommendations: z.array(z.string()),
+});
+
+const analyst = agent({
+  name: 'Analyst',
+  model: groq('gpt-oss-20b'),
+  output: ReportSchema,
+  prompt: instructions({
+    purpose: ['You analyze data and produce structured reports.'],
+    routine: [
+      'Review the provided data',
+      'Identify key findings',
+      'Generate actionable recommendations',
+    ],
+  }),
+});
+
+const { experimental_output } = await generate(analyst, data, {});
+
+console.log(experimental_output.summary);
+console.log(experimental_output.findings);       // string[]
+console.log(experimental_output.recommendations); // string[]
+```
+
+## Type Inference
+
+Zod provides automatic type inference:
+
+```typescript
+const PlanSchema = z.object({
+  steps: z.array(z.object({
+    action: z.string(),
+    tool: z.string(),
+    reasoning: z.string(),
+  })),
+  estimatedTime: z.number(),
+});
+
+// TypeScript infers this type:
+type Plan = z.infer<typeof PlanSchema>;
+// {
+//   steps: { action: string; tool: string; reasoning: string }[];
+//   estimatedTime: number;
+// }
+
+const planner = agent({
+  output: PlanSchema,
+  // ...
+});
+
+// experimental_output is typed as Plan
+const { experimental_output } = await generate(planner, task, {});
+```
+
+## Complex Schemas
+
+### Nested Objects
+
+```typescript
+const CompanyAnalysisSchema = z.object({
+  company: z.object({
+    name: z.string(),
+    ticker: z.string(),
+    sector: z.string(),
+  }),
+  financials: z.object({
+    revenue: z.number(),
+    profit: z.number(),
+    growth: z.number(),
+  }),
+  analysis: z.object({
+    strengths: z.array(z.string()),
+    weaknesses: z.array(z.string()),
+    outlook: z.enum(['bullish', 'bearish', 'neutral']),
+  }),
+});
+```
+
+### Discriminated Unions
+
+```typescript
+const ResponseSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('success'),
+    data: z.object({ result: z.string() }),
+  }),
+  z.object({
+    type: z.literal('error'),
+    error: z.object({ code: z.string(), message: z.string() }),
+  }),
+]);
+```
+
+### Recursive Schemas
+
+```typescript
+const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
+  z.object({
+    value: z.string(),
+    children: z.array(TreeNodeSchema),
+  })
+);
+```
+
+## How It Works
+
+When you provide an `output` schema, two things happen:
+
+### 1. AI SDK Output Mode
+
+The execution uses `Output.object()` from the AI SDK:
+
+```typescript
+// Internal (simplified from swarm.ts)
+experimental_output: agent.output
+  ? Output.object({ schema: agent.output })
+  : undefined,
+```
+
+### 2. Model Wrapping
+
+The model is wrapped to include JSON schema in its configuration:
+
+```typescript
+// Internal (simplified from swarm.ts)
+if (agent.output) {
+  const json_schema = zodToJsonSchema(agent.output, {
+    $refStrategy: 'root',
+  });
+  stepModel = wrapLanguageModel({
+    model: stepModel,
+    middleware: {
+      transformParams: async ({ params }) => ({
+        ...params,
+        response_format: {
+          type: 'json_schema',
+          json_schema,
+          name: `${agent.handoff.name}_output`,
+        },
+      }),
+    },
+  });
+}
+```
+
+This ensures the model produces valid JSON matching your schema.
+
+## Accessing Structured Output
+
+### With `generate()`
+
+```typescript
+const result = await generate(agent, input, context);
+
+// Typed access
+const output = result.experimental_output;
+console.log(output.summary);
+
+// Also available
+console.log(result.text); // Raw text response
+```
+
+### With `execute()`
+
+```typescript
+const stream = execute(agent, input, context);
+await stream.consumeStream();
+
+// Access after streaming completes
+const output = await stream.experimental_output;
+```
+
+## Schema Design Tips
+
+### Use Descriptions
+
+Descriptions guide the model:
+
+```typescript
+const Schema = z.object({
+  sentiment: z.enum(['positive', 'negative', 'neutral'])
+    .describe('Overall emotional tone of the text'),
+  confidence: z.number()
+    .min(0).max(1)
+    .describe('How confident the analysis is, from 0 (uncertain) to 1 (certain)'),
+});
+```
+
+### Keep It Focused
+
+Smaller, focused schemas work better than large ones:
+
+```typescript
+// Good: focused
+const SentimentSchema = z.object({
+  sentiment: z.enum(['positive', 'negative', 'neutral']),
+  confidence: z.number(),
+});
+
+// Potentially problematic: too broad
+const EverythingSchema = z.object({
+  sentiment: z.enum(['positive', 'negative', 'neutral']),
+  topics: z.array(z.string()),
+  entities: z.array(z.object({ name: z.string(), type: z.string() })),
+  summary: z.string(),
+  keywords: z.array(z.string()),
+  language: z.string(),
+  // ... many more fields
+});
+```
+
+### Provide Examples in Prompts
+
+Help the model with examples:
+
+```typescript
+const agent = agent({
+  output: ReportSchema,
+  prompt: `
+    Analyze the data and produce a report.
+
+    Example output format:
+    {
+      "summary": "Brief overview of findings",
+      "findings": ["Finding 1", "Finding 2"],
+      "confidence": 0.85
+    }
+  `,
+});
+```
+
+## Real-World Examples
+
+### Research Bot Planner
+
+```typescript
+const WebSearchPlanSchema = z.object({
+  searches: z.array(z.object({
+    reason: z.string()
+      .describe('Why this search is important to the query'),
+    query: z.string()
+      .describe('The search term to use'),
+  }))
+  .describe('A list of web searches to perform'),
+});
+
+const planner = agent({
+  name: 'PlannerAgent',
+  model: openai('gpt-4.1'),
+  output: WebSearchPlanSchema,
+  prompt: instructions({
+    purpose: ['Come up with a set of web searches to answer the query.'],
+    routine: ['Output between 5 and 10 terms to query for.'],
+  }),
+});
+```
+
+### Financial Report
+
+```typescript
+const FinancialReportSchema = z.object({
+  short_summary: z.string()
+    .describe('A short 2-3 sentence executive summary'),
+  markdown_report: z.string()
+    .describe('The full markdown report'),
+  follow_up_questions: z.array(z.string())
+    .describe('Suggested follow-up questions for further research'),
+});
+
+const writer = agent({
+  name: 'FinancialWriterAgent',
+  model: groq('gpt-oss-20b'),
+  output: FinancialReportSchema,
+  prompt: instructions({
+    purpose: ['Synthesize research into a long-form markdown report.'],
+    routine: [
+      'Create executive summary',
+      'Write detailed analysis',
+      'Suggest follow-up questions',
+    ],
+  }),
+});
+```
+
+### Verification Result
+
+```typescript
+const VerificationSchema = z.object({
+  verified: z.boolean()
+    .describe('Whether the report seems coherent and plausible'),
+  issues: z.string()
+    .describe('If not verified, describe the main issues or concerns'),
+});
+
+const verifier = agent({
+  name: 'VerificationAgent',
+  model: groq('gpt-oss-20b'),
+  output: VerificationSchema,
+  prompt: instructions({
+    purpose: ['Verify reports are internally consistent and well-sourced.'],
+    routine: ['Point out any issues or uncertainties.'],
+  }),
+});
+```
+
+## Agents as Tools with Output Extraction
+
+When using `agent.asTool()`, you can extract structured output:
+
+```typescript
+const summaryExtractor = async (result) => {
+  return result.experimental_output.summary;
+};
+
+const writerWithTools = writerAgent.clone({
+  tools: {
+    fundamentals_analysis: financialsAgent.asTool({
+      toolDescription: 'Get a financial metrics write-up',
+      outputExtractor: summaryExtractor,
+    }),
+  },
+});
+```
+
+The `outputExtractor` transforms the structured output before returning it to the calling agent.
+
+## Next Steps
+
+- [Tools](/docs/agent/tools) - Agent capabilities
+- [Context Variables](/docs/agent/context-variables) - Passing state through execution
+- [Execution Model](/docs/agent/execution-model) - How agents run

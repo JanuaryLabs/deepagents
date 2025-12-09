@@ -1,0 +1,86 @@
+---
+title: Recipes
+description: Ready-to-use multi-agent patterns for common use cases
+---
+
+Recipes are complete, working examples that demonstrate how to build multi-agent systems for specific domains. Each recipe includes the full code, architecture explanation, and customization guidance.
+
+## Available Recipes
+
+| Recipe | Pattern | Use Case |
+|--------|---------|----------|
+| [Customer Support](/docs/agent/recipes/customer-support) | Hub-and-spoke handoffs | Route inquiries to specialist agents |
+| [Content Pipeline](/docs/agent/recipes/content-pipeline) | Sequential chain | Research, write, and edit content |
+| [Code Review](/docs/agent/recipes/code-review) | Parallel specialists | Analyze code from multiple angles |
+
+## Patterns Overview
+
+### Hub-and-Spoke (Customer Support)
+
+A coordinator agent routes requests to specialists based on intent:
+
+```
+                    ┌─────────────┐
+                    │   Triage    │
+                    │   Agent     │
+                    └──────┬──────┘
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+   │   Billing   │  │  Technical  │  │   General   │
+   │  Specialist │  │  Specialist │  │  Specialist │
+   └─────────────┘  └─────────────┘  └─────────────┘
+```
+
+### Sequential Chain (Content Pipeline)
+
+Agents process work in order, each building on the previous:
+
+```
+┌────────────┐     ┌────────────┐     ┌────────────┐
+│ Researcher │ ──► │   Writer   │ ──► │   Editor   │
+└────────────┘     └────────────┘     └────────────┘
+```
+
+### Parallel Specialists (Code Review)
+
+Multiple agents analyze the same input, then synthesize findings:
+
+```
+                    ┌─────────────┐
+                    │    Code     │
+                    │   Input     │
+                    └──────┬──────┘
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+   │  Analyzer   │  │  Security   │  │   Style     │
+   └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+          │                │                │
+          └────────────────┼────────────────┘
+                           ▼
+                    ┌─────────────┐
+                    │   Summary   │
+                    │    Agent    │
+                    └─────────────┘
+```
+
+## Choosing a Pattern
+
+| Pattern | Best For | Key Feature |
+|---------|----------|-------------|
+| Hub-and-spoke | Routing, classification, support | Dynamic handoffs |
+| Sequential | Pipelines, content creation | Each step builds on previous |
+| Parallel | Analysis, review, comparison | Multiple perspectives combined |
+
+## Using Recipes
+
+Each recipe provides:
+
+1. **Complete code** - Copy and run immediately
+2. **Architecture diagram** - Understand the agent relationships
+3. **Agent breakdown** - Purpose and configuration of each agent
+4. **How it works** - Step-by-step flow explanation
+5. **Customization** - How to adapt for your needs

@@ -1,0 +1,349 @@
+---
+title: Context Variables
+description: Type-safe state that flows through agent execution and across handoffs
+---
+
+Context variables provide a type-safe way to pass state through agent execution. Unlike prompt injection, context flows through the entire chain—across tool calls, handoffs, and lifecycle hooks.
+
+## What Are Context Variables?
+
+Context variables are typed state passed to `execute()` or `generate()`:
+
+```typescript
+type MyContext = {
+  userId: string;
+  sessionId: string;
+  results: string[];
+};
+
+const stream = execute(agent, messages, {
+  userId: 'user-123',
+  sessionId: 'session-456',
+  results: [],
+});
+```
+
+This context is available throughout execution:
+- In prompt functions
+- In tool execution via `experimental_context`
+- Across agent handoffs
+- In lifecycle hooks
+
+## Generic Types: CIn and COut
+
+The `Agent` class uses generics to type context:
+
+```typescript
+class Agent<Output, CIn, COut = CIn> { ... }
+```
+
+- `Output`: Structured output schema type
+- `CIn`: Context type the agent receives
+- `COut`: Context type the agent produces (defaults to `CIn`)
+
+Most agents use the same input and output context. Transformation agents might output different context:
+
+```typescript
+// Simple case: same context in and out
+const analyzer = agent<AnalysisOutput, MyContext>({
+  // ...
+});
+
+// Transform case: adds to context
+const enricher = agent<void, BaseContext, EnrichedContext>({
+  // Takes BaseContext, produces EnrichedContext
+});
+```
+
+## Using Context in Prompts
+
+The most common use is dynamic prompts:
+
+```typescript
+type Context = {
+  userId: string;
+  userPreferences: {
+    tone: 'formal' | 'casual';
+    language: string;
+  };
+};
+
+const assistant = agent<unknown, Context>({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: (ctx) => `
+    You are an assistant for user ${ctx.userId}.
+    Communicate in a ${ctx.userPreferences.tone} tone.
+    Respond in ${ctx.userPreferences.language}.
+  `,
+});
+
+execute(assistant, 'Hello', {
+  userId: 'user-123',
+  userPreferences: { tone: 'casual', language: 'English' },
+});
+```
+
+The function form runs each time the agent's instructions are needed, so context changes are reflected immediately.
+
+## Accessing Context in Tools
+
+Tools access context via `experimental_context` in their options:
+
+```typescript
+import { tool } from 'ai';
+import { toState } from '@deepagents/agent';
+
+type Context = {
+  userId: string;
+  accessLevel: 'admin' | 'user';
+};
+
+const sensitiveDataTool = tool({
+  description: 'Access sensitive data',
+  inputSchema: z.object({ dataId: z.string() }),
+  execute: async ({ dataId }, options) => {
+    const ctx = toState<Context>(options);
+
+    if (ctx.accessLevel !== 'admin') {
+      return 'Access denied: admin required';
+    }
+
+    return await fetchSensitiveData(dataId, ctx.userId);
+  },
+});
+```
+
+The `toState<T>()` helper provides type-safe access to the context.
+
+## Modifying Context
+
+Context is mutable during execution. Tools can update it:
+
+```typescript
+const collectResultsTool = tool({
+  description: 'Store a result',
+  inputSchema: z.object({ result: z.string() }),
+  execute: async ({ result }, options) => {
+    const ctx = toState<{ results: string[] }>(options);
+    ctx.results.push(result);
+    return 'Result stored';
+  },
+});
+```
+
+Modified context persists through the rest of execution and is available in the returned `state`:
+
+```typescript
+const stream = execute(agent, input, { results: [] });
+await stream.consumeStream();
+
+console.log(stream.state.results); // Contains collected results
+```
+
+## Context Flow Across Handoffs
+
+When an agent hands off to another, context flows automatically:
+
+```typescript
+type SharedContext = {
+  userId: string;
+  findings: string[];
+};
+
+const researcher = agent<unknown, SharedContext>({
+  name: 'Researcher',
+  prompt: (ctx) => `Research for user ${ctx.userId}...`,
+  tools: { /* ... */ },
+});
+
+const writer = agent<unknown, SharedContext>({
+  name: 'Writer',
+  prompt: (ctx) => `
+    Write based on findings: ${ctx.findings.join(', ')}
+  `,
+});
+
+const coordinator = agent<unknown, SharedContext>({
+  name: 'Coordinator',
+  prompt: (ctx) => `Coordinate research for ${ctx.userId}`,
+  handoffs: [researcher, writer],
+});
+
+// Single context flows through entire system
+execute(coordinator, 'Research AI trends', {
+  userId: 'user-123',
+  findings: [],
+});
+```
+
+When the coordinator transfers to the researcher, the researcher receives the same context. Any modifications the researcher makes are visible when control returns or transfers elsewhere.
+
+## Tracking Handoffs via Context
+
+The execution engine uses `currentActiveAgent` in context to track which agent is active:
+
+```typescript
+// Internal mechanism (simplified from swarm.ts)
+handoffTool: dynamicTool({
+  execute: async (_, options) => {
+    const state = toState(options);
+    state.currentActiveAgent = this.internalName;
+    return `Transfer successful to ${this.internalName}`;
+  },
+});
+```
+
+You can use this pattern for your own tracking:
+
+```typescript
+type TrackingContext = {
+  visitedAgents: string[];
+  currentAgent: string;
+};
+
+const trackingTool = tool({
+  description: 'Track agent visit',
+  inputSchema: z.object({}),
+  execute: async (_, options) => {
+    const ctx = toState<TrackingContext>(options);
+    ctx.visitedAgents.push(ctx.currentAgent);
+    return 'Visit logged';
+  },
+});
+```
+
+## Common Patterns
+
+### User Session
+
+```typescript
+type SessionContext = {
+  userId: string;
+  sessionId: string;
+  startedAt: Date;
+  messageCount: number;
+};
+
+const chatAgent = agent<unknown, SessionContext>({
+  prompt: (ctx) => `
+    User: ${ctx.userId}
+    Session: ${ctx.sessionId}
+    Messages so far: ${ctx.messageCount}
+  `,
+});
+```
+
+### Accumulating Results
+
+```typescript
+type PipelineContext = {
+  searchResults: SearchResult[];
+  analysisResults: Analysis[];
+  errors: string[];
+};
+
+// Each agent adds to its relevant field
+const searchAgent = agent<unknown, PipelineContext>({
+  tools: {
+    storeResult: tool({
+      execute: async ({ result }, options) => {
+        const ctx = toState<PipelineContext>(options);
+        ctx.searchResults.push(result);
+        return 'Stored';
+      },
+    }),
+  },
+});
+```
+
+### Configuration Passing
+
+```typescript
+type ConfigContext = {
+  maxResults: number;
+  outputFormat: 'json' | 'markdown';
+  verbose: boolean;
+};
+
+const configuredAgent = agent<unknown, ConfigContext>({
+  prompt: (ctx) => `
+    Return up to ${ctx.maxResults} results.
+    Format: ${ctx.outputFormat}
+    ${ctx.verbose ? 'Include detailed explanations.' : ''}
+  `,
+});
+```
+
+## Accessing Final Context
+
+After execution, access the final context via `state`:
+
+```typescript
+const result = await generate(agent, input, initialContext);
+console.log(result.state); // Final context after all modifications
+
+// Or with streaming
+const stream = execute(agent, input, initialContext);
+await stream.consumeStream();
+console.log(stream.state);
+```
+
+## Real-World Example
+
+From `finanicals_bot.ts`:
+
+```typescript
+type Ctx = {
+  plan?: FinancialSearchPlan;
+  searchResults?: string[];
+  report?: FinancialReportData;
+  verification?: VerificationResult;
+};
+
+// Each stage writes to context
+progress.add({
+  title: 'Planning searches',
+  task: async (ctx, task) => {
+    const { experimental_output: plan } = await generate(
+      plannerAgent,
+      `Query: ${query}`,
+      {}
+    );
+    ctx.plan = plan;  // Store in context
+  },
+});
+
+progress.add({
+  title: 'Searching',
+  task: async (ctx) => {
+    // Use ctx.plan from previous stage
+    ctx.searchResults = await Promise.all(
+      ctx.plan!.searches.map(/* ... */)
+    );
+  },
+});
+
+progress.add({
+  title: 'Writing report',
+  task: async (ctx) => {
+    // Use ctx.searchResults from previous stage
+    const { experimental_output: report } = await generate(
+      writerAgent,
+      `Results: ${ctx.searchResults}`,
+      {}
+    );
+    ctx.report = report;
+  },
+});
+
+// Final context has everything
+const finalCtx = await progress.run();
+console.log(finalCtx.report);
+```
+
+## Next Steps
+
+- [Instructions](/docs/agent/instructions) - Using context in prompts
+- [Tools](/docs/agent/tools) - Accessing context in tool execution
+- [Handoffs](/docs/agent/handoffs) - Context flow across agents

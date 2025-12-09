@@ -1,0 +1,418 @@
+---
+title: Code Review Recipe
+description: Parallel specialists that analyze code from multiple angles and synthesize findings
+---
+
+Build a code review system where multiple specialist agents analyze code in parallel—checking logic, security, and style—then a summary agent combines their findings.
+
+## Architecture
+
+```
+                         Code Input
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+   │   Logic     │     │  Security   │     │   Style     │
+   │  Analyzer   │     │  Reviewer   │     │  Checker    │
+   └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+          │                   │                   │
+          └───────────────────┼───────────────────┘
+                              ▼
+                       ┌─────────────┐
+                       │   Summary   │
+                       │    Agent    │
+                       └─────────────┘
+                              │
+                              ▼
+                        Final Review
+```
+
+## Quick Start
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Schema for individual review findings
+const FindingsSchema = z.object({
+  issues: z.array(z.object({
+    severity: z.enum(['critical', 'warning', 'suggestion']),
+    line: z.number().optional(),
+    description: z.string(),
+    suggestion: z.string().optional(),
+  })),
+  score: z.number().min(0).max(100),
+  summary: z.string(),
+});
+
+// Schema for final review
+const ReviewSchema = z.object({
+  overallScore: z.number().min(0).max(100),
+  summary: z.string(),
+  criticalIssues: z.array(z.string()),
+  recommendations: z.array(z.string()),
+  approved: z.boolean(),
+});
+
+// Logic analyzer checks correctness and algorithms
+const logicAnalyzer = agent({
+  name: 'LogicAnalyzer',
+  model: groq('gpt-oss-20b'),
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: [
+      'You analyze code for logical correctness.',
+      'Focus on algorithms, edge cases, and potential bugs.',
+    ],
+    routine: [
+      'Read the code carefully',
+      'Check for logical errors and edge cases',
+      'Verify error handling',
+      'Assess algorithm efficiency',
+      'Score from 0-100 based on correctness',
+    ],
+  }),
+});
+
+// Security reviewer checks for vulnerabilities
+const securityReviewer = agent({
+  name: 'SecurityReviewer',
+  model: groq('gpt-oss-20b'),
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: [
+      'You review code for security vulnerabilities.',
+      'Focus on OWASP top 10, input validation, and data exposure.',
+    ],
+    routine: [
+      'Check for injection vulnerabilities',
+      'Review authentication and authorization',
+      'Look for sensitive data exposure',
+      'Verify input validation',
+      'Score from 0-100 based on security',
+    ],
+  }),
+});
+
+// Style checker reviews code quality
+const styleChecker = agent({
+  name: 'StyleChecker',
+  model: groq('gpt-oss-20b'),
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: [
+      'You review code for style and maintainability.',
+      'Focus on readability, naming, and best practices.',
+    ],
+    routine: [
+      'Check naming conventions',
+      'Review code structure and organization',
+      'Assess documentation and comments',
+      'Look for code smells',
+      'Score from 0-100 based on quality',
+    ],
+  }),
+});
+
+// Summary agent combines all findings
+const summaryAgent = agent({
+  name: 'SummaryAgent',
+  model: groq('gpt-oss-20b'),
+  output: ReviewSchema,
+  prompt: instructions({
+    purpose: [
+      'You synthesize code review findings into a final report.',
+      'Prioritize critical issues and provide actionable recommendations.',
+    ],
+    routine: [
+      'Review all specialist findings',
+      'Calculate overall score (weighted average)',
+      'Highlight critical issues',
+      'Provide prioritized recommendations',
+      'Decide if code should be approved',
+    ],
+  }),
+});
+
+// Run the code review
+async function reviewCode(code: string) {
+  // Run specialists in parallel
+  const [logic, security, style] = await Promise.all([
+    generate(logicAnalyzer, `Review this code:\n\`\`\`\n${code}\n\`\`\``, {}),
+    generate(securityReviewer, `Review this code:\n\`\`\`\n${code}\n\`\`\``, {}),
+    generate(styleChecker, `Review this code:\n\`\`\`\n${code}\n\`\`\``, {}),
+  ]);
+
+  // Synthesize findings
+  const findings = {
+    logic: logic.experimental_output,
+    security: security.experimental_output,
+    style: style.experimental_output,
+  };
+
+  const { experimental_output: review } = await generate(
+    summaryAgent,
+    `Synthesize these code review findings:\n${JSON.stringify(findings, null, 2)}`,
+    {}
+  );
+
+  return review;
+}
+
+// Usage
+const code = `
+function processUserInput(input) {
+  const query = "SELECT * FROM users WHERE id = " + input;
+  return database.execute(query);
+}
+`;
+
+const review = await reviewCode(code);
+console.log('Approved:', review.approved);
+console.log('Score:', review.overallScore);
+console.log('Critical Issues:', review.criticalIssues);
+```
+
+## Agent Breakdown
+
+### Logic Analyzer
+
+Focuses on correctness and edge cases:
+
+```typescript
+const logicAnalyzer = agent({
+  name: 'LogicAnalyzer',
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: ['You analyze code for logical correctness.'],
+    routine: [
+      'Check for logical errors and edge cases',
+      'Verify error handling',
+      'Assess algorithm efficiency',
+    ],
+  }),
+});
+```
+
+**Catches:** Off-by-one errors, null checks, race conditions, infinite loops
+
+### Security Reviewer
+
+Focuses on vulnerabilities:
+
+```typescript
+const securityReviewer = agent({
+  name: 'SecurityReviewer',
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: ['You review code for security vulnerabilities.'],
+    routine: [
+      'Check for injection vulnerabilities',
+      'Review authentication and authorization',
+      'Look for sensitive data exposure',
+    ],
+  }),
+});
+```
+
+**Catches:** SQL injection, XSS, hardcoded secrets, insecure defaults
+
+### Style Checker
+
+Focuses on maintainability:
+
+```typescript
+const styleChecker = agent({
+  name: 'StyleChecker',
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: ['You review code for style and maintainability.'],
+    routine: [
+      'Check naming conventions',
+      'Assess documentation and comments',
+      'Look for code smells',
+    ],
+  }),
+});
+```
+
+**Catches:** Poor naming, missing docs, duplicated code, complexity
+
+### Summary Agent
+
+Combines findings into actionable review:
+
+```typescript
+const summaryAgent = agent({
+  name: 'SummaryAgent',
+  output: ReviewSchema,
+  // Weights scores: security (40%) > logic (35%) > style (25%)
+});
+```
+
+## How It Works
+
+1. **Parallel analysis** → All specialists review the same code simultaneously
+2. **Independent findings** → Each produces structured findings with scores
+3. **Synthesis** → Summary agent combines findings, prioritizes issues
+4. **Decision** → Final approval recommendation based on weighted score
+
+The parallel execution makes this efficient even for thorough reviews.
+
+## With Context Variables
+
+Pass repository-specific context:
+
+```typescript
+type ReviewContext = {
+  language: 'typescript' | 'python' | 'go' | 'java';
+  framework?: string;
+  strictness: 'lenient' | 'standard' | 'strict';
+  focusAreas?: string[];
+};
+
+const securityReviewer = agent<typeof FindingsSchema, ReviewContext>({
+  name: 'SecurityReviewer',
+  model: groq('gpt-oss-20b'),
+  output: FindingsSchema,
+  prompt: (ctx) => instructions({
+    purpose: [
+      `You review ${ctx.language} code for security.`,
+      ctx.framework ? `This uses the ${ctx.framework} framework.` : '',
+      ctx.strictness === 'strict'
+        ? 'Apply the strictest security standards.'
+        : 'Apply standard security checks.',
+    ],
+    routine: [
+      'Check for injection vulnerabilities',
+      'Review authentication patterns',
+      ...(ctx.focusAreas || []).map((a) => `Focus on: ${a}`),
+    ],
+  }),
+});
+
+// Run with context
+const review = await reviewCode(code, {
+  language: 'typescript',
+  framework: 'express',
+  strictness: 'strict',
+  focusAreas: ['input validation', 'authentication'],
+});
+```
+
+## Customization
+
+### Add a performance analyzer
+
+```typescript
+const PerformanceSchema = z.object({
+  issues: z.array(z.object({
+    severity: z.enum(['critical', 'warning', 'suggestion']),
+    description: z.string(),
+    impact: z.string(),
+    suggestion: z.string(),
+  })),
+  score: z.number().min(0).max(100),
+  bigOAnalysis: z.string().optional(),
+});
+
+const performanceAnalyzer = agent({
+  name: 'PerformanceAnalyzer',
+  model: groq('gpt-oss-20b'),
+  output: PerformanceSchema,
+  prompt: instructions({
+    purpose: ['You analyze code for performance issues.'],
+    routine: [
+      'Identify performance bottlenecks',
+      'Check for unnecessary operations',
+      'Analyze algorithmic complexity',
+      'Suggest optimizations',
+    ],
+  }),
+});
+
+// Add to parallel execution
+const [logic, security, style, performance] = await Promise.all([
+  generate(logicAnalyzer, codePrompt, {}),
+  generate(securityReviewer, codePrompt, {}),
+  generate(styleChecker, codePrompt, {}),
+  generate(performanceAnalyzer, codePrompt, {}),  // Added
+]);
+```
+
+### Add test coverage analysis
+
+```typescript
+const TestCoverageSchema = z.object({
+  missingTests: z.array(z.object({
+    function: z.string(),
+    scenario: z.string(),
+    priority: z.enum(['high', 'medium', 'low']),
+  })),
+  suggestedTests: z.array(z.string()),
+  coverageEstimate: z.number().min(0).max(100),
+});
+
+const testAnalyzer = agent({
+  name: 'TestAnalyzer',
+  model: groq('gpt-oss-20b'),
+  output: TestCoverageSchema,
+  prompt: instructions({
+    purpose: ['You identify missing test coverage.'],
+    routine: [
+      'Identify untested code paths',
+      'Suggest test cases for edge cases',
+      'Prioritize tests by risk',
+    ],
+  }),
+});
+```
+
+### Language-specific reviewers
+
+```typescript
+const typescriptReviewer = agent({
+  name: 'TypeScriptReviewer',
+  model: groq('gpt-oss-20b'),
+  output: FindingsSchema,
+  prompt: instructions({
+    purpose: ['You review TypeScript-specific patterns.'],
+    routine: [
+      'Check type safety and inference',
+      'Review generic usage',
+      'Verify proper null handling',
+      'Check for any/unknown abuse',
+    ],
+  }),
+});
+```
+
+### Weighted scoring
+
+```typescript
+async function calculateScore(findings: {
+  logic: typeof FindingsSchema._type;
+  security: typeof FindingsSchema._type;
+  style: typeof FindingsSchema._type;
+}) {
+  const weights = {
+    security: 0.4,  // 40%
+    logic: 0.35,    // 35%
+    style: 0.25,    // 25%
+  };
+
+  return Math.round(
+    findings.security.score * weights.security +
+    findings.logic.score * weights.logic +
+    findings.style.score * weights.style
+  );
+}
+```
+
+## Next Steps
+
+- [Structured Output](/docs/agent/structured-output) - Defining review schemas
+- [Execution Model](/docs/agent/execution-model) - Parallel vs sequential execution
+- [Customer Support](/docs/agent/recipes/customer-support) - Hub-and-spoke pattern

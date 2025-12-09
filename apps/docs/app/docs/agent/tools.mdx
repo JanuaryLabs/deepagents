@@ -1,0 +1,773 @@
+---
+title: Tools
+description: Equipping agents with capabilities to interact with external systems and perform actions
+---
+
+## Understanding Tools
+
+In the AI SDK, a tool is a function that the language model can call during generation. The model identifies when to use a tool, constructs the appropriate arguments based on the tool's schema, and the system executes the tool and returns results to the model for further processing.
+
+This architecture enables agents to:
+
+- Access real-time information through web search
+- Perform computations and data transformations
+- Interact with external APIs and databases
+- Delegate tasks to specialized sub-agents
+- Maintain state and persistence
+
+## Defining Tools with AI SDK
+
+The AI SDK provides the `tool()` function to create tools with strongly typed schemas:
+
+```typescript
+import { tool } from 'ai';
+import z from 'zod';
+
+const weatherTool = tool({
+  description: 'Get current weather for a location',
+  inputSchema: z.object({
+    location: z.string().describe('City name or zip code'),
+    units: z.enum(['celsius', 'fahrenheit']).optional(),
+  }),
+  execute: async ({ location, units = 'celsius' }) => {
+    // Fetch weather data from API
+    const data = await fetchWeather(location, units);
+    return {
+      temperature: data.temp,
+      conditions: data.conditions,
+      humidity: data.humidity,
+    };
+  },
+});
+```
+
+The tool definition consists of three key parts:
+
+1. **description**: Helps the model understand when and how to use the tool
+2. **inputSchema**: A Zod schema defining the tool's parameters and their validation rules
+3. **execute**: The async function that performs the actual work
+
+## The ToolSet Type
+
+In the @deepagents/agent package, tools are organized into a `ToolSet`, which is simply a record mapping tool names to tool definitions:
+
+```typescript
+import { type ToolSet } from 'ai';
+
+const tools: ToolSet = {
+  search: searchTool,
+  calculate: calculatorTool,
+  save_file: fileSaverTool,
+};
+```
+
+When creating an agent, you pass this toolset to the `tools` field:
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+
+const researchAgent = agent({
+  name: 'Researcher',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: instructions({
+    purpose: 'You research topics using web search and synthesize findings.',
+    routine: [
+      'Use search tools to gather information',
+      'Analyze and validate sources',
+      'Provide comprehensive summaries',
+    ],
+  }),
+  tools: {
+    search: searchTool,
+    verify: verificationTool,
+  },
+});
+```
+
+## Provider-Supplied Tools
+
+Many AI providers offer built-in tools that integrate seamlessly with their models. These provider tools typically offer superior performance because they're optimized for the specific model architecture.
+
+### OpenAI Web Search
+
+OpenAI provides a web search tool that integrates with models like GPT-4:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { agent, instructions } from '@deepagents/agent';
+
+const research = agent({
+  name: 'ResearchAgent',
+  model: openai('gpt-4'),
+  prompt: instructions({
+    purpose: [
+      'You search the web and produce concise summaries.',
+      'Focus on capturing main points without fluff.',
+    ],
+    routine: [
+      'Use web_search to find current information',
+      'Summarize key findings succinctly',
+    ],
+  }),
+  tools: {
+    web_search: (openai as any).tools.webSearch({
+      searchContextSize: 'low', // 'low', 'medium', or 'high'
+    }),
+  },
+});
+```
+
+The `searchContextSize` parameter controls how much context the search returns:
+- `'low'`: Quick searches with minimal context
+- `'medium'`: Balanced detail
+- `'high'`: Maximum context for comprehensive research
+
+### Groq Browser Search
+
+Groq provides browser search capabilities for its models:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { agent, instructions } from '@deepagents/agent';
+
+const executor = agent({
+  name: 'ExecutorAgent',
+  model: groq('openai/gpt-oss-120b'),
+  prompt: instructions({
+    purpose: 'You execute tasks and find current information.',
+    routine: [
+      'Use browser_search for real-time data',
+      'Provide accurate, detailed results',
+    ],
+  }),
+  tools: {
+    browser_search: (groq as any).tools.browserSearch({}),
+  },
+});
+```
+
+## Tool Choice Strategy
+
+The `toolChoice` parameter controls how aggressively the model should use tools:
+
+```typescript
+type ToolChoice<T extends Record<string, any>> =
+  | 'auto' // Let the model decide (default)
+  | 'none' // Never use tools
+  | 'required' // Must use at least one tool
+  | { type: 'tool'; toolName: keyof T }; // Force specific tool
+```
+
+### Auto Mode
+
+The default behavior. The model decides whether to use tools based on the task:
+
+```typescript
+const agent = agent({
+  name: 'Assistant',
+  model: groq('openai/gpt-oss-20b'),
+  toolChoice: 'auto', // or omit—auto is default
+  prompt: 'You are a helpful assistant.',
+  tools: { search: searchTool },
+});
+```
+
+### Required Mode
+
+Forces the model to use at least one tool before responding:
+
+```typescript
+const searchAgent = agent({
+  name: 'SearchAgent',
+  model: groq('openai/gpt-oss-20b'),
+  toolChoice: 'required',
+  prompt: 'You must search before answering.',
+  tools: { browser_search: (groq as any).tools.browserSearch({}) },
+});
+```
+
+### Specific Tool
+
+Forces the model to use a particular tool:
+
+```typescript
+import { writeFile } from 'node:fs/promises';
+import { tool } from 'ai';
+import z from 'zod';
+
+const svgGenerator = agent({
+  name: 'SVGGenerator',
+  model: groq('qwen/qwen3-32b'),
+  toolChoice: { type: 'tool', toolName: 'save_svg' },
+  prompt: 'Generate animated SVG graphics.',
+  tools: {
+    save_svg: tool({
+      description: 'Saves generated SVG content to a file.',
+      inputSchema: z.object({
+        filename: z.string(),
+        content: z.string().describe('The SVG content to save'),
+      }),
+      async execute({ filename, content }) {
+        await writeFile(filename, content, 'utf-8');
+        return { success: true, message: `Saved as ${filename}` };
+      },
+    }),
+  },
+});
+```
+
+### None Mode
+
+Disables all tool usage, making the agent rely purely on its knowledge:
+
+```typescript
+const knowledgeAgent = agent({
+  name: 'KnowledgeBot',
+  model: groq('openai/gpt-oss-20b'),
+  toolChoice: 'none',
+  prompt: 'Answer questions using only your training data.',
+  tools: {}, // Tools ignored even if provided
+});
+```
+
+## Converting Agents to Tools
+
+One of the most powerful patterns in @deepagents/agent is the ability to convert agents into tools, enabling sophisticated hierarchical architectures where agents delegate to specialized sub-agents.
+
+### Agent.asTool()
+
+The `asTool()` method converts an agent into a tool that can be used by other agents:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Create a specialized analyst agent
+const riskAgent = agent({
+  name: 'RiskAnalystAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: z.object({
+    summary: z.string().describe('Risk analysis summary'),
+  }),
+  prompt: instructions({
+    purpose: [
+      "You analyze potential red flags in company outlooks.",
+      'Focus on competitive threats, regulatory issues, and risks.',
+    ],
+    routine: ['Keep analysis under 2 paragraphs.'],
+  }),
+});
+
+// Convert to tool with custom description
+const riskTool = riskAgent.asTool({
+  toolDescription: 'Use to get a short write-up of potential red flags',
+  outputExtractor: async (result) => {
+    // Extract just the summary field from structured output
+    return result.experimental_output.summary;
+  },
+});
+```
+
+The `asTool()` method accepts an optional configuration object:
+
+```typescript
+interface AsToolOptions {
+  toolDescription?: string; // Override the agent's handoffDescription
+  outputExtractor?: (result: GenerateTextResult) => string | Promise<string>;
+}
+```
+
+The **outputExtractor** is particularly useful when your agent produces structured output but you want the tool to return a specific field:
+
+```typescript
+const financialsAgent = agent({
+  name: 'FundamentalsAnalyst',
+  model: groq('openai/gpt-oss-20b'),
+  output: z.object({
+    summary: z.string(),
+    metrics: z.array(z.string()),
+  }),
+  prompt: instructions({
+    purpose: 'Analyze financial fundamentals.',
+    routine: ['Pull out key metrics and quotes.'],
+  }),
+});
+
+// Extract only the summary for tool consumers
+const fundamentalsTool = financialsAgent.asTool({
+  toolDescription: 'Get financial metrics analysis',
+  outputExtractor: async (result) => result.experimental_output.summary,
+});
+```
+
+### Using Agent Tools
+
+Once converted, agent tools can be composed into parent agents:
+
+```typescript
+const writerAgent = agent({
+  name: 'FinancialWriterAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: z.object({
+    short_summary: z.string(),
+    markdown_report: z.string(),
+  }),
+  prompt: instructions({
+    purpose: [
+      'You synthesize financial research into long-form reports.',
+      'Use specialist analysis tools to incorporate expert write-ups.',
+    ],
+    routine: [
+      'Call fundamentals_analysis for financial metrics',
+      'Call risk_analysis for risk assessment',
+      'Synthesize findings into comprehensive report',
+    ],
+  }),
+  tools: {
+    fundamentals_analysis: fundamentalsTool,
+    risk_analysis: riskTool,
+  },
+});
+```
+
+When the writer agent runs, it can invoke the specialist agents as tools, and their outputs are seamlessly integrated into the conversation flow.
+
+### Agent.toTool()
+
+The `toTool()` method returns a single-entry toolset with the agent's handoff tool name:
+
+```typescript
+const analyst = agent({
+  name: 'DataAnalyst',
+  model: groq('openai/gpt-oss-20b'),
+  handoffDescription: 'Analyzes datasets and produces insights',
+  prompt: 'You are a data analyst.',
+});
+
+// Returns: { transfer_to_data_analyst: Tool }
+const toolset = analyst.toTool();
+```
+
+This is primarily used internally for handoff mechanics but can be useful when you need the tool with its canonical transfer name.
+
+### Agent.toToolset()
+
+The `toToolset()` method collects all tools from an agent and its handoff graph:
+
+```typescript
+const supervisor = agent({
+  name: 'Supervisor',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: 'You coordinate specialized agents.',
+  handoffs: [analystAgent, researcherAgent, writerAgent],
+  tools: {
+    calculate: calculatorTool,
+  },
+});
+
+// Returns all tools including:
+// - calculate (agent's own tool)
+// - transfer_to_analyst, transfer_to_researcher, transfer_to_writer (handoff tools)
+// - Any tools from nested handoffs
+const allTools = supervisor.toToolset();
+```
+
+The `toToolset()` method accepts options to control what's included:
+
+```typescript
+interface ToToolsetOptions {
+  includeTransferTool?: boolean; // Include handoff transfer tools (default: true)
+  includeHandoffs?: boolean; // Include the agent's own handoff tool (default: true)
+}
+
+// Get only functional tools, exclude transfer mechanics
+const functionalTools = agent.toToolset({
+  includeTransferTool: false,
+  includeHandoffs: false,
+});
+```
+
+## Tool Execution and Results
+
+When a model invokes a tool, the execution flow follows these steps:
+
+1. **Model identifies need**: Based on the prompt and context, the model determines a tool is needed
+2. **Tool call construction**: The model generates a tool call with arguments matching the input schema
+3. **Validation**: Arguments are validated against the Zod schema
+4. **Execution**: The tool's `execute` function runs with validated arguments
+5. **Result handling**: The return value is serialized and passed back to the model
+6. **Continuation**: The model processes the result and continues generation
+
+### Tool Execution Context
+
+Tools receive additional context through the execution options:
+
+```typescript
+const myTool = tool({
+  description: 'Example tool with context',
+  inputSchema: z.object({ query: z.string() }),
+  execute: async ({ query }, options) => {
+    // Access abort signal for cancellation
+    if (options.abortSignal?.aborted) {
+      throw new Error('Operation cancelled');
+    }
+
+    // Access experimental context for state sharing
+    const state = options.experimental_context;
+
+    // Perform work
+    return await processQuery(query);
+  },
+});
+```
+
+### Tool Results in Agent Context
+
+When agents use tools, the results are automatically integrated into the message history. The agent can reference tool outputs in subsequent reasoning:
+
+```typescript
+const researcher = agent({
+  name: 'Researcher',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: instructions({
+    purpose: 'Research topics and analyze findings.',
+    routine: [
+      'Search for relevant information',
+      'Analyze search results',
+      'Synthesize comprehensive answer',
+    ],
+  }),
+  tools: {
+    search: searchTool,
+  },
+});
+
+// The agent will:
+// 1. Decide to call search tool
+// 2. Receive search results
+// 3. Use those results to formulate final answer
+const result = await execute(researcher, 'What is quantum computing?', {});
+const answer = await result.text;
+```
+
+## Tools vs. Handoffs
+
+It's important to understand the distinction between tools and handoffs, as they serve different architectural purposes:
+
+### Tools
+
+Tools are capabilities within an agent's scope of work. They extend what an agent can do without changing who is in control:
+
+- **Purpose**: Extend agent capabilities
+- **Control flow**: Agent maintains control, tool executes and returns
+- **Use case**: Web search, calculations, file I/O, API calls
+- **Visibility**: Tool results appear in the agent's message history
+
+```typescript
+const agent = agent({
+  name: 'Assistant',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: 'You help users with research.',
+  tools: {
+    search: searchTool, // Capability the agent can use
+    calculate: calculatorTool, // Another capability
+  },
+});
+```
+
+### Handoffs
+
+Handoffs transfer control from one agent to another. They represent delegation to a specialist:
+
+- **Purpose**: Delegate to specialized agents
+- **Control flow**: Control transfers to different agent
+- **Use case**: Task requires different expertise or context
+- **Visibility**: Handoff appears as special transfer tool call
+
+```typescript
+const supervisor = agent({
+  name: 'Supervisor',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: 'You coordinate specialists.',
+  handoffs: [analystAgent, writerAgent], // Different agents to delegate to
+  tools: {
+    search: searchTool, // Still has own tools
+  },
+});
+```
+
+When a handoff occurs, the receiving agent takes over with its own prompt, model, and toolset. The original agent's context is preserved but control has transferred.
+
+### Combining Both
+
+Real systems often use both tools and handoffs in concert:
+
+```typescript
+const system = agent({
+  name: 'MainAgent',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: instructions({
+    purpose: 'You orchestrate research and writing tasks.',
+    routine: [
+      'Use search for quick fact-checking',
+      'Transfer to researcher for deep research',
+      'Transfer to writer for long-form content',
+    ],
+  }),
+  handoffs: [researcherAgent, writerAgent], // Specialists
+  tools: {
+    search: searchTool, // Own capabilities
+    save: fileSaverTool,
+  },
+});
+```
+
+## Complete Example: Financial Analysis System
+
+Here's a comprehensive example showing all tool patterns working together:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { agent, instructions } from '@deepagents/agent';
+import z from 'zod';
+
+// Schemas for structured output
+const AnalysisSummarySchema = z.object({
+  summary: z.string().describe('Short analysis summary'),
+});
+
+const FinancialReportSchema = z.object({
+  short_summary: z.string().describe('Executive summary'),
+  markdown_report: z.string().describe('Full markdown report'),
+  follow_up_questions: z.array(z.string()),
+});
+
+// Output extractor for specialist agents
+const summaryExtractor = async (result) => {
+  return result.experimental_output.summary;
+};
+
+// Specialist: Risk analysis
+const riskAgent = agent({
+  name: 'RiskAnalystAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      "You identify red flags in company outlooks.",
+      'Focus on competitive threats, regulatory issues, risks.',
+    ],
+    routine: ['Keep analysis under 2 paragraphs.'],
+  }),
+});
+
+// Specialist: Financial fundamentals
+const financialsAgent = agent({
+  name: 'FundamentalsAnalystAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      'You analyze company fundamentals.',
+      'Focus on revenue, profit, margins, growth.',
+    ],
+    routine: ['Pull out key metrics.', 'Keep under 2 paragraphs.'],
+  }),
+});
+
+// Worker: Search agent
+const searchAgent = agent({
+  name: 'FinancialSearchAgent',
+  model: groq('openai/gpt-oss-20b'),
+  toolChoice: 'required',
+  prompt: instructions({
+    purpose: [
+      'You research financial topics.',
+      'Produce short summaries of key findings.',
+    ],
+    routine: ['Focus on numbers, events, quotes.'],
+  }),
+  tools: {
+    browser_search: (groq as any).tools.browserSearch({}),
+  },
+});
+
+// Synthesizer: Report writer
+const writerAgent = agent({
+  name: 'FinancialWriterAgent',
+  model: groq('openai/gpt-oss-20b'),
+  output: FinancialReportSchema,
+  prompt: instructions({
+    purpose: [
+      'You synthesize research into comprehensive reports.',
+      'Include executive summary and follow-up questions.',
+    ],
+    routine: [
+      'Call fundamentals_analysis for metrics',
+      'Call risk_analysis for red flags',
+      'Synthesize into long-form markdown',
+    ],
+  }),
+  tools: {
+    fundamentals_analysis: financialsAgent.asTool({
+      toolDescription: 'Get financial metrics write-up',
+      outputExtractor: summaryExtractor,
+    }),
+    risk_analysis: riskAgent.asTool({
+      toolDescription: 'Get risk assessment write-up',
+      outputExtractor: summaryExtractor,
+    }),
+  },
+});
+
+// Example usage
+import { generate } from '@deepagents/agent';
+
+async function analyzeCompany(query: string) {
+  // First, search for information
+  const searchResult = await execute(
+    searchAgent,
+    `Search financial information for: ${query}`,
+    {},
+  );
+  const searchData = await searchResult.text;
+
+  // Then, generate comprehensive report
+  const { experimental_output: report } = await generate(
+    writerAgent,
+    `Query: ${query}\nResearch: ${searchData}`,
+    {},
+  );
+
+  console.log('Executive Summary:', report.short_summary);
+  console.log('\nFull Report:\n', report.markdown_report);
+  console.log('\nFollow-up Questions:', report.follow_up_questions);
+
+  return report;
+}
+```
+
+This example demonstrates:
+
+1. **Provider tools**: `browser_search` from Groq
+2. **Tool choice**: `required` mode for search agent
+3. **Agent tools**: Converting specialist agents to tools
+4. **Output extractors**: Customizing tool return values
+5. **Structured output**: Using Zod schemas for type safety
+6. **Composition**: Building complex systems from simple agents
+
+## Best Practices
+
+### Design Clear Tool Interfaces
+
+Tools should have single, well-defined purposes:
+
+```typescript
+// Good: Specific, clear purpose
+const searchTool = tool({
+  description: 'Search the web for current information on a topic',
+  inputSchema: z.object({
+    query: z.string().describe('Search query'),
+  }),
+  execute: async ({ query }) => await searchWeb(query),
+});
+
+// Avoid: Too generic, unclear purpose
+const doStuffTool = tool({
+  description: 'Do various things',
+  inputSchema: z.object({
+    action: z.string(),
+    params: z.any(),
+  }),
+  execute: async ({ action, params }) => {
+    // Branching logic makes model's job harder
+  },
+});
+```
+
+### Use Descriptions Effectively
+
+Descriptions help models understand when and how to use tools:
+
+```typescript
+const tool = tool({
+  description: [
+    'Get current weather conditions for a location.',
+    'Use this when users ask about weather, temperature, or conditions.',
+    'Returns temperature, conditions, and humidity.',
+  ].join(' '),
+  inputSchema: z.object({
+    location: z.string().describe('City name, zip code, or coordinates'),
+  }),
+  execute: async ({ location }) => await getWeather(location),
+});
+```
+
+### Handle Errors Gracefully
+
+Tools should handle errors and return meaningful messages:
+
+```typescript
+const apiTool = tool({
+  description: 'Fetch data from external API',
+  inputSchema: z.object({ endpoint: z.string() }),
+  execute: async ({ endpoint }) => {
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        return {
+          error: true,
+          message: `API returned ${response.status}: ${response.statusText}`,
+        };
+      }
+      return await response.json();
+    } catch (error) {
+      return {
+        error: true,
+        message: `Failed to fetch: ${error.message}`,
+      };
+    }
+  },
+});
+```
+
+### Choose the Right Tool Strategy
+
+Consider whether functionality belongs in a tool or a handoff:
+
+- **Tool**: Stateless operation, quick execution, extends current agent's capabilities
+- **Handoff**: Requires different expertise, complex multi-step process, needs different context
+
+### Optimize Agent Tools
+
+When using `asTool()`, consider the performance implications:
+
+```typescript
+// Expensive: Full agent execution for simple task
+const overkillTool = complexAgent.asTool();
+
+// Better: Dedicated tool for simple operations
+const simpleTool = tool({
+  description: 'Simple calculation',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  execute: async ({ a, b }) => a + b,
+});
+```
+
+Use agent tools when the task genuinely benefits from LLM reasoning, not for deterministic operations.
+
+## Summary
+
+Tools are the interface between agents and the external world. The @deepagents/agent package provides a rich toolkit for defining tools, composing them into agents, and even converting agents themselves into tools for hierarchical architectures.
+
+Key takeaways:
+
+- Tools extend agent capabilities beyond text generation
+- The AI SDK's `tool()` function provides strongly typed tool definitions
+- Provider tools like `openai.tools.webSearch` offer optimized integrations
+- `toolChoice` controls how aggressively agents use tools
+- `Agent.asTool()` enables powerful hierarchical agent patterns
+- Tools and handoffs serve different purposes in agent architecture
+
+For more details on agent handoffs and multi-agent coordination, see the [Handoffs documentation](/docs/agent/handoffs).

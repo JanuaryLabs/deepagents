@@ -1,0 +1,385 @@
+---
+title: Instructions
+description: Crafting effective prompts with the instructions helper and prompt engineering patterns
+---
+
+## Three Forms of Instructions
+
+### String
+
+The simplest form:
+
+```typescript
+const agent = agent({
+  prompt: 'You are a helpful assistant that answers questions clearly.',
+  // ...
+});
+```
+
+### Array
+
+For multi-line prompts:
+
+```typescript
+const agent = agent({
+  prompt: [
+    'You are a senior code reviewer.',
+    'Focus on code quality, security, and best practices.',
+    'Be constructive in your feedback.',
+  ],
+  // ...
+});
+```
+
+Arrays are joined with newlines.
+
+### Function
+
+For dynamic prompts using context:
+
+```typescript
+const agent = agent<unknown, { userName: string }>({
+  prompt: (ctx) => `
+    You are helping ${ctx.userName}.
+    Respond in a friendly tone.
+  `,
+  // ...
+});
+```
+
+Functions run each time the agent's instructions are needed, so context changes are reflected immediately.
+
+## The `instructions()` Helper
+
+The `instructions()` helper structures prompts with purpose and routine:
+
+```typescript
+import { instructions } from '@deepagents/agent';
+
+const analyst = agent({
+  prompt: instructions({
+    purpose: ['You analyze financial data and identify trends.'],
+    routine: [
+      'Examine the provided data carefully',
+      'Identify key metrics and patterns',
+      'Summarize findings clearly',
+    ],
+  }),
+  // ...
+});
+```
+
+This generates:
+
+```
+# Agent Context
+You analyze financial data and identify trends.
+
+<specialized_agents_placeholder>
+
+Use the following routine to fulfill the task.
+# Routine
+1. Examine the provided data carefully
+2. Identify key metrics and patterns
+3. Summarize findings clearly
+```
+
+### Why Purpose and Routine?
+
+This structure helps the model understand:
+
+- **Purpose**: What this agent is (identity, role, capabilities)
+- **Routine**: How to approach tasks (step-by-step process)
+
+Separating these makes prompts clearer and more maintainable.
+
+### The Specialized Agents Placeholder
+
+When an agent has handoffs, the `<specialized_agents_placeholder>` is replaced with a table:
+
+```markdown
+## Specialized Agents
+
+| Agent Name | Agent Description |
+| --- | --- |
+| researcher | Use for researching topics using web search |
+| writer | Use for writing and drafting content |
+```
+
+This helps the model understand which specialists are available.
+
+## Instruction Variants
+
+### `instructions.swarm()`
+
+Adds the recommended multi-agent system prefix:
+
+```typescript
+const agent = agent({
+  prompt: instructions.swarm({
+    purpose: ['You coordinate research tasks.'],
+    routine: ['Delegate to specialists as needed'],
+  }),
+});
+```
+
+The prefix explains:
+
+```
+# System context
+You are part of a multi-agent system called the DeepAgents SDK...
+Agents uses two primary abstraction: **Agents** and **Handoffs**.
+Handoffs are achieved by calling a handoff function, generally named
+`transfer_to_<agent_name>`.
+```
+
+### `instructions.supervisor()`
+
+For supervisor agents that coordinate specialists:
+
+```typescript
+const supervisor = agent({
+  prompt: instructions.supervisor({
+    purpose: ['You coordinate a team of specialists.'],
+    routine: [
+      'Understand the user request',
+      'Break it into subtasks',
+      'Delegate to appropriate specialists',
+      'Synthesize results',
+    ],
+  }),
+});
+```
+
+The supervisor prefix includes directives for thorough execution:
+
+- Begin with a checklist of what you'll do
+- Continue until the query is completely resolved
+- Validate results after each step
+- Never terminate until all issues are resolved
+
+### `instructions.supervisor_subagent()`
+
+For specialists that should return control to the supervisor:
+
+```typescript
+const specialist = agent({
+  prompt: instructions.supervisor_subagent({
+    purpose: ['You analyze data and return findings.'],
+    routine: ['Analyze the data', 'Summarize key findings'],
+  }),
+});
+```
+
+This automatically adds `transfer_to_supervisor_agent` as the final routine step, ensuring specialists hand back control.
+
+## Prompt Engineering Helpers
+
+### `thirdPersonPrompt()`
+
+Makes agents refer to themselves in third person:
+
+```typescript
+import { thirdPersonPrompt } from '@deepagents/agent';
+
+const agent = agent({
+  prompt: [
+    thirdPersonPrompt('Aria', 'research assistant'),
+    'Focus on finding accurate information.',
+  ].join('\n'),
+});
+```
+
+Generates persona instructions:
+
+```xml
+<your_persona>
+  <persona_context>
+    This agent is Aria, a research assistant that speaks in third person,
+    referring to itself as "this agent" or "Aria".
+  </persona_context>
+  <persona_speaking_style>
+    - This agent always refers to itself in third person
+    - Use "this agent" or "Aria" instead of "I", "me", "my"
+    - Use "This agent found..." instead of "I found..."
+  </persona_speaking_style>
+</your_persona>
+```
+
+### `stepBackPrompt()`
+
+Implements step-back prompting for better reasoning:
+
+```typescript
+import { stepBackPrompt } from '@deepagents/agent';
+
+const analyst = agent({
+  prompt: [
+    'You are a problem-solving assistant.',
+    stepBackPrompt('general'),
+  ].join('\n'),
+});
+```
+
+Step-back prompting asks the model to first consider high-level principles before diving into specifics. It improves reasoning by 7-36% according to DeepMind research.
+
+#### Domains
+
+Three domain presets with appropriate examples:
+
+```typescript
+// For physics, chemistry, math questions
+stepBackPrompt('stem')
+
+// For historical facts, knowledge questions
+stepBackPrompt('knowledge')
+
+// For coding, general reasoning (default)
+stepBackPrompt('general')
+```
+
+#### Custom Examples
+
+Provide your own step-back examples:
+
+```typescript
+stepBackPrompt('general', {
+  examples: [
+    {
+      originalQuestion: 'Why is my API returning 500 errors?',
+      stepBackQuestion: 'What are common causes of 500 errors in APIs?',
+      stepBackAnswer: 'Server errors (500) typically come from: unhandled exceptions, database connection issues, timeout errors, memory exhaustion, or configuration problems.',
+      finalAnswer: 'Check server logs for the specific exception. Common culprits are database connection pools exhausted or unhandled null references.',
+    },
+  ],
+});
+```
+
+## Combining Patterns
+
+Build complex prompts by combining helpers:
+
+```typescript
+const sophisticatedAgent = agent({
+  prompt: (ctx) => [
+    instructions.swarm({
+      purpose: [`You research ${ctx.topic} thoroughly.`],
+      routine: [
+        'Identify key questions to answer',
+        'Search for authoritative sources',
+        'Cross-reference findings',
+        'Synthesize a comprehensive answer',
+      ],
+    }),
+    '',
+    stepBackPrompt('knowledge'),
+    '',
+    `Focus areas: ${ctx.focusAreas.join(', ')}`,
+  ].join('\n'),
+});
+```
+
+## System Prompt Constants
+
+Two pre-built system prompts are exported:
+
+### `RECOMMENDED_PROMPT_PREFIX`
+
+Basic multi-agent context:
+
+```typescript
+import { RECOMMENDED_PROMPT_PREFIX } from '@deepagents/agent';
+```
+
+Contains:
+- Multi-agent system explanation
+- Handoff mechanism description
+- Guidance on seamless transfers
+
+### `SUPERVISOR_PROMPT_PREFIX`
+
+Enhanced supervisor directives:
+
+```typescript
+import { SUPERVISOR_PROMPT_PREFIX } from '@deepagents/agent';
+```
+
+Contains:
+- Supervisor role definition
+- Checklist approach
+- Thoroughness requirements
+- Validation expectations
+
+Use these directly if you need custom prompt structures:
+
+```typescript
+const customPrompt = [
+  SUPERVISOR_PROMPT_PREFIX,
+  '',
+  '# Your Custom Section',
+  'Additional instructions here...',
+].join('\n');
+```
+
+## Real-World Examples
+
+### Research Bot Planner
+
+```typescript
+const planner = agent({
+  name: 'PlannerAgent',
+  model: openai('gpt-4.1'),
+  output: WebSearchPlanSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a helpful research assistant.',
+      'Given a query, come up with a set of web searches to perform.',
+    ],
+    routine: ['Output between 5 and 10 terms to query for.'],
+  }),
+});
+```
+
+### Financial Analyst
+
+```typescript
+const riskAgent = agent({
+  name: 'RiskAnalystAgent',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSummarySchema,
+  prompt: instructions({
+    purpose: [
+      "You are a risk analyst looking for potential red flags.",
+      'Given background research, produce a short analysis of risks.',
+    ],
+    routine: ['Keep it under 2 paragraphs.'],
+  }),
+});
+```
+
+### Dynamic Context-Aware
+
+```typescript
+const personalizedAgent = agent<unknown, UserContext>({
+  prompt: (ctx) => instructions({
+    purpose: [
+      `You are a personal assistant for ${ctx.user.name}.`,
+      `Their expertise level: ${ctx.user.expertiseLevel}`,
+      ctx.user.expertiseLevel === 'beginner'
+        ? 'Explain concepts simply.'
+        : 'You can use technical terminology.',
+    ],
+    routine: [
+      'Understand the request',
+      'Provide helpful information',
+      `Communicate in ${ctx.preferences.language}`,
+    ],
+  }),
+});
+```
+
+## Next Steps
+
+- [Tools](/docs/agent/tools) - Adding capabilities to agents
+- [Handoffs](/docs/agent/handoffs) - How the specialized agents table works
+- [Context Variables](/docs/agent/context-variables) - Dynamic prompts with context

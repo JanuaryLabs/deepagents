@@ -1,5 +1,20 @@
 {
   "title": "Agent",
   "root": true,
-  "pages": ["index", "configure-models"]
+  "pages": [
+    "index",
+    "getting-started",
+    "---Core Concepts---",
+    "anatomy-of-an-agent",
+    "execution-model",
+    "orchestration",
+    "context-variables",
+    "---Building Agents---",
+    "instructions",
+    "tools",
+    "structured-output",
+    "configure-models",
+    "---Recipes---",
+    "recipes"
+  ]
 }

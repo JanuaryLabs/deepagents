@@ -1,0 +1,199 @@
+---
+title: Subagents
+description: Choosing between asTool and Handoffs for multi-agent coordination
+---
+
+When one agent needs another agent's help, you have two options:
+
+1. **Handoffs** — Transfer control to the other agent
+2. **Agents as Tools** — Call the agent as a function
+
+Both patterns enable multi-agent systems, but they differ in control flow, delegation capabilities, and use cases.
+
+## The Core Difference
+
+| Aspect | Handoffs | Agents as Tools |
+|--------|----------|-----------------|
+| Control flow | Transfers control; sub-agent becomes active | Calling agent stays active |
+| Further delegation | Sub-agent can hand off to others | Sub-agent returns result only |
+| Return value | Full conversation continues | Extracted string or structured data |
+| Use case | Dynamic routing, conversational | Encapsulated sub-tasks |
+
+## Handoffs: Transfer Control
+
+With handoffs, the parent agent transfers control to a specialist. The specialist becomes the active agent and can delegate further if needed.
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+
+const billingAgent = agent({
+  name: 'BillingAgent',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You handle billing inquiries.'],
+    routine: ['Check account status', 'Process refunds', 'Explain charges'],
+  }),
+  handoffDescription: 'Transfer here for billing questions',
+});
+
+const supportAgent = agent({
+  name: 'SupportAgent',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You handle technical support.'],
+    routine: ['Diagnose issues', 'Provide solutions'],
+  }),
+  handoffDescription: 'Transfer here for technical issues',
+});
+
+const triage = agent({
+  name: 'TriageAgent',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You route customer requests to specialists.'],
+    routine: ['Understand the issue', 'Transfer to appropriate agent'],
+  }),
+  handoffs: [billingAgent, supportAgent],
+});
+```
+
+When `triage` calls `transfer_to_billing_agent()`, control transfers to `billingAgent`. The billing agent becomes the active speaker and can continue the conversation or delegate further.
+
+## Agents as Tools: Encapsulated Calls
+
+With `asTool()`, the parent agent calls a specialist as a function. The parent stays active and receives a return value.
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+const AnalysisSchema = z.object({
+  summary: z.string().describe('Brief analysis summary'),
+  score: z.number().min(0).max(100),
+});
+
+const analyst = agent({
+  name: 'Analyst',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSchema,
+  prompt: instructions({
+    purpose: ['You analyze data and provide summaries.'],
+    routine: ['Review the data', 'Score from 0-100', 'Write summary'],
+  }),
+});
+
+const coordinator = agent({
+  name: 'Coordinator',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You coordinate analysis tasks.'],
+    routine: ['Call analyst tool when analysis is needed'],
+  }),
+  tools: {
+    analyze: analyst.asTool({
+      toolDescription: 'Get analysis with score and summary',
+      outputExtractor: async (result) => result.experimental_output.summary,
+    }),
+  },
+});
+```
+
+When `coordinator` calls the `analyze` tool, it invokes the `analyst` agent, extracts the summary, and receives it as a string. The coordinator remains active throughout.
+
+## When to Use Handoffs
+
+Choose handoffs when:
+
+- **Dynamic routing** — The user's request determines which specialist handles it
+- **Conversational flow** — The specialist needs to interact with the user directly
+- **Further delegation** — The specialist may need to hand off to other specialists
+- **Unknown scope** — You don't know in advance what the specialist will need to do
+
+```typescript
+// Hub-and-spoke: Triage routes to specialists
+const triage = agent({
+  name: 'Triage',
+  handoffs: [billing, support, sales],
+  // Triage decides based on user input, then transfers
+});
+```
+
+## When to Use asTool
+
+Choose agents as tools when:
+
+- **Structured return values** — You need a specific data format back
+- **Self-contained tasks** — The specialist does one thing and returns
+- **Multiple specialists** — The parent orchestrates several specialists in sequence
+- **No further delegation** — The specialist won't need to hand off
+
+```typescript
+// Writer calls multiple analysts, synthesizes results
+const writer = agent({
+  name: 'Writer',
+  tools: {
+    fundamentals: fundamentalsAgent.asTool({ outputExtractor }),
+    risk: riskAgent.asTool({ outputExtractor }),
+    sentiment: sentimentAgent.asTool({ outputExtractor }),
+  },
+  // Writer calls each tool, combines results into report
+});
+```
+
+## Combining Both Patterns
+
+You can use both patterns in the same system. A coordinator might use handoffs for high-level routing and asTool for specialized sub-tasks:
+
+```typescript
+const researcher = agent({
+  name: 'Researcher',
+  prompt: instructions({
+    purpose: ['You research topics using specialist analysts.'],
+    routine: [
+      'Call fundamentals tool for financial metrics',
+      'Call risk tool for risk assessment',
+      'Synthesize into research report',
+    ],
+  }),
+  // Agents as tools for sub-analyses
+  tools: {
+    fundamentals: fundamentalsAgent.asTool({ outputExtractor }),
+    risk: riskAgent.asTool({ outputExtractor }),
+  },
+});
+
+const coordinator = agent({
+  name: 'Coordinator',
+  prompt: instructions({
+    purpose: ['You coordinate research and customer support.'],
+    routine: [
+      'For research questions, transfer to researcher',
+      'For support questions, transfer to support',
+    ],
+  }),
+  // Handoffs for routing
+  handoffs: [researcher, supportAgent],
+});
+```
+
+In this design:
+- The `coordinator` uses **handoffs** to route to `researcher` or `support`
+- The `researcher` uses **asTool** to call specialist analysts
+
+## Decision Matrix
+
+| Scenario | Pattern | Why |
+|----------|---------|-----|
+| Customer support routing | Handoffs | User interacts with specialist directly |
+| Report with multiple analyses | asTool | Need structured data from each specialist |
+| Chatbot with specialists | Handoffs | Conversational, may need further routing |
+| Pipeline processing | asTool | Sequential, self-contained steps |
+| Unknown user intent | Handoffs | Let LLM decide routing at runtime |
+| Predefined orchestration | asTool | Parent controls the flow |
+
+## Next Steps
+
+- [Handoffs Deep Dive](/docs/agent/orchestration/handoffs) — Transfer tools, multi-level handoffs, lazy functions
+- [Agents as Tools Deep Dive](/docs/agent/orchestration/agents-as-tools) — Output extraction, complex tool patterns

@@ -1,0 +1,1000 @@
+---
+title: Anatomy of an Agent
+description: A deep dive into the CreateAgent interface - understanding every field, design decision, and how agents coordinate through handoffs
+---
+
+An agent in DeepAgents is more than a model with a prompt. It's a composable unit that encapsulates instructions, tools, handoff capabilities, and lifecycle hooks. Understanding the anatomy helps you design robust multi-agent systems.
+
+This guide examines each field in the `CreateAgent` interface, explaining the design thinking behind it and showing how pieces fit together.
+
+## The CreateAgent Interface
+
+```typescript
+interface CreateAgent<Output, CIn, COut = CIn> {
+  name: string;
+  prompt: Instruction<CIn>;
+  handoffDescription?: string;
+  prepareHandoff?: PrepareHandoffFn;
+  prepareEnd?: PrepareEndFn<COut, Output>;
+  handoffs?: Handoffs<CIn, COut>;
+  tools?: ToolSet;
+  model: AgentModel;
+  toolChoice?: ToolChoice<Record<string, COut>>;
+  output?: z.Schema<Output>;
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  logging?: boolean;
+}
+```
+
+The interface uses three generic types:
+- `Output`: The structured output schema type (when using `output` field)
+- `CIn`: Context variables type this agent receives
+- `COut`: Context variables type this agent produces (defaults to `CIn`)
+
+## name: Agent Identity
+
+```typescript
+name: string;
+```
+
+The agent's name identifies it within the system and determines its handoff tool name.
+
+### Snake Case Conversion
+
+Names undergo automatic snake_case conversion. This happens because handoff tools follow the convention `transfer_to_<agent_name>`:
+
+```typescript
+const planner = agent({
+  name: 'PlannerAgent',  // Becomes 'planner_agent' internally
+  // ...
+});
+
+// Creates handoff tool: transfer_to_planner_agent
+```
+
+**Why this matters**: When other agents need to delegate work, they call these transfer functions. Consistent naming makes handoffs predictable and debuggable.
+
+### Naming Conventions
+
+Choose names that:
+1. Describe the agent's role clearly ("ResearchAgent", "FinancialWriterAgent")
+2. Are unique within the agent hierarchy
+3. Suggest specialization level ("FundamentalsAnalystAgent" vs "AnalystAgent")
+
+## prompt: The Agent's Instructions
+
+```typescript
+prompt: Instruction<CIn>;
+
+// Where Instruction is:
+type Instruction<C> =
+  | string
+  | string[]
+  | ((contextVariables?: C) => string);
+```
+
+The prompt defines the agent's purpose, capabilities, and behavior patterns. DeepAgents supports three forms to balance simplicity with flexibility.
+
+### String Form: Static Instructions
+
+The simplest form for agents with fixed behavior:
+
+```typescript
+const writer = agent({
+  name: 'WriterAgent',
+  prompt: 'You are a technical writer. Create clear documentation from technical details.',
+  model: openai('gpt-4'),
+});
+```
+
+**When to use**: Agents that don't need runtime context customization.
+
+### Array Form: Structured Instructions
+
+Arrays join with newlines, making complex prompts readable:
+
+```typescript
+const analyst = agent({
+  name: 'AnalystAgent',
+  prompt: [
+    '# Role',
+    'You are a financial analyst specializing in risk assessment.',
+    '',
+    '# Responsibilities',
+    '- Identify regulatory risks',
+    '- Assess competitive threats',
+    '- Evaluate supply chain vulnerabilities',
+    '',
+    '# Output Requirements',
+    'Keep analysis under 2 paragraphs.',
+  ],
+  model: openai('gpt-4'),
+});
+```
+
+**When to use**: When prompt structure matters more than runtime customization.
+
+### Function Form: Dynamic Instructions
+
+Functions receive context variables and return custom prompts:
+
+```typescript
+interface ResearchContext {
+  industry: string;
+  riskTolerance: 'low' | 'medium' | 'high';
+  requiredDepth: number;
+}
+
+const researcher = agent<unknown, ResearchContext>({
+  name: 'ResearchAgent',
+  prompt: (ctx) => {
+    const depthGuidance = ctx?.requiredDepth > 5
+      ? 'Conduct deep analysis with multiple sources.'
+      : 'Provide high-level overview.';
+
+    return `
+# Research Specialist for ${ctx?.industry || 'General'} Industry
+
+Risk tolerance: ${ctx?.riskTolerance || 'medium'}
+
+${depthGuidance}
+
+Focus on industry-specific metrics and recent developments.
+    `.trim();
+  },
+  model: openai('gpt-4'),
+});
+```
+
+**When to use**: When instructions depend on runtime context or user preferences.
+
+### The instructions() Helper
+
+DeepAgents provides an `instructions()` helper that structures prompts with purpose and routine:
+
+```typescript
+import { instructions } from '@deepagents/agent';
+
+const agent = agent({
+  name: 'SearchAgent',
+  prompt: instructions({
+    purpose: [
+      'You are a research assistant specializing in financial topics.',
+      'Given a search term, retrieve context and summarize in under 300 words.',
+    ],
+    routine: [
+      'Focus on key numbers, events, or quotes useful to analysts.',
+      'Cite sources when available.',
+    ],
+  }),
+  model: openai('gpt-4'),
+});
+```
+
+The helper generates markdown with clear structure. It also handles the specialized agents placeholder automatically when agents have handoffs.
+
+**Variants**:
+- `instructions()` - Basic structure
+- `instructions.swarm()` - Adds system context for multi-agent coordination
+- `instructions.supervisor()` - For supervisor agents managing specialists
+- `instructions.supervisor_subagent()` - For specialists that report back to supervisor
+
+## model: The Language Model
+
+```typescript
+model: AgentModel;
+
+// Where AgentModel is:
+type AgentModel = Exclude<LanguageModel, string>;
+```
+
+The model executes the agent's instructions. Notice the type excludes strings - you must pass an actual model instance, not a string identifier.
+
+### Model Configuration
+
+Model-specific parameters live with the model, not the agent. Use the AI SDK's `wrapLanguageModel` with `defaultSettingsMiddleware`:
+
+```typescript
+import { wrapLanguageModel, defaultSettingsMiddleware } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const preciseModel = wrapLanguageModel({
+  model: openai('gpt-4'),
+  middleware: defaultSettingsMiddleware({
+    settings: {
+      temperature: 0.1,
+      topK: 10,
+    },
+  }),
+});
+
+const analyzerAgent = agent({
+  name: 'analyzer',
+  model: preciseModel,
+  prompt: 'You analyze data with precision.',
+});
+```
+
+See [Configure Models](/docs/agent/configure-models) for detailed patterns.
+
+### Different Models for Different Roles
+
+Specialized agents often need different models:
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { groq } from '@ai-sdk/groq';
+
+// Heavy reasoning for planning
+const planner = agent({
+  name: 'PlannerAgent',
+  model: openai('gpt-4.1'),  // Powerful reasoning
+  // ...
+});
+
+// Fast execution for searches
+const searcher = agent({
+  name: 'SearchAgent',
+  model: groq('openai/gpt-oss-20b'),  // Fast, cost-effective
+  // ...
+});
+```
+
+## tools: The Agent's Capabilities
+
+```typescript
+tools?: ToolSet;
+```
+
+Tools extend what agents can do beyond text generation. They come from the AI SDK's tool system.
+
+### Basic Tools
+
+```typescript
+import { tool } from 'ai';
+import z from 'zod';
+
+const searchAgent = agent({
+  name: 'SearchAgent',
+  model: openai('gpt-4'),
+  prompt: 'You search and summarize information.',
+  tools: {
+    web_search: tool({
+      description: 'Search the web for current information',
+      inputSchema: z.object({
+        query: z.string().describe('Search query'),
+      }),
+      execute: async ({ query }) => {
+        // Search implementation
+        return { results: [...] };
+      },
+    }),
+  },
+});
+```
+
+### Provider Tools
+
+Some model providers offer built-in tools:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { openai } from '@ai-sdk/openai';
+
+const researcher = agent({
+  name: 'ResearchAgent',
+  model: openai('gpt-4'),
+  prompt: 'Research and analyze information.',
+  tools: {
+    browser_search: (groq as any).tools.browserSearch({}),
+    web_search: (openai as any).tools.webSearch({
+      searchContextSize: 'low',
+    }),
+  },
+});
+```
+
+### Agent-as-Tool
+
+Agents can use other agents as tools without making them full handoff targets. This creates a hierarchical delegation model:
+
+```typescript
+const riskAnalyst = agent({
+  name: 'RiskAnalystAgent',
+  model: openai('gpt-4'),
+  output: AnalysisSummarySchema,
+  prompt: 'Analyze potential risks and red flags.',
+});
+
+const writer = agent({
+  name: 'WriterAgent',
+  model: openai('gpt-4'),
+  prompt: 'Write comprehensive reports.',
+  tools: {
+    // Writer can call risk analyst as a tool
+    risk_analysis: riskAnalyst.asTool({
+      toolDescription: 'Get risk analysis write-up',
+      outputExtractor: async (result) => result.experimental_output.summary,
+    }),
+  },
+});
+```
+
+**Key difference from handoffs**: When an agent is a tool, the calling agent remains in control. With handoffs, control transfers completely.
+
+## handoffs: Agent Delegation
+
+```typescript
+handoffs?: Handoffs<CIn, COut>;
+
+// Where Handoffs is:
+type Handoffs<CIn, COut> = (
+  | Agent<unknown, CIn, COut>
+  | (() => Agent<unknown, CIn, COut>)
+)[];
+```
+
+Handoffs define which other agents this agent can transfer control to. This creates the coordination graph of your multi-agent system.
+
+### Basic Handoffs
+
+```typescript
+const researcher = agent({
+  name: 'ResearchAgent',
+  model: openai('gpt-4'),
+  prompt: 'Conduct research.',
+});
+
+const writer = agent({
+  name: 'WriterAgent',
+  model: openai('gpt-4'),
+  prompt: 'Write reports.',
+});
+
+const planner = agent({
+  name: 'PlannerAgent',
+  model: openai('gpt-4'),
+  prompt: 'Plan research projects.',
+  handoffs: [researcher, writer],  // Can delegate to either
+});
+```
+
+When an agent has handoffs, the system automatically creates transfer tools:
+- `transfer_to_research_agent`
+- `transfer_to_writer_agent`
+
+The planning agent can call these tools to delegate work.
+
+### Lazy Handoffs
+
+Use functions for circular references or conditional handoffs:
+
+```typescript
+const supervisor = agent({
+  name: 'SupervisorAgent',
+  model: openai('gpt-4'),
+  prompt: 'Coordinate work across specialists.',
+  handoffs: [
+    () => specialist1,  // Lazy evaluation
+    () => specialist2,
+  ],
+});
+
+const specialist1 = agent({
+  name: 'Specialist1',
+  model: openai('gpt-4'),
+  prompt: 'Specialized task A.',
+  handoffs: [() => supervisor],  // Can hand back to supervisor
+});
+```
+
+### Coordination Patterns
+
+Different handoff structures create different coordination patterns:
+
+**Hub-and-Spoke (Supervisor)**:
+```typescript
+const supervisor = agent({
+  name: 'Supervisor',
+  handoffs: [specialist1, specialist2, specialist3],
+  // Coordinator doesn't do work, only delegates
+});
+```
+
+**Linear Pipeline**:
+```typescript
+const planner = agent({
+  name: 'Planner',
+  handoffs: [researcher],  // Only next stage
+});
+
+const researcher = agent({
+  name: 'Researcher',
+  handoffs: [writer],  // Only next stage
+});
+
+const writer = agent({
+  name: 'Writer',
+  handoffs: [],  // End of pipeline
+});
+```
+
+**Peer Network**:
+```typescript
+const agent1 = agent({
+  name: 'Agent1',
+  handoffs: [agent2, agent3],  // Can delegate to peers
+});
+
+const agent2 = agent({
+  name: 'Agent2',
+  handoffs: [agent1, agent3],  // Symmetric relationships
+});
+```
+
+## handoffDescription: Delegation Context
+
+```typescript
+handoffDescription?: string;
+```
+
+This field appears in the transfer tool's description, helping other agents decide when to delegate:
+
+```typescript
+const financialsAgent = agent({
+  name: 'FundamentalsAnalystAgent',
+  model: openai('gpt-4'),
+  prompt: 'Analyze financial fundamentals.',
+  handoffDescription: 'Analyzes revenue, profit, margins, and growth trajectory. Use for questions about company financial performance.',
+});
+
+const riskAgent = agent({
+  name: 'RiskAnalystAgent',
+  model: openai('gpt-4'),
+  prompt: 'Analyze risks.',
+  handoffDescription: 'Identifies red flags like competitive threats, regulatory issues, and supply chain problems. Use for risk assessment.',
+});
+
+const writer = agent({
+  name: 'WriterAgent',
+  model: openai('gpt-4'),
+  prompt: 'Write financial reports.',
+  handoffs: [financialsAgent, riskAgent],
+});
+```
+
+When the writer agent sees available transfer tools, it gets descriptions:
+
+```
+transfer_to_fundamentals_analyst_agent
+  An input/parameter/argument less tool to transfer control to the fundamentals_analyst_agent agent.
+  Analyzes revenue, profit, margins, and growth trajectory. Use for questions about company financial performance.
+
+transfer_to_risk_analyst_agent
+  An input/parameter/argument less tool to transfer control to the risk_analyst_agent agent.
+  Identifies red flags like competitive threats, regulatory issues, and supply chain problems. Use for risk assessment.
+```
+
+**Writing effective descriptions**:
+- State what the agent does (capabilities)
+- Indicate when to use it (triggers)
+- Be specific about the domain
+- Keep it under 2 sentences
+
+## output: Type-Safe Responses
+
+```typescript
+output?: z.Schema<Output>;
+```
+
+Define structured output schemas with Zod for type-safe responses:
+
+```typescript
+import z from 'zod';
+
+const ReportSchema = z.object({
+  short_summary: z.string().describe('2-3 sentence executive summary'),
+  markdown_report: z.string().describe('Full markdown report'),
+  follow_up_questions: z.array(z.string()).describe('Suggested follow-ups'),
+});
+
+type Report = z.infer<typeof ReportSchema>;
+
+const writer = agent<Report>({
+  name: 'WriterAgent',
+  model: openai('gpt-5'),
+  output: ReportSchema,
+  prompt: 'Write detailed reports.',
+});
+
+// Usage
+const result = await generate(writer, 'Write a report about AI agents', {});
+
+// Type-safe access
+const summary: string = result.experimental_output.short_summary;
+const report: string = result.experimental_output.markdown_report;
+const questions: string[] = result.experimental_output.follow_up_questions;
+```
+
+### Schema Design
+
+Good schemas balance structure with flexibility:
+
+```typescript
+// ❌ Too rigid
+const BadSchema = z.object({
+  section1: z.string(),
+  section2: z.string(),
+  section3: z.string(),
+  // What if we need 4 sections?
+});
+
+// ✅ Better
+const GoodSchema = z.object({
+  sections: z.array(z.object({
+    title: z.string(),
+    content: z.string(),
+  })),
+});
+```
+
+Use descriptions liberally - they guide the model:
+
+```typescript
+const AnalysisSchema = z.object({
+  confidence: z.number()
+    .min(0).max(1)
+    .describe('Confidence score between 0 and 1'),
+  reasoning: z.string()
+    .describe('Explain the analysis reasoning in 2-3 sentences'),
+  recommendations: z.array(z.string())
+    .describe('List of actionable recommendations'),
+});
+```
+
+## toolChoice: Controlling Tool Usage
+
+```typescript
+toolChoice?: ToolChoice<Record<string, COut>>;
+```
+
+Controls how the model uses tools:
+
+- `'auto'` (default): Model decides when to use tools
+- `'none'`: Model cannot use tools (text generation only)
+- `'required'`: Model must use a tool
+
+### When to Use Each
+
+**auto**: Standard behavior for most agents
+```typescript
+const researcher = agent({
+  name: 'ResearchAgent',
+  model: openai('gpt-4'),
+  toolChoice: 'auto',  // or omit - it's the default
+  tools: { web_search: ... },
+  prompt: 'Research topics and answer questions.',
+});
+```
+
+**required**: Force tool usage
+```typescript
+const searcher = agent({
+  name: 'SearchAgent',
+  model: openai('gpt-4'),
+  toolChoice: 'required',  // Must call a tool
+  tools: {
+    browser_search: groq.tools.browserSearch({}),
+  },
+  prompt: 'Search and return results. Always use the search tool.',
+});
+```
+
+This prevents the agent from answering without searching. Useful when you want to guarantee tool execution.
+
+**none**: Pure generation
+```typescript
+const formatter = agent({
+  name: 'FormatterAgent',
+  model: openai('gpt-4'),
+  toolChoice: 'none',  // No tools allowed
+  prompt: 'Format the provided data into markdown tables.',
+});
+```
+
+Useful for pure transformation tasks where tool calls would be inappropriate.
+
+## Lifecycle Hooks
+
+### prepareHandoff: Pre-Delegation Hook
+
+```typescript
+prepareHandoff?: PrepareHandoffFn;
+
+// Where:
+type PrepareHandoffFn = (
+  messages: ModelMessage[],
+) => void | Promise<void>;
+```
+
+Called right before transferring control to another agent. Use it to:
+- Log delegation events
+- Validate state before handoff
+- Clean up resources
+- Record metrics
+
+```typescript
+const coordinator = agent({
+  name: 'CoordinatorAgent',
+  model: openai('gpt-4'),
+  prompt: 'Coordinate work.',
+  prepareHandoff: async (messages) => {
+    console.log('About to hand off work...');
+    // Could validate messages, log to analytics, etc.
+    await logHandoffEvent({
+      from: 'coordinator',
+      messageCount: messages.length,
+    });
+  },
+  handoffs: [specialist],
+});
+```
+
+### prepareEnd: Post-Completion Hook
+
+```typescript
+prepareEnd?: PrepareEndFn<COut, Output>;
+
+// Where:
+type PrepareEndFn<C, O> = (config: {
+  messages: ResponseMessage[];
+  responseMessage: ResponseMessage;
+  contextVariables: C;
+  abortSignal?: AbortSignal;
+}) => StreamTextResult<ToolSet, O> | undefined | void;
+```
+
+Called when the agent completes its work. This hook runs after the agent finishes but before control returns.
+
+Use it to:
+- Post-process outputs
+- Update context variables
+- Trigger follow-up actions
+- Return streaming results
+
+```typescript
+interface AnalysisContext {
+  findings: string[];
+}
+
+const analyst = agent<Report, AnalysisContext>({
+  name: 'AnalystAgent',
+  model: openai('gpt-4'),
+  output: ReportSchema,
+  prompt: 'Analyze data and report findings.',
+  prepareEnd: ({ messages, contextVariables, responseMessage }) => {
+    // Extract findings from the response
+    const lastMessage = responseMessage;
+    // Update context for next agent
+    contextVariables.findings = extractFindings(lastMessage);
+
+    // Optional: Return streaming result for continued processing
+    // return streamText({ ... });
+  },
+});
+```
+
+## Context Variables: The Agent's State
+
+Context variables flow through agent chains, carrying state and data:
+
+```typescript
+interface ResearchContext {
+  userId: string;
+  searchHistory: string[];
+  findings: Record<string, unknown>[];
+}
+
+const planner = agent<unknown, ResearchContext>({
+  name: 'PlannerAgent',
+  model: openai('gpt-4'),
+  prompt: (ctx) => `
+    Planning research for user ${ctx?.userId}.
+    Previous searches: ${ctx?.searchHistory.length || 0}
+  `,
+});
+```
+
+### Input vs Output Contexts
+
+The three generic types on `CreateAgent<Output, CIn, COut>` handle context flow:
+
+```typescript
+interface InputContext {
+  query: string;
+  preferences: UserPreferences;
+}
+
+interface OutputContext extends InputContext {
+  searchResults: SearchResult[];
+  analyzedData: AnalysisData;
+}
+
+const enricher = agent<unknown, InputContext, OutputContext>({
+  name: 'EnricherAgent',
+  model: openai('gpt-4'),
+  prompt: 'Enrich data with search results.',
+  prepareEnd: ({ contextVariables }) => {
+    // Add to output context
+    (contextVariables as OutputContext).searchResults = [...];
+    (contextVariables as OutputContext).analyzedData = {...};
+  },
+});
+```
+
+Next agents receive `OutputContext`, not just `InputContext`.
+
+## providerOptions: Provider-Specific Settings
+
+```typescript
+providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+```
+
+Pass provider-specific options that don't fit standard parameters:
+
+```typescript
+const reasoningAgent = agent({
+  name: 'ReasoningAgent',
+  model: openai('o1'),
+  prompt: 'Think through complex problems.',
+  providerOptions: {
+    openai: {
+      reasoningEffort: 'high',
+    },
+  },
+});
+```
+
+These options pass through to the underlying provider's API.
+
+## logging: Debug Output
+
+```typescript
+logging?: boolean;
+```
+
+Enable console logging for debugging:
+
+```typescript
+const debugAgent = agent({
+  name: 'DebugAgent',
+  model: openai('gpt-4'),
+  prompt: 'Test agent behavior.',
+  logging: true,  // Logs tool calls, handoffs, etc.
+  tools: { ... },
+});
+```
+
+Output includes:
+- Current agent name
+- Available transfer tools
+- Agent's own tools
+- Tool call executions
+
+Useful during development but disable in production.
+
+## Complete Example: Financial Research System
+
+Here's a complete multi-agent system showing all concepts together:
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+import { openai } from '@ai-sdk/openai';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Schemas
+const SearchPlanSchema = z.object({
+  searches: z.array(z.object({
+    reason: z.string().describe('Why this search matters'),
+    query: z.string().describe('The search query'),
+  })).describe('List of searches to perform'),
+});
+
+const AnalysisSummarySchema = z.object({
+  summary: z.string().describe('Short analysis summary'),
+});
+
+const ReportSchema = z.object({
+  short_summary: z.string().describe('2-3 sentence executive summary'),
+  markdown_report: z.string().describe('Full markdown report'),
+  follow_up_questions: z.array(z.string()).describe('Follow-up questions'),
+});
+
+// Context types
+interface FinancialContext {
+  companyName?: string;
+  searchResults?: string[];
+}
+
+// Planning agent - creates search strategy
+const plannerAgent = agent<typeof SearchPlanSchema, FinancialContext>({
+  name: 'FinancialPlannerAgent',
+  model: openai('gpt-4.1'),
+  output: SearchPlanSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a financial research planner.',
+      'Given a request, produce a set of web searches to gather needed context.',
+    ],
+    routine: ['Output between 5 and 15 search terms.'],
+  }),
+  logging: true,
+});
+
+// Search agent - executes searches
+const searchAgent = agent<unknown, FinancialContext>({
+  name: 'FinancialSearchAgent',
+  model: groq('openai/gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You are a research assistant specializing in financial topics.',
+      'Given a search term, use web search and produce a short summary.',
+    ],
+    routine: ['Focus on key numbers, events, or quotes.'],
+  }),
+  toolChoice: 'required',  // Must use search tool
+  tools: {
+    browser_search: (groq as any).tools.browserSearch({}),
+  },
+});
+
+// Risk analyst - specialized analysis
+const riskAgent = agent<typeof AnalysisSummarySchema, FinancialContext>({
+  name: 'RiskAnalystAgent',
+  model: openai('gpt-4'),
+  output: AnalysisSummarySchema,
+  handoffDescription: 'Identifies red flags like competitive threats, regulatory issues, supply chain problems',
+  prompt: instructions({
+    purpose: [
+      'You are a risk analyst.',
+      'Analyze potential risks and red flags in company outlook.',
+    ],
+    routine: ['Keep analysis under 2 paragraphs.'],
+  }),
+});
+
+// Fundamentals analyst - specialized analysis
+const fundamentalsAgent = agent<typeof AnalysisSummarySchema, FinancialContext>({
+  name: 'FundamentalsAnalystAgent',
+  model: openai('gpt-4'),
+  output: AnalysisSummarySchema,
+  handoffDescription: 'Analyzes revenue, profit, margins, and growth trajectory',
+  prompt: instructions({
+    purpose: [
+      'You are a financial analyst focused on company fundamentals.',
+      'Analyze recent financial performance.',
+    ],
+    routine: ['Pull out key metrics or quotes.', 'Keep under 2 paragraphs.'],
+  }),
+});
+
+// Writer agent - synthesizes reports
+const writerAgent = agent<typeof ReportSchema, FinancialContext>({
+  name: 'FinancialWriterAgent',
+  model: openai('gpt-5'),
+  output: ReportSchema,
+  prompt: instructions({
+    purpose: [
+      'You are a senior financial analyst.',
+      'Synthesize research into a long-form markdown report.',
+    ],
+    routine: [
+      'You can call the analysis tools for specialist write-ups.',
+      'Include executive summary and follow-up questions.',
+    ],
+  }),
+  tools: {
+    // Analysts as tools, not handoffs - writer stays in control
+    fundamentals_analysis: fundamentalsAgent.asTool({
+      toolDescription: 'Get short write-up of key financial metrics',
+      outputExtractor: async (result) => result.experimental_output.summary,
+    }),
+    risk_analysis: riskAgent.asTool({
+      toolDescription: 'Get short write-up of potential red flags',
+      outputExtractor: async (result) => result.experimental_output.summary,
+    }),
+  },
+  prepareEnd: ({ contextVariables, responseMessage }) => {
+    // Log completion
+    console.log('Financial report completed');
+    // Could store report, trigger notifications, etc.
+  },
+});
+
+// Verification agent - quality check
+const verifierAgent = agent({
+  name: 'VerificationAgent',
+  model: openai('gpt-4'),
+  output: z.object({
+    verified: z.boolean().describe('Whether report is coherent and plausible'),
+    issues: z.string().describe('Main issues if not verified'),
+  }),
+  prompt: instructions({
+    purpose: [
+      'You are a meticulous auditor.',
+      'Verify reports are internally consistent and well-sourced.',
+    ],
+    routine: ['Point out any issues or uncertainties.'],
+  }),
+});
+
+// Export for orchestration
+export {
+  plannerAgent,
+  searchAgent,
+  riskAgent,
+  fundamentalsAgent,
+  writerAgent,
+  verifierAgent,
+};
+```
+
+## Mental Model: Agents as Specialized Teammates
+
+Think of agents as teammates on a project:
+
+- **name**: Their role title
+- **prompt**: Their job description and work style
+- **model**: Their cognitive capabilities
+- **tools**: Their equipment and resources
+- **handoffs**: Who they can delegate to
+- **handoffDescription**: How others know when to ask for their help
+- **output**: The structured deliverables they produce
+- **toolChoice**: How they use their equipment (always/never/when needed)
+- **prepareHandoff**: What they do before delegating
+- **prepareEnd**: What they do before finishing their part
+
+This mental model helps design agent systems: start with roles and responsibilities, then add capabilities and coordination patterns.
+
+## clone(): Creating Agent Variants
+
+The `clone()` method creates a modified copy of an agent, inheriting configuration from the original:
+
+```typescript
+const baseWriter = agent({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You write clear, well-structured content.'],
+    routine: ['Analyze the topic', 'Structure the content', 'Write engagingly'],
+  }),
+});
+
+// Create variant with additional tools
+const writerWithSearch = baseWriter.clone({
+  tools: {
+    web_search: groq.tools.browserSearch({}),
+  },
+});
+
+// Create variant with different model
+const premiumWriter = baseWriter.clone({
+  model: openai('gpt-4'),
+});
+```
+
+Clone accepts partial configuration—unspecified fields inherit from the original agent. This is useful for:
+
+- Adding tools to an existing agent without redefining everything
+- Creating model variants (fast vs. high-quality)
+- Testing different configurations
+
+Note: `handoffs` are shallow-copied, so modifications to the cloned agent's handoffs don't affect the original.
+
+## Next Steps
+
+- Learn about [orchestration patterns](/docs/orchestrator) for coordinating agents
+- See [example implementations](https://github.com/JanuaryLabs/deepagents/tree/main/packages/agent/src/lib/examples) for complete systems
+- Explore [supervisor patterns](/docs/agent/supervisor-pattern) for hub-and-spoke coordination
+- Understand [context flow](/docs/agent/context-variables) for managing state across agents

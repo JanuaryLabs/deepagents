@@ -1,0 +1,337 @@
+---
+title: Agents as Tools
+description: Encapsulate agents as callable tools with output extraction
+---
+
+Convert an agent into a tool that another agent can call. Unlike handoffs, the calling agent remains active—the sub-agent runs, completes its task, and returns a result.
+
+## asTool() Basics
+
+Use `agent.asTool()` to convert any agent into a callable tool:
+
+```typescript
+import { agent, instructions } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+const summarizer = agent({
+  name: 'Summarizer',
+  model: groq('gpt-oss-20b'),
+  output: z.object({
+    summary: z.string().describe('A concise summary'),
+  }),
+  prompt: instructions({
+    purpose: ['You summarize text concisely.'],
+    routine: ['Read the input', 'Write a 2-3 sentence summary'],
+  }),
+});
+
+// Convert to tool
+const summarizerTool = summarizer.asTool({
+  toolDescription: 'Summarize the given text',
+});
+```
+
+Now `summarizerTool` can be added to any agent's toolset. When called, it invokes the `summarizer` agent and returns the result.
+
+## Using Agent Tools
+
+Add the tool to another agent's toolset:
+
+```typescript
+const coordinator = agent({
+  name: 'Coordinator',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You process documents using specialist tools.'],
+    routine: ['Call summarizer when you need a summary'],
+  }),
+  tools: {
+    summarize: summarizer.asTool({
+      toolDescription: 'Get a concise summary of text',
+    }),
+  },
+});
+```
+
+When the coordinator calls `summarize`, the summarizer agent runs to completion and returns its output.
+
+## Output Extraction
+
+By default, `asTool()` returns the agent's full output. Use `outputExtractor` to transform the result:
+
+```typescript
+type OutputExtractorFn = (
+  result: GenerateTextResult<ToolSet, any>
+) => string | Promise<string>;
+
+const summaryExtractor: OutputExtractorFn = async (result) => {
+  return result.experimental_output.summary;
+};
+
+const tool = summarizer.asTool({
+  toolDescription: 'Summarize text',
+  outputExtractor: summaryExtractor,
+});
+```
+
+The extractor receives the full `GenerateTextResult` and returns a string. This is useful when:
+
+- The agent outputs structured data but you only need one field
+- You want to format the output before returning
+- You need to combine multiple output fields
+
+### Common Extraction Patterns
+
+**Extract a single field:**
+
+```typescript
+outputExtractor: async (result) => result.experimental_output.summary
+```
+
+**Format structured output:**
+
+```typescript
+outputExtractor: async (result) => {
+  const { score, analysis } = result.experimental_output;
+  return `Score: ${score}/100\n\n${analysis}`;
+}
+```
+
+**Combine with metadata:**
+
+```typescript
+outputExtractor: async (result) => {
+  const { summary } = result.experimental_output;
+  const tokens = result.usage.totalTokens;
+  return `${summary}\n\n(Generated using ${tokens} tokens)`;
+}
+```
+
+## Multiple Agent Tools
+
+A parent agent can orchestrate multiple specialists:
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Specialist 1: Fundamentals analysis
+const fundamentalsAgent = agent({
+  name: 'FundamentalsAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: z.object({
+    summary: z.string(),
+    metrics: z.array(z.string()),
+  }),
+  prompt: instructions({
+    purpose: ['You analyze financial fundamentals.'],
+    routine: ['Extract key metrics', 'Write summary'],
+  }),
+});
+
+// Specialist 2: Risk analysis
+const riskAgent = agent({
+  name: 'RiskAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: z.object({
+    summary: z.string(),
+    risks: z.array(z.string()),
+  }),
+  prompt: instructions({
+    purpose: ['You identify investment risks.'],
+    routine: ['Identify red flags', 'Write risk summary'],
+  }),
+});
+
+// Coordinator with both as tools
+const writer = agent({
+  name: 'ReportWriter',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You write investment reports using specialist analysis.'],
+    routine: [
+      'Call fundamentals_analysis for financial metrics',
+      'Call risk_analysis for risk assessment',
+      'Synthesize into final report',
+    ],
+  }),
+  tools: {
+    fundamentals_analysis: fundamentalsAgent.asTool({
+      toolDescription: 'Get fundamentals analysis (revenue, margins, growth)',
+      outputExtractor: async (r) => r.experimental_output.summary,
+    }),
+    risk_analysis: riskAgent.asTool({
+      toolDescription: 'Get risk analysis (threats, red flags)',
+      outputExtractor: async (r) => r.experimental_output.summary,
+    }),
+  },
+});
+```
+
+The writer can call both tools, receive their summaries, and synthesize them into a final report.
+
+## Using clone() to Add Tools
+
+Use `agent.clone()` to create a variant with tools without modifying the original:
+
+```typescript
+const baseWriter = agent({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  output: ReportSchema,
+  prompt: instructions({
+    purpose: ['You write reports.'],
+    routine: ['Synthesize information into markdown reports'],
+  }),
+});
+
+// Clone with analyst tools
+const writerWithAnalysts = baseWriter.clone({
+  tools: {
+    fundamentals: fundamentalsAgent.asTool({
+      toolDescription: 'Get fundamentals analysis',
+      outputExtractor: async (r) => r.experimental_output.summary,
+    }),
+    risk: riskAgent.asTool({
+      toolDescription: 'Get risk analysis',
+      outputExtractor: async (r) => r.experimental_output.summary,
+    }),
+  },
+});
+```
+
+This keeps the base writer reusable while creating a specialized variant.
+
+## When to Use Agent Tools
+
+**Choose asTool when:**
+
+- You need structured return values from the sub-agent
+- The sub-agent is self-contained and won't need to delegate further
+- The parent agent orchestrates multiple specialists in sequence
+- You want the parent to remain the active speaker
+
+**Choose handoffs when:**
+
+- The sub-agent needs to interact with the user directly
+- The sub-agent may need to delegate to other agents
+- Control flow is determined at runtime by the LLM
+
+## Complete Example: Analysis Pipeline
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Define schemas
+const AnalysisSchema = z.object({
+  summary: z.string().describe('2-3 sentence summary'),
+  score: z.number().min(0).max(100).describe('Confidence score'),
+});
+
+const ReportSchema = z.object({
+  title: z.string(),
+  executive_summary: z.string(),
+  sections: z.array(z.object({
+    heading: z.string(),
+    content: z.string(),
+  })),
+});
+
+// Specialist agents
+const marketAnalyst = agent({
+  name: 'MarketAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSchema,
+  prompt: instructions({
+    purpose: ['You analyze market conditions and trends.'],
+    routine: ['Identify market trends', 'Score market outlook 0-100'],
+  }),
+});
+
+const competitorAnalyst = agent({
+  name: 'CompetitorAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSchema,
+  prompt: instructions({
+    purpose: ['You analyze competitive landscape.'],
+    routine: ['Identify key competitors', 'Score competitive position 0-100'],
+  }),
+});
+
+const financialAnalyst = agent({
+  name: 'FinancialAnalyst',
+  model: groq('gpt-oss-20b'),
+  output: AnalysisSchema,
+  prompt: instructions({
+    purpose: ['You analyze financial health.'],
+    routine: ['Review financials', 'Score financial health 0-100'],
+  }),
+});
+
+// Output extractor for all analysts
+const extractAnalysis = async (result) => {
+  const { summary, score } = result.experimental_output;
+  return `${summary} (Score: ${score}/100)`;
+};
+
+// Report writer with all analysts as tools
+const reportWriter = agent({
+  name: 'ReportWriter',
+  model: groq('gpt-oss-20b'),
+  output: ReportSchema,
+  prompt: instructions({
+    purpose: ['You write comprehensive investment reports.'],
+    routine: [
+      'Call market_analysis for market overview',
+      'Call competitor_analysis for competitive landscape',
+      'Call financial_analysis for financial health',
+      'Synthesize all analyses into structured report',
+    ],
+  }),
+  tools: {
+    market_analysis: marketAnalyst.asTool({
+      toolDescription: 'Analyze market conditions and trends',
+      outputExtractor: extractAnalysis,
+    }),
+    competitor_analysis: competitorAnalyst.asTool({
+      toolDescription: 'Analyze competitive landscape',
+      outputExtractor: extractAnalysis,
+    }),
+    financial_analysis: financialAnalyst.asTool({
+      toolDescription: 'Analyze financial health',
+      outputExtractor: extractAnalysis,
+    }),
+  },
+});
+
+// Usage
+const { experimental_output: report } = await generate(
+  reportWriter,
+  'Create an investment report for Apple Inc.',
+  {}
+);
+
+console.log(report.title);
+console.log(report.executive_summary);
+```
+
+In this pipeline:
+1. The report writer receives a request
+2. It calls each analyst tool to gather specialized insights
+3. Each analyst runs independently and returns extracted summaries
+4. The writer synthesizes all analyses into a structured report
+
+## Summary
+
+`asTool()` converts agents into callable functions for orchestration:
+
+- **Encapsulation** — Sub-agent runs and returns without taking control
+- **Output extraction** — Transform structured output to strings
+- **Composition** — Combine multiple specialists in one parent agent
+- **clone()** — Create tool-equipped variants without modifying originals
+
+Use agent tools when you need structured sub-task results and want the parent to maintain control of the conversation.
