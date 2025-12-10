@@ -1,0 +1,186 @@
+---
+title: Question Variations
+description: Generate paraphrased variations of existing training pairs
+---
+
+The `VariationSynthesizer` takes existing question/SQL pairs and generates paraphrased variations of the questions while keeping the SQL unchanged. This is useful for data augmentation and improving model robustness to different phrasings.
+
+## Basic Usage
+
+```typescript
+import { VariationSynthesizer, toPairs } from '@deepagents/text2sql';
+
+const existingPairs = [
+  { question: 'Show top customers', sql: 'SELECT ...', success: true },
+  { question: 'Monthly revenue', sql: 'SELECT ...', success: true },
+];
+
+const expanded = await toPairs(
+  new VariationSynthesizer(existingPairs, { count: 3 })
+);
+
+// Original: "Show top customers"
+// Variations:
+//   - "Who are our best customers?"
+//   - "List the highest-value customers"
+//   - "Display our top-performing customers"
+```
+
+## How It Works
+
+`VariationSynthesizer` uses an LLM to generate semantically equivalent questions:
+
+1. Takes existing question/SQL pairs as input
+2. For each pair, generates N paraphrased questions
+3. Keeps the original SQL unchanged for each variation
+4. Returns original pairs plus all variations
+
+## Configuration Options
+
+```typescript
+interface VariationSynthesizerOptions {
+  /** Number of variations per pair (default: 3) */
+  count?: number;
+  /** Style variations to include */
+  styles?: ('formal' | 'casual' | 'terse')[];
+}
+```
+
+### Number of Variations
+
+Control how many variations to generate per pair:
+
+```typescript
+// 3 variations per pair (default)
+const pairs = await toPairs(
+  new VariationSynthesizer(existingPairs, { count: 3 })
+);
+// 10 original pairs → 40 total (10 original + 30 variations)
+
+// 5 variations per pair
+const pairs = await toPairs(
+  new VariationSynthesizer(existingPairs, { count: 5 })
+);
+// 10 original pairs → 60 total (10 original + 50 variations)
+```
+
+### Style Variations
+
+Generate variations in different tones:
+
+```typescript
+const pairs = await toPairs(
+  new VariationSynthesizer(existingPairs, {
+    count: 3,
+    styles: ['formal', 'casual', 'terse'],
+  })
+);
+
+// Original: "Show top customers by revenue"
+// Formal:   "Please display our highest-revenue customers"
+// Casual:   "Who are our biggest spenders?"
+// Terse:    "Top customers by revenue"
+```
+
+## Example: Augment Extracted Data
+
+Expand pairs extracted from chat history:
+
+```typescript
+import {
+  MessageExtractor,
+  VariationSynthesizer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Extract from history
+const extracted = await toPairs(new MessageExtractor(messages));
+console.log(`Extracted ${extracted.length} pairs`);
+
+// Augment with variations
+const augmented = await toPairs(
+  new VariationSynthesizer(extracted, { count: 3 })
+);
+console.log(`Augmented to ${augmented.length} pairs`);
+```
+
+## Example: Pipeline with Validation
+
+```typescript
+import {
+  MessageExtractor,
+  VariationSynthesizer,
+  ValidatedProducer,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// 1. Extract from history
+const extracted = await toPairs(new MessageExtractor(messages));
+
+// 2. Generate variations
+const variations = await toPairs(
+  new VariationSynthesizer(extracted, { count: 3 })
+);
+
+// 3. Validate and deduplicate
+const final = await text2sql.toPairs(
+  (adapter) => new DeduplicatedProducer(
+    new ValidatedProducer(
+      { produce: async () => variations },
+      adapter
+    ),
+    { mode: 'exact' }
+  )
+);
+```
+
+## Variation Quality
+
+Generated variations maintain semantic equivalence:
+
+| Original | Variation (casual) | Variation (formal) | Variation (terse) |
+|----------|-------------------|-------------------|-------------------|
+| "How many orders last month?" | "What was our order count for last month?" | "Please provide the total number of orders from the previous month" | "Orders last month count" |
+| "Show revenue by product" | "Break down our revenue by product" | "Display revenue figures categorized by product" | "Revenue per product" |
+
+## Best Practices
+
+1. **Start with quality pairs** - Variations inherit quality from originals
+2. **Mix styles** - Different phrasings help model generalization
+3. **Deduplicate after** - Some variations may be similar; deduplicate the final set
+4. **Review samples** - Spot-check that variations preserve meaning
+5. **Balance dataset** - Don't over-augment simple queries relative to complex ones
+
+## Combining Sources
+
+Build a comprehensive training set:
+
+```typescript
+import {
+  MessageExtractor,
+  SqlExtractor,
+  SchemaSynthesizer,
+  VariationSynthesizer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// From multiple sources
+const fromHistory = await toPairs(new MessageExtractor(messages));
+const fromLogs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqlLogs, adapter)
+);
+const synthetic = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, { count: 50 })
+);
+
+// Combine
+const allPairs = [...fromHistory, ...fromLogs, ...synthetic];
+
+// Augment everything
+const augmented = await toPairs(
+  new VariationSynthesizer(allPairs, { count: 2 })
+);
+
+console.log(`Final dataset: ${augmented.length} pairs`);
+```

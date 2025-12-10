@@ -26,6 +26,7 @@ import {
 import { FileCache } from './file-cache.ts';
 import { History } from './history/history.ts';
 import type { TeachablesStore } from './memory/store.ts';
+import type { ExtractedPair, PairProducer } from './synthesis/types.ts';
 import {
   type Teachables,
   guardrail,
@@ -172,8 +173,30 @@ export class Text2Sql {
     return introspection;
   }
 
-  public async toQuestion(sql: string) {
-    return;
+  /**
+   * Generate training data pairs using a producer factory.
+   * The factory receives the configured adapter, so users don't need to pass it manually.
+   *
+   * @example
+   * // Generate questions for existing SQL
+   * const pairs = await text2sql.toPairs(
+   *   (adapter) => new SqlExtractor(sqls, adapter, { validateSql: true })
+   * );
+   *
+   * @example
+   * // Extract from chat history with validation
+   * const pairs = await text2sql.toPairs(
+   *   (adapter) => new ValidatedProducer(
+   *     new MessageExtractor(messages),
+   *     adapter
+   *   )
+   * );
+   */
+  public async toPairs<T extends PairProducer>(
+    factory: (adapter: Adapter) => T,
+  ): Promise<ExtractedPair[]> {
+    const producer = factory(this.#config.adapter);
+    return producer.produce();
   }
 
   // public async suggest() {

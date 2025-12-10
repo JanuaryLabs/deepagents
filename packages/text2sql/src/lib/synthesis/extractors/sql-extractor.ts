@@ -70,19 +70,23 @@ const sqlToQuestionAgent = agent<
 
 export class SqlExtractor implements PairProducer {
   #sqls: string[];
+  #adapter: Adapter;
+  #options: SqlExtractorOptions;
   constructor(
-    sqls: string[] | string,
-    private adapter: Adapter,
-    private options: SqlExtractorOptions = {},
+    sql: string[] | string,
+    adapter: Adapter,
+    options: SqlExtractorOptions = {},
   ) {
-    this.#sqls = Array.isArray(sqls) ? sqls : [sqls];
+    this.#sqls = Array.isArray(sql) ? sql : [sql];
+    this.#adapter = adapter;
+    this.#options = options;
   }
 
   async produce(): Promise<ExtractedPair[]> {
-    const { validateSql = true, skipInvalid = false } = this.options;
+    const { validateSql = true, skipInvalid = false } = this.#options;
 
     // Get introspection for schema context
-    const introspection = await this.adapter.introspect();
+    const introspection = await this.#adapter.introspect();
 
     const pairs: ExtractedPair[] = [];
 
@@ -90,7 +94,7 @@ export class SqlExtractor implements PairProducer {
       // Optionally validate SQL
       let isValid = true;
       if (validateSql) {
-        const error = await this.adapter.validate(sql);
+        const error = await this.#adapter.validate(sql);
         isValid = error === undefined || error === null;
 
         if (!isValid && skipInvalid) {

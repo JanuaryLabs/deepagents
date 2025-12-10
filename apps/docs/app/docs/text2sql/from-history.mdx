@@ -1,0 +1,227 @@
+---
+title: From Chat History
+description: Extract training pairs from chat conversations
+---
+
+The `MessageExtractor` parses chat history to extract question/SQL pairs from actual user interactions. This is the primary way to harvest training data from production usage.
+
+## Basic Usage
+
+```typescript
+import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+
+const pairs = await toPairs(new MessageExtractor(messages));
+
+console.log(pairs);
+// [
+//   { question: 'Show top customers', sql: 'SELECT ...', success: true },
+//   { question: 'Revenue by month', sql: 'SELECT ...', success: true },
+// ]
+```
+
+Or using the `Text2Sql` instance:
+
+```typescript
+const pairs = await text2sql.toPairs(
+  () => new MessageExtractor(messages)
+);
+```
+
+## How It Works
+
+`MessageExtractor` scans chat messages for `db_query` tool calls:
+
+1. Iterates through messages in order
+2. Tracks the most recent user message
+3. When it finds an assistant message with `db_query` tool call:
+   - Extracts the SQL from the tool input
+   - Pairs it with the preceding user message
+   - Records success/failure based on tool state
+
+## Configuration Options
+
+```typescript
+interface MessageExtractorOptions {
+  /** Include failed queries in output (default: false) */
+  includeFailures?: boolean;
+  /** Tool name to extract SQL from (default: 'db_query') */
+  toolName?: string;
+}
+```
+
+### Include Failures
+
+By default, only successful queries are extracted:
+
+```typescript
+// Only successful queries
+const pairs = await toPairs(new MessageExtractor(messages));
+
+// Include failures for error analysis
+const allPairs = await toPairs(
+  new MessageExtractor(messages, { includeFailures: true })
+);
+
+// Filter later
+const failed = allPairs.filter(p => !p.success);
+```
+
+### Custom Tool Name
+
+If you use a different tool name for queries:
+
+```typescript
+const pairs = await toPairs(
+  new MessageExtractor(messages, { toolName: 'execute_sql' })
+);
+```
+
+## Message Format
+
+Messages must follow the Vercel AI SDK `UIMessage` format:
+
+```typescript
+interface UIMessage {
+  role: 'user' | 'assistant' | 'system';
+  parts: UIPart[];
+}
+```
+
+The extractor looks for tool parts in assistant messages:
+
+```typescript
+const messages: UIMessage[] = [
+  {
+    role: 'user',
+    parts: [{ type: 'text', text: 'Show top 10 customers' }],
+  },
+  {
+    role: 'assistant',
+    parts: [
+      {
+        type: 'tool-invocation',
+        toolInvocationId: '123',
+        toolName: 'db_query',
+        state: 'output-available',
+        input: { sql: 'SELECT * FROM customers LIMIT 10' },
+        output: { rows: [...] },
+      },
+    ],
+  },
+];
+```
+
+## Contextual Extractors
+
+For multi-turn conversations where context matters, use contextual extractors:
+
+### FullContextExtractor
+
+Keeps all preceding messages as context:
+
+```typescript
+import { FullContextExtractor } from '@deepagents/text2sql';
+
+const extractor = new FullContextExtractor(messages, adapter);
+const pairs = await extractor.produce();
+
+// pairs[0].context = ['Show me sales data']
+// pairs[0].question = 'Now filter to California'
+// pairs[0].sql = 'SELECT ... WHERE state = "CA"'
+```
+
+### WindowedContextExtractor
+
+Keeps only the last N messages:
+
+```typescript
+import { WindowedContextExtractor } from '@deepagents/text2sql';
+
+const extractor = new WindowedContextExtractor(messages, adapter, {
+  windowSize: 3, // Keep last 3 messages as context
+});
+```
+
+### SegmentedContextExtractor
+
+Uses an LLM to detect topic changes and reset context:
+
+```typescript
+import { SegmentedContextExtractor } from '@deepagents/text2sql';
+
+const extractor = new SegmentedContextExtractor(messages, adapter);
+const pairs = await extractor.produce();
+
+// Context resets when the user asks about a completely different topic
+```
+
+## Example: Extracting from History Store
+
+```typescript
+import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+
+// Load chat history
+const chat = await history.getChat('chat-123');
+const messages = chat.messages.map(m => m.content);
+
+// Extract pairs
+const pairs = await toPairs(new MessageExtractor(messages));
+
+// Export for training
+console.log(`Extracted ${pairs.length} pairs`);
+for (const pair of pairs) {
+  console.log(`Q: ${pair.question}`);
+  console.log(`SQL: ${pair.sql}`);
+  console.log(`Success: ${pair.success}`);
+  console.log('---');
+}
+```
+
+## Example: Batch Processing Multiple Chats
+
+```typescript
+import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+
+const allPairs: ExtractedPair[] = [];
+
+// Process all chats for a user
+const chats = await history.listChats('user-456');
+
+for (const chatSummary of chats) {
+  const chat = await history.getChat(chatSummary.id);
+  const messages = chat.messages.map(m => m.content);
+
+  const pairs = await toPairs(new MessageExtractor(messages));
+  allPairs.push(...pairs);
+}
+
+console.log(`Total pairs extracted: ${allPairs.length}`);
+```
+
+## Validating Extracted Pairs
+
+Combine with `ValidatedProducer` to re-validate SQL:
+
+```typescript
+import {
+  MessageExtractor,
+  ValidatedProducer,
+  toPairs
+} from '@deepagents/text2sql';
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new ValidatedProducer(
+    new MessageExtractor(messages),
+    adapter,
+    { execute: false } // Just validate syntax
+  )
+);
+```
+
+## Best Practices
+
+1. **Filter production data** - Remove test accounts and internal users before extraction
+2. **Validate extracted SQL** - Schema may have changed since the query was run
+3. **Include context for multi-turn** - Use contextual extractors when questions reference previous turns
+4. **Deduplicate** - Users often ask similar questions; use `DeduplicatedProducer`
+5. **Sample strategically** - Balance simple and complex queries in your training set

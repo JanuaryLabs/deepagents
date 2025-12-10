@@ -1,0 +1,234 @@
+---
+title: Generate SQL
+description: Convert natural language to SQL queries without execution
+---
+
+The `toSql()` method generates SQL queries from natural language without executing them. It's ideal for previewing queries, generating code, or integrating with existing query execution pipelines.
+
+## Basic Usage
+
+```typescript
+const sql = await text2sql.toSql('Show me top 10 customers by revenue');
+
+console.log(sql);
+// SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as Revenue
+// FROM Customer c
+// JOIN Invoice i ON c.CustomerId = i.CustomerId
+// GROUP BY c.CustomerId
+// ORDER BY Revenue DESC
+// LIMIT 10
+```
+
+## How It Works
+
+When you call `toSql()`:
+
+1. **Load schema** - Database introspection is loaded (from cache if available)
+2. **Apply instructions** - System teachables and custom instructions are injected
+3. **Generate SQL** - The AI translates natural language to SQL
+4. **Validate** - The query is validated against the database (syntax check only)
+5. **Retry on error** - If validation fails, the query is regenerated with error feedback
+6. **Return SQL** - The final validated SQL string is returned
+
+## Output Constraints
+
+All generated queries enforce these constraints:
+
+### Read-Only Queries
+
+Only `SELECT` and `WITH` statements are allowed:
+
+```typescript
+// Valid
+const sql1 = await text2sql.toSql('Show all customers');
+// SELECT * FROM Customer
+
+const sql2 = await text2sql.toSql('Monthly sales totals');
+// WITH monthly_sales AS (
+//   SELECT DATE_TRUNC('month', InvoiceDate) as month, SUM(Total) as total
+//   FROM Invoice
+//   GROUP BY month
+// )
+// SELECT * FROM monthly_sales ORDER BY month
+
+// Invalid - would fail validation
+const sql3 = await text2sql.toSql('Delete old records');
+// Error: Only read-only SELECT or WITH queries are allowed
+```
+
+### Row Limits
+
+Generated queries include row limits to prevent overwhelming results. The default maximum is 100 rows:
+
+```typescript
+const sql = await text2sql.toSql('Show me all products');
+// SELECT * FROM Product LIMIT 100
+```
+
+For larger datasets, the AI will automatically apply aggregation:
+
+```typescript
+const sql = await text2sql.toSql('Show me all sales transactions');
+// SELECT COUNT(*) as total_transactions, SUM(Total) as total_revenue
+// FROM Invoice
+```
+
+## Error Handling
+
+The `toSql()` method includes automatic retry logic with validation feedback:
+
+```typescript
+// First attempt generates invalid SQL
+// Error: column "Revenu" does not exist (typo)
+
+// Second attempt includes error in prompt
+// Generates corrected SQL with proper column name "Revenue"
+
+const sql = await text2sql.toSql('Show revenue by customer');
+// Successfully returns valid SQL after auto-correction
+```
+
+### Manual Validation
+
+You can validate before execution:
+
+```typescript
+const sql = await text2sql.toSql('Show me sales data');
+
+// Validate using the adapter
+const error = await adapter.validate(sql);
+if (error) {
+  console.error('Validation error:', error);
+}
+```
+
+## When to Use toSql() vs chat()
+
+| Feature | `toSql()` | `chat()` |
+|---------|-----------|----------|
+| Returns | SQL string only | Streaming response with explanation |
+| Execution | No execution | Executes via `db_query` tool |
+| History | No conversation context | Full conversation history |
+| Memory | No user profile | User preferences and context |
+| Tools | None (pure generation) | `validate_query`, `get_sample_rows`, `db_query` |
+| Streaming | No | Yes |
+| Use case | Code generation, previews | Interactive conversations |
+
+### Use toSql() when you need to:
+
+- Generate queries for display/review before execution
+- Store queries for auditing or later execution
+- Integrate with existing query execution infrastructure
+- Test query generation without database access
+- Generate queries for non-interactive workflows
+
+### Use chat() when you need to:
+
+- Build interactive query interfaces
+- Maintain conversation context across multiple queries
+- Leverage user preferences and memory
+- Stream results to users in real-time
+- Let the AI explore data with sampling tools
+
+## Inspecting the Prompt
+
+To see the full system prompt and context used for generation:
+
+```typescript
+import { t_a_g } from '@deepagents/text2sql';
+
+const { tools, prompt } = await text2sql.inspect(t_a_g);
+
+console.log('Available tools:', tools);
+console.log('System prompt:', prompt);
+```
+
+The prompt includes:
+
+- **Introspection** - Full database schema (tables, columns, relationships, indexes, constraints)
+- **Instructions** - System teachables and custom instructions
+- **Guardrails** - Read-only enforcement, validation requirements
+- **Style guides** - Query formatting preferences
+
+## Examples
+
+### Simple Query
+
+```typescript
+const sql = await text2sql.toSql('Count total orders');
+// SELECT COUNT(*) as total_orders FROM "Order"
+```
+
+### Complex Aggregation
+
+```typescript
+const sql = await text2sql.toSql(
+  'Show monthly revenue trends for the last 12 months',
+);
+// SELECT
+//   DATE_TRUNC('month', InvoiceDate) as month,
+//   SUM(Total) as revenue
+// FROM Invoice
+// WHERE InvoiceDate >= CURRENT_DATE - INTERVAL '12 months'
+// GROUP BY month
+// ORDER BY month
+```
+
+### Multi-Table Join
+
+```typescript
+const sql = await text2sql.toSql(
+  'Which artists have the most albums in our catalog?',
+);
+// SELECT
+//   ar.Name as artist_name,
+//   COUNT(DISTINCT al.AlbumId) as album_count
+// FROM Artist ar
+// JOIN Album al ON ar.ArtistId = al.ArtistId
+// GROUP BY ar.ArtistId, ar.Name
+// ORDER BY album_count DESC
+// LIMIT 10
+```
+
+## Custom Instructions
+
+You can customize query generation with instructions:
+
+```typescript
+import { styleGuide, hint } from '@deepagents/text2sql';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter,
+  history,
+  instructions: [
+    styleGuide({
+      prefer: 'Use explicit JOIN syntax instead of implicit joins',
+      avoid: 'SELECT * (always specify columns)',
+      always: 'Include table aliases for multi-table queries',
+    }),
+    hint('Revenue means gross_revenue before discounts'),
+  ],
+});
+
+const sql = await text2sql.toSql('Show revenue by product');
+// Will follow your custom style guides and terminology
+```
+
+## Performance
+
+Query generation is fast:
+
+- **Cold start**: ~1-2 seconds (includes schema introspection)
+- **Cached schema**: ~300-500ms (typical response time)
+- **Retry attempts**: Up to 3 attempts on validation errors
+
+The introspection cache is invalidated when you change the `version` parameter:
+
+```typescript
+const text2sql = new Text2Sql({
+  version: 'v2', // Bump this when schema changes
+  adapter,
+  history,
+});
+```

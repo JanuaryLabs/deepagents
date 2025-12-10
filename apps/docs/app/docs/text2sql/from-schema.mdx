@@ -1,0 +1,180 @@
+---
+title: From Database Schema
+description: Synthesize training pairs from your database schema
+---
+
+The `SchemaSynthesizer` generates question/SQL pairs directly from your database schema. This is useful for bootstrapping training data when you don't have existing queries or chat history.
+
+## Basic Usage
+
+```typescript
+import { SchemaSynthesizer } from '@deepagents/text2sql';
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 50,
+    complexity: 'medium',
+  })
+);
+```
+
+## How It Works
+
+`SchemaSynthesizer` uses your database schema to generate realistic pairs:
+
+1. Loads schema via the adapter (tables, columns, relationships)
+2. Analyzes table structures and relationships
+3. Generates natural language questions at specified complexity
+4. Produces SQL that answers each question
+5. Optionally validates the generated SQL
+
+## Configuration Options
+
+```typescript
+interface SchemaSynthesizerOptions {
+  /** Number of pairs to generate */
+  count: number;
+  /** Complexity level(s) to generate */
+  complexity?: QuestionComplexity | QuestionComplexity[];
+  /** Validate generated SQL (default: true) */
+  validateSql?: boolean;
+}
+
+type QuestionComplexity = 'simple' | 'medium' | 'complex';
+```
+
+### Complexity Levels
+
+Control the sophistication of generated queries:
+
+```typescript
+// Simple queries only (single table, basic filters)
+const simple = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 20,
+    complexity: 'simple',
+  })
+);
+// "How many customers are there?"
+// "Show all products"
+
+// Medium complexity (joins, aggregations)
+const medium = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 20,
+    complexity: 'medium',
+  })
+);
+// "What is the total revenue by product category?"
+// "Which customers have placed more than 5 orders?"
+
+// Complex queries (multi-join, subqueries, CTEs)
+const complex = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 20,
+    complexity: 'complex',
+  })
+);
+// "What is the month-over-month growth rate for each product category?"
+// "Which customers have a higher than average order value?"
+```
+
+### Mixed Complexity
+
+Generate a balanced dataset:
+
+```typescript
+const pairs = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 60,
+    complexity: ['simple', 'medium', 'complex'], // 20 of each
+  })
+);
+```
+
+### Validation
+
+By default, generated SQL is validated:
+
+```typescript
+// Validated (default) - only returns pairs with valid SQL
+const pairs = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 50,
+    validateSql: true,
+  })
+);
+
+// Skip validation for speed (may include invalid SQL)
+const pairs = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 50,
+    validateSql: false,
+  })
+);
+```
+
+## Example: Bootstrap Training Set
+
+```typescript
+import { SchemaSynthesizer } from '@deepagents/text2sql';
+
+// Generate diverse training data
+const pairs = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, {
+    count: 100,
+    complexity: ['simple', 'medium', 'complex'],
+  })
+);
+
+// Export as JSONL for fine-tuning
+const jsonl = pairs
+  .filter(p => p.success)
+  .map(p => JSON.stringify({ question: p.question, sql: p.sql }))
+  .join('\n');
+
+await fs.writeFile('training-data.jsonl', jsonl);
+```
+
+## Example: Targeted Generation
+
+Focus on specific tables:
+
+```typescript
+import { SchemaSynthesizer, FilteredProducer } from '@deepagents/text2sql';
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new FilteredProducer(
+    new SchemaSynthesizer(adapter, { count: 100 }),
+    { tables: ['orders', 'customers', 'products'] }
+  )
+);
+```
+
+## Combining with Variations
+
+Expand synthetic data with paraphrases:
+
+```typescript
+import { SchemaSynthesizer, VariationSynthesizer } from '@deepagents/text2sql';
+
+// Generate base pairs
+const basePairs = await text2sql.toPairs(
+  (adapter) => new SchemaSynthesizer(adapter, { count: 30 })
+);
+
+// Expand with variations
+const expanded = await toPairs(
+  new VariationSynthesizer(basePairs, { count: 3 })
+);
+
+// Now have ~120 pairs (30 original + 90 variations)
+```
+
+## Best Practices
+
+1. **Start with schema quality** - Better schema documentation (column comments, constraints) leads to better questions
+2. **Mix complexity levels** - A balanced dataset trains better than all-simple or all-complex
+3. **Validate output** - Review a sample of generated pairs for quality
+4. **Iterate** - Generate, review, adjust complexity, regenerate
+5. **Supplement with real data** - Synthetic data bootstraps; real user queries improve accuracy

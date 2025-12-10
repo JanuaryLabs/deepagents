@@ -1,0 +1,177 @@
+---
+title: Training Data Overview
+description: Generate question/SQL pairs for fine-tuning and evaluation
+---
+
+The synthesis module helps you generate training data for fine-tuning models or evaluating Text2SQL performance. It produces `ExtractedPair` objects containing natural language questions paired with their SQL queries.
+
+## Use Cases
+
+- **Fine-tuning** - Generate training pairs to improve model accuracy on your schema
+- **Evaluation** - Create test sets to measure query generation quality
+- **Data augmentation** - Expand existing pairs with variations and paraphrases
+
+## Core Concepts
+
+### ExtractedPair
+
+Every producer outputs the same structure:
+
+```typescript
+interface ExtractedPair {
+  question: string;    // Natural language question
+  sql: string;         // SQL query that answers the question
+  context?: string[];  // Preceding messages (for multi-turn)
+  success: boolean;    // Whether the query is valid/executed successfully
+}
+```
+
+### PairProducer
+
+All extractors and synthesizers implement this interface:
+
+```typescript
+interface PairProducer {
+  produce(): Promise<ExtractedPair[]>;
+}
+```
+
+### toPairs()
+
+Helper function to invoke any producer:
+
+```typescript
+import { toPairs, SqlExtractor } from '@deepagents/text2sql';
+
+const pairs = await toPairs(new SqlExtractor(sqls, adapter));
+```
+
+Or use the `Text2Sql.toPairs()` method which provides the adapter automatically:
+
+```typescript
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter)
+);
+```
+
+## Extractors vs Synthesizers
+
+| Type | Input | Output | Use Case |
+|------|-------|--------|----------|
+| **Extractors** | Existing data (chat history, SQL logs) | Pairs harvested from real usage | Production data mining |
+| **Synthesizers** | Schema or seed pairs | Newly generated pairs | Bootstrapping, augmentation |
+
+### Extractors
+
+Harvest pairs from existing artifacts:
+
+- [MessageExtractor](/docs/text2sql/from-history) - Parse chat history for db_query tool calls
+- [SqlExtractor](/docs/text2sql/from-sql) - Generate questions for existing SQL queries
+- Contextual extractors - Handle multi-turn conversations with context
+
+### Synthesizers
+
+Generate new pairs from scratch:
+
+- [SchemaSynthesizer](/docs/text2sql/from-schema) - Generate pairs from database schema
+- [VariationSynthesizer](/docs/text2sql/variations) - Create paraphrased variations
+
+## Decorators
+
+Decorators wrap producers to add functionality:
+
+### ValidatedProducer
+
+Validate SQL and optionally execute queries:
+
+```typescript
+import { ValidatedProducer, MessageExtractor } from '@deepagents/text2sql';
+
+const validated = new ValidatedProducer(
+  new MessageExtractor(messages),
+  adapter,
+  { execute: true }
+);
+
+const pairs = await validated.produce();
+// Only includes pairs where SQL validated/executed successfully
+```
+
+### FilteredProducer
+
+Filter pairs by criteria:
+
+```typescript
+import { FilteredProducer, SqlExtractor } from '@deepagents/text2sql';
+
+const filtered = new FilteredProducer(
+  new SqlExtractor(sqls, adapter),
+  {
+    successOnly: true,
+    tables: ['orders', 'customers'], // Only pairs using these tables
+  }
+);
+```
+
+### DeduplicatedProducer
+
+Remove duplicate pairs:
+
+```typescript
+import { DeduplicatedProducer, MessageExtractor } from '@deepagents/text2sql';
+
+const deduped = new DeduplicatedProducer(
+  new MessageExtractor(messages),
+  { mode: 'sql' } // Dedupe by SQL only (ignore question variations)
+);
+```
+
+## Composing Producers
+
+Decorators can be chained:
+
+```typescript
+const producer = new DeduplicatedProducer(
+  new FilteredProducer(
+    new ValidatedProducer(
+      new MessageExtractor(messages),
+      adapter
+    ),
+    { successOnly: true }
+  ),
+  { mode: 'exact' }
+);
+
+const pairs = await text2sql.toPairs(() => producer);
+```
+
+## Output Format
+
+Export pairs for training:
+
+```typescript
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter)
+);
+
+// JSONL format (common for fine-tuning)
+const jsonl = pairs
+  .filter(p => p.success)
+  .map(p => JSON.stringify({
+    question: p.question,
+    sql: p.sql
+  }))
+  .join('\n');
+
+// CSV format
+const csv = pairs
+  .map(p => `"${p.question}","${p.sql}"`)
+  .join('\n');
+```
+
+## Next Steps
+
+- [From History](/docs/text2sql/from-history) - Extract pairs from chat logs
+- [From SQL](/docs/text2sql/from-sql) - Generate questions for existing queries
+- [From Schema](/docs/text2sql/from-schema) - Synthesize pairs from database schema
+- [Variations](/docs/text2sql/variations) - Augment with paraphrased questions

@@ -1,0 +1,199 @@
+---
+title: From SQL Queries
+description: Generate natural language questions for existing SQL
+---
+
+The `SqlExtractor` takes existing SQL queries and generates the natural language questions they answer. This is useful when you have SQL logs or a query library but need question/SQL pairs for training.
+
+## Basic Usage
+
+```typescript
+import { SqlExtractor, toPairs } from '@deepagents/text2sql';
+
+const sqls = [
+  'SELECT COUNT(*) FROM orders WHERE status = "completed"',
+  'SELECT customer_name, SUM(total) FROM orders GROUP BY customer_id',
+];
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter)
+);
+
+console.log(pairs);
+// [
+//   {
+//     question: 'How many completed orders do we have?',
+//     sql: 'SELECT COUNT(*) FROM orders WHERE status = "completed"',
+//     success: true
+//   },
+//   {
+//     question: 'What is the total order value for each customer?',
+//     sql: 'SELECT customer_name, SUM(total) FROM orders GROUP BY customer_id',
+//     success: true
+//   }
+// ]
+```
+
+## How It Works
+
+`SqlExtractor` uses an LLM to reverse-engineer questions:
+
+1. Loads your database schema via the adapter
+2. For each SQL query:
+   - Optionally validates the SQL
+   - Sends SQL + schema to an LLM agent
+   - Agent generates a natural language question
+3. Returns pairs with the original SQL and generated question
+
+## Configuration Options
+
+```typescript
+interface SqlExtractorOptions {
+  /** Validate SQL before generating questions (default: true) */
+  validateSql?: boolean;
+  /** Skip invalid SQL instead of including with success=false (default: false) */
+  skipInvalid?: boolean;
+}
+```
+
+### Validate SQL
+
+By default, SQL is validated before question generation:
+
+```typescript
+// With validation (default)
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter, { validateSql: true })
+);
+
+// Skip validation for speed
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter, { validateSql: false })
+);
+```
+
+### Handle Invalid SQL
+
+Control what happens when SQL is invalid:
+
+```typescript
+// Include invalid SQL with success=false (default)
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter, { skipInvalid: false })
+);
+// Invalid SQL is included: { sql: '...', success: false }
+
+// Skip invalid SQL entirely
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter, { skipInvalid: true })
+);
+// Invalid SQL is omitted from results
+```
+
+## Single SQL Query
+
+Pass a single string instead of an array:
+
+```typescript
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(
+    'SELECT * FROM products WHERE price > 100',
+    adapter
+  )
+);
+```
+
+## Example: Processing Query Logs
+
+```typescript
+import { SqlExtractor } from '@deepagents/text2sql';
+
+// Load SQL from your query logs
+const queryLogs = await loadQueryLogs(); // Your data source
+const sqls = queryLogs.map(log => log.sql);
+
+// Generate questions
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter, {
+    validateSql: true,
+    skipInvalid: true,
+  })
+);
+
+// Export for training
+const trainingData = pairs.map(p => ({
+  input: p.question,
+  output: p.sql,
+}));
+```
+
+## Example: From Saved Queries
+
+```typescript
+import { SqlExtractor } from '@deepagents/text2sql';
+
+// Your saved query library
+const savedQueries = [
+  { name: 'monthly_revenue', sql: 'SELECT ...' },
+  { name: 'top_customers', sql: 'SELECT ...' },
+  { name: 'inventory_status', sql: 'SELECT ...' },
+];
+
+const sqls = savedQueries.map(q => q.sql);
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new SqlExtractor(sqls, adapter)
+);
+
+// Match back to saved query names if needed
+const enriched = pairs.map((pair, i) => ({
+  ...pair,
+  queryName: savedQueries[i].name,
+}));
+```
+
+## Question Quality
+
+The generated questions aim to be:
+
+- **Natural** - Written as a non-technical user would ask
+- **Accurate** - Correctly describes what the SQL retrieves
+- **Concise** - Clear and to the point
+
+Example transformations:
+
+| SQL | Generated Question |
+|-----|-------------------|
+| `SELECT COUNT(*) FROM customers WHERE region = 'NY'` | "How many customers do we have in New York?" |
+| `SELECT product_name, SUM(quantity) FROM orders GROUP BY product_name ORDER BY 2 DESC LIMIT 10` | "What are our top 10 products by quantity sold?" |
+| `SELECT c.name FROM customers c LEFT JOIN orders o ON c.id = o.customer_id WHERE o.id IS NULL` | "Which customers have never placed an order?" |
+
+## Combining with Other Producers
+
+Chain with decorators for filtering and validation:
+
+```typescript
+import {
+  SqlExtractor,
+  FilteredProducer,
+  DeduplicatedProducer,
+} from '@deepagents/text2sql';
+
+const pairs = await text2sql.toPairs(
+  (adapter) => new DeduplicatedProducer(
+    new FilteredProducer(
+      new SqlExtractor(sqls, adapter),
+      { successOnly: true }
+    ),
+    { mode: 'sql' }
+  )
+);
+```
+
+## Best Practices
+
+1. **Validate SQL** - Ensure queries are valid for your current schema
+2. **Deduplicate input** - Remove duplicate SQL before processing to save LLM calls
+3. **Review output** - Spot-check generated questions for accuracy
+4. **Schema context matters** - The extractor uses your schema to generate better questions
+5. **Batch processing** - Process in batches if you have thousands of queries
