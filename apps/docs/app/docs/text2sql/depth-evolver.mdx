@@ -1,0 +1,379 @@
+---
+title: Depth Evolution
+description: Evolve questions into more complex versions using in-depth evolution
+---
+
+The `DepthEvolver` transforms simple question/SQL pairs into more complex versions that require sophisticated queries. Unlike paraphrasing (where the SQL stays the same), depth evolution creates **both** new questions **and** new SQL that's more complex than the original.
+
+Based on Microsoft's Evol-Instruct methodology for in-depth evolution, this synthesizer helps you create training data that covers increasingly advanced SQL patterns.
+
+## Basic Usage
+
+```typescript
+import { DepthEvolver, toPairs } from '@deepagents/text2sql';
+
+const seedPairs = [
+  { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true }
+];
+
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    count: 3,
+    techniques: ['add-aggregation', 'add-filter'],
+  })
+);
+
+// Input:  "Show all orders"
+//         SELECT * FROM orders
+//
+// Evolved: "Show total order count by customer for last 30 days"
+//          SELECT customer_id, COUNT(*) FROM orders
+//          WHERE order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+//          GROUP BY customer_id
+```
+
+## How It Works
+
+`DepthEvolver` applies complexity-increasing techniques:
+
+1. Takes a simple question/SQL pair as input
+2. Selects an evolution technique (add-aggregation, add-join, etc.)
+3. Generates a more complex question using that technique
+4. Produces the SQL that answers the evolved question
+5. Validates the generated SQL against your schema
+
+Both the question and SQL change - the evolved pair is more sophisticated than the original.
+
+## Evolution Techniques
+
+The evolver supports five techniques for increasing complexity:
+
+### add-aggregation
+
+Adds GROUP BY, COUNT, SUM, AVG, MIN, MAX operations:
+
+```typescript
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    techniques: ['add-aggregation'],
+  })
+);
+
+// "Show orders"
+//   → "Show total order count by customer"
+// "List products"
+//   → "What is the average price per category?"
+// "Get employees"
+//   → "How many employees are in each department?"
+```
+
+### add-filter
+
+Adds WHERE clauses with specific conditions:
+
+```typescript
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    techniques: ['add-filter'],
+  })
+);
+
+// "Show orders"
+//   → "Show orders from the last 30 days"
+// "List customers"
+//   → "List customers who have made more than 5 purchases"
+// "Get products"
+//   → "Get products with price above $100"
+```
+
+### add-join
+
+Requires data from related tables (JOIN operations):
+
+```typescript
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    techniques: ['add-join'],
+  })
+);
+
+// "Show orders"
+//   → "Show orders with customer names and addresses"
+// "List products"
+//   → "List products with their supplier information"
+// "Get employees"
+//   → "Get employees with their department and manager names"
+```
+
+### add-reasoning
+
+Adds multi-step reasoning, comparisons, or derived calculations:
+
+```typescript
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    techniques: ['add-reasoning'],
+  })
+);
+
+// "Show orders"
+//   → "Which customers have orders above the average order value?"
+// "List products"
+//   → "Which products are underperforming compared to their category average?"
+// "Get revenue"
+//   → "Which month had the highest growth compared to the previous month?"
+```
+
+### hypothetical
+
+Adds speculative scenarios and projections:
+
+```typescript
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    techniques: ['hypothetical'],
+  })
+);
+
+// "Show revenue"
+//   → "What would revenue be if we increased all prices by 15%?"
+// "List inventory"
+//   → "How many days of stock remain at current sales rate?"
+// "Get costs"
+//   → "What would be the impact of a 10% discount on profit margins?"
+```
+
+## Configuration Options
+
+```typescript
+interface DepthEvolverOptions {
+  /** Evolution techniques to use (default: all 5) */
+  techniques?: DepthTechnique[];
+  /** Number of evolved versions per input pair (default: 1) */
+  count?: number;
+  /** Custom model override */
+  model?: AgentModel;
+  /** Parallel processing limit (default: 4) */
+  concurrency?: number;
+}
+
+type DepthTechnique =
+  | 'add-aggregation'
+  | 'add-filter'
+  | 'add-join'
+  | 'add-reasoning'
+  | 'hypothetical';
+```
+
+### Multiple Evolutions Per Pair
+
+Generate multiple evolved versions from each seed:
+
+```typescript
+// Generate 3 evolved versions per seed pair
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    count: 3,
+  })
+);
+
+// 10 seed pairs → 30 evolved pairs (3 per seed)
+```
+
+### Selective Techniques
+
+Use specific techniques only:
+
+```typescript
+// Only aggregation and filtering
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    techniques: ['add-aggregation', 'add-filter'],
+    count: 5,
+  })
+);
+
+// Each seed gets 5 evolutions alternating between the two techniques
+```
+
+### Concurrency Control
+
+Adjust parallel processing:
+
+```typescript
+// Process 10 evolutions concurrently
+const evolved = await toPairs(
+  new DepthEvolver(seedPairs, adapter, {
+    count: 20,
+    concurrency: 10,
+  })
+);
+```
+
+## Example: Multi-Stage Pipeline
+
+Combine schema synthesis, depth evolution, and breadth evolution:
+
+```typescript
+import {
+  SchemaSynthesizer,
+  DepthEvolver,
+  BreadthEvolver,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Stage 1: Generate simple baseline pairs from schema
+const baseline = await toPairs(
+  new SchemaSynthesizer(adapter, {
+    count: 20,
+    complexity: 'simple',
+  })
+);
+console.log(`Baseline: ${baseline.length} simple pairs`);
+
+// Stage 2: Evolve into complex versions (depth)
+const complex = await toPairs(
+  new DepthEvolver(baseline, adapter, {
+    count: 2,
+    techniques: ['add-aggregation', 'add-join', 'add-reasoning'],
+  })
+);
+console.log(`After depth: ${complex.length} complex pairs`);
+
+// Stage 3: Generate variations of each (breadth)
+const final = await toPairs(
+  new BreadthEvolver(complex, {
+    count: 3,
+  })
+);
+console.log(`Final dataset: ${final.length} total pairs`);
+
+// 20 baseline → 40 complex → 120 final (with variations)
+```
+
+## Example: Progressive Complexity
+
+Build a dataset with graduated difficulty:
+
+```typescript
+import { DepthEvolver, toPairs } from '@deepagents/text2sql';
+
+const seeds = [
+  { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true },
+  { question: 'List products', sql: 'SELECT * FROM products', success: true },
+];
+
+// Level 1: Add basic filtering
+const level1 = await toPairs(
+  new DepthEvolver(seeds, adapter, {
+    techniques: ['add-filter'],
+  })
+);
+
+// Level 2: Add aggregations to filtered queries
+const level2 = await toPairs(
+  new DepthEvolver(level1, adapter, {
+    techniques: ['add-aggregation'],
+  })
+);
+
+// Level 3: Add joins to aggregated queries
+const level3 = await toPairs(
+  new DepthEvolver(level2, adapter, {
+    techniques: ['add-join'],
+  })
+);
+
+// Level 4: Add reasoning on top
+const level4 = await toPairs(
+  new DepthEvolver(level3, adapter, {
+    techniques: ['add-reasoning'],
+  })
+);
+
+// Progressive complexity: simple → filtered → aggregated → joined → reasoned
+```
+
+## Depth vs Breadth Evolution
+
+Understanding the difference:
+
+| Aspect | DepthEvolver | BreadthEvolver |
+|--------|--------------|----------------|
+| **Question** | Changes (more complex) | Changes (paraphrased) |
+| **SQL** | Changes (more complex) | **Stays the same** |
+| **Purpose** | Increase query sophistication | Add phrasing variety |
+| **Use case** | Cover advanced SQL patterns | Improve robustness to different wordings |
+
+### Example Comparison
+
+```typescript
+// Seed pair
+const seed = {
+  question: 'Show all orders',
+  sql: 'SELECT * FROM orders',
+  success: true,
+};
+
+// DepthEvolver: Both question and SQL change
+const depth = await toPairs(
+  new DepthEvolver([seed], adapter)
+);
+// Question: "Show total order count by customer for last 30 days"
+// SQL: SELECT customer_id, COUNT(*) FROM orders
+//      WHERE order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+//      GROUP BY customer_id
+
+// BreadthEvolver: Only question changes
+const breadth = await toPairs(
+  new BreadthEvolver([seed], { count: 3 })
+);
+// Question: "Display all orders"
+// SQL: SELECT * FROM orders  (unchanged)
+//
+// Question: "List every order"
+// SQL: SELECT * FROM orders  (unchanged)
+//
+// Question: "Get all order records"
+// SQL: SELECT * FROM orders  (unchanged)
+```
+
+## Combining Both
+
+Use together for comprehensive training data:
+
+```typescript
+import { DepthEvolver, BreadthEvolver, toPairs } from '@deepagents/text2sql';
+
+const seeds = [
+  { question: 'Show orders', sql: 'SELECT * FROM orders', success: true },
+];
+
+// Evolve in depth
+const complex = await toPairs(
+  new DepthEvolver(seeds, adapter, { count: 5 })
+);
+
+// Then evolve in breadth
+const final = await toPairs(
+  new BreadthEvolver(complex, { count: 3 })
+);
+
+// 1 seed → 5 complex → 15 total (with variations)
+// Covers both SQL complexity and phrasing variety
+```
+
+## Best Practices
+
+1. **Start simple** - Use simple seed pairs; let the evolver add complexity
+2. **Multiple passes** - Run depth evolution multiple times with different techniques for gradual complexity increase
+3. **Validate output** - Review evolved pairs to ensure questions are realistic and SQL is correct
+4. **Mix techniques** - Don't rely on a single technique; combine them for diverse complexity
+5. **Follow with breadth** - After depth evolution, use BreadthEvolver to add phrasing variations
+6. **Check success rate** - If many evolved pairs have `success: false`, your schema might not support those patterns
+
+## Related Pages
+
+- [BreadthEvolver](/docs/text2sql/breadth-evolver) - Generate paraphrased variations (breadth evolution)
+- [SchemaSynthesizer](/docs/text2sql/from-schema) - Generate seed pairs from database schema
+- [Training Data Overview](/docs/text2sql/synthesis-overview) - Overview of all synthesis tools

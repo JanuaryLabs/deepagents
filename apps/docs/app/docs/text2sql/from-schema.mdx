@@ -8,25 +8,25 @@ The `SchemaSynthesizer` generates question/SQL pairs directly from your database
 ## Basic Usage
 
 ```typescript
-import { SchemaSynthesizer } from '@deepagents/text2sql';
+import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql';
 
-const pairs = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 50,
-    complexity: 'medium',
-  })
-);
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 50,
+  complexity: 'medium',
+}));
 ```
 
 ## How It Works
 
-`SchemaSynthesizer` uses your database schema to generate realistic pairs:
+`SchemaSynthesizer` uses your database schema to generate realistic pairs using an AsyncGenerator pattern:
 
 1. Loads schema via the adapter (tables, columns, relationships)
 2. Analyzes table structures and relationships
 3. Generates natural language questions at specified complexity
 4. Produces SQL that answers each question
-5. Optionally validates the generated SQL
+5. Yields pairs in chunks via `async *produce()`
+
+The synthesizer implements an async generator that yields pairs incrementally, allowing for efficient processing of large datasets.
 
 ## Configuration Options
 
@@ -36,96 +36,177 @@ interface SchemaSynthesizerOptions {
   count: number;
   /** Complexity level(s) to generate */
   complexity?: QuestionComplexity | QuestionComplexity[];
-  /** Validate generated SQL (default: true) */
-  validateSql?: boolean;
+  /** Personas to guide question generation */
+  personas?: Persona[];
+  /** Domain knowledge to incorporate */
+  teachings?: Teachables[];
+  /** Model to use for generation */
+  model?: AgentModel;
+  /** Number of concurrent generations (default: 5) */
+  concurrency?: number;
 }
 
-type QuestionComplexity = 'simple' | 'medium' | 'complex';
+type QuestionComplexity = 'low' | 'medium' | 'hard' | 'window';
+
+interface Persona {
+  role: string;
+  perspective: string;
+}
 ```
 
-### Complexity Levels
+## Complexity Levels
 
 Control the sophistication of generated queries:
 
 ```typescript
-// Simple queries only (single table, basic filters)
-const simple = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 20,
-    complexity: 'simple',
-  })
-);
+// Low complexity (single table, basic filters)
+const low = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 20,
+  complexity: 'low',
+}));
 // "How many customers are there?"
 // "Show all products"
 
 // Medium complexity (joins, aggregations)
-const medium = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 20,
-    complexity: 'medium',
-  })
-);
+const medium = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 20,
+  complexity: 'medium',
+}));
 // "What is the total revenue by product category?"
 // "Which customers have placed more than 5 orders?"
 
-// Complex queries (multi-join, subqueries, CTEs)
-const complex = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 20,
-    complexity: 'complex',
-  })
-);
+// Hard complexity (multi-join, subqueries, CTEs)
+const hard = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 20,
+  complexity: 'hard',
+}));
 // "What is the month-over-month growth rate for each product category?"
 // "Which customers have a higher than average order value?"
+
+// Window functions (advanced SQL with window functions)
+const window = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 20,
+  complexity: 'window',
+}));
+// "Show running total of sales for each product"
+// "Rank customers by their total order value"
 ```
 
-### Mixed Complexity
+## Mixed Complexity
 
 Generate a balanced dataset:
 
 ```typescript
-const pairs = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 60,
-    complexity: ['simple', 'medium', 'complex'], // 20 of each
-  })
-);
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 80,
+  complexity: ['low', 'medium', 'hard', 'window'], // 20 of each
+}));
 ```
 
-### Validation
+## Working with Personas
 
-By default, generated SQL is validated:
+Personas guide question generation to match different user perspectives:
 
 ```typescript
-// Validated (default) - only returns pairs with valid SQL
-const pairs = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 50,
-    validateSql: true,
-  })
-);
+import { SchemaSynthesizer, PersonaGenerator, toPairs } from '@deepagents/text2sql';
 
-// Skip validation for speed (may include invalid SQL)
-const pairs = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 50,
-    validateSql: false,
-  })
-);
+// Generate personas first
+const personaGen = new PersonaGenerator(adapter, { count: 5 });
+const personas = await personaGen.generate();
+
+// Use personas in synthesis
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 10,
+  complexity: ['low', 'medium', 'hard'],
+  personas,
+}));
+```
+
+You can also define personas manually:
+
+```typescript
+const customPersonas = [
+  { role: 'Sales Manager', perspective: 'Focus on revenue, sales trends, and customer acquisition' },
+  { role: 'Data Analyst', perspective: 'Focus on data quality, statistical analysis, and patterns' },
+  { role: 'Product Manager', perspective: 'Focus on product performance, user engagement, and features' },
+];
+
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 30,
+  personas: customPersonas,
+}));
+```
+
+## Integration with Teachings
+
+Teachings provide domain-specific knowledge to improve question quality:
+
+```typescript
+import { TeachingsGenerator, SchemaSynthesizer, toPairs } from '@deepagents/text2sql';
+
+const teachGen = new TeachingsGenerator(adapter);
+const teachings = await teachGen.generate();
+
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 50,
+  teachings,
+}));
+```
+
+Teachings help the synthesizer understand:
+- Business logic and domain terminology
+- Common patterns and workflows
+- Important metrics and KPIs
+- Typical user questions and use cases
+
+## Concurrency Control
+
+Control how many pairs are generated in parallel:
+
+```typescript
+// Default concurrency (5)
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 100,
+}));
+
+// Higher concurrency for faster generation
+const fastPairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 100,
+  concurrency: 10,
+}));
+
+// Lower concurrency to reduce API rate limits
+const slowPairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 100,
+  concurrency: 2,
+}));
+```
+
+## Custom Model Selection
+
+Specify a custom model for generation:
+
+```typescript
+import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql';
+import { groq } from '@deepagents/agent';
+
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 50,
+  model: groq('gpt-oss-20b'),
+}));
 ```
 
 ## Example: Bootstrap Training Set
 
 ```typescript
-import { SchemaSynthesizer } from '@deepagents/text2sql';
+import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql';
 
 // Generate diverse training data
-const pairs = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, {
-    count: 100,
-    complexity: ['simple', 'medium', 'complex'],
-  })
-);
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 100,
+  complexity: ['low', 'medium', 'hard'],
+  concurrency: 8,
+}));
 
 // Export as JSONL for fine-tuning
 const jsonl = pairs
@@ -136,45 +217,86 @@ const jsonl = pairs
 await fs.writeFile('training-data.jsonl', jsonl);
 ```
 
-## Example: Targeted Generation
+## Example: Persona-Driven Generation
 
-Focus on specific tables:
+Generate questions from different user perspectives:
 
 ```typescript
-import { SchemaSynthesizer, FilteredProducer } from '@deepagents/text2sql';
+import { SchemaSynthesizer, PersonaGenerator, toPairs } from '@deepagents/text2sql';
 
-const pairs = await text2sql.toPairs(
-  (adapter) => new FilteredProducer(
-    new SchemaSynthesizer(adapter, { count: 100 }),
-    { tables: ['orders', 'customers', 'products'] }
-  )
-);
+// Generate personas
+const personaGen = new PersonaGenerator(adapter, { count: 3 });
+const personas = await personaGen.generate();
+
+// Generate pairs with personas
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 60,
+  complexity: ['low', 'medium', 'hard'],
+  personas,
+  concurrency: 10,
+}));
+
+// Questions will reflect different user perspectives
+// e.g., "As a sales manager, show me top performing products this quarter"
 ```
 
-## Combining with Variations
+## Example: Domain-Aware Generation
+
+Incorporate domain knowledge:
+
+```typescript
+import {
+  SchemaSynthesizer,
+  TeachingsGenerator,
+  PersonaGenerator,
+  toPairs
+} from '@deepagents/text2sql';
+
+// Generate domain knowledge and personas
+const teachGen = new TeachingsGenerator(adapter);
+const teachings = await teachGen.generate();
+
+const personaGen = new PersonaGenerator(adapter, { count: 5 });
+const personas = await personaGen.generate();
+
+// Generate pairs with full context
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 100,
+  complexity: ['low', 'medium', 'hard', 'window'],
+  personas,
+  teachings,
+  concurrency: 8,
+}));
+```
+
+## Combining with Breadth Evolution
 
 Expand synthetic data with paraphrases:
 
 ```typescript
-import { SchemaSynthesizer, VariationSynthesizer } from '@deepagents/text2sql';
+import { SchemaSynthesizer, BreadthEvolver, toPairs } from '@deepagents/text2sql';
 
 // Generate base pairs
-const basePairs = await text2sql.toPairs(
-  (adapter) => new SchemaSynthesizer(adapter, { count: 30 })
-);
+const basePairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 30,
+  complexity: ['low', 'medium', 'hard'],
+}));
 
 // Expand with variations
 const expanded = await toPairs(
-  new VariationSynthesizer(basePairs, { count: 3 })
+  new BreadthEvolver(basePairs, { count: 3 })
 );
 
-// Now have ~120 pairs (30 original + 90 variations)
+// Now have ~90 variations (30 base × 3 paraphrases each)
 ```
 
 ## Best Practices
 
 1. **Start with schema quality** - Better schema documentation (column comments, constraints) leads to better questions
 2. **Mix complexity levels** - A balanced dataset trains better than all-simple or all-complex
-3. **Validate output** - Review a sample of generated pairs for quality
-4. **Iterate** - Generate, review, adjust complexity, regenerate
-5. **Supplement with real data** - Synthetic data bootstraps; real user queries improve accuracy
+3. **Use personas** - Generate personas to create diverse, realistic questions from different user perspectives
+4. **Incorporate teachings** - Add domain knowledge to improve question relevance and accuracy
+5. **Adjust concurrency** - Balance generation speed with API rate limits and resource constraints
+6. **Validate output** - Review a sample of generated pairs for quality
+7. **Iterate** - Generate, review, adjust complexity/personas/teachings, regenerate
+8. **Supplement with real data** - Synthetic data bootstraps; real user queries improve accuracy

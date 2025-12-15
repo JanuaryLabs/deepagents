@@ -28,17 +28,19 @@ interface ExtractedPair {
 
 ### PairProducer
 
-All extractors and synthesizers implement this interface:
+All extractors and synthesizers implement this abstract class:
 
 ```typescript
-interface PairProducer {
-  produce(): Promise<ExtractedPair[]>;
+abstract class PairProducer<T extends ExtractedPair> {
+  abstract produce(): AsyncGenerator<T[], void, unknown>;
 }
 ```
 
+The streaming pattern yields chunks of pairs, allowing for efficient memory usage and real-time processing.
+
 ### toPairs()
 
-Helper function to invoke any producer:
+Helper function to iterate any producer's AsyncGenerator:
 
 ```typescript
 import { toPairs, SqlExtractor } from '@deepagents/text2sql';
@@ -46,20 +48,33 @@ import { toPairs, SqlExtractor } from '@deepagents/text2sql';
 const pairs = await toPairs(new SqlExtractor(sqls, adapter));
 ```
 
-Or use the `Text2Sql.toPairs()` method which provides the adapter automatically:
+Implementation:
 
 ```typescript
-const pairs = await text2sql.toPairs(
-  (adapter) => new SqlExtractor(sqls, adapter)
-);
+export async function toPairs<T extends ExtractedPair>(
+  producer: PairProducer<T>,
+): Promise<T[]> {
+  const pairs: T[] = [];
+  for await (const chunk of producer.produce()) {
+    pairs.push(...chunk);
+  }
+  return pairs;
+}
 ```
 
-## Extractors vs Synthesizers
+Or pass the producer directly to `toPairs()`:
+
+```typescript
+const pairs = await toPairs(new SqlExtractor(sqls, adapter));
+```
+
+## Extractors vs Synthesizers vs Generators
 
 | Type | Input | Output | Use Case |
 |------|-------|--------|----------|
-| **Extractors** | Existing data (chat history, SQL logs) | Pairs harvested from real usage | Production data mining |
+| **Extractors** | Chat history, SQL logs | Pairs harvested from real usage | Production data mining |
 | **Synthesizers** | Schema or seed pairs | Newly generated pairs | Bootstrapping, augmentation |
+| **Generators** | Schema | Personas or Teachings | Pipeline setup |
 
 ### Extractors
 
@@ -74,7 +89,25 @@ Harvest pairs from existing artifacts:
 Generate new pairs from scratch:
 
 - [SchemaSynthesizer](/docs/text2sql/from-schema) - Generate pairs from database schema
-- [VariationSynthesizer](/docs/text2sql/variations) - Create paraphrased variations
+- [BreadthEvolver](/docs/text2sql/breadth-evolver) - Paraphrase questions (in-breadth evolution, keeps same SQL)
+- [DepthEvolver](/docs/text2sql/depth-evolver) - Evolve to more complex questions (in-depth evolution, changes both Q and SQL)
+
+### Generators
+
+Generate supporting artifacts for the pipeline:
+
+- [PersonaGenerator](/docs/text2sql/persona-generator) - Generate user personas from schema
+- [TeachingsGenerator](/docs/text2sql/teachings-generator) - Generate domain teachings from schema
+
+## Evol-Instruct Methodology
+
+The synthesis module implements Microsoft's Evol-Instruct methodology for instruction tuning:
+
+- **BreadthEvolver** - In-breadth evolution: Creates paraphrased variations of questions while keeping the same SQL query. This increases dataset diversity without changing the underlying query complexity.
+
+- **DepthEvolver** - In-depth evolution: Transforms questions into more complex versions that require changes to both the question and SQL query. This progressively increases dataset difficulty and model capabilities.
+
+This two-pronged approach ensures both breadth (variety) and depth (complexity) in your training data.
 
 ## Decorators
 
@@ -93,7 +126,7 @@ const validated = new ValidatedProducer(
   { execute: true }
 );
 
-const pairs = await validated.produce();
+const pairs = await toPairs(validated);
 // Only includes pairs where SQL validated/executed successfully
 ```
 
@@ -142,7 +175,7 @@ const producer = new DeduplicatedProducer(
   { mode: 'exact' }
 );
 
-const pairs = await text2sql.toPairs(() => producer);
+const pairs = await toPairs(producer);
 ```
 
 ## Output Format
@@ -150,9 +183,7 @@ const pairs = await text2sql.toPairs(() => producer);
 Export pairs for training:
 
 ```typescript
-const pairs = await text2sql.toPairs(
-  (adapter) => new SqlExtractor(sqls, adapter)
-);
+const pairs = await toPairs(new SqlExtractor(sqls, adapter));
 
 // JSONL format (common for fine-tuning)
 const jsonl = pairs
@@ -174,4 +205,7 @@ const csv = pairs
 - [From History](/docs/text2sql/from-history) - Extract pairs from chat logs
 - [From SQL](/docs/text2sql/from-sql) - Generate questions for existing queries
 - [From Schema](/docs/text2sql/from-schema) - Synthesize pairs from database schema
-- [Variations](/docs/text2sql/variations) - Augment with paraphrased questions
+- [Breadth Evolution](/docs/text2sql/breadth-evolver) - Create paraphrased variations
+- [Depth Evolution](/docs/text2sql/depth-evolver) - Generate more complex questions
+- [Persona Generator](/docs/text2sql/persona-generator) - Generate user personas
+- [Teachings Generator](/docs/text2sql/teachings-generator) - Generate domain teachings

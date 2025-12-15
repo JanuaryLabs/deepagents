@@ -1,0 +1,263 @@
+---
+title: Persona Generator
+description: Generate user personas from database schema
+---
+
+The `PersonaGenerator` analyzes your database schema to infer realistic user personas - the different types of people who would query your database. These personas can be used with `SchemaSynthesizer` and `BreadthEvolver` to generate diverse, perspective-aware training data.
+
+## Basic Usage
+
+```typescript
+import { PersonaGenerator } from '@deepagents/text2sql';
+
+const generator = new PersonaGenerator(adapter, { count: 5 });
+const personas = await generator.generate();
+
+// [
+//   {
+//     role: "Financial Analyst",
+//     perspective: "As financial analyst, I care about:\n- Revenue trends and forecasting..."
+//   },
+//   {
+//     role: "Customer Support Rep",
+//     perspective: "As customer support, I care about:\n- Quick lookups by order ID..."
+//   }
+// ]
+```
+
+## How It Works
+
+`PersonaGenerator` examines your database schema to understand the domain and generate relevant personas:
+
+1. Introspects schema (tables, columns, relationships)
+2. Analyzes table names and structure to infer business domain
+3. Identifies different user types who would query this data
+4. Generates detailed perspectives for each persona including:
+   - What questions they typically ask
+   - What metrics/data points matter to them
+   - How they prefer data formatted
+   - Their priorities (speed vs accuracy, detail vs summary)
+   - Domain-specific concerns relevant to their role
+
+## Configuration Options
+
+```typescript
+interface PersonaGeneratorOptions {
+  /** Number of personas to generate (default: 5) */
+  count?: number;
+  /** Model to use for generation */
+  model?: AgentModel;
+}
+```
+
+### Number of Personas
+
+Control diversity by adjusting count:
+
+```typescript
+// Few personas - focused on main user types
+const personas = await new PersonaGenerator(adapter, {
+  count: 3
+}).generate();
+
+// Many personas - maximum diversity
+const personas = await new PersonaGenerator(adapter, {
+  count: 10
+}).generate();
+```
+
+### Custom Model
+
+Override the default model:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+
+const personas = await new PersonaGenerator(adapter, {
+  count: 5,
+  model: groq('llama-3.3-70b-versatile')
+}).generate();
+```
+
+## Using with SchemaSynthesizer
+
+Generate questions from different perspectives:
+
+```typescript
+import { PersonaGenerator, SchemaSynthesizer } from '@deepagents/text2sql';
+
+// Generate personas
+const generator = new PersonaGenerator(adapter, { count: 5 });
+const personas = await generator.generate();
+
+// Use personas for question generation
+const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 10,           // 10 questions per persona
+  complexity: 'medium',
+  personas: personas   // Each persona gets their own questions
+}));
+// Result: 50 pairs (5 personas × 10 questions each)
+```
+
+## Using with BreadthEvolver
+
+Paraphrase questions from different perspectives:
+
+```typescript
+import { PersonaGenerator, BreadthEvolver } from '@deepagents/text2sql';
+
+const generator = new PersonaGenerator(adapter, { count: 3 });
+const personas = await generator.generate();
+
+const existingPairs = [
+  { question: 'Show revenue by product', sql: 'SELECT ...', success: true }
+];
+
+// Generate variations from analyst perspective
+const analystVariations = await toPairs(
+  new BreadthEvolver(existingPairs, {
+    count: 3,
+    persona: personas[0] // Financial Analyst
+  })
+);
+// "What is the revenue breakdown by product?"
+// "Display product-level revenue analysis"
+// "Break down revenue by product category"
+
+// Generate variations from support perspective
+const supportVariations = await toPairs(
+  new BreadthEvolver(existingPairs, {
+    count: 3,
+    persona: personas[1] // Customer Support Rep
+  })
+);
+// "Show me which products are bringing in money"
+// "What's each product earning?"
+// "List products and their sales"
+```
+
+## Example Output
+
+For an e-commerce database with orders, customers, and products tables:
+
+```typescript
+[
+  {
+    role: "Customer Support Rep",
+    perspective: `As customer support, I care about:
+- Quick lookups by order ID or customer email
+- Order status and shipping tracking
+- Return and refund history
+- Customer contact details and order history
+- I need fast answers, not complex analysis`
+  },
+  {
+    role: "Inventory Manager",
+    perspective: `As inventory manager, I care about:
+- Current stock levels and reorder points
+- Product availability across warehouses
+- Slow-moving inventory identification
+- Supplier lead times and pending orders
+- I need accurate counts, often aggregated by location`
+  },
+  {
+    role: "Marketing Analyst",
+    perspective: `As marketing analyst, I care about:
+- Customer acquisition and retention metrics
+- Product performance and category trends
+- Customer segmentation and lifetime value
+- Campaign effectiveness and conversion rates
+- I need historical trends and comparative analysis`
+  },
+  {
+    role: "Finance Controller",
+    perspective: `As finance controller, I care about:
+- Revenue recognition and billing accuracy
+- Payment status and accounts receivable aging
+- Refund and chargeback tracking
+- Period-over-period financial metrics
+- I need precise numbers with audit trails`
+  },
+  {
+    role: "Executive",
+    perspective: `As executive, I care about:
+- High-level KPIs and business health metrics
+- Growth rates and market trends
+- Performance against targets and forecasts
+- Strategic insights, not operational details
+- I need clear summaries with context`
+  }
+]
+```
+
+## Full Pipeline Example
+
+Generate comprehensive, diverse training data:
+
+```typescript
+import {
+  PersonaGenerator,
+  TeachingsGenerator,
+  SchemaSynthesizer,
+  BreadthEvolver,
+  toPairs
+} from '@deepagents/text2sql';
+
+// 1. Generate personas
+const personaGen = new PersonaGenerator(adapter, { count: 10 });
+const personas = await personaGen.generate();
+
+// 2. Generate teachings
+const teachingsGen = new TeachingsGenerator(adapter);
+const teachings = await teachingsGen.generate();
+
+// 3. Generate base pairs with personas and teachings
+const basePairs = await toPairs(new SchemaSynthesizer(adapter, {
+  count: 5,
+  complexity: ['low', 'medium', 'hard'],
+  personas: personas,
+  teachings: teachings
+}));
+// 150 pairs (10 personas × 3 complexities × 5 questions)
+
+// 4. Evolve with persona-specific paraphrases
+const evolvedPairs = [];
+for (const persona of personas.slice(0, 3)) { // Use top 3 personas
+  const variations = await toPairs(
+    new BreadthEvolver(basePairs.slice(0, 20), { // Evolve 20 pairs
+      count: 2,
+      persona: persona
+    })
+  );
+  evolvedPairs.push(...variations);
+}
+
+console.log(`Total: ${basePairs.length + evolvedPairs.length} pairs`);
+```
+
+## Best Practices
+
+1. **Match count to domain complexity** - Simple schemas need fewer personas (3-5), complex domains benefit from more (8-12)
+2. **Review generated personas** - Verify they match actual users of your database
+3. **Combine with teachings** - Personas + teachings = contextually rich training data
+4. **Use selectively in evolution** - Don't paraphrase every question from every persona; choose strategically
+5. **Test persona coverage** - Ensure generated questions span the full range of user needs
+
+## Schema-Specific Examples
+
+### Healthcare Database
+```typescript
+// Generates: Doctor, Nurse, Administrator, Billing Specialist, Quality Analyst
+```
+
+### Financial Database
+```typescript
+// Generates: Trader, Risk Manager, Compliance Officer, Portfolio Manager, Analyst
+```
+
+### SaaS/Product Database
+```typescript
+// Generates: Product Manager, Engineer, Customer Success, Sales, Growth Analyst
+```
+
+The generator adapts to your specific schema - the personas it creates will be relevant to your actual tables and data structure.

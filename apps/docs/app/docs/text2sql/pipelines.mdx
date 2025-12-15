@@ -1,0 +1,559 @@
+---
+title: Building Pipelines
+description: Compose training data, evolution, and generators into complete workflows
+---
+
+This guide shows how to combine the synthesis components into end-to-end pipelines for different scenarios. Each pipeline addresses a specific use case for generating Text2SQL training data.
+
+## Pipeline Fundamentals
+
+Every pipeline follows a common pattern:
+
+1. **Source** - Where pairs come from (schema, history, SQL logs)
+2. **Transform** - How pairs are modified (evolution, validation)
+3. **Output** - Final dataset format (JSONL, CSV, etc.)
+
+```typescript
+import {
+  // Sources
+  SchemaSynthesizer,
+  MessageExtractor,
+  SqlExtractor,
+  // Evolution
+  BreadthEvolver,
+  DepthEvolver,
+  // Generators
+  PersonaGenerator,
+  TeachingsGenerator,
+  // Decorators
+  ValidatedProducer,
+  FilteredProducer,
+  DeduplicatedProducer,
+  // Helper
+  toPairs,
+} from '@deepagents/text2sql';
+```
+
+## Scenario A: Bootstrap from Schema
+
+**Use case**: Starting fresh with no existing data. Generate training pairs directly from your database schema.
+
+### Basic Bootstrap
+
+```typescript
+import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql';
+
+const pairs = await toPairs(
+  new SchemaSynthesizer(adapter, {
+    count: 100,
+    complexity: ['low', 'medium', 'hard'],
+  })
+);
+```
+
+### Enhanced Bootstrap with Personas
+
+Generate more realistic questions by using personas that match your actual users:
+
+```typescript
+import {
+  SchemaSynthesizer,
+  PersonaGenerator,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Step 1: Generate personas from schema
+const personas = await new PersonaGenerator(adapter, {
+  count: 5,
+}).generate();
+
+// Step 2: Generate pairs using personas
+const pairs = await toPairs(
+  new SchemaSynthesizer(adapter, {
+    count: 100,
+    complexity: ['low', 'medium', 'hard'],
+    personas,
+  })
+);
+```
+
+### Full Bootstrap Pipeline
+
+Complete pipeline with personas, teachings, evolution, and validation:
+
+```typescript
+import {
+  SchemaSynthesizer,
+  PersonaGenerator,
+  TeachingsGenerator,
+  BreadthEvolver,
+  DepthEvolver,
+  ValidatedProducer,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Step 1: Generate supporting artifacts
+const [personas, teachings] = await Promise.all([
+  new PersonaGenerator(adapter, { count: 5 }).generate(),
+  new TeachingsGenerator(adapter).generate(),
+]);
+
+// Step 2: Generate baseline pairs
+const baseline = await toPairs(
+  new SchemaSynthesizer(adapter, {
+    count: 50,
+    complexity: 'low',
+    personas,
+    teachings,
+  })
+);
+console.log(`Baseline: ${baseline.length} pairs`);
+
+// Step 3: Evolve in depth (more complex queries)
+const complex = await toPairs(
+  new DepthEvolver(baseline, adapter, {
+    count: 2,
+    techniques: ['add-aggregation', 'add-join', 'add-filter'],
+  })
+);
+console.log(`After depth evolution: ${complex.length} pairs`);
+
+// Step 4: Evolve in breadth (paraphrased variations)
+const varied = await toPairs(
+  new BreadthEvolver([...baseline, ...complex], {
+    count: 3,
+  })
+);
+console.log(`After breadth evolution: ${varied.length} pairs`);
+
+// Step 5: Validate and deduplicate
+const final = await toPairs(
+  new DeduplicatedProducer(
+    new ValidatedProducer(
+      { produce: async function* () { yield varied; } },
+      adapter
+    ),
+    { mode: 'sql' }
+  )
+);
+console.log(`Final dataset: ${final.length} validated pairs`);
+```
+
+## Scenario B: Augment Chat History
+
+**Use case**: You have existing chat logs with SQL queries. Extract and augment them.
+
+### Basic Extraction
+
+```typescript
+import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+
+const messages = await loadChatHistory(); // Your data source
+
+const pairs = await toPairs(new MessageExtractor(messages));
+```
+
+### Extraction with Context
+
+For multi-turn conversations where context matters:
+
+```typescript
+import {
+  WindowedContextExtractor,
+  toPairs,
+} from '@deepagents/text2sql';
+
+const pairs = await toPairs(
+  new WindowedContextExtractor(messages, {
+    windowSize: 3, // Include 3 preceding messages as context
+  })
+);
+
+// Each pair includes context array
+// { question, sql, context: ['prev msg 1', 'prev msg 2', 'prev msg 3'], success }
+```
+
+### Full History Augmentation Pipeline
+
+```typescript
+import {
+  MessageExtractor,
+  BreadthEvolver,
+  ValidatedProducer,
+  FilteredProducer,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Step 1: Extract from history
+const messages = await loadChatHistory();
+const extracted = await toPairs(new MessageExtractor(messages));
+console.log(`Extracted: ${extracted.length} pairs`);
+
+// Step 2: Validate against current schema
+const validated = await toPairs(
+  new ValidatedProducer(
+    { produce: async function* () { yield extracted; } },
+    adapter
+  )
+);
+console.log(`Valid: ${validated.filter(p => p.success).length} pairs`);
+
+// Step 3: Filter to successful only
+const successful = validated.filter(p => p.success);
+
+// Step 4: Generate variations
+const augmented = await toPairs(
+  new BreadthEvolver(successful, { count: 3 })
+);
+console.log(`Augmented: ${augmented.length} pairs`);
+
+// Step 5: Deduplicate
+const final = await toPairs(
+  new DeduplicatedProducer(
+    { produce: async function* () { yield augmented; } },
+    { mode: 'exact' }
+  )
+);
+console.log(`Final: ${final.length} unique pairs`);
+```
+
+## Scenario C: Reverse-Engineer SQL Logs
+
+**Use case**: You have SQL query logs but no natural language questions. Generate questions for existing SQL.
+
+### Basic SQL Extraction
+
+```typescript
+import { SqlExtractor, toPairs } from '@deepagents/text2sql';
+
+const sqlLogs = await loadQueryLogs(); // Your SQL logs
+const sqls = sqlLogs.map(log => log.sql);
+
+const pairs = await toPairs(
+  new SqlExtractor(sqls, adapter, {
+    validateSql: true,
+    skipInvalid: true,
+  })
+);
+```
+
+### Full SQL Log Pipeline
+
+```typescript
+import {
+  SqlExtractor,
+  BreadthEvolver,
+  DepthEvolver,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Step 1: Load and deduplicate SQL logs
+const sqlLogs = await loadQueryLogs();
+const uniqueSqls = [...new Set(sqlLogs.map(log => log.sql))];
+console.log(`Unique SQLs: ${uniqueSqls.length}`);
+
+// Step 2: Generate questions for each SQL
+const extracted = await toPairs(
+  new SqlExtractor(uniqueSqls, adapter, {
+    validateSql: true,
+    skipInvalid: true,
+  })
+);
+console.log(`Extracted: ${extracted.length} pairs`);
+
+// Step 3: Generate question variations (breadth)
+const varied = await toPairs(
+  new BreadthEvolver(extracted, { count: 2 })
+);
+console.log(`With variations: ${varied.length} pairs`);
+
+// Step 4: Deduplicate by question
+const final = await toPairs(
+  new DeduplicatedProducer(
+    { produce: async function* () { yield varied; } },
+    { mode: 'exact' }
+  )
+);
+console.log(`Final: ${final.length} pairs`);
+```
+
+## Scenario D: Multi-Source Synthesis
+
+**Use case**: Combine multiple data sources into a comprehensive dataset.
+
+```typescript
+import {
+  SchemaSynthesizer,
+  MessageExtractor,
+  SqlExtractor,
+  PersonaGenerator,
+  BreadthEvolver,
+  DepthEvolver,
+  ValidatedProducer,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Generate personas for realistic questions
+const personas = await new PersonaGenerator(adapter, { count: 5 }).generate();
+
+// Source 1: Schema-based synthesis
+const fromSchema = await toPairs(
+  new SchemaSynthesizer(adapter, {
+    count: 50,
+    complexity: ['low', 'medium'],
+    personas,
+  })
+);
+console.log(`From schema: ${fromSchema.length} pairs`);
+
+// Source 2: Chat history
+const messages = await loadChatHistory();
+const fromHistory = await toPairs(new MessageExtractor(messages));
+console.log(`From history: ${fromHistory.length} pairs`);
+
+// Source 3: SQL logs
+const sqlLogs = await loadQueryLogs();
+const fromLogs = await toPairs(
+  new SqlExtractor(sqlLogs.map(l => l.sql), adapter, { skipInvalid: true })
+);
+console.log(`From logs: ${fromLogs.length} pairs`);
+
+// Combine all sources
+const combined = [...fromSchema, ...fromHistory, ...fromLogs];
+console.log(`Combined: ${combined.length} pairs`);
+
+// Evolve for complexity
+const evolved = await toPairs(
+  new DepthEvolver(combined, adapter, {
+    count: 1,
+    techniques: ['add-aggregation', 'add-filter'],
+  })
+);
+
+// Evolve for variety
+const varied = await toPairs(
+  new BreadthEvolver([...combined, ...evolved], { count: 2 })
+);
+
+// Validate and deduplicate
+const final = await toPairs(
+  new DeduplicatedProducer(
+    new ValidatedProducer(
+      { produce: async function* () { yield varied; } },
+      adapter
+    ),
+    { mode: 'sql' }
+  )
+);
+
+console.log(`Final dataset: ${final.length} pairs`);
+```
+
+## Scenario E: Production Pipeline with Quality Gates
+
+**Use case**: Production-ready pipeline with validation, filtering, and quality checks.
+
+```typescript
+import {
+  SchemaSynthesizer,
+  PersonaGenerator,
+  TeachingsGenerator,
+  BreadthEvolver,
+  DepthEvolver,
+  ValidatedProducer,
+  FilteredProducer,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+async function buildProductionDataset(adapter, options: {
+  targetCount: number;
+  tables?: string[];
+}) {
+  const { targetCount, tables } = options;
+
+  // Phase 1: Setup
+  console.log('Phase 1: Generating personas and teachings...');
+  const [personas, teachings] = await Promise.all([
+    new PersonaGenerator(adapter, { count: 5 }).generate(),
+    new TeachingsGenerator(adapter).generate(),
+  ]);
+
+  // Phase 2: Baseline generation
+  console.log('Phase 2: Generating baseline pairs...');
+  const baseline = await toPairs(
+    new SchemaSynthesizer(adapter, {
+      count: Math.ceil(targetCount / 4),
+      complexity: ['low', 'medium', 'hard'],
+      personas,
+      teachings,
+    })
+  );
+
+  // Phase 3: Depth evolution (complexity)
+  console.log('Phase 3: Depth evolution...');
+  const complex = await toPairs(
+    new DepthEvolver(baseline, adapter, {
+      count: 2,
+      techniques: ['add-aggregation', 'add-join', 'add-reasoning'],
+      concurrency: 4,
+    })
+  );
+
+  // Phase 4: Breadth evolution (variety)
+  console.log('Phase 4: Breadth evolution...');
+  const allPairs = [...baseline, ...complex];
+  const varied = await toPairs(
+    new BreadthEvolver(allPairs, {
+      count: 2,
+      concurrency: 4,
+    })
+  );
+
+  // Phase 5: Quality gates
+  console.log('Phase 5: Applying quality gates...');
+
+  // Gate 1: Validation
+  const validated = await toPairs(
+    new ValidatedProducer(
+      { produce: async function* () { yield varied; } },
+      adapter,
+      { execute: true } // Actually run queries
+    )
+  );
+
+  // Gate 2: Filter by tables (if specified)
+  let filtered = validated;
+  if (tables?.length) {
+    filtered = await toPairs(
+      new FilteredProducer(
+        { produce: async function* () { yield validated; } },
+        { successOnly: true, tables }
+      )
+    );
+  } else {
+    filtered = validated.filter(p => p.success);
+  }
+
+  // Gate 3: Deduplication
+  const final = await toPairs(
+    new DeduplicatedProducer(
+      { produce: async function* () { yield filtered; } },
+      { mode: 'sql' }
+    )
+  );
+
+  // Report
+  console.log('\n=== Pipeline Complete ===');
+  console.log(`Baseline:    ${baseline.length} pairs`);
+  console.log(`After depth: ${complex.length} pairs`);
+  console.log(`After breadth: ${varied.length} pairs`);
+  console.log(`Validated:   ${validated.filter(p => p.success).length} pairs`);
+  console.log(`Final:       ${final.length} pairs`);
+
+  return final;
+}
+
+// Usage
+const dataset = await buildProductionDataset(adapter, {
+  targetCount: 500,
+  tables: ['orders', 'customers', 'products'],
+});
+```
+
+## Component Decision Guide
+
+Use this guide to choose components:
+
+### When to use each source
+
+| Source | Use When | Output |
+|--------|----------|--------|
+| `SchemaSynthesizer` | No existing data, bootstrapping | New pairs from schema |
+| `MessageExtractor` | Have chat history with SQL | Pairs from conversation |
+| `SqlExtractor` | Have SQL logs, need questions | Questions for existing SQL |
+
+### When to use each evolver
+
+| Evolver | Use When | Effect |
+|---------|----------|--------|
+| `BreadthEvolver` | Need phrasing variety | Same SQL, different questions |
+| `DepthEvolver` | Need query complexity | More complex SQL and questions |
+
+### When to use each generator
+
+| Generator | Use When | Effect |
+|-----------|----------|--------|
+| `PersonaGenerator` | Want realistic user questions | Personas for SchemaSynthesizer |
+| `TeachingsGenerator` | Want domain-aware questions | Business rules for synthesis |
+
+### When to use each decorator
+
+| Decorator | Use When | Effect |
+|-----------|----------|--------|
+| `ValidatedProducer` | Need valid SQL | Validates/executes queries |
+| `FilteredProducer` | Need subset of data | Filters by tables, success |
+| `DeduplicatedProducer` | Have duplicates | Removes duplicate pairs |
+
+## Exporting Datasets
+
+Once you have pairs, export for training:
+
+```typescript
+// JSONL format (common for fine-tuning)
+const jsonl = pairs
+  .filter(p => p.success)
+  .map(p => JSON.stringify({
+    messages: [
+      { role: 'user', content: p.question },
+      { role: 'assistant', content: p.sql },
+    ],
+  }))
+  .join('\n');
+
+await fs.writeFile('training.jsonl', jsonl);
+
+// CSV format
+const csv = [
+  'question,sql',
+  ...pairs.map(p => `"${p.question.replace(/"/g, '""')}","${p.sql.replace(/"/g, '""')}"`)
+].join('\n');
+
+await fs.writeFile('training.csv', csv);
+
+// With context (for multi-turn)
+const withContext = pairs
+  .filter(p => p.success)
+  .map(p => ({
+    context: p.context || [],
+    question: p.question,
+    sql: p.sql,
+  }));
+
+await fs.writeFile('training.json', JSON.stringify(withContext, null, 2));
+```
+
+## Best Practices
+
+1. **Start with validation** - Always validate pairs against your current schema before using
+2. **Deduplicate early** - Remove duplicates before evolution to save LLM calls
+3. **Balance complexity** - Mix simple and complex queries for robust training
+4. **Use personas** - Personas make questions more realistic and varied
+5. **Iterate on quality** - Review samples at each stage, adjust parameters
+6. **Monitor success rates** - Low success rates indicate schema mismatches
+7. **Combine evolvers** - Use DepthEvolver for complexity, BreadthEvolver for variety
+
+## Related Pages
+
+- [Training Data Overview](/docs/text2sql/synthesis-overview) - Core concepts
+- [From Schema](/docs/text2sql/from-schema) - SchemaSynthesizer details
+- [From History](/docs/text2sql/from-history) - MessageExtractor details
+- [From SQL](/docs/text2sql/from-sql) - SqlExtractor details
+- [Breadth Evolution](/docs/text2sql/breadth-evolver) - Paraphrasing details
+- [Depth Evolution](/docs/text2sql/depth-evolver) - Complexity evolution details
+- [Persona Generator](/docs/text2sql/persona-generator) - Generating personas
+- [Teachings Generator](/docs/text2sql/teachings-generator) - Generating teachings

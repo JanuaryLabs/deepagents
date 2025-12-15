@@ -19,13 +19,6 @@ console.log(pairs);
 // ]
 ```
 
-Or using the `Text2Sql` instance:
-
-```typescript
-const pairs = await text2sql.toPairs(
-  () => new MessageExtractor(messages)
-);
-```
 
 ## How It Works
 
@@ -113,44 +106,45 @@ const messages: UIMessage[] = [
 
 ## Contextual Extractors
 
-For multi-turn conversations where context matters, use contextual extractors:
+For multi-turn conversations where context matters, use contextual extractors. These extractors extend `BaseContextualExtractor` (an abstract base class using the Template Pattern) to add conversation context to extracted pairs.
 
 ### FullContextExtractor
 
 Keeps all preceding messages as context:
 
 ```typescript
-import { FullContextExtractor } from '@deepagents/text2sql';
+import { FullContextExtractor, toPairs } from '@deepagents/text2sql';
 
 const extractor = new FullContextExtractor(messages, adapter);
-const pairs = await extractor.produce();
+const pairs = await toPairs(extractor);
 
-// pairs[0].context = ['Show me sales data']
+// pairs[0].context = ['User: Show me sales data']
 // pairs[0].question = 'Now filter to California'
 // pairs[0].sql = 'SELECT ... WHERE state = "CA"'
 ```
 
 ### WindowedContextExtractor
 
-Keeps only the last N messages:
+Keeps only the last N messages in a sliding window:
 
 ```typescript
-import { WindowedContextExtractor } from '@deepagents/text2sql';
+import { WindowedContextExtractor, toPairs } from '@deepagents/text2sql';
 
 const extractor = new WindowedContextExtractor(messages, adapter, {
-  windowSize: 3, // Keep last 3 messages as context
+  windowSize: 5, // Keep last 5 messages as context
 });
+const pairs = await toPairs(extractor);
 ```
 
 ### SegmentedContextExtractor
 
-Uses an LLM to detect topic changes and reset context:
+Uses an LLM to detect topic changes and reset context. When a topic change is detected, the context is reset and the triggering message is first resolved into a standalone form:
 
 ```typescript
-import { SegmentedContextExtractor } from '@deepagents/text2sql';
+import { SegmentedContextExtractor, toPairs } from '@deepagents/text2sql';
 
 const extractor = new SegmentedContextExtractor(messages, adapter);
-const pairs = await extractor.produce();
+const pairs = await toPairs(extractor);
 
 // Context resets when the user asks about a completely different topic
 ```
@@ -209,8 +203,8 @@ import {
   toPairs
 } from '@deepagents/text2sql';
 
-const pairs = await text2sql.toPairs(
-  (adapter) => new ValidatedProducer(
+const pairs = await toPairs(
+  new ValidatedProducer(
     new MessageExtractor(messages),
     adapter,
     { execute: false } // Just validate syntax

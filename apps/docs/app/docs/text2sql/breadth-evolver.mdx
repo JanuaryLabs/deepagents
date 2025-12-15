@@ -1,0 +1,313 @@
+---
+title: Breadth Evolution
+description: Generate paraphrased variations using in-breadth evolution
+---
+
+The `BreadthEvolver` generates paraphrased variations of questions while keeping the SQL unchanged. This creates training data diversity where many different phrasings map to the same SQL query.
+
+Based on Microsoft's Evol-Instruct methodology for in-breadth evolution, this synthesizer helps improve model robustness to different question phrasings without changing the underlying query logic.
+
+## Basic Usage
+
+```typescript
+import { BreadthEvolver, toPairs } from '@deepagents/text2sql';
+
+const existingPairs = [
+  { question: 'Show top customers', sql: 'SELECT ...', success: true },
+  { question: 'Monthly revenue', sql: 'SELECT ...', success: true },
+];
+
+const expanded = await toPairs(new BreadthEvolver(existingPairs, { count: 3 }));
+
+// Original: "Show top customers"
+// Variations:
+//   - "Who are our best customers?"
+//   - "List the highest-value customers"
+//   - "Display our top-performing customers"
+```
+
+## How It Works
+
+`BreadthEvolver` uses an LLM to generate semantically equivalent questions:
+
+1. Takes existing question/SQL pairs as input
+2. For each pair, generates N paraphrased questions
+3. Keeps the original SQL unchanged for each variation
+4. All variations must be answerable by the exact same SQL query
+5. Returns variations with the same SQL and context
+
+The key principle: **same SQL, different question phrasings**.
+
+## Configuration Options
+
+```typescript
+interface BreadthEvolverOptions {
+  /** Number of variations to generate per pair (required) */
+  count: number;
+  /** Optional persona to style the paraphrases */
+  persona?: Persona;
+  /** Custom model override (defaults to gpt-oss-20b) */
+  model?: AgentModel;
+  /** Parallel processing limit (default: 4) */
+  concurrency?: number;
+}
+```
+
+### Number of Variations
+
+Control how many paraphrases to generate per pair:
+
+```typescript
+// 3 variations per pair
+const pairs = await toPairs(
+  new BreadthEvolver(existingPairs, { count: 3 })
+);
+// 10 original pairs → 30 variations
+
+// 5 variations per pair
+const pairs = await toPairs(
+  new BreadthEvolver(existingPairs, { count: 5 })
+);
+// 10 original pairs → 50 variations
+```
+
+### Persona-Driven Paraphrasing
+
+Generate variations that match a specific user persona:
+
+```typescript
+import { BreadthEvolver, toPairs } from '@deepagents/text2sql';
+
+const persona = {
+  role: 'Sales Manager',
+  perspective: 'Focus on revenue metrics and customer relationships. Use business terminology.',
+};
+
+const expanded = await toPairs(
+  new BreadthEvolver(existingPairs, {
+    count: 3,
+    persona
+  })
+);
+
+// Original: "Show customer orders"
+// With persona:
+//   - "What's the deal pipeline for this account?"
+//   - "Pull up the purchase history for this client"
+//   - "Show me the order book for this customer"
+```
+
+### Concurrency Control
+
+Process pairs in parallel for faster generation:
+
+```typescript
+// Default concurrency (4)
+const pairs = await toPairs(
+  new BreadthEvolver(existingPairs, { count: 3 })
+);
+
+// Higher concurrency for large datasets
+const pairs = await toPairs(
+  new BreadthEvolver(existingPairs, {
+    count: 3,
+    concurrency: 10
+  })
+);
+```
+
+### Custom Model
+
+Override the default model:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+
+const pairs = await toPairs(
+  new BreadthEvolver(existingPairs, {
+    count: 3,
+    model: groq('openai/gpt-oss-20b')
+  })
+);
+```
+
+## Example: Augment Extracted Data
+
+Expand pairs extracted from chat history:
+
+```typescript
+import {
+  MessageExtractor,
+  BreadthEvolver,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// Extract from history
+const extracted = await toPairs(new MessageExtractor(messages));
+console.log(`Extracted ${extracted.length} pairs`);
+
+// Augment with variations
+const augmented = await toPairs(
+  new BreadthEvolver(extracted, { count: 3 })
+);
+console.log(`Augmented to ${augmented.length} pairs`);
+```
+
+## Example: Pipeline with Validation
+
+```typescript
+import {
+  MessageExtractor,
+  BreadthEvolver,
+  ValidatedProducer,
+  DeduplicatedProducer,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// 1. Extract from history
+const extracted = await toPairs(new MessageExtractor(messages));
+
+// 2. Generate variations
+const variations = await toPairs(
+  new BreadthEvolver(extracted, { count: 3 })
+);
+
+// 3. Validate and deduplicate
+const final = await toPairs(
+  new DeduplicatedProducer(
+    new ValidatedProducer(
+      { produce: async function*() { yield variations; } },
+      adapter
+    ),
+    { mode: 'exact' }
+  )
+);
+```
+
+## Example: With Persona-Based Variations
+
+Generate variations for different user types:
+
+```typescript
+import { BreadthEvolver, toPairs } from '@deepagents/text2sql';
+
+const personas = [
+  { role: 'Sales Manager', perspective: 'Revenue and customer focus' },
+  { role: 'Data Analyst', perspective: 'Technical and precise queries' },
+  { role: 'Executive', perspective: 'High-level metrics and trends' },
+];
+
+const allVariations = [];
+
+for (const persona of personas) {
+  const variations = await toPairs(
+    new BreadthEvolver(basePairs, { count: 2, persona })
+  );
+  allVariations.push(...variations);
+}
+
+console.log(`Generated ${allVariations.length} persona-specific variations`);
+```
+
+## Variation Quality
+
+Generated variations maintain semantic equivalence while varying phrasing:
+
+| Original | Variation 1 | Variation 2 | Variation 3 |
+|----------|-------------|-------------|-------------|
+| "How many orders last month?" | "What was our order count for last month?" | "Show me total orders from the previous month" | "Orders from last month - how many?" |
+| "Show revenue by product" | "Break down our revenue by product" | "What's the revenue split across products?" | "Product revenue breakdown" |
+| "List active customers" | "Who are our current active customers?" | "Show me all customers with active status" | "Display the active customer list" |
+
+## BreadthEvolver vs DepthEvolver
+
+Understanding the difference:
+
+### BreadthEvolver (This Page)
+- **Same SQL, different phrasings**
+- Generates paraphrased questions
+- SQL remains identical
+- Increases dataset diversity
+- Helps model handle varied user language
+
+```typescript
+// Example: Breadth evolution
+const breadth = await toPairs(
+  new BreadthEvolver(
+    [{ question: 'Show customers', sql: 'SELECT * FROM customers', success: true }],
+    { count: 3 }
+  )
+);
+
+// Results:
+// - "Display all customers" → SELECT * FROM customers
+// - "List our customer base" → SELECT * FROM customers
+// - "Who are our customers?" → SELECT * FROM customers
+```
+
+### DepthEvolver
+- **Different SQL, more complex questions**
+- Evolves questions to be more sophisticated
+- SQL becomes more complex
+- Increases query complexity
+- Helps model handle advanced queries
+
+```typescript
+// Example: Depth evolution
+const depth = await toPairs(
+  new DepthEvolver(
+    [{ question: 'Show customers', sql: 'SELECT * FROM customers', success: true }],
+    adapter,
+    { count: 2, techniques: ['add-aggregation', 'add-filter'] }
+  )
+);
+
+// Results:
+// - "How many customers per region?" → SELECT region, COUNT(*) FROM customers GROUP BY region
+// - "Show customers who joined this year" → SELECT * FROM customers WHERE YEAR(joined_at) = YEAR(NOW())
+```
+
+## Combining Sources
+
+Build a comprehensive training set:
+
+```typescript
+import {
+  MessageExtractor,
+  SqlExtractor,
+  SchemaSynthesizer,
+  BreadthEvolver,
+  toPairs,
+} from '@deepagents/text2sql';
+
+// From multiple sources
+const fromHistory = await toPairs(new MessageExtractor(messages));
+const fromLogs = await toPairs(new SqlExtractor(sqlLogs, adapter));
+const synthetic = await toPairs(new SchemaSynthesizer(adapter, { count: 50 }));
+
+// Combine
+const allPairs = [...fromHistory, ...fromLogs, ...synthetic];
+
+// Augment everything with breadth variations
+const augmented = await toPairs(
+  new BreadthEvolver(allPairs, { count: 2 })
+);
+
+console.log(`Final dataset: ${augmented.length} pairs`);
+```
+
+## Best Practices
+
+1. **Start with quality pairs** - Variations inherit quality from originals; poor questions lead to poor variations
+2. **Use personas strategically** - Generate variations for your actual user personas to match real usage patterns
+3. **Deduplicate after generation** - Some variations may be similar; deduplicate the final set
+4. **Review samples** - Spot-check that variations preserve exact semantic meaning
+5. **Balance your dataset** - Don't over-augment simple queries relative to complex ones
+6. **Adjust concurrency** - Higher concurrency for large datasets, lower for rate-limited models
+7. **Combine with DepthEvolver** - Use BreadthEvolver for diversity, DepthEvolver for complexity
+
+## Related Pages
+
+- [Depth Evolution](/docs/text2sql/depth-evolver) - Evolve questions into more complex versions
+- [From Database Schema](/docs/text2sql/from-schema) - Generate synthetic pairs from schema
+- [From Chat History](/docs/text2sql/from-history) - Extract pairs from conversation history

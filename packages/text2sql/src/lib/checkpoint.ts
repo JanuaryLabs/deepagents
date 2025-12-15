@@ -250,7 +250,7 @@ export class Point<T> {
     this.data.entries.push({ inputHash, output });
     this.#cache.set(inputHash, output as T);
     await this.persist();
-    return output;
+    return codec ? codec.decode(output) : output;
   }
 
   /** Mark this point as complete. */

@@ -19,7 +19,7 @@ const CONFIG = {
   pairsPerComplexity: 10,
   depthEvolutionCount: 3,
   breadthEvolutionCount: 2,
-  concurrency: 2,
+  concurrency: 1,
 };
 
 const sqliteClient = new DatabaseSync('/Users/ezzabuzaid/Downloads/Chinook.db');
