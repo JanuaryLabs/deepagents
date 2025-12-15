@@ -105,14 +105,19 @@ export class SegmentedContextExtractor extends BaseContextualExtractor {
   /**
    * Handle user message with topic change detection.
    * If topic changes, resolve the message to standalone form before resetting.
+   *
+   * Note: We capture context snapshot before async LLM calls to prevent race conditions
+   * where context might be modified during the async operation.
    */
   protected async onUserMessage(text: string): Promise<void> {
     // Check for topic change if we have enough context
     if (this.context.length >= 2) {
-      const isTopicChange = await this.detectTopicChange(text);
+      // Capture snapshot BEFORE async calls to prevent race conditions
+      const contextSnapshot = [...this.context];
+      const isTopicChange = await this.detectTopicChange(text, contextSnapshot);
       if (isTopicChange) {
         // Resolve the triggering message BEFORE resetting context
-        const resolved = await this.resolveToStandalone(text);
+        const resolved = await this.resolveToStandalone(text, contextSnapshot);
         this.context = [`User: ${resolved}`];
         return;
       }
@@ -130,13 +135,18 @@ export class SegmentedContextExtractor extends BaseContextualExtractor {
 
   /**
    * Detect if a new message represents a topic change using LLM.
+   * @param newMessage - The new user message to check
+   * @param contextSnapshot - Snapshot of context captured before this async call
    */
-  private async detectTopicChange(newMessage: string): Promise<boolean> {
+  private async detectTopicChange(
+    newMessage: string,
+    contextSnapshot: string[],
+  ): Promise<boolean> {
     const { experimental_output } = await generate(
       topicChangeAgent,
       [user('Determine if this is a topic change.')],
       {
-        context: formatConversation(this.context),
+        context: formatConversation(contextSnapshot),
         newMessage,
       },
     );
@@ -148,13 +158,18 @@ export class SegmentedContextExtractor extends BaseContextualExtractor {
    * Resolve a context-dependent message into a standalone question.
    * Called when topic change is detected to preserve the meaning of
    * the triggering message before context is reset.
+   * @param text - The user message to resolve
+   * @param contextSnapshot - Snapshot of context captured before this async call
    */
-  private async resolveToStandalone(text: string): Promise<string> {
+  private async resolveToStandalone(
+    text: string,
+    contextSnapshot: string[],
+  ): Promise<string> {
     const { experimental_output } = await generate(
       contextResolverAgent,
       [user('Generate a standalone question for this message.')],
       {
-        conversation: formatConversation([...this.context, `User: ${text}`]),
+        conversation: formatConversation([...contextSnapshot, `User: ${text}`]),
         sql: '', // No SQL yet, just resolving the question
       },
     );

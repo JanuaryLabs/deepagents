@@ -27,6 +27,13 @@ export const cerebras = createOpenAICompatible({
   includeUsage: true,
   supportsStructuredOutputs: true,
 });
+export const nebius = createOpenAICompatible({
+  name: 'nebius',
+  baseURL: 'https://api.tokenfactory.nebius.com/v1/',
+  apiKey: process.env.NEBIUS_API_KEY,
+  includeUsage: true,
+  supportsStructuredOutputs: true,
+});
 
 export async function embed(documents: string[]): Promise<{
   embeddings: number[][];

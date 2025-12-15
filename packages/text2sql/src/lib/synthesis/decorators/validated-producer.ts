@@ -1,68 +1,77 @@
+import type { Adapter } from '../../adapters/adapter.ts';
+import { type ExtractedPair, PairProducer } from '../types.ts';
+
+export interface ValidatedProducerOptions {
+  execute?: boolean;
+  removeInvalid?: boolean;
+}
+
+export interface ValidatedPair extends ExtractedPair {
+  rowCount?: number;
+  error?: string;
+}
 /**
  * ValidatedProducer - Validate SQL from another producer.
  *
  * Wraps another PairProducer and validates each SQL query,
  * optionally executing to attach results.
  */
-import type { Adapter } from '../../adapters/adapter.ts';
-import type { ExtractedPair, PairProducer } from '../types.ts';
-
-export interface ValidatedProducerOptions {
-  /** Execute queries to get row counts (default: false) */
-  execute?: boolean;
-  /** Remove invalid pairs (default: false, just marks success=false) */
-  removeInvalid?: boolean;
-}
-
-export interface ValidatedPair extends ExtractedPair {
-  /** Number of rows returned (if executed) */
-  rowCount?: number;
-  /** Validation error message (if failed) */
-  error?: string;
-}
-
-export class ValidatedProducer implements PairProducer {
+export class ValidatedProducer extends PairProducer<ValidatedPair> {
+  /**
+   * @param producer - Source producer to validate
+   * @param adapter - Database adapter for SQL validation
+   * @param options - Validation configuration
+   */
   constructor(
     private producer: PairProducer,
     private adapter: Adapter,
     private options: ValidatedProducerOptions = {},
-  ) {}
+  ) {
+    super();
+  }
 
-  async produce(): Promise<ValidatedPair[]> {
-    const pairs = await this.producer.produce();
-    const validated: ValidatedPair[] = [];
+  /**
+   * Produces pairs with SQL validation applied, optionally executing queries.
+   * @returns Validated pairs with error/rowCount metadata attached
+   */
+  async *produce(): AsyncGenerator<ValidatedPair[]> {
+    for await (const chunk of this.producer.produce()) {
+      const validated: ValidatedPair[] = [];
 
-    for (const pair of pairs) {
-      const error = await this.adapter.validate(pair.sql);
+      for (const pair of chunk) {
+        const error = await this.adapter.validate(pair.sql);
 
-      if (error) {
-        if (!this.options.removeInvalid) {
-          validated.push({
-            ...pair,
-            success: false,
-            error,
-          });
+        if (error) {
+          if (!this.options.removeInvalid) {
+            validated.push({
+              ...pair,
+              success: false,
+              error,
+            });
+          }
+          continue;
         }
-        continue;
+
+        let rowCount: number | undefined;
+        if (this.options.execute) {
+          try {
+            const result = await this.adapter.execute(pair.sql);
+            rowCount = Array.isArray(result) ? result.length : undefined;
+          } catch {
+            // no op
+          }
+        }
+
+        validated.push({
+          ...pair,
+          success: true,
+          rowCount,
+        });
       }
 
-      let rowCount: number | undefined;
-      if (this.options.execute) {
-        try {
-          const result = await this.adapter.execute(pair.sql);
-          rowCount = Array.isArray(result) ? result.length : undefined;
-        } catch {
-          // Execution failed, but validation passed
-        }
+      if (validated.length) {
+        yield validated;
       }
-
-      validated.push({
-        ...pair,
-        success: true,
-        rowCount,
-      });
     }
-
-    return validated;
   }
 }

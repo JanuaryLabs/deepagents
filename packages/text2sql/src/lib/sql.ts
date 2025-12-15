@@ -17,7 +17,7 @@ import {
 
 import type { Adapter, IntrospectOptions } from './adapters/adapter.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
-import { toSql as agentToSql } from './agents/synthetic/sql.agent.ts';
+import { toSql as agentToSql } from './agents/sql.agent.ts';
 import {
   type RenderingTools,
   memoryTools,
@@ -26,7 +26,7 @@ import {
 import { FileCache } from './file-cache.ts';
 import { History } from './history/history.ts';
 import type { TeachablesStore } from './memory/store.ts';
-import type { ExtractedPair, PairProducer } from './synthesis/types.ts';
+import { toPairs as collectPairs, type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 import {
   type Teachables,
   guardrail,
@@ -196,7 +196,7 @@ export class Text2Sql {
     factory: (adapter: Adapter) => T,
   ): Promise<ExtractedPair[]> {
     const producer = factory(this.#config.adapter);
-    return producer.produce();
+    return collectPairs(producer);
   }
 
   // public async suggest() {

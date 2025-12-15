@@ -1,49 +1,57 @@
+import { type ExtractedPair, PairProducer } from '../types.ts';
+
+export interface FilteredProducerOptions {
+  successOnly?: boolean;
+  tables?: string[];
+  filter?: (pair: ExtractedPair) => boolean;
+}
+
 /**
  * FilteredProducer - Filter pairs from another producer.
  *
  * Wraps another PairProducer and filters the output based on criteria.
  */
-import type { ExtractedPair, PairProducer } from '../types.ts';
-
-export interface FilteredProducerOptions {
-  /** Only include successful queries (default: true) */
-  successOnly?: boolean;
-  /** Filter by tables used in SQL */
-  tables?: string[];
-  /** Custom filter function */
-  filter?: (pair: ExtractedPair) => boolean;
-}
-
-export class FilteredProducer implements PairProducer {
+export class FilteredProducer extends PairProducer {
+  /**
+   * @param producer - Source producer to filter
+   * @param options - Filter configuration
+   */
   constructor(
     private producer: PairProducer,
     private options: FilteredProducerOptions = {},
-  ) {}
+  ) {
+    super();
+  }
 
-  async produce(): Promise<ExtractedPair[]> {
-    const pairs = await this.producer.produce();
+  /**
+   * Produces pairs filtered by success status, table usage, and custom predicates.
+   * @returns Pairs matching all configured filter criteria
+   */
+  async *produce(): AsyncGenerator<ExtractedPair[]> {
+    for await (const chunk of this.producer.produce()) {
+      const filtered = chunk.filter((pair) => {
+        if (this.options.successOnly !== false && !pair.success) {
+          return false;
+        }
 
-    return pairs.filter((pair) => {
-      // Success filter
-      if (this.options.successOnly !== false && !pair.success) {
-        return false;
+        if (this.options.tables?.length) {
+          const sqlLower = pair.sql.toLowerCase();
+          const hasTable = this.options.tables.some((t) =>
+            sqlLower.includes(t.toLowerCase()),
+          );
+          if (!hasTable) return false;
+        }
+
+        if (this.options.filter && !this.options.filter(pair)) {
+          return false;
+        }
+
+        return true;
+      });
+
+      if (filtered.length) {
+        yield filtered;
       }
-
-      // Table filter
-      if (this.options.tables?.length) {
-        const sqlLower = pair.sql.toLowerCase();
-        const hasTable = this.options.tables.some((t) =>
-          sqlLower.includes(t.toLowerCase()),
-        );
-        if (!hasTable) return false;
-      }
-
-      // Custom filter
-      if (this.options.filter && !this.options.filter(pair)) {
-        return false;
-      }
-
-      return true;
-    });
+    }
   }
 }

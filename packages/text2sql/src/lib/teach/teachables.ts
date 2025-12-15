@@ -1,27 +1,11 @@
 import { indentBlock, leaf, list, wrapBlock } from './xml.ts';
 
 export interface Teachables {
-  type:
-    | 'term'
-    | 'hint'
-    | 'guardrail'
-    | 'explain'
-    | 'example'
-    | 'clarification'
-    | 'workflow'
-    | 'quirk'
-    | 'styleGuide'
-    | 'analogy'
-    | 'glossary'
-    | 'user_profile'
-    // User-specific teachable types
-    | 'identity'
-    | 'persona'
-    | 'alias'
-    | 'preference'
-    | 'context'
-    | 'correction';
-  format: () => string;
+  type: GeneratedTeachable['type'] | 'user_profile';
+  /** Serialize to GeneratedTeachable for storage */
+  encode: () => GeneratedTeachable;
+  /** Render to XML string for prompts */
+  decode: () => string;
 }
 export type GeneratedTeachable =
   | { type: 'term'; name: string; definition: string }
@@ -91,7 +75,8 @@ export type GeneratedTeachable =
 export function term(name: string, definition: string): Teachables {
   return {
     type: 'term',
-    format: () =>
+    encode: () => ({ type: 'term', name, definition }),
+    decode: () =>
       wrapBlock('term', [leaf('name', name), leaf('definition', definition)]),
   };
 }
@@ -126,7 +111,8 @@ export function term(name: string, definition: string): Teachables {
 export function hint(text: string): Teachables {
   return {
     type: 'hint',
-    format: () => leaf('hint', text),
+    encode: () => ({ type: 'hint', text }),
+    decode: () => leaf('hint', text),
   };
 }
 
@@ -172,7 +158,8 @@ export function guardrail(input: {
   const { rule, reason, action } = input;
   return {
     type: 'guardrail',
-    format: () =>
+    encode: () => ({ type: 'guardrail', rule, reason, action }),
+    decode: () =>
       wrapBlock('guardrail', [
         leaf('rule', rule),
         reason ? leaf('reason', reason) : '',
@@ -223,7 +210,8 @@ export function explain(input: {
   const { concept, explanation, therefore } = input;
   return {
     type: 'explain',
-    format: () =>
+    encode: () => ({ type: 'explain', concept, explanation, therefore }),
+    decode: () =>
       wrapBlock('explanation', [
         leaf('concept', concept),
         leaf('details', explanation),
@@ -273,7 +261,8 @@ export function example(input: {
   const { question, answer, note } = input;
   return {
     type: 'example',
-    format: () =>
+    encode: () => ({ type: 'example', question, answer, note }),
+    decode: () =>
       wrapBlock('example', [
         leaf('question', question),
         leaf('answer', answer),
@@ -325,7 +314,8 @@ export function clarification(input: {
   const { when, ask, reason } = input;
   return {
     type: 'clarification',
-    format: () =>
+    encode: () => ({ type: 'clarification', when, ask, reason }),
+    decode: () =>
       wrapBlock('clarification', [
         leaf('when', when),
         leaf('ask', ask),
@@ -402,7 +392,8 @@ export function workflow(input: {
   const { task, steps, triggers, notes } = input;
   return {
     type: 'workflow',
-    format: () =>
+    encode: () => ({ type: 'workflow', task, steps, triggers, notes }),
+    decode: () =>
       wrapBlock('workflow', [
         leaf('task', task),
         triggers?.length ? list('triggers', triggers, 'trigger') : '',
@@ -449,7 +440,8 @@ export function quirk(input: {
   const { issue, workaround } = input;
   return {
     type: 'quirk',
-    format: () =>
+    encode: () => ({ type: 'quirk', issue, workaround }),
+    decode: () =>
       wrapBlock('quirk', [
         leaf('issue', issue),
         leaf('workaround', workaround),
@@ -499,7 +491,8 @@ export function styleGuide(input: {
   const { prefer, never, always } = input;
   return {
     type: 'styleGuide',
-    format: () =>
+    encode: () => ({ type: 'styleGuide', prefer, never, always }),
+    decode: () =>
       wrapBlock('style_guide', [
         leaf('prefer', prefer),
         always ? leaf('always', always) : '',
@@ -561,7 +554,15 @@ export function analogy(input: {
   const { concept, relationship, insight, therefore, pitfall } = input;
   return {
     type: 'analogy',
-    format: () =>
+    encode: () => ({
+      type: 'analogy',
+      concept,
+      relationship,
+      insight,
+      therefore,
+      pitfall,
+    }),
+    decode: () =>
       wrapBlock('analogy', [
         list('concepts', concept, 'concept'),
         leaf('relationship', relationship),
@@ -599,7 +600,8 @@ export function analogy(input: {
 export function glossary(entries: Record<string, string>): Teachables {
   return {
     type: 'glossary',
-    format: () =>
+    encode: () => ({ type: 'glossary', entries }),
+    decode: () =>
       wrapBlock(
         'glossary',
         Object.entries(entries).map(([term, sql]) =>
@@ -632,7 +634,8 @@ export function identity(input: { name?: string; role?: string }): Teachables {
   const { name, role } = input;
   return {
     type: 'identity',
-    format: () =>
+    encode: () => ({ type: 'identity', name, role }),
+    decode: () =>
       wrapBlock('identity', [
         name ? leaf('name', name) : '',
         role ? leaf('role', role) : '',
@@ -663,7 +666,8 @@ export function persona(input: {
   const { name, role, tone } = input;
   return {
     type: 'persona',
-    format: () =>
+    encode: () => ({ type: 'persona', name, role, tone: tone ?? '' }),
+    decode: () =>
       wrapBlock('persona', [
         leaf('name', name),
         leaf('role', role),
@@ -690,7 +694,8 @@ export function persona(input: {
 export function alias(termName: string, meaning: string): Teachables {
   return {
     type: 'alias',
-    format: () =>
+    encode: () => ({ type: 'alias', term: termName, meaning }),
+    decode: () =>
       wrapBlock('alias', [leaf('term', termName), leaf('meaning', meaning)]),
   };
 }
@@ -714,7 +719,8 @@ export function alias(termName: string, meaning: string): Teachables {
 export function preference(aspect: string, value: string): Teachables {
   return {
     type: 'preference',
-    format: () =>
+    encode: () => ({ type: 'preference', aspect, value }),
+    decode: () =>
       wrapBlock('preference', [leaf('aspect', aspect), leaf('value', value)]),
   };
 }
@@ -736,7 +742,8 @@ export function preference(aspect: string, value: string): Teachables {
 export function context(description: string): Teachables {
   return {
     type: 'context',
-    format: () => leaf('context', description),
+    encode: () => ({ type: 'context', description }),
+    decode: () => leaf('context', description),
   };
 }
 
@@ -758,7 +765,8 @@ export function context(description: string): Teachables {
 export function correction(subject: string, clarification: string): Teachables {
   return {
     type: 'correction',
-    format: () =>
+    encode: () => ({ type: 'correction', subject, clarification }),
+    decode: () =>
       wrapBlock('correction', [
         leaf('subject', subject),
         leaf('clarification', clarification),
@@ -772,7 +780,8 @@ export function teachable(
 ): Teachables {
   return {
     type: 'user_profile',
-    format: () => toInstructions(tag, ...teachables),
+    encode: () => teachables[0]?.encode() ?? ({ type: 'context', description: '' }),
+    decode: () => toInstructions(tag, ...teachables),
   };
 }
 
@@ -799,7 +808,7 @@ export function toInstructions(
       return '';
     }
     const renderedItems = items
-      .map((item) => item.format().trim())
+      .map((item) => item.decode().trim())
       .filter(Boolean)
       .map((item) => indentBlock(item, 2))
       .join('\n');
@@ -815,7 +824,7 @@ export function toInstructions(
       continue;
     }
     const renderedItems = items
-      .map((item) => item.format().trim())
+      .map((item) => item.decode().trim())
       .filter(Boolean)
       .map((item) => indentBlock(item, 2))
       .join('\n');
@@ -928,6 +937,21 @@ export function toTeachables(generated: GeneratedTeachable[]): Teachables[] {
         return correction(item.subject, item.clarification);
     }
   });
+}
+
+/**
+ * Convert Teachables back to GeneratedTeachable format for storage.
+ *
+ * @param teachables - Array of Teachables to convert
+ * @returns Array of GeneratedTeachable objects suitable for storage
+ *
+ * @example
+ * const teachings = [term('NPL', 'non-performing loan'), hint('Always filter by status')];
+ * const forStorage = fromTeachables(teachings);
+ * // [{ type: 'term', name: 'NPL', definition: 'non-performing loan' }, { type: 'hint', text: 'Always filter by status' }]
+ */
+export function fromTeachables(teachables: Teachables[]): GeneratedTeachable[] {
+  return teachables.map((t) => t.encode());
 }
 
 /**

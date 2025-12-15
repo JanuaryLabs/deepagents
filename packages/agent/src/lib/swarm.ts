@@ -85,10 +85,10 @@ export function generate<O, CIn, COut = CIn>(
   contextVariables: CIn,
   config?: {
     abortSignal?: AbortSignal;
-    providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
+    providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   },
 ) {
-  const result = generateText({
+  return generateText({
     abortSignal: config?.abortSignal,
     providerOptions: agent.providerOptions ?? config?.providerOptions,
     model: agent.model,
@@ -96,6 +96,7 @@ export function generate<O, CIn, COut = CIn>(
     messages: convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
     ),
+    experimental_repairToolCall: repairToolCall,
     stopWhen: stepCountIs(25),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
@@ -118,7 +119,6 @@ export function generate<O, CIn, COut = CIn>(
     //   (contextVariables as any).content = result.content;
     // },
   });
-  return Object.assign(result, { state: contextVariables as unknown as COut });
 }
 
 export function execute<O, CIn, COut = CIn>(

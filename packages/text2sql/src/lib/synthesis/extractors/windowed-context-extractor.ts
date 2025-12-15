@@ -15,7 +15,6 @@ import {
 
 export interface WindowedContextExtractorOptions
   extends BaseContextualExtractorOptions {
-  /** Number of messages to keep in context window */
   windowSize: number;
 }
 

@@ -1,8 +1,7 @@
-import { synthetic } from './lib/agents/synthetic/index.ts';
-
 export * from './lib/adapters/adapter.ts';
 export * from './lib/agents/suggestions.agents.ts';
 export * from './lib/agents/text2sql.agent.ts';
+export * from './lib/checkpoint.ts';
 export * from './lib/file-cache.ts';
 export * from './lib/history/history.ts';
 export * from './lib/history/memory.history.ts';
@@ -28,8 +27,6 @@ if (import.meta.main) {
     execute: (sql) => sqliteClient.prepare(sql).all(),
   });
 
-  const data = await synthetic()(adapter).generateDiverseQuestions();
-  console.log(data);
   // console.dir(await text2sql.inspect(sqlQueryAgent), { depth: null });
   // const sql = await text2sql.toSql(
   //   'The top-selling products or categories each month last year given last record stored?. if the questions is wrong, show me full correct question I can ask.',

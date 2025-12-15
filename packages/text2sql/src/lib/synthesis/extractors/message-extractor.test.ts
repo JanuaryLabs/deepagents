@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { MessageExtractor } from './message-extractor.ts';
+import { toPairs } from '../types.ts';
 
 /**
  * Helper to create a user message with text content.
@@ -73,7 +74,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].question, 'How many users are there?');
@@ -90,7 +91,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 2);
       assert.strictEqual(pairs[0].question, 'How many users are there?');
@@ -123,7 +124,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 2);
       assert.strictEqual(pairs[0].sql, 'SELECT COUNT(*) FROM users');
@@ -144,7 +145,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -160,7 +161,7 @@ describe('MessageExtractor', () => {
       const extractor = new MessageExtractor(messages, {
         includeFailures: true,
       });
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].success, false);
@@ -180,7 +181,7 @@ describe('MessageExtractor', () => {
       const extractor = new MessageExtractor(messages, {
         includeFailures: true,
       });
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 2);
       assert.strictEqual(pairs[0].success, false);
@@ -198,7 +199,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -212,7 +213,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -226,7 +227,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -244,7 +245,7 @@ describe('MessageExtractor', () => {
       const extractor = new MessageExtractor(messages, {
         toolName: 'execute_sql',
       });
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].sql, 'SELECT COUNT(*) FROM users');
@@ -259,7 +260,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -280,7 +281,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].question, 'Hello! How many users are there?');
@@ -303,7 +304,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].question, 'Count users please');
@@ -325,7 +326,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -341,7 +342,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs[0].question, 'How many users?');
     });
@@ -350,7 +351,7 @@ describe('MessageExtractor', () => {
   describe('edge cases', () => {
     it('should return empty array for empty messages', async () => {
       const extractor = new MessageExtractor([]);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -373,7 +374,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -395,7 +396,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -406,7 +407,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 0);
     });
@@ -420,7 +421,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].question, 'Count users');
@@ -435,7 +436,7 @@ describe('MessageExtractor', () => {
       ];
 
       const extractor = new MessageExtractor(messages);
-      const pairs = await extractor.produce();
+      const pairs = await toPairs(extractor);
 
       assert.strictEqual(pairs.length, 1);
       assert.strictEqual(pairs[0].question, 'Actually, count users');

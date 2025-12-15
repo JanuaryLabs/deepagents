@@ -9,7 +9,7 @@
  *   --epochs <n>        Number of training epochs (default: 3)
  *   --batch-size <n>    Per-device batch size (default: 4)
  *   --lr <rate>         Learning rate (default: 1e-4)
- *   --output-dir <dir>  Output directory (default: ./qwen3-sql-lora)
+ *   --output-dir <dir>  Output directory (default: ./.finetune/qwen3-sql)
  *   --max-samples <n>   Limit training samples
  *   --use-hf            Use HuggingFace dataset instead of local
  *   --model <name>      Base model (default: Qwen/Qwen3-0.6B)
@@ -45,6 +45,7 @@ interface FinetuneOptions {
   lr?: number;
   outputDir?: string;
   maxSamples?: number;
+  input?: string;
   useHf?: boolean;
   model?: string;
   evalSplit?: number;
@@ -151,6 +152,9 @@ function runFinetune(options: FinetuneOptions): ChildProcess {
   if (options.maxSamples !== undefined) {
     args.push('--max-samples', String(options.maxSamples));
   }
+  if (options.input !== undefined) {
+    args.push('--input', options.input);
+  }
   if (options.useHf) {
     args.push('--use-hf');
   }
@@ -173,6 +177,11 @@ function runFinetune(options: FinetuneOptions): ChildProcess {
   return spawn(VENV_PYTHON, args, {
     stdio: 'inherit',
     cwd: process.cwd(),
+    env: {
+      ...process.env,
+      // Disable tokenizer parallelism to avoid fork warnings during GGUF conversion
+      TOKENIZERS_PARALLELISM: 'false',
+    },
   });
 }
 
@@ -184,6 +193,7 @@ async function main(): Promise<void> {
       lr: { type: 'string' },
       'output-dir': { type: 'string', short: 'o' },
       'max-samples': { type: 'string', short: 'n' },
+      input: { type: 'string', short: 'i' },
       'use-hf': { type: 'boolean' },
       model: { type: 'string', short: 'm' },
       'eval-split': { type: 'string' },
@@ -209,8 +219,9 @@ Options:
   -e, --epochs <n>        Number of training epochs (default: 3)
   -b, --batch-size <n>    Per-device batch size (default: 4)
       --lr <rate>         Learning rate (default: 2e-5)
-  -o, --output-dir <dir>  Output directory (default: ./qwen3-sql)
+  -o, --output-dir <dir>  Output directory (default: ./.finetune/qwen3-sql)
   -n, --max-samples <n>   Limit training samples (for testing)
+  -i, --input <file>      Path to JSONL training file (chat messages format)
       --use-hf            Use HuggingFace dataset (78k examples)
   -m, --model <name>      Base model (default: Qwen/Qwen3-0.6B)
       --eval-split <r>    Eval split ratio (default: 0.1)
@@ -223,8 +234,11 @@ Prerequisites:
   brew install llama.cpp  # Required for GGUF conversion
 
 Examples:
+  # Train with synthetic data from syntheize.ts
+  npx tsx run-finetune.ts --input training-data.jsonl
+
   # Quick test with 100 samples
-  npx tsx run-finetune.ts --max-samples 100 --epochs 1
+  npx tsx run-finetune.ts --input training-data.jsonl --max-samples 100 --epochs 1
 
   # Full training with HuggingFace dataset
   npx tsx run-finetune.ts --use-hf --epochs 3
@@ -263,6 +277,7 @@ After Training - Using the Model:
     lr: values.lr ? parseFloat(values.lr) : undefined,
     outputDir: values['output-dir'],
     maxSamples: values['max-samples'] ? parseInt(values['max-samples'], 10) : undefined,
+    input: values.input,
     useHf: values['use-hf'],
     model: values.model,
     evalSplit: values['eval-split'] ? parseFloat(values['eval-split']) : undefined,

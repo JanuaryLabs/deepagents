@@ -10,7 +10,7 @@ Options:
     --epochs        Number of training epochs (default: 3)
     --batch-size    Per-device batch size (default: 2 on Mac, 4 on CUDA)
     --lr            Learning rate (default: 2e-5)
-    --output-dir    Output directory for model (default: ./qwen3-sql)
+    --output-dir    Output directory for model (default: ./.finetune/qwen3-sql)
     --max-samples   Limit training samples (default: all)
     --use-hf        Use HuggingFace dataset instead of local JSON
     --no-gguf       Disable automatic GGUF conversion
@@ -25,11 +25,20 @@ import json
 import os
 import platform
 import subprocess
+import sys
+import threading
+import warnings
 from pathlib import Path
 
 import torch
 from datasets import Dataset, load_dataset
 from trl import SFTConfig, SFTTrainer
+
+# Suppress false-positive warnings
+# The Mistral regex warning is incorrectly triggered for Qwen3 tokenizers
+warnings.filterwarnings("ignore", message=".*incorrect regex pattern.*")
+# The PAD/BOS/EOS alignment message is informational, not an issue
+warnings.filterwarnings("ignore", message=".*The tokenizer has new PAD/BOS/EOS tokens.*")
 
 
 DOCKER_IMAGE = "ghcr.io/ggml-org/llama.cpp:full"
@@ -50,6 +59,45 @@ def get_convert_script() -> Path:
     return script_path
 
 
+def _run_with_filtered_stderr(cmd: list, env: dict) -> None:
+    """Run subprocess and filter out known false-positive warnings from stderr."""
+    # Patterns to filter from stderr (these are false-positive warnings)
+    filter_patterns = [
+        "incorrect regex pattern",  # Qwen3 tokenizer falsely triggers Mistral warning
+        "huggingface/tokenizers: The current process just got forked",  # Parallelism warning
+        "To disable this warning",  # Continuation of parallelism warning
+        "Avoid using `tokenizers` before the fork",  # Continuation
+        "Explicitly set the environment variable TOKENIZERS_PARALLELISM",  # Continuation
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    # Stream stdout directly
+    def stream_stdout():
+        for line in proc.stdout:
+            print(line, end="")
+
+    stdout_thread = threading.Thread(target=stream_stdout)
+    stdout_thread.start()
+
+    # Filter stderr
+    for line in proc.stderr:
+        if not any(pattern in line for pattern in filter_patterns):
+            print(line, end="", file=sys.stderr)
+
+    stdout_thread.join()
+    proc.wait()
+
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
 def convert_to_gguf(model_path: str, output_path: str, quantization: str = "q8_0") -> str:
     """Convert HuggingFace model to GGUF format."""
     model_path = os.path.abspath(model_path)
@@ -57,6 +105,13 @@ def convert_to_gguf(model_path: str, output_path: str, quantization: str = "q8_0
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # Environment for subprocess to suppress warnings
+    env = os.environ.copy()
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    env["TRANSFORMERS_VERBOSITY"] = "error"  # Suppress info/warning logs
+    env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    env["PYTHONWARNINGS"] = "ignore"  # Suppress Python warnings in subprocess
 
     # Try Docker first (works on Linux x86_64)
     is_arm = platform.machine() in ("arm64", "aarch64")
@@ -70,6 +125,8 @@ def convert_to_gguf(model_path: str, output_path: str, quantization: str = "q8_0
         output_name = os.path.basename(output_path)
         cmd = [
             "docker", "run", "--rm",
+            "-e", "TOKENIZERS_PARALLELISM=false",
+            "-e", "TRANSFORMERS_VERBOSITY=error",
             "-v", f"{model_path}:/model:ro",
             "-v", f"{output_dir}:/output",
             DOCKER_IMAGE,
@@ -79,7 +136,7 @@ def convert_to_gguf(model_path: str, output_path: str, quantization: str = "q8_0
             "--outtype", quantization
         ]
         print(f"Using Docker image: {DOCKER_IMAGE}")
-        subprocess.run(cmd, check=True)
+        _run_with_filtered_stderr(cmd, env)
     else:
         # Use downloaded script (works on ARM64 Mac and systems without Docker)
         script_path = get_convert_script()
@@ -89,12 +146,15 @@ def convert_to_gguf(model_path: str, output_path: str, quantization: str = "q8_0
         venv_python = Path(__file__).parent / ".venv" / "bin" / "python"
         python_cmd = str(venv_python) if venv_python.exists() else "python3"
 
-        subprocess.run([
-            python_cmd, str(script_path),
+        cmd = [
+            python_cmd,
+            "-W", "ignore::UserWarning",  # Suppress UserWarnings
+            str(script_path),
             model_path,
             "--outfile", output_path,
             "--outtype", quantization
-        ], check=True)
+        ]
+        _run_with_filtered_stderr(cmd, env)
 
     return output_path
 
@@ -129,6 +189,15 @@ def get_device_info() -> dict:
             "default_batch_size": 1,
             "gradient_checkpointing": True,
         }
+
+
+def load_jsonl_dataset(path: str, max_samples: int | None = None) -> Dataset:
+    """Load JSONL file with chat messages format."""
+    with open(path) as f:
+        data = [json.loads(line) for line in f if line.strip()]
+    if max_samples:
+        data = data[:max_samples]
+    return Dataset.from_list(data)
 
 
 def load_local_dataset(json_path: str, max_samples: int | None = None) -> Dataset:
@@ -172,9 +241,10 @@ def main():
     parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=device_info["default_batch_size"], help="Per-device batch size")
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
-    parser.add_argument("--output-dir", type=str, default="./qwen3-sql", help="Output directory")
+    parser.add_argument("--output-dir", type=str, default="./.finetune/qwen3-sql", help="Output directory")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit training samples")
-    parser.add_argument("--use-hf", action="store_true", help="Use HuggingFace dataset")
+    parser.add_argument("--input", type=str, default=None, help="Path to JSONL training file (chat messages format)")
+    parser.add_argument("--use-hf", action="store_true", help="Use HuggingFace sql-create-context dataset")
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-0.6B", help="Base model to fine-tune")
     parser.add_argument("--eval-split", type=float, default=0.1, help="Evaluation split ratio")
     parser.add_argument("--no-gguf", action="store_true", help="Disable automatic GGUF conversion")
@@ -197,24 +267,34 @@ def main():
     print()
 
     # Load dataset
-    if args.use_hf:
+    if args.input:
+        print(f"Loading dataset from {args.input}...")
+        dataset = load_jsonl_dataset(args.input, args.max_samples)
+        print(f"Loaded {len(dataset)} examples")
+        # JSONL is already in messages format, no reformatting needed
+    elif args.use_hf:
         print("Loading dataset from HuggingFace...")
         dataset = load_hf_dataset(args.max_samples)
+        print(f"Loaded {len(dataset)} examples")
+        # Format for SFT
+        print("Formatting dataset for SFT...")
+        dataset = dataset.map(
+            format_for_sft,
+            remove_columns=["question", "context", "answer"]
+        )
     else:
         # Find local JSON file relative to this script
         script_dir = Path(__file__).parent
         json_path = script_dir.parent / "evals" / "sql-create-context" / "sql-create-context.json"
         print(f"Loading dataset from {json_path}...")
         dataset = load_local_dataset(str(json_path), args.max_samples)
-
-    print(f"Loaded {len(dataset)} examples")
-
-    # Format for SFT
-    print("Formatting dataset for SFT...")
-    dataset = dataset.map(
-        format_for_sft,
-        remove_columns=["question", "context", "answer"]
-    )
+        print(f"Loaded {len(dataset)} examples")
+        # Format for SFT
+        print("Formatting dataset for SFT...")
+        dataset = dataset.map(
+            format_for_sft,
+            remove_columns=["question", "context", "answer"]
+        )
 
     # Split into train/eval
     splits = dataset.train_test_split(test_size=args.eval_split, seed=42)

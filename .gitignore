@@ -72,3 +72,5 @@ deepsearch.sqlite*
 __pycache__/
 *.pyc
 .cache/
+
+.finetune/

@@ -1,14 +1,9 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-
-
-import { agent, cerebras } from '@deepagents/agent';
-
-
-
-
+import { type AgentModel, agent, generate, user } from '@deepagents/agent';
 
 export type QuestionComplexity = 'low' | 'medium' | 'hard' | 'window';
 
@@ -64,12 +59,17 @@ const complexityInstructions: Record<QuestionComplexity, string> = {
  * Agent that generates natural language questions from database introspection.
  * Used for creating synthetic training data for text-to-SQL models.
  */
-export const questionGeneratorAgent = agent<
+const questionGeneratorAgent = agent<
   QuestionGeneratorOutput,
   QuestionGeneratorState
 >({
   name: 'question_generator',
-  model: groq('moonshotai/kimi-k2-instruct-0905'),
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.8, topP: 0.95 },
+    }),
+  }),
   handoffDescription:
     'Generates natural language questions that users might ask about the database schema.',
   output: z.object({
@@ -105,10 +105,54 @@ export const questionGeneratorAgent = agent<
       </task>
 
       <guardrails>
-        - Questions must be answerable using ONLY the provided schema
+        - Questions MUST ONLY reference tables and columns that exist in the schema above
+        - Before generating each question, verify that ALL entities (tables, columns, relationships) you reference are explicitly listed in the schema
+        - DO NOT invent or assume tables/columns that aren't explicitly shown in the schema
         - Use natural language without SQL keywords like SELECT, WHERE, etc.
         - All questions must match the specified complexity level
       </guardrails>
     `;
   },
 });
+
+export interface GenerateQuestionsParams {
+  /** Database schema introspection */
+  introspection: string;
+  /** Complexity level for generated questions */
+  complexity: QuestionComplexity;
+  /** Number of questions to generate */
+  count: number;
+  /** Optional prompt to prepend (e.g., persona context) */
+  prompt?: string;
+  /** Optional model override */
+  model?: AgentModel;
+}
+
+export interface GenerateQuestionsResult {
+  questions: string[];
+}
+
+/**
+ * Generate natural language questions from database schema.
+ * Used for creating synthetic training data for text-to-SQL models.
+ */
+export async function generateQuestions(
+  params: GenerateQuestionsParams,
+): Promise<GenerateQuestionsResult> {
+  const { introspection, complexity, count, prompt, model } = params;
+
+  const agentInstance = model
+    ? questionGeneratorAgent.clone({ model })
+    : questionGeneratorAgent;
+
+  const userPrompt =
+    prompt ?? `Generate ${count} questions at ${complexity} complexity given db schema.`;
+
+  const { experimental_output } = await generate(agentInstance, [user(userPrompt)], {
+    introspection,
+    complexity,
+    count,
+  });
+
+  return { questions: experimental_output.questions };
+}

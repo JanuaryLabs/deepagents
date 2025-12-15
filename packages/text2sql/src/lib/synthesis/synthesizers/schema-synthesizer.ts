@@ -1,83 +1,127 @@
-/**
- * SchemaSynthesizer - Generate pairs from database schema.
- *
- * Fully synthetic: generates natural language questions at specified
- * complexity levels, then generates SQL for each question.
- */
-import { generate, user } from '@deepagents/agent';
+import pLimit from 'p-limit';
+
+import type { AgentModel } from '@deepagents/agent';
 
 import type { Adapter } from '../../adapters/adapter.ts';
 import {
   type QuestionComplexity,
-  questionGeneratorAgent,
-} from '../../agents/synthetic/question.agent.ts';
-import { toSql } from '../../agents/synthetic/sql.agent.ts';
-import type { ExtractedPair, PairProducer } from '../types.ts';
+  generateQuestions,
+} from '../../agents/question.agent.ts';
+import { toSql } from '../../agents/sql.agent.ts';
+import type { Teachables } from '../../teach/teachables.ts';
+import { type ExtractedPair, PairProducer } from '../types.ts';
+import type { Persona } from './persona-generator.ts';
 
 export interface SchemaSynthesizerOptions {
-  /** Number of pairs to generate */
   count: number;
-  /** Complexity level(s) to generate */
   complexity?: QuestionComplexity | QuestionComplexity[];
-  /** Validate generated SQL (default: true) */
-  validateSql?: boolean;
+  personas?: Persona[];
+  teachings?: Teachables[];
+  model?: AgentModel;
+  concurrency?: number;
 }
+/**
+ * SchemaSynthesizer - Generate pairs from database schema.
+ *
+ * Fully synthetic: generates natural language questions at specified
+ * complexity levels and personas, then generates SQL for each question.
+ * Iterates through all persona × complexity combinations.
+ */
+export class SchemaSynthesizer extends PairProducer {
+  #complexities: QuestionComplexity[] = [];
+  #personas: (Persona | undefined)[] = [];
+  #limit: ReturnType<typeof pLimit>;
 
-export class SchemaSynthesizer implements PairProducer {
+  /**
+   * @param adapter - Database adapter for schema introspection and SQL validation
+   * @param options - Synthesis configuration including count, complexity, and concurrency
+   */
   constructor(
     private adapter: Adapter,
     private options: SchemaSynthesizerOptions,
-  ) {}
-
-  async produce(): Promise<ExtractedPair[]> {
-    const introspection = await this.adapter.introspect();
-    const pairs: ExtractedPair[] = [];
-
-    // Determine complexities to use
-    const complexities = Array.isArray(this.options.complexity)
+  ) {
+    super();
+    this.#complexities = Array.isArray(this.options.complexity)
       ? this.options.complexity
       : [this.options.complexity ?? 'medium'];
 
-    // Calculate questions per complexity level
-    const perComplexity = Math.ceil(this.options.count / complexities.length);
+    this.#personas = this.options.personas ?? [undefined];
+    this.#limit = pLimit(this.options.concurrency ?? 5);
+  }
 
-    for (const complexity of complexities) {
-      // Generate questions using questionGeneratorAgent
-      const { experimental_output } = await generate(
-        questionGeneratorAgent,
-        [user(`Generate ${perComplexity} questions at ${complexity} complexity.`)],
-        {
-          introspection,
-          complexity,
-          count: perComplexity,
-        },
+  /**
+   * Generates question-SQL pairs by iterating through all persona × complexity combinations.
+   * Uses parallel processing bounded by the configured concurrency limit.
+   * Yields results as each combination completes (streaming pattern).
+   * @returns Generated pairs from all combinations
+   */
+  async *produce(): AsyncGenerator<ExtractedPair[]> {
+    const introspection = await this.adapter.introspect();
+
+    const combinations = this.#personas.flatMap((persona) =>
+      this.#complexities.map((complexity) => ({ persona, complexity })),
+    );
+
+    // Process each combination and yield immediately as it completes
+    // pLimit handles concurrency - no need to create all promises upfront
+    for (const { persona, complexity } of combinations) {
+      const pairs = await this.#processCombination(
+        introspection,
+        persona,
+        complexity,
       );
-
-      const questions = experimental_output.questions;
-
-      // Generate SQL for each question
-      for (const question of questions) {
-        const result = await toSql({
-          input: question,
-          adapter: this.adapter,
-          introspection,
-          instructions: [],
-        });
-
-        // Determine success based on validation
-        let success = true;
-        if (this.options.validateSql !== false) {
-          // toSql already validates - check if there were errors
-          success = !result.errors || result.errors.length === 0;
-        }
-
-        pairs.push({
-          question,
-          sql: result.sql,
-          success,
-        });
+      if (pairs.length) {
+        yield pairs;
       }
     }
+  }
+
+  /**
+   * Processes a single persona × complexity combination by generating questions
+   * and converting each to SQL in parallel.
+   */
+  async #processCombination(
+    introspection: Awaited<ReturnType<Adapter['introspect']>>,
+    persona: Persona | undefined,
+    complexity: QuestionComplexity,
+  ): Promise<ExtractedPair[]> {
+    const personaContext = persona
+      ? `As ${persona.role}, ${persona.perspective}\n\nGenerate questions this persona would ask.`
+      : undefined;
+
+    const prompt = personaContext
+      ? `${personaContext}\n\nGenerate ${this.options.count} questions at ${complexity} complexity.`
+      : undefined;
+
+    const { questions } = await this.#limit(() =>
+      generateQuestions({
+        introspection,
+        complexity,
+        count: this.options.count,
+        prompt,
+        model: this.options.model,
+      }),
+    );
+
+    const pairs = await Promise.all(
+      questions.map(async (question) => {
+        const result = await this.#limit(() =>
+          toSql({
+            input: question,
+            adapter: this.adapter,
+            introspection,
+            instructions: this.options.teachings ?? [],
+            model: this.options.model,
+          }),
+        );
+
+        return {
+          question,
+          sql: result.sql,
+          success: !result.errors || result.errors.length === 0,
+        };
+      }),
+    );
 
     return pairs;
   }

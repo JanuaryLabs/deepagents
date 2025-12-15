@@ -22,31 +22,23 @@ import z from 'zod';
 import { agent, generate, user } from '@deepagents/agent';
 
 import type { Adapter } from '../../adapters/adapter.ts';
-import type { ExtractedPair, PairProducer } from '../types.ts';
+import { type ExtractedPair, PairProducer } from '../types.ts';
 
-/** Shape of the db_query tool input */
 export interface DbQueryInput {
   sql: string;
   reasoning?: string;
 }
 
-/** Intermediate representation of an extracted SQL with its context */
 export interface SqlWithContext {
   sql: string;
   success: boolean;
-  /** All messages up to and including the one that triggered this SQL */
   conversationContext: string[];
 }
 
-/** Base options for all contextual extractors */
 export interface BaseContextualExtractorOptions {
-  /** Include failed queries in output (default: false) */
   includeFailures?: boolean;
-  /** Tool name to extract SQL from (default: 'db_query') */
   toolName?: string;
 }
-
-/** Agent that resolves context-dependent questions into standalone ones */
 export const contextResolverAgent = agent<
   { question: string },
   { conversation: string; sql: string; introspection?: string }
@@ -97,13 +89,11 @@ export const contextResolverAgent = agent<
   `,
 });
 
-/** Extract text content from message parts */
 export function getMessageText(message: UIMessage): string {
   const textParts = message.parts.filter(isTextUIPart).map((part) => part.text);
   return textParts.join(' ').trim();
 }
 
-/** Format conversation messages for the resolver agent */
 export function formatConversation(messages: string[]): string {
   return messages.map((msg, i) => `[${i + 1}] ${msg}`).join('\n');
 }
@@ -119,7 +109,7 @@ export function formatConversation(messages: string[]): string {
  *
  * Subclasses implement the hooks to customize context management.
  */
-export abstract class BaseContextualExtractor implements PairProducer {
+export abstract class BaseContextualExtractor extends PairProducer {
   protected context: string[] = [];
   protected results: SqlWithContext[] = [];
 
@@ -127,27 +117,34 @@ export abstract class BaseContextualExtractor implements PairProducer {
     protected messages: UIMessage[],
     protected adapter: Adapter,
     protected options: BaseContextualExtractorOptions = {},
-  ) {}
+  ) {
+    super();
+  }
 
   /**
    * Template method - defines the extraction algorithm skeleton.
    * Subclasses customize behavior via hooks, not by overriding this method.
    */
-  async produce(): Promise<ExtractedPair[]> {
+  async *produce(): AsyncGenerator<ExtractedPair[]> {
+    // Reset state for each produce() invocation to prevent race conditions
+    // if produce() is called multiple times concurrently
+    this.context = [];
+    this.results = [];
+
     const { includeFailures = false, toolName = 'db_query' } = this.options;
 
     // Step 1: Extract SQLs with context (calls hooks)
     await this.extractSqlsWithContext(toolName, includeFailures);
 
     if (this.results.length === 0) {
-      return [];
+      return;
     }
 
     // Step 2: Get introspection for schema context
     const introspection = await this.adapter.introspect();
 
     // Step 3: Resolve each SQL's context into a standalone question
-    return this.resolveQuestions(introspection);
+    yield* this.resolveQuestions(introspection);
   }
 
   /**
@@ -232,11 +229,9 @@ export abstract class BaseContextualExtractor implements PairProducer {
   /**
    * Resolve extracted SQL contexts into standalone questions using LLM.
    */
-  private async resolveQuestions(
+  private async *resolveQuestions(
     introspection: string,
-  ): Promise<ExtractedPair[]> {
-    const pairs: ExtractedPair[] = [];
-
+  ): AsyncGenerator<ExtractedPair[]> {
     for (const item of this.results) {
       const { experimental_output } = await generate(
         contextResolverAgent,
@@ -248,15 +243,15 @@ export abstract class BaseContextualExtractor implements PairProducer {
         },
       );
 
-      pairs.push({
-        question: experimental_output.question,
-        sql: item.sql,
-        context: item.conversationContext,
-        success: item.success,
-      });
+      yield [
+        {
+          question: experimental_output.question,
+          sql: item.sql,
+          context: item.conversationContext,
+          success: item.success,
+        },
+      ];
     }
-
-    return pairs;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

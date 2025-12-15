@@ -1,0 +1,85 @@
+[
+  {
+    "id": "ecommerce-orders",
+    "schema": "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, email TEXT, tier TEXT, created_at DATE);\nCREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, total_amount DECIMAL, status TEXT, created_at TIMESTAMP);\nCREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, product_id INTEGER, quantity INTEGER, unit_price DECIMAL);\nCREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, category TEXT, price DECIMAL, stock_quantity INTEGER);",
+    "expected": {
+      "guardrails": ["email privacy"],
+      "glossary_terms": ["total_amount", "order value"],
+      "hints": ["status column", "tier values"]
+    }
+  },
+  {
+    "id": "healthcare-patients",
+    "schema": "CREATE TABLE patients (id INTEGER PRIMARY KEY, mrn TEXT, name TEXT, dob DATE, ssn TEXT, insurance_id TEXT);\nCREATE TABLE appointments (id INTEGER PRIMARY KEY, patient_id INTEGER, provider_id INTEGER, appointment_date DATETIME, status TEXT, reason TEXT);\nCREATE TABLE providers (id INTEGER PRIMARY KEY, name TEXT, specialty TEXT, department TEXT);\nCREATE TABLE prescriptions (id INTEGER PRIMARY KEY, patient_id INTEGER, medication TEXT, dosage TEXT, prescribed_date DATE, end_date DATE);",
+    "expected": {
+      "guardrails": ["SSN", "MRN", "patient privacy"],
+      "hints": ["appointment status", "prescription end_date"]
+    }
+  },
+  {
+    "id": "finance-transactions",
+    "schema": "CREATE TABLE accounts (id INTEGER PRIMARY KEY, account_number TEXT, customer_id INTEGER, account_type TEXT, balance DECIMAL, opened_date DATE);\nCREATE TABLE transactions (id INTEGER PRIMARY KEY, account_id INTEGER, amount DECIMAL, transaction_type TEXT, timestamp DATETIME, description TEXT);\nCREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, ssn TEXT, credit_score INTEGER, risk_level TEXT);",
+    "expected": {
+      "guardrails": ["SSN", "account_number"],
+      "hints": ["account_type values", "transaction_type values", "risk_level"]
+    }
+  },
+  {
+    "id": "hr-employees",
+    "schema": "CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT, email TEXT, department_id INTEGER, manager_id INTEGER, salary DECIMAL, hire_date DATE, termination_date DATE);\nCREATE TABLE departments (id INTEGER PRIMARY KEY, name TEXT, budget DECIMAL, head_count INTEGER);\nCREATE TABLE performance_reviews (id INTEGER PRIMARY KEY, employee_id INTEGER, reviewer_id INTEGER, rating INTEGER, review_date DATE, comments TEXT);",
+    "expected": {
+      "guardrails": ["salary", "email"],
+      "hints": ["termination_date NULL", "manager_id self-reference", "rating values"]
+    }
+  },
+  {
+    "id": "inventory-warehouse",
+    "schema": "CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, name TEXT, category TEXT, unit_cost DECIMAL);\nCREATE TABLE warehouses (id INTEGER PRIMARY KEY, name TEXT, location TEXT, capacity INTEGER);\nCREATE TABLE inventory (id INTEGER PRIMARY KEY, product_id INTEGER, warehouse_id INTEGER, quantity_on_hand INTEGER, quantity_reserved INTEGER, reorder_point INTEGER);\nCREATE TABLE shipments (id INTEGER PRIMARY KEY, product_id INTEGER, warehouse_id INTEGER, quantity INTEGER, shipment_date DATE, status TEXT);",
+    "expected": {
+      "glossary_terms": ["available inventory", "quantity"],
+      "hints": ["quantity_on_hand minus quantity_reserved", "reorder_point", "shipment status"]
+    }
+  },
+  {
+    "id": "saas-subscriptions",
+    "schema": "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, email TEXT, signup_date DATE);\nCREATE TABLE subscriptions (id INTEGER PRIMARY KEY, customer_id INTEGER, plan_id INTEGER, status TEXT, start_date DATE, end_date DATE, mrr DECIMAL);\nCREATE TABLE plans (id INTEGER PRIMARY KEY, name TEXT, price_monthly DECIMAL, features TEXT);\nCREATE TABLE usage_events (id INTEGER PRIMARY KEY, customer_id INTEGER, event_type TEXT, timestamp DATETIME, quantity INTEGER);",
+    "expected": {
+      "guardrails": ["email"],
+      "glossary_terms": ["mrr", "monthly recurring"],
+      "hints": ["subscription status", "end_date", "active subscription"]
+    }
+  },
+  {
+    "id": "education-courses",
+    "schema": "CREATE TABLE students (id INTEGER PRIMARY KEY, name TEXT, email TEXT, enrollment_date DATE, graduation_date DATE);\nCREATE TABLE courses (id INTEGER PRIMARY KEY, code TEXT, title TEXT, department TEXT, credits INTEGER);\nCREATE TABLE enrollments (id INTEGER PRIMARY KEY, student_id INTEGER, course_id INTEGER, semester TEXT, grade TEXT, status TEXT);\nCREATE TABLE instructors (id INTEGER PRIMARY KEY, name TEXT, department TEXT, tenure_status TEXT);",
+    "expected": {
+      "guardrails": ["email"],
+      "hints": ["grade values", "semester format", "enrollment status", "graduation_date"]
+    }
+  },
+  {
+    "id": "real-estate-listings",
+    "schema": "CREATE TABLE properties (id INTEGER PRIMARY KEY, address TEXT, city TEXT, zip_code TEXT, property_type TEXT, bedrooms INTEGER, bathrooms DECIMAL, square_feet INTEGER, lot_size INTEGER);\nCREATE TABLE listings (id INTEGER PRIMARY KEY, property_id INTEGER, list_price DECIMAL, list_date DATE, status TEXT, days_on_market INTEGER);\nCREATE TABLE agents (id INTEGER PRIMARY KEY, name TEXT, license_number TEXT, brokerage TEXT);\nCREATE TABLE transactions (id INTEGER PRIMARY KEY, listing_id INTEGER, sale_price DECIMAL, close_date DATE, buyer_agent_id INTEGER, seller_agent_id INTEGER);",
+    "expected": {
+      "glossary_terms": ["price per square foot", "list price", "sale price"],
+      "hints": ["listing status", "days_on_market", "property_type values"]
+    }
+  },
+  {
+    "id": "support-tickets",
+    "schema": "CREATE TABLE tickets (id INTEGER PRIMARY KEY, customer_id INTEGER, subject TEXT, description TEXT, priority TEXT, status TEXT, created_at DATETIME, resolved_at DATETIME, assigned_to INTEGER);\nCREATE TABLE agents (id INTEGER PRIMARY KEY, name TEXT, team TEXT, shift TEXT);\nCREATE TABLE ticket_comments (id INTEGER PRIMARY KEY, ticket_id INTEGER, author_id INTEGER, content TEXT, created_at DATETIME, is_internal BOOLEAN);\nCREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, email TEXT, plan TEXT);",
+    "expected": {
+      "guardrails": ["email", "is_internal comments"],
+      "glossary_terms": ["resolution time"],
+      "hints": ["ticket status", "priority values", "resolved_at minus created_at"]
+    }
+  },
+  {
+    "id": "iot-sensors",
+    "schema": "CREATE TABLE devices (id INTEGER PRIMARY KEY, device_id TEXT, device_type TEXT, location TEXT, installed_date DATE, status TEXT);\nCREATE TABLE readings (id INTEGER PRIMARY KEY, device_id INTEGER, metric_type TEXT, value DECIMAL, unit TEXT, timestamp DATETIME);\nCREATE TABLE alerts (id INTEGER PRIMARY KEY, device_id INTEGER, alert_type TEXT, severity TEXT, triggered_at DATETIME, acknowledged_at DATETIME);",
+    "expected": {
+      "hints": ["time-series readings", "device status", "acknowledged_at NULL", "severity values"],
+      "glossary_terms": ["average reading", "alert"]
+    }
+  }
+]

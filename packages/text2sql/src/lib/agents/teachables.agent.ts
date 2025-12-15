@@ -1,120 +1,191 @@
 import { groq } from '@ai-sdk/groq';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { agent, thirdPersonPrompt } from '@deepagents/agent';
+import { type AgentModel, agent, generate, user } from '@deepagents/agent';
 
-import type { Introspection } from '../adapters/adapter.ts';
-import { type GeneratedTeachable } from '../teach/teachables.ts';
+import {
+  type GeneratedTeachable,
+  type Teachables,
+  toTeachables,
+} from '../teach/teachables.ts';
 
-const teachableSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('term'),
-    name: z.string(),
-    definition: z.string(),
-  }),
-  z.object({
-    type: z.literal('hint'),
-    text: z.string(),
-  }),
-  z.object({
-    type: z.literal('guardrail'),
-    rule: z.string(),
-    reason: z.string().optional(),
-    action: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal('explain'),
-    concept: z.string(),
-    explanation: z.string(),
-    therefore: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal('example'),
-    question: z.string(),
-    sql: z.string(),
-    note: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal('clarification'),
-    when: z.string(),
-    ask: z.string(),
-    reason: z.string(),
-  }),
-  z.object({
-    type: z.literal('workflow'),
-    task: z.string(),
-    steps: z.array(z.string()).min(2),
-    triggers: z.array(z.string()).optional(),
-    notes: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal('quirk'),
-    issue: z.string(),
-    workaround: z.string(),
-  }),
-  z.object({
-    type: z.literal('styleGuide'),
-    prefer: z.string(),
-    never: z.string().optional(),
-    always: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal('analogy'),
-    concept: z.array(z.string()).min(2),
-    relationship: z.string(),
-    insight: z.string().optional(),
-    therefore: z.string().optional(),
-    pitfall: z.string().optional(),
-  }),
-]) as z.ZodType<GeneratedTeachable>;
+const outputSchema = z.object({
+  terms: z
+    .array(z.object({ name: z.string(), definition: z.string() }))
+    .optional()
+    .describe('Domain terminology definitions'),
+  hints: z
+    .array(z.object({ text: z.string() }))
+    .optional()
+    .describe('Helpful hints for SQL generation'),
+  guardrails: z
+    .array(
+      z.object({
+        rule: z.string(),
+        reason: z.string().optional(),
+        action: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe('Safety rules and constraints'),
+  explains: z
+    .array(
+      z.object({
+        concept: z.string(),
+        explanation: z.string(),
+        therefore: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe('Concept explanations'),
+  examples: z
+    .array(
+      z.object({
+        question: z.string(),
+        answer: z.string(),
+        note: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe('Example question-answer pairs'),
+  clarifications: z
+    .array(z.object({ when: z.string(), ask: z.string(), reason: z.string() }))
+    .optional()
+    .describe('When to ask for clarification'),
+  workflows: z
+    .array(
+      z.object({
+        task: z.string(),
+        steps: z.array(z.string()).min(1),
+        triggers: z.array(z.string()).optional(),
+        notes: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe('Multi-step workflows'),
+  quirks: z
+    .array(z.object({ issue: z.string(), workaround: z.string() }))
+    .optional()
+    .describe('Known issues and workarounds'),
+  styleGuides: z
+    .array(
+      z.object({
+        prefer: z.string(),
+        never: z.string().optional(),
+        always: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe('SQL style preferences'),
+  analogies: z
+    .array(
+      z.object({
+        concept: z.array(z.string()).min(2),
+        relationship: z.string(),
+        insight: z.string().optional(),
+        therefore: z.string().optional(),
+        pitfall: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe('Concept analogies'),
+});
 
-export const teachablesAuthorAgent = agent<
-  { teachables: GeneratedTeachable[] },
-  {
-    context?: string;
-    adapterInfo?: string;
-  }
+type TeachablesOutput = z.infer<typeof outputSchema>;
+
+const teachablesAuthorAgent = agent<
+  TeachablesOutput,
+  { schema: string; context?: string }
 >({
   name: 'teachables-author',
-  model: groq('openai/gpt-oss-20b'),
-  output: z.object({
-    teachables: z
-      .array(teachableSchema)
-      .min(3)
-      .max(10)
-      .describe(
-        'A concise, high-value set of teachables grounded in the provided schema.',
-      ),
+  model: wrapLanguageModel({
+    model: groq('openai/gpt-oss-20b'),
+    middleware: defaultSettingsMiddleware({
+      settings: { temperature: 0.4, topP: 0.95 },
+    }),
   }),
+  output: outputSchema,
   prompt: (state) => dedent`
-    ${thirdPersonPrompt()}
-
     <identity>
       You design "teachables" for a Text2SQL system. Teachables become structured XML instructions.
       Choose only high-impact items that improve accuracy, safety, or clarity for this database.
     </identity>
 
+    <database_schema>
+    ${state?.schema}
+    </database_schema>
 
-    <teachables_catalog>
-      term: name + definition for domain vocabulary.
-      hint: behavioral rule/constraint to apply by default.
-      guardrail: hard safety/performance boundary with action and optional reason.
-      explain: deeper concept metaphor/explanation (+ optional therefore).
-      example: question + SQL (+ optional note).
-      clarification: when/ask/reason to prompt the user before querying.
-      workflow: task + ordered steps (+ optional triggers/notes).
-      quirk: data edge case with workaround.
-      styleGuide: prefer/never/always guidance for SQL output.
-      analogy: comparison of two concepts with relationship (+ optional insight/therefore/pitfall).
-    </teachables_catalog>
+    ${state?.context ? `<additional_context>${state.context}</additional_context>` : ''}
+
+    <output_structure>
+      Output a JSON object with these optional arrays (include only relevant ones):
+      - terms: [{ name: string, definition: string }] - Domain terminology
+      - hints: [{ text: string }] - Helpful SQL generation hints
+      - guardrails: [{ rule: string, reason?: string, action?: string }] - Safety constraints
+      - explains: [{ concept: string, explanation: string, therefore?: string }] - Concept explanations
+      - examples: [{ question: string, answer: string, note?: string }] - Q&A examples
+      - clarifications: [{ when: string, ask: string, reason: string }] - Clarification triggers
+      - workflows: [{ task: string, steps: string[], triggers?: string[], notes?: string }] - Multi-step tasks
+      - quirks: [{ issue: string, workaround: string }] - Known issues
+      - styleGuides: [{ prefer: string, never?: string, always?: string }] - SQL style rules
+      - analogies: [{ concept: string[], relationship: string, insight?: string, therefore?: string, pitfall?: string }]
+    </output_structure>
 
     <instructions>
-      - Ground everything in the provided schema/context; do not invent tables/columns.
-      - Prefer guardrails + clarifications for performance, safety, and ambiguity.
-      - Use examples only when a clear, schema-valid pattern is evident.
-      - Keep the set lean (3-10 items) and non-duplicative; combine overlapping ideas.
-      - Return JSON that satisfies the output schema; do not wrap in prose.
+      1. Analyze the schema to infer domain, relationships, and sensitive columns.
+      2. Generate 3-10 teachables total across all categories, prioritizing:
+         - guardrails for PII columns (email, ssn, phone, etc)
+         - hints for status/enum columns
+         - clarifications for ambiguous terms
+      3. Ground everything in the schema - do not invent tables/columns.
+      4. Only include categories that are relevant to this schema.
     </instructions>
   `,
 });
+
+export interface GenerateToTeachingsOptions {
+  model?: AgentModel;
+}
+
+export async function toTeachings(
+  input: { schema: string; context?: string },
+  options?: GenerateToTeachingsOptions,
+): Promise<Teachables[]> {
+  const { experimental_output: result } = await generate(
+    teachablesAuthorAgent.clone({ model: options?.model }),
+    [
+      user(
+        `Analyze this database schema and generate teachings that will help an AI generate accurate SQL queries.`,
+      ),
+    ],
+    input,
+  );
+
+  const generated: GeneratedTeachable[] = [
+    ...(result.terms?.map((t) => ({ type: 'term' as const, ...t })) ?? []),
+    ...(result.hints?.map((h) => ({ type: 'hint' as const, ...h })) ?? []),
+    ...(result.guardrails?.map((g) => ({ type: 'guardrail' as const, ...g })) ??
+      []),
+    ...(result.explains?.map((e) => ({ type: 'explain' as const, ...e })) ??
+      []),
+    ...(result.examples?.map((e) => ({ type: 'example' as const, ...e })) ??
+      []),
+    ...(result.clarifications?.map((c) => ({
+      type: 'clarification' as const,
+      ...c,
+    })) ?? []),
+    ...(result.workflows?.map((w) => ({ type: 'workflow' as const, ...w })) ??
+      []),
+    ...(result.quirks?.map((q) => ({ type: 'quirk' as const, ...q })) ?? []),
+    ...(result.styleGuides?.map((s) => ({
+      type: 'styleGuide' as const,
+      ...s,
+    })) ?? []),
+    ...(result.analogies?.map((a) => ({ type: 'analogy' as const, ...a })) ??
+      []),
+  ];
+
+  return toTeachables(generated);
+}

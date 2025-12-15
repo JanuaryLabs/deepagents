@@ -1,9 +1,3 @@
-/**
- * SqlExtractor - Generate questions for existing SQL queries.
- *
- * Given a list of SQL queries, uses an LLM to generate the natural
- * language questions they answer.
- */
 import { groq } from '@ai-sdk/groq';
 import dedent from 'dedent';
 import z from 'zod';
@@ -11,16 +5,13 @@ import z from 'zod';
 import { agent, generate, user } from '@deepagents/agent';
 
 import type { Adapter } from '../../adapters/adapter.ts';
-import type { ExtractedPair, PairProducer } from '../types.ts';
+import { type ExtractedPair, PairProducer } from '../types.ts';
 
 export interface SqlExtractorOptions {
-  /** Validate SQL before generating questions (default: true) */
   validateSql?: boolean;
-  /** Skip invalid SQL instead of including with success=false (default: false) */
   skipInvalid?: boolean;
 }
 
-/** Agent that generates a question from SQL and schema */
 const sqlToQuestionAgent = agent<
   { question: string },
   { sql: string; introspection: string }
@@ -67,31 +58,42 @@ const sqlToQuestionAgent = agent<
     </examples>
   `,
 });
-
-export class SqlExtractor implements PairProducer {
+/**
+ * SqlExtractor - Generate questions for existing SQL queries.
+ *
+ * Given a list of SQL queries, uses an LLM to generate the natural
+ * language questions they answer.
+ */
+export class SqlExtractor extends PairProducer {
   #sqls: string[];
   #adapter: Adapter;
   #options: SqlExtractorOptions;
+
+  /**
+   * @param sql - SQL query or queries to generate questions for
+   * @param adapter - Database adapter for validation and schema introspection
+   * @param options - Extraction configuration
+   */
   constructor(
     sql: string[] | string,
     adapter: Adapter,
     options: SqlExtractorOptions = {},
   ) {
+    super();
     this.#sqls = Array.isArray(sql) ? sql : [sql];
     this.#adapter = adapter;
     this.#options = options;
   }
 
-  async produce(): Promise<ExtractedPair[]> {
+  /**
+   * Generates natural language questions for each SQL query using an LLM.
+   * @returns Pairs with generated questions and original SQL
+   */
+  async *produce(): AsyncGenerator<ExtractedPair[]> {
     const { validateSql = true, skipInvalid = false } = this.#options;
-
-    // Get introspection for schema context
     const introspection = await this.#adapter.introspect();
 
-    const pairs: ExtractedPair[] = [];
-
     for (const sql of this.#sqls) {
-      // Optionally validate SQL
       let isValid = true;
       if (validateSql) {
         const error = await this.#adapter.validate(sql);
@@ -102,7 +104,6 @@ export class SqlExtractor implements PairProducer {
         }
       }
 
-      // Generate question from SQL
       const { experimental_output } = await generate(
         sqlToQuestionAgent,
         [user('Generate a natural language question for this SQL query.')],
@@ -112,13 +113,13 @@ export class SqlExtractor implements PairProducer {
         },
       );
 
-      pairs.push({
-        question: experimental_output.question,
-        sql,
-        success: isValid,
-      });
+      yield [
+        {
+          question: experimental_output.question,
+          sql,
+          success: isValid,
+        },
+      ];
     }
-
-    return pairs;
   }
 }
