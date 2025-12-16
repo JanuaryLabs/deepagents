@@ -6,10 +6,12 @@ import z from 'zod';
 import { type AgentModel, agent, generate, user } from '@deepagents/agent';
 
 import type { Adapter } from '../../adapters/adapter.ts';
+import { ALL_STYLES, type NLStyle } from './styles.ts';
 
 export interface Persona {
   role: string;
   perspective: string;
+  styles: NLStyle[];
 }
 
 export interface PersonaGeneratorOptions {
@@ -48,6 +50,13 @@ const personaGeneratorAgent = agent<
             .describe(
               'Rich description of what this persona cares about when querying the database',
             ),
+          styles: z
+            .array(z.enum(ALL_STYLES as [NLStyle, ...NLStyle[]]))
+            .min(1)
+            .max(3)
+            .describe(
+              'Typical communication styles for this persona (1-3 styles)',
+            ),
         }),
       )
       .min(1)
@@ -76,12 +85,23 @@ const personaGeneratorAgent = agent<
            - How they prefer data formatted or presented
            - Their priorities (speed vs accuracy, detail vs summary)
            - Domain-specific concerns relevant to their role
+        3. **styles**: 1-3 communication styles typical for this persona. Choose from:
+           - formal: Professional business language, complete sentences
+           - colloquial: Casual everyday speech, contractions
+           - imperative: Commands like "Show me...", "Get...", "List..."
+           - interrogative: Questions like "What is...", "How many..."
+           - descriptive: Verbose, detailed phrasing
+           - concise: Brief, minimal words
+           - vague: Ambiguous, hedging language
+           - metaphorical: Figurative language, analogies
+           - conversational: Chat-like, casual tone
 
         Requirements:
         - Personas should be realistic for the given schema
         - Each persona should have distinct concerns and priorities
         - Perspectives should be detailed enough to guide question paraphrasing
         - Cover different levels of technical expertise (some technical, some business-focused)
+        - Styles should match how this persona would naturally communicate
       </task>
 
       <example>
@@ -89,12 +109,14 @@ const personaGeneratorAgent = agent<
 
         {
           "role": "Customer Support Rep",
-          "perspective": "As customer support, I care about:\\n- Quick lookups by order ID or customer email\\n- Order status and shipping tracking\\n- Return and refund history\\n- Customer contact details and order history\\n- I need fast answers, not complex analysis"
+          "perspective": "As customer support, I care about:\\n- Quick lookups by order ID or customer email\\n- Order status and shipping tracking\\n- Return and refund history\\n- Customer contact details and order history\\n- I need fast answers, not complex analysis",
+          "styles": ["imperative", "concise"]
         }
 
         {
           "role": "Inventory Manager",
-          "perspective": "As inventory manager, I care about:\\n- Current stock levels and reorder points\\n- Product availability across warehouses\\n- Slow-moving inventory identification\\n- Supplier lead times and pending orders\\n- I need accurate counts, often aggregated by location"
+          "perspective": "As inventory manager, I care about:\\n- Current stock levels and reorder points\\n- Product availability across warehouses\\n- Slow-moving inventory identification\\n- Supplier lead times and pending orders\\n- I need accurate counts, often aggregated by location",
+          "styles": ["formal", "interrogative"]
         }
       </example>
 

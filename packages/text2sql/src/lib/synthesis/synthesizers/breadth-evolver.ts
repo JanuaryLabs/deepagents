@@ -8,6 +8,7 @@ import { type AgentModel, agent, generate, user } from '@deepagents/agent';
 
 import { type ExtractedPair, PairProducer } from '../types.ts';
 import type { Persona } from './persona-generator.ts';
+import { styleInstructions } from './styles.ts';
 
 export interface BreadthEvolverOptions {
   count: number;
@@ -58,6 +59,20 @@ const paraphraserAgent = agent<ParaphraserOutput, ParaphraserState>({
       `
       : '';
 
+    const styleInstruction =
+      state?.persona?.styles && state.persona.styles.length > 0
+        ? dedent`
+        <communication_styles>
+          Generate paraphrases using these communication styles: ${state.persona.styles.join(', ')}
+
+          Style definitions:
+          ${state.persona.styles.map((s) => `- ${s}: ${styleInstructions[s]}`).join('\n')}
+
+          Distribute paraphrases across these styles for variety.
+        </communication_styles>
+      `
+        : '';
+
     return dedent`
       <identity>
         You are a linguistic expert specializing in paraphrasing database questions.
@@ -76,6 +91,8 @@ const paraphraserAgent = agent<ParaphraserOutput, ParaphraserState>({
 
       ${personaInstruction}
 
+      ${styleInstruction}
+
       <task>
         Generate exactly ${state?.count} paraphrased versions of the original question.
 
@@ -85,6 +102,7 @@ const paraphraserAgent = agent<ParaphraserOutput, ParaphraserState>({
         3. Use natural language without SQL keywords (SELECT, WHERE, JOIN, etc.)
         4. Keep paraphrases realistic - how actual users would ask
         5. Do not add or remove any conditions, filters, or requirements from the original
+        ${state?.persona?.styles?.length ? '6. Apply the specified communication styles to create diverse phrasings' : ''}
       </task>
 
       <guardrails>
