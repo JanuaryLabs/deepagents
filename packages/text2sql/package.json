@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/text2sql",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -60,8 +60,8 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "2.0.26",
-    "@deepagents/agent": "0.4.0",
-    "@deepagents/toolbox": "0.4.0",
+    "@deepagents/agent": "0.5.0",
+    "@deepagents/toolbox": "0.5.0",
     "ai": "^5.0.102",
     "autoevals": "^0.0.131",
     "dedent": "1.7.0",
