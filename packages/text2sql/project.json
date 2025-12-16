@@ -14,7 +14,8 @@
           "packages/text2sql/src/lib/adapters/groundings/grounding.ts",
           "packages/text2sql/src/lib/adapters/sqlite/index.ts",
           "packages/text2sql/src/lib/adapters/postgres/index.ts",
-          "packages/text2sql/src/lib/adapters/sqlserver/index.ts"
+          "packages/text2sql/src/lib/adapters/sqlserver/index.ts",
+          "packages/text2sql/src/lib/synthesis/index.ts"
         ]
       }
     },

@@ -8,7 +8,7 @@ The `SqlExtractor` takes existing SQL queries and generates the natural language
 ## Basic Usage
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql';
+import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const sqls = [
   'SELECT COUNT(*) FROM orders WHERE status = "completed"',
@@ -104,7 +104,7 @@ const pairs = await toPairs(
 ## Example: Processing Query Logs
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql';
+import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 // Load SQL from your query logs
 const queryLogs = await loadQueryLogs(); // Your data source
@@ -128,7 +128,7 @@ const trainingData = pairs.map(p => ({
 ## Example: From Saved Queries
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql';
+import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 // Your saved query library
 const savedQueries = [
@@ -174,7 +174,7 @@ import {
   FilteredProducer,
   DeduplicatedProducer,
   toPairs
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 const pairs = await toPairs(
   new DeduplicatedProducer(

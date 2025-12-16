@@ -10,7 +10,7 @@ Based on Microsoft's Evol-Instruct methodology for in-depth evolution, this synt
 ## Basic Usage
 
 ```typescript
-import { DepthEvolver, toPairs } from '@deepagents/text2sql';
+import { DepthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const seedPairs = [
   { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true }
@@ -220,7 +220,7 @@ import {
   DepthEvolver,
   BreadthEvolver,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Stage 1: Generate simple baseline pairs from schema
 const baseline = await toPairs(
@@ -256,7 +256,7 @@ console.log(`Final dataset: ${final.length} total pairs`);
 Build a dataset with graduated difficulty:
 
 ```typescript
-import { DepthEvolver, toPairs } from '@deepagents/text2sql';
+import { DepthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const seeds = [
   { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true },
@@ -343,7 +343,7 @@ const breadth = await toPairs(
 Use together for comprehensive training data:
 
 ```typescript
-import { DepthEvolver, BreadthEvolver, toPairs } from '@deepagents/text2sql';
+import { DepthEvolver, BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const seeds = [
   { question: 'Show orders', sql: 'SELECT * FROM orders', success: true },

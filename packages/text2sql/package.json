@@ -42,6 +42,12 @@
       "types": "./dist/lib/adapters/sqlserver/index.d.ts",
       "import": "./dist/lib/adapters/sqlserver/index.js",
       "default": "./dist/lib/adapters/sqlserver/index.js"
+    },
+    "./synthesis": {
+      "development": "./src/lib/synthesis/index.ts",
+      "types": "./dist/lib/synthesis/index.d.ts",
+      "import": "./dist/lib/synthesis/index.js",
+      "default": "./dist/lib/synthesis/index.js"
     }
   },
   "files": [

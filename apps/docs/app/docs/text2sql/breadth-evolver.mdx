@@ -10,7 +10,7 @@ Based on Microsoft's Evol-Instruct methodology for in-breadth evolution, this sy
 ## Basic Usage
 
 ```typescript
-import { BreadthEvolver, toPairs } from '@deepagents/text2sql';
+import { BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const existingPairs = [
   { question: 'Show top customers', sql: 'SELECT ...', success: true },
@@ -76,7 +76,7 @@ const pairs = await toPairs(
 Generate variations that match a specific user persona:
 
 ```typescript
-import { BreadthEvolver, toPairs } from '@deepagents/text2sql';
+import { BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const persona = {
   role: 'Sales Manager',
@@ -140,7 +140,7 @@ import {
   MessageExtractor,
   BreadthEvolver,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Extract from history
 const extracted = await toPairs(new MessageExtractor(messages));
@@ -162,7 +162,7 @@ import {
   ValidatedProducer,
   DeduplicatedProducer,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // 1. Extract from history
 const extracted = await toPairs(new MessageExtractor(messages));
@@ -189,7 +189,7 @@ const final = await toPairs(
 Generate variations for different user types:
 
 ```typescript
-import { BreadthEvolver, toPairs } from '@deepagents/text2sql';
+import { BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const personas = [
   { role: 'Sales Manager', perspective: 'Revenue and customer focus' },
@@ -278,7 +278,7 @@ import {
   SchemaSynthesizer,
   BreadthEvolver,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // From multiple sources
 const fromHistory = await toPairs(new MessageExtractor(messages));

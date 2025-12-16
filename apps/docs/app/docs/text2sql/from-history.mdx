@@ -8,7 +8,7 @@ The `MessageExtractor` parses chat history to extract question/SQL pairs from ac
 ## Basic Usage
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const pairs = await toPairs(new MessageExtractor(messages));
 
@@ -113,7 +113,7 @@ For multi-turn conversations where context matters, use contextual extractors. T
 Keeps all preceding messages as context:
 
 ```typescript
-import { FullContextExtractor, toPairs } from '@deepagents/text2sql';
+import { FullContextExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const extractor = new FullContextExtractor(messages, adapter);
 const pairs = await toPairs(extractor);
@@ -128,7 +128,7 @@ const pairs = await toPairs(extractor);
 Keeps only the last N messages in a sliding window:
 
 ```typescript
-import { WindowedContextExtractor, toPairs } from '@deepagents/text2sql';
+import { WindowedContextExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const extractor = new WindowedContextExtractor(messages, adapter, {
   windowSize: 5, // Keep last 5 messages as context
@@ -141,7 +141,7 @@ const pairs = await toPairs(extractor);
 Uses an LLM to detect topic changes and reset context. When a topic change is detected, the context is reset and the triggering message is first resolved into a standalone form:
 
 ```typescript
-import { SegmentedContextExtractor, toPairs } from '@deepagents/text2sql';
+import { SegmentedContextExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const extractor = new SegmentedContextExtractor(messages, adapter);
 const pairs = await toPairs(extractor);
@@ -152,7 +152,7 @@ const pairs = await toPairs(extractor);
 ## Example: Extracting from History Store
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 // Load chat history
 const chat = await history.getChat('chat-123');
@@ -174,7 +174,7 @@ for (const pair of pairs) {
 ## Example: Batch Processing Multiple Chats
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const allPairs: ExtractedPair[] = [];
 
@@ -201,7 +201,7 @@ import {
   MessageExtractor,
   ValidatedProducer,
   toPairs
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 const pairs = await toPairs(
   new ValidatedProducer(

@@ -31,7 +31,7 @@ import {
   DeduplicatedProducer,
   // Helper
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 ```
 
 ## Scenario A: Bootstrap from Schema
@@ -41,7 +41,7 @@ import {
 ### Basic Bootstrap
 
 ```typescript
-import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql';
+import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
 
 const pairs = await toPairs(
   new SchemaSynthesizer(adapter, {
@@ -60,7 +60,7 @@ import {
   SchemaSynthesizer,
   PersonaGenerator,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Step 1: Generate personas from schema
 const personas = await new PersonaGenerator(adapter, {
@@ -91,7 +91,7 @@ import {
   ValidatedProducer,
   DeduplicatedProducer,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Step 1: Generate supporting artifacts
 const [personas, teachings] = await Promise.all([
@@ -147,7 +147,7 @@ console.log(`Final dataset: ${final.length} validated pairs`);
 ### Basic Extraction
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql';
+import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const messages = await loadChatHistory(); // Your data source
 
@@ -162,7 +162,7 @@ For multi-turn conversations where context matters:
 import {
   WindowedContextExtractor,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 const pairs = await toPairs(
   new WindowedContextExtractor(messages, {
@@ -184,7 +184,7 @@ import {
   FilteredProducer,
   DeduplicatedProducer,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Step 1: Extract from history
 const messages = await loadChatHistory();
@@ -226,7 +226,7 @@ console.log(`Final: ${final.length} unique pairs`);
 ### Basic SQL Extraction
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql';
+import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
 
 const sqlLogs = await loadQueryLogs(); // Your SQL logs
 const sqls = sqlLogs.map(log => log.sql);
@@ -248,7 +248,7 @@ import {
   DepthEvolver,
   DeduplicatedProducer,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Step 1: Load and deduplicate SQL logs
 const sqlLogs = await loadQueryLogs();
@@ -295,7 +295,7 @@ import {
   ValidatedProducer,
   DeduplicatedProducer,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // Generate personas for realistic questions
 const personas = await new PersonaGenerator(adapter, { count: 5 }).generate();
@@ -368,7 +368,7 @@ import {
   FilteredProducer,
   DeduplicatedProducer,
   toPairs,
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 async function buildProductionDataset(adapter, options: {
   targetCount: number;

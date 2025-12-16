@@ -8,7 +8,7 @@ The `PersonaGenerator` analyzes your database schema to infer realistic user per
 ## Basic Usage
 
 ```typescript
-import { PersonaGenerator } from '@deepagents/text2sql';
+import { PersonaGenerator } from '@deepagents/text2sql/synthesis';
 
 const generator = new PersonaGenerator(adapter, { count: 5 });
 const personas = await generator.generate();
@@ -84,7 +84,7 @@ const personas = await new PersonaGenerator(adapter, {
 Generate questions from different perspectives:
 
 ```typescript
-import { PersonaGenerator, SchemaSynthesizer } from '@deepagents/text2sql';
+import { PersonaGenerator, SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
 
 // Generate personas
 const generator = new PersonaGenerator(adapter, { count: 5 });
@@ -104,7 +104,7 @@ const pairs = await toPairs(new SchemaSynthesizer(adapter, {
 Paraphrase questions from different perspectives:
 
 ```typescript
-import { PersonaGenerator, BreadthEvolver } from '@deepagents/text2sql';
+import { PersonaGenerator, BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
 
 const generator = new PersonaGenerator(adapter, { count: 3 });
 const personas = await generator.generate();
@@ -201,7 +201,7 @@ import {
   SchemaSynthesizer,
   BreadthEvolver,
   toPairs
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // 1. Generate personas
 const personaGen = new PersonaGenerator(adapter, { count: 10 });

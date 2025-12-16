@@ -8,7 +8,7 @@ The `TeachingsGenerator` analyzes your database schema to automatically generate
 ## Basic Usage
 
 ```typescript
-import { TeachingsGenerator } from '@deepagents/text2sql';
+import { TeachingsGenerator } from '@deepagents/text2sql/synthesis';
 
 const generator = new TeachingsGenerator(adapter, {
   context: 'E-commerce database tracking orders and inventory'
@@ -106,8 +106,9 @@ Generate training pairs with domain knowledge:
 import {
   TeachingsGenerator,
   SchemaSynthesizer,
-  PersonaGenerator
-} from '@deepagents/text2sql';
+  PersonaGenerator,
+  toPairs
+} from '@deepagents/text2sql/synthesis';
 
 // Generate teachings
 const teachingsGen = new TeachingsGenerator(adapter, {
@@ -215,7 +216,7 @@ import {
   DepthEvolver,
   BreadthEvolver,
   toPairs
-} from '@deepagents/text2sql';
+} from '@deepagents/text2sql/synthesis';
 
 // 1. Generate teachings
 const teachingsGen = new TeachingsGenerator(adapter, {

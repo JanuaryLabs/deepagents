@@ -43,7 +43,7 @@ The streaming pattern yields chunks of pairs, allowing for efficient memory usag
 Helper function to iterate any producer's AsyncGenerator:
 
 ```typescript
-import { toPairs, SqlExtractor } from '@deepagents/text2sql';
+import { toPairs, SqlExtractor } from '@deepagents/text2sql/synthesis';
 
 const pairs = await toPairs(new SqlExtractor(sqls, adapter));
 ```
@@ -118,7 +118,7 @@ Decorators wrap producers to add functionality:
 Validate SQL and optionally execute queries:
 
 ```typescript
-import { ValidatedProducer, MessageExtractor } from '@deepagents/text2sql';
+import { ValidatedProducer, MessageExtractor } from '@deepagents/text2sql/synthesis';
 
 const validated = new ValidatedProducer(
   new MessageExtractor(messages),
@@ -135,7 +135,7 @@ const pairs = await toPairs(validated);
 Filter pairs by criteria:
 
 ```typescript
-import { FilteredProducer, SqlExtractor } from '@deepagents/text2sql';
+import { FilteredProducer, SqlExtractor } from '@deepagents/text2sql/synthesis';
 
 const filtered = new FilteredProducer(
   new SqlExtractor(sqls, adapter),
@@ -151,7 +151,7 @@ const filtered = new FilteredProducer(
 Remove duplicate pairs:
 
 ```typescript
-import { DeduplicatedProducer, MessageExtractor } from '@deepagents/text2sql';
+import { DeduplicatedProducer, MessageExtractor } from '@deepagents/text2sql/synthesis';
 
 const deduped = new DeduplicatedProducer(
   new MessageExtractor(messages),
