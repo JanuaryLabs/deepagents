@@ -1,11 +1,12 @@
-import { describe, it, mock, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import type { Adapter } from '@deepagents/text2sql';
+import { beforeEach, describe, it, mock } from 'node:test';
+
+import type { Adapter } from '../adapters/adapter.ts';
 import {
-  toSql,
-  sqlGenerators,
   type GenerateSqlParams,
   type GenerateSqlResult,
+  sqlGenerators,
+  toSql,
 } from './sql.agent.ts';
 
 describe('toSql', () => {
@@ -22,10 +23,19 @@ describe('toSql', () => {
     mockValidateResponses = [];
 
     // Mock generateSql using mock.method on the exported object
-    mock.method(sqlGenerators, 'generateSql', async (params: GenerateSqlParams) => {
-      mockGenerateCalls.push(params);
-      return mockGenerateResponses.shift() ?? { success: false, error: 'No mock response' };
-    });
+    mock.method(
+      sqlGenerators,
+      'generateSql',
+      async (params: GenerateSqlParams) => {
+        mockGenerateCalls.push(params);
+        return (
+          mockGenerateResponses.shift() ?? {
+            success: false,
+            error: 'No mock response',
+          }
+        );
+      },
+    );
   });
 
   function createMockAdapter(): Adapter {
@@ -93,7 +103,9 @@ describe('toSql', () => {
 
       assert.strictEqual(result.sql, 'SELECT * FROM users');
       assert.strictEqual(result.attempts, 2);
-      assert.deepStrictEqual(result.errors, ['JSON validation failed: invalid response']);
+      assert.deepStrictEqual(result.errors, [
+        'JSON validation failed: invalid response',
+      ]);
     });
   });
 

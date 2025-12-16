@@ -11,6 +11,7 @@ export default [
       '**/vitest.config.*.timestamp*',
       '**/build',
       '**/.react-router',
+      '**/.venv',
     ],
   },
   {
