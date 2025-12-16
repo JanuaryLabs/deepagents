@@ -1,5 +1,5 @@
-import type { Adapter } from './adapter.ts';
-import type { GroundingContext } from './groundings/context.ts';
+import type { Adapter } from '../adapter.ts';
+import type { GroundingContext } from './context.ts';
 
 /**
  * Filter type for table names.
@@ -31,9 +31,7 @@ export abstract class AbstractGrounding {
 class SampleDataGrounding {
   // this will fetch sample data for tables matching the filter
 }
-class ExampleQueryGrounding {
-  // this will create example queries for tables matching the filter
-}
+
 class FunctionGrounding {
   #filter: Filter;
   #adapter: Adapter;

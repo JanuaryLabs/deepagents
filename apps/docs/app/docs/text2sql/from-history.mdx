@@ -149,6 +149,24 @@ const pairs = await toPairs(extractor);
 // Context resets when the user asks about a completely different topic
 ```
 
+### LastQueryExtractor
+
+Extracts only the **last** `db_query` from a conversation and uses the full conversation context to generate a standalone question via LLM:
+
+```typescript
+import { LastQueryExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+
+const extractor = new LastQueryExtractor(messages, adapter);
+const pairs = await toPairs(extractor);
+
+// Returns at most 1 pair - the last query with resolved question
+// pairs[0].question = 'Show customers in NY sorted by revenue'
+// pairs[0].sql = 'SELECT * FROM customers WHERE region = 'NY' ORDER BY revenue DESC'
+// pairs[0].context = ['User: Show me customers', 'Assistant: ...', 'User: Filter to NY', ...]
+```
+
+Use this when you need to extract a standalone question for the most recent SQL query in a conversation. It collects all user and assistant messages leading up to the last query and asks the LLM to generate a question that captures the full intent without needing prior context.
+
 ## Example: Extracting from History Store
 
 ```typescript

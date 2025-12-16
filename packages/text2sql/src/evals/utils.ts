@@ -1,7 +1,3 @@
-/**
- * Eval utilities for filtering and debugging
- */
-
 interface DataItem<TInput, TExpected = unknown> {
   input: TInput;
   expected?: TExpected;
@@ -39,9 +35,7 @@ export function filterByIndex<TInput, TExpected>(
     return data;
   }
 
-  console.log(
-    `\x1b[36m🎯 Running single test at index ${index}\x1b[0m`,
-  );
+  console.log(`\x1b[36m🎯 Running single test at index ${index}\x1b[0m`);
 
   return [data[index]];
 }

@@ -1,13 +1,6 @@
-/**
- * WindowedContextExtractor - Extracts pairs with a sliding window of context.
- *
- * Keeps only the last N messages in context. Useful for long conversations
- * where older messages become less relevant.
- */
 import type { UIMessage } from 'ai';
 
 import type { Adapter } from '../../adapters/adapter.ts';
-
 import {
   BaseContextualExtractor,
   type BaseContextualExtractorOptions,

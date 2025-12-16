@@ -1,33 +1,3 @@
-/**
- * Checkpoint - A generic, reusable checkpoint system for fault-tolerant pipelines.
- *
- * Features:
- * - Unified storage using points for both single and iterative operations
- * - Atomic writes (temp file + rename) to prevent corruption
- * - Config hash invalidation to detect config changes
- * - Immediate persistence after each update
- *
- * @example
- * ```typescript
- * const checkpoint = await Checkpoint.load({
- *   path: 'output.json',
- *   configHash: hashConfig(myConfig),
- * });
- *
- * // Single computation
- * const step1 = await checkpoint.run('step1', async () => {
- *   return await doStep1();
- * });
- *
- * // Iterative with concurrency
- * const results = await checkpoint.each('step2', inputs, async (item) => {
- *   return await process(item);
- * }, { concurrency: 4 });
- *
- * // Get clean output
- * const output = checkpoint.getOutput();
- * ```
- */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import pLimit from 'p-limit';
@@ -128,10 +98,14 @@ export class Checkpoint {
     const point = this.point<T>(key);
 
     // Use fixed input hash for single-value runs
-    return point.through('single', async () => {
-      const result = await computation();
-      return codec ? (codec.encode(result) as T) : result;
-    }, codec);
+    return point.through(
+      'single',
+      async () => {
+        const result = await computation();
+        return codec ? (codec.encode(result) as T) : result;
+      },
+      codec,
+    );
   }
 
   /**

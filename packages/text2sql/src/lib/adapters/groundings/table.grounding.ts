@@ -1,7 +1,7 @@
 import pluralize from 'pluralize';
 
 import type { Filter, Relationship, Table } from '../adapter.ts';
-import { AbstractGrounding } from '../grounding.ticket.ts';
+import { AbstractGrounding } from './abstract.grounding.ts';
 import type { GroundingContext } from './context.ts';
 
 /**
@@ -227,9 +227,7 @@ export abstract class TableGrounding extends AbstractGrounding {
         // Single-column UNIQUE constraints
         const uniqueColumns = new Set(
           table.constraints
-            ?.filter(
-              (c) => c.type === 'UNIQUE' && c.columns?.length === 1,
-            )
+            ?.filter((c) => c.type === 'UNIQUE' && c.columns?.length === 1)
             .flatMap((c) => c.columns ?? []) ?? [],
         );
 
@@ -270,7 +268,10 @@ export abstract class TableGrounding extends AbstractGrounding {
             }
             if (column.kind === 'Enum' && column.values?.length) {
               annotations.push(`Enum: ${column.values.join(', ')}`);
-            } else if (column.kind === 'LowCardinality' && column.values?.length) {
+            } else if (
+              column.kind === 'LowCardinality' &&
+              column.values?.length
+            ) {
               annotations.push(`LowCardinality: ${column.values.join(', ')}`);
             }
             if (column.stats) {

@@ -25,6 +25,10 @@ export abstract class PairProducer<T extends ExtractedPair = ExtractedPair> {
         })(producer)
       : producer.produce();
   }
+
+  public toPairs(): Promise<T[]> {
+    return toPairs(this);
+  }
 }
 
 /**

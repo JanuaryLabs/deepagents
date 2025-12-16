@@ -1,19 +1,12 @@
-/**
- * Eval for FullContextExtractor
- *
- * Tests that the extractor correctly:
- * 1. Extracts SQL queries from multi-turn conversations
- * 2. Resolves context-dependent questions into standalone form
- */
 /* eslint-disable @nx/enforce-module-boundaries */
 import { evalite } from 'evalite';
 import { DatabaseSync } from 'node:sqlite';
 
-import { FullContextExtractor } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
+import { FullContextExtractor } from '@deepagents/text2sql/synthesis';
 
-import { filterByIndex } from '../utils';
 import { simulateConversation } from '../helpers/conversation-simulator';
+import { filterByIndex } from '../utils';
 
 const DB_PATH = '/Users/ezzabuzaid/Downloads/Chinook.db';
 
@@ -73,7 +66,7 @@ evalite<EvalInput, string>('FullContextExtractor - Question Resolution', {
 
     // 2. Extract pairs using FullContextExtractor
     const extractor = new FullContextExtractor(messages, adapter);
-    const pairs = await extractor.produce();
+    const pairs = await extractor.toPairs();
 
     // 3. Return results for scoring
     if (pairs.length === 0) {

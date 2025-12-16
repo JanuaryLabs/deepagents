@@ -1,11 +1,3 @@
-/**
- * Conversation Simulator for Evals
- *
- * Simulates multi-turn conversations with Text2Sql by:
- * 1. Starting with an initial question
- * 2. Using an LLM agent to generate natural follow-up questions
- * 3. Collecting the full UIMessage[] history for extraction testing
- */
 import { groq } from '@ai-sdk/groq';
 import type { UIMessage } from 'ai';
 import dedent from 'dedent';
@@ -118,9 +110,7 @@ function buildConversationSummary(messages: UIMessage[]): string {
     .map((m) => {
       if (m.role === 'user') {
         const text = m.parts
-          .filter(
-            (p): p is { type: 'text'; text: string } => p.type === 'text',
-          )
+          .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
           .map((p) => p.text)
           .join(' ');
         return `User: ${text}`;

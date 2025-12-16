@@ -1,4 +1,4 @@
-import type { AbstractGrounding } from './grounding.ticket.ts';
+import type { AbstractGrounding } from './groundings/abstract.grounding.ts';
 import { createGroundingContext } from './groundings/context.ts';
 
 /**

@@ -1,5 +1,5 @@
 import type { Table, TableConstraint } from '../adapter.ts';
-import { AbstractGrounding } from '../grounding.ticket.ts';
+import { AbstractGrounding } from './abstract.grounding.ts';
 import type { Column, ColumnContainer, GroundingContext } from './context.ts';
 
 export type { Column, ColumnContainer };
@@ -143,10 +143,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
   /**
    * Get the table from context by name.
    */
-  private getTable(
-    ctx: GroundingContext,
-    name: string,
-  ): Table | undefined {
+  private getTable(ctx: GroundingContext, name: string): Table | undefined {
     return ctx.tables.find((t) => t.name === name);
   }
 

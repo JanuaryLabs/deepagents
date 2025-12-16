@@ -12,7 +12,7 @@ import {
 } from '@deepagents/agent';
 
 import type { Adapter } from '../adapter.ts';
-import { AbstractGrounding } from '../grounding.ticket.ts';
+import { AbstractGrounding } from './abstract.grounding.ts';
 import type { GroundingContext } from './context.ts';
 
 /**
@@ -51,7 +51,7 @@ export class ReportGrounding extends AbstractGrounding {
   #cache?: ReportCache;
   #forceRefresh: boolean;
 
-  constructor(adapter: Adapter, config: ReportGroundingConfig={}) {
+  constructor(adapter: Adapter, config: ReportGroundingConfig = {}) {
     super('business_context');
     this.#adapter = adapter;
     this.#model = config.model ?? groq('openai/gpt-oss-20b');

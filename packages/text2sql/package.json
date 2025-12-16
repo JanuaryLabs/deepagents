@@ -20,10 +20,10 @@
       "default": "./dist/lib/instructions.js"
     },
     "./grounding": {
-      "development": "./src/lib/adapters/groundings/grounding.ts",
-      "types": "./dist/lib/adapters/groundings/grounding.d.ts",
-      "import": "./dist/lib/adapters/groundings/grounding.js",
-      "default": "./dist/lib/adapters/groundings/grounding.js"
+      "development": "./src/lib/adapters/groundings/index.ts",
+      "types": "./dist/lib/adapters/groundings/index.d.ts",
+      "import": "./dist/lib/adapters/groundings/index.js",
+      "default": "./dist/lib/adapters/groundings/index.js"
     },
     "./sqlite": {
       "development": "./src/lib/adapters/sqlite/index.ts",

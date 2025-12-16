@@ -1,5 +1,5 @@
 import type { TableConstraint } from '../adapter.ts';
-import { AbstractGrounding } from '../grounding.ticket.ts';
+import { AbstractGrounding } from './abstract.grounding.ts';
 import type { GroundingContext } from './context.ts';
 
 /**
@@ -27,7 +27,9 @@ export abstract class ConstraintGrounding extends AbstractGrounding {
   /**
    * Fetch constraints for a specific table.
    */
-  protected abstract getConstraints(tableName: string): Promise<TableConstraint[]>;
+  protected abstract getConstraints(
+    tableName: string,
+  ): Promise<TableConstraint[]>;
 
   /**
    * Execute the grounding process.

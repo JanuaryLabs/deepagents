@@ -1,14 +1,3 @@
-/**
- * BaseContextualExtractor - Abstract base class for contextual extraction.
- *
- * Uses the Template Pattern to define the extraction algorithm skeleton,
- * with hooks for subclasses to customize context management.
- *
- * Subclasses:
- * - FullContextExtractor: Keeps all context
- * - WindowedContextExtractor: Keeps last N messages
- * - SegmentedContextExtractor: Resets on topic change
- */
 import { groq } from '@ai-sdk/groq';
 import {
   type UIMessage,
@@ -229,7 +218,7 @@ export abstract class BaseContextualExtractor extends PairProducer {
   /**
    * Resolve extracted SQL contexts into standalone questions using LLM.
    */
-  private async *resolveQuestions(
+  protected async *resolveQuestions(
     introspection: string,
   ): AsyncGenerator<ExtractedPair[]> {
     for (const item of this.results) {

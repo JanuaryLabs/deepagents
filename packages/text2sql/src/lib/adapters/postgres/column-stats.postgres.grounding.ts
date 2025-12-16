@@ -69,7 +69,8 @@ export class PostgresColumnStatsGrounding extends ColumnStatsGrounding {
       return false;
     }
     const normalized = type.toLowerCase();
-    return /int|real|numeric|double|float|decimal|date|time|bool|serial/.test(
+    // Note: boolean excluded because PostgreSQL doesn't support MIN/MAX on boolean types
+    return /int|real|numeric|double|float|decimal|date|time|serial/.test(
       normalized,
     );
   }

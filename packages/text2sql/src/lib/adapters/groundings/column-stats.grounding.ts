@@ -1,5 +1,5 @@
 import type { ColumnStats } from '../adapter.ts';
-import { AbstractGrounding } from '../grounding.ticket.ts';
+import { AbstractGrounding } from './abstract.grounding.ts';
 import type { Column, ColumnContainer, GroundingContext } from './context.ts';
 
 /**

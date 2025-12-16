@@ -1,13 +1,6 @@
-/**
- * FullContextExtractor - Extracts pairs with complete conversation context.
- *
- * Keeps all messages in context from the start of the conversation.
- * Best for short conversations where full history is relevant.
- */
 import type { UIMessage } from 'ai';
 
 import type { Adapter } from '../../adapters/adapter.ts';
-
 import {
   BaseContextualExtractor,
   type BaseContextualExtractorOptions,

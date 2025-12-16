@@ -1,12 +1,3 @@
-/**
- * SegmentedContextExtractor - Extracts pairs with topic-aware context segmentation.
- *
- * Uses an LLM to detect topic changes in the conversation. When a topic change
- * is detected, the context is reset but the triggering message is first resolved
- * into a standalone form to preserve its meaning.
- *
- * Best for long conversations that span multiple topics.
- */
 import { groq } from '@ai-sdk/groq';
 import type { UIMessage } from 'ai';
 import dedent from 'dedent';

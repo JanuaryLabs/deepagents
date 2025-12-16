@@ -5,3 +5,4 @@ export * from './base-contextual-extractor.ts';
 export * from './full-context-extractor.ts';
 export * from './windowed-context-extractor.ts';
 export * from './segmented-context-extractor.ts';
+export * from './last-query-extractor.ts';
