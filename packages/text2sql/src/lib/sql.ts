@@ -137,6 +137,12 @@ export class Text2Sql {
     );
     const allInstructions = [
       ...this.#config.instructions,
+      guardrail({
+        rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
+        reason: 'Prevents SQL errors from wrong value formats.',
+        action:
+          "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
+      }),
       ...(renderToolNames.length
         ? [
             hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
@@ -244,6 +250,12 @@ export class Text2Sql {
     );
     const instructions = [
       ...this.#config.instructions,
+      guardrail({
+        rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
+        reason: 'Prevents SQL errors from wrong value formats.',
+        action:
+          "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
+      }),
       ...(renderToolNames.length
         ? [
             hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
