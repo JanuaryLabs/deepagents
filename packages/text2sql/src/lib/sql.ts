@@ -16,6 +16,10 @@ import {
 } from '@deepagents/agent';
 
 import type { Adapter, IntrospectOptions } from './adapters/adapter.ts';
+import { chat1Agent, chat1Tools } from './agents/chat1.agent.ts';
+import { chat2Agent, chat2Tools } from './agents/chat2.agent.ts';
+import { chat3Agent, chat3Tools } from './agents/chat3.agent.ts';
+import { chat4Agent, chat4Tools } from './agents/chat4.agent.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
 import { toSql as agentToSql } from './agents/sql.agent.ts';
 import {
@@ -26,7 +30,11 @@ import {
 import { FileCache } from './file-cache.ts';
 import { History } from './history/history.ts';
 import type { TeachablesStore } from './memory/store.ts';
-import { toPairs as collectPairs, type ExtractedPair, type PairProducer } from './synthesis/types.ts';
+import {
+  type ExtractedPair,
+  type PairProducer,
+  toPairs as collectPairs,
+} from './synthesis/types.ts';
 import {
   type Teachables,
   guardrail,
@@ -129,12 +137,6 @@ export class Text2Sql {
     );
     const allInstructions = [
       ...this.#config.instructions,
-      guardrail({
-        rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
-        reason: 'Prevents SQL errors from wrong value formats.',
-        action:
-          "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
-      }),
       ...(renderToolNames.length
         ? [
             hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
@@ -242,12 +244,6 @@ export class Text2Sql {
     );
     const instructions = [
       ...this.#config.instructions,
-      guardrail({
-        rule: 'ALWAYS use `get_sample_rows` before writing queries that filter or compare against string columns.',
-        reason: 'Prevents SQL errors from wrong value formats.',
-        action:
-          "Target specific columns (e.g., get_sample_rows('table', ['status', 'type'])).",
-      }),
       ...(renderToolNames.length
         ? [
             hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
@@ -328,6 +324,413 @@ export class Text2Sql {
         }
 
         // Use responseMessage directly - guaranteed to have the assistant's reply
+        await this.#config.history.addMessage({
+          id: v7(),
+          chatId: params.chatId,
+          role: responseMessage.role,
+          content: responseMessage,
+        });
+      },
+    });
+  }
+
+  /**
+   * Chat1 - Combined tool, no peek.
+   *
+   * Uses a single `query_database` tool that:
+   * 1. Takes a natural language question
+   * 2. Internally calls toSql() to generate validated SQL
+   * 3. Executes the SQL
+   * 4. Returns both SQL and results
+   *
+   * The agent does NOT see the SQL before execution.
+   */
+  public async chat1(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
+    const [introspection, userTeachables] = await Promise.all([
+      this.index({ onProgress: console.log }),
+      this.#config.memory
+        ? this.#config.memory.toTeachables(params.userId)
+        : [],
+    ]);
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const renderToolNames = Object.keys(this.#config.tools ?? {}).filter(
+      (name) => name.startsWith('render_'),
+    );
+    const instructions = [
+      ...this.#config.instructions,
+      ...(renderToolNames.length
+        ? [
+            hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
+            styleGuide({
+              prefer:
+                'Use render_* tools for trend/over time/monthly requests or chart asks',
+              always:
+                'Include text insight alongside visualizations. Prefer line charts for time-based data.',
+            }),
+          ]
+        : []),
+    ];
+
+    const originalMessage = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
+
+    const result = stream(
+      chat1Agent.clone({
+        model: this.#config.model,
+        tools: {
+          ...chat1Tools,
+          ...(this.#config.memory ? memoryTools : {}),
+          ...this.#config.tools,
+        },
+      }),
+      originalMessage,
+      {
+        teachings: toInstructions(
+          'instructions',
+          persona({
+            name: 'Freya',
+            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
+            tone: 'Your tone should be concise and business-friendly.',
+          }),
+          ...instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
+        adapter: this.#config.adapter,
+        introspection,
+        instructions: this.#config.instructions,
+        memory: this.#config.memory,
+        userId: params.userId,
+      },
+    );
+
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessage,
+    );
+  }
+
+  /**
+   * Chat2 - Separate generate + execute tools (with peek).
+   *
+   * Uses two separate tools:
+   * 1. `generate_sql` - Takes a question, returns validated SQL
+   * 2. `execute_sql` - Takes SQL, executes it
+   *
+   * The agent sees the SQL before execution and can review/refine.
+   */
+  public async chat2(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
+    const [introspection, userTeachables] = await Promise.all([
+      this.index({ onProgress: console.log }),
+      this.#config.memory
+        ? this.#config.memory.toTeachables(params.userId)
+        : [],
+    ]);
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const renderToolNames = Object.keys(this.#config.tools ?? {}).filter(
+      (name) => name.startsWith('render_'),
+    );
+    const instructions = [
+      ...this.#config.instructions,
+      ...(renderToolNames.length
+        ? [
+            hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
+            styleGuide({
+              prefer:
+                'Use render_* tools for trend/over time/monthly requests or chart asks',
+              always:
+                'Include text insight alongside visualizations. Prefer line charts for time-based data.',
+            }),
+          ]
+        : []),
+    ];
+
+    const originalMessage = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
+
+    const result = stream(
+      chat2Agent.clone({
+        model: this.#config.model,
+        tools: {
+          ...chat2Tools,
+          ...(this.#config.memory ? memoryTools : {}),
+          ...this.#config.tools,
+        },
+      }),
+      originalMessage,
+      {
+        teachings: toInstructions(
+          'instructions',
+          persona({
+            name: 'Freya',
+            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
+            tone: 'Your tone should be concise and business-friendly.',
+          }),
+          ...instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
+        adapter: this.#config.adapter,
+        introspection,
+        instructions: this.#config.instructions,
+        memory: this.#config.memory,
+        userId: params.userId,
+      },
+    );
+
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessage,
+    );
+  }
+
+  /**
+   * Chat3 - Agent conversation/collaboration.
+   *
+   * Enables richer interaction where the SQL agent can:
+   * - Surface confidence levels
+   * - State assumptions
+   * - Request clarification when uncertain
+   */
+  public async chat3(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
+    const [introspection, userTeachables] = await Promise.all([
+      this.index({ onProgress: console.log }),
+      this.#config.memory
+        ? this.#config.memory.toTeachables(params.userId)
+        : [],
+    ]);
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const renderToolNames = Object.keys(this.#config.tools ?? {}).filter(
+      (name) => name.startsWith('render_'),
+    );
+    const instructions = [
+      ...this.#config.instructions,
+      ...(renderToolNames.length
+        ? [
+            hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
+            styleGuide({
+              prefer:
+                'Use render_* tools for trend/over time/monthly requests or chart asks',
+              always:
+                'Include text insight alongside visualizations. Prefer line charts for time-based data.',
+            }),
+          ]
+        : []),
+    ];
+
+    const originalMessage = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
+
+    const result = stream(
+      chat3Agent.clone({
+        model: this.#config.model,
+        tools: {
+          ...chat3Tools,
+          ...(this.#config.memory ? memoryTools : {}),
+          ...this.#config.tools,
+        },
+      }),
+      originalMessage,
+      {
+        teachings: toInstructions(
+          'instructions',
+          persona({
+            name: 'Freya',
+            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
+            tone: 'Your tone should be concise and business-friendly.',
+          }),
+          ...instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
+        adapter: this.#config.adapter,
+        introspection,
+        instructions: this.#config.instructions,
+        memory: this.#config.memory,
+        userId: params.userId,
+      },
+    );
+
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessage,
+    );
+  }
+
+  /**
+   * Chat4 - Question decomposition approach.
+   *
+   * Breaks down questions into semantic components before SQL generation:
+   * - entities: Key concepts mentioned
+   * - filters: Filtering criteria
+   * - aggregation: Type of aggregation
+   * - breakdown: Semantic parts of the question
+   *
+   * This helps ensure all aspects of the question are addressed.
+   */
+  public async chat4(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
+    const [introspection, userTeachables] = await Promise.all([
+      this.index({ onProgress: console.log }),
+      this.#config.memory
+        ? this.#config.memory.toTeachables(params.userId)
+        : [],
+    ]);
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const renderToolNames = Object.keys(this.#config.tools ?? {}).filter(
+      (name) => name.startsWith('render_'),
+    );
+    const instructions = [
+      ...this.#config.instructions,
+      ...(renderToolNames.length
+        ? [
+            hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
+            styleGuide({
+              prefer:
+                'Use render_* tools for trend/over time/monthly requests or chart asks',
+              always:
+                'Include text insight alongside visualizations. Prefer line charts for time-based data.',
+            }),
+          ]
+        : []),
+    ];
+
+    const originalMessage = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
+
+    const result = stream(
+      chat4Agent.clone({
+        model: this.#config.model,
+        tools: {
+          ...chat4Tools,
+          ...(this.#config.memory ? memoryTools : {}),
+          ...this.#config.tools,
+        },
+      }),
+      originalMessage,
+      {
+        teachings: toInstructions(
+          'instructions',
+          persona({
+            name: 'Freya',
+            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
+            tone: 'Your tone should be concise and business-friendly.',
+          }),
+          ...instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
+        adapter: this.#config.adapter,
+        introspection,
+        instructions: this.#config.instructions,
+        memory: this.#config.memory,
+        userId: params.userId,
+      },
+    );
+
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessage,
+    );
+  }
+
+  /**
+   * Helper to create UI message stream with common error handling and persistence.
+   */
+  #createUIMessageStream(
+    result: ReturnType<typeof stream>,
+    messages: UIMessage[],
+    params: { chatId: string; userId: string },
+    originalMessage: UIMessage[],
+  ) {
+    return result.toUIMessageStream({
+      onError: (error) => {
+        if (NoSuchToolError.isInstance(error)) {
+          return 'The model tried to call an unknown tool.';
+        } else if (InvalidToolInputError.isInstance(error)) {
+          return 'The model called a tool with invalid arguments.';
+        } else if (ToolCallRepairError.isInstance(error)) {
+          return 'The model tried to call a tool with invalid arguments, but it was repaired.';
+        } else {
+          return 'An unknown error occurred.';
+        }
+      },
+      sendStart: true,
+      sendFinish: true,
+      sendReasoning: true,
+      sendSources: true,
+      originalMessages: originalMessage,
+      generateMessageId: generateId,
+      onFinish: async ({ responseMessage, isContinuation }) => {
+        const userMessage = messages.at(-1);
+        if (!isContinuation && userMessage) {
+          console.log(
+            'Saving user message to history:',
+            JSON.stringify(userMessage),
+          );
+          await this.#config.history.addMessage({
+            id: v7(),
+            chatId: params.chatId,
+            role: userMessage.role,
+            content: userMessage,
+          });
+        }
+
         await this.#config.history.addMessage({
           id: v7(),
           chatId: params.chatId,

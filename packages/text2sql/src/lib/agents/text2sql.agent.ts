@@ -13,53 +13,6 @@ import type { GeneratedTeachable } from '../teach/teachables.ts';
 export type RenderingTools = Record<string, Tool<unknown, never>>;
 
 const tools = {
-  validate_query: tool({
-    description: `Validate SQL query syntax before execution. Use this to check if your SQL is valid before running db_query. This helps catch errors early and allows you to correct the query if needed.`,
-    inputSchema: z.object({
-      sql: z.string().describe('The SQL query to validate.'),
-    }),
-    execute: async ({ sql }, options) => {
-      const state = toState<{ adapter: Adapter }>(options);
-      const result = await state.adapter.validate(sql);
-      if (typeof result === 'string') {
-        return `Validation Error: ${result}`;
-      }
-      return 'Query is valid.';
-    },
-  }),
-  get_sample_rows: tool({
-    description: `Sample rows from a table to understand data formatting, codes, and value patterns. Use BEFORE writing queries when:
-- Column types in schema don't reveal format (e.g., "status" could be 'active'/'inactive' or 1/0)
-- Date/time formats are unclear (ISO, Unix timestamp, locale-specific)
-- You need to understand lookup table codes or enum values
-- Column names are ambiguous (e.g., "type", "category", "code")`,
-    inputSchema: z.object({
-      tableName: z.string().describe('The name of the table to sample.'),
-      columns: z
-        .array(z.string())
-        .optional()
-        .describe(
-          'Specific columns to sample. If omitted, samples all columns.',
-        ),
-      limit: z
-        .number()
-        .min(1)
-        .max(10)
-        .default(3)
-        .optional()
-        .describe('Number of rows to sample (1-10, default 3).'),
-    }),
-    execute: ({ tableName, columns, limit = 3 }, options) => {
-      const safeLimit = Math.min(Math.max(1, limit), 10);
-      const state = toState<{ adapter: Adapter }>(options);
-      const sql = state.adapter.buildSampleRowsQuery(
-        tableName,
-        columns,
-        safeLimit,
-      );
-      return state.adapter.execute(sql);
-    },
-  }),
   db_query: tool({
     description: `Internal tool to fetch data from the store's database. Write a SQL query to retrieve the information needed to answer the user's question. The results will be returned as data that you can then present to the user in natural language.`,
     inputSchema: z.object({

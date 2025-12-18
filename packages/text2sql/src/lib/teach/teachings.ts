@@ -144,7 +144,7 @@ export function guidelines(options: TeachingsOptions = {}): Teachables[] {
         'Translate the question into SQL patterns (aggregation, segmentation, time range, ranking) only if no column name match.',
         'Choose tables/relations that satisfy those patterns; note lookup tables and filter values implied by schema hints.',
         'Sketch join/filter/aggregation order considering table sizes, indexes, and stats.',
-        "Draft SQL, validate via 'validate_query', then execute via 'db_query' with a short reasoning note.",
+        'Generate precise, validated SQL that answers the question.',
       ],
     }),
   ];
