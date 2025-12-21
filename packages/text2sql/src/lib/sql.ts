@@ -300,50 +300,12 @@ export class Text2Sql {
       },
     );
 
-    return result.toUIMessageStream({
-      onError: (error) => {
-        if (NoSuchToolError.isInstance(error)) {
-          return 'The model tried to call a unknown tool.';
-        } else if (InvalidToolInputError.isInstance(error)) {
-          return 'The model called a tool with invalid arguments.';
-        } else if (ToolCallRepairError.isInstance(error)) {
-          return 'The model tried to call a tool with invalid arguments, but it was repaired.';
-        } else {
-          return 'An unknown error occurred.';
-        }
-      },
-      sendStart: true,
-      sendFinish: true,
-      sendReasoning: true,
-      sendSources: true,
-      originalMessages: originalMessage,
-      generateMessageId: generateId,
-      onFinish: async ({ responseMessage, isContinuation }) => {
-        // Get user message from the input array (already known before the call)
-        // Don't save if this is a continuation of an existing message
-        const userMessage = messages.at(-1);
-        if (!isContinuation && userMessage) {
-          console.log(
-            'Saving user message to history:',
-            JSON.stringify(userMessage),
-          );
-          await this.#config.history.addMessage({
-            id: v7(),
-            chatId: params.chatId,
-            role: userMessage.role,
-            content: userMessage,
-          });
-        }
-
-        // Use responseMessage directly - guaranteed to have the assistant's reply
-        await this.#config.history.addMessage({
-          id: v7(),
-          chatId: params.chatId,
-          role: responseMessage.role,
-          content: responseMessage,
-        });
-      },
-    });
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessage,
+    );
   }
 
   /**
@@ -412,11 +374,6 @@ export class Text2Sql {
       {
         teachings: toInstructions(
           'instructions',
-          persona({
-            name: 'Freya',
-            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
-            tone: 'Your tone should be concise and business-friendly.',
-          }),
           ...instructions,
           teachable('user_profile', ...userTeachables),
         ),
@@ -500,11 +457,6 @@ export class Text2Sql {
       {
         teachings: toInstructions(
           'instructions',
-          persona({
-            name: 'Freya',
-            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
-            tone: 'Your tone should be concise and business-friendly.',
-          }),
           ...instructions,
           teachable('user_profile', ...userTeachables),
         ),
@@ -587,11 +539,7 @@ export class Text2Sql {
       {
         teachings: toInstructions(
           'instructions',
-          persona({
-            name: 'Freya',
-            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
-            tone: 'Your tone should be concise and business-friendly.',
-          }),
+
           ...instructions,
           teachable('user_profile', ...userTeachables),
         ),
@@ -677,11 +625,6 @@ export class Text2Sql {
       {
         teachings: toInstructions(
           'instructions',
-          persona({
-            name: 'Freya',
-            role: 'You are an expert SQL query generator, answering business questions with accurate queries.',
-            tone: 'Your tone should be concise and business-friendly.',
-          }),
           ...instructions,
           teachable('user_profile', ...userTeachables),
         ),
@@ -708,7 +651,7 @@ export class Text2Sql {
     result: ReturnType<typeof stream>,
     messages: UIMessage[],
     params: { chatId: string; userId: string },
-    originalMessage: UIMessage[],
+    originalMessages: UIMessage[],
   ) {
     return result.toUIMessageStream({
       onError: (error) => {
@@ -726,7 +669,7 @@ export class Text2Sql {
       sendFinish: true,
       sendReasoning: true,
       sendSources: true,
-      originalMessages: originalMessage,
+      originalMessages: originalMessages,
       generateMessageId: generateId,
       onFinish: async ({ responseMessage, isContinuation }) => {
         const userMessage = messages.at(-1);
