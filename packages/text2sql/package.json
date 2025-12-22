@@ -53,6 +53,12 @@
       "import": "./dist/lib/adapters/sqlserver/index.js",
       "default": "./dist/lib/adapters/sqlserver/index.js"
     },
+    "./mysql": {
+      "development": "./src/lib/adapters/mysql/index.ts",
+      "types": "./dist/lib/adapters/mysql/index.d.ts",
+      "import": "./dist/lib/adapters/mysql/index.js",
+      "default": "./dist/lib/adapters/mysql/index.js"
+    },
     "./synthesis": {
       "development": "./src/lib/synthesis/index.ts",
       "types": "./dist/lib/synthesis/index.d.ts",
