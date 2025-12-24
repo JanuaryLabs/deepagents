@@ -47,6 +47,7 @@
     "jiti": "2.4.2",
     "jsdom": "~22.1.0",
     "jsonc-eslint-parser": "^2.4.0",
+    "msw": "^2.12.4",
     "nx": "21.6.4",
     "postcss": "8.4.38",
     "prettier": "^3.6.1",

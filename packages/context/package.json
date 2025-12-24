@@ -1,0 +1,42 @@
+{
+  "name": "@deepagents/context",
+  "version": "0.6.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JanuaryLabs/deepagents",
+    "directory": "packages/context"
+  },
+  "bugs": {
+    "url": "https://github.com/JanuaryLabs/deepagents/issues"
+  },
+  "homepage": "https://github.com/JanuaryLabs/deepagents#readme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo",
+    "!**/*.test.*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "pluralize": "^8.0.0",
+    "stringcase": "^4.3.1"
+  },
+  "peerDependencies": {},
+  "devDependencies": {
+    "@types/debug": "^4.1.12"
+  }
+}
