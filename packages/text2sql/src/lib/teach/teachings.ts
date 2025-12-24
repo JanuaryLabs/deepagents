@@ -73,7 +73,9 @@ export function guidelines(options: TeachingsOptions = {}): Teachables[] {
     // Style and readability
     styleGuide({
       prefer:
-        'Use meaningful aliases for tables and columns to improve readability.',
+        'For table aliases, use the full table name (e.g., "FROM users AS users", "JOIN order_items AS order_items"). For column aliases, use descriptive names that reflect the data (e.g., "COUNT(*) AS total_orders").',
+      never:
+        'Use abbreviated table aliases (u, oi, ca) or generic positional aliases (t1, t2, a, b).',
     }),
     styleGuide({
       prefer:

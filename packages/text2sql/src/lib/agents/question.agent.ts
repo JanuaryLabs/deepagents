@@ -5,7 +5,11 @@ import z from 'zod';
 
 import { type AgentModel, agent, generate, user } from '@deepagents/agent';
 
-export type QuestionComplexity = 'low' | 'medium' | 'hard' | 'window';
+export type QuestionComplexity =
+  | 'simple'
+  | 'moderate'
+  | 'complex'
+  | 'high complex';
 
 type QuestionGeneratorState = {
   introspection: string;
@@ -18,7 +22,7 @@ type QuestionGeneratorOutput = {
 };
 
 const complexityInstructions: Record<QuestionComplexity, string> = {
-  low: dedent`
+  simple: dedent`
     Generate simple questions that require:
     - Basic SELECT with single table
     - Simple WHERE clauses with one condition
@@ -26,7 +30,7 @@ const complexityInstructions: Record<QuestionComplexity, string> = {
     - No joins required
     Examples: "How many customers do we have?", "List all products", "What is the total revenue?"
   `,
-  medium: dedent`
+  moderate: dedent`
     Generate moderate questions that require:
     - JOINs between 2-3 tables
     - Multiple WHERE conditions (AND/OR)
@@ -35,7 +39,7 @@ const complexityInstructions: Record<QuestionComplexity, string> = {
     - Basic subqueries
     Examples: "What are the top 5 customers by total orders?", "Which products have never been ordered?"
   `,
-  hard: dedent`
+  complex: dedent`
     Generate complex questions that require:
     - Multiple JOINs (3+ tables)
     - Nested subqueries or CTEs
@@ -44,20 +48,20 @@ const complexityInstructions: Record<QuestionComplexity, string> = {
     - Date/time calculations
     Examples: "What is the month-over-month growth rate?", "Which customers have increased spending compared to last year?"
   `,
-  window: dedent`
-    Generate advanced questions that require window functions:
-    - ROW_NUMBER, RANK, DENSE_RANK
+  'high complex': dedent`
+    Generate highly complex questions that require advanced SQL features:
+    - Window functions (ROW_NUMBER, RANK, DENSE_RANK)
     - LAG, LEAD for comparisons
     - Running totals (SUM OVER)
     - Moving averages
     - PARTITION BY clauses
+    - Complex CTEs with multiple levels
     Examples: "What is the running total of sales per month?", "Rank customers by their purchase frequency within each region"
   `,
 };
 
 /**
  * Agent that generates natural language questions from database introspection.
- * Used for creating synthetic training data for text-to-SQL models.
  */
 const questionGeneratorAgent = agent<
   QuestionGeneratorOutput,
@@ -80,7 +84,7 @@ const questionGeneratorAgent = agent<
   }),
   prompt: (state) => {
     const count = state?.count;
-    const complexity = state?.complexity ?? 'medium';
+    const complexity = state?.complexity ?? 'moderate';
 
     return dedent`
       <identity>
@@ -146,13 +150,18 @@ export async function generateQuestions(
     : questionGeneratorAgent;
 
   const userPrompt =
-    prompt ?? `Generate ${count} questions at ${complexity} complexity given db schema.`;
+    prompt ??
+    `Generate ${count} questions at ${complexity} complexity given db schema.`;
 
-  const { experimental_output } = await generate(agentInstance, [user(userPrompt)], {
-    introspection,
-    complexity,
-    count,
-  });
+  const { experimental_output } = await generate(
+    agentInstance,
+    [user(userPrompt)],
+    {
+      introspection,
+      complexity,
+      count,
+    },
+  );
 
   return { questions: experimental_output.questions };
 }

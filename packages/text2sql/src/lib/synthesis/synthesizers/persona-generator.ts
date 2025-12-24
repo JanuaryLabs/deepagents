@@ -51,7 +51,7 @@ const personaGeneratorAgent = agent<
               'Rich description of what this persona cares about when querying the database',
             ),
           styles: z
-            .array(z.enum(ALL_STYLES as [NLStyle, ...NLStyle[]]))
+            .array(z.enum(ALL_STYLES))
             .min(1)
             .max(3)
             .describe(

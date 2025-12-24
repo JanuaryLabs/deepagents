@@ -13,7 +13,7 @@ import z from 'zod';
 import { type AgentModel, agent, generate, user } from '@deepagents/agent';
 
 import type { Adapter } from '../../adapters/adapter.ts';
-import { toSql } from '../../agents/sql.agent.ts';
+import { UnanswerableSQLError, toSql } from '../../agents/sql.agent.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
 
 /**
@@ -232,21 +232,35 @@ export class DepthEvolver extends PairProducer {
     );
 
     const evolvedQuestion = experimental_output.evolvedQuestion;
+    try {
+      const sqlResult = await toSql({
+        input: evolvedQuestion,
+        adapter: this.adapter,
+        introspection,
+        instructions: [],
+        model: this.options?.model,
+      });
 
-    const sqlResult = await toSql({
-      input: evolvedQuestion,
-      adapter: this.adapter,
-      introspection,
-      instructions: [],
-      model: this.options?.model,
-    });
-
-    return {
-      question: evolvedQuestion,
-      sql: sqlResult.sql,
-      context: pair.context,
-      success: !sqlResult.errors || sqlResult.errors.length === 0,
-    };
+      return {
+        question: evolvedQuestion,
+        sql: sqlResult.sql,
+        context: pair.context,
+        success: !sqlResult.errors || sqlResult.errors.length === 0,
+      };
+    } catch (error) {
+      if (UnanswerableSQLError.isInstance(error)) {
+        return {
+          question: evolvedQuestion,
+          sql: '',
+          context: pair.context,
+          success: false,
+          errors: [
+            `Cannot answer the question ${evolvedQuestion} because ${error.message}`,
+          ],
+        };
+      }
+      throw error;
+    }
   }
 }
 
@@ -254,6 +268,14 @@ async function withRetry<T>(computation: () => Promise<T>): Promise<T> {
   return pRetry(computation, {
     retries: 3,
     shouldRetry: (context) => {
+      console.log({
+        NoObjectGeneratedError: NoObjectGeneratedError.isInstance(
+          context.error,
+        ),
+        NoOutputGeneratedError: NoOutputGeneratedError.isInstance(
+          context.error,
+        ),
+      });
       return (
         NoObjectGeneratedError.isInstance(context.error) ||
         NoOutputGeneratedError.isInstance(context.error)
@@ -263,7 +285,7 @@ async function withRetry<T>(computation: () => Promise<T>): Promise<T> {
       console.log(
         `Attempt ${context.attemptNumber} failed. There are ${context.retriesLeft} retries left.`,
       );
-      console.error(context.error);
+      console.dir(context.error, { depth: null });
     },
   });
 }

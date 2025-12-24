@@ -7,7 +7,11 @@ import {
   type QuestionComplexity,
   generateQuestions,
 } from '../../agents/question.agent.ts';
-import { toSql } from '../../agents/sql.agent.ts';
+import {
+  type ToSqlResult,
+  UnanswerableSQLError,
+  toSql,
+} from '../../agents/sql.agent.ts';
 import type { Teachables } from '../../teach/teachables.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
 import type { Persona } from './persona-generator.ts';
@@ -43,7 +47,7 @@ export class SchemaSynthesizer extends PairProducer {
     super();
     this.#complexities = Array.isArray(this.options.complexity)
       ? this.options.complexity
-      : [this.options.complexity ?? 'medium'];
+      : [this.options.complexity ?? 'moderate'];
 
     this.#personas = this.options.personas ?? [undefined];
     this.#limit = pLimit(this.options.concurrency ?? 5);
@@ -105,15 +109,28 @@ export class SchemaSynthesizer extends PairProducer {
 
     const pairs = await Promise.all(
       questions.map(async (question) => {
-        const result = await this.#limit(() =>
-          toSql({
-            input: question,
-            adapter: this.adapter,
-            introspection,
-            instructions: this.options.teachings ?? [],
-            model: this.options.model,
-          }),
-        );
+        const result = await this.#limit(async () => {
+          try {
+            return await toSql({
+              input: question,
+              adapter: this.adapter,
+              introspection,
+              instructions: this.options.teachings ?? [],
+              model: this.options.model,
+            });
+          } catch (error) {
+            if (UnanswerableSQLError.isInstance(error)) {
+              return {
+                attempts: 0,
+                sql: '',
+                errors: [
+                  `Cannot answer the question ${question} because ${error.message}`,
+                ],
+              } satisfies ToSqlResult;
+            }
+            throw error;
+          }
+        });
 
         return {
           question,

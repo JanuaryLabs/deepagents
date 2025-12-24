@@ -114,9 +114,7 @@ export class Checkpoint {
    * @param step - Unique identifier for this checkpoint point
    */
   point<T>(step: string): Point<T> {
-    if (!this.points[step]) {
-      this.points[step] = { committed: false, entries: [] };
-    }
+    this.points[step] ??= { committed: false, entries: [] };
     return new Point<T>(this.points[step], () => this.save());
   }
 

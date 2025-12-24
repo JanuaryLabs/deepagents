@@ -91,7 +91,6 @@ Use this tool when you need to retrieve data to answer the user's question.`,
           return {
             success: false,
             error: sqlResult.errors?.join('; ') || 'Failed to generate SQL',
-            attempts: sqlResult.attempts,
           };
         }
 
@@ -102,7 +101,6 @@ Use this tool when you need to retrieve data to answer the user's question.`,
           success: true,
           sql: sqlResult.sql,
           data,
-          attempts: sqlResult.attempts,
         };
       } catch (error) {
         return {

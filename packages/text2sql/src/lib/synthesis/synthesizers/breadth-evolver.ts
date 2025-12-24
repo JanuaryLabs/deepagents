@@ -4,7 +4,13 @@ import dedent from 'dedent';
 import pLimit from 'p-limit';
 import z from 'zod';
 
-import { type AgentModel, agent, generate, user } from '@deepagents/agent';
+import {
+  type AgentModel,
+  agent,
+  generate,
+  toOutput,
+  user,
+} from '@deepagents/agent';
 
 import { type ExtractedPair, PairProducer } from '../types.ts';
 import type { Persona } from './persona-generator.ts';
@@ -146,22 +152,24 @@ export class BreadthEvolver extends PairProducer {
     for await (const chunk of this.from(this.source)) {
       const tasks = chunk.map((pair) =>
         this.#limit(async () => {
-          const { experimental_output } = await generate(
-            paraphraserAgent.clone({ model: this.options.model }),
-            [
-              user(
-                `Paraphrase this question ${this.options.count} times: "${pair.question}"`,
-              ),
-            ],
-            {
-              question: pair.question,
-              sql: pair.sql,
-              count: this.options.count,
-              persona: this.options.persona,
-            },
+          const { paraphrases } = await toOutput(
+            generate(
+              paraphraserAgent.clone({ model: this.options.model }),
+              [
+                user(
+                  `Paraphrase this question ${this.options.count} times: "${pair.question}"`,
+                ),
+              ],
+              {
+                question: pair.question,
+                sql: pair.sql,
+                count: this.options.count,
+                persona: this.options.persona,
+              },
+            ),
           );
 
-          return experimental_output.paraphrases.map((paraphrase) => ({
+          return paraphrases.map((paraphrase) => ({
             question: paraphrase,
             sql: pair.sql,
             context: pair.context,

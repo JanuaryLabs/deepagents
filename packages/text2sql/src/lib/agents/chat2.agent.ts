@@ -105,7 +105,6 @@ Use this BEFORE execute_sql to see what query will be run. You can then:
           return {
             success: false,
             error: sqlResult.errors?.join('; ') || 'Failed to generate SQL',
-            attempts: sqlResult.attempts,
             validationErrors: sqlResult.errors,
           };
         }
@@ -113,7 +112,6 @@ Use this BEFORE execute_sql to see what query will be run. You can then:
         return {
           success: true,
           sql: sqlResult.sql,
-          attempts: sqlResult.attempts,
           validationErrors: sqlResult.errors,
         };
       } catch (error) {

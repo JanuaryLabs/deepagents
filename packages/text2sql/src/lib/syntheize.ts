@@ -2,21 +2,19 @@ import { writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import sqlite from './adapters/sqlite/index.ts';
-import { type QuestionComplexity } from './agents/question.agent.ts';
 import { Checkpoint, hashConfig as hash } from './checkpoint.ts';
 import {
   BreadthEvolver,
   DepthEvolver,
   PersonaGenerator,
+  type QuestionComplexity,
   SchemaSynthesizer,
-  TeachingsGenerator,
 } from './synthesis/index.ts';
-import { type ExtractedPair, toPairs } from './synthesis/types.ts';
-import { type Teachables, toTeachables } from './teach/teachables.ts';
+import { type ExtractedPair } from './synthesis/types.ts';
 
 const CONFIG = {
-  personaCount: 10,
-  pairsPerComplexity: 10,
+  personaCount: 5,
+  pairsPerComplexity: 4,
   depthEvolutionCount: 3,
   breadthEvolutionCount: 2,
   concurrency: 1,
@@ -41,21 +39,21 @@ console.log(`- Depth pairs: ${estimate.evolvedPairs}`);
 console.log(`- Breadth pairs: ${estimate.paraphrasedPairs}`);
 console.log(`- Total pairs: ${estimate.total}\n`);
 
-const teachings = await checkpoint.run(
-  'teachings',
-  async () => {
-    console.log('Generating teachings...');
-    const generator = new TeachingsGenerator(adapter, {});
-    return generator.generate();
-  },
-  {
-    encode: (teachings: Teachables[]) => teachings.map((t) => t.encode()),
-    decode: (stored) => {
-      console.dir(stored, { depth: null });
-      return toTeachables(stored as never);
-    },
-  },
-);
+// const teachings = await checkpoint.run(
+//   'teachings',
+//   async () => {
+//     console.log('Generating teachings...');
+//     const generator = new TeachingsGenerator(adapter, {});
+//     return generator.generate();
+//   },
+//   {
+//     encode: (teachings: Teachables[]) => teachings.map((t) => t.encode()),
+//     decode: (stored) => {
+//       console.dir(stored, { depth: null });
+//       return toTeachables(stored as never);
+//     },
+//   },
+// );
 
 const personas = await checkpoint.run('personas', async () => {
   console.log('Generating personas...');
@@ -65,8 +63,15 @@ const personas = await checkpoint.run('personas', async () => {
   return generator.generate();
 });
 
+console.dir(checkpoint.getOutput(), { depth: null });
+
 // Create input combinations for per-item checkpointing
-const complexities: QuestionComplexity[] = ['low', 'medium', 'hard', 'window'];
+const complexities: QuestionComplexity[] = [
+  'simple',
+  'moderate',
+  'complex',
+  'high complex',
+];
 const combinations = personas.flatMap((persona) =>
   complexities.map((complexity) => ({ persona, complexity })),
 );
@@ -77,34 +82,38 @@ const seed = (
     'basePairs',
     combinations,
     async ({ persona, complexity }) => {
+      console.log(
+        `Generating pairs for persona: ${persona.role}, complexity: ${complexity}`,
+      );
       const producer = new SchemaSynthesizer(adapter, {
         count: CONFIG.pairsPerComplexity,
         complexity: [complexity],
         personas: [persona],
-        teachings,
+        teachings: [],
       });
-      return toPairs(producer);
+      return producer.toPairs();
     },
     { concurrency: CONFIG.concurrency },
   )
 ).flat();
 console.log(`✓ Seed pairs: ${seed.length}`);
 
-console.log('Evolving pairs...');
+console.log('Depth pairs...');
 const evolvedPairs = (
   await checkpoint.each(
     'evolvedPairs',
     seed,
     async (pair) => {
+      console.log('Depth pair:', pair.question);
       const producer = new DepthEvolver([pair], adapter, {
         count: CONFIG.depthEvolutionCount,
       });
-      return toPairs(producer);
+      return producer.toPairs();
     },
     { concurrency: CONFIG.concurrency },
   )
 ).flat();
-console.log(`✓ Evolved pairs: ${evolvedPairs.length}`);
+console.log(`✓ Depth pairs: ${evolvedPairs.length}`);
 
 console.log('Generating paraphrases...');
 const paraphrasedPairs = (
@@ -112,10 +121,11 @@ const paraphrasedPairs = (
     'paraphrasedPairs',
     [...seed, ...evolvedPairs],
     async (pair) => {
+      console.log(`Breadth pair:`, pair.question);
       const producer = new BreadthEvolver([pair], {
         count: CONFIG.breadthEvolutionCount,
       });
-      return toPairs(producer);
+      return producer.toPairs();
     },
     { concurrency: CONFIG.concurrency },
   )

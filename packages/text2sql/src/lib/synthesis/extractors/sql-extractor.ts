@@ -12,6 +12,9 @@ export interface SqlExtractorOptions {
   skipInvalid?: boolean;
 }
 
+/**
+ * Agent that generates natural language questions from SQL queries.
+ */
 const sqlToQuestionAgent = agent<
   { question: string },
   { sql: string; introspection: string }
