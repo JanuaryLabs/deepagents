@@ -16,9 +16,9 @@ Without grounding, the AI would need to guess table names, column types, and rel
 
 ## Quick Start
 
-Each database adapter (PostgreSQL, SQLite, SQL Server) exports grounding factory functions. Import them and pass to your adapter:
+Each database adapter (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB) exports grounding factory functions. Import them and pass to your adapter:
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB']}>
 <Tab value="PostgreSQL">
 ```typescript
 import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
@@ -91,6 +91,34 @@ const text2sql = new Text2Sql({
       sqlserver.rowCount(),
       sqlserver.columnStats(),
       sqlserver.lowCardinality(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+<Tab value="MySQL/MariaDB">
+```typescript
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Mysql } from '@deepagents/text2sql/mysql';
+import * as mysqlGrounding from '@deepagents/text2sql/mysql';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new Mysql({
+    execute: async (sql) => {
+      const [rows] = await pool.query(sql);
+      return rows;
+    },
+    grounding: [
+      mysqlGrounding.tables(),
+      mysqlGrounding.views(),
+      mysqlGrounding.info(),
+      mysqlGrounding.indexes(),
+      mysqlGrounding.constraints(),
+      mysqlGrounding.rowCount(),
+      mysqlGrounding.columnStats(),
+      mysqlGrounding.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -294,7 +322,7 @@ tables({
 
 For simple use cases, you can use a minimal grounding setup:
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB']}>
 <Tab value="PostgreSQL">
 ```typescript
 import * as postgres from '@deepagents/text2sql/postgres';
@@ -325,6 +353,16 @@ grounding: [
 ]
 ```
 </Tab>
+<Tab value="MySQL/MariaDB">
+```typescript
+import * as mysqlGrounding from '@deepagents/text2sql/mysql';
+
+grounding: [
+  mysqlGrounding.tables(),
+  mysqlGrounding.info(),
+]
+```
+</Tab>
 </Tabs>
 
 ## Empty Grounding
@@ -342,4 +380,5 @@ This is useful when providing custom introspection via the adapter's `introspect
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific configuration
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific configuration
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific configuration
+- [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific configuration
 - [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

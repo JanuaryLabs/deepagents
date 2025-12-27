@@ -1,7 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import pg from 'pg';
 
-import sqlite from './adapters/sqlite/index.ts';
+import postgres from './adapters/postgres/index.ts';
 import { Checkpoint, hashConfig as hash } from './checkpoint.ts';
 import {
   BreadthEvolver,
@@ -20,11 +21,18 @@ const CONFIG = {
   concurrency: 1,
 };
 
-const sqliteClient = new DatabaseSync('/Users/ezzabuzaid/Downloads/Chinook.db');
-
-const adapter = new sqlite.Sqlite({
-  grounding: [sqlite.info(), sqlite.tables(), sqlite.constraints()],
-  execute: (sql) => sqliteClient.prepare(sql).all(),
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+const adapter = new postgres.Postgres({
+  execute: async (sql) => pool.query(sql).then((it) => it.rows),
+  grounding: [
+    postgres.info(),
+    postgres.tables(),
+    postgres.constraints(),
+    postgres.columnStats(),
+    postgres.indexes(),
+  ],
 });
 
 const checkpoint = await Checkpoint.load({

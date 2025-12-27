@@ -15,12 +15,12 @@ npm install @deepagents/text2sql
 
 Text2SQL requires four components:
 
-1. **Adapter** - Connects to your database (PostgreSQL, SQLite, or SQL Server)
+1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, or MySQL/MariaDB)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Version** - A string used to manage cache invalidation (bump when schema changes)
 4. **History** - Stores conversation history (optional for single queries)
 
-<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server']}>
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
@@ -97,6 +97,34 @@ const text2sql = new Text2Sql({
 });
 ```
 </Tab>
+<Tab value="MySQL/MariaDB">
+```typescript
+import mysql from 'mysql2/promise';
+
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Mysql } from '@deepagents/text2sql/mysql';
+import * as mysqlGrounding from '@deepagents/text2sql/mysql';
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new Mysql({
+    execute: async (sql) => {
+      const [rows] = await pool.query(sql);
+      return rows;
+    },
+    grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
 </Tabs>
 
 ## Your First Query
@@ -162,5 +190,6 @@ export GROQ_API_KEY=your-api-key
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific features
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific features
+- [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific features
 - [Generate SQL](/docs/text2sql/generate-sql) - Deep dive into SQL generation
 - [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

@@ -23,6 +23,9 @@
     },
     {
       "path": "./packages/text2sql"
+    },
+    {
+      "path": "./packages/context"
     }
   ]
 }

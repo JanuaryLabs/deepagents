@@ -214,7 +214,7 @@ Render it for prompt injection
 Lifecycle it (refresh, invalidate, persist)
 A Minimal Design
 // The atomic unit - a piece of context
-interface ContextItem {
+interface ContextFragment {
 key: string;
 content: string | (() => string | Promise<string>);
 priority?: number; // Higher = more important
@@ -225,17 +225,17 @@ ttl?: number; // Time-to-live in ms
 // Something that produces context
 interface ContextProvider {
 name: string;
-provide(): ContextItem | ContextItem[] | Promise<ContextItem | ContextItem[]>;
+provide(): ContextFragment | ContextFragment[] | Promise<ContextFragment | ContextFragment[]>;
 }
 
 // The manager
 class ContextManager {
-private items: Map<string, ContextItem> = new Map();
+private items: Map<string, ContextFragment> = new Map();
 private providers: ContextProvider[] = [];
 
 // Direct item management
-set(item: ContextItem): this;
-get(key: string): ContextItem | undefined;
+set(item: ContextFragment): this;
+get(key: string): ContextFragment | undefined;
 delete(key: string): boolean;
 
 // Provider-based (lazy/dynamic)
@@ -525,7 +525,7 @@ packages/context/
 ├── src/
 │ ├── manager.ts # Core ContextManager
 │ ├── provider.ts # ContextProvider interface
-│ ├── item.ts # ContextItem types
+│ ├── item.ts # ContextFragment types
 │ │
 │ ├── renderers/
 │ │ ├── xml.ts # <key>content</key>
@@ -548,7 +548,7 @@ packages/context/
 Core API Sketch
 // ============ Core ============
 
-interface ContextItem {
+interface ContextFragment {
 key: string;
 content: string | (() => string | Promise<string>);
 priority?: number;
@@ -558,13 +558,13 @@ metadata?: Record<string, unknown>;
 
 interface ContextProvider {
 name: string;
-provide(): MaybePromise<ContextItem | ContextItem[]>;
+provide(): MaybePromise<ContextFragment | ContextFragment[]>;
 }
 
 class ContextManager {
 // Item management
-set(item: ContextItem): this;
-get(key: string): ContextItem | undefined;
+set(item: ContextFragment): this;
+get(key: string): ContextFragment | undefined;
 delete(key: string): boolean;
 has(key: string): boolean;
 
@@ -632,7 +632,7 @@ append(message: Message): Promise<void>;
 getMessages(options?: { limit?: number; before?: string }): Promise<Message[]>;
 
 // For context manager to call
-toContextItems(): Promise<ContextItem[]>;
+toContextFragments(): Promise<ContextFragment[]>;
 }
 
 // ============ History Operations ============
@@ -659,8 +659,8 @@ keepRecent?: number; // Keep N recent messages verbatim
 
 // Merge related context items
 async consolidate(options: {
-matcher: (a: ContextItem, b: ContextItem) => boolean;
-merger: (items: ContextItem[]) => ContextItem;
+matcher: (a: ContextFragment, b: ContextFragment) => boolean;
+merger: (items: ContextFragment[]) => ContextFragment;
 }): Promise<void>;
 }
 
@@ -699,14 +699,14 @@ This enables "memory" across sessions—finding relevant past context.
 
 interface RecallAdapter {
 // Store context for later recall
-store(item: ContextItem, embedding: number[]): Promise<void>;
+store(item: ContextFragment, embedding: number[]): Promise<void>;
 
 // Search for relevant context
 search(query: string, options?: {
 limit?: number;
 threshold?: number;
 filter?: { tags?: string[]; sessionId?: string };
-}): Promise<ContextItem[]>;
+}): Promise<ContextFragment[]>;
 }
 
 interface EmbeddingProvider {
@@ -733,7 +733,7 @@ sessionId?: string;
 }): Promise<void>;
 
 // Recall relevant context from past sessions
-async recall(query: string, options?: RecallOptions): Promise<ContextItem[]>;
+async recall(query: string, options?: RecallOptions): Promise<ContextFragment[]>;
 
 // Auto-inject recalled context into current resolution
 async resolve(options?: ResolveOptions & {
@@ -969,8 +969,8 @@ Start with a minimal core and prove it works:
 
 // v0.1.0 - The essentials
 class ContextManager {
-set(item: ContextItem): this;
-get(key: string): ContextItem | undefined;
+set(item: ContextFragment): this;
+get(key: string): ContextFragment | undefined;
 delete(key: string): boolean;
 register(provider: ContextProvider): this;
 resolve(options?: { tags?: string[] }): Promise<ResolvedContext>;

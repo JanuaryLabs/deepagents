@@ -32,10 +32,10 @@
     "access": "public"
   },
   "dependencies": {
+    "gpt-tokenizer": "^3.4.0",
     "pluralize": "^8.0.0",
     "stringcase": "^4.3.1"
   },
-  "peerDependencies": {},
   "devDependencies": {
     "@types/debug": "^4.1.12"
   }

@@ -1,0 +1,179 @@
+---
+title: MySQL / MariaDB
+description: Configure Text2SQL with MySQL and MariaDB databases
+---
+
+The MySQL adapter provides full support for both MySQL and MariaDB databases with automatic schema introspection, ENUM type detection, and helpful error messages. The adapter auto-detects whether you're connected to MySQL or MariaDB via the `VERSION()` string.
+
+## Basic Setup
+
+```typescript
+import mysql from 'mysql2/promise';
+
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Mysql } from '@deepagents/text2sql/mysql';
+import * as mysqlGrounding from '@deepagents/text2sql/mysql';
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new Mysql({
+    execute: async (sql) => {
+      const [rows] = await pool.query(sql);
+      return rows;
+    },
+    grounding: [
+      mysqlGrounding.tables(),
+      mysqlGrounding.views(),
+      mysqlGrounding.info(),
+      mysqlGrounding.indexes(),
+      mysqlGrounding.constraints(),
+      mysqlGrounding.rowCount(),
+      mysqlGrounding.columnStats(),
+      mysqlGrounding.columnValues(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+
+### Using with MariaDB
+
+For semantic clarity when working with MariaDB, you can import the `Mariadb` class (identical to `Mysql`):
+
+```typescript
+import { Mariadb } from '@deepagents/text2sql/mysql';
+
+const adapter = new Mariadb({
+  execute: async (sql) => {
+    const [rows] = await pool.query(sql);
+    return rows;
+  },
+  grounding: [/* ... */],
+});
+```
+
+## Configuration Options
+
+```typescript
+import * as mysqlGrounding from '@deepagents/text2sql/mysql';
+
+new Mysql({
+  // Required: Execute SQL queries
+  execute: async (sql) => {
+    const [rows] = await pool.query(sql);
+    return rows;
+  },
+
+  // Required: Grounding functions for schema introspection
+  grounding: [
+    mysqlGrounding.tables(),
+    mysqlGrounding.info(),
+    // Add more grounding functions as needed
+  ],
+
+  // Optional: Custom validation function
+  validate: async (sql) => {
+    // Return void if valid, or error string if invalid
+  },
+
+  // Optional: Filter to specific databases
+  databases: ['myapp', 'analytics'],
+});
+```
+
+See [Grounding](/docs/text2sql/grounding) for the full list of available grounding functions and their configuration options.
+
+## Database Filtering
+
+By default, the adapter excludes system databases (`mysql`, `information_schema`, `performance_schema`, `sys`). To limit introspection to specific databases:
+
+```typescript
+new Mysql({
+  execute: async (sql) => {
+    const [rows] = await pool.query(sql);
+    return rows;
+  },
+  databases: ['myapp', 'sales', 'inventory'],
+  grounding: [/* ... */],
+});
+```
+
+## Available Grounding Functions
+
+The following grounding functions are available for MySQL/MariaDB. Import them from `@deepagents/text2sql/mysql`:
+
+| Function | Description |
+|----------|-------------|
+| `tables()` | Discovers tables and columns across databases, detects primary keys |
+| `views()` | Discovers database views |
+| `info()` | Collects MySQL/MariaDB version and auto-detects the dialect |
+| `indexes()` | Identifies indexes from `INFORMATION_SCHEMA.STATISTICS` |
+| `constraints()` | Maps foreign keys, CHECK, UNIQUE, NOT NULL, and DEFAULT constraints |
+| `rowCount()` | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
+| `columnStats()` | Collects min, max, null fraction for numeric/date columns |
+| `columnValues()` | Detects native ENUM types and low cardinality columns |
+| `report()` | Uses an LLM to generate a business context report from your database |
+
+See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
+
+## Error Handling
+
+The adapter maps MySQL/MariaDB error codes to helpful suggestions:
+
+| Error Code | Type             | Suggestion                                           |
+| ---------- | ---------------- | ---------------------------------------------------- |
+| 1146       | MISSING_TABLE    | Check the database for the correct table name. Include the database prefix if necessary. |
+| 1054       | INVALID_COLUMN   | Verify the column exists and use table aliases to disambiguate |
+| 1064       | SYNTAX_ERROR     | Review keywords, punctuation, and the overall query shape |
+| 1630       | INVALID_FUNCTION | The function does not exist or the arguments are invalid |
+| 1305       | INVALID_FUNCTION | Function or procedure not recognized. Confirm name and argument types. |
+| 1109       | MISSING_TABLE    | Unknown table in query. Verify table name and database. |
+| 1051       | MISSING_TABLE    | Table does not exist in the current database |
+
+## Execute Function Return Types
+
+The `execute` function supports multiple return formats for compatibility with different MySQL drivers:
+
+```typescript
+// mysql2: Destructure [rows, fields] tuple
+execute: async (sql) => {
+  const [rows] = await pool.query(sql);
+  return rows;
+};
+
+// Or return the tuple directly (adapter handles it)
+execute: async (sql) => {
+  return await pool.query(sql); // [rows, fields]
+};
+
+// Or return object with rows property
+execute: async (sql) => {
+  const [rows] = await pool.query(sql);
+  return { rows };
+};
+```
+
+## Size Hints
+
+Tables are classified by row count:
+
+| Size Hint | Row Count       |
+| --------- | --------------- |
+| tiny      | < 100           |
+| small     | 100 - 999       |
+| medium    | 1,000 - 9,999   |
+| large     | 10,000 - 99,999 |
+| huge      | >= 100,000      |
+
+This helps the AI understand query performance implications.
+
+## ENUM Support
+
+MySQL's native ENUM type is automatically detected by the `columnValues()` grounding function. ENUM definitions like `enum('active','inactive','pending')` are parsed and included in the schema context, helping the AI generate accurate queries with valid enum values.
