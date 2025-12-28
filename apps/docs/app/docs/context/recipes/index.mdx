@@ -1,0 +1,171 @@
+---
+title: Recipes Overview
+description: Real-world patterns for integrating context management into your deepagents applications
+---
+
+These recipes show practical patterns for using `@deepagents/context` with other deepagents packages and common use cases.
+
+## Available Recipes
+
+| Recipe | Use Case |
+| --- | --- |
+| [Agent Integration](/docs/context/recipes/agent-integration) | Using context with `@deepagents/agent` for dynamic prompts |
+| [Text2SQL Integration](/docs/context/recipes/text2sql-integration) | Domain knowledge and schema context for SQL generation |
+| [Multi-Session Context](/docs/context/recipes/multi-session-context) | Persisting conversations across browser sessions |
+
+## Integration Philosophy
+
+The context package is designed as the foundation layer for deepagents:
+
+```
+┌─────────────────────────────────────────────────────┐
+│              Application Layer                       │
+│   (Your chatbot, analytics tool, code assistant)     │
+└─────────────────────────────────────────────────────┘
+                         │
+            ┌────────────┼────────────┐
+            ▼            ▼            ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│    Agent     │  │   Text2SQL   │  │   Retrieval  │
+│   Package    │  │   Package    │  │   Package    │
+└──────────────┘  └──────────────┘  └──────────────┘
+            │            │            │
+            └────────────┼────────────┘
+                         ▼
+            ┌─────────────────────────┐
+            │    Context Package      │
+            │  (Fragments, Renderers, │
+            │   Storage, Estimation)  │
+            └─────────────────────────┘
+                         │
+                         ▼
+            ┌─────────────────────────┐
+            │        AI SDK           │
+            │   (generateText, etc.)  │
+            └─────────────────────────┘
+```
+
+## Common Patterns
+
+### Pattern 1: Dynamic System Prompts
+
+Use context in agent prompt functions:
+
+```typescript
+const myAgent = agent({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: async (ctx) => {
+    const context = new ContextEngine({ store })
+      .set(
+        role('You are helpful.'),
+        hint(ctx.userPreference), // Dynamic based on agent context
+      );
+    return (await context.resolve()).systemPrompt;
+  },
+});
+```
+
+### Pattern 2: Shared Domain Knowledge
+
+Reuse domain context across multiple agents or tools:
+
+```typescript
+// Shared domain context
+const domainContext = new ContextEngine({ store })
+  .set(
+    fragment('terminology',
+      hint('LTV = Lifetime Value'),
+      hint('MRR = Monthly Recurring Revenue'),
+    ),
+    fragment('rules',
+      hint('Never expose PII'),
+      hint('Limit results to 1000 rows'),
+    ),
+  );
+
+// Use in SQL generation
+const sqlPrompt = (await domainContext.resolve()).systemPrompt;
+
+// Use in report generation
+const reportPrompt = (await domainContext.resolve({
+  renderer: new MarkdownRenderer(),
+})).systemPrompt;
+```
+
+### Pattern 3: Cost-Aware Processing
+
+Estimate costs before expensive operations:
+
+```typescript
+async function processWithBudget(
+  context: ContextEngine,
+  budget: number,
+): Promise<string> {
+  const estimate = await context.estimate('openai:gpt-4o');
+
+  if (estimate.cost > budget) {
+    // Fall back to cheaper model
+    const { systemPrompt, messages } = await context.resolve({
+      renderer: new ToonRenderer(), // More token-efficient
+    });
+
+    return generateText({
+      model: groq('gpt-oss-20b'), // Cheaper model
+      system: systemPrompt,
+      messages,
+    }).then((r) => r.text);
+  }
+
+  // Use premium model
+  const { systemPrompt, messages } = await context.resolve();
+  return generateText({
+    model: openai('gpt-4o'),
+    system: systemPrompt,
+    messages,
+  }).then((r) => r.text);
+}
+```
+
+### Pattern 4: Context Layering
+
+Compose context from multiple sources:
+
+```typescript
+// Base context (always present)
+const baseContext = new ContextEngine({ store: new InMemoryContextStore() })
+  .set(role('You are a helpful assistant.'));
+
+// Feature-specific context
+function withCodeReview(context: ContextEngine) {
+  return context.set(
+    fragment('code_review_guidelines',
+      hint('Check for security vulnerabilities'),
+      hint('Verify error handling'),
+      hint('Review naming conventions'),
+    ),
+  );
+}
+
+function withDocumentation(context: ContextEngine) {
+  return context.set(
+    fragment('documentation_guidelines',
+      hint('Use JSDoc format'),
+      hint('Include examples'),
+      hint('Document edge cases'),
+    ),
+  );
+}
+
+// Compose based on task
+const reviewContext = withCodeReview(baseContext);
+const docsContext = withDocumentation(baseContext);
+```
+
+## Next Steps
+
+Explore the detailed recipes:
+
+- [Agent Integration](/docs/context/recipes/agent-integration) - Dynamic prompts in agents
+- [Text2SQL Integration](/docs/context/recipes/text2sql-integration) - SQL generation context
+- [Multi-Session Context](/docs/context/recipes/multi-session-context) - Conversation persistence

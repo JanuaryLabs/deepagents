@@ -1,0 +1,303 @@
+---
+title: Chat Management
+description: Manage multiple independent chats with metadata, listing, and deletion
+---
+
+The context package supports managing multiple independent chats within a single store. Each chat has its own ID, metadata, and fragment history.
+
+## The Problem
+
+Real-world chat applications need:
+- Multiple conversations per user
+- Titles and metadata for each chat
+- Listing chats sorted by recency
+- Ability to delete old chats
+
+## Creating a Chat
+
+Every `ContextEngine` requires a `chatId` to scope its data:
+
+```typescript
+import {
+  ContextEngine,
+  SqliteContextStore,
+  role,
+  user,
+} from '@deepagents/context';
+
+const store = new SqliteContextStore('./app.db');
+
+// Create a new chat
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',  // Required: unique identifier
+});
+
+context.set(
+  role('You are a helpful assistant.'),
+  user('Hello!'),
+);
+```
+
+All data for this chat is stored with keys prefixed by `chat:chat-001:*`.
+
+## Chat ID Strategies
+
+Choose a chat ID strategy based on your needs:
+
+```typescript
+// UUID for new conversations
+const chatId = crypto.randomUUID();
+
+// User-scoped with timestamp
+const chatId = `user-${userId}-${Date.now()}`;
+
+// Sequential for simple apps
+const chatId = `chat-${nextId++}`;
+```
+
+## Accessing Chat Metadata
+
+Use the `chatId` and `chat` getters:
+
+```typescript
+const context = new ContextEngine({ store, chatId: 'chat-001' });
+
+// Get the chat ID
+console.log(context.chatId); // 'chat-001'
+
+// Get metadata (null until resolved or saved)
+console.log(context.chat); // null
+
+// After resolve() or save(), metadata is loaded
+await context.resolve();
+console.log(context.chat);
+// {
+//   id: 'chat-001',
+//   createdAt: 1703123456789,
+//   updatedAt: 1703123456789,
+//   title: undefined,
+//   metadata: undefined,
+// }
+```
+
+## Updating Chat Metadata
+
+Add titles and custom metadata:
+
+```typescript
+await context.updateChat({
+  title: 'Help with TypeScript',
+  metadata: {
+    tags: ['coding', 'typescript'],
+    priority: 'high',
+  },
+});
+
+console.log(context.chat?.title); // 'Help with TypeScript'
+```
+
+Metadata is merged, not replaced:
+
+```typescript
+// First update
+await context.updateChat({
+  metadata: { category: 'support' },
+});
+
+// Second update (adds to existing)
+await context.updateChat({
+  metadata: { resolved: true },
+});
+
+console.log(context.chat?.metadata);
+// { category: 'support', resolved: true }
+```
+
+## Listing All Chats
+
+Use the store's `listChats()` method:
+
+```typescript
+const chats = await store.listChats();
+
+for (const chat of chats) {
+  console.log(`${chat.id}: ${chat.meta.title ?? 'Untitled'}`);
+  console.log(`  Messages: ${chat.fragmentCount}`);
+  console.log(`  Updated: ${new Date(chat.meta.updatedAt).toLocaleString()}`);
+}
+```
+
+Chats are sorted by `updatedAt` descending (most recent first).
+
+### StoreChatInfo Type
+
+```typescript
+interface StoreChatInfo {
+  id: string;
+  meta: StoreChatMeta;
+  fragmentCount: number;
+}
+
+interface StoreChatMeta {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  title?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+## Deleting a Chat
+
+Remove a chat and all its data:
+
+```typescript
+await store.deleteChat('chat-001');
+```
+
+This deletes:
+- Fragment history
+- Chat metadata
+- All checkpoints for this chat
+
+## Complete Example: Chat List UI
+
+```typescript
+import {
+  ContextEngine,
+  SqliteContextStore,
+  role,
+  user,
+  assistant,
+} from '@deepagents/context';
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+class ChatApp {
+  private store: SqliteContextStore;
+
+  constructor() {
+    this.store = new SqliteContextStore('./chats.db');
+  }
+
+  // Create a new chat
+  async createChat(): Promise<string> {
+    const chatId = crypto.randomUUID();
+
+    const context = new ContextEngine({
+      store: this.store,
+      chatId,
+    });
+
+    context.set(role('You are a helpful assistant.'));
+    await context.save();
+
+    return chatId;
+  }
+
+  // Send a message in a chat
+  async sendMessage(chatId: string, message: string): Promise<string> {
+    const context = new ContextEngine({
+      store: this.store,
+      chatId,
+    }).set(role('You are a helpful assistant.'));
+
+    context.set(user(message));
+
+    const { systemPrompt, messages } = await context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    context.set(assistant(response.text));
+    await context.save();
+
+    // Auto-title based on first message
+    if (!context.chat?.title) {
+      await context.updateChat({
+        title: message.slice(0, 50),
+      });
+    }
+
+    return response.text;
+  }
+
+  // List all chats for UI
+  async listChats(): Promise<Array<{
+    id: string;
+    title: string;
+    updatedAt: Date;
+    messageCount: number;
+  }>> {
+    const chats = await this.store.listChats();
+
+    return chats.map((chat) => ({
+      id: chat.id,
+      title: chat.meta.title ?? 'Untitled Chat',
+      updatedAt: new Date(chat.meta.updatedAt),
+      messageCount: chat.fragmentCount,
+    }));
+  }
+
+  // Delete a chat
+  async deleteChat(chatId: string): Promise<void> {
+    await this.store.deleteChat(chatId);
+  }
+
+  // Rename a chat
+  async renameChat(chatId: string, title: string): Promise<void> {
+    const context = new ContextEngine({
+      store: this.store,
+      chatId,
+    });
+
+    await context.resolve(); // Load metadata
+    await context.updateChat({ title });
+  }
+}
+
+// Usage
+const app = new ChatApp();
+
+// Create and use a chat
+const chatId = await app.createChat();
+await app.sendMessage(chatId, 'What is TypeScript?');
+await app.sendMessage(chatId, 'Show me an example');
+
+// List all chats
+const chats = await app.listChats();
+console.log('Your chats:', chats);
+
+// Delete old chats
+for (const chat of chats) {
+  const ageInDays = (Date.now() - chat.updatedAt.getTime()) / (1000 * 60 * 60 * 24);
+  if (ageInDays > 30) {
+    await app.deleteChat(chat.id);
+  }
+}
+```
+
+## Key Storage Pattern
+
+All chat data is stored with conversation-scoped keys:
+
+| Key Pattern | Content |
+| --- | --- |
+| `chat:{id}:fragments` | Message and context fragments |
+| `chat:{id}:meta` | Chat metadata (title, timestamps) |
+| `chat:{id}:checkpoint:{name}` | Named checkpoints |
+
+This enables:
+- Multiple chats in one database
+- Easy cleanup when deleting a chat
+- Isolation between chats
+
+## Next Steps
+
+- [Checkpoints](/docs/context/checkpoints) - Save and restore chat state
+- [Rewind](/docs/context/rewind) - Undo messages in a chat
+- [Branching](/docs/context/branching) - Explore multiple conversation paths

@@ -1,0 +1,234 @@
+---
+title: TOML Renderer
+description: Render context fragments as TOML for configuration-like prompts
+---
+
+The `TomlRenderer` produces TOML (Tom's Obvious Minimal Language) output. It's useful when your context resembles configuration data or when working with models that understand TOML syntax.
+
+## Basic Usage
+
+```typescript
+import { TomlRenderer, role, hint } from '@deepagents/context';
+
+const renderer = new TomlRenderer();
+
+const fragments = [
+  role('You are a configuration assistant.'),
+  hint('Follow best practices.'),
+];
+
+const output = renderer.render(fragments);
+```
+
+**Output:**
+
+```toml
+role = "You are a configuration assistant."
+hint = "Follow best practices."
+```
+
+## Rendering Rules
+
+### Primitives
+
+Primitives become key-value pairs with proper TOML typing:
+
+```typescript
+{ name: 'temperature', data: 0.7 }     // temperature = 0.7
+{ name: 'enabled', data: true }        // enabled = true
+{ name: 'model', data: 'gpt-4' }       // model = "gpt-4"
+```
+
+Strings are automatically quoted and escaped:
+
+```typescript
+{ name: 'prompt', data: 'Say "hello"' }
+// prompt = "Say \"hello\""
+```
+
+### Objects
+
+Objects become TOML sections:
+
+```typescript
+{
+  name: 'config',
+  data: {
+    maxTokens: 1000,
+    temperature: 0.7,
+    stream: true,
+  }
+}
+```
+
+**Output:**
+
+```toml
+[config]
+maxTokens = 1000
+temperature = 0.7
+stream = true
+```
+
+### Nested Objects
+
+Nested objects use dotted section names:
+
+```typescript
+{
+  name: 'model',
+  data: {
+    settings: {
+      temperature: 0.7,
+      topP: 0.9,
+    },
+  }
+}
+```
+
+**Output:**
+
+```toml
+[model]
+
+[model.settings]
+temperature = 0.7
+topP = 0.9
+```
+
+### Arrays
+
+Primitive arrays render inline:
+
+```typescript
+{
+  name: 'tags',
+  data: ['sql', 'database', 'query']
+}
+```
+
+**Output:**
+
+```toml
+tags = ["sql", "database", "query"]
+```
+
+### Nested Fragments
+
+Fragment arrays render as sections:
+
+```typescript
+fragment('guidelines',
+  hint('Use CTEs'),
+  hint('Avoid SELECT *'),
+)
+```
+
+**Output:**
+
+```toml
+[guidelines]
+hint = "Use CTEs"
+hint = "Avoid SELECT *"
+```
+
+## Type Preservation
+
+TOML preserves JavaScript types:
+
+| JavaScript | TOML |
+| --- | --- |
+| `'string'` | `"string"` |
+| `42` | `42` |
+| `3.14` | `3.14` |
+| `true` | `true` |
+| `false` | `false` |
+
+```typescript
+{
+  name: 'settings',
+  data: {
+    name: 'assistant',
+    maxTokens: 1000,
+    temperature: 0.7,
+    streaming: true,
+  }
+}
+```
+
+**Output:**
+
+```toml
+[settings]
+name = "assistant"
+maxTokens = 1000
+temperature = 0.7
+streaming = true
+```
+
+## String Escaping
+
+Special characters in strings are escaped:
+
+| Character | Escaped |
+| --- | --- |
+| `\` | `\\` |
+| `"` | `\"` |
+
+```typescript
+{ name: 'path', data: 'C:\\Users\\admin' }
+// path = "C:\\Users\\admin"
+```
+
+## When to Use TOML
+
+**Advantages:**
+- Clean, minimal syntax
+- Familiar to developers
+- Good for configuration-like data
+- Type-preserving
+
+**Trade-offs:**
+- Less common in LLM training data than XML/Markdown
+- Complex nesting can become verbose
+- Multiple values with same key may behave unexpectedly
+
+## Example with ContextEngine
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  TomlRenderer,
+  role,
+  fragment,
+} from '@deepagents/context';
+
+const context = new ContextEngine({ store: new InMemoryContextStore() })
+  .set(
+    role('You are a DevOps assistant.'),
+    fragment('defaults',
+      { name: 'region', data: 'us-east-1' },
+      { name: 'timeout', data: 30 },
+      { name: 'retries', data: 3 },
+    ),
+  );
+
+const { systemPrompt } = await context.resolve({
+  renderer: new TomlRenderer(),
+});
+
+console.log(systemPrompt);
+// role = "You are a DevOps assistant."
+//
+// [defaults]
+// region = "us-east-1"
+// timeout = 30
+// retries = 3
+```
+
+## Next Steps
+
+- [Renderers Overview](/docs/context/renderers-overview) - Compare all renderers
+- [XML Renderer](/docs/context/xml-renderer) - Structured XML format
+- [TOON Renderer](/docs/context/toon-renderer) - Token-efficient format

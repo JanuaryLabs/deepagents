@@ -1,0 +1,414 @@
+---
+title: Multi-Session Context
+description: Persist conversation history across browser sessions and application restarts
+---
+
+This recipe shows patterns for maintaining conversation context across sessions, enabling chatbots and assistants that remember previous interactions.
+
+## Basic Session Persistence
+
+Use `SqliteContextStore` to persist conversations:
+
+```typescript
+import {
+  ContextEngine,
+  SqliteContextStore,
+  role,
+  hint,
+  user,
+  assistant,
+} from '@deepagents/context';
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+class ChatSession {
+  private context: ContextEngine;
+
+  constructor(sessionId: string) {
+    const store = new SqliteContextStore(`./data/sessions/${sessionId}.db`);
+
+    this.context = new ContextEngine({ store })
+      .set(
+        role('You are a helpful assistant with memory of our conversation.'),
+        hint('Reference previous messages when relevant.'),
+      );
+  }
+
+  async chat(message: string): Promise<string> {
+    // Add user message
+    this.context.set(user(message));
+
+    // Resolve (loads previous messages on first call)
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    // Generate response
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    // Save assistant response
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    return response.text;
+  }
+}
+
+// Session 1
+const session = new ChatSession('user-123-session-1');
+await session.chat('My name is Alice.');
+await session.chat('What is TypeScript?');
+
+// Later, same session ID...
+const sameSession = new ChatSession('user-123-session-1');
+await sameSession.chat('What is my name?');
+// AI remembers: "Your name is Alice."
+```
+
+## User-Scoped Storage
+
+Organize storage by user ID:
+
+```typescript
+import { mkdir } from 'fs/promises';
+
+class UserConversation {
+  static async create(userId: string): Promise<UserConversation> {
+    // Ensure user directory exists
+    await mkdir(`./data/users/${userId}`, { recursive: true });
+
+    return new UserConversation(userId);
+  }
+
+  private store: SqliteContextStore;
+  private context: ContextEngine;
+
+  private constructor(userId: string) {
+    this.store = new SqliteContextStore(`./data/users/${userId}/context.db`);
+    this.context = new ContextEngine({ store: this.store })
+      .set(role('You are a helpful assistant.'));
+  }
+
+  async chat(message: string): Promise<string> {
+    this.context.set(user(message));
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    return response.text;
+  }
+
+  async clearHistory(): Promise<void> {
+    await this.store.delete('fragments');
+  }
+}
+
+// Usage
+const userConvo = await UserConversation.create('user-456');
+await userConvo.chat('Hello!');
+```
+
+## Multiple Conversations per User
+
+Support multiple conversation threads:
+
+```typescript
+class ConversationManager {
+  private userId: string;
+  private dataDir: string;
+
+  constructor(userId: string) {
+    this.userId = userId;
+    this.dataDir = `./data/users/${userId}/conversations`;
+  }
+
+  async init(): Promise<void> {
+    await mkdir(this.dataDir, { recursive: true });
+  }
+
+  getConversation(conversationId: string): ContextEngine {
+    const store = new SqliteContextStore(
+      `${this.dataDir}/${conversationId}.db`
+    );
+
+    return new ContextEngine({ store })
+      .set(role('You are a helpful assistant.'));
+  }
+
+  async listConversations(): Promise<string[]> {
+    const { readdir } = await import('fs/promises');
+    const files = await readdir(this.dataDir);
+    return files
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => f.replace('.db', ''));
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    const { unlink } = await import('fs/promises');
+    await unlink(`${this.dataDir}/${conversationId}.db`);
+  }
+}
+
+// Usage
+const manager = new ConversationManager('user-789');
+await manager.init();
+
+// Start new conversation
+const conv1 = manager.getConversation('work-project');
+conv1.set(user('Let\'s discuss the API design.'));
+
+// Different conversation
+const conv2 = manager.getConversation('personal-notes');
+conv2.set(user('Remind me to buy groceries.'));
+
+// List all conversations
+const convos = await manager.listConversations();
+// ['work-project', 'personal-notes']
+```
+
+## Web Application Pattern
+
+Session management for web apps:
+
+```typescript
+import { randomUUID } from 'crypto';
+
+// Session store (could be Redis in production)
+const sessions = new Map<string, ChatSession>();
+
+// API endpoint handlers
+async function handleNewSession(userId: string): Promise<string> {
+  const sessionId = `${userId}-${randomUUID()}`;
+  const session = new ChatSession(sessionId);
+  sessions.set(sessionId, session);
+  return sessionId;
+}
+
+async function handleMessage(
+  sessionId: string,
+  message: string,
+): Promise<string> {
+  let session = sessions.get(sessionId);
+
+  if (!session) {
+    // Restore from disk
+    session = new ChatSession(sessionId);
+    sessions.set(sessionId, session);
+  }
+
+  return session.chat(message);
+}
+
+async function handleClearSession(sessionId: string): Promise<void> {
+  const session = sessions.get(sessionId);
+  if (session) {
+    await session.clearHistory();
+    sessions.delete(sessionId);
+  }
+}
+
+// Express.js example
+app.post('/api/sessions', async (req, res) => {
+  const sessionId = await handleNewSession(req.user.id);
+  res.json({ sessionId });
+});
+
+app.post('/api/sessions/:id/messages', async (req, res) => {
+  const response = await handleMessage(req.params.id, req.body.message);
+  res.json({ response });
+});
+```
+
+## Context Size Management
+
+Prevent context from growing too large:
+
+```typescript
+class ManagedChatSession {
+  private context: ContextEngine;
+  private maxMessages = 50;
+
+  constructor(sessionId: string) {
+    const store = new SqliteContextStore(`./data/${sessionId}.db`);
+    this.context = new ContextEngine({ store })
+      .set(role('You are a helpful assistant.'));
+  }
+
+  async chat(message: string): Promise<string> {
+    this.context.set(user(message));
+
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    // Check message count
+    if (messages.length > this.maxMessages) {
+      console.warn(`Conversation has ${messages.length} messages, consider summarizing.`);
+    }
+
+    // Check token count
+    const estimate = await this.context.estimate('groq:llama-3.3-70b-versatile');
+    if (estimate.limits.exceedsContext) {
+      throw new Error('Conversation too long. Please start a new session.');
+    }
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    return response.text;
+  }
+}
+```
+
+## Conversation Summarization
+
+Summarize old messages to manage context size:
+
+```typescript
+class SummarizingSession {
+  private context: ContextEngine;
+  private store: SqliteContextStore;
+  private summaryThreshold = 20;
+
+  constructor(sessionId: string) {
+    this.store = new SqliteContextStore(`./data/${sessionId}.db`);
+    this.context = new ContextEngine({ store: this.store })
+      .set(role('You are a helpful assistant with conversation history.'));
+  }
+
+  async chat(message: string): Promise<string> {
+    this.context.set(user(message));
+
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    // Summarize if too many messages
+    if (messages.length > this.summaryThreshold) {
+      await this.summarizeHistory(messages);
+    }
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    return response.text;
+  }
+
+  private async summarizeHistory(messages: Message[]): Promise<void> {
+    // Get older messages to summarize
+    const toSummarize = messages.slice(0, -10);
+    const toKeep = messages.slice(-10);
+
+    // Generate summary
+    const summaryResponse = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: 'Summarize this conversation briefly, keeping key facts and context.',
+      messages: toSummarize.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    });
+
+    // Clear and rebuild context
+    await this.store.delete('fragments');
+
+    this.context = new ContextEngine({ store: this.store })
+      .set(
+        role('You are a helpful assistant with conversation history.'),
+        hint(`Previous conversation summary: ${summaryResponse.text}`),
+      );
+
+    // Re-add recent messages
+    for (const msg of toKeep) {
+      if (msg.role === 'user') {
+        this.context.set(user(msg.content));
+      } else {
+        this.context.set(assistant(msg.content));
+      }
+    }
+
+    await this.context.save();
+  }
+}
+```
+
+## Metadata Storage
+
+Store conversation metadata alongside messages:
+
+```typescript
+interface ConversationMetadata {
+  title: string;
+  createdAt: number;
+  lastMessageAt: number;
+  messageCount: number;
+}
+
+class MetadataSession {
+  private context: ContextEngine;
+  private store: SqliteContextStore;
+
+  constructor(sessionId: string) {
+    this.store = new SqliteContextStore(`./data/${sessionId}.db`);
+    this.context = new ContextEngine({ store: this.store })
+      .set(role('You are a helpful assistant.'));
+  }
+
+  async getMetadata(): Promise<ConversationMetadata | undefined> {
+    return this.store.get<ConversationMetadata>('metadata');
+  }
+
+  async chat(message: string): Promise<string> {
+    this.context.set(user(message));
+
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    // Update metadata
+    const metadata = await this.getMetadata() ?? {
+      title: message.slice(0, 50),
+      createdAt: Date.now(),
+      lastMessageAt: 0,
+      messageCount: 0,
+    };
+
+    metadata.lastMessageAt = Date.now();
+    metadata.messageCount = messages.length + 2;
+
+    await this.store.set('metadata', metadata);
+
+    return response.text;
+  }
+}
+```
+
+## Next Steps
+
+- [Storage](/docs/context/storage) - Storage implementation details
+- [Agent Integration](/docs/context/recipes/agent-integration) - Using context with agents
+- [Cost Estimation](/docs/context/cost-estimation) - Monitor context growth

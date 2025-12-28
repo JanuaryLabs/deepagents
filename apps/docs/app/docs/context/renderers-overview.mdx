@@ -1,0 +1,218 @@
+---
+title: Renderers Overview
+description: Compare rendering formats and choose the right one for your LLM application
+---
+
+Renderers transform context fragments into formatted strings. The package includes four renderers, each optimized for different use cases.
+
+## Available Renderers
+
+| Renderer | Format | Best For |
+| --- | --- | --- |
+| `XmlRenderer` | `<tag>content</tag>` | Claude, GPT-4, structured prompts (default) |
+| `MarkdownRenderer` | `## Header`, `- item` | Human-readable prompts, debugging |
+| `TomlRenderer` | `[section]`, `key = "value"` | Configuration-like contexts |
+| `ToonRenderer` | `key: value`, compact arrays | Token-efficient prompts, large contexts |
+
+## Side-by-Side Comparison
+
+Given these fragments:
+
+```typescript
+import { role, hint, fragment } from '@deepagents/context';
+
+const fragments = [
+  role('You are a SQL expert.'),
+  fragment('guidelines',
+    hint('Use CTEs for complex queries'),
+    hint('Always include LIMIT'),
+  ),
+];
+```
+
+### XML Output
+
+```xml
+<role>You are a SQL expert.</role>
+<guidelines>
+  <hint>Use CTEs for complex queries</hint>
+  <hint>Always include LIMIT</hint>
+</guidelines>
+```
+
+### Markdown Output
+
+```markdown
+## Role
+You are a SQL expert.
+
+## Guidelines
+- **hint**: Use CTEs for complex queries
+- **hint**: Always include LIMIT
+```
+
+### TOML Output
+
+```toml
+role = "You are a SQL expert."
+
+[guidelines]
+hint = "Use CTEs for complex queries"
+hint = "Always include LIMIT"
+```
+
+### TOON Output
+
+```
+role: You are a SQL expert.
+guidelines:
+  hint: Use CTEs for complex queries
+  hint: Always include LIMIT
+```
+
+## Choosing a Renderer
+
+### Use XML (Default) When:
+- Working with Claude or GPT models that handle XML well
+- You need clear structural boundaries
+- Fragment names should be semantic tags
+- You're building production prompts
+
+### Use Markdown When:
+- Debugging prompts (most human-readable)
+- Models trained on documentation
+- You want familiar formatting
+- Logging or displaying prompts to users
+
+### Use TOML When:
+- Context resembles configuration
+- You have key-value structured data
+- Models understand TOML syntax
+
+### Use TOON When:
+- Token count is critical
+- Large contexts that need compression
+- Tabular data (TOON has special array handling)
+- You want YAML-like readability with less overhead
+
+## Usage
+
+```typescript
+import {
+  ContextEngine,
+  XmlRenderer,
+  MarkdownRenderer,
+  TomlRenderer,
+  ToonRenderer,
+} from '@deepagents/context';
+
+const context = new ContextEngine({ store })
+  .set(role('You are helpful.'));
+
+// XML (default)
+const { systemPrompt: xml } = await context.resolve();
+
+// Markdown
+const { systemPrompt: md } = await context.resolve({
+  renderer: new MarkdownRenderer(),
+});
+
+// TOML
+const { systemPrompt: toml } = await context.resolve({
+  renderer: new TomlRenderer(),
+});
+
+// TOON
+const { systemPrompt: toon } = await context.resolve({
+  renderer: new ToonRenderer(),
+});
+```
+
+## Renderer Options
+
+All renderers accept an options object:
+
+```typescript
+interface RendererOptions {
+  groupFragments?: boolean;
+}
+```
+
+### groupFragments
+
+When `true`, fragments with the same name are grouped under a pluralized parent:
+
+```typescript
+const fragments = [
+  hint('Be concise'),
+  hint('Use examples'),
+  hint('Stay on topic'),
+];
+
+// Without grouping (default)
+new XmlRenderer().render(fragments);
+// <hint>Be concise</hint>
+// <hint>Use examples</hint>
+// <hint>Stay on topic</hint>
+
+// With grouping
+new XmlRenderer({ groupFragments: true }).render(fragments);
+// <hints>
+//   <hint>Be concise</hint>
+//   <hint>Use examples</hint>
+//   <hint>Stay on topic</hint>
+// </hints>
+```
+
+## Token Efficiency
+
+Approximate token comparison for the same content:
+
+| Renderer | Relative Tokens | Notes |
+| --- | --- | --- |
+| XML | 100% (baseline) | Most verbose |
+| Markdown | ~85% | Headers add overhead |
+| TOML | ~75% | Compact for flat data |
+| TOON | ~60-70% | Most compact, especially for arrays |
+
+TOON's efficiency comes from:
+- No closing tags
+- Minimal punctuation
+- Tabular array format (CSV-like headers)
+
+## Custom Renderers
+
+Extend `ContextRenderer` for custom formats:
+
+```typescript
+import { ContextRenderer, ContextFragment } from '@deepagents/context';
+
+class JsonRenderer extends ContextRenderer {
+  render(fragments: ContextFragment[]): string {
+    return JSON.stringify(fragments, null, 2);
+  }
+
+  protected renderFragment(fragment: ContextFragment, ctx: RenderContext): string {
+    return JSON.stringify(fragment);
+  }
+
+  protected renderPrimitive(key: string, value: string, ctx: RenderContext): string {
+    return `"${key}": "${value}"`;
+  }
+
+  protected renderArray(key: string, items: FragmentData[], ctx: RenderContext): string {
+    return `"${key}": ${JSON.stringify(items)}`;
+  }
+
+  protected renderObject(key: string, obj: FragmentObject, ctx: RenderContext): string {
+    return `"${key}": ${JSON.stringify(obj)}`;
+  }
+}
+```
+
+## Next Steps
+
+- [XML Renderer](/docs/context/xml-renderer) - Detailed XML formatting
+- [Markdown Renderer](/docs/context/markdown-renderer) - Markdown output
+- [TOML Renderer](/docs/context/toml-renderer) - TOML configuration format
+- [TOON Renderer](/docs/context/toon-renderer) - Token-efficient format

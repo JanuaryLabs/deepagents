@@ -1,0 +1,254 @@
+---
+title: Resolve and Render
+description: Understand how context fragments become AI SDK-ready prompts through the resolution pipeline
+---
+
+The resolution pipeline transforms your context fragments into output ready for the AI SDK. This page explains what happens when you call `resolve()`.
+
+## The Resolution Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        resolve() called                          │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│            1. Load Persisted Fragments (first call only)         │
+│                                                                  │
+│   Store.get('fragments') → prepend to internal fragment list     │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    2. Split by Fragment Type                     │
+│                                                                  │
+│   ┌────────────────────┐    ┌────────────────────┐              │
+│   │  Regular Fragments │    │  Message Fragments │              │
+│   │  (type !== 'msg')  │    │  (type === 'msg')  │              │
+│   └────────────────────┘    └────────────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
+                │                           │
+                ▼                           ▼
+┌──────────────────────────┐   ┌──────────────────────────┐
+│   3a. Render to String   │   │  3b. Decode to Messages  │
+│                          │   │                          │
+│   renderer.render(       │   │  [                       │
+│     regularFragments     │   │    { role, content },    │
+│   )                      │   │    { role, content },    │
+│                          │   │  ]                       │
+└──────────────────────────┘   └──────────────────────────┘
+                │                           │
+                ▼                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     4. Return Result                             │
+│                                                                  │
+│   {                                                              │
+│     systemPrompt: string,  // Rendered regular fragments         │
+│     messages: Message[],   // Decoded message fragments          │
+│   }                                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Step 1: Load Persisted Fragments
+
+On the first `resolve()` call, the engine loads any previously saved fragments:
+
+```typescript
+// First time resolve() is called
+const persisted = await store.get<ContextFragment[]>('fragments');
+if (persisted) {
+  // Prepend persisted fragments (they came first chronologically)
+  this.#fragments = [...persisted, ...this.#fragments];
+}
+this.#loaded = true; // Don't load again
+```
+
+This happens exactly once per `ContextEngine` instance. Subsequent calls skip this step.
+
+### Why Prepend?
+
+Persisted fragments represent earlier conversation turns. They should appear before new fragments:
+
+```
+Session 1:
+  context.set(user('Hello'));
+  context.set(assistant('Hi!'));
+  await context.save();
+
+Session 2:
+  context.set(user('How are you?'));
+  await context.resolve();
+
+Result order:
+  1. user('Hello')       ← from store (prepended)
+  2. assistant('Hi!')    ← from store (prepended)
+  3. user('How are you?') ← new fragment
+```
+
+## Step 2: Split by Fragment Type
+
+Fragments are categorized using `isMessageFragment()`:
+
+```typescript
+for (const fragment of this.#fragments) {
+  if (isMessageFragment(fragment)) {
+    messageFragments.push(fragment);
+  } else {
+    regularFragments.push(fragment);
+  }
+}
+```
+
+A fragment is a message if `fragment.type === 'message'`. The `user()` and `assistant()` helpers set this automatically.
+
+### Regular Fragments
+
+These become part of the system prompt:
+- `role()` - System instructions
+- `hint()` - Guidelines
+- `fragment()` - Custom structures
+- Any fragment without `type: 'message'`
+
+### Message Fragments
+
+These become the conversation history:
+- `user()` - User messages
+- `assistant()` - Assistant responses
+- Any fragment with `type: 'message'`
+
+## Step 3a: Render Regular Fragments
+
+Regular fragments are rendered using the selected renderer (default: `XmlRenderer`):
+
+```typescript
+const renderer = options.renderer ?? new XmlRenderer();
+const systemPrompt = renderer.render(regularFragments);
+```
+
+### Example
+
+```typescript
+const context = new ContextEngine({ store })
+  .set(
+    role('You are a SQL expert.'),
+    hint('Use CTEs for complex queries.'),
+  );
+
+const { systemPrompt } = await context.resolve();
+// <role>You are a SQL expert.</role>
+// <hint>Use CTEs for complex queries.</hint>
+```
+
+### Choosing a Renderer
+
+```typescript
+import { MarkdownRenderer, ToonRenderer } from '@deepagents/context';
+
+// Markdown format
+const { systemPrompt: md } = await context.resolve({
+  renderer: new MarkdownRenderer(),
+});
+
+// Token-efficient TOON format
+const { systemPrompt: toon } = await context.resolve({
+  renderer: new ToonRenderer(),
+});
+```
+
+## Step 3b: Decode Message Fragments
+
+Message fragments are converted to AI SDK format:
+
+```typescript
+const messages = messageFragments.map((fragment) => ({
+  role: fragment.name as 'user' | 'assistant' | 'system',
+  content: String(fragment.data),
+}));
+```
+
+### Example
+
+```typescript
+const context = new ContextEngine({ store })
+  .set(
+    user('What is TypeScript?'),
+    assistant('TypeScript is a typed superset of JavaScript.'),
+    user('Show me an example.'),
+  );
+
+const { messages } = await context.resolve();
+// [
+//   { role: 'user', content: 'What is TypeScript?' },
+//   { role: 'assistant', content: 'TypeScript is a typed superset of JavaScript.' },
+//   { role: 'user', content: 'Show me an example.' },
+// ]
+```
+
+## Step 4: Return Result
+
+The result is ready for the AI SDK:
+
+```typescript
+interface ResolveResult {
+  systemPrompt: string;
+  messages: Message[];
+}
+
+interface Message {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+```
+
+### Using with AI SDK
+
+```typescript
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+const { systemPrompt, messages } = await context.resolve();
+
+const response = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: systemPrompt,
+  messages,
+});
+```
+
+## Order Matters
+
+Fragments are processed in the order they were added:
+
+```typescript
+// This order:
+context
+  .set(role('You are helpful.'))
+  .set(user('Hello'))
+  .set(hint('Be concise.'))  // Hint after user message
+  .set(assistant('Hi!'));
+
+// Results in:
+// systemPrompt: role + hint (regular fragments)
+// messages: [user, assistant] (message fragments, in order added)
+```
+
+The system prompt contains all regular fragments regardless of when they were added. Messages maintain their chronological order.
+
+## Performance Considerations
+
+1. **Store loading is cached**: The first `resolve()` loads from store, subsequent calls don't
+
+2. **Rendering happens each time**: Every `resolve()` re-renders fragments. Cache the result if calling multiple times:
+   ```typescript
+   const result = await context.resolve();
+   // Use result.systemPrompt and result.messages multiple times
+   ```
+
+3. **Large contexts**: For many fragments, consider using `ToonRenderer` to reduce token count
+
+## Next Steps
+
+- [Renderers Overview](/docs/context/renderers-overview) - Choosing the right format
+- [Storage](/docs/context/storage) - How persistence works
+- [Context Engine](/docs/context/context-engine) - Full API reference

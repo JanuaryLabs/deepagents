@@ -1,0 +1,283 @@
+---
+title: Cost Estimation
+description: Estimate token counts and API costs before making LLM calls using real-time pricing data
+---
+
+The cost estimation system helps you predict API spending before making calls. It uses real pricing data from [models.dev](https://models.dev) for 1000+ AI models.
+
+## Basic Usage
+
+```typescript
+import { ContextEngine, InMemoryContextStore, role, hint, user } from '@deepagents/context';
+
+const context = new ContextEngine({ store: new InMemoryContextStore() })
+  .set(
+    role('You are a helpful assistant.'),
+    hint('Be concise.'),
+    user('What is TypeScript?'),
+  );
+
+const estimate = await context.estimate('openai:gpt-4o');
+
+console.log(`Model: ${estimate.model}`);
+console.log(`Provider: ${estimate.provider}`);
+console.log(`Tokens: ${estimate.tokens}`);
+console.log(`Cost: $${estimate.cost.toFixed(6)}`);
+console.log(`Context limit: ${estimate.limits.context}`);
+console.log(`Exceeds limit: ${estimate.limits.exceedsContext}`);
+```
+
+## EstimateResult Interface
+
+```typescript
+interface EstimateResult {
+  model: string;      // Model name (e.g., 'gpt-4o')
+  provider: string;   // Provider (e.g., 'openai')
+  tokens: number;     // Estimated input token count
+  cost: number;       // Estimated cost in USD
+  limits: {
+    context: number;      // Model's context window size
+    output: number;       // Model's max output tokens
+    exceedsContext: boolean;  // True if tokens > context limit
+  };
+}
+```
+
+## Model ID Format
+
+Use `provider:model-name` format:
+
+```typescript
+// OpenAI
+await context.estimate('openai:gpt-4o');
+await context.estimate('openai:gpt-4o-mini');
+await context.estimate('openai:gpt-4-turbo');
+
+// Anthropic
+await context.estimate('anthropic:claude-3-5-sonnet');
+await context.estimate('anthropic:claude-3-opus');
+
+// Groq
+await context.estimate('groq:llama-3.3-70b-versatile');
+await context.estimate('groq:mixtral-8x7b-32768');
+
+// Google
+await context.estimate('google:gemini-1.5-pro');
+```
+
+## Cost-Aware Patterns
+
+### Pre-flight Check
+
+Validate context size before API calls:
+
+```typescript
+const estimate = await context.estimate('openai:gpt-4o');
+
+if (estimate.limits.exceedsContext) {
+  throw new Error(
+    `Context (${estimate.tokens} tokens) exceeds model limit (${estimate.limits.context})`
+  );
+}
+
+// Safe to proceed
+const { systemPrompt, messages } = await context.resolve();
+```
+
+### Budget Control
+
+Track and limit spending:
+
+```typescript
+const MAX_COST_PER_REQUEST = 0.01; // $0.01
+
+const estimate = await context.estimate('openai:gpt-4o');
+
+if (estimate.cost > MAX_COST_PER_REQUEST) {
+  // Use a cheaper model
+  const cheaperEstimate = await context.estimate('openai:gpt-4o-mini');
+  console.log(`Switching to gpt-4o-mini (${cheaperEstimate.cost.toFixed(6)} vs ${estimate.cost.toFixed(6)})`);
+}
+```
+
+### Model Selection
+
+Choose the most cost-effective model:
+
+```typescript
+async function selectCheapestModel(
+  context: ContextEngine,
+  candidates: string[],
+): Promise<string> {
+  const estimates = await Promise.all(
+    candidates.map(async (model) => ({
+      model,
+      estimate: await context.estimate(model as any),
+    }))
+  );
+
+  // Filter out models that exceed context limit
+  const valid = estimates.filter((e) => !e.estimate.limits.exceedsContext);
+
+  if (valid.length === 0) {
+    throw new Error('Context too large for all candidate models');
+  }
+
+  // Sort by cost
+  valid.sort((a, b) => a.estimate.cost - b.estimate.cost);
+
+  return valid[0].model;
+}
+
+const model = await selectCheapestModel(context, [
+  'openai:gpt-4o',
+  'openai:gpt-4o-mini',
+  'anthropic:claude-3-5-sonnet',
+]);
+```
+
+## ModelsRegistry
+
+The `ModelsRegistry` class manages model information and tokenization:
+
+```typescript
+import { getModelsRegistry, ModelsRegistry } from '@deepagents/context';
+
+// Get singleton instance
+const registry = getModelsRegistry();
+
+// Load model data (required before use)
+await registry.load();
+
+// Get model info
+const info = registry.get('openai:gpt-4o');
+console.log(info);
+// {
+//   id: 'gpt-4o',
+//   name: 'GPT-4o',
+//   family: 'gpt-4',
+//   provider: 'openai',
+//   cost: { input: 2.5, output: 10 },  // per 1M tokens
+//   limit: { context: 128000, output: 16384 },
+// }
+
+// Check if model exists
+registry.has('openai:gpt-4o'); // true
+
+// List all models
+const allModels = registry.list(); // ['openai:gpt-4o', 'anthropic:claude-3-5-sonnet', ...]
+```
+
+## Custom Tokenizers
+
+The default tokenizer uses `gpt-tokenizer`, which works well for GPT models with ~5-10% variance for others. Register custom tokenizers for better accuracy:
+
+```typescript
+import { getModelsRegistry, type Tokenizer } from '@deepagents/context';
+
+// Custom tokenizer for a model family
+const llamaTokenizer: Tokenizer = {
+  encode(text: string): number[] {
+    // Your tokenization logic
+    return [];
+  },
+  count(text: string): number {
+    // Your token counting logic
+    return Math.ceil(text.length / 4); // Rough estimate
+  },
+};
+
+const registry = getModelsRegistry();
+registry.registerTokenizer('llama', llamaTokenizer);
+
+// Now llama family models use the custom tokenizer
+const estimate = await context.estimate('groq:llama-3.3-70b-versatile');
+```
+
+### Tokenizer Interface
+
+```typescript
+interface Tokenizer {
+  encode(text: string): number[];
+  count(text: string): number;
+}
+```
+
+## Renderer Impact on Token Count
+
+Different renderers produce different token counts:
+
+```typescript
+import { XmlRenderer, ToonRenderer } from '@deepagents/context';
+
+// XML (default) - more tokens
+const xmlEstimate = await context.estimate('openai:gpt-4o');
+
+// TOON - fewer tokens
+const toonEstimate = await context.estimate('openai:gpt-4o', {
+  renderer: new ToonRenderer(),
+});
+
+console.log(`XML: ${xmlEstimate.tokens} tokens, $${xmlEstimate.cost.toFixed(6)}`);
+console.log(`TOON: ${toonEstimate.tokens} tokens, $${toonEstimate.cost.toFixed(6)}`);
+console.log(`Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`);
+```
+
+## Convenience Function
+
+For one-off estimates without a ContextEngine:
+
+```typescript
+import { estimate } from '@deepagents/context';
+
+const result = await estimate('openai:gpt-4o', 'Hello, how are you?');
+console.log(`Tokens: ${result.tokens}, Cost: $${result.cost.toFixed(6)}`);
+```
+
+## Pricing Data
+
+Pricing comes from [models.dev](https://models.dev), which aggregates pricing from model providers. The data is cached after the first `load()` call.
+
+### ModelCost Interface
+
+```typescript
+interface ModelCost {
+  input: number;       // USD per 1M input tokens
+  output: number;      // USD per 1M output tokens
+  cache_read?: number; // USD per 1M cached read tokens
+  cache_write?: number;// USD per 1M cached write tokens
+  reasoning?: number;  // USD per 1M reasoning tokens
+}
+```
+
+### ModelInfo Interface
+
+```typescript
+interface ModelInfo {
+  id: string;
+  name: string;
+  family: string;
+  provider: string;
+  cost: ModelCost;
+  limit: {
+    context: number;  // Max input tokens
+    output: number;   // Max output tokens
+  };
+}
+```
+
+## Error Handling
+
+```typescript
+try {
+  const estimate = await context.estimate('unknown:model');
+} catch (error) {
+  // Error: Model "unknown:model" not found. Call load() first or check model ID.
+}
+```
+
+## Next Steps
+
+- [Context Engine](/docs/context/context-engine) - Using estimate() with ContextEngine
+- [Renderers Overview](/docs/context/renderers-overview) - Token-efficient rendering
+- [TOON Renderer](/docs/context/toon-renderer) - Most token-efficient format

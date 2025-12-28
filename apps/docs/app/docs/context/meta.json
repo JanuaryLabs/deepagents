@@ -1,0 +1,29 @@
+{
+  "title": "Context",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Core Concepts---",
+    "fragments",
+    "context-engine",
+    "resolve-and-render",
+    "---State Management---",
+    "chat",
+    "checkpoints",
+    "rewind",
+    "branching",
+    "---Renderers---",
+    "renderers-overview",
+    "xml-renderer",
+    "markdown-renderer",
+    "toml-renderer",
+    "toon-renderer",
+    "---Persistence---",
+    "storage",
+    "---Cost Estimation---",
+    "cost-estimation",
+    "---Recipes---",
+    "recipes"
+  ]
+}

@@ -1,0 +1,189 @@
+---
+title: Getting Started
+description: Install the context package and build your first context-managed LLM application
+---
+
+This guide walks you through installing `@deepagents/context` and building your first context-managed conversation.
+
+## Installation
+
+```bash
+npm install @deepagents/context
+```
+
+The package uses Node.js 22+'s built-in `node:sqlite` for persistence, so no additional database drivers are required.
+
+## Basic Setup
+
+Every context engine needs a store for persistence:
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  hint,
+  user,
+  assistant,
+} from '@deepagents/context';
+
+// Create an in-memory store (good for development/testing)
+const store = new InMemoryContextStore();
+
+// Create the context engine
+const context = new ContextEngine({ store });
+```
+
+## Adding Fragments
+
+Use helper functions to add context fragments:
+
+```typescript
+// System-level instructions
+context.set(
+  role('You are a helpful coding assistant.'),
+  hint('Prefer TypeScript over JavaScript.'),
+  hint('Use modern ES6+ syntax.'),
+);
+
+// User message
+context.set(user('How do I read a file in Node.js?'));
+```
+
+Each helper creates a typed fragment:
+- `role()` - System instructions
+- `hint()` - Guidelines and preferences
+- `user()` - User messages (auto-persisted)
+- `assistant()` - Assistant responses (auto-persisted)
+- `fragment()` - Custom nested structures
+
+## Resolving for AI SDK
+
+The `resolve()` method prepares context for the AI SDK:
+
+```typescript
+const { systemPrompt, messages } = await context.resolve();
+
+console.log(systemPrompt);
+// <role>You are a helpful coding assistant.</role>
+// <hint>Prefer TypeScript over JavaScript.</hint>
+// <hint>Use modern ES6+ syntax.</hint>
+
+console.log(messages);
+// [{ role: 'user', content: 'How do I read a file in Node.js?' }]
+```
+
+## Complete Example with AI SDK
+
+Here's a full working example using the Vercel AI SDK:
+
+```typescript
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  hint,
+  user,
+  assistant,
+} from '@deepagents/context';
+
+async function main() {
+  const store = new InMemoryContextStore();
+  const context = new ContextEngine({ store });
+
+  // Set up system context
+  context.set(
+    role('You are a helpful coding assistant.'),
+    hint('Keep answers concise.'),
+    hint('Include code examples.'),
+  );
+
+  // First turn
+  context.set(user('What is a Promise in JavaScript?'));
+
+  const { systemPrompt, messages } = await context.resolve();
+
+  const response = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages,
+  });
+
+  console.log(response.text);
+
+  // Add assistant response to context
+  context.set(assistant(response.text));
+
+  // Save for future sessions
+  await context.save();
+}
+
+main();
+```
+
+## Persisting Conversations
+
+Messages marked with `persist: true` are saved when you call `save()`. The `user()` and `assistant()` helpers automatically set this flag:
+
+```typescript
+// Session 1
+const store = new SqliteContextStore('./conversation.db');
+const context = new ContextEngine({ store });
+
+context.set(user('Hello!'));
+// ... get AI response
+context.set(assistant('Hi there! How can I help?'));
+await context.save(); // Persists both messages
+
+// Session 2 (new process, same database)
+const store2 = new SqliteContextStore('./conversation.db');
+const context2 = new ContextEngine({ store: store2 });
+
+const { messages } = await context2.resolve();
+console.log(messages);
+// [
+//   { role: 'user', content: 'Hello!' },
+//   { role: 'assistant', content: 'Hi there! How can I help?' }
+// ]
+```
+
+## Estimating Costs
+
+Before making API calls, estimate token usage and costs:
+
+```typescript
+const estimate = await context.estimate('groq:llama-3.3-70b-versatile');
+
+console.log(`Tokens: ${estimate.tokens}`);
+console.log(`Cost: $${estimate.cost.toFixed(6)}`);
+console.log(`Exceeds limit: ${estimate.limits.exceedsContext}`);
+```
+
+The estimate uses real pricing data from [models.dev](https://models.dev) for 1000+ models.
+
+## Choosing a Renderer
+
+By default, context renders to XML. You can switch formats:
+
+```typescript
+import { MarkdownRenderer, ToonRenderer } from '@deepagents/context';
+
+// Use Markdown format
+const { systemPrompt } = await context.resolve({
+  renderer: new MarkdownRenderer(),
+});
+
+// Use TOON (token-efficient) format
+const { systemPrompt: toonPrompt } = await context.resolve({
+  renderer: new ToonRenderer(),
+});
+```
+
+## Next Steps
+
+- [Fragments](/docs/context/fragments) - Deep dive into fragment types and composition
+- [Context Engine](/docs/context/context-engine) - Complete API reference
+- [Renderers Overview](/docs/context/renderers-overview) - Choosing the right format
+- [Storage](/docs/context/storage) - Persistence options

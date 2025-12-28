@@ -1,0 +1,287 @@
+---
+title: Storage
+description: Persist conversation history and context fragments with SQLite or custom stores
+---
+
+The storage system enables persistence of context fragments across sessions. The package provides SQLite-based storage out of the box, with an abstract base class for custom implementations.
+
+## Built-in Stores
+
+### InMemoryContextStore
+
+Uses SQLite's in-memory mode. Data is lost when the process exits. Ideal for testing and development:
+
+```typescript
+import { InMemoryContextStore, ContextEngine } from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store });
+```
+
+### SqliteContextStore
+
+Persists to a SQLite database file. Data survives process restarts:
+
+```typescript
+import { SqliteContextStore, ContextEngine } from '@deepagents/context';
+
+const store = new SqliteContextStore('./conversation.db');
+const context = new ContextEngine({ store });
+```
+
+The store creates the database and schema automatically on first use.
+
+## How Storage Works
+
+### Schema
+
+The SQLite store uses a simple key-value schema:
+
+```sql
+CREATE TABLE IF NOT EXISTS "context_store" (
+  "key" VARCHAR PRIMARY KEY,
+  "value" TEXT NOT NULL,
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS "context_store_updated_at_idx"
+  ON "context_store" ("updatedAt");
+```
+
+Values are stored as JSON strings.
+
+### The Persistence Flow
+
+1. **set()**: Add fragments to context (not persisted yet)
+2. **save()**: Persist fragments with `persist: true`
+3. **resolve()**: Load persisted fragments (first call only)
+
+```typescript
+// Session 1
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({ store });
+
+context.set(user('Hello!'));              // Added to context
+context.set(assistant('Hi there!'));      // Added to context
+await context.save();                      // Now persisted to SQLite
+
+// Session 2 (new process)
+const store2 = new SqliteContextStore('./chat.db');
+const context2 = new ContextEngine({ store: store2 });
+
+const { messages } = await context2.resolve();  // Loads from SQLite
+// messages = [
+//   { role: 'user', content: 'Hello!' },
+//   { role: 'assistant', content: 'Hi there!' },
+// ]
+```
+
+### What Gets Persisted
+
+Only fragments with `persist: true` are saved:
+
+```typescript
+// Auto-persist (user/assistant helpers set persist: true)
+context.set(user('Hello'));        // Will be saved
+context.set(assistant('Hi!'));     // Will be saved
+
+// No auto-persist
+context.set(role('Be helpful'));   // Won't be saved
+context.set(hint('Be concise'));   // Won't be saved
+
+// Manual persist
+context.set({
+  name: 'metadata',
+  data: { topic: 'TypeScript' },
+  persist: true,                    // Will be saved
+});
+
+await context.save();  // Saves only persist: true fragments
+```
+
+## ContextStore Interface
+
+All stores extend the abstract `ContextStore` class:
+
+```typescript
+abstract class ContextStore {
+  abstract get<T>(key: string): Promise<T | undefined>;
+  abstract set<T>(key: string, value: T): Promise<void>;
+  abstract delete(key: string): Promise<void>;
+}
+```
+
+### get(key)
+
+Retrieve a value by key. Returns `undefined` if not found:
+
+```typescript
+const fragments = await store.get<ContextFragment[]>('fragments');
+```
+
+### set(key, value)
+
+Store a value. Overwrites if key exists:
+
+```typescript
+await store.set('fragments', [user('Hello'), assistant('Hi')]);
+```
+
+### delete(key)
+
+Remove a value by key:
+
+```typescript
+await store.delete('fragments');
+```
+
+## Storage Patterns
+
+### User-Scoped Storage
+
+Create separate databases per user:
+
+```typescript
+function getStoreForUser(userId: string) {
+  return new SqliteContextStore(`./data/users/${userId}/context.db`);
+}
+
+const store = getStoreForUser('user-123');
+const context = new ContextEngine({ store });
+```
+
+### Session-Based Storage
+
+Create databases per session:
+
+```typescript
+function getStoreForSession(sessionId: string) {
+  return new SqliteContextStore(`./data/sessions/${sessionId}.db`);
+}
+
+// New session
+const sessionId = crypto.randomUUID();
+const store = getStoreForSession(sessionId);
+```
+
+### Clearing History
+
+Delete the fragments key to clear conversation:
+
+```typescript
+await store.delete('fragments');
+```
+
+Or delete the database file:
+
+```typescript
+import { unlink } from 'fs/promises';
+await unlink('./conversation.db');
+```
+
+## Custom Store Implementation
+
+Implement `ContextStore` for other backends:
+
+### Redis Example
+
+```typescript
+import { ContextStore } from '@deepagents/context';
+import { createClient } from 'redis';
+
+class RedisContextStore extends ContextStore {
+  #client;
+
+  constructor(url: string) {
+    super();
+    this.#client = createClient({ url });
+  }
+
+  async connect() {
+    await this.#client.connect();
+  }
+
+  async get<T>(key: string): Promise<T | undefined> {
+    const value = await this.#client.get(key);
+    if (!value) return undefined;
+    return JSON.parse(value) as T;
+  }
+
+  async set<T>(key: string, value: T): Promise<void> {
+    await this.#client.set(key, JSON.stringify(value));
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.#client.del(key);
+  }
+}
+
+// Usage
+const store = new RedisContextStore('redis://localhost:6379');
+await store.connect();
+const context = new ContextEngine({ store });
+```
+
+### PostgreSQL Example
+
+```typescript
+import { ContextStore } from '@deepagents/context';
+import { Pool } from 'pg';
+
+class PostgresContextStore extends ContextStore {
+  #pool: Pool;
+
+  constructor(connectionString: string) {
+    super();
+    this.#pool = new Pool({ connectionString });
+  }
+
+  async init() {
+    await this.#pool.query(`
+      CREATE TABLE IF NOT EXISTS context_store (
+        key VARCHAR PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+  }
+
+  async get<T>(key: string): Promise<T | undefined> {
+    const result = await this.#pool.query(
+      'SELECT value FROM context_store WHERE key = $1',
+      [key]
+    );
+    if (result.rows.length === 0) return undefined;
+    return result.rows[0].value as T;
+  }
+
+  async set<T>(key: string, value: T): Promise<void> {
+    await this.#pool.query(
+      `INSERT INTO context_store (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [key, JSON.stringify(value)]
+    );
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.#pool.query('DELETE FROM context_store WHERE key = $1', [key]);
+  }
+}
+```
+
+## Node.js SQLite Requirement
+
+The built-in SQLite stores use Node.js 22+'s native `node:sqlite` module:
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+```
+
+If you're on an older Node.js version, implement a custom store using `better-sqlite3` or another SQLite library.
+
+## Next Steps
+
+- [Getting Started](/docs/context/getting-started) - Basic setup with stores
+- [Context Engine](/docs/context/context-engine) - Using save() and resolve()
+- [Recipes: Multi-Session Context](/docs/context/recipes/multi-session-context) - Real-world persistence patterns

@@ -1,0 +1,307 @@
+---
+title: Text2SQL Integration
+description: Use context management with @deepagents/text2sql for domain-aware SQL generation
+---
+
+This recipe shows how to use `@deepagents/context` to manage domain knowledge, schema information, and conversation history for SQL generation.
+
+## Domain Knowledge as Fragments
+
+Organize business terminology and rules as context fragments:
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  hint,
+  role,
+} from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+
+// Create domain context for SQL generation
+const domainContext = new ContextEngine({ store })
+  .set(
+    role('You are a SQL expert that generates accurate queries.'),
+
+    // Business terminology
+    fragment('terminology',
+      hint('LTV = Lifetime Value = total revenue from a customer'),
+      hint('MRR = Monthly Recurring Revenue'),
+      hint('Churn = customers who cancelled in the period'),
+      hint('Active user = logged in within last 30 days'),
+    ),
+
+    // SQL conventions
+    fragment('sql_rules',
+      hint('Use CTEs for complex queries'),
+      hint('Always include LIMIT clause (default 100)'),
+      hint('Use explicit JOIN syntax, never implicit'),
+      hint('Prefer DATE functions over string manipulation'),
+    ),
+
+    // Data constraints
+    fragment('constraints',
+      hint('Never expose email addresses or PII'),
+      hint('Always filter by tenant_id for multi-tenant queries'),
+      hint('Use created_at for time-based queries, not updated_at'),
+    ),
+  );
+
+const { systemPrompt } = await domainContext.resolve();
+```
+
+## Schema Representation
+
+Represent database schema as structured fragments:
+
+```typescript
+import { fragment, hint } from '@deepagents/context';
+
+// Schema as fragments
+const schemaContext = new ContextEngine({ store })
+  .set(
+    fragment('schema',
+      // Tables as nested fragments
+      fragment('users',
+        { name: 'columns', data: ['id', 'email', 'name', 'created_at', 'tenant_id'] },
+        { name: 'primary_key', data: 'id' },
+        hint('Main user table, one row per user'),
+      ),
+
+      fragment('orders',
+        { name: 'columns', data: ['id', 'user_id', 'total', 'status', 'created_at'] },
+        { name: 'primary_key', data: 'id' },
+        { name: 'foreign_keys', data: ['user_id → users.id'] },
+        hint('status can be: pending, completed, cancelled, refunded'),
+      ),
+
+      fragment('order_items',
+        { name: 'columns', data: ['id', 'order_id', 'product_id', 'quantity', 'price'] },
+        { name: 'foreign_keys', data: ['order_id → orders.id', 'product_id → products.id'] },
+      ),
+
+      fragment('products',
+        { name: 'columns', data: ['id', 'name', 'price', 'category', 'active'] },
+        hint('active=false means discontinued product'),
+      ),
+    ),
+
+    // Relationships summary
+    fragment('relationships',
+      hint('users has_many orders'),
+      hint('orders has_many order_items'),
+      hint('order_items belongs_to products'),
+    ),
+  );
+```
+
+## Token-Efficient Schema with TOON
+
+For large schemas, use TOON renderer for efficiency:
+
+```typescript
+import { ToonRenderer } from '@deepagents/context';
+
+// Schema as tabular data (very token-efficient with TOON)
+const efficientSchema = new ContextEngine({ store })
+  .set({
+    name: 'tables',
+    data: [
+      { name: 'users', columns: 'id,email,name,created_at,tenant_id' },
+      { name: 'orders', columns: 'id,user_id,total,status,created_at' },
+      { name: 'order_items', columns: 'id,order_id,product_id,quantity,price' },
+      { name: 'products', columns: 'id,name,price,category,active' },
+    ],
+  });
+
+const { systemPrompt } = await efficientSchema.resolve({
+  renderer: new ToonRenderer(),
+});
+
+// Output:
+// tables[4]{name,columns}:
+//   users,id,email,name,created_at,tenant_id
+//   orders,id,user_id,total,status,created_at
+//   order_items,id,order_id,product_id,quantity,price
+//   products,id,name,price,category,active
+```
+
+## Combining Domain + Schema + Teachables
+
+Create a complete SQL generation context:
+
+```typescript
+function createSqlContext(userTeachables: string[] = []) {
+  const context = new ContextEngine({ store })
+    .set(
+      // Role
+      role('You are a SQL expert. Generate accurate, efficient queries.'),
+
+      // Domain knowledge
+      fragment('domain',
+        hint('LTV = Lifetime Value'),
+        hint('Active user = logged in within 30 days'),
+      ),
+
+      // Schema
+      fragment('schema',
+        fragment('users', { name: 'columns', data: 'id,email,name,created_at' }),
+        fragment('orders', { name: 'columns', data: 'id,user_id,total,status' }),
+      ),
+
+      // SQL rules
+      fragment('rules',
+        hint('Use CTEs for readability'),
+        hint('Always LIMIT results'),
+        hint('Never SELECT * in production'),
+      ),
+    );
+
+  // Add user-specific teachables
+  if (userTeachables.length > 0) {
+    context.set(
+      fragment('user_teachables',
+        ...userTeachables.map((t) => hint(t)),
+      ),
+    );
+  }
+
+  return context;
+}
+
+// Usage
+const sqlContext = createSqlContext([
+  'Our fiscal year starts in April',
+  'Revenue calculations should exclude refunds',
+]);
+
+const { systemPrompt } = await sqlContext.resolve();
+```
+
+## Cost-Aware Query Generation
+
+Estimate costs before complex schema contexts:
+
+```typescript
+async function generateSql(
+  question: string,
+  schemaContext: ContextEngine,
+): Promise<string> {
+  // Estimate cost
+  const estimate = await schemaContext.estimate('openai:gpt-4o');
+
+  console.log(`Schema context: ${estimate.tokens} tokens, $${estimate.cost.toFixed(4)}`);
+
+  // If context is too large, use TOON for efficiency
+  const renderer = estimate.tokens > 10000
+    ? new ToonRenderer()
+    : new XmlRenderer();
+
+  const { systemPrompt } = await schemaContext.resolve({ renderer });
+
+  const response = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages: [{ role: 'user', content: question }],
+  });
+
+  return response.text;
+}
+```
+
+## Conversation-Aware SQL
+
+Maintain SQL conversation history for follow-up questions:
+
+```typescript
+import { user, assistant, SqliteContextStore } from '@deepagents/context';
+
+class SqlConversation {
+  private context: ContextEngine;
+
+  constructor(sessionId: string) {
+    const store = new SqliteContextStore(`./sql-sessions/${sessionId}.db`);
+
+    this.context = new ContextEngine({ store })
+      .set(
+        role('You are a SQL expert. Generate queries based on our conversation.'),
+        fragment('schema',
+          hint('users: id, name, email, created_at'),
+          hint('orders: id, user_id, total, status'),
+        ),
+      );
+  }
+
+  async ask(question: string): Promise<{ sql: string; explanation: string }> {
+    this.context.set(user(question));
+
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    // Parse SQL and explanation from response
+    return {
+      sql: extractSql(response.text),
+      explanation: response.text,
+    };
+  }
+}
+
+// Usage
+const conv = new SqlConversation('session-123');
+
+await conv.ask('Show me all users');
+// SELECT * FROM users LIMIT 100
+
+await conv.ask('Now filter to active ones');
+// SELECT * FROM users WHERE active = true LIMIT 100
+// (AI remembers "users" from previous query)
+
+await conv.ask('And sort by most recent');
+// SELECT * FROM users WHERE active = true ORDER BY created_at DESC LIMIT 100
+```
+
+## Schema-Specific Examples
+
+Add example queries as learning context:
+
+```typescript
+const contextWithExamples = new ContextEngine({ store })
+  .set(
+    role('You are a SQL expert.'),
+
+    fragment('examples',
+      fragment('example',
+        { name: 'question', data: 'How many orders per user?' },
+        { name: 'sql', data: 'SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id' },
+      ),
+      fragment('example',
+        { name: 'question', data: 'Total revenue by month' },
+        { name: 'sql', data: `
+          SELECT
+            DATE_TRUNC('month', created_at) as month,
+            SUM(total) as revenue
+          FROM orders
+          WHERE status = 'completed'
+          GROUP BY 1
+          ORDER BY 1
+        `.trim() },
+      ),
+    ),
+  );
+```
+
+## Next Steps
+
+- [Agent Integration](/docs/context/recipes/agent-integration) - Using context with agents
+- [Multi-Session Context](/docs/context/recipes/multi-session-context) - Persistence patterns
+- [Text2SQL Documentation](/docs/text2sql) - Full text2sql package docs

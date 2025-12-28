@@ -1,0 +1,284 @@
+---
+title: Rewind
+description: Remove fragments after a target to undo responses and regenerate
+---
+
+The `rewind()` method removes fragments after (and optionally including) a target fragment. It's the surgical tool for undoing specific parts of a conversation.
+
+## The Problem
+
+Users need to:
+- Remove a bad AI response and try again
+- Undo their last question
+- Edit and regenerate from a specific point
+
+## Basic Usage
+
+Rewind to a fragment by its ID:
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  user,
+  assistant,
+} from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store, chatId: 'chat-001' })
+  .set(role('You are helpful.'));
+
+// Conversation with custom IDs
+context.set(user('What is TypeScript?', { id: 'q1' }));
+context.set(assistant('TypeScript is...', { id: 'a1' }));
+context.set(user('Show an example', { id: 'q2' }));
+context.set(assistant('Here is an example...', { id: 'a2' }));
+
+// Rewind to q1 (keeps q1, removes a1, q2, a2)
+await context.rewind('q1');
+
+const { messages } = await context.resolve();
+// messages = [{ role: 'user', content: 'What is TypeScript?' }]
+```
+
+## Fragment IDs
+
+The `user()` and `assistant()` helpers auto-generate UUIDs, but you can provide custom IDs:
+
+```typescript
+// Auto-generated ID
+context.set(user('Hello'));
+// { id: 'uuid-xxx', name: 'user', data: 'Hello', ... }
+
+// Custom ID for tracking
+context.set(user('Hello', { id: 'msg-001' }));
+// { id: 'msg-001', name: 'user', data: 'Hello', ... }
+```
+
+Custom IDs make rewind easier to use.
+
+## Inclusive vs Exclusive Rewind
+
+The `inclusive` option controls whether the target fragment is kept:
+
+### Inclusive (Default)
+
+Keeps the target, removes everything after:
+
+```typescript
+context.set(user('Question?', { id: 'q1' }));
+context.set(assistant('Bad answer', { id: 'a1' }));
+
+// Keep q1, remove a1
+await context.rewind('q1', { inclusive: true });
+// or just: await context.rewind('q1');
+```
+
+**Use case**: Remove a bad response, regenerate with the same question.
+
+### Exclusive
+
+Removes the target AND everything after:
+
+```typescript
+context.set(user('Question?', { id: 'q1' }));
+context.set(assistant('Answer', { id: 'a1' }));
+
+// Remove both q1 and a1
+await context.rewind('q1', { inclusive: false });
+```
+
+**Use case**: User wants to undo their question entirely.
+
+## RewindOptions Interface
+
+```typescript
+interface RewindOptions {
+  inclusive?: boolean;  // Default: true
+}
+```
+
+## Auto-Persistence
+
+After rewind, the new state is automatically saved:
+
+```typescript
+await context.rewind('q1');
+// State is now persisted to store
+```
+
+## Chaining
+
+`rewind()` returns `this` for chaining:
+
+```typescript
+await context
+  .rewind('q1')
+  .set(user('Better question?', { id: 'q2' }));
+```
+
+## Error Handling
+
+Throws if the fragment ID is not found:
+
+```typescript
+try {
+  await context.rewind('nonexistent-id');
+} catch (error) {
+  // Error: Fragment with id "nonexistent-id" not found
+}
+```
+
+## Complete Example: Regenerate Response
+
+```typescript
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+async function regenerateLastResponse(context: ContextEngine): Promise<string> {
+  // Get current messages
+  const { messages } = await context.resolve();
+
+  if (messages.length < 2) {
+    throw new Error('No response to regenerate');
+  }
+
+  // Find the last user message
+  const lastUserIndex = messages.findLastIndex((m) => m.role === 'user');
+  if (lastUserIndex === -1) {
+    throw new Error('No user message found');
+  }
+
+  // Get the user message ID (we need to track these)
+  const lastUserMsg = messages[lastUserIndex];
+
+  // Rewind to keep the user message, remove the response
+  // Note: This requires you to track message IDs
+  const lastUserId = getMessageId(lastUserIndex); // Your tracking logic
+  await context.rewind(lastUserId);
+
+  // Regenerate
+  const { systemPrompt, messages: newMessages } = await context.resolve();
+
+  const response = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages: newMessages,
+    temperature: 0.9, // Higher temperature for variety
+  });
+
+  context.set(assistant(response.text));
+  await context.save();
+
+  return response.text;
+}
+```
+
+## Example: User Undo Feature
+
+```typescript
+class ChatWithUndo {
+  private context: ContextEngine;
+  private messageIds: string[] = [];
+
+  constructor(store: ContextStore, chatId: string) {
+    this.context = new ContextEngine({ store, chatId })
+      .set(role('You are helpful.'));
+  }
+
+  async sendMessage(content: string): Promise<string> {
+    const msgId = `msg-${Date.now()}`;
+    this.messageIds.push(msgId);
+
+    this.context.set(user(content, { id: msgId }));
+
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    const respId = `resp-${Date.now()}`;
+    this.messageIds.push(respId);
+
+    this.context.set(assistant(response.text, { id: respId }));
+    await this.context.save();
+
+    return response.text;
+  }
+
+  async undo(): Promise<void> {
+    if (this.messageIds.length < 2) {
+      throw new Error('Nothing to undo');
+    }
+
+    // Remove last 2 (user message + response)
+    const userMsgId = this.messageIds[this.messageIds.length - 2];
+
+    await this.context.rewind(userMsgId, { inclusive: false });
+
+    // Update our tracking
+    this.messageIds.pop();
+    this.messageIds.pop();
+  }
+
+  async undoResponse(): Promise<void> {
+    if (this.messageIds.length < 2) {
+      throw new Error('No response to undo');
+    }
+
+    // Keep user message, remove response
+    const userMsgId = this.messageIds[this.messageIds.length - 2];
+
+    await this.context.rewind(userMsgId, { inclusive: true });
+
+    // Update tracking (only remove response)
+    this.messageIds.pop();
+  }
+}
+
+// Usage
+const chat = new ChatWithUndo(store, 'chat-001');
+await chat.sendMessage('What is TypeScript?');
+await chat.sendMessage('Show me an example');
+
+// Undo the last exchange
+await chat.undo();
+
+// Or just undo the response to regenerate
+await chat.undoResponse();
+```
+
+## Rewind vs Restore
+
+| Feature | Rewind | Checkpoint/Restore |
+| --- | --- | --- |
+| Target | Specific fragment ID | Full snapshot |
+| Removes | Everything after target | Replaces everything |
+| Precision | Surgical | Wholesale |
+| Storage | N/A | Optional (named) |
+
+Use rewind for surgical removal. Use [checkpoints](/docs/context/checkpoints) for full state management.
+
+## Best Practices
+
+1. **Use meaningful IDs**: Custom IDs make rewind easier
+   ```typescript
+   user('Hello', { id: 'turn-1-user' })
+   assistant('Hi', { id: 'turn-1-assistant' })
+   ```
+
+2. **Track IDs externally**: Keep a list of message IDs for undo features
+
+3. **Handle errors**: Always catch the "not found" error
+
+4. **Consider checkpoints**: For complex workflows, checkpoints might be simpler
+
+## Next Steps
+
+- [Checkpoints](/docs/context/checkpoints) - Save and restore full state
+- [Branching](/docs/context/branching) - Combine rewind and checkpoints
+- [Chat Management](/docs/context/chat) - Managing multiple chats

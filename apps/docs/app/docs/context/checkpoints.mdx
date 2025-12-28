@@ -1,0 +1,249 @@
+---
+title: Checkpoints
+description: Save and restore chat state with checkpoints for undo and branching workflows
+---
+
+Checkpoints capture a snapshot of your chat's context at a point in time. Use them to save state before risky operations and restore if needed.
+
+## The Problem
+
+When interacting with AI:
+- Responses can be unsatisfactory
+- You might want to try different approaches
+- Users expect "undo" functionality
+- A/B testing requires state restoration
+
+## Creating Checkpoints
+
+Use `checkpoint()` to save the current state:
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  user,
+  assistant,
+} from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store, chatId: 'chat-001' })
+  .set(role('You are a helpful assistant.'));
+
+// Add some conversation
+context.set(user('What is TypeScript?'));
+context.set(assistant('TypeScript is a typed superset of JavaScript.'));
+
+// Create a checkpoint
+const checkpoint = await context.checkpoint();
+
+console.log(checkpoint);
+// {
+//   id: 'uuid-xxx',
+//   fragments: [...],  // Snapshot of all fragments
+//   timestamp: 1703123456789,
+// }
+```
+
+## Anonymous vs Named Checkpoints
+
+### Anonymous Checkpoints
+
+Return a checkpoint object that you manage in memory:
+
+```typescript
+const cp = await context.checkpoint();
+
+// ... make changes ...
+
+// Restore using the object
+await context.restore(cp);
+```
+
+Best for: Temporary undo within a single session.
+
+### Named Checkpoints
+
+Stored in the database for later retrieval:
+
+```typescript
+// Create named checkpoint (stored)
+await context.checkpoint('before-question');
+
+// ... make changes ...
+
+// Restore by name (even in a new session)
+await context.restore('before-question');
+```
+
+Best for: Persistent state, branching workflows, cross-session recovery.
+
+## Checkpoint Interface
+
+```typescript
+interface Checkpoint {
+  id: string;           // Unique identifier
+  name?: string;        // Name (if stored)
+  fragments: ContextFragment[];  // Snapshot
+  timestamp: number;    // When created
+}
+```
+
+## Restoring from Checkpoints
+
+The `restore()` method replaces current fragments with the checkpoint's snapshot:
+
+```typescript
+const context = new ContextEngine({ store, chatId: 'chat-001' })
+  .set(role('You are helpful.'));
+
+// Initial conversation
+context.set(user('Hello'));
+context.set(assistant('Hi there!'));
+
+// Save state
+const checkpoint = await context.checkpoint();
+
+// Continue conversation
+context.set(user('Tell me a joke'));
+context.set(assistant('Why did the chicken...'));
+
+// Oops, bad joke - restore to before
+await context.restore(checkpoint);
+
+// Now we're back to just Hello/Hi there!
+const { messages } = await context.resolve();
+// messages = [{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hi there!' }]
+```
+
+## Restore by Name
+
+For named checkpoints, pass the name as a string:
+
+```typescript
+// Save a named checkpoint
+await context.checkpoint('good-state');
+
+// Later (even in a new session)
+const context2 = new ContextEngine({ store, chatId: 'chat-001' });
+await context2.restore('good-state');
+```
+
+Named checkpoints are scoped to the chat, so `chat:chat-001:checkpoint:good-state` won't conflict with other chats.
+
+## Auto-Persistence
+
+After `restore()`, the restored state is automatically saved:
+
+```typescript
+await context.restore('before-question');
+// Fragments are now saved to store
+```
+
+This ensures consistency between memory and storage.
+
+## Complete Example: Retry Loop
+
+```typescript
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+async function askWithRetry(
+  context: ContextEngine,
+  question: string,
+  maxRetries = 3,
+): Promise<string> {
+  // Save state before asking
+  const checkpoint = await context.checkpoint();
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    context.set(user(question));
+
+    const { systemPrompt, messages } = await context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    // Check if response is satisfactory
+    if (isGoodResponse(response.text)) {
+      context.set(assistant(response.text));
+      await context.save();
+      return response.text;
+    }
+
+    // Bad response - restore and try again
+    console.log(`Attempt ${attempt + 1} failed, retrying...`);
+    await context.restore(checkpoint);
+  }
+
+  throw new Error('Max retries exceeded');
+}
+
+function isGoodResponse(text: string): boolean {
+  // Your validation logic
+  return text.length > 10 && !text.includes('I cannot');
+}
+```
+
+## Multiple Checkpoints
+
+Create checkpoints at different stages:
+
+```typescript
+// Initial setup
+context.set(role('You are a research assistant.'));
+await context.checkpoint('initial');
+
+// After gathering context
+context.set(user('Research topic: AI safety'));
+context.set(assistant('I found several key papers...'));
+await context.checkpoint('research-complete');
+
+// After analysis
+context.set(user('Summarize the findings'));
+context.set(assistant('The main themes are...'));
+await context.checkpoint('summary-complete');
+
+// Can restore to any stage
+await context.restore('research-complete');
+// Back to after research, before summary
+```
+
+## Checkpoint Storage
+
+Named checkpoints are stored with keys like:
+
+```
+chat:{chatId}:checkpoint:{name}
+```
+
+They persist until explicitly deleted or the chat is deleted.
+
+## When to Use Checkpoints
+
+| Scenario | Recommendation |
+| --- | --- |
+| Retry bad responses | Anonymous checkpoint |
+| A/B test conversation paths | Named checkpoints |
+| User "undo" feature | Named checkpoint per turn |
+| Long-running workflows | Named checkpoints at stages |
+
+## Checkpoints vs Rewind
+
+| Feature | Checkpoint/Restore | Rewind |
+| --- | --- | --- |
+| Scope | Full snapshot | By fragment ID |
+| Direction | Jump to any saved state | Remove from target onward |
+| Storage | Optional (named) | N/A |
+| Use case | Branching, full rollback | Surgical removal |
+
+Use checkpoints for full state snapshots. Use [rewind](/docs/context/rewind) for removing specific fragments.
+
+## Next Steps
+
+- [Rewind](/docs/context/rewind) - Remove fragments by ID
+- [Branching](/docs/context/branching) - Combine checkpoints and rewind
+- [Chat Management](/docs/context/chat) - Managing multiple chats

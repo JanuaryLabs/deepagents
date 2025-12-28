@@ -990,4 +990,8 @@ What's your reaction to this pushback? Am I being too conservative, or does this
 
 <!-- Notes for me -->
 
-Is it named "set" so that it replaces existing items with the same key or content?
+- Is it named "set" so that it replaces existing items with the same key or content?
+
+- we should have reduction strategy inteface that trimming, compacting, consolidating (not so sure here) can implement
+
+- after compaction or trimming we still need to store the original messages somewhere so we can reference them later on if needed. perhaps we can consider those reduction strategies branching from orignal chat. perhaps we need to look at graph based approach where each operation creates a new node that references the previous one. This way we can always go back to original messages if needed.

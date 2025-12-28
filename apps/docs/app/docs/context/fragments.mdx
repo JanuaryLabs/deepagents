@@ -1,0 +1,274 @@
+---
+title: Fragments
+description: Understand context fragments - the building blocks of structured LLM prompts
+---
+
+Context fragments are the atomic units of context in the deepagents system. Each fragment has a name, data, and optional metadata that controls how it's rendered and persisted.
+
+## Fragment Structure
+
+Every fragment implements this interface:
+
+```typescript
+interface ContextFragment {
+  id?: string;           // Optional unique identifier
+  name: string;          // Fragment name (e.g., 'role', 'hint', 'user')
+  data: FragmentData;    // Content (see below)
+  type?: FragmentType;   // 'fragment' | 'message'
+  persist?: boolean;     // Save on context.save()?
+}
+```
+
+## Fragment Data Types
+
+The `data` field accepts multiple types:
+
+```typescript
+type FragmentData =
+  | string                              // "Hello"
+  | number                              // 42
+  | boolean                             // true
+  | ContextFragment                     // Nested fragment
+  | FragmentData[]                      // Array of any above
+  | { [key: string]: FragmentData };    // Object with any above
+```
+
+This allows rich, nested structures:
+
+```typescript
+import { fragment, hint } from '@deepagents/context';
+
+// Simple string
+hint('Be concise');
+
+// Nested fragments
+fragment('guidelines',
+  hint('Use clear language'),
+  hint('Avoid jargon'),
+);
+
+// Object data
+{
+  name: 'schema',
+  data: {
+    tables: ['users', 'orders'],
+    relationships: { users: 'orders.user_id' },
+  },
+};
+```
+
+## Helper Functions
+
+The package provides helpers for common fragment types:
+
+### role(content)
+
+Creates a system role instruction:
+
+```typescript
+import { role } from '@deepagents/context';
+
+role('You are a helpful assistant.');
+// { name: 'role', data: 'You are a helpful assistant.' }
+```
+
+### hint(text)
+
+Creates a guidance hint:
+
+```typescript
+import { hint } from '@deepagents/context';
+
+hint('Keep responses under 100 words.');
+// { name: 'hint', data: 'Keep responses under 100 words.' }
+```
+
+### user(content, options?)
+
+Creates a user message fragment. Automatically sets `type: 'message'` and `persist: true`:
+
+```typescript
+import { user } from '@deepagents/context';
+
+user('What is TypeScript?');
+// {
+//   id: 'uuid-xxx',
+//   name: 'user',
+//   data: 'What is TypeScript?',
+//   type: 'message',
+//   persist: true,
+// }
+
+// With custom ID
+user('Hello', { id: 'msg-001' });
+```
+
+### assistant(content, options?)
+
+Creates an assistant message fragment. Same behavior as `user()`:
+
+```typescript
+import { assistant } from '@deepagents/context';
+
+assistant('TypeScript is a typed superset of JavaScript.');
+// {
+//   id: 'uuid-xxx',
+//   name: 'assistant',
+//   data: 'TypeScript is a typed superset of JavaScript.',
+//   type: 'message',
+//   persist: true,
+// }
+```
+
+### fragment(name, ...children)
+
+Creates a custom fragment with nested children:
+
+```typescript
+import { fragment, hint } from '@deepagents/context';
+
+fragment('sql_guidelines',
+  hint('Use CTEs for complex queries'),
+  hint('Always include LIMIT clause'),
+  hint('Prefer explicit JOINs over implicit'),
+);
+// {
+//   name: 'sql_guidelines',
+//   data: [
+//     { name: 'hint', data: 'Use CTEs for complex queries' },
+//     { name: 'hint', data: 'Always include LIMIT clause' },
+//     { name: 'hint', data: 'Prefer explicit JOINs over implicit' },
+//   ],
+// }
+```
+
+## Message vs Regular Fragments
+
+Fragments are categorized into two types:
+
+| Type | Created By | Behavior |
+| --- | --- | --- |
+| **Regular** | `role()`, `hint()`, `fragment()` | Rendered into `systemPrompt` |
+| **Message** | `user()`, `assistant()` | Returned as `messages[]` array |
+
+During `resolve()`, these are automatically separated:
+
+```typescript
+const context = new ContextEngine({ store })
+  .set(
+    role('You are helpful.'),      // → systemPrompt
+    hint('Be concise.'),           // → systemPrompt
+    user('Hello!'),                // → messages[0]
+    assistant('Hi there!'),        // → messages[1]
+    user('How are you?'),          // → messages[2]
+  );
+
+const { systemPrompt, messages } = await context.resolve();
+
+// systemPrompt contains rendered role + hint
+// messages = [
+//   { role: 'user', content: 'Hello!' },
+//   { role: 'assistant', content: 'Hi there!' },
+//   { role: 'user', content: 'How are you?' },
+// ]
+```
+
+## Persistence
+
+Fragments with `persist: true` are saved when you call `context.save()`:
+
+```typescript
+// user() and assistant() auto-set persist: true
+context.set(user('Hello'));        // Will be saved
+context.set(assistant('Hi!'));     // Will be saved
+context.set(hint('Be helpful'));   // Won't be saved (persist defaults to false)
+
+await context.save(); // Saves user + assistant messages
+```
+
+To persist custom fragments, set the flag manually:
+
+```typescript
+context.set({
+  name: 'conversation_metadata',
+  data: { topic: 'TypeScript', started: Date.now() },
+  persist: true,
+});
+```
+
+## Nesting Fragments
+
+Fragments can nest arbitrarily deep:
+
+```typescript
+fragment('domain_knowledge',
+  fragment('terminology',
+    hint('LTV = Lifetime Value'),
+    hint('MRR = Monthly Recurring Revenue'),
+  ),
+  fragment('rules',
+    hint('Never expose PII'),
+    hint('Limit query results to 1000 rows'),
+  ),
+);
+```
+
+Rendered as XML:
+
+```xml
+<domain_knowledge>
+  <terminology>
+    <hint>LTV = Lifetime Value</hint>
+    <hint>MRR = Monthly Recurring Revenue</hint>
+  </terminology>
+  <rules>
+    <hint>Never expose PII</hint>
+    <hint>Limit query results to 1000 rows</hint>
+  </rules>
+</domain_knowledge>
+```
+
+## Type Guards
+
+The package exports type guards for runtime checking:
+
+```typescript
+import { isFragment, isMessageFragment, isFragmentObject } from '@deepagents/context';
+
+// Check if value is a ContextFragment
+isFragment({ name: 'test', data: 'hello' }); // true
+isFragment('just a string');                  // false
+
+// Check if fragment is a message type
+isMessageFragment(user('Hello'));     // true
+isMessageFragment(hint('Be helpful')); // false
+
+// Check if value is a plain object (not array, not fragment)
+isFragmentObject({ key: 'value' });   // true
+isFragmentObject([1, 2, 3]);          // false
+```
+
+## Best Practices
+
+1. **Use helpers for common cases**: `role()`, `hint()`, `user()`, `assistant()` handle metadata correctly
+
+2. **Group related context**: Use `fragment()` to organize related hints:
+   ```typescript
+   fragment('formatting',
+     hint('Use bullet points'),
+     hint('Include code examples'),
+   );
+   ```
+
+3. **Keep fragments focused**: Each fragment should represent one concept
+
+4. **Use custom IDs for tracking**: When you need to reference specific messages:
+   ```typescript
+   user('Question?', { id: 'question-1' });
+   ```
+
+## Next Steps
+
+- [Context Engine](/docs/context/context-engine) - Managing fragments with ContextEngine
+- [Renderers Overview](/docs/context/renderers-overview) - How fragments become prompts
+- [Storage](/docs/context/storage) - Persisting fragments

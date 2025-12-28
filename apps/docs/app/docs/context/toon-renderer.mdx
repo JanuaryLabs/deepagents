@@ -1,0 +1,314 @@
+---
+title: TOON Renderer
+description: Render context fragments in Token-Oriented Object Notation for maximum token efficiency
+---
+
+The `ToonRenderer` produces TOON (Token-Oriented Object Notation) output - a compact format designed specifically for LLM prompts. TOON combines YAML-like readability with CSV-like efficiency for tabular data.
+
+## Basic Usage
+
+```typescript
+import { ToonRenderer, role, hint } from '@deepagents/context';
+
+const renderer = new ToonRenderer();
+
+const fragments = [
+  role('You are a helpful assistant.'),
+  hint('Be concise.'),
+];
+
+const output = renderer.render(fragments);
+```
+
+**Output:**
+
+```
+role: You are a helpful assistant.
+hint: Be concise.
+```
+
+## Why TOON?
+
+TOON is optimized for token efficiency:
+
+| Format | Approximate Tokens | Overhead |
+| --- | --- | --- |
+| XML | 100 (baseline) | Closing tags, angle brackets |
+| Markdown | ~85 | Headers, formatting |
+| TOML | ~75 | Quotes, brackets |
+| TOON | ~60-70 | Minimal punctuation |
+
+For large contexts, TOON can save 30-40% tokens compared to XML.
+
+## Rendering Rules
+
+### Primitives
+
+Simple key-value pairs without quotes (when possible):
+
+```typescript
+{ name: 'role', data: 'You are a SQL expert.' }
+// role: You are a SQL expert.
+
+{ name: 'temperature', data: 0.7 }
+// temperature: 0.7
+
+{ name: 'enabled', data: true }
+// enabled: true
+```
+
+Strings are quoted only when necessary (contains special characters, looks like a number, etc.):
+
+```typescript
+{ name: 'value', data: '123' }      // value: "123"
+{ name: 'text', data: 'hello' }     // text: hello
+{ name: 'path', data: 'a:b' }       // path: "a:b"
+```
+
+### Objects
+
+Objects use indented key-value pairs:
+
+```typescript
+{
+  name: 'config',
+  data: {
+    maxTokens: 1000,
+    temperature: 0.7,
+  }
+}
+```
+
+**Output:**
+
+```
+config:
+  maxTokens: 1000
+  temperature: 0.7
+```
+
+### Primitive Arrays
+
+Arrays of primitives use compact notation with count:
+
+```typescript
+{
+  name: 'tags',
+  data: ['sql', 'database', 'query']
+}
+```
+
+**Output:**
+
+```
+tags[3]: sql,database,query
+```
+
+The `[3]` indicates array length for clarity.
+
+### Tabular Arrays (Special Feature)
+
+Arrays of uniform objects render in CSV-like format:
+
+```typescript
+{
+  name: 'users',
+  data: [
+    { name: 'Alice', role: 'admin', active: true },
+    { name: 'Bob', role: 'user', active: true },
+    { name: 'Carol', role: 'user', active: false },
+  ]
+}
+```
+
+**Output:**
+
+```
+users[3]{name,role,active}:
+  Alice,admin,true
+  Bob,user,true
+  Carol,user,false
+```
+
+This is significantly more token-efficient than XML or JSON for tabular data:
+
+```xml
+<!-- XML equivalent: ~150 tokens -->
+<users>
+  <user>
+    <name>Alice</name>
+    <role>admin</role>
+    <active>true</active>
+  </user>
+  <!-- ... -->
+</users>
+```
+
+### Mixed Arrays
+
+Arrays with non-uniform items use list notation:
+
+```typescript
+{
+  name: 'items',
+  data: [
+    'simple string',
+    { key: 'value' },
+    hint('A hint'),
+  ]
+}
+```
+
+**Output:**
+
+```
+items[3]:
+  - simple string
+  - key: value
+  - hint: A hint
+```
+
+### Nested Fragments
+
+Fragments nest with proper indentation:
+
+```typescript
+fragment('domain',
+  fragment('rules',
+    hint('Use CTEs'),
+    hint('Avoid SELECT *'),
+  ),
+)
+```
+
+**Output:**
+
+```
+domain:
+  rules:
+    hint: Use CTEs
+    hint: Avoid SELECT *
+```
+
+## Smart Quoting
+
+TOON only quotes strings when necessary:
+
+| Content | Needs Quotes | Reason |
+| --- | --- | --- |
+| `hello` | No | Simple string |
+| `hello world` | No | Spaces allowed |
+| `123` | Yes | Looks like number |
+| `true` | Yes | Reserved word |
+| `a:b` | Yes | Contains colon |
+| `"quoted"` | Yes | Contains quotes |
+| (empty) | Yes | Empty string |
+| ` spaces ` | Yes | Leading/trailing whitespace |
+
+```typescript
+{ name: 'a', data: 'hello' }    // a: hello
+{ name: 'b', data: '123' }      // b: "123"
+{ name: 'c', data: 'true' }     // c: "true"
+{ name: 'd', data: '' }         // d: ""
+```
+
+## String Escaping
+
+When quotes are needed, special characters are escaped:
+
+| Character | Escaped |
+| --- | --- |
+| `\` | `\\` |
+| `"` | `\"` |
+| newline | `\n` |
+| tab | `\t` |
+| carriage return | `\r` |
+
+## When to Use TOON
+
+**Advantages:**
+- Most token-efficient format
+- Excellent for tabular data
+- YAML-like readability
+- Minimal overhead
+
+**Trade-offs:**
+- Less familiar to some LLMs
+- Custom format (not a standard)
+- May need explanation in system prompt
+
+## Real-World Example
+
+```typescript
+import { ToonRenderer, fragment, hint } from '@deepagents/context';
+
+// Database schema representation
+const schema = fragment('schema',
+  {
+    name: 'tables',
+    data: [
+      { name: 'users', columns: 'id,email,created_at' },
+      { name: 'orders', columns: 'id,user_id,total,status' },
+      { name: 'products', columns: 'id,name,price,stock' },
+    ],
+  },
+  fragment('relationships',
+    hint('orders.user_id → users.id'),
+    hint('order_items.product_id → products.id'),
+  ),
+);
+
+const output = new ToonRenderer().render([schema]);
+```
+
+**Output:**
+
+```
+schema:
+  tables[3]{name,columns}:
+    users,id,email,created_at
+    orders,id,user_id,total,status
+    products,id,name,price,stock
+  relationships:
+    hint: orders.user_id → users.id
+    hint: order_items.product_id → products.id
+```
+
+## Example with ContextEngine
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  ToonRenderer,
+  role,
+  hint,
+} from '@deepagents/context';
+
+const context = new ContextEngine({ store: new InMemoryContextStore() })
+  .set(
+    role('You are a data analyst.'),
+    hint('Optimize for readability.'),
+    hint('Include sample data.'),
+  );
+
+const { systemPrompt } = await context.resolve({
+  renderer: new ToonRenderer(),
+});
+
+// Estimate savings
+const xmlEstimate = await context.estimate('openai:gpt-4o');
+const toonEstimate = await context.estimate('openai:gpt-4o', {
+  renderer: new ToonRenderer(),
+});
+
+console.log(`XML tokens: ${xmlEstimate.tokens}`);
+console.log(`TOON tokens: ${toonEstimate.tokens}`);
+console.log(`Savings: ${((1 - toonEstimate.tokens / xmlEstimate.tokens) * 100).toFixed(1)}%`);
+```
+
+## Next Steps
+
+- [Renderers Overview](/docs/context/renderers-overview) - Compare all renderers
+- [Cost Estimation](/docs/context/cost-estimation) - Measure token savings
+- [XML Renderer](/docs/context/xml-renderer) - Standard XML format

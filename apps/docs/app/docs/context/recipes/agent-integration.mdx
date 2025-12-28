@@ -1,0 +1,293 @@
+---
+title: Agent Integration
+description: Use context management with @deepagents/agent for dynamic, context-aware prompts
+---
+
+This recipe shows how to integrate `@deepagents/context` with `@deepagents/agent` for dynamic prompt generation and context-aware agent behavior.
+
+## Basic Integration
+
+Use context in an agent's prompt function:
+
+```typescript
+import { agent, execute } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  hint,
+} from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+
+const assistant = agent({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: async () => {
+    const context = new ContextEngine({ store })
+      .set(
+        role('You are a helpful coding assistant.'),
+        hint('Prefer TypeScript over JavaScript.'),
+        hint('Use modern ES6+ syntax.'),
+        hint('Include error handling in examples.'),
+      );
+
+    const { systemPrompt } = await context.resolve();
+    return systemPrompt;
+  },
+});
+
+// Execute the agent
+const result = execute(assistant, 'How do I read a file in Node.js?', {});
+```
+
+## Dynamic Context from Agent Context
+
+Access agent context variables to build dynamic prompts:
+
+```typescript
+type UserContext = {
+  userId: string;
+  preferences: {
+    language: 'typescript' | 'javascript';
+    style: 'concise' | 'detailed';
+  };
+};
+
+const personalizedAgent = agent<unknown, UserContext>({
+  name: 'PersonalizedAssistant',
+  model: groq('gpt-oss-20b'),
+  prompt: async (ctx) => {
+    const context = new ContextEngine({ store })
+      .set(
+        role(`You are a coding assistant helping user ${ctx.userId}.`),
+      );
+
+    // Add hints based on user preferences
+    if (ctx.preferences.language === 'typescript') {
+      context.set(hint('Always use TypeScript with strict mode.'));
+    } else {
+      context.set(hint('Use vanilla JavaScript.'));
+    }
+
+    if (ctx.preferences.style === 'concise') {
+      context.set(hint('Keep explanations brief.'));
+    } else {
+      context.set(hint('Provide detailed explanations with examples.'));
+    }
+
+    const { systemPrompt } = await context.resolve();
+    return systemPrompt;
+  },
+});
+
+// Execute with user context
+execute(personalizedAgent, 'Explain async/await', {
+  userId: 'user-123',
+  preferences: { language: 'typescript', style: 'detailed' },
+});
+```
+
+## Renderer Selection by Model
+
+Choose renderers based on the model being used:
+
+```typescript
+import { XmlRenderer, ToonRenderer } from '@deepagents/context';
+
+const smartAgent = agent({
+  name: 'SmartAssistant',
+  model: groq('gpt-oss-20b'),
+  prompt: async () => {
+    const context = new ContextEngine({ store })
+      .set(
+        role('You are helpful.'),
+        hint('Be concise.'),
+      );
+
+    // Use TOON for Groq models (token-efficient)
+    const { systemPrompt } = await context.resolve({
+      renderer: new ToonRenderer(),
+    });
+
+    return systemPrompt;
+  },
+});
+
+// For Claude/GPT, use XML
+const claudeAgent = agent({
+  name: 'ClaudeAssistant',
+  model: anthropic('claude-3-5-sonnet'),
+  prompt: async () => {
+    const context = new ContextEngine({ store })
+      .set(
+        role('You are helpful.'),
+        hint('Be concise.'),
+      );
+
+    // XML works well for Claude
+    const { systemPrompt } = await context.resolve({
+      renderer: new XmlRenderer(),
+    });
+
+    return systemPrompt;
+  },
+});
+```
+
+## Cost-Aware Agent Execution
+
+Check costs before executing expensive agents:
+
+```typescript
+import { generate } from '@deepagents/agent';
+
+async function executeWithBudget(
+  agentDef: any,
+  prompt: string,
+  context: any,
+  maxCost: number,
+) {
+  const contextEngine = new ContextEngine({ store })
+    .set(
+      role('You are helpful.'),
+      hint('Be thorough.'),
+    );
+
+  const estimate = await contextEngine.estimate('openai:gpt-4o');
+
+  if (estimate.cost > maxCost) {
+    console.warn(
+      `Estimated cost $${estimate.cost.toFixed(4)} exceeds budget $${maxCost}. Using cheaper model.`
+    );
+
+    // Switch to cheaper model
+    const cheaperAgent = agent({
+      ...agentDef,
+      model: groq('gpt-oss-20b'),
+    });
+
+    return generate(cheaperAgent, prompt, context);
+  }
+
+  return generate(agentDef, prompt, context);
+}
+```
+
+## Multi-Agent with Shared Context
+
+Share domain context across multiple agents:
+
+```typescript
+// Shared domain knowledge
+function createDomainContext() {
+  return new ContextEngine({ store: new InMemoryContextStore() })
+    .set(
+      fragment('company_info',
+        hint('Company: Acme Corp'),
+        hint('Industry: E-commerce'),
+        hint('Tech stack: Node.js, PostgreSQL, React'),
+      ),
+    );
+}
+
+// Researcher agent
+const researcher = agent({
+  name: 'Researcher',
+  model: groq('gpt-oss-20b'),
+  prompt: async () => {
+    const context = createDomainContext()
+      .set(
+        role('You research topics and gather information.'),
+        hint('Use web search when needed.'),
+      );
+    return (await context.resolve()).systemPrompt;
+  },
+  tools: {
+    webSearch: groq.tools.webSearch({}),
+  },
+  handoffDescription: 'Research and information gathering',
+});
+
+// Writer agent
+const writer = agent({
+  name: 'Writer',
+  model: groq('gpt-oss-20b'),
+  prompt: async () => {
+    const context = createDomainContext()
+      .set(
+        role('You write clear, engaging content.'),
+        hint('Match the company tone and style.'),
+      );
+    return (await context.resolve()).systemPrompt;
+  },
+  handoffDescription: 'Content writing and editing',
+});
+
+// Coordinator uses both
+const coordinator = agent({
+  name: 'Coordinator',
+  model: groq('gpt-oss-20b'),
+  prompt: async () => {
+    const context = createDomainContext()
+      .set(
+        role('You coordinate research and writing tasks.'),
+      );
+    return (await context.resolve()).systemPrompt;
+  },
+  handoffs: [researcher, writer],
+});
+```
+
+## Persistent Agent Conversations
+
+Maintain conversation history across agent interactions:
+
+```typescript
+import { SqliteContextStore } from '@deepagents/context';
+
+class ConversationalAgent {
+  private store: SqliteContextStore;
+  private context: ContextEngine;
+
+  constructor(sessionId: string) {
+    this.store = new SqliteContextStore(`./sessions/${sessionId}.db`);
+    this.context = new ContextEngine({ store: this.store })
+      .set(
+        role('You are a helpful assistant with memory of our conversation.'),
+      );
+  }
+
+  async chat(userMessage: string): Promise<string> {
+    // Add user message
+    this.context.set(user(userMessage));
+
+    // Resolve and call agent
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    // Save assistant response
+    this.context.set(assistant(response.text));
+    await this.context.save();
+
+    return response.text;
+  }
+}
+
+// Usage
+const agent = new ConversationalAgent('session-123');
+await agent.chat('Hello!');
+await agent.chat('What did I just say?'); // Agent remembers
+```
+
+## Next Steps
+
+- [Text2SQL Integration](/docs/context/recipes/text2sql-integration) - SQL generation patterns
+- [Multi-Session Context](/docs/context/recipes/multi-session-context) - Session persistence
+- [Agent Documentation](/docs/agent) - Full agent package docs

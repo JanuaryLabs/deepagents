@@ -1,0 +1,241 @@
+---
+title: Markdown Renderer
+description: Render context fragments as readable Markdown for debugging and documentation-focused models
+---
+
+The `MarkdownRenderer` produces human-readable Markdown output. It's ideal for debugging prompts or when working with models trained heavily on documentation.
+
+## Basic Usage
+
+```typescript
+import { MarkdownRenderer, role, hint } from '@deepagents/context';
+
+const renderer = new MarkdownRenderer();
+
+const fragments = [
+  role('You are a helpful assistant.'),
+  hint('Be concise.'),
+];
+
+const output = renderer.render(fragments);
+```
+
+**Output:**
+
+```markdown
+## Role
+You are a helpful assistant.
+
+## Hint
+Be concise.
+```
+
+## Rendering Rules
+
+### Primitives
+
+Top-level primitives become H2 headers with content below:
+
+```typescript
+{ name: 'role', data: 'You are a SQL expert.' }
+```
+
+**Output:**
+
+```markdown
+## Role
+You are a SQL expert.
+```
+
+Fragment names are converted to Title Case using [stringcase](https://www.npmjs.com/package/stringcase).
+
+### Objects
+
+Object properties become bold key-value pairs:
+
+```typescript
+{
+  name: 'config',
+  data: {
+    maxTokens: 1000,
+    temperature: 0.7,
+  }
+}
+```
+
+**Output:**
+
+```markdown
+## Config
+- **maxTokens**: 1000
+- **temperature**: 0.7
+```
+
+### Arrays
+
+Array items render as nested bullet lists:
+
+```typescript
+{
+  name: 'rules',
+  data: ['Be helpful', 'Be concise', 'Be accurate']
+}
+```
+
+**Output:**
+
+```markdown
+## Rules
+- Be helpful
+- Be concise
+- Be accurate
+```
+
+### Nested Fragments
+
+Nested fragments use indented bullet points with bold names:
+
+```typescript
+fragment('guidelines',
+  hint('Use CTEs for complex queries'),
+  hint('Always include LIMIT clause'),
+)
+```
+
+**Output:**
+
+```markdown
+## Guidelines
+- **hint**: Use CTEs for complex queries
+- **hint**: Always include LIMIT clause
+```
+
+### Deep Nesting
+
+Multi-level nesting uses increased indentation:
+
+```typescript
+fragment('domain',
+  fragment('sql_rules',
+    hint('Use CTEs'),
+    hint('Avoid SELECT *'),
+  ),
+  fragment('formatting',
+    hint('Use snake_case'),
+  ),
+)
+```
+
+**Output:**
+
+```markdown
+## Domain
+- **sql_rules**:
+  - **hint**: Use CTEs
+  - **hint**: Avoid SELECT *
+- **formatting**:
+  - **hint**: Use snake_case
+```
+
+## Fragment Grouping
+
+Enable `groupFragments` to collect same-named fragments:
+
+```typescript
+const renderer = new MarkdownRenderer({ groupFragments: true });
+
+const fragments = [
+  hint('Be helpful'),
+  hint('Be concise'),
+];
+
+renderer.render(fragments);
+```
+
+**Without grouping:**
+
+```markdown
+## Hint
+Be helpful
+
+## Hint
+Be concise
+```
+
+**With grouping:**
+
+```markdown
+## Hints
+- **hint**: Be helpful
+- **hint**: Be concise
+```
+
+## When to Use Markdown
+
+**Advantages:**
+- Most human-readable format
+- Great for debugging prompts
+- Familiar formatting for documentation-trained models
+- Easy to copy-paste and share
+
+**Trade-offs:**
+- Headers add some token overhead
+- Less structured than XML for parsing
+- May confuse models expecting XML
+
+## Example with ContextEngine
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  MarkdownRenderer,
+  role,
+  hint,
+} from '@deepagents/context';
+
+const context = new ContextEngine({ store: new InMemoryContextStore() })
+  .set(
+    role('You are a documentation writer.'),
+    hint('Use clear language.'),
+    hint('Include examples.'),
+  );
+
+const { systemPrompt } = await context.resolve({
+  renderer: new MarkdownRenderer(),
+});
+
+console.log(systemPrompt);
+// ## Role
+// You are a documentation writer.
+//
+// ## Hint
+// Use clear language.
+//
+// ## Hint
+// Include examples.
+```
+
+## Debugging Tip
+
+Use Markdown rendering to inspect your context during development:
+
+```typescript
+// Debug helper
+async function debugContext(context: ContextEngine) {
+  const { systemPrompt, messages } = await context.resolve({
+    renderer: new MarkdownRenderer(),
+  });
+
+  console.log('=== System Prompt ===');
+  console.log(systemPrompt);
+  console.log('\n=== Messages ===');
+  console.log(JSON.stringify(messages, null, 2));
+}
+```
+
+## Next Steps
+
+- [Renderers Overview](/docs/context/renderers-overview) - Compare all renderers
+- [XML Renderer](/docs/context/xml-renderer) - Structured XML format
+- [TOON Renderer](/docs/context/toon-renderer) - Token-efficient format

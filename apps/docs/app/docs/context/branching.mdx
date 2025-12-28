@@ -1,0 +1,385 @@
+---
+title: Branching
+description: Explore multiple conversation paths using checkpoints and rewind
+---
+
+Branching lets you explore different conversation paths from the same starting point. Combine checkpoints and rewind to implement A/B testing, response comparison, and user choice workflows.
+
+## The Problem
+
+AI conversations often need:
+- Try multiple response strategies
+- Let users choose between options
+- A/B test different prompts
+- Explore "what if" scenarios
+
+## Branching Concept
+
+```
+         ┌── Branch A: "Explain simply"
+         │
+Start ───┤
+         │
+         └── Branch B: "Explain technically"
+```
+
+At any point, you can:
+1. Save a checkpoint
+2. Explore one path
+3. Restore and explore another path
+4. Compare results
+
+## Basic Branching Pattern
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  user,
+  assistant,
+} from '@deepagents/context';
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store, chatId: 'chat-001' })
+  .set(role('You are a helpful assistant.'));
+
+// User asks a question
+context.set(user('Explain quantum computing'));
+
+// Save checkpoint before responding
+await context.checkpoint('before-response');
+
+// Branch A: Simple explanation
+const { systemPrompt, messages } = await context.resolve();
+const simpleResponse = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: systemPrompt + '\nExplain in simple terms for beginners.',
+  messages,
+});
+
+console.log('Simple:', simpleResponse.text);
+
+// Restore to try a different approach
+await context.restore('before-response');
+
+// Branch B: Technical explanation
+const technicalResponse = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: systemPrompt + '\nExplain with technical depth for experts.',
+  messages,
+});
+
+console.log('Technical:', technicalResponse.text);
+
+// Choose the better one
+const chosenResponse = simpleResponse.text; // or technicalResponse.text
+context.set(assistant(chosenResponse));
+await context.save();
+```
+
+## User Choice Pattern
+
+Let users pick from multiple AI responses:
+
+```typescript
+interface ResponseOption {
+  id: string;
+  text: string;
+  style: string;
+}
+
+async function generateOptions(
+  context: ContextEngine,
+  question: string,
+): Promise<ResponseOption[]> {
+  context.set(user(question));
+  await context.checkpoint('before-options');
+
+  const styles = [
+    { id: 'concise', prompt: 'Be brief and to the point.' },
+    { id: 'detailed', prompt: 'Provide comprehensive detail.' },
+    { id: 'examples', prompt: 'Use practical examples.' },
+  ];
+
+  const options: ResponseOption[] = [];
+
+  for (const style of styles) {
+    await context.restore('before-options');
+
+    const { systemPrompt, messages } = await context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt + '\n' + style.prompt,
+      messages,
+    });
+
+    options.push({
+      id: style.id,
+      text: response.text,
+      style: style.prompt,
+    });
+  }
+
+  return options;
+}
+
+async function selectOption(
+  context: ContextEngine,
+  option: ResponseOption,
+): Promise<void> {
+  await context.restore('before-options');
+  context.set(assistant(option.text));
+  await context.save();
+}
+
+// Usage
+const options = await generateOptions(context, 'What is TypeScript?');
+
+// Show options to user...
+console.log('Choose a response:');
+options.forEach((opt, i) => {
+  console.log(`${i + 1}. [${opt.style}] ${opt.text.slice(0, 50)}...`);
+});
+
+// User picks one
+const userChoice = options[0];
+await selectOption(context, userChoice);
+```
+
+## A/B Testing Responses
+
+Compare response quality programmatically:
+
+```typescript
+interface ABTestResult {
+  variantA: { text: string; score: number };
+  variantB: { text: string; score: number };
+  winner: 'A' | 'B';
+}
+
+async function abTestResponses(
+  context: ContextEngine,
+  question: string,
+  scorer: (response: string) => Promise<number>,
+): Promise<ABTestResult> {
+  context.set(user(question));
+  await context.checkpoint('ab-test');
+
+  // Variant A: Default temperature
+  const { systemPrompt, messages } = await context.resolve();
+  const responseA = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages,
+    temperature: 0.7,
+  });
+
+  await context.restore('ab-test');
+
+  // Variant B: Higher temperature
+  const responseB = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages,
+    temperature: 1.0,
+  });
+
+  const scoreA = await scorer(responseA.text);
+  const scoreB = await scorer(responseB.text);
+
+  const result: ABTestResult = {
+    variantA: { text: responseA.text, score: scoreA },
+    variantB: { text: responseB.text, score: scoreB },
+    winner: scoreA >= scoreB ? 'A' : 'B',
+  };
+
+  // Commit the winner
+  await context.restore('ab-test');
+  context.set(assistant(result.winner === 'A' ? responseA.text : responseB.text));
+  await context.save();
+
+  return result;
+}
+```
+
+## Multi-Step Branching
+
+Branch at multiple decision points:
+
+```typescript
+async function exploratoryConversation(context: ContextEngine) {
+  // Stage 1: Initial question
+  context.set(user('Help me learn Python'));
+  await context.checkpoint('stage-1');
+
+  const { systemPrompt, messages } = await context.resolve();
+
+  const response1 = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages,
+  });
+
+  context.set(assistant(response1.text));
+  await context.checkpoint('stage-2');
+
+  // Stage 2: Follow-up options
+  const followUps = [
+    'Show me a hello world example',
+    'Explain data types',
+    'How do functions work?',
+  ];
+
+  for (const followUp of followUps) {
+    await context.restore('stage-2');
+    context.set(user(followUp));
+
+    const result = await context.resolve();
+    const response2 = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: result.systemPrompt,
+      messages: result.messages,
+    });
+
+    console.log(`\nPath: "${followUp}"`);
+    console.log(`Response: ${response2.text.slice(0, 100)}...`);
+  }
+
+  // Commit the best path
+  await context.restore('stage-2');
+  context.set(user('Show me a hello world example'));
+  // ... continue with chosen path
+}
+```
+
+## Tree-Based Branching
+
+For complex exploration, track branches as a tree:
+
+```typescript
+interface BranchNode {
+  id: string;
+  checkpoint: string;
+  messages: Array<{ role: string; content: string }>;
+  children: BranchNode[];
+}
+
+class ConversationTree {
+  private context: ContextEngine;
+  private root: BranchNode;
+  private current: BranchNode;
+
+  constructor(store: ContextStore, chatId: string) {
+    this.context = new ContextEngine({ store, chatId })
+      .set(role('You are helpful.'));
+
+    this.root = {
+      id: 'root',
+      checkpoint: 'root',
+      messages: [],
+      children: [],
+    };
+    this.current = this.root;
+  }
+
+  async initialize(): Promise<void> {
+    await this.context.checkpoint('root');
+  }
+
+  async branch(userMessage: string): Promise<BranchNode> {
+    const branchId = `branch-${Date.now()}`;
+    const checkpointName = `checkpoint-${branchId}`;
+
+    // Save current state
+    await this.context.checkpoint(checkpointName);
+
+    // Create new branch
+    const newBranch: BranchNode = {
+      id: branchId,
+      checkpoint: checkpointName,
+      messages: [{ role: 'user', content: userMessage }],
+      children: [],
+    };
+
+    this.current.children.push(newBranch);
+
+    // Execute the branch
+    this.context.set(user(userMessage));
+    const { systemPrompt, messages } = await this.context.resolve();
+
+    const response = await generateText({
+      model: groq('gpt-oss-20b'),
+      system: systemPrompt,
+      messages,
+    });
+
+    this.context.set(assistant(response.text));
+    newBranch.messages.push({ role: 'assistant', content: response.text });
+
+    this.current = newBranch;
+    return newBranch;
+  }
+
+  async switchBranch(branchId: string): Promise<void> {
+    const branch = this.findBranch(this.root, branchId);
+    if (!branch) {
+      throw new Error(`Branch ${branchId} not found`);
+    }
+
+    await this.context.restore(branch.checkpoint);
+    this.current = branch;
+  }
+
+  private findBranch(node: BranchNode, id: string): BranchNode | null {
+    if (node.id === id) return node;
+    for (const child of node.children) {
+      const found = this.findBranch(child, id);
+      if (found) return found;
+    }
+    return null;
+  }
+}
+```
+
+## When to Use Branching
+
+| Scenario | Approach |
+| --- | --- |
+| Retry bad response | Single checkpoint + restore |
+| A/B test | Named checkpoint + 2 branches |
+| User picks response | Named checkpoint + N options |
+| Complex exploration | Tree-based branching |
+| What-if analysis | Multiple named checkpoints |
+
+## Branching vs Rewind
+
+| Need | Use |
+| --- | --- |
+| Try multiple options from same point | Checkpoint + restore |
+| Remove specific fragments | Rewind |
+| Full state restoration | Checkpoint |
+| Surgical undo | Rewind |
+
+Branching uses checkpoints for exploration. [Rewind](/docs/context/rewind) removes specific fragments.
+
+## Best Practices
+
+1. **Name checkpoints meaningfully**: Use descriptive names like `before-analysis`, `stage-1-complete`
+
+2. **Clean up branches**: Delete unused checkpoints when done exploring
+
+3. **Track branch metadata**: Store which path was chosen for analytics
+
+4. **Consider memory**: Each checkpoint stores all fragments - manage for long conversations
+
+5. **Commit the winner**: After branching, always commit the chosen path with `save()`
+
+## Next Steps
+
+- [Checkpoints](/docs/context/checkpoints) - Checkpoint API details
+- [Rewind](/docs/context/rewind) - Surgical fragment removal
+- [Chat Management](/docs/context/chat) - Managing multiple chats

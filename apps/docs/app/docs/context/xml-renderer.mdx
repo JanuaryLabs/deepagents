@@ -1,0 +1,262 @@
+---
+title: XML Renderer
+description: Render context fragments as well-formed XML for structured LLM prompts
+---
+
+The `XmlRenderer` is the default renderer, producing well-formed XML output that works well with Claude, GPT-4, and other models trained to understand XML structure.
+
+## Basic Usage
+
+```typescript
+import { XmlRenderer, role, hint, fragment } from '@deepagents/context';
+
+const renderer = new XmlRenderer();
+
+const fragments = [
+  role('You are a helpful assistant.'),
+  hint('Be concise.'),
+];
+
+const output = renderer.render(fragments);
+```
+
+**Output:**
+
+```xml
+<role>You are a helpful assistant.</role>
+<hint>Be concise.</hint>
+```
+
+## Rendering Rules
+
+### Primitives
+
+Strings, numbers, and booleans render as tag content:
+
+```typescript
+{ name: 'temperature', data: 0.7 }
+// <temperature>0.7</temperature>
+
+{ name: 'enabled', data: true }
+// <enabled>true</enabled>
+```
+
+### Objects
+
+Object properties become nested tags:
+
+```typescript
+{
+  name: 'config',
+  data: {
+    maxTokens: 1000,
+    format: 'json',
+  }
+}
+```
+
+**Output:**
+
+```xml
+<config>
+  <maxTokens>1000</maxTokens>
+  <format>json</format>
+</config>
+```
+
+### Arrays
+
+Array items use singularized tag names:
+
+```typescript
+{
+  name: 'rules',
+  data: ['Be helpful', 'Be concise', 'Be accurate']
+}
+```
+
+**Output:**
+
+```xml
+<rules>
+  <rule>Be helpful</rule>
+  <rule>Be concise</rule>
+  <rule>Be accurate</rule>
+</rules>
+```
+
+### Nested Fragments
+
+Fragments within fragments maintain hierarchy:
+
+```typescript
+fragment('domain',
+  fragment('terminology',
+    hint('LTV = Lifetime Value'),
+    hint('MRR = Monthly Recurring Revenue'),
+  ),
+  fragment('constraints',
+    hint('Never expose PII'),
+  ),
+)
+```
+
+**Output:**
+
+```xml
+<domain>
+  <terminology>
+    <hint>LTV = Lifetime Value</hint>
+    <hint>MRR = Monthly Recurring Revenue</hint>
+  </terminology>
+  <constraints>
+    <hint>Never expose PII</hint>
+  </constraints>
+</domain>
+```
+
+## XML Escaping
+
+Special characters are automatically escaped:
+
+| Character | Escaped As |
+| --- | --- |
+| `&` | `&amp;` |
+| `<` | `&lt;` |
+| `>` | `&gt;` |
+| `"` | `&quot;` |
+| `'` | `&apos;` |
+
+```typescript
+{ name: 'query', data: 'SELECT * FROM users WHERE age > 18' }
+// <query>SELECT * FROM users WHERE age &gt; 18</query>
+```
+
+## Multiline Content
+
+Multiline strings are indented for readability:
+
+```typescript
+{
+  name: 'instructions',
+  data: `Follow these steps:
+1. Read the query
+2. Generate SQL
+3. Validate output`
+}
+```
+
+**Output:**
+
+```xml
+<instructions>
+  Follow these steps:
+  1. Read the query
+  2. Generate SQL
+  3. Validate output
+</instructions>
+```
+
+## Fragment Grouping
+
+Enable `groupFragments` to collect same-named fragments:
+
+```typescript
+const renderer = new XmlRenderer({ groupFragments: true });
+
+const fragments = [
+  hint('Be helpful'),
+  hint('Be concise'),
+  hint('Use examples'),
+];
+
+renderer.render(fragments);
+```
+
+**Without grouping:**
+
+```xml
+<hint>Be helpful</hint>
+<hint>Be concise</hint>
+<hint>Use examples</hint>
+```
+
+**With grouping:**
+
+```xml
+<hints>
+  <hint>Be helpful</hint>
+  <hint>Be concise</hint>
+  <hint>Use examples</hint>
+</hints>
+```
+
+This uses the [pluralize](https://www.npmjs.com/package/pluralize) library for correct pluralization.
+
+## Null and Undefined Handling
+
+Null and undefined values are filtered out:
+
+```typescript
+{
+  name: 'config',
+  data: {
+    enabled: true,
+    value: null,
+    name: undefined,
+  }
+}
+// <config>
+//   <enabled>true</enabled>
+// </config>
+```
+
+## When to Use XML
+
+**Advantages:**
+- Clear structural boundaries
+- Well-understood by modern LLMs
+- Familiar to developers
+- Easy to parse programmatically
+
+**Trade-offs:**
+- Most verbose format (highest token count)
+- Closing tags add overhead
+
+## Example with ContextEngine
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  XmlRenderer,
+  role,
+  hint,
+} from '@deepagents/context';
+
+const context = new ContextEngine({ store: new InMemoryContextStore() })
+  .set(
+    role('You are a code reviewer.'),
+    hint('Focus on security issues.'),
+    hint('Check for performance problems.'),
+  );
+
+// XML is the default
+const { systemPrompt } = await context.resolve();
+
+// Explicit XML renderer
+const { systemPrompt: xml } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
+
+// Grouped hints
+const { systemPrompt: grouped } = await context.resolve({
+  renderer: new XmlRenderer({ groupFragments: true }),
+});
+```
+
+## Next Steps
+
+- [Renderers Overview](/docs/context/renderers-overview) - Compare all renderers
+- [Markdown Renderer](/docs/context/markdown-renderer) - Human-readable format
+- [TOON Renderer](/docs/context/toon-renderer) - Token-efficient format

@@ -1,0 +1,9 @@
+{
+  "title": "Recipes",
+  "pages": [
+    "index",
+    "agent-integration",
+    "text2sql-integration",
+    "multi-session-context"
+  ]
+}

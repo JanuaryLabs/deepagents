@@ -1,0 +1,155 @@
+---
+title: Overview
+description: Domain-agnostic context management for LLM applications with rendering, persistence, and cost estimation
+---
+
+The `@deepagents/context` package provides primitives for managing LLM context: organizing fragments, rendering to multiple formats, persisting conversations, and estimating costs. It's the foundation layer that other deepagents packages build upon.
+
+## The Problem with Ad-Hoc Context
+
+When building LLM applications, context management often becomes messy:
+
+- **String concatenation**: System prompts grow through manual string assembly
+- **No structure**: Hard to organize different types of context (instructions, hints, conversation)
+- **Format lock-in**: Can't easily switch between XML, Markdown, or other formats
+- **No persistence**: Conversation history requires custom storage logic
+- **Cost blindness**: No way to predict API costs before making calls
+
+## Context Fragments
+
+DeepAgents Context solves this through structured fragments. Instead of raw strings, you compose context from typed pieces:
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  hint,
+  user,
+  assistant,
+} from '@deepagents/context';
+
+// Create a context engine with storage
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store })
+  .set(
+    role('You are a helpful assistant.'),
+    hint('Be concise and friendly.'),
+    hint('Use examples when explaining concepts.'),
+  );
+
+// Add a user message
+context.set(user('What is TypeScript?'));
+
+// Resolve for AI SDK consumption
+const { systemPrompt, messages } = await context.resolve();
+// systemPrompt: XML-rendered role + hints
+// messages: [{ role: 'user', content: 'What is TypeScript?' }]
+```
+
+The `resolve()` method automatically:
+- Separates message fragments from system context
+- Renders system context using your chosen format (XML by default)
+- Returns AI SDK-compatible output
+
+## Key Features
+
+| Feature | Description |
+| --- | --- |
+| Fragment Helpers | `role()`, `user()`, `assistant()`, `hint()`, `fragment()` for composing context |
+| Multiple Renderers | XML, Markdown, TOML, TOON formats for different models and use cases |
+| Persistence | SQLite and in-memory stores for conversation history |
+| Cost Estimation | Token counting and pricing via models.dev for 1000+ models |
+| AI SDK Integration | `resolve()` returns `systemPrompt` + `messages` ready for `generateText()` |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      ContextEngine                          │
+├─────────────────────────────────────────────────────────────┤
+│  set(fragments...)  →  Internal Fragment Store              │
+│                              │                              │
+│  resolve()  ─────────────────┼──────────────────────────▶  │
+│                              │                              │
+│              ┌───────────────┴───────────────┐              │
+│              │                               │              │
+│       Regular Fragments              Message Fragments      │
+│              │                               │              │
+│              ▼                               ▼              │
+│     ┌─────────────┐                 ┌──────────────┐       │
+│     │  Renderer   │                 │ decodeMsg()  │       │
+│     └─────────────┘                 └──────────────┘       │
+│              │                               │              │
+│              ▼                               ▼              │
+│        systemPrompt                     messages[]          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                      { systemPrompt, messages }
+                      Ready for AI SDK
+```
+
+## Renderers at a Glance
+
+Same context, four output formats:
+
+```typescript
+const fragments = [
+  role('You are a SQL expert.'),
+  hint('Use CTEs for complex queries.'),
+];
+```
+
+| Renderer | Output |
+| --- | --- |
+| **XML** (default) | `<role>You are a SQL expert.</role>`<br/>`<hint>Use CTEs for complex queries.</hint>` |
+| **Markdown** | `## Role`<br/>`You are a SQL expert.`<br/><br/>`## Hint`<br/>`Use CTEs for complex queries.` |
+| **TOML** | `role = "You are a SQL expert."`<br/>`hint = "Use CTEs for complex queries."` |
+| **TOON** | `role: You are a SQL expert.`<br/>`hint: Use CTEs for complex queries.` |
+
+## When to Use This Package
+
+**Ideal for:**
+- Multi-turn conversations requiring persistence
+- Applications that need different prompt formats for different models
+- Cost-conscious systems that need to estimate before calling APIs
+- Projects using `@deepagents/agent` or `@deepagents/text2sql`
+
+**Consider alternatives when:**
+- Simple one-shot prompts suffice
+- You don't need conversation history
+- Token counting isn't important
+
+## Integration with DeepAgents
+
+The context package is designed to work seamlessly with other deepagents packages:
+
+```typescript
+// With @deepagents/agent
+const myAgent = agent({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: async (ctx) => {
+    const context = new ContextEngine({ store })
+      .set(role('You are helpful.'), hint(ctx.preference));
+    return (await context.resolve()).systemPrompt;
+  },
+});
+
+// With @deepagents/text2sql
+const domainContext = new ContextEngine({ store })
+  .set(
+    fragment('domain',
+      hint('LTV means Lifetime Value'),
+      hint('MRR means Monthly Recurring Revenue'),
+    ),
+  );
+```
+
+## Next Steps
+
+- [Getting Started](/docs/context/getting-started) - Installation and first example
+- [Fragments](/docs/context/fragments) - Deep dive into fragment types and composition
+- [Renderers Overview](/docs/context/renderers-overview) - Choosing the right output format
+- [Recipes](/docs/context/recipes) - Real-world integration patterns

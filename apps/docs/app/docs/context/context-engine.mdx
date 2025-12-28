@@ -1,0 +1,278 @@
+---
+title: Context Engine
+description: Complete API reference for the ContextEngine class - the orchestrator for context management
+---
+
+The `ContextEngine` class is the central orchestrator for managing context fragments. It handles fragment storage, rendering, persistence, and cost estimation.
+
+## Creating a Context Engine
+
+Every context engine requires a store:
+
+```typescript
+import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store });
+```
+
+For persistent storage across sessions:
+
+```typescript
+import { ContextEngine, SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./context.db');
+const context = new ContextEngine({ store });
+```
+
+## API Reference
+
+### set(...fragments)
+
+Add fragments to the context. Returns `this` for chaining.
+
+```typescript
+import { role, hint, user } from '@deepagents/context';
+
+// Add multiple fragments
+context.set(
+  role('You are helpful.'),
+  hint('Be concise.'),
+);
+
+// Chain calls
+context
+  .set(role('You are helpful.'))
+  .set(hint('Be concise.'))
+  .set(user('Hello!'));
+```
+
+Fragments are stored in order and rendered in the order they were added.
+
+### resolve(options?)
+
+Resolves the context into AI SDK-ready format. This is the primary method for getting output.
+
+```typescript
+interface ResolveOptions {
+  renderer?: ContextRenderer; // Default: XmlRenderer
+}
+
+interface ResolveResult {
+  systemPrompt: string;  // Rendered non-message fragments
+  messages: Message[];   // Message fragments as AI SDK format
+}
+```
+
+**Behavior:**
+1. Loads persisted fragments from store (first call only)
+2. Separates message fragments from regular fragments
+3. Renders regular fragments to `systemPrompt`
+4. Converts message fragments to AI SDK `Message[]`
+
+```typescript
+const context = new ContextEngine({ store })
+  .set(
+    role('You are a helpful assistant.'),
+    hint('Be brief.'),
+    user('Hello!'),
+  );
+
+const { systemPrompt, messages } = await context.resolve();
+
+// systemPrompt:
+// <role>You are a helpful assistant.</role>
+// <hint>Be brief.</hint>
+
+// messages:
+// [{ role: 'user', content: 'Hello!' }]
+```
+
+**Using a different renderer:**
+
+```typescript
+import { MarkdownRenderer } from '@deepagents/context';
+
+const { systemPrompt } = await context.resolve({
+  renderer: new MarkdownRenderer(),
+});
+
+// systemPrompt:
+// ## Role
+// You are a helpful assistant.
+//
+// ## Hint
+// Be brief.
+```
+
+### save()
+
+Persists fragments with `persist: true` to the store.
+
+```typescript
+context.set(user('Hello!'));           // persist: true (automatic)
+context.set(assistant('Hi there!'));   // persist: true (automatic)
+context.set(hint('Be helpful'));       // persist: false (default)
+
+await context.save();
+// Only user and assistant messages are saved
+```
+
+**Persistence flow:**
+
+```
+Session 1:
+  context.set(user('Hello'))
+  context.set(assistant('Hi'))
+  await context.save()  →  Store: [user, assistant]
+
+Session 2:
+  const context = new ContextEngine({ store })
+  await context.resolve()  ←  Loads [user, assistant] from store
+```
+
+### render(renderer)
+
+Low-level method to render all fragments. Prefer `resolve()` for normal use.
+
+```typescript
+import { XmlRenderer } from '@deepagents/context';
+
+const xml = context.render(new XmlRenderer());
+```
+
+### estimate(modelId, options?)
+
+Estimates token count and cost for the current context.
+
+```typescript
+const estimate = await context.estimate('openai:gpt-4o');
+
+console.log(estimate);
+// {
+//   model: 'gpt-4o',
+//   provider: 'openai',
+//   tokens: 156,
+//   cost: 0.00078,
+//   limits: {
+//     context: 128000,
+//     output: 16384,
+//     exceedsContext: false,
+//   },
+// }
+```
+
+**Model ID format**: `provider:model-name`
+- `openai:gpt-4o`
+- `anthropic:claude-3-5-sonnet`
+- `groq:llama-3.3-70b-versatile`
+
+**With custom renderer:**
+
+```typescript
+import { ToonRenderer } from '@deepagents/context';
+
+// Estimate with TOON (more token-efficient)
+const estimate = await context.estimate('openai:gpt-4o', {
+  renderer: new ToonRenderer(),
+});
+```
+
+### consolidate()
+
+Placeholder for future context merging functionality. Currently a no-op.
+
+```typescript
+context.consolidate(); // Does nothing yet
+```
+
+## Chaining Pattern
+
+All mutating methods return `this`, enabling fluent chains:
+
+```typescript
+const context = new ContextEngine({ store })
+  .set(role('You are helpful.'))
+  .set(hint('Be concise.'))
+  .set(hint('Use examples.'));
+
+const { systemPrompt, messages } = await context.resolve();
+```
+
+## Fragment Loading
+
+On the first `resolve()` call, the engine loads any persisted fragments from the store:
+
+```typescript
+// Fragments already in store: [user('Previous message')]
+
+const context = new ContextEngine({ store })
+  .set(role('You are helpful.'));
+
+// First resolve() loads from store
+const { messages } = await context.resolve();
+// messages includes the previous user message
+
+// Subsequent calls don't reload
+context.set(user('New message'));
+const result2 = await context.resolve();
+```
+
+This happens exactly once per engine instance.
+
+## Complete Example
+
+```typescript
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+import {
+  ContextEngine,
+  SqliteContextStore,
+  role,
+  hint,
+  user,
+  assistant,
+} from '@deepagents/context';
+
+async function chat(userMessage: string) {
+  const store = new SqliteContextStore('./chat.db');
+  const context = new ContextEngine({ store })
+    .set(
+      role('You are a friendly assistant.'),
+      hint('Keep responses brief.'),
+    );
+
+  // Add new user message
+  context.set(user(userMessage));
+
+  // Check cost before calling API
+  const estimate = await context.estimate('groq:llama-3.3-70b-versatile');
+  if (estimate.limits.exceedsContext) {
+    throw new Error('Context too large for model');
+  }
+
+  console.log(`Estimated cost: $${estimate.cost.toFixed(6)}`);
+
+  // Resolve and call API
+  const { systemPrompt, messages } = await context.resolve();
+
+  const response = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: systemPrompt,
+    messages,
+  });
+
+  // Save the exchange
+  context.set(assistant(response.text));
+  await context.save();
+
+  return response.text;
+}
+```
+
+## Next Steps
+
+- [Resolve and Render](/docs/context/resolve-and-render) - Understanding the resolution pipeline
+- [Renderers Overview](/docs/context/renderers-overview) - Output format options
+- [Storage](/docs/context/storage) - Persistence implementations
+- [Cost Estimation](/docs/context/cost-estimation) - Token counting and pricing
