@@ -10,9 +10,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "../../global.d.ts"],
-  "references": [
-    {
-      "path": "../agent/tsconfig.lib.json"
-    }
-  ]
+  "references": []
 }
