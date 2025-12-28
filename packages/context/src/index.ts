@@ -28,9 +28,14 @@ export {
   type BranchInfo,
   type CheckpointData,
   type CheckpointInfo,
+  type GraphNode,
+  type GraphBranch,
+  type GraphCheckpoint,
+  type GraphData,
 } from './lib/store/store.ts';
 export { SqliteContextStore } from './lib/store/sqlite.store.ts';
 export { InMemoryContextStore } from './lib/store/memory.store.ts';
+export { visualizeGraph } from './lib/visualize.ts';
 
 /**
  * Message format compatible with AI SDK's CoreMessage.

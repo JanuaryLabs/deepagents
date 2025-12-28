@@ -117,6 +117,49 @@ export interface CheckpointInfo {
 }
 
 // ============================================================================
+// Graph Visualization Types
+// ============================================================================
+
+/**
+ * A node in the visualization graph.
+ */
+export interface GraphNode {
+  id: string;
+  parentId: string | null;
+  role: string; // 'user', 'assistant', etc.
+  content: string; // Truncated preview of message content
+  createdAt: number;
+  deleted: boolean;
+}
+
+/**
+ * A branch pointer for visualization.
+ */
+export interface GraphBranch {
+  name: string;
+  headMessageId: string | null;
+  isActive: boolean;
+}
+
+/**
+ * A checkpoint pointer for visualization.
+ */
+export interface GraphCheckpoint {
+  name: string;
+  messageId: string;
+}
+
+/**
+ * Complete graph data for visualization.
+ */
+export interface GraphData {
+  chatId: string;
+  nodes: GraphNode[];
+  branches: GraphBranch[];
+  checkpoints: GraphCheckpoint[];
+}
+
+// ============================================================================
 // Abstract Store Interface
 // ============================================================================
 
@@ -253,4 +296,14 @@ export abstract class ContextStore {
    * Delete a checkpoint.
    */
   abstract deleteCheckpoint(chatId: string, name: string): Promise<void>;
+
+  // ==========================================================================
+  // Visualization Operations
+  // ==========================================================================
+
+  /**
+   * Get the complete graph data for a chat.
+   * Returns all messages (including deleted), branches, and checkpoints.
+   */
+  abstract getGraph(chatId: string): Promise<GraphData>;
 }

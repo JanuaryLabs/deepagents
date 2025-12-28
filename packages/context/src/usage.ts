@@ -6,6 +6,7 @@ import {
   hint,
   role,
   user,
+  visualizeGraph,
 } from './index.ts';
 
 // Create a shared store for persistence
@@ -326,6 +327,45 @@ async function demonstrateBranchSwitching() {
   );
 }
 
+/**
+ * Example: Graph Visualization
+ *
+ * Visualize the message graph structure with branches and checkpoints.
+ */
+async function demonstrateVisualization() {
+  console.log('\n=== Graph Visualization ===');
+
+  const vizStore = new InMemoryContextStore();
+  const context = new ContextEngine({
+    store: vizStore,
+    chatId: 'viz-demo',
+  });
+
+  // Create a conversation with branching
+  context.set(user('Hello', { id: 'msg-1' }));
+  context.set(assistant('Hi there!', { id: 'msg-2' }));
+  await context.save();
+
+  // Create a checkpoint
+  await context.checkpoint('greeting-done');
+
+  // Continue conversation
+  context.set(user('Help with Python', { id: 'msg-3' }));
+  context.set(assistant('Sure, I can help!', { id: 'msg-4' }));
+  await context.save();
+
+  // Rewind and create alternative branch
+  await context.rewind('msg-2');
+  context.set(user('Help with JavaScript', { id: 'msg-5' }));
+  context.set(assistant('JavaScript is great!', { id: 'msg-6' }));
+  await context.save();
+
+  // Get and visualize the graph
+  const graph = await vizStore.getGraph('viz-demo');
+  console.log('\nGraph structure:');
+  console.log(visualizeGraph(graph));
+}
+
 // Run examples
 async function main() {
   await demonstrateContextEngine();
@@ -335,6 +375,7 @@ async function main() {
   await demonstrateRewind();
   await demonstrateBranching();
   await demonstrateBranchSwitching();
+  await demonstrateVisualization();
 }
 
-main().catch(console.error);
+// main().catch(console.error);

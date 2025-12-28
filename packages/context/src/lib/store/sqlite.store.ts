@@ -7,6 +7,10 @@ import type {
   ChatInfo,
   CheckpointData,
   CheckpointInfo,
+  GraphBranch,
+  GraphCheckpoint,
+  GraphData,
+  GraphNode,
   MessageData,
 } from './store.ts';
 import { ContextStore } from './store.ts';
@@ -543,5 +547,86 @@ export class SqliteContextStore extends ContextStore {
     this.#db
       .prepare('DELETE FROM checkpoints WHERE chatId = ? AND name = ?')
       .run(chatId, name);
+  }
+
+  // ==========================================================================
+  // Visualization Operations
+  // ==========================================================================
+
+  async getGraph(chatId: string): Promise<GraphData> {
+    // Get all messages (including deleted) for complete graph
+    const messageRows = this.#db
+      .prepare(
+        `SELECT id, parentId, name, data, createdAt, deleted
+         FROM messages
+         WHERE chatId = ?
+         ORDER BY createdAt ASC`,
+      )
+      .all(chatId) as {
+      id: string;
+      parentId: string | null;
+      name: string;
+      data: string;
+      createdAt: number;
+      deleted: number;
+    }[];
+
+    const nodes: GraphNode[] = messageRows.map((row) => {
+      const data = JSON.parse(row.data);
+      const content = typeof data === 'string' ? data : JSON.stringify(data);
+      return {
+        id: row.id,
+        parentId: row.parentId,
+        role: row.name,
+        content: content.length > 50 ? content.slice(0, 50) + '...' : content,
+        createdAt: row.createdAt,
+        deleted: row.deleted === 1,
+      };
+    });
+
+    // Get all branches
+    const branchRows = this.#db
+      .prepare(
+        `SELECT name, headMessageId, isActive
+         FROM branches
+         WHERE chatId = ?
+         ORDER BY createdAt ASC`,
+      )
+      .all(chatId) as {
+      name: string;
+      headMessageId: string | null;
+      isActive: number;
+    }[];
+
+    const branches: GraphBranch[] = branchRows.map((row) => ({
+      name: row.name,
+      headMessageId: row.headMessageId,
+      isActive: row.isActive === 1,
+    }));
+
+    // Get all checkpoints
+    const checkpointRows = this.#db
+      .prepare(
+        `SELECT name, messageId
+         FROM checkpoints
+         WHERE chatId = ?
+         ORDER BY createdAt ASC`,
+      )
+      .all(chatId) as {
+      name: string;
+      messageId: string;
+    }[];
+
+    const checkpoints: GraphCheckpoint[] = checkpointRows.map((row) => ({
+      name: row.name,
+      messageId: row.messageId,
+    }));
+
+    return {
+      chatId,
+      nodes,
+      branches,
+      checkpoints,
+    };
   }
 }
