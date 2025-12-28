@@ -12,6 +12,8 @@ import type {
   GraphData,
   GraphNode,
   MessageData,
+  SearchOptions,
+  SearchResult,
 } from './store.ts';
 import { ContextStore } from './store.ts';
 
@@ -36,7 +38,6 @@ CREATE TABLE IF NOT EXISTS messages (
   type TEXT,
   data TEXT NOT NULL,
   persist INTEGER NOT NULL DEFAULT 1,
-  deleted INTEGER NOT NULL DEFAULT 0,
   createdAt INTEGER NOT NULL,
   FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
   FOREIGN KEY (parentId) REFERENCES messages(id)
@@ -73,6 +74,17 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 
 CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
+
+-- FTS5 virtual table for full-text search
+-- Using external content mode (content='') so we manage sync manually
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  messageId,
+  chatId,
+  name,
+  content,
+  content='',
+  tokenize='porter unicode61'
+);
 `;
 
 /**
@@ -177,7 +189,7 @@ export class SqliteContextStore extends ContextStore {
           COUNT(DISTINCT m.id) as messageCount,
           COUNT(DISTINCT b.id) as branchCount
         FROM chats c
-        LEFT JOIN messages m ON m.chatId = c.id AND m.deleted = 0
+        LEFT JOIN messages m ON m.chatId = c.id
         LEFT JOIN branches b ON b.chatId = c.id
         GROUP BY c.id
         ORDER BY c.updatedAt DESC`,
@@ -208,8 +220,8 @@ export class SqliteContextStore extends ContextStore {
   async addMessage(message: MessageData): Promise<void> {
     this.#db
       .prepare(
-        `INSERT INTO messages (id, chatId, parentId, name, type, data, persist, deleted, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (id, chatId, parentId, name, type, data, persist, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -219,9 +231,21 @@ export class SqliteContextStore extends ContextStore {
         message.type ?? null,
         JSON.stringify(message.data),
         message.persist ? 1 : 0,
-        message.deleted ? 1 : 0,
         message.createdAt,
       );
+
+    // Index in FTS for search
+    const content =
+      typeof message.data === 'string'
+        ? message.data
+        : JSON.stringify(message.data);
+
+    this.#db
+      .prepare(
+        `INSERT INTO messages_fts(messageId, chatId, name, content)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(message.id, message.chatId, message.name, content);
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {
@@ -236,7 +260,6 @@ export class SqliteContextStore extends ContextStore {
           type: string | null;
           data: string;
           persist: number;
-          deleted: number;
           createdAt: number;
         }
       | undefined;
@@ -253,7 +276,6 @@ export class SqliteContextStore extends ContextStore {
       type: row.type ?? undefined,
       data: JSON.parse(row.data),
       persist: row.persist === 1,
-      deleted: row.deleted === 1,
       createdAt: row.createdAt,
     };
   }
@@ -270,7 +292,7 @@ export class SqliteContextStore extends ContextStore {
           SELECT m.*, c.depth + 1 FROM messages m
           INNER JOIN chain c ON m.id = c.parentId
         )
-        SELECT * FROM chain WHERE deleted = 0
+        SELECT * FROM chain
         ORDER BY depth DESC`,
       )
       .all(headId) as {
@@ -281,7 +303,6 @@ export class SqliteContextStore extends ContextStore {
       type: string | null;
       data: string;
       persist: number;
-      deleted: number;
       createdAt: number;
       depth: number;
     }[];
@@ -294,21 +315,14 @@ export class SqliteContextStore extends ContextStore {
       type: row.type ?? undefined,
       data: JSON.parse(row.data),
       persist: row.persist === 1,
-      deleted: row.deleted === 1,
       createdAt: row.createdAt,
     }));
-  }
-
-  async softDeleteMessage(messageId: string): Promise<void> {
-    this.#db
-      .prepare('UPDATE messages SET deleted = 1 WHERE id = ?')
-      .run(messageId);
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
     const row = this.#db
       .prepare(
-        'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ? AND deleted = 0) as hasChildren',
+        'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ?) as hasChildren',
       )
       .get(messageId) as { hasChildren: number };
 
@@ -550,14 +564,85 @@ export class SqliteContextStore extends ContextStore {
   }
 
   // ==========================================================================
+  // Search Operations
+  // ==========================================================================
+
+  async searchMessages(
+    chatId: string,
+    query: string,
+    options?: SearchOptions,
+  ): Promise<SearchResult[]> {
+    const limit = options?.limit ?? 20;
+    const roles = options?.roles;
+
+    // Build the query dynamically based on options
+    let sql = `
+      SELECT
+        m.id,
+        m.chatId,
+        m.parentId,
+        m.name,
+        m.type,
+        m.data,
+        m.persist,
+        m.createdAt,
+        fts.rank,
+        snippet(messages_fts, 3, '<mark>', '</mark>', '...', 32) as snippet
+      FROM messages_fts fts
+      JOIN messages m ON m.id = fts.messageId
+      WHERE messages_fts MATCH ?
+        AND fts.chatId = ?
+    `;
+
+    const params: SQLInputValue[] = [query, chatId];
+
+    if (roles && roles.length > 0) {
+      const placeholders = roles.map(() => '?').join(', ');
+      sql += ` AND fts.name IN (${placeholders})`;
+      params.push(...roles);
+    }
+
+    sql += ' ORDER BY fts.rank LIMIT ?';
+    params.push(limit);
+
+    const rows = this.#db.prepare(sql).all(...params) as {
+      id: string;
+      chatId: string;
+      parentId: string | null;
+      name: string;
+      type: string | null;
+      data: string;
+      persist: number;
+      createdAt: number;
+      rank: number;
+      snippet: string;
+    }[];
+
+    return rows.map((row) => ({
+      message: {
+        id: row.id,
+        chatId: row.chatId,
+        parentId: row.parentId,
+        name: row.name,
+        type: row.type ?? undefined,
+        data: JSON.parse(row.data),
+        persist: row.persist === 1,
+        createdAt: row.createdAt,
+      },
+      rank: row.rank,
+      snippet: row.snippet,
+    }));
+  }
+
+  // ==========================================================================
   // Visualization Operations
   // ==========================================================================
 
   async getGraph(chatId: string): Promise<GraphData> {
-    // Get all messages (including deleted) for complete graph
+    // Get all messages for complete graph
     const messageRows = this.#db
       .prepare(
-        `SELECT id, parentId, name, data, createdAt, deleted
+        `SELECT id, parentId, name, data, createdAt
          FROM messages
          WHERE chatId = ?
          ORDER BY createdAt ASC`,
@@ -568,7 +653,6 @@ export class SqliteContextStore extends ContextStore {
       name: string;
       data: string;
       createdAt: number;
-      deleted: number;
     }[];
 
     const nodes: GraphNode[] = messageRows.map((row) => {
@@ -580,7 +664,6 @@ export class SqliteContextStore extends ContextStore {
         role: row.name,
         content: content.length > 50 ? content.slice(0, 50) + '...' : content,
         createdAt: row.createdAt,
-        deleted: row.deleted === 1,
       };
     });
 

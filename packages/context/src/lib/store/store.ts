@@ -2,10 +2,10 @@
  * Graph-based context store types and abstract interface.
  *
  * The storage model uses a DAG (Directed Acyclic Graph) for messages:
- * - Messages are nodes with parentId forming the graph
+ * - Messages are immutable nodes with parentId forming the graph
  * - Branches are pointers to head (tip) messages
  * - Checkpoints are pointers to specific messages
- * - No hard deletion - only soft delete via 'deleted' flag
+ * - History is preserved through branching (rewind creates new branch)
  */
 
 // ============================================================================
@@ -50,7 +50,6 @@ export interface MessageData {
   type?: string; // 'message', 'fragment'
   data: unknown; // JSON-serializable content
   persist: boolean;
-  deleted: boolean;
   createdAt: number;
 }
 
@@ -117,6 +116,32 @@ export interface CheckpointInfo {
 }
 
 // ============================================================================
+// Search Types
+// ============================================================================
+
+/**
+ * Options for searching messages.
+ */
+export interface SearchOptions {
+  /** Only search in specific roles (e.g., ['user', 'assistant']) */
+  roles?: string[];
+  /** Maximum results to return (default: 20) */
+  limit?: number;
+}
+
+/**
+ * Search result with relevance ranking.
+ */
+export interface SearchResult {
+  /** The matched message */
+  message: MessageData;
+  /** BM25 relevance score (lower = more relevant) */
+  rank: number;
+  /** Highlighted snippet with matched terms */
+  snippet?: string;
+}
+
+// ============================================================================
 // Graph Visualization Types
 // ============================================================================
 
@@ -129,7 +154,6 @@ export interface GraphNode {
   role: string; // 'user', 'assistant', etc.
   content: string; // Truncated preview of message content
   createdAt: number;
-  deleted: boolean;
 }
 
 /**
@@ -216,14 +240,9 @@ export abstract class ContextStore {
 
   /**
    * Walk up the parent chain from a head message, returning messages in
-   * chronological order (root first). Excludes deleted messages.
+   * chronological order (root first).
    */
   abstract getMessageChain(headId: string): Promise<MessageData[]>;
-
-  /**
-   * Soft delete a message (set deleted = true).
-   */
-  abstract softDeleteMessage(messageId: string): Promise<void>;
 
   /**
    * Check if a message has children (is a fork point).
@@ -298,12 +317,30 @@ export abstract class ContextStore {
   abstract deleteCheckpoint(chatId: string, name: string): Promise<void>;
 
   // ==========================================================================
+  // Search Operations
+  // ==========================================================================
+
+  /**
+   * Search messages using full-text search.
+   *
+   * @param chatId - The chat to search in
+   * @param query - FTS5 query string (supports AND, OR, NOT, phrases, prefix*)
+   * @param options - Search options
+   * @returns Search results ordered by relevance (lower rank = more relevant)
+   */
+  abstract searchMessages(
+    chatId: string,
+    query: string,
+    options?: SearchOptions,
+  ): Promise<SearchResult[]>;
+
+  // ==========================================================================
   // Visualization Operations
   // ==========================================================================
 
   /**
    * Get the complete graph data for a chat.
-   * Returns all messages (including deleted), branches, and checkpoints.
+   * Returns all messages, branches, and checkpoints.
    */
   abstract getGraph(chatId: string): Promise<GraphData>;
 }

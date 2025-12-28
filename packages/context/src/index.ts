@@ -32,6 +32,8 @@ export {
   type GraphBranch,
   type GraphCheckpoint,
   type GraphData,
+  type SearchOptions,
+  type SearchResult,
 } from './lib/store/store.ts';
 export { SqliteContextStore } from './lib/store/sqlite.store.ts';
 export { InMemoryContextStore } from './lib/store/memory.store.ts';
@@ -122,10 +124,10 @@ export type { Models, KnownModels } from './lib/models.generated.ts';
  * Context engine for managing AI conversation context with graph-based storage.
  *
  * The engine uses a DAG (Directed Acyclic Graph) model for messages:
- * - Messages are nodes with parentId forming the graph
+ * - Messages are immutable nodes with parentId forming the graph
  * - Branches are pointers to head (tip) messages
  * - Checkpoints are pointers to specific messages
- * - No hard deletion - only soft delete via 'deleted' flag
+ * - History is preserved through branching (rewind creates new branch)
  */
 export class ContextEngine {
   /** Non-message fragments (role, hints, etc.) - not persisted in graph */
@@ -333,7 +335,6 @@ export class ContextEngine {
         type: fragment.type,
         data: fragment.data,
         persist: fragment.persist ?? true,
-        deleted: false,
         createdAt: now,
       };
 

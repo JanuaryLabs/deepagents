@@ -366,6 +366,77 @@ async function demonstrateVisualization() {
   console.log(visualizeGraph(graph));
 }
 
+/**
+ * Example: Full-Text Search
+ *
+ * Search messages using FTS5 with stemming, ranking, and snippets.
+ */
+async function demonstrateSearch() {
+  console.log('\n=== Full-Text Search ===');
+
+  const searchStore = new InMemoryContextStore();
+  const context = new ContextEngine({
+    store: searchStore,
+    chatId: 'search-demo',
+  });
+
+  // Add some messages to search through
+  context.set(user('How do I learn Python programming?'));
+  context.set(
+    assistant(
+      'Python is a great language for beginners. Start with basic syntax and data types.',
+    ),
+  );
+  await context.save();
+
+  context.set(user('What about JavaScript?'));
+  context.set(
+    assistant(
+      'JavaScript is essential for web development. Learn DOM manipulation and async programming.',
+    ),
+  );
+  await context.save();
+
+  context.set(user('Can you recommend some machine learning resources?'));
+  context.set(
+    assistant(
+      'For machine learning, start with Python libraries like scikit-learn and TensorFlow.',
+    ),
+  );
+  await context.save();
+
+  // Basic search - finds "Python", "python", "pythons" (stemming)
+  console.log('\nSearch for "python":');
+  const pythonResults = await searchStore.searchMessages(
+    'search-demo',
+    'python',
+  );
+  for (const result of pythonResults) {
+    console.log(`  [rank: ${result.rank.toFixed(2)}] ${result.snippet}`);
+  }
+
+  // Search with FTS5 syntax
+  console.log('\nSearch for "learn AND programming":');
+  const learnResults = await searchStore.searchMessages(
+    'search-demo',
+    'learn AND programming',
+  );
+  for (const result of learnResults) {
+    console.log(`  [rank: ${result.rank.toFixed(2)}] ${result.snippet}`);
+  }
+
+  // Search only user messages
+  console.log('\nSearch user messages only for "learn":');
+  const userResults = await searchStore.searchMessages('search-demo', 'learn', {
+    roles: ['user'],
+  });
+  for (const result of userResults) {
+    console.log(
+      `  [${result.message.name}] [rank: ${result.rank.toFixed(2)}] ${result.snippet}`,
+    );
+  }
+}
+
 // Run examples
 async function main() {
   await demonstrateContextEngine();
@@ -376,6 +447,7 @@ async function main() {
   await demonstrateBranching();
   await demonstrateBranchSwitching();
   await demonstrateVisualization();
+  await demonstrateSearch();
 }
 
 // main().catch(console.error);

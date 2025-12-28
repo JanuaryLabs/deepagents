@@ -55,10 +55,9 @@ export function visualizeGraph(data: GraphData): string {
     isRoot: boolean,
   ): void {
     const connector = isRoot ? '' : isLast ? '└── ' : '├── ';
-    const roleLabel = node.deleted ? `~${node.role}~` : node.role;
     const contentPreview = node.content.replace(/\n/g, ' ');
 
-    let line = `${prefix}${connector}${node.id.slice(0, 8)} (${roleLabel}): "${contentPreview}"`;
+    let line = `${prefix}${connector}${node.id.slice(0, 8)} (${node.role}): "${contentPreview}"`;
 
     // Add branch markers
     const branches = branchHeads.get(node.id);
@@ -90,7 +89,7 @@ export function visualizeGraph(data: GraphData): string {
 
   // Add legend
   lines.push('');
-  lines.push('Legend: * = active branch, ~role~ = deleted, {...} = checkpoint');
+  lines.push('Legend: * = active branch, {...} = checkpoint');
 
   return lines.join('\n');
 }
