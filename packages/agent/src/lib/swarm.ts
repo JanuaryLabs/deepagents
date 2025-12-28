@@ -32,7 +32,12 @@ import {
   type TransferTool,
   isTransferToolResult,
 } from './agent.ts';
-import { last, messageToUiMessage, user } from './stream_utils.ts';
+import {
+  htmlElementChunking,
+  last,
+  messageToUiMessage,
+  user,
+} from './stream_utils.ts';
 
 export type OutputMode = 'full_history' | 'last_message';
 
@@ -140,7 +145,9 @@ export function execute<O, CIn, COut = CIn>(
       Array.isArray(messages) ? messages : [user(messages)],
     ),
     stopWhen: stepCountIs(25),
-    experimental_transform: smoothStream(),
+    experimental_transform: smoothStream({
+      chunking: htmlElementChunking(),
+    }),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,

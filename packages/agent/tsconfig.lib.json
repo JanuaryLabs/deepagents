@@ -10,6 +10,7 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"],
   "references": [
     {
       "path": "../retrieval/tsconfig.lib.json"
