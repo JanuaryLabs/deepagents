@@ -16,10 +16,12 @@ import {
 } from '@deepagents/agent';
 
 import type { Adapter, IntrospectOptions } from './adapters/adapter.ts';
+import { biAgent } from './agents/bi.agent.ts';
 import { chat1Agent, chat1Tools } from './agents/chat1.agent.ts';
 import { chat2Agent, chat2Tools } from './agents/chat2.agent.ts';
 import { chat3Agent, chat3Tools } from './agents/chat3.agent.ts';
 import { chat4Agent, chat4Tools } from './agents/chat4.agent.ts';
+import { developerAgent } from './agents/developer.agent.ts';
 import { explainerAgent } from './agents/explainer.agent.ts';
 import { toSql as agentToSql } from './agents/sql.agent.ts';
 import {
@@ -641,6 +643,137 @@ export class Text2Sql {
       messages,
       params,
       originalMessage,
+    );
+  }
+  /**
+   * Business intelligence focused chat agent.
+   *
+   * Creates dashboards using MDX components with embedded SQL queries.
+   * The agent explores data, validates SQL, and outputs markdown with
+   * JSX chart components that the frontend renders via MDX.
+   *
+   * @example
+   * ```typescript
+   * const result = await text2sql.bi(
+   *   [user("Show me a sales dashboard for last 30 days")],
+   *   { chatId: 'dashboard-1', userId: 'user-1' }
+   * );
+   * // Result contains markdown with <BarChart sql="..." />, <KPI sql="..." />, etc.
+   * ```
+   */
+  public async bi(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
+    const [introspection, userTeachables] = await Promise.all([
+      this.index({ onProgress: console.log }),
+      this.#config.memory
+        ? this.#config.memory.toTeachables(params.userId)
+        : [],
+    ]);
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const originalMessages = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
+
+    // Pass configured instructions as teachings for the BI agent
+    const result = stream(
+      biAgent.clone({
+        model: this.#config.model,
+      }),
+      originalMessages,
+      {
+        teachings: toInstructions(
+          'instructions',
+          ...this.#config.instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
+        adapter: this.#config.adapter,
+        introspection,
+      },
+    );
+
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessages,
+    );
+  }
+
+  /**
+   * Developer-focused conversational interface for SQL generation.
+   *
+   * Provides power-user tools for query building without execution:
+   * - generate_sql: Convert natural language to validated SQL
+   * - validate_sql: Check SQL syntax
+   * - explain_sql: Get plain-English explanations
+   * - show_schema: Explore database schema on demand
+   *
+   * @example
+   * ```typescript
+   * const result = await text2sql.developer(
+   *   [user("Generate a query to find top customers by revenue")],
+   *   { chatId: 'dev-session-1', userId: 'dev-1' }
+   * );
+   * // Agent responds with SQL, can validate, explain, or refine iteratively
+   * ```
+   */
+  public async developer(
+    messages: UIMessage[],
+    params: {
+      chatId: string;
+      userId: string;
+    },
+  ) {
+    const [introspection, userTeachables] = await Promise.all([
+      this.index({ onProgress: console.log }),
+      this.#config.memory
+        ? this.#config.memory.toTeachables(params.userId)
+        : [],
+    ]);
+    const chat = await this.#config.history.upsertChat({
+      id: params.chatId,
+      userId: params.userId,
+      title: 'Chat ' + params.chatId,
+    });
+
+    const originalMessages = [
+      ...chat.messages.map((it) => it.content),
+      ...messages,
+    ];
+
+    const result = stream(
+      developerAgent.clone({
+        model: this.#config.model,
+      }),
+      originalMessages,
+      {
+        teachings: toInstructions(
+          'instructions',
+          ...this.#config.instructions,
+          teachable('user_profile', ...userTeachables),
+        ),
+        adapter: this.#config.adapter,
+        introspection,
+        instructions: this.#config.instructions,
+      },
+    );
+
+    return this.#createUIMessageStream(
+      result,
+      messages,
+      params,
+      originalMessages,
     );
   }
 

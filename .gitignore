@@ -34,6 +34,18 @@ npm-debug.log
 yarn-error.log
 testem.log
 /typings
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
 
 # System Files
 .DS_Store

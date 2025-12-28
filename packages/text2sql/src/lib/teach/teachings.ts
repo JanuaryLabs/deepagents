@@ -89,7 +89,7 @@ export function guidelines(options: TeachingsOptions = {}): Teachables[] {
       action: 'Validate syntax and schema references before returning.',
     }),
     guardrail({
-      rule: 'Only generate SELECT statements (read-only queries).',
+      rule: 'Only generate SELECT/WITH statements (read-only queries).',
       reason: 'Prevents accidental data modification.',
       action:
         'Never generate INSERT, UPDATE, DELETE, DROP, or other DDL/DML statements.',
