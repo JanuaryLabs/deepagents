@@ -7,6 +7,7 @@ import {
   type PrepareStepFunction,
   type PrepareStepResult,
   type StepResult,
+  type StreamTextTransform,
   type ToolCallRepairFunction,
   type ToolSet,
   type UIDataTypes,
@@ -32,12 +33,7 @@ import {
   type TransferTool,
   isTransferToolResult,
 } from './agent.ts';
-import {
-  htmlElementChunking,
-  last,
-  messageToUiMessage,
-  user,
-} from './stream_utils.ts';
+import { last, messageToUiMessage, user } from './stream_utils.ts';
 
 export type OutputMode = 'full_history' | 'last_message';
 
@@ -133,6 +129,7 @@ export function execute<O, CIn, COut = CIn>(
   config?: {
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
+    transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   },
 ) {
   const runId = generateId();
@@ -145,9 +142,7 @@ export function execute<O, CIn, COut = CIn>(
       Array.isArray(messages) ? messages : [user(messages)],
     ),
     stopWhen: stepCountIs(25),
-    experimental_transform: smoothStream({
-      chunking: htmlElementChunking(),
-    }),
+    experimental_transform: config?.transform ?? smoothStream(),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,

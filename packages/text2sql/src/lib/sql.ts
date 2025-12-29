@@ -16,7 +16,6 @@ import {
 } from '@deepagents/agent';
 
 import type { Adapter, IntrospectOptions } from './adapters/adapter.ts';
-import { biAgent } from './agents/bi.agent.ts';
 import { chat1Agent, chat1Tools } from './agents/chat1.agent.ts';
 import { chat2Agent, chat2Tools } from './agents/chat2.agent.ts';
 import { chat3Agent, chat3Tools } from './agents/chat3.agent.ts';
@@ -645,70 +644,6 @@ export class Text2Sql {
       originalMessage,
     );
   }
-  /**
-   * Business intelligence focused chat agent.
-   *
-   * Creates dashboards using MDX components with embedded SQL queries.
-   * The agent explores data, validates SQL, and outputs markdown with
-   * JSX chart components that the frontend renders via MDX.
-   *
-   * @example
-   * ```typescript
-   * const result = await text2sql.bi(
-   *   [user("Show me a sales dashboard for last 30 days")],
-   *   { chatId: 'dashboard-1', userId: 'user-1' }
-   * );
-   * // Result contains markdown with <BarChart sql="..." />, <KPI sql="..." />, etc.
-   * ```
-   */
-  public async bi(
-    messages: UIMessage[],
-    params: {
-      chatId: string;
-      userId: string;
-    },
-  ) {
-    const [introspection, userTeachables] = await Promise.all([
-      this.index({ onProgress: console.log }),
-      this.#config.memory
-        ? this.#config.memory.toTeachables(params.userId)
-        : [],
-    ]);
-    const chat = await this.#config.history.upsertChat({
-      id: params.chatId,
-      userId: params.userId,
-      title: 'Chat ' + params.chatId,
-    });
-
-    const originalMessages = [
-      ...chat.messages.map((it) => it.content),
-      ...messages,
-    ];
-
-    // Pass configured instructions as teachings for the BI agent
-    const result = stream(
-      biAgent.clone({
-        model: this.#config.model,
-      }),
-      originalMessages,
-      {
-        teachings: toInstructions(
-          'instructions',
-          ...this.#config.instructions,
-          teachable('user_profile', ...userTeachables),
-        ),
-        adapter: this.#config.adapter,
-        introspection,
-      },
-    );
-
-    return this.#createUIMessageStream(
-      result,
-      messages,
-      params,
-      originalMessages,
-    );
-  }
 
   /**
    * Developer-focused conversational interface for SQL generation.
@@ -741,39 +676,28 @@ export class Text2Sql {
         ? this.#config.memory.toTeachables(params.userId)
         : [],
     ]);
-    const chat = await this.#config.history.upsertChat({
-      id: params.chatId,
-      userId: params.userId,
-      title: 'Chat ' + params.chatId,
-    });
 
-    const originalMessages = [
-      ...chat.messages.map((it) => it.content),
-      ...messages,
-    ];
-
-    const result = stream(
-      developerAgent.clone({
-        model: this.#config.model,
-      }),
-      originalMessages,
-      {
-        teachings: toInstructions(
-          'instructions',
-          ...this.#config.instructions,
-          teachable('user_profile', ...userTeachables),
-        ),
-        adapter: this.#config.adapter,
-        introspection,
-        instructions: this.#config.instructions,
-      },
-    );
-
-    return this.#createUIMessageStream(
-      result,
-      messages,
+    return withChat(
+      this.#config.history,
       params,
-      originalMessages,
+      messages,
+      (originalMessages) =>
+        stream(
+          developerAgent.clone({
+            model: this.#config.model,
+          }),
+          originalMessages,
+          {
+            teachings: toInstructions(
+              'instructions',
+              ...this.#config.instructions,
+              teachable('user_profile', ...userTeachables),
+            ),
+            adapter: this.#config.adapter,
+            introspection,
+            instructions: this.#config.instructions,
+          },
+        ),
     );
   }
 
@@ -828,4 +752,64 @@ export class Text2Sql {
       },
     });
   }
+}
+
+export async function withChat(
+  history: History,
+  params: { chatId: string; userId: string },
+  messages: UIMessage[],
+  streamFn: (originalMessages: UIMessage[]) => ReturnType<typeof stream>,
+) {
+  const chat = await history.upsertChat({
+    id: params.chatId,
+    userId: params.userId,
+    title: 'Chat ' + params.chatId,
+  });
+  const originalMessages = [
+    ...chat.messages.map((it) => it.content),
+    ...messages,
+  ];
+  const result = streamFn(originalMessages);
+  return result.toUIMessageStream({
+    onError: (error) => {
+      if (NoSuchToolError.isInstance(error)) {
+        return 'The model tried to call an unknown tool.';
+      } else if (InvalidToolInputError.isInstance(error)) {
+        return 'The model called a tool with invalid arguments.';
+      } else if (ToolCallRepairError.isInstance(error)) {
+        return 'The model tried to call a tool with invalid arguments, but it was repaired.';
+      } else {
+        return 'An unknown error occurred.';
+      }
+    },
+    sendStart: true,
+    sendFinish: true,
+    sendReasoning: true,
+    sendSources: true,
+    originalMessages: originalMessages,
+    generateMessageId: generateId,
+    onFinish: async ({ responseMessage, isContinuation }) => {
+      const userMessage = messages.at(-1);
+      if (!isContinuation && userMessage) {
+        console.log(
+          'Saving user message to history:',
+          JSON.stringify(userMessage),
+        );
+
+        await history.addMessage({
+          id: v7(),
+          chatId: params.chatId,
+          role: userMessage.role,
+          content: userMessage,
+        });
+      }
+
+      await history.addMessage({
+        id: v7(),
+        chatId: params.chatId,
+        role: responseMessage.role,
+        content: responseMessage,
+      });
+    },
+  });
 }
