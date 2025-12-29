@@ -126,13 +126,7 @@ npm install @deepagents/context`}
               AGENTS
             </h1>
             <p
-              className="text-gray font-sans"
-              style={{
-                fontSize: '1.25rem',
-                lineHeight: 1.6,
-                maxWidth: '540px',
-                marginBottom: '2.5rem',
-              }}
+              className="text-fd-muted-foreground font-sans text-xl leading-relaxed max-w-[540px] mb-10"
             >
               AI-native building blocks for production systems. Composable
               packages for agents, retrieval, and natural language interfaces.
