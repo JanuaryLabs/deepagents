@@ -29,8 +29,6 @@ import {
   ValidatedProducer,
   FilteredProducer,
   DeduplicatedProducer,
-  // Helper
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 ```
 
@@ -41,14 +39,12 @@ import {
 ### Basic Bootstrap
 
 ```typescript
-import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(
-  new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
     count: 100,
     complexity: ['low', 'medium', 'hard'],
-  })
-);
+  }).toPairs();
 ```
 
 ### Enhanced Bootstrap with Personas
@@ -59,7 +55,6 @@ Generate more realistic questions by using personas that match your actual users
 import {
   SchemaSynthesizer,
   PersonaGenerator,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Step 1: Generate personas from schema
@@ -68,13 +63,11 @@ const personas = await new PersonaGenerator(adapter, {
 }).generate();
 
 // Step 2: Generate pairs using personas
-const pairs = await toPairs(
-  new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
     count: 100,
     complexity: ['low', 'medium', 'hard'],
     personas,
-  })
-);
+  }).toPairs();
 ```
 
 ### Full Bootstrap Pipeline
@@ -90,7 +83,6 @@ import {
   DepthEvolver,
   ValidatedProducer,
   DeduplicatedProducer,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Step 1: Generate supporting artifacts
@@ -100,43 +92,35 @@ const [personas, teachings] = await Promise.all([
 ]);
 
 // Step 2: Generate baseline pairs
-const baseline = await toPairs(
-  new SchemaSynthesizer(adapter, {
+const baseline = await new SchemaSynthesizer(adapter, {
     count: 50,
     complexity: 'low',
     personas,
     teachings,
-  })
-);
+  }).toPairs();
 console.log(`Baseline: ${baseline.length} pairs`);
 
 // Step 3: Evolve in depth (more complex queries)
-const complex = await toPairs(
-  new DepthEvolver(baseline, adapter, {
+const complex = await new DepthEvolver(baseline, adapter, {
     count: 2,
     techniques: ['add-aggregation', 'add-join', 'add-filter'],
-  })
-);
+  }).toPairs();
 console.log(`After depth evolution: ${complex.length} pairs`);
 
 // Step 4: Evolve in breadth (paraphrased variations)
-const varied = await toPairs(
-  new BreadthEvolver([...baseline, ...complex], {
+const varied = await new BreadthEvolver([...baseline, ...complex], {
     count: 3,
-  })
-);
+  }).toPairs();
 console.log(`After breadth evolution: ${varied.length} pairs`);
 
 // Step 5: Validate and deduplicate
-const final = await toPairs(
-  new DeduplicatedProducer(
+const final = await new DeduplicatedProducer(
     new ValidatedProducer(
       { produce: async function* () { yield varied; } },
       adapter
     ),
     { mode: 'sql' }
-  )
-);
+  ).toPairs();
 console.log(`Final dataset: ${final.length} validated pairs`);
 ```
 
@@ -147,11 +131,11 @@ console.log(`Final dataset: ${final.length} validated pairs`);
 ### Basic Extraction
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { MessageExtractor } from '@deepagents/text2sql/synthesis';
 
 const messages = await loadChatHistory(); // Your data source
 
-const pairs = await toPairs(new MessageExtractor(messages));
+const pairs = await new MessageExtractor(messages).toPairs();
 ```
 
 ### Extraction with Context
@@ -161,14 +145,11 @@ For multi-turn conversations where context matters:
 ```typescript
 import {
   WindowedContextExtractor,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(
-  new WindowedContextExtractor(messages, {
+const pairs = await new WindowedContextExtractor(messages, {
     windowSize: 3, // Include 3 preceding messages as context
-  })
-);
+  }).toPairs();
 
 // Each pair includes context array
 // { question, sql, context: ['prev msg 1', 'prev msg 2', 'prev msg 3'], success }
@@ -183,39 +164,32 @@ import {
   ValidatedProducer,
   FilteredProducer,
   DeduplicatedProducer,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Step 1: Extract from history
 const messages = await loadChatHistory();
-const extracted = await toPairs(new MessageExtractor(messages));
+const extracted = await new MessageExtractor(messages).toPairs();
 console.log(`Extracted: ${extracted.length} pairs`);
 
 // Step 2: Validate against current schema
-const validated = await toPairs(
-  new ValidatedProducer(
+const validated = await new ValidatedProducer(
     { produce: async function* () { yield extracted; } },
     adapter
-  )
-);
+  ).toPairs();
 console.log(`Valid: ${validated.filter(p => p.success).length} pairs`);
 
 // Step 3: Filter to successful only
 const successful = validated.filter(p => p.success);
 
 // Step 4: Generate variations
-const augmented = await toPairs(
-  new BreadthEvolver(successful, { count: 3 })
-);
+const augmented = await new BreadthEvolver(successful, { count: 3 }).toPairs();
 console.log(`Augmented: ${augmented.length} pairs`);
 
 // Step 5: Deduplicate
-const final = await toPairs(
-  new DeduplicatedProducer(
+const final = await new DeduplicatedProducer(
     { produce: async function* () { yield augmented; } },
     { mode: 'exact' }
-  )
-);
+  ).toPairs();
 console.log(`Final: ${final.length} unique pairs`);
 ```
 
@@ -226,17 +200,15 @@ console.log(`Final: ${final.length} unique pairs`);
 ### Basic SQL Extraction
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { SqlExtractor } from '@deepagents/text2sql/synthesis';
 
 const sqlLogs = await loadQueryLogs(); // Your SQL logs
 const sqls = sqlLogs.map(log => log.sql);
 
-const pairs = await toPairs(
-  new SqlExtractor(sqls, adapter, {
+const pairs = await new SqlExtractor(sqls, adapter, {
     validateSql: true,
     skipInvalid: true,
-  })
-);
+  }).toPairs();
 ```
 
 ### Full SQL Log Pipeline
@@ -247,7 +219,6 @@ import {
   BreadthEvolver,
   DepthEvolver,
   DeduplicatedProducer,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Step 1: Load and deduplicate SQL logs
@@ -256,27 +227,21 @@ const uniqueSqls = [...new Set(sqlLogs.map(log => log.sql))];
 console.log(`Unique SQLs: ${uniqueSqls.length}`);
 
 // Step 2: Generate questions for each SQL
-const extracted = await toPairs(
-  new SqlExtractor(uniqueSqls, adapter, {
+const extracted = await new SqlExtractor(uniqueSqls, adapter, {
     validateSql: true,
     skipInvalid: true,
-  })
-);
+  }).toPairs();
 console.log(`Extracted: ${extracted.length} pairs`);
 
 // Step 3: Generate question variations (breadth)
-const varied = await toPairs(
-  new BreadthEvolver(extracted, { count: 2 })
-);
+const varied = await new BreadthEvolver(extracted, { count: 2 }).toPairs();
 console.log(`With variations: ${varied.length} pairs`);
 
 // Step 4: Deduplicate by question
-const final = await toPairs(
-  new DeduplicatedProducer(
+const final = await new DeduplicatedProducer(
     { produce: async function* () { yield varied; } },
     { mode: 'exact' }
-  )
-);
+  ).toPairs();
 console.log(`Final: ${final.length} pairs`);
 ```
 
@@ -294,32 +259,27 @@ import {
   DepthEvolver,
   ValidatedProducer,
   DeduplicatedProducer,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Generate personas for realistic questions
 const personas = await new PersonaGenerator(adapter, { count: 5 }).generate();
 
 // Source 1: Schema-based synthesis
-const fromSchema = await toPairs(
-  new SchemaSynthesizer(adapter, {
+const fromSchema = await new SchemaSynthesizer(adapter, {
     count: 50,
     complexity: ['low', 'medium'],
     personas,
-  })
-);
+  }).toPairs();
 console.log(`From schema: ${fromSchema.length} pairs`);
 
 // Source 2: Chat history
 const messages = await loadChatHistory();
-const fromHistory = await toPairs(new MessageExtractor(messages));
+const fromHistory = await new MessageExtractor(messages).toPairs();
 console.log(`From history: ${fromHistory.length} pairs`);
 
 // Source 3: SQL logs
 const sqlLogs = await loadQueryLogs();
-const fromLogs = await toPairs(
-  new SqlExtractor(sqlLogs.map(l => l.sql), adapter, { skipInvalid: true })
-);
+const fromLogs = await new SqlExtractor(sqlLogs.map(l => l.sql), adapter, { skipInvalid: true }).toPairs();
 console.log(`From logs: ${fromLogs.length} pairs`);
 
 // Combine all sources
@@ -327,28 +287,22 @@ const combined = [...fromSchema, ...fromHistory, ...fromLogs];
 console.log(`Combined: ${combined.length} pairs`);
 
 // Evolve for complexity
-const evolved = await toPairs(
-  new DepthEvolver(combined, adapter, {
+const evolved = await new DepthEvolver(combined, adapter, {
     count: 1,
     techniques: ['add-aggregation', 'add-filter'],
-  })
-);
+  }).toPairs();
 
 // Evolve for variety
-const varied = await toPairs(
-  new BreadthEvolver([...combined, ...evolved], { count: 2 })
-);
+const varied = await new BreadthEvolver([...combined, ...evolved], { count: 2 }).toPairs();
 
 // Validate and deduplicate
-const final = await toPairs(
-  new DeduplicatedProducer(
+const final = await new DeduplicatedProducer(
     new ValidatedProducer(
       { produce: async function* () { yield varied; } },
       adapter
     ),
     { mode: 'sql' }
-  )
-);
+  ).toPairs();
 
 console.log(`Final dataset: ${final.length} pairs`);
 ```
@@ -367,7 +321,6 @@ import {
   ValidatedProducer,
   FilteredProducer,
   DeduplicatedProducer,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 async function buildProductionDataset(adapter, options: {
@@ -385,67 +338,55 @@ async function buildProductionDataset(adapter, options: {
 
   // Phase 2: Baseline generation
   console.log('Phase 2: Generating baseline pairs...');
-  const baseline = await toPairs(
-    new SchemaSynthesizer(adapter, {
+  const baseline = await new SchemaSynthesizer(adapter, {
       count: Math.ceil(targetCount / 4),
       complexity: ['low', 'medium', 'hard'],
       personas,
       teachings,
-    })
-  );
+    }).toPairs();
 
   // Phase 3: Depth evolution (complexity)
   console.log('Phase 3: Depth evolution...');
-  const complex = await toPairs(
-    new DepthEvolver(baseline, adapter, {
+  const complex = await new DepthEvolver(baseline, adapter, {
       count: 2,
       techniques: ['add-aggregation', 'add-join', 'add-reasoning'],
       concurrency: 4,
-    })
-  );
+    }).toPairs();
 
   // Phase 4: Breadth evolution (variety)
   console.log('Phase 4: Breadth evolution...');
   const allPairs = [...baseline, ...complex];
-  const varied = await toPairs(
-    new BreadthEvolver(allPairs, {
+  const varied = await new BreadthEvolver(allPairs, {
       count: 2,
       concurrency: 4,
-    })
-  );
+    }).toPairs();
 
   // Phase 5: Quality gates
   console.log('Phase 5: Applying quality gates...');
 
   // Gate 1: Validation
-  const validated = await toPairs(
-    new ValidatedProducer(
+  const validated = await new ValidatedProducer(
       { produce: async function* () { yield varied; } },
       adapter,
       { execute: true } // Actually run queries
-    )
-  );
+    ).toPairs();
 
   // Gate 2: Filter by tables (if specified)
   let filtered = validated;
   if (tables?.length) {
-    filtered = await toPairs(
-      new FilteredProducer(
+    filtered = await new FilteredProducer(
         { produce: async function* () { yield validated; } },
         { successOnly: true, tables }
-      )
-    );
+      ).toPairs();
   } else {
     filtered = validated.filter(p => p.success);
   }
 
   // Gate 3: Deduplication
-  const final = await toPairs(
-    new DeduplicatedProducer(
+  const final = await new DeduplicatedProducer(
       { produce: async function* () { yield filtered; } },
       { mode: 'sql' }
-    )
-  );
+    ).toPairs();
 
   // Report
   console.log('\n=== Pipeline Complete ===');

@@ -19,6 +19,12 @@ export interface ChatData {
   id: string;
   title?: string;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Stored chat data returned from database (includes timestamps).
+ */
+export interface StoredChatData extends ChatData {
   createdAt: number;
   updatedAt: number;
 }
@@ -49,7 +55,6 @@ export interface MessageData {
   name: string; // 'user', 'assistant', 'role', 'hint', etc.
   type?: string; // 'message', 'fragment'
   data: unknown; // JSON-serializable content
-  persist: boolean;
   createdAt: number;
 }
 
@@ -207,17 +212,25 @@ export abstract class ContextStore {
   abstract createChat(chat: ChatData): Promise<void>;
 
   /**
+   * Create a chat if it doesn't exist, or return existing one.
+   * Returns the stored chat data with timestamps.
+   */
+  abstract upsertChat(chat: ChatData): Promise<StoredChatData>;
+
+  /**
    * Get a chat by ID.
    */
-  abstract getChat(chatId: string): Promise<ChatData | undefined>;
+  abstract getChat(chatId: string): Promise<StoredChatData | undefined>;
 
   /**
    * Update chat metadata.
+   * Note: updatedAt is automatically managed by database triggers.
+   * Returns the updated chat data.
    */
   abstract updateChat(
     chatId: string,
-    updates: Partial<Pick<ChatData, 'title' | 'metadata' | 'updatedAt'>>,
-  ): Promise<void>;
+    updates: Partial<Pick<ChatData, 'title' | 'metadata'>>,
+  ): Promise<StoredChatData>;
 
   /**
    * List all chats, sorted by updatedAt descending.

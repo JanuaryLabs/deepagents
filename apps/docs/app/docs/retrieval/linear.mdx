@@ -1,0 +1,234 @@
+---
+title: Linear Connector
+description: Index Linear workspace issues for semantic search
+---
+
+The `linear` connector indexes issues assigned to the authenticated user from a Linear workspace, enabling semantic search over issue content.
+
+## Import
+
+```typescript
+import { linear } from '@deepagents/retrieval/connectors';
+```
+
+## Setup
+
+You'll need a Linear API key. Create one at [Linear Settings → API](https://linear.app/settings/api).
+
+```bash
+export LINEAR_API_KEY=lin_api_xxxxxxxxxxxxx
+```
+
+## Basic Usage
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { linear } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./linear.db', 384);
+
+const results = await similaritySearch('authentication bug', {
+  connector: linear(process.env.LINEAR_API_KEY!),
+  store,
+  embedder: fastembed(),
+});
+```
+
+## Parameters
+
+```typescript
+linear(apiKey: string)
+```
+
+The connector uses the Linear SDK to authenticate and fetch issues.
+
+## Content Format
+
+Each issue is formatted as:
+
+```
+Issue: {title}
+Description: {description or "No description"}
+Status: {state name or "Unknown"}
+ID: {issue id}
+```
+
+## Instructions Property
+
+The connector includes an `instructions` property:
+
+```typescript
+const connector = linear(process.env.LINEAR_API_KEY!);
+
+console.log(connector.instructions);
+// "You answer questions about Linear issues assigned to the user."
+```
+
+This can be passed to an LLM to provide context about the knowledge source.
+
+## Real-World Examples
+
+### Issue Search
+
+Find issues related to a specific topic:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { linear } from '@deepagents/retrieval/connectors';
+
+async function searchIssues(query: string) {
+  const store = nodeSQLite('./issues.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: linear(process.env.LINEAR_API_KEY!),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.map(r => ({
+    content: r.content,
+    similarity: r.similarity,
+  }));
+}
+
+// Find issues about payment processing
+const results = await searchIssues('payment processing integration');
+```
+
+### Developer Assistant
+
+Build an assistant that can answer questions about your current work:
+
+```typescript
+import { agent, instructions, execute } from '@deepagents/agent';
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { linear } from '@deepagents/retrieval/connectors';
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
+import z from 'zod';
+
+const store = nodeSQLite('./linear.db', 384);
+const linearConnector = linear(process.env.LINEAR_API_KEY!);
+
+const searchIssuesTool = tool({
+  description: 'Search Linear issues assigned to you',
+  parameters: z.object({
+    query: z.string().describe('Search query'),
+  }),
+  execute: async ({ query }) => {
+    const results = await similaritySearch(query, {
+      connector: linearConnector,
+      store,
+      embedder: fastembed(),
+    });
+
+    return results.slice(0, 5).map(r => r.content);
+  },
+});
+
+const assistant = agent({
+  name: 'WorkAssistant',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['You help developers understand their assigned Linear issues.'],
+    routine: [
+      'Search issues when asked about work items',
+      'Summarize relevant issues',
+      'Provide context from issue descriptions',
+    ],
+  }),
+  tools: { searchIssues: searchIssuesTool },
+});
+
+// Ask about current work
+const stream = execute(assistant, 'What authentication issues do I have?', {});
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+### Sprint Overview
+
+Generate a summary of issues for standup or sprint planning:
+
+```typescript
+import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { linear } from '@deepagents/retrieval/connectors';
+
+async function indexIssues() {
+  const store = nodeSQLite('./sprint.db', 384);
+
+  // Index all assigned issues
+  await ingest({
+    connector: linear(process.env.LINEAR_API_KEY!),
+    store,
+    embedder: fastembed(),
+  });
+
+  console.log('Issues indexed successfully');
+}
+
+// Run this periodically to keep issues up to date
+await indexIssues();
+```
+
+### Project Context
+
+Build context for code review or planning:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { linear } from '@deepagents/retrieval/connectors';
+
+async function getProjectContext(feature: string) {
+  const store = nodeSQLite('./context.db', 384);
+
+  const results = await similaritySearch(feature, {
+    connector: linear(process.env.LINEAR_API_KEY!),
+    store,
+    embedder: fastembed(),
+  });
+
+  // Extract relevant issues
+  const issues = results.slice(0, 3).map(r => {
+    const match = r.content.match(/Issue: (.+)\n/);
+    return {
+      title: match?.[1] || 'Unknown',
+      content: r.content,
+      similarity: r.similarity,
+    };
+  });
+
+  return issues;
+}
+
+// Get context for a feature you're working on
+const context = await getProjectContext('user authentication flow');
+console.log('Related issues:', context);
+```
+
+## Source ID
+
+The connector uses a fixed source ID:
+
+```typescript
+linear(apiKey)
+// sourceId: "linear:workspace"
+```
+
+All issues share this source ID regardless of the API key used.
+
+## Limitations
+
+Current limitations of the Linear connector:
+
+- **Assigned issues only**: Only indexes issues assigned to the authenticated user
+- **No comments**: Issue comments are not included
+- **No attachments**: File attachments are not processed
+- **Synchronous sources**: Returns a Promise, not an AsyncGenerator
+
+## Next Steps
+
+- [Repo Connector](/docs/retrieval/repo) - Index repository code
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build your own connector
+- [Recipes](/docs/retrieval/recipes) - Build a work assistant

@@ -1,6 +1,12 @@
+import { type UIMessage, generateId } from 'ai';
+
 import type { ContextFragment } from './lib/context.ts';
 import { isMessageFragment } from './lib/context.ts';
-import { type EstimateResult, getModelsRegistry } from './lib/estimate.ts';
+import {
+  type EstimateResult,
+  type FragmentEstimate,
+  getModelsRegistry,
+} from './lib/estimate.ts';
 import type { Models } from './lib/models.generated.ts';
 import {
   type ContextRenderer,
@@ -13,39 +19,35 @@ import {
   type CheckpointData,
   type CheckpointInfo,
   ContextStore,
+  type GraphData,
   type MessageData,
+  type StoredChatData,
 } from './lib/store/store.ts';
 
-export type { ContextFragment, FragmentType } from './lib/context.ts';
+export type { FragmentCodec } from './lib/codec.ts';
 export { isMessageFragment } from './lib/context.ts';
+export type { ContextFragment, FragmentType } from './lib/context.ts';
+export { InMemoryContextStore } from './lib/store/memory.store.ts';
+export { SqliteContextStore } from './lib/store/sqlite.store.ts';
 export {
   ContextStore,
-  type ChatData,
-  type ChatInfo,
-  type MessageData,
-  type MessageInfo,
   type BranchData,
   type BranchInfo,
+  type ChatData,
+  type ChatInfo,
   type CheckpointData,
   type CheckpointInfo,
-  type GraphNode,
   type GraphBranch,
   type GraphCheckpoint,
   type GraphData,
+  type GraphNode,
+  type MessageData,
+  type MessageInfo,
   type SearchOptions,
   type SearchResult,
+  type StoredChatData,
 } from './lib/store/store.ts';
-export { SqliteContextStore } from './lib/store/sqlite.store.ts';
-export { InMemoryContextStore } from './lib/store/memory.store.ts';
 export { visualizeGraph } from './lib/visualize.ts';
-
-/**
- * Message format compatible with AI SDK's CoreMessage.
- */
-export interface Message {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
 
 /**
  * Result of resolving context - ready for AI SDK consumption.
@@ -54,7 +56,7 @@ export interface ResolveResult {
   /** Rendered non-message fragments for system prompt */
   systemPrompt: string;
   /** Message fragments decoded to AI SDK format */
-  messages: Message[];
+  messages: unknown[];
 }
 
 /**
@@ -62,7 +64,7 @@ export interface ResolveResult {
  */
 export interface ResolveOptions {
   /** Renderer to use for system prompt (defaults to XmlRenderer) */
-  renderer?: ContextRenderer;
+  renderer: ContextRenderer;
 }
 
 /**
@@ -101,24 +103,64 @@ export interface ChatMeta {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Options for context inspection.
+ */
+export interface InspectOptions {
+  /** Model ID for cost estimation (required) */
+  modelId: Models;
+  /** Renderer for estimation (required) */
+  renderer: ContextRenderer;
+}
+
+/**
+ * Result of inspecting context state.
+ * Provides a comprehensive JSON-serializable snapshot for debugging.
+ */
+export interface InspectResult {
+  /** Token usage and cost estimation */
+  estimate: EstimateResult;
+  /** Rendered output using the provided renderer */
+  rendered: string;
+  /** Fragment structure breakdown */
+  fragments: {
+    /** Non-message fragments (role, hints, etc.) */
+    context: ContextFragment[];
+    /** Pending messages not yet saved to store */
+    pending: ContextFragment[];
+    /** Persisted messages from the store */
+    persisted: MessageData[];
+  };
+  /** Conversation graph with branches and checkpoints */
+  graph: GraphData;
+  /** Inspection metadata */
+  meta: {
+    chatId: string;
+    branch: string;
+    timestamp: number;
+  };
+}
+
 export {
-  type ContextRenderer,
-  type RendererOptions,
-  XmlRenderer,
+  ModelsRegistry,
+  defaultTokenizer,
+  estimate,
+  getModelsRegistry,
+  type EstimateResult,
+  type FragmentEstimate,
+  type ModelCost,
+  type ModelInfo,
+  type Tokenizer,
+} from './lib/estimate.ts';
+export type { KnownModels, Models } from './lib/models.generated.ts';
+export {
   MarkdownRenderer,
   TomlRenderer,
   ToonRenderer,
+  XmlRenderer,
+  type ContextRenderer,
+  type RendererOptions,
 } from './lib/renderers/abstract.renderer.ts';
-export {
-  type ModelCost,
-  type ModelInfo,
-  type EstimateResult,
-  type Tokenizer,
-  defaultTokenizer,
-  ModelsRegistry,
-  getModelsRegistry,
-} from './lib/estimate.ts';
-export type { Models, KnownModels } from './lib/models.generated.ts';
 
 /**
  * Context engine for managing AI conversation context with graph-based storage.
@@ -131,14 +173,14 @@ export type { Models, KnownModels } from './lib/models.generated.ts';
  */
 export class ContextEngine {
   /** Non-message fragments (role, hints, etc.) - not persisted in graph */
-  #contextFragments: ContextFragment[] = [];
+  #fragments: ContextFragment[] = [];
   /** Pending message fragments to be added to graph */
   #pendingMessages: ContextFragment[] = [];
   #store: ContextStore;
   #chatId: string;
   #branchName: string;
   #branch: BranchData | null = null;
-  #chatData: ChatData | null = null;
+  #chatData: StoredChatData | null = null;
   #initialized = false;
 
   constructor(options: ContextEngineOptions) {
@@ -158,21 +200,8 @@ export class ContextEngine {
       return;
     }
 
-    // Get or create chat
-    const existingChat = await this.#store.getChat(this.#chatId);
-    if (existingChat) {
-      this.#chatData = existingChat;
-    } else {
-      const now = Date.now();
-      this.#chatData = {
-        id: this.#chatId,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await this.#store.createChat(this.#chatData);
-    }
+    this.#chatData = await this.#store.upsertChat({ id: this.#chatId });
 
-    // Get or create branch
     const existingBranch = await this.#store.getBranch(
       this.#chatId,
       this.#branchName,
@@ -236,7 +265,7 @@ export class ContextEngine {
       if (isMessageFragment(fragment)) {
         this.#pendingMessages.push(fragment);
       } else {
-        this.#contextFragments.push(fragment);
+        this.#fragments.push(fragment);
       }
     }
     return this;
@@ -247,7 +276,7 @@ export class ContextEngine {
    * @internal Use resolve() instead for public API.
    */
   public render(renderer: ContextRenderer) {
-    return renderer.render(this.#contextFragments);
+    return renderer.render(this.#fragments);
   }
 
   /**
@@ -267,35 +296,27 @@ export class ContextEngine {
    * await generateText({ system: systemPrompt, messages });
    * ```
    */
-  public async resolve(options: ResolveOptions = {}): Promise<ResolveResult> {
+  public async resolve(options: ResolveOptions): Promise<ResolveResult> {
     await this.#ensureInitialized();
 
-    const renderer = options.renderer ?? new XmlRenderer();
-
-    // Render context fragments to system prompt
-    const systemPrompt = renderer.render(this.#contextFragments);
+    const systemPrompt = options.renderer.render(this.#fragments);
 
     // Get persisted messages from graph
-    const persistedMessages: MessageData[] = [];
+    const messages: unknown[] = [];
     if (this.#branch?.headMessageId) {
       const chain = await this.#store.getMessageChain(
         this.#branch.headMessageId,
       );
-      persistedMessages.push(...chain);
-    }
 
-    // Convert persisted messages to AI SDK format
-    const messages: Message[] = persistedMessages.map((msg) => ({
-      role: msg.name as Message['role'],
-      content: String(msg.data),
-    }));
+      for (const msg of chain) {
+        messages.push(message(msg.data as never).codec?.decode());
+      }
+    }
 
     // Add pending messages (not yet saved)
     for (const fragment of this.#pendingMessages) {
-      messages.push({
-        role: fragment.name as Message['role'],
-        content: String(fragment.data),
-      });
+      const decoded = fragment.codec!.decode();
+      messages.push(decoded);
     }
 
     return { systemPrompt, messages };
@@ -333,8 +354,7 @@ export class ContextEngine {
         parentId,
         name: fragment.name,
         type: fragment.type,
-        data: fragment.data,
-        persist: fragment.persist ?? true,
+        data: fragment.codec!.encode(),
         createdAt: now,
       };
 
@@ -346,22 +366,21 @@ export class ContextEngine {
     await this.#store.updateBranchHead(this.#branch!.id, parentId);
     this.#branch!.headMessageId = parentId;
 
-    // Update chat timestamp
-    await this.#store.updateChat(this.#chatId, { updatedAt: now });
-    if (this.#chatData) {
-      this.#chatData.updatedAt = now;
-    }
-
     // Clear pending messages
     this.#pendingMessages = [];
   }
 
   /**
-   * Estimate token count and cost for the current context.
+   * Estimate token count and cost for the full context.
+   *
+   * Includes:
+   * - System prompt fragments (role, hints, etc.)
+   * - Persisted chat messages (from store)
+   * - Pending messages (not yet saved)
    *
    * @param modelId - Model ID (e.g., "openai:gpt-4o", "anthropic:claude-3-5-sonnet")
    * @param options - Optional settings
-   * @returns Estimate result with token counts and costs
+   * @returns Estimate result with token counts, costs, and per-fragment breakdown
    */
   public async estimate(
     modelId: Models,
@@ -369,13 +388,82 @@ export class ContextEngine {
       renderer?: ContextRenderer;
     } = {},
   ): Promise<EstimateResult> {
-    const renderer = options.renderer ?? new XmlRenderer();
-    const renderedContext = this.render(renderer);
+    await this.#ensureInitialized();
 
+    const renderer = options.renderer ?? new XmlRenderer();
     const registry = getModelsRegistry();
     await registry.load();
 
-    return registry.estimate(modelId, renderedContext);
+    const model = registry.get(modelId);
+    if (!model) {
+      throw new Error(
+        `Model "${modelId}" not found. Call load() first or check model ID.`,
+      );
+    }
+
+    const tokenizer = registry.getTokenizer(modelId);
+    const fragmentEstimates: FragmentEstimate[] = [];
+
+    // 1. Estimate context fragments (system prompt)
+    for (const fragment of this.#fragments) {
+      const rendered = renderer.render([fragment]);
+      const tokens = tokenizer.count(rendered);
+      const cost = (tokens / 1_000_000) * model.cost.input;
+      fragmentEstimates.push({
+        id: fragment.id,
+        name: fragment.name,
+        tokens,
+        cost,
+      });
+    }
+
+    // 2. Estimate persisted messages from store
+    if (this.#branch?.headMessageId) {
+      const chain = await this.#store.getMessageChain(
+        this.#branch.headMessageId,
+      );
+      for (const msg of chain) {
+        const content = String(msg.data);
+        const tokens = tokenizer.count(content);
+        const cost = (tokens / 1_000_000) * model.cost.input;
+        fragmentEstimates.push({
+          name: msg.name,
+          id: msg.id,
+          tokens,
+          cost,
+        });
+      }
+    }
+
+    // 3. Estimate pending messages (not yet saved)
+    for (const fragment of this.#pendingMessages) {
+      const content = String(fragment.data);
+      const tokens = tokenizer.count(content);
+      const cost = (tokens / 1_000_000) * model.cost.input;
+      fragmentEstimates.push({
+        name: fragment.name,
+        id: fragment.id,
+        tokens,
+        cost,
+      });
+    }
+
+    // Calculate totals
+    const totalTokens = fragmentEstimates.reduce((sum, f) => sum + f.tokens, 0);
+    const totalCost = fragmentEstimates.reduce((sum, f) => sum + f.cost, 0);
+
+    return {
+      model: model.id,
+      provider: model.provider,
+      tokens: totalTokens,
+      cost: totalCost,
+      limits: {
+        context: model.limit.context,
+        output: model.limit.output,
+        exceedsContext: totalTokens > model.limit.context,
+      },
+      fragments: fragmentEstimates,
+    };
   }
 
   /**
@@ -571,12 +659,7 @@ export class ContextEngine {
   ): Promise<void> {
     await this.#ensureInitialized();
 
-    const now = Date.now();
-    const storeUpdates: Partial<
-      Pick<ChatData, 'title' | 'metadata' | 'updatedAt'>
-    > = {
-      updatedAt: now,
-    };
+    const storeUpdates: Partial<Pick<ChatData, 'title' | 'metadata'>> = {};
 
     if (updates.title !== undefined) {
       storeUpdates.title = updates.title;
@@ -589,18 +672,7 @@ export class ContextEngine {
       };
     }
 
-    await this.#store.updateChat(this.#chatId, storeUpdates);
-
-    // Update local cache
-    if (this.#chatData) {
-      if (storeUpdates.title !== undefined) {
-        this.#chatData.title = storeUpdates.title;
-      }
-      if (storeUpdates.metadata !== undefined) {
-        this.#chatData.metadata = storeUpdates.metadata;
-      }
-      this.#chatData.updatedAt = now;
-    }
+    this.#chatData = await this.#store.updateChat(this.#chatId, storeUpdates);
   }
 
   /**
@@ -613,6 +685,65 @@ export class ContextEngine {
    */
   public consolidate(): void {
     return void 0;
+  }
+
+  /**
+   * Inspect the full context state for debugging.
+   * Returns a comprehensive JSON-serializable object with all context information.
+   *
+   * @param options - Inspection options (modelId and renderer required)
+   * @returns Complete inspection data including estimates, rendered output, fragments, and graph
+   *
+   * @example
+   * ```ts
+   * const inspection = await context.inspect({
+   *   modelId: 'openai:gpt-4o',
+   *   renderer: new XmlRenderer(),
+   * });
+   * console.log(JSON.stringify(inspection, null, 2));
+   *
+   * // Or write to file for analysis
+   * await fs.writeFile('context-debug.json', JSON.stringify(inspection, null, 2));
+   * ```
+   */
+  public async inspect(options: InspectOptions): Promise<InspectResult> {
+    await this.#ensureInitialized();
+
+    const { renderer } = options;
+
+    // Get token/cost estimation
+    const estimateResult = await this.estimate(options.modelId, { renderer });
+
+    // Render using provided renderer
+    const rendered = renderer.render(this.#fragments);
+
+    // Get persisted messages from store
+    const persistedMessages: MessageData[] = [];
+    if (this.#branch?.headMessageId) {
+      const chain = await this.#store.getMessageChain(
+        this.#branch.headMessageId,
+      );
+      persistedMessages.push(...chain);
+    }
+
+    // Get conversation graph
+    const graph = await this.#store.getGraph(this.#chatId);
+
+    return {
+      estimate: estimateResult,
+      rendered,
+      fragments: {
+        context: [...this.#fragments],
+        pending: [...this.#pendingMessages],
+        persisted: persistedMessages,
+      },
+      graph,
+      meta: {
+        chatId: this.#chatId,
+        branch: this.#branchName,
+        timestamp: Date.now(),
+      },
+    };
   }
 }
 
@@ -656,16 +787,29 @@ export function role(content: string): ContextFragment {
  * context.set(user('Hello', { id: 'msg-1' }));   // Custom ID
  * ```
  */
-export function user(
-  content: string,
-  options?: MessageOptions,
-): ContextFragment {
+export function user(content: string | UIMessage): ContextFragment {
+  const message =
+    typeof content === 'string'
+      ? {
+          id: generateId(),
+          role: 'user',
+          parts: [{ type: 'text', text: content }],
+        }
+      : content;
   return {
-    id: options?.id ?? crypto.randomUUID(),
+    id: message.id,
     name: 'user',
-    data: content,
+    data: 'content',
     type: 'message',
     persist: true,
+    codec: {
+      decode() {
+        return message;
+      },
+      encode() {
+        return message;
+      },
+    },
   };
 }
 
@@ -673,7 +817,7 @@ export function user(
  * Create an assistant message fragment.
  * Message fragments are separated from regular fragments during resolve().
  *
- * @param content - The message content
+ * @param message - The message content
  * @param options - Optional settings (id)
  *
  * @example
@@ -682,15 +826,70 @@ export function user(
  * context.set(assistant('Hi there!', { id: 'resp-1' })); // Custom ID
  * ```
  */
-export function assistant(
+export function assistant(message: UIMessage): ContextFragment {
+  return {
+    id: message.id,
+    name: 'assistant',
+    data: 'content',
+    type: 'message',
+    persist: true,
+    codec: {
+      decode() {
+        return message;
+      },
+      encode() {
+        return message;
+      },
+    },
+  };
+}
+export function message(content: string | UIMessage): ContextFragment {
+  const message =
+    typeof content === 'string'
+      ? {
+          id: generateId(),
+          role: 'user',
+          parts: [{ type: 'text', text: content }],
+        }
+      : content;
+  return {
+    id: message.id,
+    name: 'message',
+    data: 'content',
+    type: 'message',
+    persist: true,
+    codec: {
+      decode() {
+        return message;
+      },
+      encode() {
+        return message;
+      },
+    },
+  };
+}
+
+/**
+ * Create an assistant message fragment from text content.
+ * Convenience wrapper that creates a UIMessage internally.
+ *
+ * @param content - The message text content
+ * @param options - Optional settings (id)
+ *
+ * @example
+ * ```ts
+ * context.set(assistantText('Hi there!'));                    // Auto-generated ID
+ * context.set(assistantText('Hi there!', { id: 'resp-1' })); // Custom ID
+ * ```
+ */
+export function assistantText(
   content: string,
   options?: MessageOptions,
 ): ContextFragment {
-  return {
-    id: options?.id ?? crypto.randomUUID(),
-    name: 'assistant',
-    data: content,
-    type: 'message',
-    persist: true,
-  };
+  const id = options?.id ?? crypto.randomUUID();
+  return assistant({
+    id,
+    role: 'assistant',
+    parts: [{ type: 'text', text: content }],
+  });
 }

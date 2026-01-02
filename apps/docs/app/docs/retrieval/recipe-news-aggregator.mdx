@@ -1,0 +1,323 @@
+---
+title: News Aggregator
+description: Aggregate content from multiple RSS feeds with AI-powered digests
+---
+
+Build a system that aggregates news from multiple RSS feeds and generates AI-powered daily digests. This recipe demonstrates multi-source ingestion with TTL-based refresh and structured output generation.
+
+## What You'll Build
+
+- Multi-feed RSS aggregation
+- Automatic refresh based on TTL
+- AI-generated daily digests with trending topics
+- Semantic search across all news sources
+
+## Prerequisites
+
+```bash
+npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
+```
+
+## Complete Implementation
+
+```typescript
+import { agent, instructions, generate } from '@deepagents/agent';
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+// Configure news feeds
+const feeds = [
+  { name: 'Hacker News', url: 'https://news.ycombinator.com/rss' },
+  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/' },
+  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml' },
+  { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/technology-lab' },
+];
+
+// Set up retrieval infrastructure
+const store = nodeSQLite('./news.db', 384);
+const embedder = fastembed();
+
+// Index all feeds with TTL-based refresh
+async function updateFeeds() {
+  console.log('Updating news feeds...\n');
+
+  for (const feed of feeds) {
+    console.log(`Indexing ${feed.name}...`);
+
+    await ingest({
+      connector: {
+        ...rss(feed.url, {
+          maxItems: 30,
+          fetchFullArticles: true,
+        }),
+        ingestWhen: 'expired',
+        expiresAfter: 60 * 60 * 1000, // 1 hour TTL
+      },
+      store,
+      embedder,
+    });
+  }
+
+  console.log('\nAll feeds indexed!\n');
+}
+
+// Search across all feeds
+async function searchNews(query: string, limit = 10) {
+  const results = await similaritySearch(query, {
+    connector: rss(feeds[0].url), // Any connector works for search
+    store,
+    embedder,
+  });
+
+  return results.slice(0, limit);
+}
+
+// Define the digest schema
+const DigestSchema = z.object({
+  summary: z.string().describe('2-3 sentence overview of top stories'),
+  topStories: z.array(z.object({
+    title: z.string(),
+    source: z.string(),
+    keyPoints: z.array(z.string()).describe('2-3 key points'),
+  })).describe('Top 5 most important stories'),
+  trends: z.array(z.string()).describe('3-5 emerging trends'),
+  categories: z.record(z.array(z.string())).describe('Stories grouped by category'),
+});
+
+// Create the digest agent
+const digestAgent = agent({
+  name: 'DigestAgent',
+  model: groq('gpt-oss-20b'),
+  output: DigestSchema,
+  prompt: instructions({
+    purpose: [
+      'Create a concise, informative daily tech news digest.',
+      'Identify the most important stories and emerging trends.',
+      'Group stories by category for easy scanning.',
+    ],
+    routine: [
+      'Analyze the provided news articles',
+      'Identify the top 5 most significant stories',
+      'Extract key points from each story',
+      'Identify emerging trends across stories',
+      'Categorize stories (AI, Startups, Security, etc.)',
+    ],
+  }),
+});
+
+// Generate the daily digest
+async function generateDigest() {
+  console.log('Generating daily digest...\n');
+
+  // Search across multiple topics to get diverse content
+  const topics = ['AI', 'startups', 'cybersecurity', 'developer tools', 'tech industry'];
+  const allResults: any[] = [];
+
+  for (const topic of topics) {
+    const results = await searchNews(topic, 5);
+    allResults.push(...results);
+  }
+
+  // Deduplicate by document_id
+  const unique = [...new Map(allResults.map(r => [r.document_id, r])).values()];
+  const top = unique
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 20);
+
+  // Format content for the agent
+  const context = top.map((r, i) => `
+Article ${i + 1}:
+${r.content}
+---`).join('\n');
+
+  // Generate structured digest
+  const { experimental_output: digest } = await generate(
+    digestAgent,
+    `Create a daily tech news digest from these articles:\n\n${context}`,
+    {}
+  );
+
+  return digest;
+}
+
+// Format digest for display
+function formatDigest(digest: z.infer<typeof DigestSchema>) {
+  let output = '';
+
+  output += '# Daily Tech Digest\n\n';
+  output += `## Overview\n${digest.summary}\n\n`;
+
+  output += '## Top Stories\n';
+  for (const story of digest.topStories) {
+    output += `\n### ${story.title}\n`;
+    output += `*Source: ${story.source}*\n`;
+    for (const point of story.keyPoints) {
+      output += `- ${point}\n`;
+    }
+  }
+
+  output += '\n## Emerging Trends\n';
+  for (const trend of digest.trends) {
+    output += `- ${trend}\n`;
+  }
+
+  output += '\n## By Category\n';
+  for (const [category, stories] of Object.entries(digest.categories)) {
+    output += `\n### ${category}\n`;
+    for (const story of stories) {
+      output += `- ${story}\n`;
+    }
+  }
+
+  return output;
+}
+
+// Run the aggregator
+async function main() {
+  // Update feeds (respects TTL)
+  await updateFeeds();
+
+  // Generate and display digest
+  const digest = await generateDigest();
+  console.log(formatDigest(digest));
+
+  // Example: search for specific topic
+  console.log('\n--- Search Results: "AI regulation" ---\n');
+  const searchResults = await searchNews('AI regulation', 3);
+  for (const result of searchResults) {
+    console.log(`[${result.similarity.toFixed(2)}] ${result.content.slice(0, 200)}...\n`);
+  }
+}
+
+await main();
+```
+
+## How It Works
+
+### 1. Feed Configuration
+
+Define your news sources with URLs:
+
+```typescript
+const feeds = [
+  { name: 'Hacker News', url: 'https://news.ycombinator.com/rss' },
+  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/' },
+];
+```
+
+### 2. TTL-Based Refresh
+
+Configure automatic refresh with `expiresAfter`:
+
+```typescript
+await ingest({
+  connector: {
+    ...rss(feed.url, { fetchFullArticles: true }),
+    ingestWhen: 'expired',
+    expiresAfter: 60 * 60 * 1000, // Re-fetch after 1 hour
+  },
+  store,
+  embedder,
+});
+```
+
+### 3. Structured Output
+
+Use Zod schemas for consistent digest format:
+
+```typescript
+const DigestSchema = z.object({
+  summary: z.string(),
+  topStories: z.array(z.object({...})),
+  trends: z.array(z.string()),
+});
+```
+
+## Customization Options
+
+### Different Refresh Intervals
+
+Set different TTLs for different feeds:
+
+```typescript
+const feedConfigs = [
+  { url: 'https://breaking-news.com/rss', ttl: 15 * 60 * 1000 },  // 15 min
+  { url: 'https://weekly-digest.com/rss', ttl: 24 * 60 * 60 * 1000 }, // 24 hours
+];
+```
+
+### Category-Specific Feeds
+
+Organize feeds by category:
+
+```typescript
+const feedsByCategory = {
+  tech: ['https://techcrunch.com/feed/'],
+  security: ['https://krebsonsecurity.com/feed/'],
+  ai: ['https://openai.com/blog/rss.xml'],
+};
+
+for (const [category, urls] of Object.entries(feedsByCategory)) {
+  for (const url of urls) {
+    await ingest({
+      connector: {
+        ...rss(url),
+        ingestWhen: 'expired',
+        expiresAfter: 60 * 60 * 1000,
+      },
+      store,
+      embedder,
+    });
+  }
+}
+```
+
+### Scheduled Updates
+
+Run on a schedule using cron or node-schedule:
+
+```typescript
+import { schedule } from 'node-schedule';
+
+// Update feeds every hour
+schedule.scheduleJob('0 * * * *', async () => {
+  await updateFeeds();
+  const digest = await generateDigest();
+  await sendDigestEmail(digest);
+});
+```
+
+### Alert System
+
+Get notified when specific topics appear:
+
+```typescript
+async function checkAlerts(topics: string[]) {
+  for (const topic of topics) {
+    const results = await searchNews(topic, 3);
+
+    if (results.length > 0 && results[0].similarity > 0.8) {
+      console.log(`Alert: High-relevance content for "${topic}"`);
+      // Send notification
+    }
+  }
+}
+
+await checkAlerts(['security breach', 'data leak', 'major acquisition']);
+```
+
+## Production Tips
+
+1. **Respect rate limits**: Add delays between feed fetches
+2. **Handle failures gracefully**: Skip failed feeds, don't crash the pipeline
+3. **Store raw content**: Keep original articles for reference
+4. **Deduplicate**: Same story often appears in multiple feeds
+5. **Time filtering**: Focus on recent articles for daily digests
+
+## Next Steps
+
+- [Research Assistant](/docs/retrieval/recipe-research-assistant) - Academic content
+- [RSS Connector](/docs/retrieval/rss) - Connector details
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - TTL configuration

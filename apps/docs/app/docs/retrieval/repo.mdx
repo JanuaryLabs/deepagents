@@ -1,0 +1,284 @@
+---
+title: Repo Connector
+description: Index repository source code with language-aware filtering
+---
+
+The `repo` connector indexes source code from local repositories with intelligent filtering for common non-essential files. It's optimized for code search and understanding.
+
+## Import
+
+```typescript
+import { repo } from '@deepagents/retrieval/connectors';
+```
+
+## Basic Usage
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { repo } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./code.db', 384);
+
+const results = await similaritySearch('authentication middleware', {
+  connector: repo('./src', ['.ts', '.tsx'], 'contentChanged'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+## Parameters
+
+```typescript
+repo(
+  dir: string,                                    // Repository directory
+  extensions: string[],                           // File extensions to include
+  ingestWhen: 'never' | 'contentChanged' | 'expired'  // Ingestion mode
+)
+```
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `dir` | Path to the repository root |
+| `extensions` | Array of file extensions (with or without dots) |
+| `ingestWhen` | Controls re-indexing behavior |
+
+## File Filtering
+
+The connector automatically excludes:
+
+### Common Directories
+
+- `node_modules/`, `.pnpm/`, `.npm/`, `.yarn/`, `vendor/`
+- `.git/`, `.svn/`, `.hg/`
+- `dist/`, `build/`, `out/`, `target/`, `bin/`, `obj/`
+- `.next/`, `.vercel/`, `.turbo/`, `.vite/`
+- `coverage/`, `.nyc_output/`, `jest-cache/`, `.pytest_cache/`
+- `.venv/`, `venv/`
+- `.idea/`, `.vscode/`, `.fleet/`
+
+### Files
+
+- `.env`, `.env.*`
+- Lock files (`*.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`)
+
+### Size Limit
+
+Files larger than 3KB are skipped to focus on meaningful code units.
+
+## Gitignore Support
+
+The connector respects `.gitignore` patterns from the repository root.
+
+## Real-World Examples
+
+### TypeScript Codebase Search
+
+Index and search a TypeScript project:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { repo } from '@deepagents/retrieval/connectors';
+
+async function searchCode(query: string) {
+  const store = nodeSQLite('./ts-code.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: repo('./src', ['.ts', '.tsx'], 'contentChanged'),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.map(r => ({
+    file: r.document_id,
+    content: r.content.slice(0, 200),
+    similarity: r.similarity,
+  }));
+}
+
+// Find authentication-related code
+const results = await searchCode('JWT token validation middleware');
+```
+
+### Multi-Language Project
+
+Index a project with multiple languages:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { repo } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./fullstack.db', 384);
+const embedder = fastembed();
+
+// Index frontend (TypeScript/React)
+await ingest({
+  connector: repo('./frontend/src', ['.ts', '.tsx', '.css'], 'contentChanged'),
+  store,
+  embedder,
+});
+
+// Index backend (Python)
+await ingest({
+  connector: repo('./backend', ['.py'], 'contentChanged'),
+  store,
+  embedder,
+});
+
+// Index infrastructure (Go)
+await ingest({
+  connector: repo('./services', ['.go'], 'contentChanged'),
+  store,
+  embedder,
+});
+
+// Search across all code
+async function searchFullstack(query: string) {
+  const results = await similaritySearch(query, {
+    connector: repo('./frontend/src', ['.ts'], 'contentChanged'),
+    store,
+    embedder,
+  });
+
+  return results;
+}
+
+const results = await searchFullstack('error handling retry logic');
+```
+
+### Monorepo Search
+
+Index multiple packages in a monorepo:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { repo } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./monorepo.db', 384);
+const embedder = fastembed();
+
+// Index each package
+const packages = ['api', 'web', 'shared', 'cli'];
+
+for (const pkg of packages) {
+  await ingest({
+    connector: repo(`./packages/${pkg}/src`, ['.ts'], 'contentChanged'),
+    store,
+    embedder,
+  });
+  console.log(`Indexed: ${pkg}`);
+}
+
+// Search across all packages
+async function searchMonorepo(query: string) {
+  const results = await similaritySearch(query, {
+    connector: repo('./packages/api/src', ['.ts'], 'contentChanged'),
+    store,
+    embedder,
+  });
+
+  return results;
+}
+
+const results = await searchMonorepo('database connection pool');
+```
+
+### Code Review Context
+
+Build context for code review:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { repo } from '@deepagents/retrieval/connectors';
+
+async function getRelatedCode(changedFile: string, content: string) {
+  const store = nodeSQLite('./review.db', 384);
+
+  // Search for related code based on the changes
+  const results = await similaritySearch(content, {
+    connector: repo('./src', ['.ts', '.tsx'], 'contentChanged'),
+    store,
+    embedder: fastembed(),
+  });
+
+  // Filter out the file being reviewed
+  return results
+    .filter(r => r.document_id !== changedFile)
+    .slice(0, 5);
+}
+
+// Find code related to a PR change
+const relatedCode = await getRelatedCode(
+  'src/auth/login.ts',
+  'async function validateCredentials(email: string, password: string)'
+);
+```
+
+### Finding All Git Repos
+
+The connector exports a utility to find all Git repositories:
+
+```typescript
+import { findAllGitRepos } from '@deepagents/retrieval/connectors';
+
+// Find all git repos under home directory
+for await (const repoPath of findAllGitRepos('/Users/dev')) {
+  console.log(`Found repo: ${repoPath}`);
+}
+```
+
+This skips common non-project directories like `node_modules`, `Library`, `Downloads`, etc.
+
+## Source ID
+
+The connector generates a source ID based on the directory:
+
+```typescript
+repo('./src', ['.ts'], 'contentChanged')
+// sourceId: "repo:./src"
+```
+
+## Metadata
+
+Each indexed file includes repository metadata:
+
+```typescript
+{
+  repo: './src', // The directory parameter
+}
+```
+
+## Helper Functions
+
+### collectFiles
+
+Get all files matching extensions in a directory:
+
+```typescript
+import { collectFiles } from '@deepagents/retrieval/connectors';
+
+const files = await collectFiles('./src', ['.ts', '.tsx']);
+
+for await (const file of files) {
+  console.log(file);
+}
+```
+
+### ignorePatterns
+
+Get the full list of ignore patterns:
+
+```typescript
+import { ignorePatterns } from '@deepagents/retrieval/connectors';
+
+const patterns = await ignorePatterns('./my-project');
+console.log(patterns);
+// ['node_modules/**', '.git/**', 'dist/**', ...]
+```
+
+## Next Steps
+
+- [Embedders](/docs/retrieval/embedders) - Choose embedding models
+- [Stores](/docs/retrieval/stores) - Configure vector storage
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build your own connector

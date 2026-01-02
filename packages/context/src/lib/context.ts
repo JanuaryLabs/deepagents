@@ -1,3 +1,5 @@
+import type { FragmentCodec } from './codec.ts';
+
 /**
  * Fragment type identifier.
  * - 'fragment': Regular context fragment (default)
@@ -25,6 +27,11 @@ export interface ContextFragment {
    * When true, this fragment will be persisted to the store on save().
    */
   persist?: boolean;
+  /**
+   * Codec for encoding/decoding this fragment.
+   * Used by resolve() to convert to AI SDK format.
+   */
+  codec?: FragmentCodec;
 }
 
 /**

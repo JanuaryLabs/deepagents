@@ -8,12 +8,12 @@ The `SchemaSynthesizer` generates question/SQL pairs directly from your database
 ## Basic Usage
 
 ```typescript
-import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 50,
   complexity: 'medium',
-}));
+}).toPairs();
 ```
 
 ## How It Works
@@ -60,34 +60,34 @@ Control the sophistication of generated queries:
 
 ```typescript
 // Low complexity (single table, basic filters)
-const low = await toPairs(new SchemaSynthesizer(adapter, {
+const low = await new SchemaSynthesizer(adapter, {
   count: 20,
   complexity: 'low',
-}));
+}).toPairs();
 // "How many customers are there?"
 // "Show all products"
 
 // Medium complexity (joins, aggregations)
-const medium = await toPairs(new SchemaSynthesizer(adapter, {
+const medium = await new SchemaSynthesizer(adapter, {
   count: 20,
   complexity: 'medium',
-}));
+}).toPairs();
 // "What is the total revenue by product category?"
 // "Which customers have placed more than 5 orders?"
 
 // Hard complexity (multi-join, subqueries, CTEs)
-const hard = await toPairs(new SchemaSynthesizer(adapter, {
+const hard = await new SchemaSynthesizer(adapter, {
   count: 20,
   complexity: 'hard',
-}));
+}).toPairs();
 // "What is the month-over-month growth rate for each product category?"
 // "Which customers have a higher than average order value?"
 
 // Window functions (advanced SQL with window functions)
-const window = await toPairs(new SchemaSynthesizer(adapter, {
+const window = await new SchemaSynthesizer(adapter, {
   count: 20,
   complexity: 'window',
-}));
+}).toPairs();
 // "Show running total of sales for each product"
 // "Rank customers by their total order value"
 ```
@@ -97,10 +97,10 @@ const window = await toPairs(new SchemaSynthesizer(adapter, {
 Generate a balanced dataset:
 
 ```typescript
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 80,
   complexity: ['low', 'medium', 'hard', 'window'], // 20 of each
-}));
+}).toPairs();
 ```
 
 ## Working with Personas
@@ -108,18 +108,18 @@ const pairs = await toPairs(new SchemaSynthesizer(adapter, {
 Personas guide question generation to match different user perspectives:
 
 ```typescript
-import { SchemaSynthesizer, PersonaGenerator, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer, PersonaGenerator } from '@deepagents/text2sql/synthesis';
 
 // Generate personas first
 const personaGen = new PersonaGenerator(adapter, { count: 5 });
 const personas = await personaGen.generate();
 
 // Use personas in synthesis
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 10,
   complexity: ['low', 'medium', 'hard'],
   personas,
-}));
+}).toPairs();
 ```
 
 You can also define personas manually:
@@ -131,10 +131,10 @@ const customPersonas = [
   { role: 'Product Manager', perspective: 'Focus on product performance, user engagement, and features' },
 ];
 
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 30,
   personas: customPersonas,
-}));
+}).toPairs();
 ```
 
 ## Integration with Teachings
@@ -142,15 +142,15 @@ const pairs = await toPairs(new SchemaSynthesizer(adapter, {
 Teachings provide domain-specific knowledge to improve question quality:
 
 ```typescript
-import { TeachingsGenerator, SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
+import { TeachingsGenerator, SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
 const teachGen = new TeachingsGenerator(adapter);
 const teachings = await teachGen.generate();
 
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 50,
   teachings,
-}));
+}).toPairs();
 ```
 
 Teachings help the synthesizer understand:
@@ -165,21 +165,21 @@ Control how many pairs are generated in parallel:
 
 ```typescript
 // Default concurrency (5)
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 100,
-}));
+}).toPairs();
 
 // Higher concurrency for faster generation
-const fastPairs = await toPairs(new SchemaSynthesizer(adapter, {
+const fastPairs = await new SchemaSynthesizer(adapter, {
   count: 100,
   concurrency: 10,
-}));
+}).toPairs();
 
 // Lower concurrency to reduce API rate limits
-const slowPairs = await toPairs(new SchemaSynthesizer(adapter, {
+const slowPairs = await new SchemaSynthesizer(adapter, {
   count: 100,
   concurrency: 2,
-}));
+}).toPairs();
 ```
 
 ## Custom Model Selection
@@ -187,26 +187,26 @@ const slowPairs = await toPairs(new SchemaSynthesizer(adapter, {
 Specify a custom model for generation:
 
 ```typescript
-import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 import { groq } from '@deepagents/agent';
 
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 50,
   model: groq('gpt-oss-20b'),
-}));
+}).toPairs();
 ```
 
 ## Example: Bootstrap Training Set
 
 ```typescript
-import { SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
 // Generate diverse training data
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 100,
   complexity: ['low', 'medium', 'hard'],
   concurrency: 8,
-}));
+}).toPairs();
 
 // Export as JSONL for fine-tuning
 const jsonl = pairs
@@ -222,19 +222,19 @@ await fs.writeFile('training-data.jsonl', jsonl);
 Generate questions from different user perspectives:
 
 ```typescript
-import { SchemaSynthesizer, PersonaGenerator, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer, PersonaGenerator } from '@deepagents/text2sql/synthesis';
 
 // Generate personas
 const personaGen = new PersonaGenerator(adapter, { count: 3 });
 const personas = await personaGen.generate();
 
 // Generate pairs with personas
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 60,
   complexity: ['low', 'medium', 'hard'],
   personas,
   concurrency: 10,
-}));
+}).toPairs();
 
 // Questions will reflect different user perspectives
 // e.g., "As a sales manager, show me top performing products this quarter"
@@ -249,7 +249,6 @@ import {
   SchemaSynthesizer,
   TeachingsGenerator,
   PersonaGenerator,
-  toPairs
 } from '@deepagents/text2sql/synthesis';
 
 // Generate domain knowledge and personas
@@ -260,13 +259,13 @@ const personaGen = new PersonaGenerator(adapter, { count: 5 });
 const personas = await personaGen.generate();
 
 // Generate pairs with full context
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 100,
   complexity: ['low', 'medium', 'hard', 'window'],
   personas,
   teachings,
   concurrency: 8,
-}));
+}).toPairs();
 ```
 
 ## Combining with Breadth Evolution
@@ -274,18 +273,16 @@ const pairs = await toPairs(new SchemaSynthesizer(adapter, {
 Expand synthetic data with paraphrases:
 
 ```typescript
-import { SchemaSynthesizer, BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { SchemaSynthesizer, BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 // Generate base pairs
-const basePairs = await toPairs(new SchemaSynthesizer(adapter, {
+const basePairs = await new SchemaSynthesizer(adapter, {
   count: 30,
   complexity: ['low', 'medium', 'hard'],
-}));
+}).toPairs();
 
 // Expand with variations
-const expanded = await toPairs(
-  new BreadthEvolver(basePairs, { count: 3 })
-);
+const expanded = await new BreadthEvolver(basePairs, { count: 3 }).toPairs();
 
 // Now have ~90 variations (30 base × 3 paraphrases each)
 ```

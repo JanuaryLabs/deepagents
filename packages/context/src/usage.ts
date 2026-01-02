@@ -1,13 +1,28 @@
+import { groq } from '@ai-sdk/groq';
+import {
+  InvalidToolInputError,
+  NoSuchToolError,
+  ToolCallRepairError,
+  generateId,
+} from 'ai';
+
+import { input, printer } from '@deepagents/agent';
+
 import {
   ContextEngine,
+  type ContextFragment,
   InMemoryContextStore,
+  SqliteContextStore,
   XmlRenderer,
   assistant,
+  assistantText,
   hint,
+  message,
   role,
   user,
   visualizeGraph,
 } from './index.ts';
+import { agent } from './lib/agent.ts';
 
 // Create a shared store for persistence
 const store = new InMemoryContextStore();
@@ -30,7 +45,9 @@ async function demonstrateContextEngine() {
   const context = new ContextEngine({
     store,
     chatId: 'demo-chat-1',
-  }).set(
+  });
+
+  context.set(
     role('You are a helpful assistant.'),
     hint('Be concise and friendly.'),
     hint('Use examples when explaining concepts.'),
@@ -49,7 +66,9 @@ async function demonstrateContextEngine() {
 
   // Simulate AI response (in real usage, this comes from AI SDK generate())
   context.set(
-    assistant('Hi! I can help you with coding, writing, analysis, and more.'),
+    assistantText(
+      'Hi! I can help you with coding, writing, analysis, and more.',
+    ),
   );
 
   // Save after AI responds (explicit - developer decides when)
@@ -59,15 +78,25 @@ async function demonstrateContextEngine() {
   context.set(user('Tell me a joke.'));
 
   // Resolve again - now includes previous conversation
-  const result2 = await context.resolve();
+  const result2 = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log('\nSecond turn messages:', result2.messages.length);
 
   // Estimate cost
-  const estimate = await context.estimate(
-    'groq:moonshotai/kimi-k2-instruct-0905',
-  );
-  console.log('Estimated tokens:', estimate.tokens);
-  console.log('Estimated cost: $', estimate.cost.toFixed(6));
+  // const estimate = await context.estimate(
+  //   'groq:moonshotai/kimi-k2-instruct-0905',
+  // );
+  const inspection = await context.inspect({
+    modelId: 'groq:moonshotai/kimi-k2-instruct-0905',
+    renderer: new XmlRenderer(),
+  });
+  console.log(JSON.stringify(inspection, null, 2));
+
+  // Visualize the message graph
+  const graph = await store.getGraph('demo-chat-1');
+  console.log('\nMessage Graph:');
+  console.log(visualizeGraph(graph));
 }
 
 /**
@@ -85,7 +114,9 @@ async function demonstrateSessionRestore() {
   }).set(role('You are a helpful assistant.'));
 
   // Resolve loads persisted messages from store
-  const { messages } = await context.resolve();
+  const { messages } = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
 
   console.log('Restored messages from previous session:', messages.length);
 }
@@ -139,7 +170,7 @@ async function demonstrateChatMetadata() {
 
   // Add some messages
   context.set(user('Help me learn Python'));
-  context.set(assistant('Great choice! Python is beginner-friendly.'));
+  context.set(assistantText('Great choice! Python is beginner-friendly.'));
   await context.save();
 
   // Update chat with title and metadata
@@ -171,11 +202,13 @@ async function demonstrateRewind() {
   }).set(role('You are a helpful assistant.'));
 
   // Add a question with a custom ID for easy targeting
-  context.set(user('What is 2 + 2?', { id: 'math-question' }));
-  context.set(assistant('The answer is 5.', { id: 'wrong-answer' })); // Oops!
+  context.set(user('What is 2 + 2?'));
+  context.set(assistantText('The answer is 5.', { id: 'wrong-answer' })); // Oops!
   await context.save();
 
-  const before = await context.resolve();
+  const before = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log('Before rewind - messages:', before.messages.length);
   console.log('Current branch:', context.branch);
 
@@ -184,15 +217,19 @@ async function demonstrateRewind() {
   const newBranch = await context.rewind('math-question');
   console.log('Created new branch:', newBranch.name);
 
-  const after = await context.resolve();
+  const after = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log('After rewind - messages:', after.messages.length);
   console.log('Kept message:', after.messages[0]);
 
   // Now add the correct answer on the new branch
-  context.set(assistant('The answer is 4.', { id: 'correct-answer' }));
+  context.set(assistantText('The answer is 4.', { id: 'correct-answer' }));
   await context.save();
 
-  const final = await context.resolve();
+  const final = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log('Final messages on new branch:', final.messages);
 
   // List all branches - both should exist (via store)
@@ -206,16 +243,15 @@ async function demonstrateRewind() {
 
   // Can switch back to original branch
   await context.switchBranch('main');
-  const originalMessages = await context.resolve();
+  const originalMessages = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log(
     '\nOriginal branch still has:',
     originalMessages.messages.length,
     'messages',
   );
-  console.log(
-    'Original last message:',
-    originalMessages.messages.at(-1)?.content,
-  );
+  console.log('Original last message:', originalMessages.messages.length);
 }
 
 /**
@@ -237,7 +273,9 @@ async function demonstrateBranching() {
 
   // Initial conversation
   context.set(user('I want to learn a new skill.'));
-  context.set(assistant('Great! Would you like to learn coding or cooking?'));
+  context.set(
+    assistantText('Great! Would you like to learn coding or cooking?'),
+  );
   await context.save();
 
   // Save checkpoint before the user's choice
@@ -246,10 +284,12 @@ async function demonstrateBranching() {
 
   // Branch A: User chooses coding
   context.set(user('I want to learn coding.'));
-  context.set(assistant('Python is a great starting language!'));
+  context.set(assistantText('Python is a great starting language!'));
   await context.save();
 
-  const branchA = await context.resolve();
+  const branchA = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log('Branch A messages:', branchA.messages.length);
 
   // Restore to before the choice (creates new branch)
@@ -258,12 +298,14 @@ async function demonstrateBranching() {
 
   // Branch B: User chooses cooking
   context.set(user('I want to learn cooking.'));
-  context.set(assistant('Italian cuisine is a great place to start!'));
+  context.set(assistantText('Italian cuisine is a great place to start!'));
   await context.save();
 
-  const branchB = await context.resolve();
+  const branchB = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
   console.log('Branch B messages:', branchB.messages.length);
-  console.log('Last message in Branch B:', branchB.messages.at(-1)?.content);
+  console.log('Last message in Branch B:', branchB.messages.at(-1));
 
   // List all branches (via store)
   const branches = await branchStore.listBranches(context.chatId);
@@ -295,8 +337,8 @@ async function demonstrateBranchSwitching() {
   });
 
   // Use explicit message IDs for easy rewind
-  context.set(user('Question 1', { id: 'q1' }));
-  context.set(assistant('Answer 1', { id: 'a1' }));
+  context.set(user('Question 1'));
+  context.set(assistantText('Answer 1', { id: 'a1' }));
   await context.save();
 
   console.log('On main branch:', context.branch);
@@ -305,26 +347,22 @@ async function demonstrateBranchSwitching() {
   await context.rewind('q1');
   console.log('Switched to:', context.branch);
 
-  context.set(assistant('Alternative answer 1', { id: 'alt-a1' }));
+  context.set(assistantText('Alternative answer 1', { id: 'alt-a1' }));
   await context.save();
 
   // Switch back to main
   await context.switchBranch('main');
   console.log('Switched back to:', context.branch);
 
-  const mainMessages = await context.resolve();
-  console.log(
-    'Main branch messages:',
-    mainMessages.messages.map((m) => m.content),
-  );
+  const mainMessages = await context.resolve({ renderer: new XmlRenderer() });
+  console.log('Main branch messages:', mainMessages.messages);
 
   // Switch to alternative
   await context.switchBranch('main-v2');
-  const altMessages = await context.resolve();
-  console.log(
-    'Alt branch messages:',
-    altMessages.messages.map((m) => m.content),
-  );
+  const altMessages = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
+  console.log('Alt branch messages:', altMessages.messages);
 }
 
 /**
@@ -342,22 +380,22 @@ async function demonstrateVisualization() {
   });
 
   // Create a conversation with branching
-  context.set(user('Hello', { id: 'msg-1' }));
-  context.set(assistant('Hi there!', { id: 'msg-2' }));
+  context.set(user('Hello'));
+  context.set(assistantText('Hi there!', { id: 'msg-2' }));
   await context.save();
 
   // Create a checkpoint
   await context.checkpoint('greeting-done');
 
   // Continue conversation
-  context.set(user('Help with Python', { id: 'msg-3' }));
-  context.set(assistant('Sure, I can help!', { id: 'msg-4' }));
+  context.set(user('Help with Python'));
+  context.set(assistantText('Sure, I can help!', { id: 'msg-4' }));
   await context.save();
 
   // Rewind and create alternative branch
   await context.rewind('msg-2');
-  context.set(user('Help with JavaScript', { id: 'msg-5' }));
-  context.set(assistant('JavaScript is great!', { id: 'msg-6' }));
+  context.set(user('Help with JavaScript'));
+  context.set(assistantText('JavaScript is great!'));
   await context.save();
 
   // Get and visualize the graph
@@ -383,7 +421,7 @@ async function demonstrateSearch() {
   // Add some messages to search through
   context.set(user('How do I learn Python programming?'));
   context.set(
-    assistant(
+    assistantText(
       'Python is a great language for beginners. Start with basic syntax and data types.',
     ),
   );
@@ -391,7 +429,7 @@ async function demonstrateSearch() {
 
   context.set(user('What about JavaScript?'));
   context.set(
-    assistant(
+    assistantText(
       'JavaScript is essential for web development. Learn DOM manipulation and async programming.',
     ),
   );
@@ -399,7 +437,7 @@ async function demonstrateSearch() {
 
   context.set(user('Can you recommend some machine learning resources?'));
   context.set(
-    assistant(
+    assistantText(
       'For machine learning, start with Python libraries like scikit-learn and TensorFlow.',
     ),
   );
@@ -450,4 +488,60 @@ async function main() {
   await demonstrateSearch();
 }
 
-// main().catch(console.error);
+function engine(...fragments: ContextFragment[]) {
+  const context = new ContextEngine({
+    store: new SqliteContextStore('./context.sqlite'),
+    chatId: 'demo-chat-1',
+  });
+  context.set(...fragments);
+  return context;
+}
+
+// const context = engine(
+//   role('You are a bad assistant.'),
+//   hint('Greet the user badly.'),
+// );
+
+// const grettingAgent = agent({
+//   name: 'greeting_agent',
+//   model: groq('moonshotai/kimi-k2-instruct-0905'),
+//   context,
+// });
+
+// while (true) {
+//   context.set(message(await input()));
+//   const stream = await grettingAgent.stream({});
+
+//   const messages = stream.toUIMessageStream({
+//     generateMessageId: generateId,
+//     sendStart: true,
+//     sendFinish: true,
+//     sendReasoning: true,
+//     sendSources: true,
+//     onError: (error) => {
+//       if (NoSuchToolError.isInstance(error)) {
+//         return 'The model tried to call an unknown tool.';
+//       } else if (InvalidToolInputError.isInstance(error)) {
+//         return 'The model called a tool with invalid arguments.';
+//       } else if (ToolCallRepairError.isInstance(error)) {
+//         return 'The model tried to call a tool with invalid arguments, but it was repaired.';
+//       } else {
+//         return JSON.stringify(error);
+//       }
+//     },
+
+//     onFinish: async ({
+//       isAborted,
+//       isContinuation,
+//       messages,
+//       finishReason,
+//       responseMessage,
+//     }) => {
+//       // TODO: handle error through finishReason
+//       context.set(message(responseMessage));
+//       await context.save();
+//       console.dir(responseMessage, { depth: null });
+//     },
+//   });
+//   await printer.readableStream(messages);
+// }

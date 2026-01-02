@@ -8,9 +8,9 @@ The `MessageExtractor` parses chat history to extract question/SQL pairs from ac
 ## Basic Usage
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { MessageExtractor } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(new MessageExtractor(messages));
+const pairs = await new MessageExtractor(messages).toPairs();
 
 console.log(pairs);
 // [
@@ -48,12 +48,10 @@ By default, only successful queries are extracted:
 
 ```typescript
 // Only successful queries
-const pairs = await toPairs(new MessageExtractor(messages));
+const pairs = await new MessageExtractor(messages).toPairs();
 
 // Include failures for error analysis
-const allPairs = await toPairs(
-  new MessageExtractor(messages, { includeFailures: true })
-);
+const allPairs = await new MessageExtractor(messages, { includeFailures: true }).toPairs();
 
 // Filter later
 const failed = allPairs.filter(p => !p.success);
@@ -64,9 +62,7 @@ const failed = allPairs.filter(p => !p.success);
 If you use a different tool name for queries:
 
 ```typescript
-const pairs = await toPairs(
-  new MessageExtractor(messages, { toolName: 'execute_sql' })
-);
+const pairs = await new MessageExtractor(messages, { toolName: 'execute_sql' }).toPairs();
 ```
 
 ## Message Format
@@ -113,10 +109,10 @@ For multi-turn conversations where context matters, use contextual extractors. T
 Keeps all preceding messages as context:
 
 ```typescript
-import { FullContextExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { FullContextExtractor } from '@deepagents/text2sql/synthesis';
 
 const extractor = new FullContextExtractor(messages, adapter);
-const pairs = await toPairs(extractor);
+const pairs = await extractor.toPairs();
 
 // pairs[0].context = ['User: Show me sales data']
 // pairs[0].question = 'Now filter to California'
@@ -128,12 +124,12 @@ const pairs = await toPairs(extractor);
 Keeps only the last N messages in a sliding window:
 
 ```typescript
-import { WindowedContextExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { WindowedContextExtractor } from '@deepagents/text2sql/synthesis';
 
 const extractor = new WindowedContextExtractor(messages, adapter, {
   windowSize: 5, // Keep last 5 messages as context
 });
-const pairs = await toPairs(extractor);
+const pairs = await extractor.toPairs();
 ```
 
 ### SegmentedContextExtractor
@@ -141,10 +137,10 @@ const pairs = await toPairs(extractor);
 Uses an LLM to detect topic changes and reset context. When a topic change is detected, the context is reset and the triggering message is first resolved into a standalone form:
 
 ```typescript
-import { SegmentedContextExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { SegmentedContextExtractor } from '@deepagents/text2sql/synthesis';
 
 const extractor = new SegmentedContextExtractor(messages, adapter);
-const pairs = await toPairs(extractor);
+const pairs = await extractor.toPairs();
 
 // Context resets when the user asks about a completely different topic
 ```
@@ -154,10 +150,10 @@ const pairs = await toPairs(extractor);
 Extracts only the **last** `db_query` from a conversation and uses the full conversation context to generate a standalone question via LLM:
 
 ```typescript
-import { LastQueryExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { LastQueryExtractor } from '@deepagents/text2sql/synthesis';
 
 const extractor = new LastQueryExtractor(messages, adapter);
-const pairs = await toPairs(extractor);
+const pairs = await extractor.toPairs();
 
 // Returns at most 1 pair - the last query with resolved question
 // pairs[0].question = 'Show customers in NY sorted by revenue'
@@ -170,14 +166,14 @@ Use this when you need to extract a standalone question for the most recent SQL 
 ## Example: Extracting from History Store
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { MessageExtractor } from '@deepagents/text2sql/synthesis';
 
 // Load chat history
 const chat = await history.getChat('chat-123');
 const messages = chat.messages.map(m => m.content);
 
 // Extract pairs
-const pairs = await toPairs(new MessageExtractor(messages));
+const pairs = await new MessageExtractor(messages).toPairs();
 
 // Export for training
 console.log(`Extracted ${pairs.length} pairs`);
@@ -192,7 +188,7 @@ for (const pair of pairs) {
 ## Example: Batch Processing Multiple Chats
 
 ```typescript
-import { MessageExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { MessageExtractor } from '@deepagents/text2sql/synthesis';
 
 const allPairs: ExtractedPair[] = [];
 
@@ -203,7 +199,7 @@ for (const chatSummary of chats) {
   const chat = await history.getChat(chatSummary.id);
   const messages = chat.messages.map(m => m.content);
 
-  const pairs = await toPairs(new MessageExtractor(messages));
+  const pairs = await new MessageExtractor(messages).toPairs();
   allPairs.push(...pairs);
 }
 
@@ -218,16 +214,13 @@ Combine with `ValidatedProducer` to re-validate SQL:
 import {
   MessageExtractor,
   ValidatedProducer,
-  toPairs
 } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(
-  new ValidatedProducer(
+const pairs = await new ValidatedProducer(
     new MessageExtractor(messages),
     adapter,
     { execute: false } // Just validate syntax
-  )
-);
+  ).toPairs();
 ```
 
 ## Best Practices

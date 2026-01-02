@@ -10,14 +10,14 @@ Based on Microsoft's Evol-Instruct methodology for in-breadth evolution, this sy
 ## Basic Usage
 
 ```typescript
-import { BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 const existingPairs = [
   { question: 'Show top customers', sql: 'SELECT ...', success: true },
   { question: 'Monthly revenue', sql: 'SELECT ...', success: true },
 ];
 
-const expanded = await toPairs(new BreadthEvolver(existingPairs, { count: 3 }));
+const expanded = await new BreadthEvolver(existingPairs, { count: 3 }).toPairs();
 
 // Original: "Show top customers"
 // Variations:
@@ -59,15 +59,11 @@ Control how many paraphrases to generate per pair:
 
 ```typescript
 // 3 variations per pair
-const pairs = await toPairs(
-  new BreadthEvolver(existingPairs, { count: 3 })
-);
+const pairs = await new BreadthEvolver(existingPairs, { count: 3 }).toPairs();
 // 10 original pairs → 30 variations
 
 // 5 variations per pair
-const pairs = await toPairs(
-  new BreadthEvolver(existingPairs, { count: 5 })
-);
+const pairs = await new BreadthEvolver(existingPairs, { count: 5 }).toPairs();
 // 10 original pairs → 50 variations
 ```
 
@@ -76,19 +72,17 @@ const pairs = await toPairs(
 Generate variations that match a specific user persona:
 
 ```typescript
-import { BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 const persona = {
   role: 'Sales Manager',
   perspective: 'Focus on revenue metrics and customer relationships. Use business terminology.',
 };
 
-const expanded = await toPairs(
-  new BreadthEvolver(existingPairs, {
+const expanded = await new BreadthEvolver(existingPairs, {
     count: 3,
     persona
-  })
-);
+  }).toPairs();
 
 // Original: "Show customer orders"
 // With persona:
@@ -103,17 +97,13 @@ Process pairs in parallel for faster generation:
 
 ```typescript
 // Default concurrency (4)
-const pairs = await toPairs(
-  new BreadthEvolver(existingPairs, { count: 3 })
-);
+const pairs = await new BreadthEvolver(existingPairs, { count: 3 }).toPairs();
 
 // Higher concurrency for large datasets
-const pairs = await toPairs(
-  new BreadthEvolver(existingPairs, {
+const pairs = await new BreadthEvolver(existingPairs, {
     count: 3,
     concurrency: 10
-  })
-);
+  }).toPairs();
 ```
 
 ### Custom Model
@@ -123,12 +113,10 @@ Override the default model:
 ```typescript
 import { groq } from '@ai-sdk/groq';
 
-const pairs = await toPairs(
-  new BreadthEvolver(existingPairs, {
+const pairs = await new BreadthEvolver(existingPairs, {
     count: 3,
     model: groq('openai/gpt-oss-20b')
-  })
-);
+  }).toPairs();
 ```
 
 ## Example: Augment Extracted Data
@@ -139,17 +127,14 @@ Expand pairs extracted from chat history:
 import {
   MessageExtractor,
   BreadthEvolver,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Extract from history
-const extracted = await toPairs(new MessageExtractor(messages));
+const extracted = await new MessageExtractor(messages).toPairs();
 console.log(`Extracted ${extracted.length} pairs`);
 
 // Augment with variations
-const augmented = await toPairs(
-  new BreadthEvolver(extracted, { count: 3 })
-);
+const augmented = await new BreadthEvolver(extracted, { count: 3 }).toPairs();
 console.log(`Augmented to ${augmented.length} pairs`);
 ```
 
@@ -161,27 +146,22 @@ import {
   BreadthEvolver,
   ValidatedProducer,
   DeduplicatedProducer,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // 1. Extract from history
-const extracted = await toPairs(new MessageExtractor(messages));
+const extracted = await new MessageExtractor(messages).toPairs();
 
 // 2. Generate variations
-const variations = await toPairs(
-  new BreadthEvolver(extracted, { count: 3 })
-);
+const variations = await new BreadthEvolver(extracted, { count: 3 }).toPairs();
 
 // 3. Validate and deduplicate
-const final = await toPairs(
-  new DeduplicatedProducer(
+const final = await new DeduplicatedProducer(
     new ValidatedProducer(
       { produce: async function*() { yield variations; } },
       adapter
     ),
     { mode: 'exact' }
-  )
-);
+  ).toPairs();
 ```
 
 ## Example: With Persona-Based Variations
@@ -189,7 +169,7 @@ const final = await toPairs(
 Generate variations for different user types:
 
 ```typescript
-import { BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 const personas = [
   { role: 'Sales Manager', perspective: 'Revenue and customer focus' },
@@ -200,9 +180,7 @@ const personas = [
 const allVariations = [];
 
 for (const persona of personas) {
-  const variations = await toPairs(
-    new BreadthEvolver(basePairs, { count: 2, persona })
-  );
+  const variations = await new BreadthEvolver(basePairs, { count: 2, persona }).toPairs();
   allVariations.push(...variations);
 }
 
@@ -232,12 +210,10 @@ Understanding the difference:
 
 ```typescript
 // Example: Breadth evolution
-const breadth = await toPairs(
-  new BreadthEvolver(
+const breadth = await new BreadthEvolver(
     [{ question: 'Show customers', sql: 'SELECT * FROM customers', success: true }],
     { count: 3 }
-  )
-);
+  ).toPairs();
 
 // Results:
 // - "Display all customers" → SELECT * FROM customers
@@ -254,13 +230,11 @@ const breadth = await toPairs(
 
 ```typescript
 // Example: Depth evolution
-const depth = await toPairs(
-  new DepthEvolver(
+const depth = await new DepthEvolver(
     [{ question: 'Show customers', sql: 'SELECT * FROM customers', success: true }],
     adapter,
     { count: 2, techniques: ['add-aggregation', 'add-filter'] }
-  )
-);
+  ).toPairs();
 
 // Results:
 // - "How many customers per region?" → SELECT region, COUNT(*) FROM customers GROUP BY region
@@ -277,21 +251,18 @@ import {
   SqlExtractor,
   SchemaSynthesizer,
   BreadthEvolver,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // From multiple sources
-const fromHistory = await toPairs(new MessageExtractor(messages));
-const fromLogs = await toPairs(new SqlExtractor(sqlLogs, adapter));
-const synthetic = await toPairs(new SchemaSynthesizer(adapter, { count: 50 }));
+const fromHistory = await new MessageExtractor(messages).toPairs();
+const fromLogs = await new SqlExtractor(sqlLogs, adapter).toPairs();
+const synthetic = await new SchemaSynthesizer(adapter, { count: 50 }).toPairs();
 
 // Combine
 const allPairs = [...fromHistory, ...fromLogs, ...synthetic];
 
 // Augment everything with breadth variations
-const augmented = await toPairs(
-  new BreadthEvolver(allPairs, { count: 2 })
-);
+const augmented = await new BreadthEvolver(allPairs, { count: 2 }).toPairs();
 
 console.log(`Final dataset: ${augmented.length} pairs`);
 ```

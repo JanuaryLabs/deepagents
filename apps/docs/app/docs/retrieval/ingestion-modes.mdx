@@ -1,0 +1,313 @@
+---
+title: Ingestion Modes
+description: Control when content is re-indexed with smart caching
+---
+
+Ingestion modes control when content gets re-indexed, enabling efficient caching strategies for different use cases.
+
+## Overview
+
+The `ingestWhen` option on connectors determines re-indexing behavior:
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| `contentChanged` | Re-index when content hash changes | Local files, code |
+| `never` | Index once, never update | Static content, archives |
+| `expired` | Re-index when TTL expires | External APIs, RSS feeds |
+
+## contentChanged (Default)
+
+Re-indexes documents only when their content changes. Uses SHA-256 hashing to detect modifications.
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('docs/**/*.md', {
+  ingestWhen: 'contentChanged', // Default
+});
+```
+
+### How It Works
+
+1. Computes SHA-256 hash (CID) of document content
+2. Compares with stored CID in the database
+3. Re-indexes only if CID differs
+4. Updates CID after successful indexing
+
+### Best For
+
+- Local documentation
+- Source code
+- Any content that changes over time
+- Development environments
+
+### Example
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./docs.db', 384);
+const embedder = fastembed();
+
+// First run: indexes all files
+const results1 = await similaritySearch('auth', {
+  connector: local('docs/**/*.md'), // contentChanged is default
+  store,
+  embedder,
+});
+
+// Second run: only indexes changed files
+const results2 = await similaritySearch('auth', {
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+```
+
+## never
+
+Indexes content once and never updates, even if content changes.
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('archives/**/*.md', {
+  ingestWhen: 'never',
+});
+```
+
+### How It Works
+
+1. Checks if source exists in the database
+2. If exists, skips ingestion entirely
+3. If not exists, indexes all documents
+4. Never re-indexes regardless of content changes
+
+### Best For
+
+- Static archives
+- Historical data
+- One-time imports
+- Read-only datasets
+
+### Example
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./releases.db', 384);
+const embedder = fastembed();
+
+// Index release notes once
+const results = await similaritySearch('migration guide', {
+  connector: github.release('vercel/next.js', {
+    untilTag: 'v13.0.0',
+  }),
+  store,
+  embedder,
+});
+
+// Even if new releases are published, this won't re-index
+// because the source already exists
+```
+
+### Forcing Re-index
+
+To force re-indexing with `never` mode, delete the source from the database or use a new database:
+
+```typescript
+// Option 1: New database
+const freshStore = nodeSQLite('./releases-v2.db', 384);
+
+// Option 2: Different source ID (not recommended)
+// Each connector has a unique sourceId based on its parameters
+```
+
+## expired
+
+Re-indexes when a time-to-live (TTL) expires. Good for content that should be refreshed periodically.
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
+});
+```
+
+### How It Works
+
+1. Checks if source exists in the database
+2. If exists, checks if `expires_at` timestamp has passed
+3. If expired (or doesn't exist), indexes all documents
+4. Sets new expiry date after indexing
+5. If not expired, skips ingestion
+
+### Parameters
+
+- `ingestWhen: 'expired'` - Enable expiry-based ingestion
+- `expiresAfter: number` - TTL in milliseconds
+
+### Best For
+
+- RSS feeds
+- External APIs
+- News aggregation
+- Content that updates on a schedule
+
+### Example
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./news.db', 384);
+const embedder = fastembed();
+
+// Configure 1-hour refresh for news feeds
+const connector = rss('https://news.ycombinator.com/rss', {
+  maxItems: 50,
+});
+
+// Manually set expiry behavior
+const newsConnector = {
+  ...connector,
+  ingestWhen: 'expired' as const,
+  expiresAfter: 60 * 60 * 1000, // 1 hour
+};
+
+// First call: indexes the feed
+const results1 = await similaritySearch('AI', {
+  connector: newsConnector,
+  store,
+  embedder,
+});
+
+// Subsequent calls within 1 hour: skip indexing
+// After 1 hour: re-indexes the feed
+```
+
+## Comparison
+
+| Aspect | contentChanged | never | expired |
+|--------|---------------|-------|---------|
+| First run | Index all | Index all | Index all |
+| Subsequent runs | Index changed only | Skip all | Skip until TTL |
+| Content hash check | Yes | No | No |
+| Time-based refresh | No | No | Yes |
+| Memory of changes | Per-document | Per-source | Per-source |
+
+## Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    similaritySearch()                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ingestWhen = 'never'?                                      │
+│  ├── YES ─→ Source exists? ─→ YES ─→ SKIP ingestion        │
+│  │                          └→ NO ──→ RUN ingestion         │
+│  │                                                          │
+│  ingestWhen = 'expired'?                                    │
+│  ├── YES ─→ Source exists? ─→ YES ─→ Expired? ─→ YES ─→ RUN│
+│  │          └→ NO ──→ RUN                       └→ NO ──→ SKIP│
+│  │                                                          │
+│  ingestWhen = 'contentChanged'? (default)                   │
+│  └── YES ─→ RUN ingestion (skips unchanged docs internally) │
+│                                                             │
+│                         ↓                                   │
+│                   VECTOR SEARCH                             │
+│                         ↓                                   │
+│                    RETURN RESULTS                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Real-World Examples
+
+### Development vs Production
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+const connector = local('docs/**/*.md', {
+  // Development: always check for changes
+  ingestWhen: process.env.NODE_ENV === 'development'
+    ? 'contentChanged'
+    : 'expired',
+
+  // Production: refresh every 6 hours
+  expiresAfter: 6 * 60 * 60 * 1000,
+});
+```
+
+### Multi-Source Strategy
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local, rss, github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./knowledge.db', 384);
+const embedder = fastembed();
+
+// Local docs: check for changes
+await ingest({
+  connector: local('docs/**/*.md', { ingestWhen: 'contentChanged' }),
+  store,
+  embedder,
+});
+
+// Release notes: index once
+await ingest({
+  connector: github.release('vercel/next.js', { ingestWhen: 'never' } as any),
+  store,
+  embedder,
+});
+
+// News: refresh hourly
+await ingest({
+  connector: {
+    ...rss('https://news.ycombinator.com/rss'),
+    ingestWhen: 'expired',
+    expiresAfter: 60 * 60 * 1000,
+  },
+  store,
+  embedder,
+});
+```
+
+### Scheduled Refresh
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./news.db', 384);
+const embedder = fastembed();
+
+// Search function that handles refresh
+async function searchNews(query: string) {
+  const connector = {
+    ...rss('https://news.ycombinator.com/rss', { maxItems: 100 }),
+    ingestWhen: 'expired' as const,
+    expiresAfter: 30 * 60 * 1000, // 30 minutes
+  };
+
+  return similaritySearch(query, {
+    connector,
+    store,
+    embedder,
+  });
+}
+
+// Each call checks TTL and refreshes if needed
+const results = await searchNews('machine learning');
+```
+
+## Next Steps
+
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build your own connector
+- [Stores](/docs/retrieval/stores) - Configure vector storage
+- [Recipes](/docs/retrieval/recipes) - Real-world examples

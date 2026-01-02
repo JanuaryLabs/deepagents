@@ -1,0 +1,306 @@
+---
+title: GitHub Connector
+description: Index GitHub files, releases, and entire repositories
+---
+
+The `github` connector provides three ways to index content from GitHub: individual files, release notes, and entire repositories.
+
+## Import
+
+```typescript
+import { github } from '@deepagents/retrieval/connectors';
+```
+
+## Available Connectors
+
+| Connector | Description |
+|-----------|-------------|
+| `github.file()` | Single file from a repository |
+| `github.release()` | Release notes with pagination |
+| `github.repo()` | Entire repository via gitingest |
+
+## github.file()
+
+Index a single file from a GitHub repository:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./github.db', 384);
+
+const results = await similaritySearch('installation guide', {
+  connector: github.file('facebook/react/README.md'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+### Parameters
+
+```typescript
+github.file(filePath: string)
+// filePath format: "owner/repo/path/to/file"
+```
+
+### Examples
+
+```typescript
+// README from a repo
+github.file('vercel/next.js/README.md')
+
+// Specific documentation file
+github.file('anthropics/anthropic-sdk-python/docs/getting-started.md')
+
+// Configuration file
+github.file('prettier/prettier/prettier.config.js')
+```
+
+## github.release()
+
+Index release notes from a repository with pagination and filtering:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./releases.db', 384);
+
+// Index all releases
+const results = await similaritySearch('breaking changes', {
+  connector: github.release('vercel/next.js'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+### Options
+
+```typescript
+github.release(repo: string, options?: {
+  untilTag?: string;        // Stop at this tag (exclusive by default)
+  inclusive?: boolean;      // Include the untilTag release (default: true)
+  includeDrafts?: boolean;  // Include draft releases (default: false)
+  includePrerelease?: boolean; // Include prereleases (default: false)
+})
+```
+
+### Examples
+
+```typescript
+// All stable releases
+github.release('facebook/react')
+
+// Releases since v18.0.0
+github.release('facebook/react', {
+  untilTag: 'v18.0.0',
+  inclusive: false,
+})
+
+// Include prereleases (canary, beta, rc)
+github.release('facebook/react', {
+  includePrerelease: true,
+})
+
+// Everything including drafts
+github.release('facebook/react', {
+  includeDrafts: true,
+  includePrerelease: true,
+})
+```
+
+### Release Content Format
+
+Each release is formatted as:
+
+```
+Release: {name}
+Tag: {tag_name}
+Published at: {published_at}
+Updated at: {updated_at}
+URL: {html_url}
+Draft: {draft}
+Prerelease: {prerelease}
+
+{body}
+```
+
+## github.repo()
+
+Index an entire repository using [gitingest](https://github.com/cyclotruc/gitingest). This creates a markdown digest of the repository that's optimized for LLM consumption.
+
+**Requires**: `uvx` (install via `pip install uv`)
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./repos.db', 384);
+
+const results = await similaritySearch('authentication middleware', {
+  connector: github.repo('https://github.com/expressjs/express', {
+    includes: ['**/*.js'],
+    branch: 'main',
+  }),
+  store,
+  embedder: fastembed(),
+});
+```
+
+### Options
+
+```typescript
+github.repo(repoUrl: string, options: {
+  includes: string[];           // Required: glob patterns to include
+  excludes?: string[];          // Patterns to exclude (has sensible defaults)
+  branch?: string;              // Branch to index
+  includeGitignored?: boolean;  // Include gitignored files (default: false)
+  includeSubmodules?: boolean;  // Include submodules (default: false)
+  githubToken?: string;         // GitHub token for private repos
+  ingestWhen?: 'never' | 'contentChanged'; // Ingestion mode
+})
+```
+
+### Default Excludes
+
+The connector excludes common non-essential paths by default:
+
+- `node_modules/`, `dist/`, `build/`, `coverage/`
+- `.git/`, `.github/`, `.vscode/`, `.idea/`
+- `*.test.ts`, `*.test.tsx`, `__tests__/`
+- `*.d.ts`, `vendor/`, `3rdparty/`
+
+### Examples
+
+```typescript
+// Index TypeScript source files
+github.repo('https://github.com/trpc/trpc', {
+  includes: ['packages/**/*.ts'],
+  excludes: ['**/*.test.ts', '**/*.spec.ts'],
+})
+
+// Index documentation only
+github.repo('https://github.com/vitejs/vite', {
+  includes: ['docs/**/*.md'],
+  branch: 'main',
+})
+
+// Private repository
+github.repo('https://github.com/myorg/private-repo', {
+  includes: ['src/**/*.ts'],
+  githubToken: process.env.GITHUB_TOKEN,
+})
+
+// Specific branch
+github.repo('https://github.com/facebook/react/tree/canary', {
+  includes: ['packages/react/**/*.js'],
+  branch: 'canary',
+})
+```
+
+## Real-World Examples
+
+### Changelog Search
+
+Build a searchable changelog from release notes:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+async function searchChangelog(repo: string, query: string) {
+  const store = nodeSQLite('./changelogs.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: github.release(repo, {
+      includePrerelease: false,
+    }),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.map(r => ({
+    content: r.content,
+    similarity: r.similarity,
+  }));
+}
+
+// Find breaking changes in Next.js
+const results = await searchChangelog(
+  'vercel/next.js',
+  'breaking changes migration guide'
+);
+```
+
+### Multi-Repo Knowledge Base
+
+Index multiple repositories for cross-project search:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./ecosystem.db', 384);
+const embedder = fastembed();
+
+// Index related projects
+const repos = [
+  { url: 'https://github.com/vercel/next.js', includes: ['docs/**/*.md'] },
+  { url: 'https://github.com/vercel/swr', includes: ['**/*.md'] },
+  { url: 'https://github.com/vercel/ai', includes: ['docs/**/*.mdx'] },
+];
+
+for (const repo of repos) {
+  await ingest({
+    connector: github.repo(repo.url, {
+      includes: repo.includes,
+      ingestWhen: 'never', // Index once
+    }),
+    store,
+    embedder,
+  });
+}
+
+// Search across all repos
+const results = await similaritySearch('streaming responses', {
+  connector: github.repo(repos[0].url, { includes: repos[0].includes }),
+  store,
+  embedder,
+});
+```
+
+### Library Documentation Index
+
+Index a library's README and documentation:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { github } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./zod-docs.db', 384);
+
+// Index Zod's documentation
+const results = await similaritySearch('optional fields with default', {
+  connector: github.repo('https://github.com/colinhacks/zod', {
+    includes: ['README.md', 'docs/**/*.md'],
+  }),
+  store,
+  embedder: fastembed(),
+});
+```
+
+## Source IDs
+
+Each connector generates a unique source ID:
+
+```typescript
+github.file('owner/repo/file.md')    // sourceId: "github:file:owner/repo/file.md"
+github.release('owner/repo')          // sourceId: "github:releases:owner/repo"
+github.repo('https://github.com/...')  // sourceId: "github:repo:https://github.com/..."
+```
+
+## Next Steps
+
+- [RSS Connector](/docs/retrieval/rss) - Index RSS feeds
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing
+- [Recipes](/docs/retrieval/recipes) - Build a documentation chatbot

@@ -1,4 +1,28 @@
 {
   "title": "Retrieval",
-  "root": true
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Connectors---",
+    "local",
+    "github",
+    "rss",
+    "pdf",
+    "linear",
+    "repo",
+    "---Guides---",
+    "embedders",
+    "stores",
+    "ingestion-modes",
+    "custom-connectors",
+    "---Recipes---",
+    "recipes",
+    "recipe-docs-chatbot",
+    "recipe-news-aggregator",
+    "recipe-research-assistant",
+    "recipe-code-search",
+    "recipe-knowledge-base",
+    "recipe-indexing-pipeline"
+  ]
 }

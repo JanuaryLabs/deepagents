@@ -1,0 +1,257 @@
+---
+title: Documentation Chatbot
+description: Build an AI assistant that answers questions about your documentation
+---
+
+Build an AI assistant that answers questions about your documentation using semantic search. This recipe combines `@deepagents/retrieval` with `@deepagents/agent` to create a conversational interface with source citations.
+
+## What You'll Build
+
+- A chatbot that searches your documentation semantically
+- Streaming responses with real-time output
+- Source citations for every answer
+- Automatic context retrieval based on user questions
+
+## Prerequisites
+
+```bash
+npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
+```
+
+## Complete Implementation
+
+```typescript
+import { agent, instructions, execute } from '@deepagents/agent';
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
+import z from 'zod';
+
+// Set up retrieval infrastructure
+const store = nodeSQLite('./docs.db', 384);
+const embedder = fastembed();
+const connector = local('docs/**/*.{md,mdx}');
+
+// Create a search tool for the agent
+const searchDocsTool = tool({
+  description: 'Search documentation for relevant information. Use this to find answers to user questions.',
+  parameters: z.object({
+    query: z.string().describe('The search query based on the user question'),
+  }),
+  execute: async ({ query }) => {
+    const results = await similaritySearch(query, {
+      connector,
+      store,
+      embedder,
+    });
+
+    // Return top 5 results with metadata
+    return results.slice(0, 5).map(r => ({
+      source: r.document_id,
+      content: r.content,
+      relevance: r.similarity.toFixed(2),
+    }));
+  },
+});
+
+// Create the documentation chatbot
+const docsBot = agent({
+  name: 'DocsBot',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You are a helpful documentation assistant.',
+      'Answer questions by searching the documentation.',
+      'Always cite sources when providing information.',
+      'If you cannot find relevant information, say so honestly.',
+    ],
+    routine: [
+      'Understand the user question',
+      'Search documentation for relevant content',
+      'Synthesize information from multiple sources if needed',
+      'Provide clear, accurate answers with citations',
+      'Format citations as [Source: filename]',
+    ],
+  }),
+  tools: { searchDocs: searchDocsTool },
+});
+
+// Chat function with streaming
+async function chat(question: string) {
+  console.log(`\nQuestion: ${question}\n`);
+  console.log('Answer:');
+
+  const stream = execute(docsBot, question, {});
+
+  let response = '';
+  for await (const chunk of stream.textStream) {
+    process.stdout.write(chunk);
+    response += chunk;
+  }
+
+  console.log('\n');
+  return response;
+}
+
+// Example usage
+await chat('How do I set up authentication?');
+await chat('What are the available configuration options?');
+await chat('How do I deploy to production?');
+```
+
+## How It Works
+
+### 1. Retrieval Setup
+
+The retrieval infrastructure indexes your documentation files:
+
+```typescript
+const store = nodeSQLite('./docs.db', 384);      // Vector database
+const embedder = fastembed();                     // Embedding model
+const connector = local('docs/**/*.{md,mdx}');   // Documentation files
+```
+
+### 2. Search Tool
+
+The search tool wraps `similaritySearch` for the agent to use:
+
+```typescript
+const searchDocsTool = tool({
+  description: 'Search documentation...',
+  parameters: z.object({
+    query: z.string(),
+  }),
+  execute: async ({ query }) => {
+    const results = await similaritySearch(query, { connector, store, embedder });
+    return results.slice(0, 5);
+  },
+});
+```
+
+### 3. Agent Configuration
+
+The agent uses instructions to define its behavior:
+
+```typescript
+const docsBot = agent({
+  name: 'DocsBot',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: ['What the bot does'],
+    routine: ['Step-by-step behavior'],
+  }),
+  tools: { searchDocs: searchDocsTool },
+});
+```
+
+## Customization Options
+
+### Multiple Documentation Sources
+
+Index docs from multiple locations:
+
+```typescript
+import { ingest } from '@deepagents/retrieval';
+
+// Index main docs
+await ingest({
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+
+// Index API reference
+await ingest({
+  connector: local('api-docs/**/*.md'),
+  store,
+  embedder,
+});
+
+// Index tutorials
+await ingest({
+  connector: local('tutorials/**/*.md'),
+  store,
+  embedder,
+});
+```
+
+### Conversation History
+
+Add memory for multi-turn conversations:
+
+```typescript
+import { swarm } from '@deepagents/agent';
+
+// Use swarm() for UI frameworks with message history
+const messages = [
+  { role: 'user', content: 'How do I authenticate?' },
+];
+
+const stream = swarm(docsBot, messages, {});
+```
+
+### Custom Prompt
+
+Tailor the bot for your specific documentation:
+
+```typescript
+const customBot = agent({
+  name: 'APIDocsBot',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'You are the official documentation assistant for ACME API.',
+      'Help developers integrate and use the ACME API effectively.',
+      'Always provide code examples in TypeScript.',
+    ],
+    routine: [
+      'Search for relevant API documentation',
+      'Provide code examples when applicable',
+      'Link to related endpoints or concepts',
+      'Suggest best practices from the docs',
+    ],
+  }),
+  tools: { searchDocs: searchDocsTool },
+});
+```
+
+### Structured Responses
+
+Return structured data for UI integration:
+
+```typescript
+const ResponseSchema = z.object({
+  answer: z.string(),
+  sources: z.array(z.object({
+    file: z.string(),
+    relevance: z.number(),
+  })),
+  followUpQuestions: z.array(z.string()),
+});
+
+const structuredBot = agent({
+  name: 'StructuredDocsBot',
+  model: groq('gpt-oss-20b'),
+  output: ResponseSchema,
+  prompt: instructions({
+    purpose: ['Provide structured answers to documentation questions'],
+    routine: ['Search docs', 'Format response with sources and follow-ups'],
+  }),
+  tools: { searchDocs: searchDocsTool },
+});
+```
+
+## Production Tips
+
+1. **Pre-index on startup**: Run ingestion once when your app starts
+2. **Use contentChanged mode**: Only re-index when docs actually change
+3. **Limit results**: Return 3-5 results to avoid context overflow
+4. **Add rate limiting**: Protect your embeddings API
+5. **Cache common queries**: Store frequent question/answer pairs
+
+## Next Steps
+
+- [News Aggregator](/docs/retrieval/recipe-news-aggregator) - Multi-source content
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Index from any source
+- [Embedders](/docs/retrieval/embedders) - Optimize embedding models

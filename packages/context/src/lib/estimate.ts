@@ -1,6 +1,8 @@
 import { encode } from 'gpt-tokenizer';
 
+import type { ContextFragment } from './context.ts';
 import type { Models } from './models.generated.ts';
+import type { ContextRenderer } from './renderers/abstract.renderer.ts';
 
 /**
  * Cost information for a model (prices per 1M tokens)
@@ -29,6 +31,16 @@ export interface ModelInfo {
 }
 
 /**
+ * Estimate for a single fragment
+ */
+export interface FragmentEstimate {
+  name: string;
+  id?: string;
+  tokens: number;
+  cost: number;
+}
+
+/**
  * Estimate result returned by the estimate function
  */
 export interface EstimateResult {
@@ -41,6 +53,7 @@ export interface EstimateResult {
     output: number;
     exceedsContext: boolean;
   };
+  fragments: FragmentEstimate[];
 }
 
 /**
@@ -203,6 +216,7 @@ export class ModelsRegistry {
         output: model.limit.output,
         exceedsContext: tokens > model.limit.context,
       },
+      fragments: [],
     };
   }
 }
@@ -225,13 +239,53 @@ export function getModelsRegistry(): ModelsRegistry {
  * Automatically loads the registry if not already loaded
  *
  * @param modelId - Model ID (e.g., "openai:gpt-4o", "anthropic:claude-3-5-sonnet")
- * @param input - Input text (prompt)
+ * @param renderer - Renderer to use for converting fragments to text
+ * @param fragments - Context fragments to estimate
  */
 export async function estimate(
   modelId: Models,
-  input: string,
+  renderer: ContextRenderer,
+  ...fragments: ContextFragment[]
 ): Promise<EstimateResult> {
   const registry = getModelsRegistry();
   await registry.load();
-  return registry.estimate(modelId, input);
+
+  // Calculate total (all fragments rendered together)
+  const input = renderer.render(fragments);
+  const model = registry.get(modelId);
+  if (!model) {
+    throw new Error(
+      `Model "${modelId}" not found. Call load() first or check model ID.`,
+    );
+  }
+
+  const tokenizer = registry.getTokenizer(modelId);
+  const totalTokens = tokenizer.count(input);
+  const totalCost = (totalTokens / 1_000_000) * model.cost.input;
+
+  // Calculate per-fragment estimates
+  const fragmentEstimates: FragmentEstimate[] = fragments.map((fragment) => {
+    const rendered = renderer.render([fragment]);
+    const tokens = tokenizer.count(rendered);
+    const cost = (tokens / 1_000_000) * model.cost.input;
+    return {
+      id: fragment.id,
+      name: fragment.name,
+      tokens,
+      cost,
+    };
+  });
+
+  return {
+    model: model.id,
+    provider: model.provider,
+    tokens: totalTokens,
+    cost: totalCost,
+    limits: {
+      context: model.limit.context,
+      output: model.limit.output,
+      exceedsContext: totalTokens > model.limit.context,
+    },
+    fragments: fragmentEstimates,
+  };
 }

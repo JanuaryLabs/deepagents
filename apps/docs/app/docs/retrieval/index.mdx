@@ -1,8 +1,188 @@
 ---
 title: Retrieval
-description: Retrieval package documentation
+description: A RAG (Retrieval-Augmented Generation) system for semantic search over any data source
 ---
 
 # Retrieval
 
-Retrieval package documentation.
+`@deepagents/retrieval` is a complete RAG (Retrieval-Augmented Generation) system that enables semantic search over various data sources. Ingest content from local files, GitHub repositories, RSS feeds, PDFs, and more—then query with natural language.
+
+## Installation
+
+```bash
+npm install @deepagents/retrieval
+```
+
+## How It Works
+
+The retrieval system follows a simple pipeline:
+
+```
+Data Sources → Connectors → Chunking → Embeddings → Vector Store → Search
+```
+
+1. **Connectors** pull content from data sources (files, GitHub, RSS, PDFs)
+2. **Splitters** break content into chunks for embedding
+3. **Embedders** convert text into vector representations
+4. **Stores** persist embeddings and enable similarity search
+5. **Search** finds relevant chunks based on semantic similarity
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    @deepagents/retrieval                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────┐     ┌──────────────┐     ┌─────────────┐  │
+│  │  Connectors │ ──▶ │   Ingestion  │ ──▶ │    Store    │  │
+│  │             │     │   Pipeline   │     │             │  │
+│  │  • local    │     │              │     │  • SQLite   │  │
+│  │  • github   │     │  ┌────────┐  │     │  • vec0     │  │
+│  │  • rss      │     │  │Splitter│  │     │             │  │
+│  │  • pdf      │     │  └───┬────┘  │     └──────┬──────┘  │
+│  │  • linear   │     │      │       │            │         │
+│  │  • repo     │     │  ┌───▼────┐  │     ┌──────▼──────┐  │
+│  └─────────────┘     │  │Embedder│  │     │   Search    │  │
+│                      │  └────────┘  │     │             │  │
+│                      └──────────────┘     └─────────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Quick Example
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+// Create a vector store (384 dimensions for BGE-small model)
+const store = nodeSQLite('./knowledge.db', 384);
+
+// Search your markdown documentation
+const results = await similaritySearch('How do I authenticate users?', {
+  connector: local('docs/**/*.md'),
+  store,
+  embedder: fastembed(),
+});
+
+// Results include content, similarity score, and metadata
+for (const result of results) {
+  console.log(`[${result.similarity.toFixed(2)}] ${result.content.slice(0, 100)}...`);
+}
+```
+
+## Key Concepts
+
+### Connectors
+
+Connectors define where your data comes from. Each connector implements a simple interface that yields documents:
+
+```typescript
+type Connector = {
+  sourceId: string;                    // Unique identifier for caching
+  sources: () => AsyncGenerator<...>;  // Yields documents
+  ingestWhen?: 'never' | 'contentChanged' | 'expired';
+  expiresAfter?: number;               // TTL in milliseconds
+};
+```
+
+Available connectors:
+- **[local](/docs/retrieval/local)** - Local filesystem with glob patterns
+- **[github](/docs/retrieval/github)** - GitHub files, releases, and repositories
+- **[rss](/docs/retrieval/rss)** - RSS feeds with article extraction
+- **[pdf](/docs/retrieval/pdf)** - PDF text extraction
+- **[linear](/docs/retrieval/linear)** - Linear workspace issues
+- **[repo](/docs/retrieval/repo)** - Repository code with language filtering
+
+### Embedders
+
+Embedders convert text into vector representations. The package includes FastEmbed with multiple model options:
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+// Default: BGE-small-en-v1.5 (384 dimensions)
+const embedder = fastembed();
+
+// Or specify a different model
+const embedder = fastembed({
+  model: EmbeddingModel.AllMiniLML6V2,
+  batchSize: 32,
+});
+```
+
+### Stores
+
+Stores persist embeddings and provide similarity search. The SQLite store uses the vec0 extension for efficient vector operations:
+
+```typescript
+import { nodeSQLite } from '@deepagents/retrieval';
+
+// Create store with dimension matching your embedding model
+const store = nodeSQLite('./vectors.db', 384);
+```
+
+### Ingestion Modes
+
+Control when content gets re-indexed:
+
+- **`contentChanged`** (default) - Re-ingest when content hash changes
+- **`never`** - Ingest once, never update
+- **`expired`** - Re-ingest when TTL expires
+
+```typescript
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours
+});
+```
+
+## Exports
+
+### Main Package
+
+```typescript
+import {
+  // Core functions
+  similaritySearch,
+  ingest,
+
+  // Embedders
+  fastembed,
+
+  // Stores
+  nodeSQLite,
+  SQLiteStore,
+
+  // Utilities
+  cid,
+
+  // Types
+  type Store,
+  type Embedder,
+  type Chunk,
+  type Corpus,
+} from '@deepagents/retrieval';
+```
+
+### Connectors Subpath
+
+```typescript
+import {
+  local,
+  github,
+  rss,
+  pdf,
+  pdfFile,
+  linear,
+  repo,
+} from '@deepagents/retrieval/connectors';
+```
+
+## Next Steps
+
+- [Getting Started](/docs/retrieval/getting-started) - Build your first RAG pipeline
+- [Local Connector](/docs/retrieval/local) - Index local files
+- [Embedders](/docs/retrieval/embedders) - Configure embedding models
+- [Recipes](/docs/retrieval/recipes) - Real-world examples

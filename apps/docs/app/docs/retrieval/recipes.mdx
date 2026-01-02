@@ -1,0 +1,112 @@
+---
+title: Recipes
+description: Production-ready examples for common RAG applications
+---
+
+Complete, production-ready examples showing how to build real-world RAG applications with the retrieval package.
+
+## Available Recipes
+
+### [Documentation Chatbot](/docs/retrieval/recipe-docs-chatbot)
+
+Build an AI assistant that answers questions about your documentation using semantic search. Combines the retrieval package with `@deepagents/agent` to create a conversational interface with source citations.
+
+**Key features:**
+- RAG-powered Q&A
+- Source citations
+- Streaming responses
+
+---
+
+### [News Aggregator](/docs/retrieval/recipe-news-aggregator)
+
+Aggregate content from multiple RSS feeds and generate AI-powered daily digests. Demonstrates multi-source ingestion with TTL-based refresh and structured output generation.
+
+**Key features:**
+- Multi-feed aggregation
+- Automatic refresh with TTL
+- AI-generated summaries
+
+---
+
+### [Research Paper Assistant](/docs/retrieval/recipe-research-assistant)
+
+Search and summarize research papers from arXiv or local PDFs. Shows how to build a research tool that indexes academic papers and answers questions about them.
+
+**Key features:**
+- PDF indexing
+- Paper summarization
+- Research Q&A
+
+---
+
+### [Multi-Repository Code Search](/docs/retrieval/recipe-code-search)
+
+Build a semantic code search system across multiple local and GitHub repositories. Useful for understanding large codebases and finding relevant implementations.
+
+**Key features:**
+- Local + GitHub repos
+- Language-aware filtering
+- Cross-project search
+
+---
+
+### [Knowledge Base with Citations](/docs/retrieval/recipe-knowledge-base)
+
+Create a knowledge base that combines multiple source types (docs, releases, news) and provides answers with proper source attribution.
+
+**Key features:**
+- Multi-source ingestion
+- Source tracking
+- Citation formatting
+
+---
+
+### [Incremental Indexing Pipeline](/docs/retrieval/recipe-indexing-pipeline)
+
+Build a production indexing pipeline with different refresh strategies for different content types. Shows how to efficiently manage large-scale content ingestion.
+
+**Key features:**
+- Mixed ingestion modes
+- Scheduled updates
+- Pipeline orchestration
+
+## Choosing a Recipe
+
+| Use Case | Recipe |
+|----------|--------|
+| Customer support bot | [Documentation Chatbot](/docs/retrieval/recipe-docs-chatbot) |
+| Content monitoring | [News Aggregator](/docs/retrieval/recipe-news-aggregator) |
+| Academic research | [Research Assistant](/docs/retrieval/recipe-research-assistant) |
+| Code understanding | [Code Search](/docs/retrieval/recipe-code-search) |
+| Enterprise knowledge | [Knowledge Base](/docs/retrieval/recipe-knowledge-base) |
+| Large-scale indexing | [Indexing Pipeline](/docs/retrieval/recipe-indexing-pipeline) |
+
+## Common Patterns
+
+All recipes follow these patterns:
+
+1. **Store creation** - Initialize SQLite with matching dimensions
+2. **Connector setup** - Configure data sources with ingestion modes
+3. **Embedder config** - Use FastEmbed with appropriate model
+4. **Search integration** - Combine with agents or direct queries
+
+```typescript
+// Common setup across all recipes
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+
+const store = nodeSQLite('./knowledge.db', 384);
+const embedder = fastembed();
+
+const results = await similaritySearch(query, {
+  connector,
+  store,
+  embedder,
+});
+```
+
+## Next Steps
+
+- [Getting Started](/docs/retrieval/getting-started) - Basic setup
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build your own data sources
+- [Embedders](/docs/retrieval/embedders) - Configure embedding models

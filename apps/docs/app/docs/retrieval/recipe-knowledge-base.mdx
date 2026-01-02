@@ -1,0 +1,372 @@
+---
+title: Knowledge Base with Citations
+description: Build a knowledge base that combines multiple source types with proper attribution
+---
+
+Create a knowledge base that combines multiple source types (docs, releases, news) and provides answers with proper source attribution. This recipe shows how to build an enterprise-grade knowledge system.
+
+## What You'll Build
+
+- Multi-source content ingestion
+- Unified semantic search across all sources
+- AI assistant with source citations
+- Source type filtering
+
+## Prerequisites
+
+```bash
+npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
+```
+
+## Complete Implementation
+
+```typescript
+import { agent, instructions, execute } from '@deepagents/agent';
+import { similaritySearch, fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
+import { local, rss, github } from '@deepagents/retrieval/connectors';
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
+import z from 'zod';
+
+// Set up retrieval infrastructure
+const store = nodeSQLite('./knowledge.db', 384);
+const embedder = fastembed();
+
+// Source type identifiers for filtering
+const SOURCE_PREFIXES = {
+  docs: 'glob:',
+  releases: 'github:releases:',
+  news: 'rss:',
+};
+
+// Build the knowledge base from multiple sources
+async function buildKnowledgeBase() {
+  console.log('Building knowledge base...\n');
+
+  // 1. Internal documentation (checks for changes)
+  console.log('Indexing internal docs...');
+  await ingest({
+    connector: local('docs/**/*.md', { ingestWhen: 'contentChanged' }),
+    store,
+    embedder,
+  });
+
+  // 2. Product release notes (index once)
+  console.log('Indexing release notes...');
+  await ingest({
+    connector: github.release('vercel/next.js'),
+    store,
+    embedder,
+  });
+
+  // 3. Industry news (hourly refresh)
+  console.log('Indexing news feeds...');
+  await ingest({
+    connector: {
+      ...rss('https://news.ycombinator.com/rss', { maxItems: 50 }),
+      ingestWhen: 'expired',
+      expiresAfter: 60 * 60 * 1000, // 1 hour
+    },
+    store,
+    embedder,
+  });
+
+  console.log('\nKnowledge base ready!');
+}
+
+// Search tool with source type filtering
+const searchKnowledgeTool = tool({
+  description: 'Search the knowledge base for information. Can filter by source type.',
+  parameters: z.object({
+    query: z.string().describe('The search query'),
+    sourceType: z.enum(['all', 'docs', 'releases', 'news'])
+      .optional()
+      .describe('Filter by source type'),
+  }),
+  execute: async ({ query, sourceType }) => {
+    const results = await similaritySearch(query, {
+      connector: local('docs/**/*.md'),
+      store,
+      embedder,
+    });
+
+    // Filter by source type if specified
+    let filtered = results;
+    if (sourceType && sourceType !== 'all') {
+      const prefix = SOURCE_PREFIXES[sourceType];
+      // Note: In practice, you'd filter by sourceId metadata
+      // This is a simplified example
+    }
+
+    return filtered.slice(0, 8).map(r => ({
+      source: r.document_id,
+      sourceType: detectSourceType(r.document_id),
+      content: r.content,
+      relevance: r.similarity.toFixed(2),
+      metadata: r.metadata,
+    }));
+  },
+});
+
+// Detect source type from document ID
+function detectSourceType(docId: string): string {
+  if (docId.includes('github.com') || docId.includes('release')) return 'releases';
+  if (docId.includes('rss:') || docId.includes('http')) return 'news';
+  return 'docs';
+}
+
+// Format citation based on source type
+function formatCitation(result: any): string {
+  const type = result.sourceType;
+
+  switch (type) {
+    case 'docs':
+      return `[Docs: ${result.source}]`;
+    case 'releases':
+      return `[Release: ${result.source}]`;
+    case 'news':
+      return `[News: ${result.source}]`;
+    default:
+      return `[Source: ${result.source}]`;
+  }
+}
+
+// Knowledge assistant agent
+const assistant = agent({
+  name: 'KnowledgeAssistant',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'Answer questions using the knowledge base.',
+      'Always cite sources for information you provide.',
+      'Distinguish between internal docs, release notes, and news.',
+      'Be clear about the recency and reliability of sources.',
+    ],
+    routine: [
+      'Understand the user question',
+      'Search relevant sources',
+      'Synthesize information from multiple sources if needed',
+      'Provide citations in format [Type: source]',
+      'Note when information might be outdated',
+    ],
+  }),
+  tools: { searchKnowledge: searchKnowledgeTool },
+});
+
+// Ask a question with citations
+async function ask(question: string) {
+  console.log(`\nQuestion: ${question}\n`);
+  console.log('Answer:');
+
+  const stream = execute(assistant, question, {});
+
+  for await (const chunk of stream.textStream) {
+    process.stdout.write(chunk);
+  }
+
+  console.log('\n');
+}
+
+// Example usage
+async function main() {
+  // Build the knowledge base
+  await buildKnowledgeBase();
+
+  // Ask questions
+  await ask('What new features were added in Next.js 14?');
+  await ask('How do we handle authentication in our API?');
+  await ask('What are the latest trends in AI development?');
+  await ask('Compare our documentation approach to industry news about documentation tools.');
+}
+
+await main();
+```
+
+## How It Works
+
+### 1. Multi-Source Ingestion
+
+Different sources use different ingestion modes:
+
+```typescript
+// Docs: check for changes
+local('docs/**/*.md', { ingestWhen: 'contentChanged' })
+
+// Releases: index once
+github.release('vercel/next.js')
+
+// News: hourly refresh
+{ ...rss(url), ingestWhen: 'expired', expiresAfter: 60 * 60 * 1000 }
+```
+
+### 2. Source Type Detection
+
+Track where content came from:
+
+```typescript
+function detectSourceType(docId: string): string {
+  if (docId.includes('release')) return 'releases';
+  if (docId.includes('rss:')) return 'news';
+  return 'docs';
+}
+```
+
+### 3. Citation Formatting
+
+Format citations by source type:
+
+```typescript
+[Docs: api/authentication.md]
+[Release: vercel/next.js:v14.0.0]
+[News: https://example.com/article]
+```
+
+## Customization Options
+
+### Source Priority
+
+Weight sources differently:
+
+```typescript
+const SOURCE_WEIGHTS = {
+  docs: 1.0,      // Internal docs are authoritative
+  releases: 0.9,  // Release notes are official
+  news: 0.7,      // News is less authoritative
+};
+
+function weightedResults(results: any[]) {
+  return results
+    .map(r => ({
+      ...r,
+      weightedScore: r.similarity * SOURCE_WEIGHTS[detectSourceType(r.source)],
+    }))
+    .sort((a, b) => b.weightedScore - a.weightedScore);
+}
+```
+
+### Freshness Filtering
+
+Prioritize recent content:
+
+```typescript
+const MAX_AGE = {
+  docs: Infinity,        // Docs don't expire
+  releases: 365,         // Releases relevant for a year
+  news: 7,               // News relevant for a week
+};
+
+function filterByFreshness(results: any[]) {
+  const now = Date.now();
+
+  return results.filter(r => {
+    const type = detectSourceType(r.source);
+    const maxAgeDays = MAX_AGE[type];
+
+    if (maxAgeDays === Infinity) return true;
+
+    const timestamp = r.metadata?.timestamp || r.metadata?.published_at;
+    if (!timestamp) return true;
+
+    const ageInDays = (now - new Date(timestamp).getTime()) / (1000 * 60 * 60 * 24);
+    return ageInDays <= maxAgeDays;
+  });
+}
+```
+
+### Access Control
+
+Filter sources by user permissions:
+
+```typescript
+const USER_ACCESS = {
+  admin: ['docs', 'releases', 'news', 'internal'],
+  developer: ['docs', 'releases', 'news'],
+  guest: ['docs', 'releases'],
+};
+
+async function searchWithAccess(query: string, userRole: string) {
+  const results = await similaritySearch(query, { connector, store, embedder });
+
+  const allowedTypes = USER_ACCESS[userRole] || [];
+
+  return results.filter(r => {
+    const type = detectSourceType(r.source);
+    return allowedTypes.includes(type);
+  });
+}
+```
+
+### Structured Responses
+
+Return structured answers with sources:
+
+```typescript
+const AnswerSchema = z.object({
+  answer: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  sources: z.array(z.object({
+    type: z.string(),
+    path: z.string(),
+    relevance: z.number(),
+    excerpt: z.string(),
+  })),
+  relatedTopics: z.array(z.string()),
+});
+
+const structuredAssistant = agent({
+  name: 'StructuredKB',
+  model: groq('gpt-oss-20b'),
+  output: AnswerSchema,
+  prompt: instructions({
+    purpose: ['Provide structured answers with sources'],
+    routine: ['Search', 'Synthesize', 'Format with citations'],
+  }),
+  tools: { searchKnowledge: searchKnowledgeTool },
+});
+```
+
+### Feedback Loop
+
+Track which sources are most helpful:
+
+```typescript
+interface Feedback {
+  queryId: string;
+  sourceId: string;
+  helpful: boolean;
+  timestamp: Date;
+}
+
+const feedbackStore: Feedback[] = [];
+
+function recordFeedback(queryId: string, sourceId: string, helpful: boolean) {
+  feedbackStore.push({
+    queryId,
+    sourceId,
+    helpful,
+    timestamp: new Date(),
+  });
+}
+
+function getSourceReliability(sourceId: string): number {
+  const feedback = feedbackStore.filter(f => f.sourceId === sourceId);
+  if (feedback.length === 0) return 0.5; // Neutral
+
+  const helpful = feedback.filter(f => f.helpful).length;
+  return helpful / feedback.length;
+}
+```
+
+## Production Tips
+
+1. **Separate stores**: Consider separate stores for different source types
+2. **Metadata tracking**: Store source type, timestamp, and author metadata
+3. **Regular refresh**: Schedule updates for time-sensitive sources
+4. **Audit logging**: Track queries and citations for compliance
+5. **Cache popular queries**: Store answers to frequent questions
+
+## Next Steps
+
+- [Indexing Pipeline](/docs/retrieval/recipe-indexing-pipeline) - Scale ingestion
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Add new sources
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - Refresh strategies

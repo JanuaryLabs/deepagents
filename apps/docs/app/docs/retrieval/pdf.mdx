@@ -1,0 +1,289 @@
+---
+title: PDF Connector
+description: Extract and index text content from PDF files
+---
+
+The `pdf` connector extracts text from PDF files using the [unpdf](https://github.com/nicksrandall/unpdf) library. It supports both local files and remote URLs.
+
+## Import
+
+```typescript
+import { pdf, pdfFile } from '@deepagents/retrieval/connectors';
+```
+
+## Available Connectors
+
+| Connector | Description |
+|-----------|-------------|
+| `pdf()` | Multiple PDF files via glob pattern |
+| `pdfFile()` | Single PDF file or URL |
+
+## pdf()
+
+Index multiple PDF files matching a glob pattern:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdf } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./documents.db', 384);
+
+const results = await similaritySearch('financial projections', {
+  connector: pdf('reports/**/*.pdf'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+### Parameters
+
+```typescript
+pdf(pattern: string)
+```
+
+The pattern supports glob syntax:
+
+```typescript
+// All PDFs in a directory
+pdf('documents/*.pdf')
+
+// Recursive search
+pdf('**/*.pdf')
+
+// Specific directory
+pdf('contracts/2024/**/*.pdf')
+```
+
+### Automatic Exclusions
+
+The connector excludes:
+- `node_modules/`
+- `.git/`
+
+## pdfFile()
+
+Index a single PDF file from local path or URL:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./papers.db', 384);
+
+// Local file
+const results = await similaritySearch('methodology', {
+  connector: pdfFile('./research/paper.pdf'),
+  store,
+  embedder: fastembed(),
+});
+
+// Remote URL
+const results = await similaritySearch('methodology', {
+  connector: pdfFile('https://arxiv.org/pdf/2301.00234.pdf'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+### Parameters
+
+```typescript
+pdfFile(source: string)
+// source: Local file path or HTTP(S) URL
+```
+
+## Real-World Examples
+
+### Research Paper Search
+
+Build a searchable research paper library:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdfFile } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./research.db', 384);
+const embedder = fastembed();
+
+// Index papers from arXiv
+const papers = [
+  'https://arxiv.org/pdf/1706.03762.pdf', // Attention Is All You Need
+  'https://arxiv.org/pdf/2005.14165.pdf', // GPT-3
+  'https://arxiv.org/pdf/2303.08774.pdf', // GPT-4 Technical Report
+];
+
+for (const paperUrl of papers) {
+  await ingest({
+    connector: pdfFile(paperUrl),
+    store,
+    embedder,
+  });
+  console.log(`Indexed: ${paperUrl}`);
+}
+
+// Search across all papers
+async function searchPapers(query: string) {
+  const results = await similaritySearch(query, {
+    connector: pdfFile(papers[0]), // Any connector works for search
+    store,
+    embedder,
+  });
+
+  return results.slice(0, 5);
+}
+
+const results = await searchPapers('self-attention mechanism');
+```
+
+### Contract Analysis
+
+Index and search legal contracts:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdf } from '@deepagents/retrieval/connectors';
+
+async function searchContracts(query: string) {
+  const store = nodeSQLite('./contracts.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: pdf('contracts/**/*.pdf'),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.map(r => ({
+    file: r.document_id,
+    content: r.content.slice(0, 300),
+    similarity: r.similarity,
+  }));
+}
+
+// Find clauses about termination
+const results = await searchContracts('termination clause conditions');
+```
+
+### Financial Reports
+
+Index quarterly and annual financial reports:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdf } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./financials.db', 384);
+
+async function searchFinancials(query: string, year?: string) {
+  const pattern = year
+    ? `financials/${year}/**/*.pdf`
+    : 'financials/**/*.pdf';
+
+  const results = await similaritySearch(query, {
+    connector: pdf(pattern),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.slice(0, 10);
+}
+
+// Search 2024 reports for revenue information
+const results = await searchFinancials('quarterly revenue growth', '2024');
+```
+
+### Technical Documentation
+
+Index product manuals and technical documentation:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdf } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./manuals.db', 384);
+const embedder = fastembed();
+
+// Index all product manuals
+await ingest({
+  connector: pdf('manuals/**/*.pdf'),
+  store,
+  embedder,
+});
+
+// Search for installation instructions
+async function searchManuals(query: string) {
+  const results = await similaritySearch(query, {
+    connector: pdf('manuals/**/*.pdf'),
+    store,
+    embedder,
+  });
+
+  return results;
+}
+
+const results = await searchManuals('installation requirements');
+```
+
+### Mixed Document Library
+
+Combine PDF search with other document types:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { pdf } from '@deepagents/retrieval/connectors';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./library.db', 384);
+const embedder = fastembed();
+
+// Index PDFs
+await ingest({
+  connector: pdf('docs/**/*.pdf'),
+  store,
+  embedder,
+});
+
+// Index markdown files
+await ingest({
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+
+// Search across all document types
+async function searchLibrary(query: string) {
+  const results = await similaritySearch(query, {
+    connector: local('docs/**/*.md'), // Any connector works
+    store,
+    embedder,
+  });
+
+  return results;
+}
+```
+
+## Source IDs
+
+Each connector generates a unique source ID:
+
+```typescript
+pdf('reports/**/*.pdf')                    // sourceId: "pdf:reports/**/*.pdf"
+pdfFile('./document.pdf')                  // sourceId: "pdf:file:./document.pdf"
+pdfFile('https://example.com/doc.pdf')     // sourceId: "pdf:url:https://example.com/doc.pdf"
+```
+
+## Text Extraction
+
+The connector uses `unpdf` with `mergePages: true` to extract text content. This means:
+
+- All pages are combined into a single text string
+- Page breaks are preserved as whitespace
+- Tables and formatted content become plain text
+- Images and graphics are not extracted
+
+For complex PDFs with tables, consider preprocessing with specialized PDF tools before indexing.
+
+## Next Steps
+
+- [Linear Connector](/docs/retrieval/linear) - Index Linear issues
+- [Embedders](/docs/retrieval/embedders) - Choose embedding models
+- [Recipes](/docs/retrieval/recipes) - Build a document Q&A system

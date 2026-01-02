@@ -1,0 +1,325 @@
+---
+title: Stores
+description: Configure SQLite vector storage for embeddings
+---
+
+Stores persist embeddings and enable similarity search. The retrieval package includes a SQLite-based store that uses the vec0 extension for efficient vector operations.
+
+## SQLite Store
+
+The SQLite store uses [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector operations, providing:
+
+- Cosine distance similarity search
+- Efficient K-nearest neighbor queries
+- Automatic index management
+- Transaction support for consistency
+
+### Import
+
+```typescript
+import { nodeSQLite, SQLiteStore } from '@deepagents/retrieval';
+```
+
+### Basic Usage
+
+```typescript
+import { nodeSQLite, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+// Create store with dimension matching your embedding model
+const store = nodeSQLite('./knowledge.db', 384);
+
+const results = await similaritySearch('authentication', {
+  connector: local('**/*.md'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+### Parameters
+
+```typescript
+nodeSQLite(dbName: string, dimension: number)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `dbName` | Path to SQLite database file (created if doesn't exist) |
+| `dimension` | Vector dimension (must match embedding model) |
+
+## Schema
+
+The store creates these tables:
+
+### sources
+
+Tracks data sources and their expiry:
+
+```sql
+CREATE TABLE sources (
+  source_id TEXT PRIMARY KEY,
+  expires_at TEXT,
+  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+```
+
+### documents
+
+Stores document metadata and content hashes:
+
+```sql
+CREATE TABLE documents (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL,
+  cid TEXT NOT NULL,
+  metadata TEXT,
+  updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  FOREIGN KEY (source_id) REFERENCES sources(source_id) ON DELETE CASCADE
+);
+```
+
+### vec_chunks
+
+Virtual table for vector storage and search:
+
+```sql
+CREATE VIRTUAL TABLE vec_chunks USING vec0(
+  source_id TEXT,
+  document_id TEXT,
+  content TEXT,
+  embedding FLOAT[{DIMENSION}] distance_metric=cosine
+);
+```
+
+## Store Interface
+
+All stores implement this interface:
+
+```typescript
+interface Store {
+  search: (
+    query: string,
+    options: SearchOptions,
+    embedder: Embedder,
+  ) => Promise<any[]>;
+
+  sourceExists: (sourceId: string) => Promise<boolean> | boolean;
+  sourceExpired: (sourceId: string) => Promise<boolean> | boolean;
+  setSourceExpiry: (sourceId: string, expiryDate: Date) => Promise<void> | void;
+
+  index: (
+    sourceId: string,
+    corpus: Corpus,
+    expiryDate?: Date,
+  ) => Promise<void>;
+}
+```
+
+## Search Options
+
+```typescript
+interface SearchOptions {
+  sourceId: string;      // Required: filter by source
+  documentId?: string;   // Optional: filter by specific document
+  topN?: number;         // Number of results (default: 10)
+}
+```
+
+## Search Results
+
+Results include:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `content` | string | The matched text chunk |
+| `distance` | number | Cosine distance (lower = more similar) |
+| `similarity` | number | 1 - distance (higher = more relevant) |
+| `document_id` | string | Source document identifier |
+| `metadata` | object | Custom metadata from the document |
+
+## Real-World Examples
+
+### Basic Search
+
+```typescript
+import { nodeSQLite, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./docs.db', 384);
+
+const results = await similaritySearch('error handling patterns', {
+  connector: local('**/*.md'),
+  store,
+  embedder: fastembed(),
+});
+
+for (const result of results) {
+  console.log(`[${result.similarity.toFixed(2)}] ${result.document_id}`);
+  console.log(result.content.slice(0, 200));
+  console.log('---');
+}
+```
+
+### Direct Store Access
+
+For more control, use the SQLiteStore directly:
+
+```typescript
+import { nodeSQLite, fastembed, ingest } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./direct.db', 384);
+const embedder = fastembed();
+const connector = local('**/*.md');
+
+// Index content
+await ingest({
+  connector,
+  store,
+  embedder,
+});
+
+// Search directly
+const results = await store.search(
+  'authentication middleware',
+  { sourceId: connector.sourceId, topN: 20 },
+  embedder
+);
+```
+
+### Check Source Status
+
+```typescript
+import { nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./check.db', 384);
+const connector = local('**/*.md');
+
+// Check if source exists
+const exists = store.sourceExists(connector.sourceId);
+console.log(`Source exists: ${exists}`);
+
+// Check if source is expired
+const expired = store.sourceExpired(connector.sourceId);
+console.log(`Source expired: ${expired}`);
+```
+
+### Multiple Stores
+
+Use separate stores for different content types:
+
+```typescript
+import { nodeSQLite, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { local, pdf, rss } from '@deepagents/retrieval/connectors';
+
+const embedder = fastembed();
+
+// Separate stores for different content
+const docsStore = nodeSQLite('./docs.db', 384);
+const papersStore = nodeSQLite('./papers.db', 384);
+const newsStore = nodeSQLite('./news.db', 384);
+
+// Search documentation
+const docsResults = await similaritySearch('getting started', {
+  connector: local('docs/**/*.md'),
+  store: docsStore,
+  embedder,
+});
+
+// Search papers
+const paperResults = await similaritySearch('transformer architecture', {
+  connector: pdf('papers/**/*.pdf'),
+  store: papersStore,
+  embedder,
+});
+
+// Search news
+const newsResults = await similaritySearch('AI regulation', {
+  connector: rss('https://news.ycombinator.com/rss'),
+  store: newsStore,
+  embedder,
+});
+```
+
+### Shared Store
+
+Or use a single store for unified search:
+
+```typescript
+import { nodeSQLite, ingest, similaritySearch, fastembed } from '@deepagents/retrieval';
+import { local, pdf } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./unified.db', 384);
+const embedder = fastembed();
+
+// Index all content into one store
+await ingest({
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+
+await ingest({
+  connector: pdf('papers/**/*.pdf'),
+  store,
+  embedder,
+});
+
+// Search across all content
+const results = await similaritySearch('machine learning', {
+  connector: local('docs/**/*.md'), // Any connector works
+  store,
+  embedder,
+});
+```
+
+## Transaction Safety
+
+The store uses transactions for write operations:
+
+```typescript
+// Internally, index operations use BEGIN IMMEDIATE / COMMIT
+// This ensures consistency even during concurrent access
+await store.index(sourceId, corpus);
+```
+
+For multiple index operations, each is atomic:
+
+```typescript
+// Safe for concurrent use
+await Promise.all([
+  ingest({ connector: conn1, store, embedder }),
+  ingest({ connector: conn2, store, embedder }),
+]);
+```
+
+## Content Change Detection
+
+The store uses content hashes (CID) to detect changes:
+
+```typescript
+import { cid } from '@deepagents/retrieval';
+
+const content = 'Hello, world!';
+const hash = cid(content);
+console.log(hash); // SHA-256 hash
+```
+
+When a document's CID changes, its chunks are re-indexed. Unchanged documents are skipped.
+
+## Performance Tips
+
+1. **Match dimensions**: Ensure store dimension matches embedding model
+2. **Use appropriate topN**: Default is 10, increase for broader results
+3. **Separate stores**: Use different stores for unrelated content
+4. **Batch operations**: Index multiple sources before searching
+5. **Use SSD**: SQLite performance benefits from fast storage
+
+## Next Steps
+
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing
+- [Embedders](/docs/retrieval/embedders) - Choose embedding models
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build data sources

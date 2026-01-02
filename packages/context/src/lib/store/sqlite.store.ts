@@ -14,17 +14,19 @@ import type {
   MessageData,
   SearchOptions,
   SearchResult,
+  StoredChatData,
 } from './store.ts';
 import { ContextStore } from './store.ts';
 
 const STORE_DDL = `
 -- Chats table
+-- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
 CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY,
   title TEXT,
   metadata TEXT,
-  createdAt INTEGER NOT NULL,
-  updatedAt INTEGER NOT NULL
+  createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
 );
 
 CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
@@ -37,7 +39,6 @@ CREATE TABLE IF NOT EXISTS messages (
   name TEXT NOT NULL,
   type TEXT,
   data TEXT NOT NULL,
-  persist INTEGER NOT NULL DEFAULT 1,
   createdAt INTEGER NOT NULL,
   FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
   FOREIGN KEY (parentId) REFERENCES messages(id)
@@ -76,13 +77,13 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
 
 -- FTS5 virtual table for full-text search
--- Using external content mode (content='') so we manage sync manually
+-- messageId/chatId/name are UNINDEXED (stored but not searchable, used for filtering/joining)
+-- Only 'content' is indexed for full-text search
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-  messageId,
-  chatId,
-  name,
+  messageId UNINDEXED,
+  chatId UNINDEXED,
+  name UNINDEXED,
   content,
-  content='',
   tokenize='porter unicode61'
 );
 `;
@@ -108,21 +109,50 @@ export class SqliteContextStore extends ContextStore {
   // ==========================================================================
 
   async createChat(chat: ChatData): Promise<void> {
+    // createdAt and updatedAt are auto-set by SQLite DEFAULT
     this.#db
       .prepare(
-        `INSERT INTO chats (id, title, metadata, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO chats (id, title, metadata)
+         VALUES (?, ?, ?)`,
       )
       .run(
         chat.id,
         chat.title ?? null,
         chat.metadata ? JSON.stringify(chat.metadata) : null,
-        chat.createdAt,
-        chat.updatedAt,
       );
   }
 
-  async getChat(chatId: string): Promise<ChatData | undefined> {
+  async upsertChat(chat: ChatData): Promise<StoredChatData> {
+    // Insert if not exists, no-op update if exists (to trigger RETURNING)
+    const row = this.#db
+      .prepare(
+        `INSERT INTO chats (id, title, metadata)
+         VALUES (?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET id = excluded.id
+         RETURNING *`,
+      )
+      .get(
+        chat.id,
+        chat.title ?? null,
+        chat.metadata ? JSON.stringify(chat.metadata) : null,
+      ) as {
+      id: string;
+      title: string | null;
+      metadata: string | null;
+      createdAt: number;
+      updatedAt: number;
+    };
+
+    return {
+      id: row.id,
+      title: row.title ?? undefined,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async getChat(chatId: string): Promise<StoredChatData | undefined> {
     const row = this.#db
       .prepare('SELECT * FROM chats WHERE id = ?')
       .get(chatId) as
@@ -150,9 +180,9 @@ export class SqliteContextStore extends ContextStore {
 
   async updateChat(
     chatId: string,
-    updates: Partial<Pick<ChatData, 'title' | 'metadata' | 'updatedAt'>>,
-  ): Promise<void> {
-    const setClauses: string[] = [];
+    updates: Partial<Pick<ChatData, 'title' | 'metadata'>>,
+  ): Promise<StoredChatData> {
+    const setClauses: string[] = ["updatedAt = strftime('%s', 'now') * 1000"];
     const params: SQLInputValue[] = [];
 
     if (updates.title !== undefined) {
@@ -163,19 +193,27 @@ export class SqliteContextStore extends ContextStore {
       setClauses.push('metadata = ?');
       params.push(JSON.stringify(updates.metadata));
     }
-    if (updates.updatedAt !== undefined) {
-      setClauses.push('updatedAt = ?');
-      params.push(updates.updatedAt);
-    }
-
-    if (setClauses.length === 0) {
-      return;
-    }
 
     params.push(chatId);
-    this.#db
-      .prepare(`UPDATE chats SET ${setClauses.join(', ')} WHERE id = ?`)
-      .run(...params);
+    const row = this.#db
+      .prepare(
+        `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+      )
+      .get(...params) as {
+      id: string;
+      title: string | null;
+      metadata: string | null;
+      createdAt: number;
+      updatedAt: number;
+    };
+
+    return {
+      id: row.id,
+      title: row.title ?? undefined,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 
   async listChats(): Promise<ChatInfo[]> {
@@ -218,10 +256,16 @@ export class SqliteContextStore extends ContextStore {
   // ==========================================================================
 
   async addMessage(message: MessageData): Promise<void> {
+    // Upsert the message
     this.#db
       .prepare(
-        `INSERT INTO messages (id, chatId, parentId, name, type, data, persist, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           parentId = excluded.parentId,
+           name = excluded.name,
+           type = excluded.type,
+           data = excluded.data`,
       )
       .run(
         message.id,
@@ -230,7 +274,6 @@ export class SqliteContextStore extends ContextStore {
         message.name,
         message.type ?? null,
         JSON.stringify(message.data),
-        message.persist ? 1 : 0,
         message.createdAt,
       );
 
@@ -240,6 +283,10 @@ export class SqliteContextStore extends ContextStore {
         ? message.data
         : JSON.stringify(message.data);
 
+    // Delete existing FTS entry if any (for upsert), then insert new one
+    this.#db
+      .prepare(`DELETE FROM messages_fts WHERE messageId = ?`)
+      .run(message.id);
     this.#db
       .prepare(
         `INSERT INTO messages_fts(messageId, chatId, name, content)
@@ -259,7 +306,6 @@ export class SqliteContextStore extends ContextStore {
           name: string;
           type: string | null;
           data: string;
-          persist: number;
           createdAt: number;
         }
       | undefined;
@@ -275,7 +321,6 @@ export class SqliteContextStore extends ContextStore {
       name: row.name,
       type: row.type ?? undefined,
       data: JSON.parse(row.data),
-      persist: row.persist === 1,
       createdAt: row.createdAt,
     };
   }
@@ -302,7 +347,6 @@ export class SqliteContextStore extends ContextStore {
       name: string;
       type: string | null;
       data: string;
-      persist: number;
       createdAt: number;
       depth: number;
     }[];
@@ -314,7 +358,6 @@ export class SqliteContextStore extends ContextStore {
       name: row.name,
       type: row.type ?? undefined,
       data: JSON.parse(row.data),
-      persist: row.persist === 1,
       createdAt: row.createdAt,
     }));
   }
@@ -584,7 +627,6 @@ export class SqliteContextStore extends ContextStore {
         m.name,
         m.type,
         m.data,
-        m.persist,
         m.createdAt,
         fts.rank,
         snippet(messages_fts, 3, '<mark>', '</mark>', '...', 32) as snippet
@@ -612,7 +654,6 @@ export class SqliteContextStore extends ContextStore {
       name: string;
       type: string | null;
       data: string;
-      persist: number;
       createdAt: number;
       rank: number;
       snippet: string;
@@ -626,7 +667,6 @@ export class SqliteContextStore extends ContextStore {
         name: row.name,
         type: row.type ?? undefined,
         data: JSON.parse(row.data),
-        persist: row.persist === 1,
         createdAt: row.createdAt,
       },
       rank: row.rank,

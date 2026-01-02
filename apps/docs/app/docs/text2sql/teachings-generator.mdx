@@ -107,7 +107,6 @@ import {
   TeachingsGenerator,
   SchemaSynthesizer,
   PersonaGenerator,
-  toPairs
 } from '@deepagents/text2sql/synthesis';
 
 // Generate teachings
@@ -121,12 +120,12 @@ const personaGen = new PersonaGenerator(adapter, { count: 5 });
 const personas = await personaGen.generate();
 
 // Generate pairs with teachings and personas
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 10,
   complexity: 'medium',
   personas: personas,
   teachings: teachings  // Guides SQL generation
-}));
+}).toPairs();
 ```
 
 ## Example Output
@@ -215,7 +214,6 @@ import {
   SchemaSynthesizer,
   DepthEvolver,
   BreadthEvolver,
-  toPairs
 } from '@deepagents/text2sql/synthesis';
 
 // 1. Generate teachings
@@ -232,28 +230,24 @@ const personaGen = new PersonaGenerator(adapter, { count: 8 });
 const personas = await personaGen.generate();
 
 // 3. Generate base pairs
-const basePairs = await toPairs(new SchemaSynthesizer(adapter, {
+const basePairs = await new SchemaSynthesizer(adapter, {
   count: 5,
   complexity: ['low', 'medium', 'hard'],
   personas: personas,
   teachings: teachings
-}));
+}).toPairs();
 console.log(`Base pairs: ${basePairs.length}`);
 
 // 4. Evolve in depth (make questions harder)
-const depthEvolved = await toPairs(
-  new DepthEvolver(basePairs, adapter, {
+const depthEvolved = await new DepthEvolver(basePairs, adapter, {
     count: 2  // 2 harder versions per question
-  })
-);
+  }).toPairs();
 console.log(`Depth evolved: ${depthEvolved.length}`);
 
 // 5. Evolve in breadth (paraphrase)
-const breadthEvolved = await toPairs(
-  new BreadthEvolver([...basePairs, ...depthEvolved], {
+const breadthEvolved = await new BreadthEvolver([...basePairs, ...depthEvolved], {
     count: 3  // 3 paraphrases per question
-  })
-);
+  }).toPairs();
 console.log(`Breadth evolved: ${breadthEvolved.length}`);
 
 const allPairs = [...basePairs, ...depthEvolved, ...breadthEvolved];

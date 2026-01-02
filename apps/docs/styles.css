@@ -317,6 +317,48 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   HOMEPAGE TABS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.brutalist-page [role='tablist'] {
+  border-bottom: 1px solid var(--color-fd-border);
+  gap: 0;
+}
+
+.brutalist-page [role='tablist'] button {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.brutalist-page [role='tablist'] button[data-state='active'] {
+  border-bottom-color: var(--coral);
+  color: var(--coral);
+}
+
+.brutalist-page [role='tablist'] button:hover:not([data-state='active']) {
+  color: var(--color-fd-foreground);
+}
+
+/* Tab content padding adjustment */
+.brutalist-page [role='tabpanel'] {
+  padding-top: 0;
+}
+
+/* Remove double borders when code block is inside tab */
+.brutalist-page [role='tabpanel'] figure[data-rehype-pretty-code-figure] {
+  margin: 0;
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    CODE SYNTAX (for terminal examples)
    ═══════════════════════════════════════════════════════════════════════════ */
 

@@ -31,11 +31,7 @@ import {
 import { FileCache } from './file-cache.ts';
 import { History } from './history/history.ts';
 import type { TeachablesStore } from './memory/store.ts';
-import {
-  type ExtractedPair,
-  type PairProducer,
-  toPairs as collectPairs,
-} from './synthesis/types.ts';
+import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 import {
   type Teachables,
   guardrail,
@@ -205,7 +201,7 @@ export class Text2Sql {
     factory: (adapter: Adapter) => T,
   ): Promise<ExtractedPair[]> {
     const producer = factory(this.#config.adapter);
-    return collectPairs(producer);
+    return producer.toPairs();
   }
 
   // public async suggest() {
@@ -779,7 +775,7 @@ export async function withChat(
       } else if (ToolCallRepairError.isInstance(error)) {
         return 'The model tried to call a tool with invalid arguments, but it was repaired.';
       } else {
-        return 'An unknown error occurred.';
+        return JSON.stringify(error);
       }
     },
     sendStart: true,

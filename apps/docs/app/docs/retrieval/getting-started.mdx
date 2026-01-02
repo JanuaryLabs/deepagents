@@ -1,0 +1,181 @@
+---
+title: Getting Started
+description: Build your first RAG pipeline with semantic search in minutes
+---
+
+This guide walks you through building a complete RAG (Retrieval-Augmented Generation) pipeline that indexes your local documentation and enables natural language search.
+
+## Installation
+
+```bash
+npm install @deepagents/retrieval
+```
+
+## Your First RAG Pipeline
+
+Let's build a documentation search system that indexes markdown files and answers questions about them.
+
+### Step 1: Set Up the Store
+
+Create a SQLite vector database to store embeddings:
+
+```typescript
+import { nodeSQLite } from '@deepagents/retrieval';
+
+// 384 dimensions matches the default BGE-small-en-v1.5 model
+const store = nodeSQLite('./docs.db', 384);
+```
+
+The store will be created automatically on first use. The dimension parameter must match your embedding model's output size.
+
+### Step 2: Define Your Data Source
+
+Use a connector to specify where your content lives:
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+
+// Index all markdown files in your docs folder
+const connector = local('docs/**/*.md');
+```
+
+The `local` connector supports glob patterns and automatically respects `.gitignore` rules.
+
+### Step 3: Configure the Embedder
+
+Set up the embedding model that converts text to vectors:
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+
+// Uses BGE-small-en-v1.5 by default (fast and high quality)
+const embedder = fastembed();
+```
+
+The first run will download the model (~30MB). Subsequent runs use the cached version.
+
+### Step 4: Search
+
+Bring it all together with `similaritySearch`:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./docs.db', 384);
+const embedder = fastembed();
+const connector = local('docs/**/*.md');
+
+// Search for relevant content
+const results = await similaritySearch('How do I configure authentication?', {
+  connector,
+  store,
+  embedder,
+});
+
+// Display results
+for (const result of results) {
+  console.log(`Score: ${result.similarity.toFixed(3)}`);
+  console.log(`Source: ${result.document_id}`);
+  console.log(`Content: ${result.content.slice(0, 200)}...`);
+  console.log('---');
+}
+```
+
+## Complete Example
+
+Here's a production-ready script that creates a searchable knowledge base:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+async function searchDocs(query: string) {
+  const store = nodeSQLite('./knowledge.db', 384);
+  const embedder = fastembed();
+
+  // Index markdown and text files
+  const connector = local('**/*.{md,txt}', {
+    cwd: './docs',
+    ingestWhen: 'contentChanged', // Only re-index when content changes
+  });
+
+  const results = await similaritySearch(query, {
+    connector,
+    store,
+    embedder,
+  });
+
+  return results.slice(0, 5); // Top 5 results
+}
+
+// Usage
+const query = process.argv[2] || 'How do I get started?';
+const results = await searchDocs(query);
+
+console.log(`\nSearch: "${query}"\n`);
+console.log(`Found ${results.length} results:\n`);
+
+for (const [i, result] of results.entries()) {
+  console.log(`${i + 1}. [${result.similarity.toFixed(2)}] ${result.document_id}`);
+  console.log(`   ${result.content.slice(0, 150).replace(/\n/g, ' ')}...\n`);
+}
+```
+
+Run it:
+
+```bash
+node search.ts "authentication setup"
+```
+
+## Understanding the Output
+
+Each result contains:
+
+| Field | Description |
+|-------|-------------|
+| `content` | The chunk of text that matched |
+| `similarity` | Score from 0-1 (higher = more relevant) |
+| `distance` | Cosine distance (lower = more similar) |
+| `document_id` | Path or identifier of the source document |
+| `metadata` | Custom metadata attached to the document |
+
+## How Ingestion Works
+
+When you call `similaritySearch`, the system:
+
+1. **Checks if ingestion is needed** based on `ingestWhen` mode
+2. **Iterates through connector sources** to get documents
+3. **Computes content hash (CID)** to detect changes
+4. **Skips unchanged documents** for efficiency
+5. **Chunks changed documents** using MarkdownTextSplitter
+6. **Generates embeddings** in batches of 40
+7. **Stores in SQLite** with the vec0 extension
+8. **Performs vector search** and returns ranked results
+
+The first search may take longer as content is indexed. Subsequent searches are fast since only changed content is re-processed.
+
+## Ingestion Modes
+
+Control re-indexing behavior with `ingestWhen`:
+
+```typescript
+// Only index once, never update (fastest for static content)
+const connector = local('**/*.md', { ingestWhen: 'never' });
+
+// Re-index when content changes (default, recommended)
+const connector = local('**/*.md', { ingestWhen: 'contentChanged' });
+
+// Re-index when TTL expires (good for external sources)
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 60 * 60 * 1000, // 1 hour
+});
+```
+
+## Next Steps
+
+- [Local Connector](/docs/retrieval/local) - Advanced file selection patterns
+- [GitHub Connector](/docs/retrieval/github) - Index GitHub repos and releases
+- [Embedders](/docs/retrieval/embedders) - Choose different embedding models
+- [Recipes](/docs/retrieval/recipes) - Build a RAG chatbot, news aggregator, and more

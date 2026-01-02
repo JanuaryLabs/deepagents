@@ -1,0 +1,195 @@
+---
+title: Local Connector
+description: Index local files with glob patterns and automatic gitignore support
+---
+
+The `local` connector indexes files from your local filesystem using glob patterns. It automatically respects `.gitignore` rules and filters out common non-content directories.
+
+## Import
+
+```typescript
+import { local } from '@deepagents/retrieval/connectors';
+```
+
+## Basic Usage
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./docs.db', 384);
+
+// Index all markdown files
+const results = await similaritySearch('deployment guide', {
+  connector: local('**/*.md'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+## Glob Patterns
+
+The connector uses [fast-glob](https://github.com/mrmlnc/fast-glob) for pattern matching:
+
+```typescript
+// Single extension
+local('**/*.md')
+
+// Multiple extensions
+local('**/*.{md,txt,mdx}')
+
+// Specific directory
+local('docs/**/*.md')
+
+// Exclude patterns (use cwd + pattern)
+local('src/**/*.ts', { cwd: './packages/api' })
+```
+
+## Options
+
+```typescript
+local(pattern: string, options?: {
+  cwd?: string;                                    // Base directory (default: process.cwd())
+  ingestWhen?: 'never' | 'contentChanged' | 'expired';  // Ingestion mode
+  expiresAfter?: number;                           // TTL in milliseconds
+})
+```
+
+### Custom Working Directory
+
+```typescript
+// Index files relative to a specific directory
+const connector = local('**/*.md', {
+  cwd: '/path/to/project/docs',
+});
+```
+
+### Ingestion Control
+
+```typescript
+// Only index once (fastest for static content)
+const connector = local('**/*.md', {
+  ingestWhen: 'never',
+});
+
+// Re-index when content changes (default)
+const connector = local('**/*.md', {
+  ingestWhen: 'contentChanged',
+});
+
+// Re-index after TTL expires
+const connector = local('**/*.md', {
+  ingestWhen: 'expired',
+  expiresAfter: 24 * 60 * 60 * 1000, // 24 hours
+});
+```
+
+## Automatic Filtering
+
+The connector automatically excludes:
+
+- `node_modules/`
+- `.git/`
+- `dist/`, `build/`, `coverage/`
+- `.DS_Store`, `Thumbs.db`
+- Temporary files (`*.tmp`, `*.temp`)
+
+It also respects all `.gitignore` files from the root directory down to each file's parent directory.
+
+## Real-World Examples
+
+### Documentation Search
+
+Index your project's documentation for semantic search:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+async function searchDocs(query: string) {
+  const store = nodeSQLite('./knowledge.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: local('**/*.{md,mdx}', { cwd: './docs' }),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.slice(0, 10);
+}
+
+// Find documentation about API authentication
+const results = await searchDocs('API authentication bearer token');
+```
+
+### Codebase Search
+
+Index source code for semantic code search:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+async function searchCode(query: string) {
+  const store = nodeSQLite('./code.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: local('**/*.{ts,tsx,js,jsx}', {
+      cwd: './src',
+      ingestWhen: 'contentChanged',
+    }),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results;
+}
+
+// Find code related to user authentication
+const results = await searchCode('user login validation');
+```
+
+### Multi-Project Index
+
+Index multiple projects into a single knowledge base:
+
+```typescript
+import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./multi-project.db', 384);
+const embedder = fastembed();
+
+// Index each project separately
+const projects = [
+  { name: 'api', path: './packages/api' },
+  { name: 'web', path: './packages/web' },
+  { name: 'shared', path: './packages/shared' },
+];
+
+for (const project of projects) {
+  await ingest({
+    connector: local('**/*.ts', { cwd: project.path }),
+    store,
+    embedder,
+  });
+  console.log(`Indexed ${project.name}`);
+}
+```
+
+## Source ID
+
+The connector generates a source ID based on the pattern:
+
+```typescript
+local('**/*.md')        // sourceId: "glob:**/*.md"
+local('docs/**/*.mdx')  // sourceId: "glob:docs/**/*.mdx"
+```
+
+This ID is used for caching and deduplication. Documents from the same pattern share a source ID.
+
+## Next Steps
+
+- [GitHub Connector](/docs/retrieval/github) - Index GitHub repositories
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing behavior
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build your own connector

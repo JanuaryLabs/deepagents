@@ -1,4 +1,5 @@
 import { DynamicCodeBlock } from 'fumadocs-ui/components/dynamic-codeblock';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Link } from 'react-router';
 
 const packages = [
@@ -58,6 +59,50 @@ const features = [
   },
 ];
 
+const codeExamples = {
+  agent: `import { agent, execute } from '@deepagents/agent';
+import { groq } from '@ai-sdk/groq';
+
+const assistant = agent({
+  name: 'Assistant',
+  model: groq('gpt-oss-20b'),
+  prompt: 'You are a helpful assistant.',
+});
+
+await execute(assistant, 'Hello!', {});`,
+
+  text2sql: `import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Postgres } from '@deepagents/text2sql/postgres';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new Postgres({ execute, grounding: [] }),
+  history: new InMemoryHistory(),
+});
+
+await text2sql.toSql('Show all customers');`,
+
+  context: `import { ContextEngine, role, user, XmlRenderer } from '@deepagents/context';
+import { SqliteContextStore } from '@deepagents/context';
+
+const context = new ContextEngine({
+  store: new SqliteContextStore('./chat.db'),
+  chatId: 'session-1',
+});
+
+context.set(role('You are helpful'), user('Hello'));
+await context.resolve({ renderer: new XmlRenderer() });`,
+
+  retrieval: `import { ingest, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import * as connectors from '@deepagents/retrieval/connectors';
+
+await ingest({
+  connector: connectors.local('./docs'),
+  store: nodeSQLite('./vectors.db', 1024),
+  embedder: fastembed(),
+});`,
+};
+
 function PackageCard({
   name,
   description,
@@ -116,6 +161,24 @@ export default function HomePage() {
 npm install @deepagents/text2sql
 npm install @deepagents/context`}
             />
+          </div>
+
+          {/* Package Usage Examples */}
+          <div style={{ maxWidth: '700px', marginBottom: '3rem' }}>
+            <Tabs items={['agent', 'text2sql', 'context', 'retrieval']}>
+              <Tab value="agent">
+                <DynamicCodeBlock lang="ts" code={codeExamples.agent} />
+              </Tab>
+              <Tab value="text2sql">
+                <DynamicCodeBlock lang="ts" code={codeExamples.text2sql} />
+              </Tab>
+              <Tab value="context">
+                <DynamicCodeBlock lang="ts" code={codeExamples.context} />
+              </Tab>
+              <Tab value="retrieval">
+                <DynamicCodeBlock lang="ts" code={codeExamples.retrieval} />
+              </Tab>
+            </Tabs>
           </div>
 
           {/* Hero content */}

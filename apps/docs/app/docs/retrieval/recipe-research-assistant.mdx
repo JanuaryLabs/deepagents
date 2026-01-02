@@ -1,0 +1,359 @@
+---
+title: Research Paper Assistant
+description: Search and summarize research papers from arXiv or local PDFs
+---
+
+Build an assistant for searching and summarizing research papers. This recipe shows how to index academic papers from arXiv or local PDFs and create an AI-powered research tool.
+
+## What You'll Build
+
+- PDF paper indexing from URLs or local files
+- Semantic search across papers
+- Structured paper summarization
+- Research Q&A with citations
+
+## Prerequisites
+
+```bash
+npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
+```
+
+## Complete Implementation
+
+```typescript
+import { agent, instructions, execute, generate } from '@deepagents/agent';
+import { similaritySearch, fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
+import { pdfFile } from '@deepagents/retrieval/connectors';
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
+import z from 'zod';
+
+// Set up retrieval infrastructure
+const store = nodeSQLite('./research.db', 384);
+const embedder = fastembed();
+
+// Index a paper from URL or local path
+async function indexPaper(source: string) {
+  console.log(`Indexing: ${source}`);
+
+  await ingest({
+    connector: pdfFile(source),
+    store,
+    embedder,
+  });
+
+  console.log('Paper indexed successfully');
+}
+
+// Search tool for the research agent
+const searchPapersTool = tool({
+  description: 'Search research papers for relevant information about a topic',
+  parameters: z.object({
+    query: z.string().describe('Search query about research topics, methods, or findings'),
+  }),
+  execute: async ({ query }) => {
+    const results = await similaritySearch(query, {
+      connector: pdfFile(''), // Any connector works for search
+      store,
+      embedder,
+    });
+
+    return results.slice(0, 8).map(r => ({
+      paper: r.document_id,
+      content: r.content,
+      relevance: r.similarity.toFixed(3),
+    }));
+  },
+});
+
+// Paper summary schema
+const SummarySchema = z.object({
+  title: z.string().describe('Paper title'),
+  authors: z.array(z.string()).describe('Author names'),
+  abstract: z.string().describe('Paper abstract or summary'),
+  keyContributions: z.array(z.string()).describe('Main contributions of the paper'),
+  methodology: z.string().describe('Research methodology used'),
+  results: z.string().describe('Key results and findings'),
+  limitations: z.array(z.string()).describe('Stated limitations'),
+  futureWork: z.array(z.string()).describe('Suggested future research directions'),
+});
+
+// Paper summarizer agent
+const summarizer = agent({
+  name: 'PaperSummarizer',
+  model: groq('gpt-oss-20b'),
+  output: SummarySchema,
+  prompt: instructions({
+    purpose: [
+      'Summarize research papers in a structured, academic format.',
+      'Extract key information accurately from paper content.',
+      'Identify the core contributions and methodology.',
+    ],
+    routine: [
+      'Read the paper content carefully',
+      'Identify title, authors, and abstract',
+      'Extract key contributions and novel aspects',
+      'Summarize the methodology',
+      'Note the main results and findings',
+      'List limitations and future work',
+    ],
+  }),
+});
+
+// Research assistant agent
+const researcher = agent({
+  name: 'ResearchAssistant',
+  model: groq('gpt-oss-20b'),
+  prompt: instructions({
+    purpose: [
+      'Help researchers find and understand relevant papers.',
+      'Provide accurate information based on paper content.',
+      'Always cite sources when making claims.',
+    ],
+    routine: [
+      'Understand the research question',
+      'Search for relevant papers',
+      'Synthesize information from multiple sources',
+      'Cite specific papers for each claim',
+      'Suggest related topics to explore',
+    ],
+  }),
+  tools: { searchPapers: searchPapersTool },
+});
+
+// Summarize a specific paper
+async function summarizePaper(paperUrl: string) {
+  // First, ensure paper is indexed
+  await indexPaper(paperUrl);
+
+  // Search for content from this specific paper
+  const results = await similaritySearch('abstract introduction methodology results conclusion', {
+    connector: pdfFile(paperUrl),
+    store,
+    embedder,
+  });
+
+  const paperContent = results
+    .slice(0, 10)
+    .map(r => r.content)
+    .join('\n\n');
+
+  // Generate structured summary
+  const { experimental_output: summary } = await generate(
+    summarizer,
+    `Summarize this research paper:\n\n${paperContent}`,
+    {}
+  );
+
+  return summary;
+}
+
+// Ask a research question
+async function askResearch(question: string) {
+  console.log(`\nQuestion: ${question}\n`);
+  console.log('Answer:');
+
+  const stream = execute(researcher, question, {});
+
+  for await (const chunk of stream.textStream) {
+    process.stdout.write(chunk);
+  }
+
+  console.log('\n');
+}
+
+// Example usage
+async function main() {
+  // Index some foundational papers
+  const papers = [
+    'https://arxiv.org/pdf/1706.03762.pdf',  // Attention Is All You Need
+    'https://arxiv.org/pdf/2005.14165.pdf',  // GPT-3
+    'https://arxiv.org/pdf/2303.08774.pdf',  // GPT-4 Technical Report
+  ];
+
+  console.log('Indexing research papers...\n');
+  for (const url of papers) {
+    await indexPaper(url);
+  }
+
+  // Summarize a paper
+  console.log('\n--- Paper Summary ---\n');
+  const summary = await summarizePaper(papers[0]);
+  console.log(JSON.stringify(summary, null, 2));
+
+  // Ask research questions
+  console.log('\n--- Research Q&A ---\n');
+  await askResearch('What are the key differences between attention mechanisms in transformers and previous sequence-to-sequence models?');
+  await askResearch('How does GPT-3 handle few-shot learning?');
+}
+
+await main();
+```
+
+## How It Works
+
+### 1. Paper Indexing
+
+Index PDFs from arXiv URLs or local files:
+
+```typescript
+// From URL
+await indexPaper('https://arxiv.org/pdf/1706.03762.pdf');
+
+// From local file
+await indexPaper('./papers/my-paper.pdf');
+```
+
+### 2. Semantic Search
+
+Search across all indexed papers:
+
+```typescript
+const results = await similaritySearch('attention mechanism', {
+  connector: pdfFile(''),
+  store,
+  embedder,
+});
+```
+
+### 3. Structured Summarization
+
+Use Zod schemas for consistent summaries:
+
+```typescript
+const SummarySchema = z.object({
+  title: z.string(),
+  keyContributions: z.array(z.string()),
+  methodology: z.string(),
+  // ...
+});
+```
+
+## Customization Options
+
+### Paper Collection Management
+
+Organize papers into collections:
+
+```typescript
+const collections = {
+  transformers: [
+    'https://arxiv.org/pdf/1706.03762.pdf',
+    'https://arxiv.org/pdf/1810.04805.pdf', // BERT
+  ],
+  languageModels: [
+    'https://arxiv.org/pdf/2005.14165.pdf', // GPT-3
+    'https://arxiv.org/pdf/2303.08774.pdf', // GPT-4
+  ],
+};
+
+async function indexCollection(name: string) {
+  const papers = collections[name];
+  for (const url of papers) {
+    await indexPaper(url);
+  }
+}
+```
+
+### Citation Extraction
+
+Extract and format citations:
+
+```typescript
+const CitationSchema = z.object({
+  claim: z.string(),
+  source: z.string(),
+  section: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+});
+
+const citationAgent = agent({
+  name: 'CitationAgent',
+  model: groq('gpt-oss-20b'),
+  output: z.array(CitationSchema),
+  prompt: instructions({
+    purpose: ['Extract citations for claims from research papers'],
+    routine: ['Identify claims', 'Find supporting evidence', 'Rate confidence'],
+  }),
+  tools: { searchPapers: searchPapersTool },
+});
+```
+
+### Literature Review
+
+Generate a literature review on a topic:
+
+```typescript
+const LitReviewSchema = z.object({
+  topic: z.string(),
+  background: z.string(),
+  keyPapers: z.array(z.object({
+    title: z.string(),
+    contribution: z.string(),
+    year: z.string(),
+  })),
+  researchGaps: z.array(z.string()),
+  futureDirections: z.array(z.string()),
+});
+
+async function generateLitReview(topic: string) {
+  // Search for relevant papers
+  const results = await similaritySearch(topic, {
+    connector: pdfFile(''),
+    store,
+    embedder,
+  });
+
+  const context = results.slice(0, 15).map(r => r.content).join('\n\n---\n\n');
+
+  const { experimental_output: review } = await generate(
+    litReviewAgent,
+    `Generate a literature review on: ${topic}\n\nPapers:\n${context}`,
+    {}
+  );
+
+  return review;
+}
+```
+
+### Comparison Analysis
+
+Compare methodologies across papers:
+
+```typescript
+async function compareMethodologies(topics: string[]) {
+  const comparisons = [];
+
+  for (const topic of topics) {
+    const results = await similaritySearch(`methodology ${topic}`, {
+      connector: pdfFile(''),
+      store,
+      embedder,
+    });
+
+    comparisons.push({
+      topic,
+      papers: results.slice(0, 3).map(r => ({
+        source: r.document_id,
+        methodology: r.content,
+      })),
+    });
+  }
+
+  return comparisons;
+}
+```
+
+## Production Tips
+
+1. **Batch indexing**: Index papers in parallel for speed
+2. **Metadata tracking**: Store paper metadata separately for filtering
+3. **Version control**: Track which version of papers are indexed
+4. **Error handling**: Skip papers that fail to parse
+5. **Caching**: Cache summaries to avoid re-generation
+
+## Next Steps
+
+- [Code Search](/docs/retrieval/recipe-code-search) - Search across codebases
+- [PDF Connector](/docs/retrieval/pdf) - Connector details
+- [Embedders](/docs/retrieval/embedders) - Model selection

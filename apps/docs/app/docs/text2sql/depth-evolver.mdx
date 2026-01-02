@@ -10,18 +10,16 @@ Based on Microsoft's Evol-Instruct methodology for in-depth evolution, this synt
 ## Basic Usage
 
 ```typescript
-import { DepthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { DepthEvolver } from '@deepagents/text2sql/synthesis';
 
 const seedPairs = [
   { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true }
 ];
 
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     count: 3,
     techniques: ['add-aggregation', 'add-filter'],
-  })
-);
+  }).toPairs();
 
 // Input:  "Show all orders"
 //         SELECT * FROM orders
@@ -53,11 +51,9 @@ The evolver supports five techniques for increasing complexity:
 Adds GROUP BY, COUNT, SUM, AVG, MIN, MAX operations:
 
 ```typescript
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     techniques: ['add-aggregation'],
-  })
-);
+  }).toPairs();
 
 // "Show orders"
 //   → "Show total order count by customer"
@@ -72,11 +68,9 @@ const evolved = await toPairs(
 Adds WHERE clauses with specific conditions:
 
 ```typescript
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     techniques: ['add-filter'],
-  })
-);
+  }).toPairs();
 
 // "Show orders"
 //   → "Show orders from the last 30 days"
@@ -91,11 +85,9 @@ const evolved = await toPairs(
 Requires data from related tables (JOIN operations):
 
 ```typescript
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     techniques: ['add-join'],
-  })
-);
+  }).toPairs();
 
 // "Show orders"
 //   → "Show orders with customer names and addresses"
@@ -110,11 +102,9 @@ const evolved = await toPairs(
 Adds multi-step reasoning, comparisons, or derived calculations:
 
 ```typescript
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     techniques: ['add-reasoning'],
-  })
-);
+  }).toPairs();
 
 // "Show orders"
 //   → "Which customers have orders above the average order value?"
@@ -129,11 +119,9 @@ const evolved = await toPairs(
 Adds speculative scenarios and projections:
 
 ```typescript
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     techniques: ['hypothetical'],
-  })
-);
+  }).toPairs();
 
 // "Show revenue"
 //   → "What would revenue be if we increased all prices by 15%?"
@@ -171,11 +159,9 @@ Generate multiple evolved versions from each seed:
 
 ```typescript
 // Generate 3 evolved versions per seed pair
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     count: 3,
-  })
-);
+  }).toPairs();
 
 // 10 seed pairs → 30 evolved pairs (3 per seed)
 ```
@@ -186,12 +172,10 @@ Use specific techniques only:
 
 ```typescript
 // Only aggregation and filtering
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     techniques: ['add-aggregation', 'add-filter'],
     count: 5,
-  })
-);
+  }).toPairs();
 
 // Each seed gets 5 evolutions alternating between the two techniques
 ```
@@ -202,12 +186,10 @@ Adjust parallel processing:
 
 ```typescript
 // Process 10 evolutions concurrently
-const evolved = await toPairs(
-  new DepthEvolver(seedPairs, adapter, {
+const evolved = await new DepthEvolver(seedPairs, adapter, {
     count: 20,
     concurrency: 10,
-  })
-);
+  }).toPairs();
 ```
 
 ## Example: Multi-Stage Pipeline
@@ -219,33 +201,26 @@ import {
   SchemaSynthesizer,
   DepthEvolver,
   BreadthEvolver,
-  toPairs,
 } from '@deepagents/text2sql/synthesis';
 
 // Stage 1: Generate simple baseline pairs from schema
-const baseline = await toPairs(
-  new SchemaSynthesizer(adapter, {
+const baseline = await new SchemaSynthesizer(adapter, {
     count: 20,
     complexity: 'simple',
-  })
-);
+  }).toPairs();
 console.log(`Baseline: ${baseline.length} simple pairs`);
 
 // Stage 2: Evolve into complex versions (depth)
-const complex = await toPairs(
-  new DepthEvolver(baseline, adapter, {
+const complex = await new DepthEvolver(baseline, adapter, {
     count: 2,
     techniques: ['add-aggregation', 'add-join', 'add-reasoning'],
-  })
-);
+  }).toPairs();
 console.log(`After depth: ${complex.length} complex pairs`);
 
 // Stage 3: Generate variations of each (breadth)
-const final = await toPairs(
-  new BreadthEvolver(complex, {
+const final = await new BreadthEvolver(complex, {
     count: 3,
-  })
-);
+  }).toPairs();
 console.log(`Final dataset: ${final.length} total pairs`);
 
 // 20 baseline → 40 complex → 120 final (with variations)
@@ -256,7 +231,7 @@ console.log(`Final dataset: ${final.length} total pairs`);
 Build a dataset with graduated difficulty:
 
 ```typescript
-import { DepthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { DepthEvolver } from '@deepagents/text2sql/synthesis';
 
 const seeds = [
   { question: 'Show all orders', sql: 'SELECT * FROM orders', success: true },
@@ -264,32 +239,24 @@ const seeds = [
 ];
 
 // Level 1: Add basic filtering
-const level1 = await toPairs(
-  new DepthEvolver(seeds, adapter, {
+const level1 = await new DepthEvolver(seeds, adapter, {
     techniques: ['add-filter'],
-  })
-);
+  }).toPairs();
 
 // Level 2: Add aggregations to filtered queries
-const level2 = await toPairs(
-  new DepthEvolver(level1, adapter, {
+const level2 = await new DepthEvolver(level1, adapter, {
     techniques: ['add-aggregation'],
-  })
-);
+  }).toPairs();
 
 // Level 3: Add joins to aggregated queries
-const level3 = await toPairs(
-  new DepthEvolver(level2, adapter, {
+const level3 = await new DepthEvolver(level2, adapter, {
     techniques: ['add-join'],
-  })
-);
+  }).toPairs();
 
 // Level 4: Add reasoning on top
-const level4 = await toPairs(
-  new DepthEvolver(level3, adapter, {
+const level4 = await new DepthEvolver(level3, adapter, {
     techniques: ['add-reasoning'],
-  })
-);
+  }).toPairs();
 
 // Progressive complexity: simple → filtered → aggregated → joined → reasoned
 ```
@@ -316,18 +283,14 @@ const seed = {
 };
 
 // DepthEvolver: Both question and SQL change
-const depth = await toPairs(
-  new DepthEvolver([seed], adapter)
-);
+const depth = await new DepthEvolver([seed], adapter).toPairs();
 // Question: "Show total order count by customer for last 30 days"
 // SQL: SELECT customer_id, COUNT(*) FROM orders
 //      WHERE order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
 //      GROUP BY customer_id
 
 // BreadthEvolver: Only question changes
-const breadth = await toPairs(
-  new BreadthEvolver([seed], { count: 3 })
-);
+const breadth = await new BreadthEvolver([seed], { count: 3 }).toPairs();
 // Question: "Display all orders"
 // SQL: SELECT * FROM orders  (unchanged)
 //
@@ -343,21 +306,17 @@ const breadth = await toPairs(
 Use together for comprehensive training data:
 
 ```typescript
-import { DepthEvolver, BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { DepthEvolver, BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 const seeds = [
   { question: 'Show orders', sql: 'SELECT * FROM orders', success: true },
 ];
 
 // Evolve in depth
-const complex = await toPairs(
-  new DepthEvolver(seeds, adapter, { count: 5 })
-);
+const complex = await new DepthEvolver(seeds, adapter, { count: 5 }).toPairs();
 
 // Then evolve in breadth
-const final = await toPairs(
-  new BreadthEvolver(complex, { count: 3 })
-);
+const final = await new BreadthEvolver(complex, { count: 3 }).toPairs();
 
 // 1 seed → 5 complex → 15 total (with variations)
 // Covers both SQL complexity and phrasing variety

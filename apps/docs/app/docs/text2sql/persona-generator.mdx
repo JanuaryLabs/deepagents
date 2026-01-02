@@ -84,18 +84,18 @@ const personas = await new PersonaGenerator(adapter, {
 Generate questions from different perspectives:
 
 ```typescript
-import { PersonaGenerator, SchemaSynthesizer, toPairs } from '@deepagents/text2sql/synthesis';
+import { PersonaGenerator, SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
 // Generate personas
 const generator = new PersonaGenerator(adapter, { count: 5 });
 const personas = await generator.generate();
 
 // Use personas for question generation
-const pairs = await toPairs(new SchemaSynthesizer(adapter, {
+const pairs = await new SchemaSynthesizer(adapter, {
   count: 10,           // 10 questions per persona
   complexity: 'medium',
   personas: personas   // Each persona gets their own questions
-}));
+}).toPairs();
 // Result: 50 pairs (5 personas × 10 questions each)
 ```
 
@@ -104,7 +104,7 @@ const pairs = await toPairs(new SchemaSynthesizer(adapter, {
 Paraphrase questions from different perspectives:
 
 ```typescript
-import { PersonaGenerator, BreadthEvolver, toPairs } from '@deepagents/text2sql/synthesis';
+import { PersonaGenerator, BreadthEvolver } from '@deepagents/text2sql/synthesis';
 
 const generator = new PersonaGenerator(adapter, { count: 3 });
 const personas = await generator.generate();
@@ -114,23 +114,19 @@ const existingPairs = [
 ];
 
 // Generate variations from analyst perspective
-const analystVariations = await toPairs(
-  new BreadthEvolver(existingPairs, {
+const analystVariations = await new BreadthEvolver(existingPairs, {
     count: 3,
     persona: personas[0] // Financial Analyst
-  })
-);
+  }).toPairs();
 // "What is the revenue breakdown by product?"
 // "Display product-level revenue analysis"
 // "Break down revenue by product category"
 
 // Generate variations from support perspective
-const supportVariations = await toPairs(
-  new BreadthEvolver(existingPairs, {
+const supportVariations = await new BreadthEvolver(existingPairs, {
     count: 3,
     persona: personas[1] // Customer Support Rep
-  })
-);
+  }).toPairs();
 // "Show me which products are bringing in money"
 // "What's each product earning?"
 // "List products and their sales"
@@ -200,7 +196,6 @@ import {
   TeachingsGenerator,
   SchemaSynthesizer,
   BreadthEvolver,
-  toPairs
 } from '@deepagents/text2sql/synthesis';
 
 // 1. Generate personas
@@ -212,23 +207,21 @@ const teachingsGen = new TeachingsGenerator(adapter);
 const teachings = await teachingsGen.generate();
 
 // 3. Generate base pairs with personas and teachings
-const basePairs = await toPairs(new SchemaSynthesizer(adapter, {
+const basePairs = await new SchemaSynthesizer(adapter, {
   count: 5,
   complexity: ['low', 'medium', 'hard'],
   personas: personas,
   teachings: teachings
-}));
+}).toPairs();
 // 150 pairs (10 personas × 3 complexities × 5 questions)
 
 // 4. Evolve with persona-specific paraphrases
 const evolvedPairs = [];
 for (const persona of personas.slice(0, 3)) { // Use top 3 personas
-  const variations = await toPairs(
-    new BreadthEvolver(basePairs.slice(0, 20), { // Evolve 20 pairs
+  const variations = await new BreadthEvolver(basePairs.slice(0, 20), { // Evolve 20 pairs
       count: 2,
       persona: persona
-    })
-  );
+    }).toPairs();
   evolvedPairs.push(...variations);
 }
 

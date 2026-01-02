@@ -8,14 +8,14 @@ The `SqlExtractor` takes existing SQL queries and generates the natural language
 ## Basic Usage
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { SqlExtractor } from '@deepagents/text2sql/synthesis';
 
 const sqls = [
   'SELECT COUNT(*) FROM orders WHERE status = "completed"',
   'SELECT customer_name, SUM(total) FROM orders GROUP BY customer_id',
 ];
 
-const pairs = await toPairs(new SqlExtractor(sqls, adapter));
+const pairs = await new SqlExtractor(sqls, adapter).toPairs();
 
 console.log(pairs);
 // [
@@ -60,14 +60,10 @@ By default, SQL is validated before question generation:
 
 ```typescript
 // With validation (default)
-const pairs = await toPairs(
-  new SqlExtractor(sqls, adapter, { validateSql: true })
-);
+const pairs = await new SqlExtractor(sqls, adapter, { validateSql: true }).toPairs();
 
 // Skip validation for speed
-const pairs = await toPairs(
-  new SqlExtractor(sqls, adapter, { validateSql: false })
-);
+const pairs = await new SqlExtractor(sqls, adapter, { validateSql: false }).toPairs();
 ```
 
 ### Handle Invalid SQL
@@ -76,15 +72,11 @@ Control what happens when SQL is invalid:
 
 ```typescript
 // Include invalid SQL with success=false (default)
-const pairs = await toPairs(
-  new SqlExtractor(sqls, adapter, { skipInvalid: false })
-);
+const pairs = await new SqlExtractor(sqls, adapter, { skipInvalid: false }).toPairs();
 // Invalid SQL is included: { sql: '...', success: false }
 
 // Skip invalid SQL entirely
-const pairs = await toPairs(
-  new SqlExtractor(sqls, adapter, { skipInvalid: true })
-);
+const pairs = await new SqlExtractor(sqls, adapter, { skipInvalid: true }).toPairs();
 // Invalid SQL is omitted from results
 ```
 
@@ -93,30 +85,26 @@ const pairs = await toPairs(
 Pass a single string instead of an array:
 
 ```typescript
-const pairs = await toPairs(
-  new SqlExtractor(
+const pairs = await new SqlExtractor(
     'SELECT * FROM products WHERE price > 100',
     adapter
-  )
-);
+  ).toPairs();
 ```
 
 ## Example: Processing Query Logs
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { SqlExtractor } from '@deepagents/text2sql/synthesis';
 
 // Load SQL from your query logs
 const queryLogs = await loadQueryLogs(); // Your data source
 const sqls = queryLogs.map(log => log.sql);
 
 // Generate questions
-const pairs = await toPairs(
-  new SqlExtractor(sqls, adapter, {
+const pairs = await new SqlExtractor(sqls, adapter, {
     validateSql: true,
     skipInvalid: true,
-  })
-);
+  }).toPairs();
 
 // Export for training
 const trainingData = pairs.map(p => ({
@@ -128,7 +116,7 @@ const trainingData = pairs.map(p => ({
 ## Example: From Saved Queries
 
 ```typescript
-import { SqlExtractor, toPairs } from '@deepagents/text2sql/synthesis';
+import { SqlExtractor } from '@deepagents/text2sql/synthesis';
 
 // Your saved query library
 const savedQueries = [
@@ -139,7 +127,7 @@ const savedQueries = [
 
 const sqls = savedQueries.map(q => q.sql);
 
-const pairs = await toPairs(new SqlExtractor(sqls, adapter));
+const pairs = await new SqlExtractor(sqls, adapter).toPairs();
 
 // Match back to saved query names if needed
 const enriched = pairs.map((pair, i) => ({
@@ -173,18 +161,15 @@ import {
   SqlExtractor,
   FilteredProducer,
   DeduplicatedProducer,
-  toPairs
 } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(
-  new DeduplicatedProducer(
+const pairs = await new DeduplicatedProducer(
     new FilteredProducer(
       new SqlExtractor(sqls, adapter),
       { successOnly: true }
     ),
     { mode: 'sql' }
-  )
-);
+  ).toPairs();
 ```
 
 ## Best Practices

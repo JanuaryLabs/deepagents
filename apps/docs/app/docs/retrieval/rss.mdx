@@ -1,0 +1,261 @@
+---
+title: RSS Connector
+description: Index RSS feeds with automatic article extraction
+---
+
+The `rss` connector indexes content from RSS feeds, optionally fetching and parsing full article content using Mozilla's Readability library.
+
+## Import
+
+```typescript
+import { rss } from '@deepagents/retrieval/connectors';
+```
+
+## Basic Usage
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./news.db', 384);
+
+const results = await similaritySearch('machine learning breakthroughs', {
+  connector: rss('https://news.ycombinator.com/rss'),
+  store,
+  embedder: fastembed(),
+});
+```
+
+## Options
+
+```typescript
+rss(feedUrl: string, options?: {
+  maxItems?: number;           // Maximum items to index (default: 50)
+  fetchFullArticles?: boolean; // Extract full article content (default: false)
+})
+```
+
+### Fetch Full Articles
+
+By default, the connector uses RSS summary content. Enable `fetchFullArticles` to extract the complete article text:
+
+```typescript
+const connector = rss('https://blog.example.com/feed.xml', {
+  fetchFullArticles: true, // Uses Readability to extract article content
+  maxItems: 20,
+});
+```
+
+When enabled, the connector:
+
+1. Fetches each article URL from the feed
+2. Parses the HTML using JSDOM
+3. Extracts main content using Mozilla Readability
+4. Falls back to RSS content if extraction fails
+
+## Content Format
+
+Each article is formatted as:
+
+```
+Title: {title}
+Author: {author}
+Published: {pubDate}
+Categories: {categories}
+Link: {url}
+Content/Full Article Content:
+{content}
+
+Summary: {title} - {description}
+```
+
+A feed summary document is also created:
+
+```
+RSS Feed: {title}
+Description: {description}
+Website: {link}
+Language: {language}
+Last Updated: {lastBuildDate}
+Total Items: {count}
+```
+
+## Real-World Examples
+
+### Tech News Aggregator
+
+Build a searchable tech news knowledge base:
+
+```typescript
+import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./tech-news.db', 384);
+const embedder = fastembed();
+
+// Index multiple tech news feeds
+const feeds = [
+  'https://news.ycombinator.com/rss',
+  'https://www.theverge.com/rss/index.xml',
+  'https://techcrunch.com/feed/',
+  'https://feeds.arstechnica.com/arstechnica/technology-lab',
+];
+
+// Index all feeds
+for (const feedUrl of feeds) {
+  await ingest({
+    connector: rss(feedUrl, {
+      maxItems: 30,
+      fetchFullArticles: true,
+    }),
+    store,
+    embedder,
+  });
+  console.log(`Indexed: ${feedUrl}`);
+}
+
+// Search across all feeds
+async function searchNews(query: string) {
+  // Use any feed connector for search (store contains all)
+  const results = await similaritySearch(query, {
+    connector: rss(feeds[0]),
+    store,
+    embedder,
+  });
+
+  return results.slice(0, 10);
+}
+
+const results = await searchNews('artificial intelligence regulation');
+```
+
+### Blog Content Search
+
+Index a company blog for internal search:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+async function searchBlog(query: string) {
+  const store = nodeSQLite('./blog.db', 384);
+
+  const results = await similaritySearch(query, {
+    connector: rss('https://blog.company.com/feed.xml', {
+      fetchFullArticles: true, // Get complete article text
+      maxItems: 100,           // Index last 100 posts
+    }),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.map(r => ({
+    title: r.content.match(/Title: (.+)/)?.[1],
+    link: r.content.match(/Link: (.+)/)?.[1],
+    similarity: r.similarity,
+  }));
+}
+
+const results = await searchBlog('product launch announcement');
+```
+
+### Research Paper Monitoring
+
+Track academic preprints and papers:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./research.db', 384);
+
+// arXiv RSS feeds for specific categories
+const arxivFeeds = [
+  'https://rss.arxiv.org/rss/cs.AI',  // AI
+  'https://rss.arxiv.org/rss/cs.LG',  // Machine Learning
+  'https://rss.arxiv.org/rss/cs.CL',  // NLP
+];
+
+async function searchPapers(query: string) {
+  const results = await similaritySearch(query, {
+    connector: rss(arxivFeeds[0], { maxItems: 100 }),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results.slice(0, 5);
+}
+
+const results = await searchPapers('transformer architecture improvements');
+```
+
+### Newsletter Archive
+
+Index newsletter content for reference:
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
+
+const store = nodeSQLite('./newsletters.db', 384);
+
+const newsletters = [
+  'https://tldr.tech/tech/rss',
+  'https://www.morningbrew.com/daily/rss.xml',
+  'https://bytes.dev/rss',
+];
+
+async function searchNewsletters(query: string) {
+  const results = await similaritySearch(query, {
+    connector: rss(newsletters[0], { fetchFullArticles: true }),
+    store,
+    embedder: fastembed(),
+  });
+
+  return results;
+}
+
+const results = await searchNewsletters('developer productivity tips');
+```
+
+## Instructions Property
+
+The RSS connector includes an `instructions` property with context about the feed:
+
+```typescript
+const connector = rss('https://news.ycombinator.com/rss', {
+  fetchFullArticles: true,
+});
+
+console.log(connector.instructions);
+// "You answer questions about articles and content from the RSS feed: https://news.ycombinator.com/rss.
+//  Always cite the article title and link when referencing specific content.
+//  The feed contains recent articles, blog posts, and news items.
+//  When referencing content, include the publication date and author when available.
+//  Full article content has been extracted from the original links for comprehensive analysis."
+```
+
+This can be passed to an LLM to provide context about the knowledge source.
+
+## Source ID
+
+The connector generates a source ID based on the feed URL:
+
+```typescript
+rss('https://example.com/feed.xml')
+// sourceId: "rss:https://example.com/feed.xml"
+```
+
+## Error Handling
+
+The connector handles common RSS parsing issues:
+
+- Missing fields are replaced with empty strings
+- Failed article fetches fall back to RSS summary content
+- Parse errors are logged but don't stop ingestion
+
+## Next Steps
+
+- [PDF Connector](/docs/retrieval/pdf) - Index PDF documents
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing
+- [Recipes](/docs/retrieval/recipes) - Build a news aggregator chatbot

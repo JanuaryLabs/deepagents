@@ -19,7 +19,7 @@ export type LastQueryExtractorOptions = BaseContextualExtractorOptions;
  * @example
  * ```typescript
  * const extractor = new LastQueryExtractor(messages, adapter);
- * const pairs = await toPairs(extractor); // Returns array with at most 1 pair
+ * const pairs = await extractor.toPairs(); // Returns array with at most 1 pair
  * ```
  */
 export class LastQueryExtractor extends BaseContextualExtractor {

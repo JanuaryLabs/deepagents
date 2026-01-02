@@ -1,0 +1,254 @@
+---
+title: Embedders
+description: Configure embedding models for vector representations
+---
+
+Embedders convert text into vector representations (embeddings) that enable semantic similarity search. The retrieval package includes FastEmbed with multiple model options.
+
+## FastEmbed
+
+FastEmbed is a lightweight, fast embedding library that runs locally. It downloads models on first use and caches them for subsequent runs.
+
+### Import
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+```
+
+### Basic Usage
+
+```typescript
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+// Default model: BGE-small-en-v1.5 (384 dimensions)
+const embedder = fastembed();
+const store = nodeSQLite('./docs.db', 384);
+
+const results = await similaritySearch('authentication', {
+  connector: local('**/*.md'),
+  store,
+  embedder,
+});
+```
+
+### Options
+
+```typescript
+import { EmbeddingModel } from 'fastembed';
+
+fastembed({
+  model?: EmbeddingModel;  // Embedding model (default: BGESmallENV15)
+  batchSize?: number;      // Batch size for embedding (default: varies by model)
+  cacheDir?: string;       // Custom cache directory for models
+})
+```
+
+## Available Models
+
+| Model | ID | Dimensions | Notes |
+|-------|-----|------------|-------|
+| BGE-small-en-v1.5 | `EmbeddingModel.BGESmallENV15` | 384 | Default, good balance |
+| BGE-base-en-v1.5 | `EmbeddingModel.BGEBaseENV15` | 768 | Higher quality, slower |
+| BGE-small-en | `EmbeddingModel.BGESmallEN` | 384 | Earlier version |
+| BGE-base-en | `EmbeddingModel.BGEBaseEN` | 768 | Earlier version |
+| BGE-small-zh | `EmbeddingModel.BGESmallZH` | 384 | Chinese language |
+| All-MiniLM-L6-v2 | `EmbeddingModel.AllMiniLML6V2` | 384 | Fast, lightweight |
+| MLE5-Large | `EmbeddingModel.MLE5Large` | 1024 | Highest quality |
+
+### Model Selection
+
+```typescript
+import { fastembed } from '@deepagents/retrieval';
+import { EmbeddingModel } from 'fastembed';
+
+// High quality (slower, more memory)
+const highQuality = fastembed({
+  model: EmbeddingModel.BGEBaseENV15,
+});
+
+// Fast and lightweight
+const fast = fastembed({
+  model: EmbeddingModel.AllMiniLML6V2,
+});
+
+// Chinese content
+const chinese = fastembed({
+  model: EmbeddingModel.BGESmallZH,
+});
+```
+
+## Dimension Matching
+
+The store dimension **must match** your embedding model's output dimension:
+
+```typescript
+import { fastembed, nodeSQLite } from '@deepagents/retrieval';
+import { EmbeddingModel } from 'fastembed';
+
+// 384-dimension models
+const embedder384 = fastembed(); // BGE-small-en-v1.5
+const store384 = nodeSQLite('./384.db', 384);
+
+// 768-dimension models
+const embedder768 = fastembed({ model: EmbeddingModel.BGEBaseENV15 });
+const store768 = nodeSQLite('./768.db', 768);
+
+// 1024-dimension models
+const embedder1024 = fastembed({ model: EmbeddingModel.MLE5Large });
+const store1024 = nodeSQLite('./1024.db', 1024);
+```
+
+Mismatched dimensions will cause runtime errors.
+
+## Batch Processing
+
+FastEmbed processes embeddings in batches to optimize memory usage:
+
+```typescript
+// Custom batch size for memory-constrained environments
+const embedder = fastembed({
+  batchSize: 16, // Smaller batches use less memory
+});
+
+// Larger batches for faster processing
+const fastEmbedder = fastembed({
+  batchSize: 64,
+});
+```
+
+## Model Caching
+
+Models are downloaded on first use and cached locally:
+
+```typescript
+// Custom cache directory
+const embedder = fastembed({
+  cacheDir: '/path/to/cache',
+});
+```
+
+Default cache location varies by OS:
+- macOS: `~/Library/Caches/fastembed`
+- Linux: `~/.cache/fastembed`
+- Windows: `%LOCALAPPDATA%\fastembed`
+
+## Embedder Interface
+
+All embedders implement this interface:
+
+```typescript
+type Embedder = (documents: string[]) => Promise<{
+  embeddings: (number[] | Float32Array)[];
+  dimensions: number;
+}>;
+```
+
+You can create custom embedders that follow this interface:
+
+```typescript
+const customEmbedder: Embedder = async (documents) => {
+  // Call your embedding API
+  const response = await fetch('https://api.example.com/embed', {
+    method: 'POST',
+    body: JSON.stringify({ texts: documents }),
+  });
+
+  const data = await response.json();
+
+  return {
+    embeddings: data.embeddings,
+    dimensions: data.dimensions,
+  };
+};
+```
+
+## Real-World Examples
+
+### Quality vs Speed Trade-off
+
+```typescript
+import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+import { EmbeddingModel } from 'fastembed';
+
+// For development: fast iteration
+const devEmbedder = fastembed({
+  model: EmbeddingModel.AllMiniLML6V2,
+  batchSize: 32,
+});
+const devStore = nodeSQLite('./dev.db', 384);
+
+// For production: highest quality
+const prodEmbedder = fastembed({
+  model: EmbeddingModel.BGEBaseENV15,
+  batchSize: 16,
+});
+const prodStore = nodeSQLite('./prod.db', 768);
+
+// Use environment to switch
+const embedder = process.env.NODE_ENV === 'production'
+  ? prodEmbedder
+  : devEmbedder;
+
+const store = process.env.NODE_ENV === 'production'
+  ? prodStore
+  : devStore;
+```
+
+### Reusable Embedder Instance
+
+```typescript
+import { fastembed, nodeSQLite, similaritySearch, ingest } from '@deepagents/retrieval';
+import { local, github } from '@deepagents/retrieval/connectors';
+
+// Create embedder once, reuse across operations
+const embedder = fastembed();
+const store = nodeSQLite('./knowledge.db', 384);
+
+// Index local docs
+await ingest({
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+
+// Index GitHub docs
+await ingest({
+  connector: github.file('vercel/next.js/README.md'),
+  store,
+  embedder,
+});
+
+// Search with same embedder
+const results = await similaritySearch('routing', {
+  connector: local('docs/**/*.md'),
+  store,
+  embedder,
+});
+```
+
+### Memory-Efficient Processing
+
+```typescript
+import { fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
+import { local } from '@deepagents/retrieval/connectors';
+
+// For large codebases, use smaller batches
+const embedder = fastembed({
+  batchSize: 8, // Reduce memory usage
+});
+
+// The ingestion pipeline also batches internally (40 chunks at a time)
+await ingest({
+  connector: local('**/*.ts'),
+  store: nodeSQLite('./code.db', 384),
+  embedder,
+});
+```
+
+## Next Steps
+
+- [Stores](/docs/retrieval/stores) - Configure vector storage
+- [Ingestion Modes](/docs/retrieval/ingestion-modes) - Control re-indexing
+- [Custom Connectors](/docs/retrieval/custom-connectors) - Build data sources

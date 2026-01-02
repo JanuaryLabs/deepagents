@@ -1,0 +1,335 @@
+---
+title: Multi-Repository Code Search
+description: Build a semantic code search system across multiple repositories
+---
+
+Build a semantic code search system across multiple local and GitHub repositories. This recipe is useful for understanding large codebases and finding relevant implementations.
+
+## What You'll Build
+
+- Index local and GitHub repositories
+- Semantic code search across all indexed code
+- Language-aware filtering
+- Cross-project pattern discovery
+
+## Prerequisites
+
+```bash
+npm install @deepagents/retrieval
+```
+
+For GitHub repo indexing via gitingest:
+```bash
+pip install uv  # Required for uvx command
+```
+
+## Complete Implementation
+
+```typescript
+import { similaritySearch, fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
+import { repo, github } from '@deepagents/retrieval/connectors';
+
+// Set up retrieval infrastructure
+const store = nodeSQLite('./code-search.db', 384);
+const embedder = fastembed();
+
+// Index local repositories
+async function indexLocalRepos() {
+  const localProjects = [
+    { path: './projects/api', extensions: ['.ts', '.tsx'] },
+    { path: './projects/web', extensions: ['.ts', '.tsx', '.css'] },
+    { path: './projects/shared', extensions: ['.ts'] },
+  ];
+
+  for (const project of localProjects) {
+    console.log(`Indexing local: ${project.path}`);
+
+    await ingest({
+      connector: repo(project.path, project.extensions, 'contentChanged'),
+      store,
+      embedder,
+    });
+  }
+}
+
+// Index GitHub repositories
+async function indexGitHubRepos() {
+  const githubRepos = [
+    {
+      url: 'https://github.com/vercel/ai',
+      includes: ['packages/**/*.ts'],
+      name: 'Vercel AI SDK',
+    },
+    {
+      url: 'https://github.com/trpc/trpc',
+      includes: ['packages/**/*.ts'],
+      name: 'tRPC',
+    },
+    {
+      url: 'https://github.com/TanStack/query',
+      includes: ['packages/**/*.ts'],
+      name: 'TanStack Query',
+    },
+  ];
+
+  for (const gh of githubRepos) {
+    console.log(`Indexing GitHub: ${gh.name}`);
+
+    await ingest({
+      connector: github.repo(gh.url, {
+        includes: gh.includes,
+        ingestWhen: 'never', // Index once for open source repos
+      }),
+      store,
+      embedder,
+    });
+  }
+}
+
+// Search across all indexed code
+async function searchCode(query: string, limit = 10) {
+  const results = await similaritySearch(query, {
+    connector: repo('.', ['.ts'], 'never'), // Any connector works
+    store,
+    embedder,
+  });
+
+  return results.slice(0, limit).map(r => ({
+    file: r.document_id,
+    content: r.content,
+    similarity: r.similarity,
+    metadata: r.metadata,
+  }));
+}
+
+// Find implementations of a concept
+async function findImplementations(concept: string) {
+  console.log(`\nSearching for: "${concept}"\n`);
+
+  const results = await searchCode(concept, 5);
+
+  for (const result of results) {
+    console.log(`--- ${result.file} (${result.similarity.toFixed(2)}) ---`);
+    console.log(result.content);
+    console.log();
+  }
+
+  return results;
+}
+
+// Index all repositories
+async function indexAll() {
+  console.log('Starting code indexing...\n');
+
+  await indexLocalRepos();
+  await indexGitHubRepos();
+
+  console.log('\nIndexing complete!');
+}
+
+// Example usage
+async function main() {
+  // Index repositories
+  await indexAll();
+
+  // Search for various patterns
+  await findImplementations('streaming response handler');
+  await findImplementations('authentication middleware');
+  await findImplementations('error boundary component');
+  await findImplementations('database connection pool');
+}
+
+await main();
+```
+
+## How It Works
+
+### 1. Local Repository Indexing
+
+The `repo` connector indexes local code:
+
+```typescript
+await ingest({
+  connector: repo('./src', ['.ts', '.tsx'], 'contentChanged'),
+  store,
+  embedder,
+});
+```
+
+### 2. GitHub Repository Indexing
+
+Use `github.repo()` with gitingest for remote repos:
+
+```typescript
+await ingest({
+  connector: github.repo('https://github.com/vercel/ai', {
+    includes: ['packages/**/*.ts'],
+    ingestWhen: 'never',
+  }),
+  store,
+  embedder,
+});
+```
+
+### 3. Semantic Search
+
+Search finds semantically similar code:
+
+```typescript
+const results = await searchCode('rate limiting middleware');
+// Returns code snippets about rate limiting, throttling, etc.
+```
+
+## Customization Options
+
+### Language-Specific Search
+
+Index and search by language:
+
+```typescript
+const languageConfigs = {
+  typescript: ['.ts', '.tsx'],
+  python: ['.py'],
+  go: ['.go'],
+  rust: ['.rs'],
+};
+
+async function indexByLanguage(projectPath: string, language: string) {
+  const extensions = languageConfigs[language];
+
+  await ingest({
+    connector: repo(projectPath, extensions, 'contentChanged'),
+    store,
+    embedder,
+  });
+}
+```
+
+### Monorepo Support
+
+Index a monorepo with multiple packages:
+
+```typescript
+async function indexMonorepo(rootPath: string) {
+  const packages = await fs.readdir(`${rootPath}/packages`);
+
+  for (const pkg of packages) {
+    const pkgPath = `${rootPath}/packages/${pkg}`;
+
+    await ingest({
+      connector: repo(`${pkgPath}/src`, ['.ts'], 'contentChanged'),
+      store,
+      embedder,
+    });
+
+    console.log(`Indexed: ${pkg}`);
+  }
+}
+```
+
+### Code Review Context
+
+Find related code for code review:
+
+```typescript
+async function getReviewContext(changedFile: string, changedContent: string) {
+  // Find similar code patterns
+  const similarCode = await searchCode(changedContent, 5);
+
+  // Filter out the file being reviewed
+  const relatedFiles = similarCode.filter(r => r.file !== changedFile);
+
+  return {
+    changedFile,
+    relatedFiles: relatedFiles.map(r => ({
+      file: r.file,
+      similarity: r.similarity,
+      snippet: r.content.slice(0, 200),
+    })),
+  };
+}
+```
+
+### Pattern Discovery
+
+Find common patterns across projects:
+
+```typescript
+async function discoverPatterns(patterns: string[]) {
+  const discoveries = [];
+
+  for (const pattern of patterns) {
+    const results = await searchCode(pattern, 10);
+
+    const byProject = results.reduce((acc, r) => {
+      const project = r.file.split('/')[0];
+      acc[project] = acc[project] || [];
+      acc[project].push(r);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    discoveries.push({
+      pattern,
+      occurrences: results.length,
+      projects: Object.keys(byProject),
+      examples: results.slice(0, 3),
+    });
+  }
+
+  return discoveries;
+}
+
+// Find how different projects implement common patterns
+const patterns = await discoverPatterns([
+  'error handling try catch',
+  'async await pattern',
+  'dependency injection',
+  'factory pattern',
+]);
+```
+
+### Integration with IDE
+
+Create a CLI for IDE integration:
+
+```typescript
+#!/usr/bin/env node
+import { searchCode } from './code-search';
+
+const query = process.argv.slice(2).join(' ');
+
+if (!query) {
+  console.log('Usage: code-search <query>');
+  process.exit(1);
+}
+
+const results = await searchCode(query, 5);
+
+for (const result of results) {
+  // Output in format that IDEs can parse
+  console.log(`${result.file}:1: ${result.content.split('\n')[0]}`);
+}
+```
+
+## Production Tips
+
+1. **Incremental updates**: Use `contentChanged` for active repos
+2. **Size limits**: The repo connector skips files > 3KB by default
+3. **Gitignore respect**: Connector automatically respects .gitignore
+4. **Batch indexing**: Index repos in parallel for speed
+5. **Regular refresh**: Re-index GitHub repos periodically for updates
+
+## Automatic Exclusions
+
+The repo connector automatically excludes:
+
+- `node_modules/`, `vendor/`, `.git/`
+- `dist/`, `build/`, `coverage/`
+- Lock files and environment files
+- IDE configuration directories
+
+## Next Steps
+
+- [Knowledge Base](/docs/retrieval/recipe-knowledge-base) - Multi-source knowledge
+- [Repo Connector](/docs/retrieval/repo) - Connector details
+- [GitHub Connector](/docs/retrieval/github) - GitHub-specific features

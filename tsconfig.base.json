@@ -7,7 +7,7 @@
     "importHelpers": true,
     "isolatedModules": true,
     "useUnknownInCatchVariables": true,
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "esnext.asynciterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmitOnError": true,

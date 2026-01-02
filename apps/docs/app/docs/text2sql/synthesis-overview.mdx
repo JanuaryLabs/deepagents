@@ -40,15 +40,15 @@ The streaming pattern yields chunks of pairs, allowing for efficient memory usag
 
 ### toPairs()
 
-Helper function to iterate any producer's AsyncGenerator:
+Convenience method to collect all pairs from a producer's AsyncGenerator:
 
 ```typescript
-import { toPairs, SqlExtractor } from '@deepagents/text2sql/synthesis';
+import { SqlExtractor } from '@deepagents/text2sql/synthesis';
 
-const pairs = await toPairs(new SqlExtractor(sqls, adapter));
+const pairs = await new SqlExtractor(sqls, adapter).toPairs();
 ```
 
-Implementation:
+Implementation (shared helper used by `.toPairs()`):
 
 ```typescript
 export async function toPairs<T extends ExtractedPair>(
@@ -62,11 +62,7 @@ export async function toPairs<T extends ExtractedPair>(
 }
 ```
 
-Or pass the producer directly to `toPairs()`:
-
-```typescript
-const pairs = await toPairs(new SqlExtractor(sqls, adapter));
-```
+The `.toPairs()` method delegates to the helper above, so you can use the method consistently across producers.
 
 ## Extractors vs Synthesizers vs Generators
 
@@ -126,7 +122,7 @@ const validated = new ValidatedProducer(
   { execute: true }
 );
 
-const pairs = await toPairs(validated);
+const pairs = await validated.toPairs();
 // Only includes pairs where SQL validated/executed successfully
 ```
 
@@ -175,7 +171,7 @@ const producer = new DeduplicatedProducer(
   { mode: 'exact' }
 );
 
-const pairs = await toPairs(producer);
+const pairs = await producer.toPairs();
 ```
 
 ## Output Format
@@ -183,7 +179,7 @@ const pairs = await toPairs(producer);
 Export pairs for training:
 
 ```typescript
-const pairs = await toPairs(new SqlExtractor(sqls, adapter));
+const pairs = await new SqlExtractor(sqls, adapter).toPairs();
 
 // JSONL format (common for fine-tuning)
 const jsonl = pairs
