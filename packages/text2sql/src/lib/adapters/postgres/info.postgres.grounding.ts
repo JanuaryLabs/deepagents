@@ -27,6 +27,9 @@ export class PostgresInfoGrounding extends InfoGrounding {
       dialect: 'postgresql',
       version: versionRows[0]?.version,
       database: dbRows[0]?.db,
+      details: {
+        parameterPlaceholder: '$1, $2, $3, ...',
+      },
     };
   }
 }

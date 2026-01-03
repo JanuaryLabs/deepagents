@@ -23,6 +23,9 @@ export class SqliteInfoGrounding extends InfoGrounding {
     return {
       dialect: 'sqlite',
       version: rows[0]?.version,
+      details: {
+        parameterPlaceholder: '?',
+      },
     };
   }
 }

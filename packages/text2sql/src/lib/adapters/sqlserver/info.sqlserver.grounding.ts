@@ -27,6 +27,9 @@ export class SqlServerInfoGrounding extends InfoGrounding {
       dialect: 'sqlserver',
       version: versionRows[0]?.version,
       database: dbRows[0]?.db,
+      details: {
+        parameterPlaceholder: '@p1, @p2, @p3, ...',
+      },
     };
   }
 }

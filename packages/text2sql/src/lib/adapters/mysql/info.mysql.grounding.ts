@@ -36,6 +36,9 @@ export class MysqlInfoGrounding extends InfoGrounding {
       dialect,
       version,
       database,
+      details: {
+        parameterPlaceholder: '?',
+      },
     };
   }
 }
