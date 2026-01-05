@@ -1,0 +1,238 @@
+---
+title: Spreadsheet
+description: Query Excel and CSV files with natural language using Text2SQL
+---
+
+The Spreadsheet adapter loads Excel (.xlsx/.xls) and CSV/TSV files into an in-memory SQLite database, enabling natural language queries against spreadsheet data. Each sheet becomes a queryable table.
+
+## Basic Setup
+
+```typescript
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Spreadsheet, tables, info } from '@deepagents/text2sql/spreadsheet';
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new Spreadsheet({
+    file: './sales-data.xlsx',
+    grounding: [tables(), info()],
+  }),
+  history: new InMemoryHistory(),
+});
+
+// Query your spreadsheet with natural language
+const result = await text2sql.toSql('What are the top 5 products by revenue?');
+
+// Don't forget to close when done
+text2sql.adapter.close();
+```
+
+## Configuration Options
+
+```typescript
+import { Spreadsheet, tables, info, rowCount } from '@deepagents/text2sql/spreadsheet';
+
+new Spreadsheet({
+  // Required: Path to Excel or CSV/TSV file
+  file: './data.xlsx',
+
+  // Required: Grounding functions for schema introspection
+  grounding: [
+    tables(),
+    info(),
+    rowCount(),
+  ],
+
+  // Optional: Persist SQLite database to file (default: in-memory)
+  database: './cache.db',
+});
+```
+
+## Supported File Formats
+
+| Format | Extension | Table Naming |
+|--------|-----------|--------------|
+| Excel | `.xlsx`, `.xls` | Each sheet becomes a table (sheet name → table name) |
+| CSV | `.csv` | Filename becomes table name |
+| TSV | `.tsv` | Filename becomes table name |
+
+## Table and Column Naming
+
+The adapter automatically sanitizes identifiers for SQL compatibility:
+
+| Original | Sanitized | Rule |
+|----------|-----------|------|
+| `My Sheet!` | `my_sheet` | Special chars → underscore, lowercase |
+| `123Data` | `_123data` | Prefix underscore if starts with number |
+| `Customer ID` | `customer_id` | Spaces → underscores |
+| `aaaa...` (100 chars) | `aaaa...` (64 chars) | Truncated to 64 characters |
+| `col`, `col`, `col` | `col`, `col_2`, `col_3` | Duplicates get numeric suffix |
+
+## Type Inference
+
+The adapter automatically infers SQLite types from your data:
+
+| Data Pattern | SQLite Type | Example Values |
+|--------------|-------------|----------------|
+| All integers | `INTEGER` | `1`, `42`, `100` |
+| Any decimals | `REAL` | `3.14`, `99.99` |
+| Dates | `TEXT` | Stored as `YYYY-MM-DD` |
+| Mixed/text | `TEXT` | `"hello"`, `"123"` |
+| Empty/null | `NULL` | Empty cells become NULL |
+
+## Multi-Sheet Excel Files
+
+Each sheet in an Excel file becomes a separate table that you can query and join:
+
+```typescript
+import { Spreadsheet, tables } from '@deepagents/text2sql/spreadsheet';
+
+// sales.xlsx has sheets: "Customers", "Orders", "Products"
+const adapter = new Spreadsheet({
+  file: './sales.xlsx',
+  grounding: [tables()],
+});
+
+// Query individual tables
+const customers = await adapter.execute('SELECT * FROM customers');
+
+// Join across sheets
+const results = await adapter.execute(`
+  SELECT c.name, o.amount
+  FROM customers c
+  JOIN orders o ON c.id = o.customer_id
+`);
+
+adapter.close();
+```
+
+## Available Grounding Functions
+
+The Spreadsheet adapter reuses SQLite grounding functions. Import from `@deepagents/text2sql/spreadsheet`:
+
+| Function | Description |
+|----------|-------------|
+| `tables()` | Lists all tables (sheets) with their columns and types |
+| `info()` | Reports SQLite dialect and version info |
+| `rowCount()` | Counts rows per table with size classification |
+| `columnStats()` | Collects min, max, null fraction for columns |
+| `columnValues()` | Samples distinct values from columns |
+
+See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
+
+## Persisting the Database
+
+By default, the adapter creates an in-memory database. For large files or repeated queries, persist to disk:
+
+```typescript
+const adapter = new Spreadsheet({
+  file: './large-dataset.xlsx',
+  database: './cache.db', // SQLite file is created here
+  grounding: [tables()],
+});
+
+// Later sessions can query the persisted database directly
+```
+
+## Handling Special Data
+
+### Unicode and International Characters
+
+```typescript
+// Full Unicode support including CJK, accents, and emoji
+const adapter = new Spreadsheet({
+  file: './international-data.xlsx',
+  grounding: [tables()],
+});
+
+const results = await adapter.execute("SELECT * FROM data WHERE text LIKE '%日本%'");
+```
+
+### Dates
+
+Excel dates are automatically converted to `YYYY-MM-DD` format:
+
+```typescript
+// Query date ranges
+const events = await adapter.execute(`
+  SELECT * FROM events
+  WHERE date >= '2024-01-01' AND date < '2025-01-01'
+`);
+```
+
+### NULL Values
+
+Empty cells and missing values become SQL NULL:
+
+```typescript
+// Find rows with missing emails
+const incomplete = await adapter.execute(`
+  SELECT * FROM customers WHERE email IS NULL
+`);
+```
+
+## Error Handling
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Failed to read spreadsheet` | File not found or corrupted | Check file path and format |
+| `No valid sheets found` | All sheets are empty | Ensure spreadsheet has data |
+| `Cannot create table with no columns` | Sheet has no headers | Add header row to sheet |
+
+## Full Example
+
+```typescript
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import {
+  Spreadsheet,
+  tables,
+  info,
+  rowCount,
+  columnStats,
+} from '@deepagents/text2sql/spreadsheet';
+
+// Load an Excel file with customer and order data
+const adapter = new Spreadsheet({
+  file: './ecommerce.xlsx',
+  grounding: [
+    tables(),
+    info(),
+    rowCount(),
+    columnStats(),
+  ],
+});
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter,
+  history: new InMemoryHistory(),
+});
+
+// Introspect schema
+const schema = await adapter.introspect();
+console.log('Schema:', schema);
+
+// Natural language queries
+const topCustomers = await text2sql.toSql(
+  'Who are the top 10 customers by total order amount?'
+);
+console.log('SQL:', topCustomers.sql);
+
+const results = await adapter.execute(topCustomers.sql);
+console.log('Results:', results);
+
+// Always close when done
+adapter.close();
+```
+
+## Size Hints
+
+Tables are classified by row count (inherited from SQLite adapter):
+
+| Size Hint | Row Count |
+|-----------|-----------|
+| tiny | < 100 |
+| small | 100 - 999 |
+| medium | 1,000 - 9,999 |
+| large | 10,000 - 99,999 |
+| huge | >= 100,000 |

@@ -64,6 +64,12 @@
       "types": "./dist/lib/synthesis/index.d.ts",
       "import": "./dist/lib/synthesis/index.js",
       "default": "./dist/lib/synthesis/index.js"
+    },
+    "./spreadsheet": {
+      "development": "./src/lib/adapters/spreadsheet/index.ts",
+      "types": "./dist/lib/adapters/spreadsheet/index.d.ts",
+      "import": "./dist/lib/adapters/spreadsheet/index.js",
+      "default": "./dist/lib/adapters/spreadsheet/index.js"
     }
   },
   "files": [
@@ -91,6 +97,7 @@
     "@ai-sdk/openai": "2.0.76",
     "nano-spawn": "^1.0.3",
     "p-retry": "^7.1.1",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "xlsx": "^0.18.5"
   }
 }

@@ -9,6 +9,7 @@
     "sqlite",
     "sqlserver",
     "mysql",
+    "spreadsheet",
     "---Guides---",
     "to-sql",
     "explain-queries",

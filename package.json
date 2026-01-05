@@ -62,7 +62,6 @@
     "verdaccio": "6.1.4",
     "vite": "^7.0.0",
     "vite-tsconfig-paths": "^5.1.4",
-    "@serverize/sandbox": "^5.1.4",
     "vitest": "^4.0.13"
   },
   "workspaces": [
