@@ -224,6 +224,56 @@ export class ContextEngine {
   }
 
   /**
+   * Create a new branch from a specific message.
+   * Shared logic between rewind() and btw().
+   */
+  async #createBranchFrom(
+    messageId: string,
+    switchTo: boolean,
+  ): Promise<BranchInfo> {
+    // Generate branch name based on same-prefix count (e.g., main-v2, main-v3)
+    const branches = await this.#store.listBranches(this.#chatId);
+    const samePrefix = branches.filter(
+      (b) =>
+        b.name === this.#branchName ||
+        b.name.startsWith(`${this.#branchName}-v`),
+    );
+    const newBranchName = `${this.#branchName}-v${samePrefix.length + 1}`;
+
+    // Create new branch pointing to the target message
+    const newBranch: BranchData = {
+      id: crypto.randomUUID(),
+      chatId: this.#chatId,
+      name: newBranchName,
+      headMessageId: messageId,
+      isActive: false,
+      createdAt: Date.now(),
+    };
+    await this.#store.createBranch(newBranch);
+
+    if (switchTo) {
+      // Switch to the new branch
+      await this.#store.setActiveBranch(this.#chatId, newBranch.id);
+      this.#branch = { ...newBranch, isActive: true };
+      this.#branchName = newBranchName;
+      // Clear pending messages (they were for the old branch)
+      this.#pendingMessages = [];
+    }
+
+    // Get message count for branch info
+    const chain = await this.#store.getMessageChain(messageId);
+
+    return {
+      id: newBranch.id,
+      name: newBranch.name,
+      headMessageId: newBranch.headMessageId,
+      isActive: switchTo,
+      messageCount: chain.length,
+      createdAt: newBranch.createdAt,
+    };
+  }
+
+  /**
    * Get the current chat ID.
    */
   public get chatId(): string {
@@ -501,39 +551,7 @@ export class ContextEngine {
       throw new Error(`Message "${messageId}" belongs to a different chat`);
     }
 
-    // Count existing branches to generate name
-    const branches = await this.#store.listBranches(this.#chatId);
-    const newBranchName = `${this.#branchName}-v${branches.length + 1}`;
-
-    // Create new branch pointing to the target message
-    const newBranch: BranchData = {
-      id: crypto.randomUUID(),
-      chatId: this.#chatId,
-      name: newBranchName,
-      headMessageId: messageId,
-      isActive: false,
-      createdAt: Date.now(),
-    };
-    await this.#store.createBranch(newBranch);
-
-    // Switch to new branch
-    await this.#store.setActiveBranch(this.#chatId, newBranch.id);
-    this.#branch = { ...newBranch, isActive: true };
-    this.#branchName = newBranchName;
-
-    // Clear pending messages (they were for the old branch)
-    this.#pendingMessages = [];
-
-    // Return branch info
-    const chain = await this.#store.getMessageChain(messageId);
-    return {
-      id: newBranch.id,
-      name: newBranch.name,
-      headMessageId: newBranch.headMessageId,
-      isActive: true,
-      messageCount: chain.length,
-      createdAt: newBranch.createdAt,
-    };
+    return this.#createBranchFrom(messageId, true);
   }
 
   /**
@@ -639,6 +657,47 @@ export class ContextEngine {
 
     // Clear pending messages (they were for the old branch)
     this.#pendingMessages = [];
+  }
+
+  /**
+   * Create a parallel branch from the current position ("by the way").
+   *
+   * Use this when you want to fork the conversation without leaving
+   * the current branch. Common use case: user wants to ask another
+   * question while waiting for the model to respond.
+   *
+   * Unlike rewind(), this method:
+   * - Uses the current HEAD (no messageId needed)
+   * - Does NOT switch to the new branch
+   * - Keeps pending messages intact
+   *
+   * @returns The new branch info (does not switch to it)
+   * @throws Error if no messages exist in the conversation
+   *
+   * @example
+   * ```ts
+   * // User asked a question, model is generating...
+   * context.set(user('What is the weather?'));
+   * await context.save();
+   *
+   * // User wants to ask something else without waiting
+   * const newBranch = await context.btw();
+   * // newBranch = { name: 'main-v2', ... }
+   *
+   * // Later, switch to the new branch and add the question
+   * await context.switchBranch(newBranch.name);
+   * context.set(user('Also, what time is it?'));
+   * await context.save();
+   * ```
+   */
+  public async btw(): Promise<BranchInfo> {
+    await this.#ensureInitialized();
+
+    if (!this.#branch?.headMessageId) {
+      throw new Error('Cannot create btw branch: no messages in conversation');
+    }
+
+    return this.#createBranchFrom(this.#branch.headMessageId, false);
   }
 
   /**

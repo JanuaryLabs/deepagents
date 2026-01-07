@@ -67,7 +67,13 @@ describe('Branching', () => {
         chatId: 'test-chain-1',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       await engine.save();
 
       const msg = await store.getMessage('msg-1');
@@ -82,9 +88,21 @@ describe('Branching', () => {
         chatId: 'test-chain-2',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Hi!', { id: 'msg-2' }));
-      engine.set(user('How are you?', { id: 'msg-3' }));
+      engine.set(
+        user({
+          id: 'msg-3',
+          role: 'user',
+          parts: [{ type: 'text', text: 'How are you?' }],
+        }),
+      );
       await engine.save();
 
       const msg1 = await store.getMessage('msg-1');
@@ -103,7 +121,13 @@ describe('Branching', () => {
         chatId: 'test-chain-3',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Hi!', { id: 'msg-2' }));
       await engine.save();
 
@@ -126,10 +150,10 @@ describe('Branching', () => {
       const { messages } = await engine.resolve({ renderer });
 
       assert.strictEqual(messages.length, 3);
-      // Messages from store are MessageData with .data containing the encoded UIMessage
-      assert.strictEqual(messages[0].data.parts[0].text, 'First');
-      assert.strictEqual(messages[1].data.parts[0].text, 'Second');
-      assert.strictEqual(messages[2].data.parts[0].text, 'Third');
+      // resolve() returns decoded UIMessage objects
+      assert.strictEqual(messages[0].parts[0].text, 'First');
+      assert.strictEqual(messages[1].parts[0].text, 'Second');
+      assert.strictEqual(messages[2].parts[0].text, 'Third');
     });
   });
 
@@ -141,9 +165,21 @@ describe('Branching', () => {
         chatId: 'test-rewind-1',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Hi!', { id: 'msg-2' }));
-      engine.set(user('Wrong path', { id: 'msg-3' }));
+      engine.set(
+        user({
+          id: 'msg-3',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Wrong path' }],
+        }),
+      );
       await engine.save();
 
       // Rewind to msg-2
@@ -161,7 +197,13 @@ describe('Branching', () => {
         chatId: 'test-rewind-2',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Hi!', { id: 'msg-2' }));
       await engine.save();
 
@@ -182,7 +224,13 @@ describe('Branching', () => {
         chatId: 'test-rewind-3',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Original response', { id: 'msg-2' }));
       await engine.save();
 
@@ -205,7 +253,13 @@ describe('Branching', () => {
         chatId: 'test-rewind-4',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Original', { id: 'msg-2' }));
       await engine.save();
 
@@ -229,7 +283,13 @@ describe('Branching', () => {
         chatId: 'test-rewind-5',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       await engine.save();
 
       assert.strictEqual(engine.branch, 'main');
@@ -246,7 +306,13 @@ describe('Branching', () => {
         chatId: 'test-rewind-6',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       await engine.save();
 
       // Add pending message
@@ -268,7 +334,13 @@ describe('Branching', () => {
         chatId: 'test-switch-1',
       });
 
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Hi!', { id: 'msg-2' }));
       await engine.save();
 
@@ -292,7 +364,13 @@ describe('Branching', () => {
       });
 
       // Build main branch
-      engine.set(user('Hello', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }),
+      );
       engine.set(assistantText('Response A', { id: 'msg-2' }));
       await engine.save();
 
@@ -304,13 +382,13 @@ describe('Branching', () => {
       // Get messages from forked branch
       const { messages: forkedMessages } = await engine.resolve({ renderer });
       assert.strictEqual(forkedMessages.length, 2);
-      assert.strictEqual(forkedMessages[1].data.parts[0].text, 'Response B');
+      assert.strictEqual(forkedMessages[1].parts[0].text, 'Response B');
 
       // Switch to main and get its messages
       await engine.switchBranch('main');
       const { messages: mainMessages } = await engine.resolve({ renderer });
       assert.strictEqual(mainMessages.length, 2);
-      assert.strictEqual(mainMessages[1].data.parts[0].text, 'Response A');
+      assert.strictEqual(mainMessages[1].parts[0].text, 'Response A');
     });
 
     it('should throw when switching to non-existent branch', async () => {
@@ -336,7 +414,13 @@ describe('Branching', () => {
         chatId: 'test-multi-1',
       });
 
-      engine.set(user('Start', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Start' }],
+        }),
+      );
       await engine.save();
 
       // Create multiple forks
@@ -363,7 +447,13 @@ describe('Branching', () => {
         chatId: 'test-multi-2',
       });
 
-      engine.set(user('Root', { id: 'root' }));
+      engine.set(
+        user({
+          id: 'root',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Root' }],
+        }),
+      );
       await engine.save();
 
       // Fork and extend
@@ -386,7 +476,13 @@ describe('Branching', () => {
         chatId: 'test-multi-3',
       });
 
-      engine.set(user('Start', { id: 'msg-1' }));
+      engine.set(
+        user({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Start' }],
+        }),
+      );
       await engine.save();
 
       // Create forks
@@ -398,6 +494,133 @@ describe('Branching', () => {
       const activeBranches = branches.filter((b) => b.isActive);
 
       assert.strictEqual(activeBranches.length, 1);
+    });
+  });
+
+  describe('btw (By The Way branching)', () => {
+    it('should create a new branch from current head without switching', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'test-btw-1',
+      });
+
+      // Add and save a message
+      engine.set(user('What is the weather?'));
+      await engine.save();
+
+      // Call btw - should create branch but not switch
+      const branchInfo = await engine.btw();
+
+      // Verify branch was created
+      assert.ok(branchInfo);
+      assert.strictEqual(branchInfo.name, 'main-v2');
+      assert.strictEqual(branchInfo.isActive, false);
+      assert.strictEqual(branchInfo.messageCount, 1);
+
+      // Verify we're still on main branch
+      assert.strictEqual(engine.branch, 'main');
+
+      // Verify both branches exist
+      const branches = await store.listBranches('test-btw-1');
+      assert.strictEqual(branches.length, 2);
+    });
+
+    it('should throw when no messages exist', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'test-btw-2',
+      });
+
+      // Initialize but don't add messages
+      await engine.resolve({ renderer });
+
+      // btw should fail - no messages to branch from
+      await assert.rejects(
+        () => engine.btw(),
+        /Cannot create btw branch: no messages in conversation/,
+      );
+    });
+
+    it('should keep pending messages after btw', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'test-btw-3',
+      });
+
+      // Save a message
+      engine.set(user('Saved message'));
+      await engine.save();
+
+      // Add pending message
+      engine.set(user('Pending message'));
+
+      // Call btw
+      await engine.btw();
+
+      // Resolve should still include the pending message
+      const { messages } = await engine.resolve({ renderer });
+      assert.strictEqual(messages.length, 2);
+    });
+
+    it('should create incrementing branch names', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'test-btw-4',
+      });
+
+      engine.set(user('Message'));
+      await engine.save();
+
+      const branch1 = await engine.btw();
+      const branch2 = await engine.btw();
+      const branch3 = await engine.btw();
+
+      assert.strictEqual(branch1.name, 'main-v2');
+      assert.strictEqual(branch2.name, 'main-v3');
+      assert.strictEqual(branch3.name, 'main-v4');
+    });
+
+    it('should allow switching to btw branch and adding messages', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'test-btw-5',
+      });
+
+      // Initial conversation
+      engine.set(user('What is the weather?'));
+      await engine.save();
+
+      // Create btw branch
+      const btwBranch = await engine.btw();
+
+      // Switch to it and add new question
+      await engine.switchBranch(btwBranch.name);
+      engine.set(user('Also, what time is it?'));
+      await engine.save();
+
+      // Verify the branch has 2 messages now
+      const branches = await store.listBranches('test-btw-5');
+      const mainBranch = branches.find((b) => b.name === 'main');
+      const v2Branch = branches.find((b) => b.name === 'main-v2');
+
+      assert.ok(mainBranch);
+      assert.ok(v2Branch);
+
+      // Main should still have 1 message, v2 should have 2
+      const mainChain = mainBranch.headMessageId
+        ? await store.getMessageChain(mainBranch.headMessageId)
+        : [];
+      const v2Chain = v2Branch.headMessageId
+        ? await store.getMessageChain(v2Branch.headMessageId)
+        : [];
+
+      assert.strictEqual(mainChain.length, 1);
+      assert.strictEqual(v2Chain.length, 2);
     });
   });
 });

@@ -1,4 +1,5 @@
 import {
+  APICallError,
   InvalidToolInputError,
   NoSuchToolError,
   ToolCallRepairError,
@@ -714,8 +715,11 @@ export class Text2Sql {
           return 'The model called a tool with invalid arguments.';
         } else if (ToolCallRepairError.isInstance(error)) {
           return 'The model tried to call a tool with invalid arguments, but it was repaired.';
+        } else if (APICallError.isInstance(error)) {
+          console.error('Upstream API call failed:', error);
+          return `Upstream API call failed with status ${error.statusCode}: ${error.message}`;
         } else {
-          return 'An unknown error occurred.';
+          return JSON.stringify(error);
         }
       },
       sendStart: true,
@@ -774,6 +778,9 @@ export async function withChat(
         return 'The model called a tool with invalid arguments.';
       } else if (ToolCallRepairError.isInstance(error)) {
         return 'The model tried to call a tool with invalid arguments, but it was repaired.';
+      } else if (APICallError.isInstance(error)) {
+        console.error('Upstream API call failed:', error);
+        return `Upstream API call failed with status ${error.statusCode}: ${error.message}`;
       } else {
         return JSON.stringify(error);
       }
