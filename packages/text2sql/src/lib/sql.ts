@@ -6,7 +6,6 @@ import {
   type UIMessage,
   generateId,
 } from 'ai';
-import { v7 } from 'uuid';
 
 import {
   type Agent,
@@ -735,16 +734,16 @@ export class Text2Sql {
             'Saving user message to history:',
             JSON.stringify(userMessage),
           );
-          await this.#config.history.addMessage({
-            id: v7(),
+          await this.#config.history.upsertMessage({
+            id: userMessage.id,
             chatId: params.chatId,
             role: userMessage.role,
             content: userMessage,
           });
         }
 
-        await this.#config.history.addMessage({
-          id: v7(),
+        await this.#config.history.upsertMessage({
+          id: responseMessage.id,
           chatId: params.chatId,
           role: responseMessage.role,
           content: responseMessage,
@@ -799,16 +798,16 @@ export async function withChat(
           JSON.stringify(userMessage),
         );
 
-        await history.addMessage({
-          id: v7(),
+        await history.upsertMessage({
+          id: userMessage.id,
           chatId: params.chatId,
           role: userMessage.role,
           content: userMessage,
         });
       }
 
-      await history.addMessage({
-        id: v7(),
+      await history.upsertMessage({
+        id: responseMessage.id,
         chatId: params.chatId,
         role: responseMessage.role,
         content: responseMessage,

@@ -106,7 +106,11 @@ export class SqliteHistory extends History {
       : new Date().toISOString();
     this.#db
       .prepare(
-        `INSERT INTO messages (id, "chatId", role, "createdAt", content) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (id, "chatId", role, "createdAt", content) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          "chatId" = excluded."chatId",
+          role = excluded.role,
+          content = excluded.content`,
       )
       .run(
         message.id,
