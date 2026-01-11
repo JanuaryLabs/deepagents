@@ -10,7 +10,68 @@
   temporarily) unless I explicitly ask for it. If something isn’t fully wired yet, keep the UX
   surface intact and stub/annotate it instead of deleting it.
 
-- Always ask more questions until you have enough context to give an accurate & confident answer.
+- Always ask more questions using AskUserQuestionTool until you have enough context to give an accurate & confident answer.
+
+## Package Overview
+
+### @deepagents/agent (`packages/agent`)
+
+A framework for building multi-agent AI systems with TypeScript. Create agents that use tools, coordinate through handoffs, and work together to solve complex tasks.
+
+**Key Features:**
+
+- **Agent Composition** - Build modular agents with specific roles and capabilities
+- **Tool Integration** - Compatible with Vercel AI SDK tools
+- **Handoffs** - Agents can delegate to specialized agents automatically
+- **Structured Output** - Type-safe responses with Zod schemas
+- **Streaming** - Real-time streaming responses
+- **Context Sharing** - Type-safe state passed between agents
+
+**Main Exports:** `agent`, `execute`, `swarm`, `instructions`, memory utilities, streaming utilities
+
+### @deepagents/context (`packages/context`)
+
+A domain-agnostic context management system for formatting context fragments into different prompt styles.
+
+**Key Features:**
+
+- **Multi-format Rendering** - XML, Markdown, TOML renderers for different LLM prompt styles
+- **Context Store** - Persistent storage with SQLite and in-memory adapters
+- **Skills Module** - Anthropic-style progressive disclosure with skills fragment
+- **Token Estimation** - Estimate token usage across different models
+- **Graph Visualization** - Visualize context graphs with branching and checkpoints
+
+### @deepagents/text2sql (`packages/text2sql`)
+
+AI-powered natural language to SQL. Ask questions in plain English, get executable queries.
+
+**Key Features:**
+
+- **Natural Language to SQL** - Convert questions to validated, executable queries
+- **Multi-Database Support** - PostgreSQL, SQLite, and SQL Server adapters
+- **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
+- **Teachables** - Inject domain knowledge via terms, hints, guardrails, examples, and more
+- **Conversational** - Multi-turn conversations with history and user memory
+- **Explainable** - Convert SQL back to plain English explanations
+- **Safe by Default** - Read-only queries, validation, and configurable guardrails
+
+**Teachable Types:** `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`
+
+### @deepagents/retrieval (`packages/retrieval`)
+
+A local-first RAG (Retrieval-Augmented Generation) system that ingests content from various sources, creates vector embeddings, and provides intelligent document search.
+
+**Key Features:**
+
+- **Connector Pattern** - Ingest from GitHub, RSS feeds, local files, PDFs, Linear issues
+- **Embedding** - FastEmbed for local embedding generation
+- **Vector Storage** - SQLite-based vector store
+- **Semantic Search** - Similarity search across ingested content
+- **Chunking** - Markdown and recursive character text splitters
+
+**Main Exports:** `ingest`, `similaritySearch`, `FastEmbed`, `SqliteStore`
+
+---
 
 ### Building packages
 
@@ -34,15 +95,25 @@ We use node version that support running typescript files directly without preco
 node path/to/file.ts
 ```
 
-### Running and Writing unit test
+Always import files with extension. For example:
+
+```ts
+import { someFunction } from './some-file.ts';
+```
+
+Otherwise, node will throw an error.
+
+### Running and Writing test
 
 We write tests exclusively using nodejs test running.
 
-To run unit tests for a specific package, use the following command:
+To run tests for a specific package, use the following command:
 
 ```sh
 node --test path/to/package/test/file.test.ts
 ```
+
+It is very important to note that we focus on integration tests rather than unit tests. This means that we test the entire flow of a feature rather than individual functions. When writing tests, focus on testing the overall functionality and user experience.
 
 ### Running Evals
 

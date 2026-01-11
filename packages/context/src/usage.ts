@@ -1,24 +1,23 @@
 import { groq } from '@ai-sdk/groq';
-import {
-  InvalidToolInputError,
-  NoSuchToolError,
-  ToolCallRepairError,
-  generateId,
-} from 'ai';
+import { createBashTool } from 'bash-tool';
+import chalk from 'chalk';
+import { Bash, OverlayFs } from 'just-bash';
 
-import { input, printer } from '@deepagents/agent';
+import { printer } from '@deepagents/agent';
 
 import {
   ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
-  SqliteContextStore,
   XmlRenderer,
-  assistant,
   assistantText,
+  // Docker sandbox
+  createContainerTool,
+  createDockerSandbox,
   hint,
-  message,
   role,
+  // Skills fragment
+  skills,
   user,
   visualizeGraph,
 } from './index.ts';
@@ -475,6 +474,42 @@ async function demonstrateSearch() {
   }
 }
 
+/**
+ * Example: Skills System (Anthropic-style progressive disclosure)
+ *
+ * Demonstrates how to use the skills system:
+ * 1. Create a registry with skill directories
+ * 2. Discover skills (loads metadata only - name + description)
+ * 3. Add skills fragment to context (metadata injected into system prompt)
+ * 4. LLM reads full SKILL.md content when relevant using file tools
+ */
+async function demonstrateSkills() {
+  // Create context with skills metadata injected into system prompt
+  const skillStore = new InMemoryContextStore();
+  const context = new ContextEngine({
+    store: skillStore,
+    chatId: 'skill-demo',
+  }).set(
+    role('You are a helpful assistant with access to specialized skills.'),
+    skills({ paths: ['packages/context/src/skills'] }), // Injects <available_skills> into system prompt
+  );
+
+  // Resolve to see what the LLM receives
+  const { systemPrompt } = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
+
+  console.log('\nSystem prompt with skills metadata:');
+  console.log(systemPrompt);
+
+  // The LLM now sees skill metadata and can read SKILL.md files when needed
+  // Example flow when user asks "Create a presentation":
+  // 1. LLM sees "presenterm" skill matches the request
+  // 2. LLM uses readFile tool to read /path/to/presenterm/SKILL.md
+  // 3. Full skill instructions now in context
+  // 4. LLM follows the skill's guidance to complete the task
+}
+
 // Run examples
 async function main() {
   await demonstrateContextEngine();
@@ -490,58 +525,258 @@ async function main() {
 
 function engine(...fragments: ContextFragment[]) {
   const context = new ContextEngine({
-    store: new SqliteContextStore('./context.sqlite'),
+    // store: new SqliteContextStore('./context.sqlite'),
+    store: new InMemoryContextStore(),
     chatId: 'demo-chat-1',
   });
   context.set(...fragments);
   return context;
 }
 
-// const context = engine(
-//   role('You are a bad assistant.'),
-//   hint('Greet the user badly.'),
-// );
+const context = engine(
+  role('You are a bad assistant.'),
+  hint('Greet the user badly.'),
+);
 
-// const grettingAgent = agent({
-//   name: 'greeting_agent',
-//   model: groq('moonshotai/kimi-k2-instruct-0905'),
-//   context,
-// });
+const grettingAgent = agent({
+  name: 'greeting_agent',
+  model: groq('moonshotai/kimi-k2-instruct-0905'),
+  context,
+});
 
-// while (true) {
-//   context.set(message(await input()));
-//   const stream = await grettingAgent.stream({});
+// Create the skill-aware agent with bash-tool
+async function createSkillAwareAgent() {
+  console.log('\n=== Skill-Aware Agent Demo (using bash-tool) ===');
 
-//   const messages = stream.toUIMessageStream({
-//     generateMessageId: generateId,
-//     sendStart: true,
-//     sendFinish: true,
-//     sendReasoning: true,
-//     sendSources: true,
-//     onError: (error) => {
-//       if (NoSuchToolError.isInstance(error)) {
-//         return 'The model tried to call an unknown tool.';
-//       } else if (InvalidToolInputError.isInstance(error)) {
-//         return 'The model called a tool with invalid arguments.';
-//       } else if (ToolCallRepairError.isInstance(error)) {
-//         return 'The model tried to call a tool with invalid arguments, but it was repaired.';
-//       } else {
-//         return JSON.stringify(error);
-//       }
-//     },
+  const { bash } = await createBashTool({
+    sandbox: new Bash({
+      fs: new OverlayFs({ root: process.cwd() }),
+      // customCommands: createBinaryBridges(
+      //   'presenterm', // Presentation tool
+      //   'node', // Node.js runtime
+      //   { name: 'python', binaryPath: 'python3' }, // Python with alias
+      // ),
+    }),
+    uploadDirectory: {
+      source: process.cwd(),
+      include: 'packages/**/src/skills/**/*.{md,ts,json}',
+    },
+    onBeforeBashCall: ({ command }) => {
+      console.log(chalk.blue(`[Bash Tool] Executing: ${command}`));
+      return { command };
+    },
+    onAfterBashCall: ({ command, result }) => {
+      console.log(
+        chalk.blue(
+          `[Bash Tool] Command "${command}" exited with code ${JSON.stringify(result)}`,
+        ),
+      );
+      return { result };
+    },
+  });
 
-//     onFinish: async ({
-//       isAborted,
-//       isContinuation,
-//       messages,
-//       finishReason,
-//       responseMessage,
-//     }) => {
-//       // TODO: handle error through finishReason
-//       context.set(message(responseMessage));
-//       await context.save();
-//       console.dir(responseMessage, { depth: null });
-//     },
-//   });
-//   await printer.readableStream(messages);
-// }
+  const agentContext = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: 'skill-agent-demo',
+  }).set(
+    role(
+      `You are a helpful assistant with access to specialized skills. your main tool is bash tool to read files and execute commands on the user's behalf.`,
+    ),
+    skills({ paths: ['packages/**/src/skills'] }),
+  );
+  const skillAwareAgent = agent({
+    name: 'skill_agent',
+    model: groq('moonshotai/kimi-k2-instruct-0905'),
+    context: agentContext,
+    tools: { bash },
+  });
+
+  agentContext.set(user(`Forecast sales base on the last 4 years.`));
+
+  const stream = await skillAwareAgent.stream({}, {});
+  await printer.stdout(stream);
+}
+
+/**
+ * Example: Docker Sandbox - Real Binary Execution in Containers
+ *
+ * Demonstrates how to use Docker sandbox for executing real system binaries
+ * in isolated containers instead of simulated environments.
+ *
+ * Two approaches are shown:
+ * 1. Low-level: createDockerSandbox() for direct container control
+ * 2. High-level: createContainerTool() for AI agent integration
+ */
+async function demonstrateDockerSandbox() {
+  console.log('\n=== Docker Sandbox Demo ===');
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Approach 1: Low-level - Direct Docker sandbox control
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('\n--- Low-level: createDockerSandbox() ---');
+
+  const sandbox = await createDockerSandbox({
+    image: 'alpine:latest',
+    packages: ['curl', 'jq'],
+    mounts: [
+      {
+        hostPath: process.cwd(),
+        containerPath: '/workspace',
+        readOnly: true, // Read-only by default for security
+      },
+    ],
+    resources: { memory: '512m', cpus: 1 },
+  });
+
+  try {
+    // Execute commands in the container
+    const result = await sandbox.executeCommand('curl --version');
+    console.log('curl version:', result.stdout.split('\n')[0]);
+
+    // Commands return stdout, stderr, and exitCode
+    const lsResult = await sandbox.executeCommand('ls /workspace');
+    console.log('Workspace files:', lsResult.stdout.trim().split('\n').length);
+
+    // Write files to the container
+    await sandbox.writeFiles([
+      { path: '/tmp/hello.txt', content: 'Hello from Docker sandbox!' },
+    ]);
+
+    // Read files from the container
+    const content = await sandbox.readFile('/tmp/hello.txt');
+    console.log('File content:', content);
+
+    // Handle command failures gracefully
+    const failResult = await sandbox.executeCommand('nonexistent_command');
+    console.log('Failed command exitCode:', failResult.exitCode); // 127
+  } finally {
+    // Always dispose to stop and remove the container
+    await sandbox.dispose();
+    console.log('Container cleaned up');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Approach 2: High-level - Container tool for AI agents
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('\n--- High-level: createContainerTool() ---');
+
+  // createContainerTool combines createDockerSandbox + createBashTool
+  const {
+    bash,
+    tools,
+    sandbox: agentSandbox,
+  } = await createContainerTool({
+    packages: ['python3', 'nodejs'],
+    mounts: [
+      {
+        hostPath: process.cwd(),
+        containerPath: '/project',
+        readOnly: false, // Allow writes for agent work
+      },
+    ],
+
+    // Bash tool hooks work as expected
+    onBeforeBashCall: ({ command }) => {
+      console.log(chalk.cyan(`[Container] Running: ${command}`));
+      return { command };
+    },
+    onAfterBashCall: ({ result }) => {
+      if (result.exitCode !== 0) {
+        console.log(chalk.yellow(`[Container] Exit code: ${result.exitCode}`));
+      }
+      return { result };
+    },
+  });
+
+  try {
+    // The bash tool can be used directly with AI SDK
+    // In a real agent, you'd pass `tools` to generateText/streamText
+    console.log('Available tools:', Object.keys(tools));
+
+    // Execute via the underlying sandbox
+    const pythonResult = await agentSandbox.executeCommand('python3 --version');
+    console.log('Python:', pythonResult.stdout.trim());
+
+    const nodeResult = await agentSandbox.executeCommand('node --version');
+    console.log('Node.js:', nodeResult.stdout.trim());
+  } finally {
+    await agentSandbox.dispose();
+    console.log('Agent container cleaned up');
+  }
+}
+
+/**
+ * Example: Docker Sandbox with Skill-Aware Agent
+ *
+ * Combines Docker sandbox with skills for a powerful agent that can:
+ * - Execute real binaries (python, node, presenterm, etc.)
+ * - Access skill instructions via progressive disclosure
+ * - Work in an isolated, reproducible environment
+ */
+async function createDockerSkillAgent() {
+  console.log('\n=== Docker + Skills Agent Demo ===');
+
+  // Create container tool with necessary packages
+  // Note: presenterm is not available in Alpine's apk repository,
+  // so we install it from pre-built binaries using the `binaries` option
+  const { bash, sandbox, tools } = await createContainerTool({
+    packages: ['curl', 'jq'], // curl is needed for binary downloads, jq for JSON parsing
+    binaries: [
+      {
+        name: 'presenterm',
+        url: {
+          // Pre-built musl binaries for Alpine Linux
+          x86_64:
+            'https://github.com/mfontanini/presenterm/releases/download/v0.15.1/presenterm-0.15.1-x86_64-unknown-linux-musl.tar.gz',
+          aarch64:
+            'https://github.com/mfontanini/presenterm/releases/download/v0.15.1/presenterm-0.15.1-aarch64-unknown-linux-musl.tar.gz',
+        },
+        binaryPath: 'presenterm', // The binary name inside the tar.gz archive
+      },
+    ],
+    mounts: [
+      {
+        hostPath: process.cwd(),
+        containerPath: '/workspace',
+        readOnly: false,
+      },
+    ],
+    onBeforeBashCall: ({ command }) => {
+      console.log(chalk.blue(`[Docker Agent] ${command}`));
+      return { command };
+    },
+  });
+
+  try {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'docker-skill-agent',
+    }).set(
+      role(`You are a system admin.`),
+      skills({ paths: ['packages/context/src/skills'] }),
+    );
+
+    // Create the agent
+    const dockerAgent = agent({
+      name: 'docker_skill_agent',
+      model: groq('moonshotai/kimi-k2-instruct-0905'),
+      context,
+      tools: { bash },
+    });
+
+    // Example: Agent can now execute real commands
+    context.set(user('Show me all installed apps.'));
+
+    const stream = await dockerAgent.stream({}, {});
+    await printer.stdout(stream);
+  } finally {
+    await sandbox.dispose();
+  }
+}
+
+// Run the skill-aware agent demo
+// await createSkillAwareAgent();
+
+// Uncomment to run Docker sandbox demos (requires Docker)
+// await demonstrateDockerSandbox();
+// await createDockerSkillAgent();
