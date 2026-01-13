@@ -7,9 +7,8 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 - **Natural Language to SQL** - Convert questions to validated, executable queries
 - **Multi-Database Support** - PostgreSQL, SQLite, and SQL Server adapters
 - **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
-- **Domain Knowledge** - Teach business terms, guardrails, and query patterns via teachables
-- **Conversational** - Multi-turn conversations with history and user memory
-- **Explainable** - Convert SQL back to plain English explanations
+- **Domain Knowledge** - Inject business terms, guardrails, and query patterns via fragments
+- **Conversational** - Multi-turn conversations with context persistence
 - **Safe by Default** - Read-only queries, validation, and configurable guardrails
 
 ## Installation
@@ -23,9 +22,11 @@ Requires Node.js LTS (20+).
 ## Quick Start
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
 import pg from 'pg';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { InMemoryContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
 import {
   Postgres,
   constraints,
@@ -42,6 +43,7 @@ const pool = new pg.Pool({
 
 const text2sql = new Text2Sql({
   version: 'v1',
+  model: groq('gpt-oss-20b'),
   adapter: new Postgres({
     execute: async (sql) => {
       const result = await pool.query(sql);
@@ -56,7 +58,7 @@ const text2sql = new Text2Sql({
       lowCardinality(),
     ],
   }),
-  history: new InMemoryHistory(),
+  store: new InMemoryContextStore(),
 });
 
 // Generate SQL
@@ -68,34 +70,36 @@ console.log(sql);
 
 Text2SQL works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs), including OpenAI, Anthropic, Google, Groq, and more.
 
-## Teachables
+## Fragments
 
-Inject domain knowledge to improve query accuracy:
+Inject domain knowledge using fragments from `@deepagents/context` to improve query accuracy. Pass instructions via the constructor:
 
 ```typescript
-import {
-  example,
-  guardrail,
-  hint,
-  term,
-} from '@deepagents/text2sql/instructions';
+import { example, guardrail, hint, term } from '@deepagents/context';
 
-text2sql.instruct(
-  term('MRR', 'monthly recurring revenue'),
-  hint('Always exclude test accounts with email ending in @test.com'),
-  guardrail({
-    rule: 'Never expose individual salaries',
-    reason: 'Confidential HR data',
-    action: 'Aggregate by department instead',
-  }),
-  example({
-    question: 'show me churned customers',
-    answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
-  }),
-);
+const text2sql = new Text2Sql({
+  // ... other config
+  instructions: [
+    term('MRR', 'monthly recurring revenue'),
+    hint('Always exclude test accounts with email ending in @test.com'),
+    guardrail({
+      rule: 'Never expose individual salaries',
+      reason: 'Confidential HR data',
+      action: 'Aggregate by department instead',
+    }),
+    example({
+      question: 'show me churned customers',
+      answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
+    }),
+  ],
+});
 ```
 
-10 teachable types available: `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`.
+**Domain fragments** (11 types): `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`, `glossary`.
+
+**User fragments** (6 types): `identity`, `persona`, `alias`, `preference`, `userContext`, `correction`.
+
+See [@deepagents/context](../context/README.md) for full fragment documentation.
 
 ## Grounding
 
@@ -134,19 +138,6 @@ const followUp = await text2sql.chat(
   [{ role: 'user', content: 'Now filter to only completed ones' }],
   { chatId, userId },
 );
-```
-
-## Explain Queries
-
-Convert SQL to plain English:
-
-```typescript
-const explanation = await text2sql.explain(`
-  SELECT department, AVG(salary)
-  FROM employees
-  GROUP BY department
-`);
-// "This query calculates the average salary for each department..."
 ```
 
 ## Documentation

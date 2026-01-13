@@ -4,12 +4,19 @@ import dedent from 'dedent';
 import z from 'zod';
 
 import { type AgentModel, agent, generate, user } from '@deepagents/agent';
-
 import {
-  type GeneratedTeachable,
-  type Teachables,
-  toTeachables,
-} from '../teach/teachables.ts';
+  type ContextFragment,
+  analogy,
+  clarification,
+  example,
+  explain,
+  guardrail,
+  hint,
+  quirk,
+  styleGuide,
+  term,
+  workflow,
+} from '@deepagents/context';
 
 const outputSchema = z.object({
   terms: z
@@ -82,7 +89,7 @@ const outputSchema = z.object({
   analogies: z
     .array(
       z.object({
-        concept: z.array(z.string()).min(2),
+        concepts: z.array(z.string()).min(2),
         relationship: z.string(),
         insight: z.string().optional(),
         therefore: z.string().optional(),
@@ -109,7 +116,7 @@ const teachablesAuthorAgent = agent<
   output: outputSchema,
   prompt: (state) => dedent`
     <identity>
-      You design "teachables" for a Text2SQL system. Teachables become structured XML instructions.
+      You design "fragments" for a Text2SQL system. Fragments become structured XML instructions.
       Choose only high-impact items that improve accuracy, safety, or clarity for this database.
     </identity>
 
@@ -130,12 +137,12 @@ const teachablesAuthorAgent = agent<
       - workflows: [{ task: string, steps: string[], triggers?: string[], notes?: string }] - Multi-step tasks
       - quirks: [{ issue: string, workaround: string }] - Known issues
       - styleGuides: [{ prefer: string, never?: string, always?: string }] - SQL style rules
-      - analogies: [{ concept: string[], relationship: string, insight?: string, therefore?: string, pitfall?: string }]
+      - analogies: [{ concepts: string[], relationship: string, insight?: string, therefore?: string, pitfall?: string }]
     </output_structure>
 
     <instructions>
       1. Analyze the schema to infer domain, relationships, and sensitive columns.
-      2. Generate 3-10 teachables total across all categories, prioritizing:
+      2. Generate 3-10 fragments total across all categories, prioritizing:
          - guardrails for PII columns (email, ssn, phone, etc)
          - hints for status/enum columns
          - clarifications for ambiguous terms
@@ -152,40 +159,75 @@ export interface GenerateToTeachingsOptions {
 export async function toTeachings(
   input: { schema: string; context?: string },
   options?: GenerateToTeachingsOptions,
-): Promise<Teachables[]> {
+): Promise<ContextFragment[]> {
   const { experimental_output: result } = await generate(
     teachablesAuthorAgent.clone({ model: options?.model }),
     [
       user(
-        `Analyze this database schema and generate teachings that will help an AI generate accurate SQL queries.`,
+        `Analyze this database schema and generate fragments that will help an AI generate accurate SQL queries.`,
       ),
     ],
     input,
   );
 
-  const generated: GeneratedTeachable[] = [
-    ...(result.terms?.map((t) => ({ type: 'term' as const, ...t })) ?? []),
-    ...(result.hints?.map((h) => ({ type: 'hint' as const, ...h })) ?? []),
-    ...(result.guardrails?.map((g) => ({ type: 'guardrail' as const, ...g })) ??
-      []),
-    ...(result.explains?.map((e) => ({ type: 'explain' as const, ...e })) ??
-      []),
-    ...(result.examples?.map((e) => ({ type: 'example' as const, ...e })) ??
-      []),
-    ...(result.clarifications?.map((c) => ({
-      type: 'clarification' as const,
-      ...c,
-    })) ?? []),
-    ...(result.workflows?.map((w) => ({ type: 'workflow' as const, ...w })) ??
-      []),
-    ...(result.quirks?.map((q) => ({ type: 'quirk' as const, ...q })) ?? []),
-    ...(result.styleGuides?.map((s) => ({
-      type: 'styleGuide' as const,
-      ...s,
-    })) ?? []),
-    ...(result.analogies?.map((a) => ({ type: 'analogy' as const, ...a })) ??
-      []),
-  ];
+  const fragments: ContextFragment[] = [];
 
-  return toTeachables(generated);
+  // Convert generated output to ContextFragments
+  result.terms?.forEach((t) => fragments.push(term(t.name, t.definition)));
+  result.hints?.forEach((h) => fragments.push(hint(h.text)));
+  result.guardrails?.forEach((g) =>
+    fragments.push(
+      guardrail({ rule: g.rule, reason: g.reason, action: g.action }),
+    ),
+  );
+  result.explains?.forEach((e) =>
+    fragments.push(
+      explain({
+        concept: e.concept,
+        explanation: e.explanation,
+        therefore: e.therefore,
+      }),
+    ),
+  );
+  result.examples?.forEach((e) =>
+    fragments.push(
+      example({ question: e.question, answer: e.answer, note: e.note }),
+    ),
+  );
+  result.clarifications?.forEach((c) =>
+    fragments.push(
+      clarification({ when: c.when, ask: c.ask, reason: c.reason }),
+    ),
+  );
+  result.workflows?.forEach((w) =>
+    fragments.push(
+      workflow({
+        task: w.task,
+        steps: w.steps,
+        triggers: w.triggers,
+        notes: w.notes,
+      }),
+    ),
+  );
+  result.quirks?.forEach((q) =>
+    fragments.push(quirk({ issue: q.issue, workaround: q.workaround })),
+  );
+  result.styleGuides?.forEach((s) =>
+    fragments.push(
+      styleGuide({ prefer: s.prefer, never: s.never, always: s.always }),
+    ),
+  );
+  result.analogies?.forEach((a) =>
+    fragments.push(
+      analogy({
+        concepts: a.concepts,
+        relationship: a.relationship,
+        insight: a.insight,
+        therefore: a.therefore,
+        pitfall: a.pitfall,
+      }),
+    ),
+  );
+
+  return fragments;
 }

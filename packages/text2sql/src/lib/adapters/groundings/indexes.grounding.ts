@@ -20,7 +20,7 @@ export interface IndexesGroundingConfig {
  */
 export abstract class IndexesGrounding extends AbstractGrounding {
   constructor(config: IndexesGroundingConfig = {}) {
-    super('indexes');
+    super('index');
   }
 
   /**
@@ -32,7 +32,7 @@ export abstract class IndexesGrounding extends AbstractGrounding {
    * Execute the grounding process.
    * Annotates tables in ctx.tables with their indexes and marks indexed columns.
    */
-  async execute(ctx: GroundingContext) {
+  async execute(ctx: GroundingContext): Promise<void> {
     for (const table of ctx.tables) {
       table.indexes = await this.getIndexes(table.name);
       // Mark columns that are part of indexes
@@ -45,7 +45,5 @@ export abstract class IndexesGrounding extends AbstractGrounding {
         }
       }
     }
-    // Return null - TableGrounding already describes indexes in its output
-    return () => null;
   }
 }

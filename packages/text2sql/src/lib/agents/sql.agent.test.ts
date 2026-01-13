@@ -69,7 +69,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      introspection: '',
+      schemaFragments: [],
       instructions: [],
       model,
     });
@@ -95,7 +95,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      introspection: '',
+      schemaFragments: [],
       instructions: [],
       model,
     });
@@ -145,7 +145,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      introspection: '',
+      schemaFragments: [],
       instructions: [],
       model,
     });
@@ -170,7 +170,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
         }),
@@ -192,7 +192,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
           maxRetries: 5,
@@ -214,7 +214,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
           maxRetries: 0,
@@ -237,7 +237,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
           maxRetries: 1,
@@ -268,7 +268,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      introspection: '',
+      schemaFragments: [],
       instructions: [],
       model,
       maxRetries: 6,
@@ -323,7 +323,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      introspection: '',
+      schemaFragments: [],
       instructions: [],
       model,
     });
@@ -344,7 +344,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
           maxRetries: 3,
@@ -380,7 +380,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
           maxRetries: 1,
@@ -413,7 +413,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
           maxRetries: 1,
@@ -437,7 +437,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model,
         }),
@@ -481,7 +481,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: 'query',
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -499,7 +499,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      introspection: '',
+      schemaFragments: [],
       instructions: [],
       model,
       maxRetries: 1,
@@ -517,7 +517,7 @@ describe('toSql', () => {
       await toSql({
         input: 'query',
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -543,7 +543,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: 'query',
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -560,7 +560,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: 'query',
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -585,7 +585,7 @@ describe('toSql', () => {
           toSql({
             input: 'query',
             adapter,
-            introspection: '',
+            schemaFragments: [],
             instructions: [],
             model,
             maxRetries: 1,
@@ -607,7 +607,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: 'query',
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -626,7 +626,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: '',
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -647,7 +647,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: inputWithSpecialChars,
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -666,7 +666,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: longInput,
         adapter,
-        introspection: '',
+        schemaFragments: [],
         instructions: [],
         model,
         maxRetries: 1,
@@ -689,7 +689,7 @@ describe('toSql', () => {
         toSql({
           input: 'query 1',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model: model1,
           maxRetries: 1,
@@ -697,7 +697,7 @@ describe('toSql', () => {
         toSql({
           input: 'query 2',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model: model2,
           maxRetries: 1,
@@ -705,7 +705,7 @@ describe('toSql', () => {
         toSql({
           input: 'query 3',
           adapter,
-          introspection: '',
+          schemaFragments: [],
           instructions: [],
           model: model3,
           maxRetries: 1,

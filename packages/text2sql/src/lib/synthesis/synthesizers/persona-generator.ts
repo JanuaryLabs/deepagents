@@ -3,9 +3,18 @@ import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { type AgentModel, agent, generate, user } from '@deepagents/agent';
+import { type AgentModel } from '@deepagents/agent';
+import {
+  ContextEngine,
+  type ContextFragment,
+  InMemoryContextStore,
+  XmlRenderer,
+  persona as personaFragment,
+  role,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
-import type { Adapter } from '../../adapters/adapter.ts';
 import { ALL_STYLES, type NLStyle } from './styles.ts';
 
 export interface Persona {
@@ -19,90 +28,89 @@ export interface PersonaGeneratorOptions {
   model?: AgentModel;
 }
 
-type PersonaGeneratorState = {
-  schema: string;
-  count: number;
-};
+const outputSchema = z.object({
+  personas: z
+    .array(
+      z.object({
+        role: z.string().describe('The job title or role of this persona'),
+        perspective: z
+          .string()
+          .describe(
+            'Rich description of what this persona cares about when querying the database',
+          ),
+        styles: z
+          .array(z.enum(ALL_STYLES))
+          .min(1)
+          .max(3)
+          .describe(
+            'Typical communication styles for this persona (1-3 styles)',
+          ),
+      }),
+    )
+    .min(1)
+    .describe('List of personas who would query this database'),
+});
 
-type PersonaGeneratorOutput = {
-  personas: Persona[];
-};
+/**
+ * Generate personas by analyzing database schema.
+ * Analyzes the schema to infer who would query this database and what
+ * they care about. Generated personas can be used with BreadthEvolver
+ * to create diverse question paraphrases from different perspectives.
+ *
+ * @param schemaFragments - Schema fragments from adapter.introspect()
+ * @param options - Generation options including count and model
+ * @returns Array of personas with roles and perspectives
+ */
+export async function generatePersonas(
+  schemaFragments: ContextFragment[],
+  options?: PersonaGeneratorOptions,
+): Promise<Persona[]> {
+  const schema = new XmlRenderer().render(schemaFragments);
+  const count = options?.count ?? 5;
 
-const personaGeneratorAgent = agent<
-  PersonaGeneratorOutput,
-  PersonaGeneratorState
->({
-  name: 'persona_generator',
-  model: wrapLanguageModel({
-    model: groq('openai/gpt-oss-20b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.8, topP: 0.95, presencePenalty: 0.2 },
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `persona-gen-${crypto.randomUUID()}`,
+  });
+
+  context.set(
+    personaFragment({
+      name: 'persona_generator',
+      role: 'You are an expert at understanding database schemas and inferring who would use them.',
     }),
-  }),
-  logging: process.env.AGENT_LOGGING === 'true',
-  output: z.object({
-    personas: z
-      .array(
-        z.object({
-          role: z.string().describe('The job title or role of this persona'),
-          perspective: z
-            .string()
-            .describe(
-              'Rich description of what this persona cares about when querying the database',
-            ),
-          styles: z
-            .array(z.enum(ALL_STYLES))
-            .min(1)
-            .max(3)
-            .describe(
-              'Typical communication styles for this persona (1-3 styles)',
-            ),
-        }),
-      )
-      .min(1)
-      .describe('List of personas who would query this database'),
-  }),
-  prompt: (state) => {
-    return dedent`
-      <identity>
-        You are an expert at understanding database schemas and inferring who would use them.
-        Your task is to analyze a database schema and generate realistic personas representing
-        the different types of users who would query this database.
-      </identity>
+    role(dedent`
+      Your task is to analyze a database schema and generate realistic personas representing
+      the different types of users who would query this database.
 
       <database_schema>
-        ${state?.schema}
+        ${schema}
       </database_schema>
 
-      <task>
-        Generate exactly ${state?.count} distinct personas who would query this database.
+      For each persona, provide:
+      1. **role**: Their job title or role (e.g., "Financial Analyst", "Customer Support Rep")
+      2. **perspective**: A rich description of what they care about, including:
+         - What questions they typically ask
+         - What metrics/data points matter to them
+         - How they prefer data formatted or presented
+         - Their priorities (speed vs accuracy, detail vs summary)
+         - Domain-specific concerns relevant to their role
+      3. **styles**: 1-3 communication styles typical for this persona. Choose from:
+         - formal: Professional business language, complete sentences
+         - colloquial: Casual everyday speech, contractions
+         - imperative: Commands like "Show me...", "Get...", "List..."
+         - interrogative: Questions like "What is...", "How many..."
+         - descriptive: Verbose, detailed phrasing
+         - concise: Brief, minimal words
+         - vague: Ambiguous, hedging language
+         - metaphorical: Figurative language, analogies
+         - conversational: Chat-like, casual tone
 
-        For each persona, provide:
-        1. **role**: Their job title or role (e.g., "Financial Analyst", "Customer Support Rep")
-        2. **perspective**: A rich description of what they care about, including:
-           - What questions they typically ask
-           - What metrics/data points matter to them
-           - How they prefer data formatted or presented
-           - Their priorities (speed vs accuracy, detail vs summary)
-           - Domain-specific concerns relevant to their role
-        3. **styles**: 1-3 communication styles typical for this persona. Choose from:
-           - formal: Professional business language, complete sentences
-           - colloquial: Casual everyday speech, contractions
-           - imperative: Commands like "Show me...", "Get...", "List..."
-           - interrogative: Questions like "What is...", "How many..."
-           - descriptive: Verbose, detailed phrasing
-           - concise: Brief, minimal words
-           - vague: Ambiguous, hedging language
-           - metaphorical: Figurative language, analogies
-           - conversational: Chat-like, casual tone
-
-        Requirements:
-        - Personas should be realistic for the given schema
-        - Each persona should have distinct concerns and priorities
-        - Perspectives should be detailed enough to guide question paraphrasing
-        - Cover different levels of technical expertise (some technical, some business-focused)
-        - Styles should match how this persona would naturally communicate
-      </task>
+      Requirements:
+      - Personas should be realistic for the given schema
+      - Each persona should have distinct concerns and priorities
+      - Perspectives should be detailed enough to guide question paraphrasing
+      - Cover different levels of technical expertise (some technical, some business-focused)
+      - Styles should match how this persona would naturally communicate
 
       <example>
         For an e-commerce schema with orders, customers, products tables:
@@ -125,45 +133,24 @@ const personaGeneratorAgent = agent<
         - Do not invent tables or data that don't exist in the schema
         - Ensure perspectives are specific to the domain, not generic
       </guardrails>
-    `;
-  },
-});
-/**
- * PersonaGenerator - Generate relevant personas from database schema.
- *
- * Analyzes the schema to infer who would query this database and what
- * they care about. Generated personas can be used with BreadthEvolver
- * to create diverse question paraphrases from different perspectives.
- */
-export class PersonaGenerator {
-  /**
-   * @param adapter - Database adapter for schema introspection
-   * @param options - Generation options including count and model
-   */
-  constructor(
-    private adapter: Adapter,
-    private options?: PersonaGeneratorOptions,
-  ) {}
+    `),
+    user(
+      `Generate exactly ${count} distinct personas who would query this database.`,
+    ),
+  );
 
-  /**
-   * Generates personas by analyzing the database schema to infer user types.
-   * @returns Array of personas with roles and perspectives
-   */
-  async generate(): Promise<Persona[]> {
-    const schema = await this.adapter.introspect();
-    const count = this.options?.count ?? 5;
-
-    const { experimental_output } = await generate(
-      personaGeneratorAgent.clone({
-        model: this.options?.model,
+  const personaOutput = structuredOutput({
+    name: 'persona_generator',
+    model: wrapLanguageModel({
+      model: options?.model ?? groq('openai/gpt-oss-20b'),
+      middleware: defaultSettingsMiddleware({
+        settings: { temperature: 0.8, topP: 0.95, presencePenalty: 0.2 },
       }),
-      [user(`Generate ${count} personas for this database schema.`)],
-      {
-        schema,
-        count,
-      },
-    );
+    }),
+    context,
+    schema: outputSchema,
+  });
 
-    return experimental_output.personas;
-  }
+  const output = await personaOutput.generate();
+  return output.personas;
 }

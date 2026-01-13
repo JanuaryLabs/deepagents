@@ -20,7 +20,7 @@ export interface ColumnStatsGroundingConfig {
  */
 export abstract class ColumnStatsGrounding extends AbstractGrounding {
   constructor(config: ColumnStatsGroundingConfig = {}) {
-    super('column_stats');
+    super('columnStats');
   }
 
   /**
@@ -36,7 +36,7 @@ export abstract class ColumnStatsGrounding extends AbstractGrounding {
    * Execute the grounding process.
    * Annotates columns in ctx.tables and ctx.views with statistics.
    */
-  async execute(ctx: GroundingContext) {
+  async execute(ctx: GroundingContext): Promise<void> {
     // Process both tables and views
     const allContainers: ColumnContainer[] = [...ctx.tables, ...ctx.views];
     for (const container of allContainers) {
@@ -58,10 +58,5 @@ export abstract class ColumnStatsGrounding extends AbstractGrounding {
         }
       }
     }
-    return () => this.#describe();
-  }
-
-  #describe() {
-    return null;
   }
 }

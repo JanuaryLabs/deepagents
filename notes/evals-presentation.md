@@ -1,6 +1,6 @@
 ---
 title: Why Evals?
-sub_title: From Traditional Testing to AI Evaluation
+sub_title: Gentel Introduction to Evals
 author: ezzabuzaid
 theme:
   name: dark
@@ -67,13 +67,16 @@ They can ask things you never expected.
 
 # The Challenge
 
-> How do you ensure the model behaves as expected across many inputs, edge cases, and over time as you iterate?
+> How do you ensure the model behaves as expected
+> across many inputs, edge cases, and over time as you iterate?
 
 <!-- pause -->
 
 <!-- newlines: 2 -->
 
 A new model drops with better pricing.
+
+<!-- pause -->
 
 A new prompting technique claims to boost performance.
 
@@ -90,8 +93,6 @@ A new prompting technique claims to boost performance.
 <!-- jump_to_middle -->
 
 Building a **text2sql** agent
-
-_A real scenario from my work_
 
 <!--
 speaker_note: |
@@ -243,7 +244,8 @@ This is exactly what **evals** help answer.
 
 # What Are Evals?
 
-> Evals evaluate the performance of models, agents, or applications — **across a spectrum**, not just pass/fail.
+> Evals evaluate the performance of models, agents,
+> or applications — **across a spectrum**, not just pass/fail.
 
 <!-- pause -->
 
@@ -330,14 +332,15 @@ Trial 1 Trial 2  Trial N
 - **Task**: Scenario with inputs, expected outputs, criteria
 - **Trial**: One attempt (run multiple for reliability)
 - **Grader**: Logic to assess output → score
+- **Transcript**: Complete record of a trial (outputs, tool calls, reasoning)
 
-<!-- speaker_note: "Multiple trials because output varies each time." -->
+<!-- speaker_note: "Multiple trials because output varies each time. Transcripts capture everything for debugging." -->
 
 <!-- end_slide -->
 
 # Code Example: Translation Eval
 
-```ts {1-5|6-10|11-15}
+```ts {1-4|5-11|12-17}
 suite('Translation Eval Suite', () => {
   test({
     report: 'French Translation Task',
@@ -349,10 +352,11 @@ suite('Translation Eval Suite', () => {
         models: [groq('gpt-oss-20b'), lmstudio('qwen3-4b')],
       },
     ],
+    task: (prompt, model) => generateText({ model, prompt }),
     graders: [
-      exactMatch,      // Identical?
-      levenshtein,     // Close enough?
-      answerSimilarity // Semantically same?
+      exactMatch, // Identical?
+      levenshtein, // Close enough?
+      answerSimilarity, // Semantically same?
     ],
   });
 });
@@ -368,35 +372,106 @@ suite('Translation Eval Suite', () => {
 
 <!-- column: 0 -->
 
-## String Scorers
+## Deterministic
 
 _No AI required_
 
-| Scorer | Use |
-|--------|-----|
-| `exactMatch` | Identical strings |
-| `contains` | Substring check |
-| `levenshtein` | Fuzzy matching |
+| Scorer             | Use                  |
+| ------------------ | -------------------- |
+| `exactMatch`       | Identical strings    |
+| `contains`         | Substring check      |
+| `levenshtein`      | Fuzzy matching       |
+| `toolCallAccuracy` | Correct tools called |
 
 <!-- column: 1 -->
 
-## AI Scorers
+## AI-Based
 
 _Embeddings/LLM required_
 
-| Scorer | Use |
-|--------|-----|
-| `answerSimilarity` | Semantic match |
-| `faithfulness` | Hallucination check |
-| `toolCallAccuracy` | Agent tools |
+| Scorer             | Use                    |
+| ------------------ | ---------------------- |
+| `answerSimilarity` | Semantic match         |
+| `answerRelevancy`  | Answered the question? |
+| `faithfulness`     | Hallucination check    |
+| `contextRecall`    | RAG retrieval quality  |
 
 <!-- reset_layout -->
 
+<!-- end_slide -->
+
+# Before You Iterate...
+
+<!-- jump_to_middle -->
+
+Before changing prompts or swapping models,
+
+you need a **reference point**.
+
 <!-- pause -->
 
-**LLM-as-Judge**: When programmatic scoring isn't enough
+This is your **baseline**.
 
-<!-- speaker_note: "Use stronger model as judge than the one being evaluated." -->
+<!-- speaker_note: "Pause here. Let them anticipate what comes next." -->
+
+<!-- end_slide -->
+
+# Why Baselines Matter
+
+<!-- incremental_lists: true -->
+
+- **Before/after comparison** — Without a baseline, you can't tell if changes improve or degrade performance
+
+- **Regression detection** — Catch when "improvements" in one area break another
+
+- **Model comparison** — Objectively compare performance across different models
+
+<!-- speaker_note: "Three concrete reasons. Let each sink in." -->
+
+<!-- end_slide -->
+
+# Creating Your Baseline
+
+<!-- incremental_lists: true -->
+
+1. **Define goals** — What should your agent do well?
+
+2. **Build eval suite** — Cover those goals with tasks
+
+3. **Run evals** — Record scores. This IS your baseline.
+
+4. **Document failures** — Note specific gaps for targeted improvement
+
+<!-- speaker_note: "Four steps. Simple but often skipped." -->
+
+<!-- end_slide -->
+
+# The Iteration Loop
+
+```
+┌─────────────────────────────────┐
+│  Make small, isolated change    │
+└───────────────┬─────────────────┘
+                ▼
+┌─────────────────────────────────┐
+│       Re-run evals              │
+└───────────────┬─────────────────┘
+                ▼
+┌─────────────────────────────────┐
+│  Compare to baseline            │
+│  Improved? Regressed? Same?     │
+└───────────────┬─────────────────┘
+                ▼
+┌─────────────────────────────────┐
+│  If improved → new baseline     │
+└─────────────────────────────────┘
+```
+
+<!-- pause -->
+
+> **Tip**: Version your prompts and eval results together. When something breaks, trace back to exactly which change caused it.
+
+<!-- speaker_note: "One change at a time. Always compare. Never guess." -->
 
 <!-- end_slide -->
 
@@ -488,6 +563,17 @@ Increase complexity:
 
 <!-- speaker_note: "Microsoft's Evol-Instruct paper. Breadth × Depth = coverage." -->
 
+<!-- end_slide -->
+
+# Pro Tip: Tuning Context
+
+You don't always need to change the prompt.
+
+<!-- pause -->
+
+Keep prompts **simple** and **short**.
+
+<!-- speaker_note: "Show the render_ask_user_tool" -->
 <!-- end_slide -->
 
 # Pro Tip: Start Big, Then Shrink

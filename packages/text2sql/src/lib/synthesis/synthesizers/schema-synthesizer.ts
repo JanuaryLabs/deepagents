@@ -1,6 +1,7 @@
 import pLimit from 'p-limit';
 
 import type { AgentModel } from '@deepagents/agent';
+import type { ContextFragment } from '@deepagents/context';
 
 import type { Adapter } from '../../adapters/adapter.ts';
 import {
@@ -12,7 +13,6 @@ import {
   UnanswerableSQLError,
   toSql,
 } from '../../agents/sql.agent.ts';
-import type { Teachables } from '../../teach/teachables.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
 import type { Persona } from './persona-generator.ts';
 
@@ -20,7 +20,7 @@ export interface SchemaSynthesizerOptions {
   count: number;
   complexity?: QuestionComplexity | QuestionComplexity[];
   personas?: Persona[];
-  teachings?: Teachables[];
+  teachings?: ContextFragment[];
   model?: AgentModel;
   concurrency?: number;
 }
@@ -60,7 +60,10 @@ export class SchemaSynthesizer extends PairProducer {
    * @returns Generated pairs from all combinations
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
-    const introspection = await this.adapter.introspect();
+    // TODO: Update to use fragments and render them
+    // const schemaFragments = await this.adapter.introspect();
+    // const introspection = new XmlRenderer().render(schemaFragments);
+    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
 
     const combinations = this.#personas.flatMap((persona) =>
       this.#complexities.map((complexity) => ({ persona, complexity })),
@@ -85,7 +88,7 @@ export class SchemaSynthesizer extends PairProducer {
    * and converting each to SQL in parallel.
    */
   async #processCombination(
-    introspection: Awaited<ReturnType<Adapter['introspect']>>,
+    introspection: string, // TODO: This was Awaited<ReturnType<Adapter['introspect']>> - needs update when synthesis uses fragments
     persona: Persona | undefined,
     complexity: QuestionComplexity,
   ): Promise<ExtractedPair[]> {
@@ -111,10 +114,11 @@ export class SchemaSynthesizer extends PairProducer {
       questions.map(async (question) => {
         const result = await this.#limit(async () => {
           try {
+            // TODO: Update to use schemaFragments instead of introspection string
             return await toSql({
               input: question,
               adapter: this.adapter,
-              introspection,
+              schemaFragments: [], // Placeholder - needs to pass actual fragments
               instructions: this.options.teachings ?? [],
               model: this.options.model,
             });

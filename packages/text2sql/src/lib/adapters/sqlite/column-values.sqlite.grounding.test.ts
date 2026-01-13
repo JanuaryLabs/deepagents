@@ -1,8 +1,10 @@
+/* eslint-disable @nx/enforce-module-boundaries */
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { columnValues, constraints, tables } from '@deepagents/text2sql/sqlite';
+
 import { init_db } from '../../../tests/sqlite.ts';
-import { columnValues, constraints, tables } from './index.ts';
 
 describe('SqliteColumnValuesGrounding', () => {
   describe('Low cardinality detection', () => {
@@ -19,22 +21,29 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(
-        output.includes('LowCardinality'),
-        'Expected LowCardinality annotation',
-      );
-      assert.ok(
-        output.includes('pending') &&
-          output.includes('shipped') &&
-          output.includes('delivered'),
-        'Expected all status values in output',
-      );
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'orders',
+        columns: [
+          {
+            name: 'column',
+            data: { name: 'id', type: 'INTEGER', values: ['1', '2', '3'] },
+          },
+          {
+            name: 'column',
+            data: {
+              name: 'status',
+              type: 'TEXT',
+              values: ['pending', 'shipped', 'delivered'],
+            },
+          },
+        ],
+      });
     });
 
     it('should not annotate columns with too many distinct values', async () => {
-      // Create a table with more than 20 distinct values
       const ddl = `
         CREATE TABLE items (
           id INTEGER PRIMARY KEY,
@@ -51,12 +60,17 @@ describe('SqliteColumnValuesGrounding', () => {
         db.exec(`INSERT INTO items (code) VALUES ('code_${i}')`);
       }
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(
-        !output.includes('LowCardinality'),
-        'Should NOT include LowCardinality annotation for high cardinality column',
-      );
+      // No values array since cardinality exceeds limit
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'items',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+          { name: 'column', data: { name: 'code', type: 'TEXT' } },
+        ],
+      });
     });
 
     it('should handle NULL values gracefully', async () => {
@@ -72,10 +86,27 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      // Should still detect low cardinality for non-NULL values
-      assert.ok(output.includes('category'), 'Expected category column');
+      // Should detect non-NULL values (id gets values, category gets non-null values)
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'products',
+        columns: [
+          {
+            name: 'column',
+            data: { name: 'id', type: 'INTEGER', values: ['1', '2', '3'] },
+          },
+          {
+            name: 'column',
+            data: {
+              name: 'category',
+              type: 'TEXT',
+              values: ['electronics', 'books'],
+            },
+          },
+        ],
+      });
     });
 
     it('should handle empty table', async () => {
@@ -90,12 +121,17 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(
-        !output.includes('LowCardinality'),
-        'Should NOT include LowCardinality for empty table',
-      );
+      // No values since table is empty
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'empty_table',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+          { name: 'column', data: { name: 'status', type: 'TEXT' } },
+        ],
+      });
     });
 
     it('should handle various data types', async () => {
@@ -113,12 +149,30 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      // All columns should be detected as low cardinality
-      assert.ok(output.includes('flag'), 'Expected flag column');
-      assert.ok(output.includes('amount'), 'Expected amount column');
-      assert.ok(output.includes('label'), 'Expected label column');
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'mixed',
+        columns: [
+          {
+            name: 'column',
+            data: { name: 'id', type: 'INTEGER', values: ['1', '2'] },
+          },
+          {
+            name: 'column',
+            data: { name: 'flag', type: 'INTEGER', values: ['0', '1'] },
+          },
+          {
+            name: 'column',
+            data: { name: 'amount', type: 'REAL', values: ['10.5', '20'] },
+          },
+          {
+            name: 'column',
+            data: { name: 'label', type: 'TEXT', values: ['A', 'B'] },
+          },
+        ],
+      });
     });
   });
 
@@ -135,15 +189,34 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), constraints(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(output.includes('Enum'), 'Expected Enum annotation');
-      assert.ok(
-        output.includes('todo') &&
-          output.includes('in_progress') &&
-          output.includes('done'),
-        'Expected all enum values in output',
-      );
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'tasks',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER', pk: true } },
+          {
+            name: 'column',
+            data: {
+              name: 'status',
+              type: 'TEXT',
+              values: ['todo', 'in_progress', 'done'],
+            },
+          },
+        ],
+        constraints: [
+          {
+            name: 'constraint',
+            data: {
+              name: 'tasks_check_0',
+              type: 'CHECK',
+              columns: ['status'],
+              definition: "status IN ('todo', 'in_progress', 'done')",
+            },
+          },
+        ],
+      });
     });
 
     it('should prefer CHECK constraint over low cardinality', async () => {
@@ -159,19 +232,38 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), constraints(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      // Should show Enum for status (from CHECK), not LowCardinality
-      // The status line should have Enum annotation, not LowCardinality
-      const statusLine = output
-        .split('\n')
-        .find((line) => line.includes('status'));
-      assert.ok(statusLine, 'Expected status column in output');
-      assert.ok(statusLine.includes('Enum'), 'Expected Enum annotation for status');
-      assert.ok(
-        !statusLine.includes('LowCardinality'),
-        'Should NOT show LowCardinality for status when CHECK constraint exists',
-      );
+      // Values should come from CHECK constraint
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'orders',
+        columns: [
+          {
+            name: 'column',
+            data: { name: 'id', type: 'INTEGER', pk: true, values: ['1', '2'] },
+          },
+          {
+            name: 'column',
+            data: {
+              name: 'status',
+              type: 'TEXT',
+              values: ['pending', 'completed'],
+            },
+          },
+        ],
+        constraints: [
+          {
+            name: 'constraint',
+            data: {
+              name: 'orders_check_0',
+              type: 'CHECK',
+              columns: ['status'],
+              definition: "status IN ('pending', 'completed')",
+            },
+          },
+        ],
+      });
     });
 
     it('should handle named CHECK constraints', async () => {
@@ -186,15 +278,34 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), constraints(), columnValues()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(output.includes('Enum'), 'Expected Enum annotation');
-      assert.ok(
-        output.includes('admin') &&
-          output.includes('user') &&
-          output.includes('guest'),
-        'Expected all role values in output',
-      );
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'users',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER', pk: true } },
+          {
+            name: 'column',
+            data: {
+              name: 'role',
+              type: 'TEXT',
+              values: ['admin', 'user', 'guest'],
+            },
+          },
+        ],
+        constraints: [
+          {
+            name: 'constraint',
+            data: {
+              name: 'valid_role',
+              type: 'CHECK',
+              columns: ['role'],
+              definition: "role IN ('admin', 'user', 'guest')",
+            },
+          },
+        ],
+      });
     });
   });
 
@@ -213,22 +324,46 @@ describe('SqliteColumnValuesGrounding', () => {
         grounding: [tables(), columnValues({ lowCardinalityLimit: 3 })],
       });
 
-      const output1 = await adapter1.introspect();
-      assert.ok(
-        !output1.includes('LowCardinality'),
-        'Should NOT detect with limit 3',
-      );
+      const fragments1 = await adapter1.introspect();
+      const tableFragment1 = fragments1.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment1?.data, {
+        name: 'test',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+          { name: 'column', data: { name: 'code', type: 'TEXT' } },
+        ],
+      });
 
       // With limit of 10, 5 values should be detected
       const { adapter: adapter2 } = await init_db(ddl, {
         grounding: [tables(), columnValues({ lowCardinalityLimit: 10 })],
       });
 
-      const output2 = await adapter2.introspect();
-      assert.ok(
-        output2.includes('LowCardinality'),
-        'Should detect with limit 10',
-      );
+      const fragments2 = await adapter2.introspect();
+      const tableFragment2 = fragments2.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment2?.data, {
+        name: 'test',
+        columns: [
+          {
+            name: 'column',
+            data: {
+              name: 'id',
+              type: 'INTEGER',
+              values: ['1', '2', '3', '4', '5'],
+            },
+          },
+          {
+            name: 'column',
+            data: {
+              name: 'code',
+              type: 'TEXT',
+              values: ['a', 'b', 'c', 'd', 'e'],
+            },
+          },
+        ],
+      });
     });
   });
 });

@@ -1,6 +1,6 @@
 import { encode } from 'gpt-tokenizer';
 
-import type { ContextFragment } from './context.ts';
+import type { ContextFragment } from './fragments.ts';
 import type { Models } from './models.generated.ts';
 import type { ContextRenderer } from './renderers/abstract.renderer.ts';
 

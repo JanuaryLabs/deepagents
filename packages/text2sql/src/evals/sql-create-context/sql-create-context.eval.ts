@@ -3,10 +3,10 @@ import { evalite } from 'evalite';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { InMemoryContextStore, hint, styleGuide } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
-import { hint, styleGuide } from '../../lib/teach/teachables.ts';
 import { EVAL_MODELS } from '../models';
 import { sqlSemanticMatch } from '../scorers';
 import { filterByIndex } from '../utils';
@@ -35,7 +35,7 @@ evalite.each(EVAL_MODELS)('SQL Create Context', {
 
     const text2sql = new Text2Sql({
       version: randomUUID(), // Use unique version per run for cache isolation
-      history: new InMemoryHistory(),
+      store: new InMemoryContextStore(),
       model: variant.model,
       teachingsOptions: { date: false }, // Skip date clarifications for evals
       instructions: [

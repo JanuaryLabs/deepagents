@@ -4,8 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 
 import sqlite from '@deepagents/text2sql/sqlite';
 
-import { TeachingsGenerator } from '../../lib/synthesis/synthesizers/teachings-generator.ts';
-import { toInstructions } from '../../lib/teach/teachables.ts';
+import { toInstructions } from '../../lib/instructions.ts';
+import { generateTeachings } from '../../lib/synthesis/synthesizers/teachings-generator.ts';
 import { teachingsCoverage, teachingsQuality } from '../scorers';
 import { filterByIndex } from '../utils';
 import DATASET from './teachings-dataset.json' with { type: 'json' };
@@ -43,9 +43,9 @@ evalite('TeachingsGenerator Quality', {
       execute: (sql) => db.prepare(sql).all(),
     });
 
-    // Generate teachings using TeachingsGenerator
-    const generator = new TeachingsGenerator(adapter);
-    const teachings = await generator.generate();
+    // Generate teachings
+    const schemaFragments = await adapter.introspect();
+    const teachings = await generateTeachings(schemaFragments);
 
     db.close();
 

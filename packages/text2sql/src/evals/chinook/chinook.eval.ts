@@ -2,7 +2,8 @@
 import { evalite } from 'evalite';
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { InMemoryContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
 import { EVAL_MODELS } from '../models';
@@ -20,7 +21,7 @@ evalite.each(EVAL_MODELS)('Chinook Text2SQL', {
   task: async (question, variant) => {
     const text2sql = new Text2Sql({
       version: `chinook-${variant.model.modelId}`,
-      history: new InMemoryHistory(),
+      store: new InMemoryContextStore(),
       model: variant.model,
       adapter: new sqlite.Sqlite({
         grounding: [sqlite.tables(), sqlite.columnValues()],

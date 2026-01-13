@@ -1,3 +1,4 @@
+/* eslint-disable @nx/enforce-module-boundaries */
 import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -5,8 +6,16 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import XLSX from 'xlsx';
 
-import { info, rowCount, tables } from './index.ts';
-import { Spreadsheet } from './spreadsheet.ts';
+import {
+  Spreadsheet,
+  info,
+  rowCount,
+  tables,
+} from '@deepagents/text2sql/spreadsheet';
+
+// Helper to normalize SQLite results (which have null prototype) to plain objects
+const normalize = <T extends Record<string, unknown>>(rows: T[]): T[] =>
+  rows.map((r) => ({ ...r }) as T);
 
 /**
  * Helper to create a temp file path with a specific name.
@@ -75,10 +84,11 @@ describe('Spreadsheet Adapter', () => {
 
       const rows = await adapter.execute('SELECT * FROM users ORDER BY id');
 
-      assert.strictEqual(rows.length, 3);
-      assert.strictEqual(rows[0].name, 'Alice');
-      assert.strictEqual(rows[1].name, 'Bob');
-      assert.strictEqual(rows[2].name, 'Charlie');
+      assert.deepStrictEqual(normalize(rows), [
+        { id: 1, name: 'Alice', age: 30 },
+        { id: 2, name: 'Bob', age: 25 },
+        { id: 3, name: 'Charlie', age: 35 },
+      ]);
 
       adapter.close();
     });
@@ -96,7 +106,7 @@ describe('Spreadsheet Adapter', () => {
 
       const rows = await adapter.execute('SELECT * FROM customers');
 
-      assert.strictEqual(rows.length, 1);
+      assert.deepStrictEqual(normalize(rows), [{ value: 1 }]);
       adapter.close();
     });
   });
@@ -125,14 +135,18 @@ describe('Spreadsheet Adapter', () => {
       const customers = await adapter.execute(
         'SELECT * FROM Customers ORDER BY id',
       );
-      assert.strictEqual(customers.length, 2);
-      assert.strictEqual(customers[0].name, 'Alice');
+      assert.deepStrictEqual(normalize(customers), [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+      ]);
 
       const orders = await adapter.execute(
         'SELECT * FROM Orders ORDER BY order_id',
       );
-      assert.strictEqual(orders.length, 2);
-      assert.strictEqual(orders[0].amount, 99.99);
+      assert.deepStrictEqual(normalize(orders), [
+        { order_id: 101, customer_id: 1, amount: 99.99 },
+        { order_id: 102, customer_id: 2, amount: 149.5 },
+      ]);
 
       adapter.close();
     });
@@ -165,9 +179,11 @@ describe('Spreadsheet Adapter', () => {
         ORDER BY Posts.id
       `);
 
-      assert.strictEqual(results.length, 3);
-      assert.strictEqual(results[0].name, 'Alice');
-      assert.strictEqual(results[0].title, 'Hello');
+      assert.deepStrictEqual(normalize(results), [
+        { name: 'Alice', title: 'Hello' },
+        { name: 'Alice', title: 'World' },
+        { name: 'Bob', title: 'Test' },
+      ]);
 
       adapter.close();
     });
@@ -188,7 +204,7 @@ describe('Spreadsheet Adapter', () => {
       const rows = await adapter.execute(
         'SELECT SUM(count) as total FROM integers',
       );
-      assert.strictEqual(rows[0].total, 60);
+      assert.deepStrictEqual(normalize(rows), [{ total: 60 }]);
 
       adapter.close();
     });
@@ -207,7 +223,7 @@ describe('Spreadsheet Adapter', () => {
       const rows = await adapter.execute(
         'SELECT AVG(price) as avg_price FROM floats',
       );
-      assert.ok(Math.abs(rows[0].avg_price - 15.375) < 0.001);
+      assert.deepStrictEqual(normalize(rows), [{ avg_price: 15.375 }]);
 
       adapter.close();
     });
@@ -224,7 +240,10 @@ describe('Spreadsheet Adapter', () => {
       });
 
       const rows = await adapter.execute('SELECT * FROM mixed ORDER BY value');
-      assert.strictEqual(rows.length, 2);
+      assert.deepStrictEqual(normalize(rows), [
+        { value: '123' },
+        { value: 'hello' },
+      ]);
 
       adapter.close();
     });
@@ -246,7 +265,7 @@ describe('Spreadsheet Adapter', () => {
 
       // "My Sheet!" should become "my_sheet" (lowercase)
       const rows = await adapter.execute('SELECT * FROM my_sheet');
-      assert.strictEqual(rows.length, 1);
+      assert.deepStrictEqual(normalize(rows), [{ id: 1 }]);
 
       adapter.close();
     });
@@ -266,7 +285,7 @@ describe('Spreadsheet Adapter', () => {
 
       // "123Data" should become "_123data" (lowercase + prefixed)
       const rows = await adapter.execute('SELECT * FROM _123data');
-      assert.strictEqual(rows.length, 1);
+      assert.deepStrictEqual(normalize(rows), [{ id: 1 }]);
 
       adapter.close();
     });
@@ -293,9 +312,9 @@ describe('Spreadsheet Adapter', () => {
       const rows = await adapter.execute(
         'SELECT mycolumn, anothercol FROM mytable',
       );
-      assert.strictEqual(rows.length, 1);
-      assert.strictEqual(rows[0].mycolumn, 'value1');
-      assert.strictEqual(rows[0].anothercol, 'value2');
+      assert.deepStrictEqual(normalize(rows), [
+        { mycolumn: 'value1', anothercol: 'value2' },
+      ]);
 
       adapter.close();
     });
@@ -319,8 +338,7 @@ describe('Spreadsheet Adapter', () => {
       // Column name should be truncated to 64 chars
       const truncatedName = 'a'.repeat(64);
       const rows = await adapter.execute(`SELECT "${truncatedName}" FROM data`);
-      assert.strictEqual(rows.length, 1);
-      assert.strictEqual(rows[0][truncatedName], 'value');
+      assert.deepStrictEqual(normalize(rows), [{ [truncatedName]: 'value' }]);
 
       adapter.close();
     });
@@ -350,14 +368,16 @@ describe('Spreadsheet Adapter', () => {
       const nullEmails = await adapter.execute(
         'SELECT * FROM Users WHERE email IS NULL',
       );
-      assert.strictEqual(nullEmails.length, 1);
-      assert.strictEqual(nullEmails[0].name, 'Bob');
+      assert.deepStrictEqual(normalize(nullEmails), [
+        { id: 2, name: 'Bob', email: null },
+      ]);
 
       const nullNames = await adapter.execute(
         'SELECT * FROM Users WHERE name IS NULL',
       );
-      assert.strictEqual(nullNames.length, 1);
-      assert.strictEqual(nullNames[0].id, 3);
+      assert.deepStrictEqual(normalize(nullNames), [
+        { id: 3, name: null, email: 'charlie@example.com' },
+      ]);
 
       adapter.close();
     });
@@ -377,16 +397,18 @@ describe('Spreadsheet Adapter', () => {
         grounding: [tables()],
       });
 
-      const schema = await adapter.introspect();
+      const fragments = await adapter.introspect();
 
-      // Table name is lowercase
-      assert.ok(
-        schema.includes('products'),
-        'Schema should include table name (lowercase)',
-      );
-      assert.ok(schema.includes('id'), 'Schema should include id column');
-      assert.ok(schema.includes('name'), 'Schema should include name column');
-      assert.ok(schema.includes('price'), 'Schema should include price column');
+      const tableFragment = fragments.find((f) => f.name === 'table');
+      assert.ok(tableFragment);
+      assert.deepStrictEqual(tableFragment.data, {
+        name: 'products',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+          { name: 'column', data: { name: 'name', type: 'TEXT' } },
+          { name: 'column', data: { name: 'price', type: 'REAL' } },
+        ],
+      });
 
       adapter.close();
     });
@@ -402,13 +424,17 @@ describe('Spreadsheet Adapter', () => {
         grounding: [tables(), rowCount()],
       });
 
-      const schema = await adapter.introspect();
+      const fragments = await adapter.introspect();
 
-      // Row count should be included
-      assert.ok(
-        schema.includes('3') || schema.includes('rows'),
-        'Schema should include row count info',
-      );
+      // Find table fragment and check rowCount
+      const tableFragment = fragments.find((f) => f.name === 'table');
+      assert.ok(tableFragment);
+      assert.deepStrictEqual(tableFragment.data, {
+        name: 'rowcount',
+        columns: [{ name: 'column', data: { name: 'id', type: 'INTEGER' } }],
+        rowCount: 3,
+        sizeHint: 'tiny',
+      });
 
       adapter.close();
     });
@@ -424,13 +450,15 @@ describe('Spreadsheet Adapter', () => {
         grounding: [info()],
       });
 
-      const schema = await adapter.introspect();
+      const fragments = await adapter.introspect();
 
-      // Should report SQLite dialect
-      assert.ok(
-        schema.includes('sqlite'),
-        'Schema should report sqlite dialect',
-      );
+      // Find dialectInfo fragment and check dialect
+      const dialectFragment = fragments.find((f) => f.name === 'dialectInfo');
+      assert.ok(dialectFragment);
+      assert.deepStrictEqual(dialectFragment.data, {
+        dialect: 'sqlite',
+        version: dialectFragment.data.version, // version is dynamic
+      });
 
       adapter.close();
     });
@@ -496,7 +524,7 @@ describe('Spreadsheet Adapter', () => {
       });
 
       const rows = await adapter.execute('SELECT * FROM persist');
-      assert.strictEqual(rows.length, 1);
+      assert.deepStrictEqual(normalize(rows), [{ id: 1, name: 'Test' }]);
 
       adapter.close();
 
@@ -524,10 +552,11 @@ describe('Spreadsheet Adapter', () => {
       });
 
       const rows = await adapter.execute('SELECT * FROM data');
-      assert.strictEqual(rows.length, 3);
-      assert.strictEqual(rows[0].text, '你好世界');
-      assert.strictEqual(rows[1].text, 'Données été');
-      assert.ok(rows[2].text.includes('🎉'));
+      assert.deepStrictEqual(normalize(rows), [
+        { text: '你好世界' },
+        { text: 'Données été' },
+        { text: 'emoji: 🎉' },
+      ]);
 
       adapter.close();
     });
@@ -550,10 +579,11 @@ describe('Spreadsheet Adapter', () => {
       });
 
       const rows = await adapter.execute('SELECT * FROM data');
-      assert.strictEqual(rows.length, 3);
-      assert.strictEqual(rows[0].text, "It's a test");
-      assert.strictEqual(rows[1].text, 'Say "hello"');
-      assert.ok(rows[2].text.includes('Line1'));
+      assert.deepStrictEqual(normalize(rows), [
+        { text: "It's a test" },
+        { text: 'Say "hello"' },
+        { text: 'Line1\nLine2' },
+      ]);
 
       adapter.close();
     });
@@ -574,10 +604,7 @@ describe('Spreadsheet Adapter', () => {
       // Insert a decimal that should be floored
       // Note: We test via the existing integer column which floors decimals
       const rows = await adapter.execute('SELECT value FROM numbers');
-      assert.strictEqual(rows.length, 2);
-      // Values should be integers
-      assert.strictEqual(rows[0].value, 42);
-      assert.strictEqual(rows[1].value, 43);
+      assert.deepStrictEqual(normalize(rows), [{ value: 42 }, { value: 43 }]);
 
       adapter.close();
     });
@@ -604,15 +631,12 @@ describe('Spreadsheet Adapter', () => {
 
       // The 'not a number' row should have NULL for amount
       const rows = await adapter.execute('SELECT * FROM data');
-      assert.strictEqual(rows.length, 3);
-
-      // Find the NULL row
-      const nullRows = await adapter.execute(
-        'SELECT * FROM data WHERE amount IS NULL',
-      );
-      // Due to type inference, the column might be TEXT if it has mixed values
-      // But if inferred as numeric, 'not a number' becomes NULL
-      assert.ok(rows.length === 3);
+      // Due to type inference, the column is TEXT since it has mixed values
+      assert.deepStrictEqual(normalize(rows), [
+        { amount: '100' },
+        { amount: 'not a number' },
+        { amount: '200' },
+      ]);
 
       adapter.close();
     });
@@ -637,14 +661,10 @@ describe('Spreadsheet Adapter', () => {
       });
 
       const rows = await adapter.execute('SELECT * FROM data');
-      assert.strictEqual(rows.length, 2);
-
-      // Second row should have NULL for missing columns
-      const sparseRow = await adapter.execute(
-        'SELECT * FROM data WHERE b IS NULL',
-      );
-      assert.strictEqual(sparseRow.length, 1);
-      assert.strictEqual(sparseRow[0].a, 'only_a');
+      assert.deepStrictEqual(normalize(rows), [
+        { a: 'val1', b: 'val2', c: 'val3' },
+        { a: 'only_a', b: null, c: null },
+      ]);
 
       adapter.close();
     });
@@ -669,12 +689,10 @@ describe('Spreadsheet Adapter', () => {
       });
 
       const rows = await adapter.execute('SELECT * FROM events');
+      // Dates should be formatted as YYYY-MM-DD (exact format depends on timezone)
       assert.strictEqual(rows.length, 2);
-      // Dates should be formatted as YYYY-MM-DD
-      assert.ok(
-        rows[0].date.startsWith('2024-03-15') ||
-          rows[0].date.includes('2024-03-15'),
-      );
+      assert.ok(rows[0].date.includes('2024-03-15'));
+      assert.ok(rows[1].date.includes('2024-12-25'));
 
       adapter.close();
     });

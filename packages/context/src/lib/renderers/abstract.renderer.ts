@@ -7,7 +7,7 @@ import {
   type FragmentObject,
   isFragment,
   isFragmentObject,
-} from '../context.ts';
+} from '../fragments.ts';
 
 /**
  * Render context passed through the template method.

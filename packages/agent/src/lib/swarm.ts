@@ -174,7 +174,7 @@ export function execute<O, CIn, COut = CIn>(
     //   (contextVariables as any).content = result.content;
     // },
   });
-  return Object.assign(stream, { state: contextVariables as unknown as COut });
+  return stream;
 }
 
 export const stream = execute;

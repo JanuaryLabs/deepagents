@@ -19,13 +19,30 @@ export type AdapterInfoProvider =
   | AdapterInfo
   | (() => Promise<AdapterInfo> | AdapterInfo);
 
+/**
+ * Abstract base class for database schema groundings.
+ *
+ * Groundings collect schema metadata into the shared GroundingContext.
+ * Fragment generation is centralized in Adapter.introspect().
+ */
 export abstract class AbstractGrounding {
-  tag: string;
-  constructor(tag: string) {
-    this.tag = tag;
+  /**
+   * Grounding identifier for debugging/logging.
+   */
+  name: string;
+
+  constructor(name: string) {
+    this.name = name;
   }
 
-  abstract execute(ctx: GroundingContext): Promise<() => string | null>;
+  /**
+   * Execute grounding to populate the shared context.
+   * Groundings mutate ctx to add their collected data (tables, views, indexes, etc).
+   * Fragment generation happens centrally in Adapter after all groundings complete.
+   *
+   * @param ctx - Shared context for accumulating schema data
+   */
+  abstract execute(ctx: GroundingContext): Promise<void>;
 }
 
 class SampleDataGrounding {

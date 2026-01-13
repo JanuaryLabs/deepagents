@@ -7,7 +7,7 @@ import { printer } from '@deepagents/agent';
 
 import { ContextEngine, InMemoryContextStore, role, user } from './index.ts';
 import { agent } from './lib/agent.ts';
-import type { ContextFragment } from './lib/context.ts';
+import type { ContextFragment } from './lib/fragments.ts';
 
 function engine(...fragments: ContextFragment[]) {
   const context = new ContextEngine({

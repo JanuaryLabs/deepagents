@@ -104,13 +104,13 @@ export class ReportGrounding extends AbstractGrounding {
     this.#forceRefresh = config.forceRefresh ?? false;
   }
 
-  async execute(ctx: GroundingContext): Promise<() => string | null> {
+  async execute(ctx: GroundingContext): Promise<void> {
     // Check cache first (unless forcing refresh)
     if (!this.#forceRefresh && this.#cache) {
       const cached = await this.#cache.get();
       if (cached) {
         ctx.report = cached;
-        return () => cached;
+        return;
       }
     }
 
@@ -122,8 +122,6 @@ export class ReportGrounding extends AbstractGrounding {
     if (this.#cache) {
       await this.#cache.set(report);
     }
-
-    return () => report;
   }
 
   async #generateReport(): Promise<string> {

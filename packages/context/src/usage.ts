@@ -6,7 +6,6 @@ import { Bash, OverlayFs } from 'just-bash';
 import { printer } from '@deepagents/agent';
 
 import {
-  ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
   XmlRenderer,
@@ -22,6 +21,7 @@ import {
   visualizeGraph,
 } from './index.ts';
 import { agent } from './lib/agent.ts';
+import { ContextEngine } from './lib/engine.ts';
 
 // Create a shared store for persistence
 const store = new InMemoryContextStore();
@@ -40,10 +40,9 @@ const store = new InMemoryContextStore();
 async function demonstrateContextEngine() {
   console.log('=== Basic Context Engine Example ===');
 
-  // Create context with store and chatId (REQUIRED)
   const context = new ContextEngine({
-    store,
-    chatId: 'demo-chat-1',
+    store: new InMemoryContextStore(),
+    chatId: 'chat-1',
   });
 
   context.set(
@@ -52,10 +51,8 @@ async function demonstrateContextEngine() {
     hint('Use examples when explaining concepts.'),
   );
 
-  // First turn: User sends a message
   context.set(user('Hello! What can you help me with?'));
 
-  // Resolve context for AI SDK
   const { systemPrompt, messages } = await context.resolve({
     renderer: new XmlRenderer(),
   });

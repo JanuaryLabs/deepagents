@@ -43,7 +43,7 @@ export abstract class ViewGrounding extends AbstractGrounding {
   #filter?: Filter;
 
   constructor(config: ViewGroundingConfig = {}) {
-    super('views');
+    super('view');
     this.#filter = config.filter;
   }
 
@@ -57,61 +57,12 @@ export abstract class ViewGrounding extends AbstractGrounding {
    * Execute the grounding process.
    * Writes discovered views to the context.
    */
-  async execute(ctx: GroundingContext) {
+  async execute(ctx: GroundingContext): Promise<void> {
     const viewNames = await this.applyFilter();
     const views = await Promise.all(
       viewNames.map((name) => this.getView(name)),
     );
     ctx.views.push(...views);
-    return () => this.#describe(views);
-  }
-
-  #describe(views: View[]): string {
-    if (!views.length) {
-      return 'No views available.';
-    }
-
-    return views
-      .map((view) => {
-        const columns = view.columns
-          .map((column) => {
-            const annotations: string[] = [];
-            if (column.kind === 'LowCardinality' && column.values?.length) {
-              annotations.push(`LowCardinality: ${column.values.join(', ')}`);
-            }
-            if (column.stats) {
-              const statParts: string[] = [];
-              if (column.stats.min != null || column.stats.max != null) {
-                const minText = column.stats.min ?? 'n/a';
-                const maxText = column.stats.max ?? 'n/a';
-                statParts.push(`range ${minText} → ${maxText}`);
-              }
-              if (
-                column.stats.nullFraction != null &&
-                Number.isFinite(column.stats.nullFraction)
-              ) {
-                const percent =
-                  Math.round(column.stats.nullFraction * 1000) / 10;
-                statParts.push(`null≈${percent}%`);
-              }
-              if (statParts.length) {
-                annotations.push(statParts.join(', '));
-              }
-            }
-            const annotationText = annotations.length
-              ? ` [${annotations.join(', ')}]`
-              : '';
-            return `    - ${column.name} (${column.type})${annotationText}`;
-          })
-          .join('\n');
-
-        const definition = view.definition
-          ? `\n  Definition: ${view.definition.length > 200 ? view.definition.slice(0, 200) + '...' : view.definition}`
-          : '';
-
-        return `- View: ${view.name}${definition}\n  Columns:\n${columns}`;
-      })
-      .join('\n\n');
   }
 
   /**

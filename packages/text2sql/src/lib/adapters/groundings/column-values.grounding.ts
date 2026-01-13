@@ -36,7 +36,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
   protected lowCardinalityLimit: number;
 
   constructor(config: ColumnValuesGroundingConfig = {}) {
-    super('column_values');
+    super('columnValues');
     this.lowCardinalityLimit = config.lowCardinalityLimit ?? 20;
   }
 
@@ -151,7 +151,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
    * Execute the grounding process.
    * Annotates columns in ctx.tables and ctx.views with values.
    */
-  async execute(ctx: GroundingContext) {
+  async execute(ctx: GroundingContext): Promise<void> {
     // Process both tables and views
     const allContainers: ColumnContainer[] = [...ctx.tables, ...ctx.views];
 
@@ -179,8 +179,6 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
         }
       }
     }
-
-    return () => this.#describe();
   }
 
   /**
@@ -214,9 +212,5 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
     }
 
     return undefined;
-  }
-
-  #describe() {
-    return null;
   }
 }

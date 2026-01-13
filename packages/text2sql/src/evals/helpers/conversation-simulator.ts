@@ -1,12 +1,12 @@
 import { groq } from '@ai-sdk/groq';
-import type { UIMessage } from 'ai';
+import type { LanguageModelV1, UIMessage } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
 import { agent, generate, user } from '@deepagents/agent';
+import { type ContextStore, InMemoryContextStore } from '@deepagents/context';
 
 import type { Adapter } from '../../lib/adapters/adapter.ts';
-import { InMemoryHistory } from '../../lib/history/memory.history.ts';
 import { Text2Sql } from '../../lib/sql.ts';
 
 export interface ConversationSimulatorConfig {
@@ -16,12 +16,8 @@ export interface ConversationSimulatorConfig {
   initialQuestion: string;
   /** Number of turns (including initial question) */
   turns: number;
-  /** Optional model for Text2Sql (defaults to agent default) */
-  model?: Parameters<typeof Text2Sql.prototype.chat>[1] extends infer P
-    ? P extends { model?: infer M }
-      ? M
-      : never
-    : never;
+  /** Model for Text2Sql (defaults to groq gpt-oss-20b) */
+  model?: LanguageModelV1;
 }
 
 export interface SimulationResult {
@@ -170,10 +166,12 @@ async function drainStream(
 export async function simulateConversation(
   config: ConversationSimulatorConfig,
 ): Promise<SimulationResult> {
-  const history = new InMemoryHistory();
+  const store = new InMemoryContextStore();
+  const model = config.model ?? groq('gpt-oss-20b');
   const text2sql = new Text2Sql({
     version: `eval-simulator-${Date.now()}`,
-    history,
+    store,
+    model,
     adapter: config.adapter,
   });
 
@@ -189,18 +187,13 @@ export async function simulateConversation(
     // Create user message
     const userMessage = createUserMessage(currentQuestion);
 
-    // Send to Text2Sql and drain the stream (messages saved to history via onFinish)
+    // Send to Text2Sql and drain the stream (messages saved to store via onFinish)
     const stream = text2sql.chat([userMessage], { chatId, userId });
     await drainStream(stream);
 
     // Generate follow-up for next turn (if not last)
     if (turn < config.turns - 1) {
-      const chat = await history.getChat(chatId);
-      if (!chat) {
-        throw new Error('Chat not found in history');
-      }
-
-      const allMessages = chat.messages.map((m) => m.content);
+      const allMessages = await getMessagesFromStore(store, chatId);
       const lastAssistant = allMessages.findLast((m) => m.role === 'assistant');
 
       const { experimental_output } = await generate(
@@ -219,17 +212,37 @@ export async function simulateConversation(
     }
   }
 
-  // Retrieve final messages from history
-  const finalChat = await history.getChat(chatId);
-  if (!finalChat) {
-    throw new Error('Final chat not found in history');
-  }
+  // Retrieve final messages from store
+  const messages = await getMessagesFromStore(store, chatId);
 
   return {
-    messages: finalChat.messages.map((m) => m.content),
+    messages,
     chatId,
     questions,
   };
+}
+
+/**
+ * Helper to get UIMessages from the new ContextStore.
+ */
+async function getMessagesFromStore(
+  store: ContextStore,
+  chatId: string,
+): Promise<UIMessage[]> {
+  const branch = await store.getActiveBranch(chatId);
+  if (!branch?.headMessageId) {
+    return [];
+  }
+
+  const messageChain = await store.getMessageChain(branch.headMessageId);
+
+  // Filter to only message types and convert to UIMessage
+  return messageChain
+    .filter(
+      (m) =>
+        m.type === 'message' || m.name === 'user' || m.name === 'assistant',
+    )
+    .map((m) => m.data as UIMessage);
 }
 
 /**

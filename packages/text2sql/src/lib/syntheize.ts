@@ -7,9 +7,9 @@ import { Checkpoint, hashConfig as hash } from './checkpoint.ts';
 import {
   BreadthEvolver,
   DepthEvolver,
-  PersonaGenerator,
   type QuestionComplexity,
   SchemaSynthesizer,
+  generatePersonas,
 } from './synthesis/index.ts';
 import { type ExtractedPair } from './synthesis/types.ts';
 
@@ -65,10 +65,10 @@ console.log(`- Total pairs: ${estimate.total}\n`);
 
 const personas = await checkpoint.run('personas', async () => {
   console.log('Generating personas...');
-  const generator = new PersonaGenerator(adapter, {
+  const schemaFragments = await adapter.introspect();
+  return generatePersonas(schemaFragments, {
     count: CONFIG.personaCount,
   });
-  return generator.generate();
 });
 
 console.dir(checkpoint.getOutput(), { depth: null });
@@ -150,7 +150,10 @@ console.log(
 );
 
 // Export training data in JSONL format for fine-tuning (two versions for A/B comparison)
-const schema = await adapter.introspect();
+// TODO: Update to use fragments and render them
+// const schemaFragments = await adapter.introspect();
+// const schema = new XmlRenderer().render(schemaFragments);
+const schema = ''; // Placeholder - synthesis needs to be updated to use fragments
 
 // Version 1: With schema context (recommended)
 const withSchemaPath = 'training-with-schema.jsonl';

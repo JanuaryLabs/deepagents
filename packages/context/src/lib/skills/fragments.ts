@@ -1,4 +1,4 @@
-import type { ContextFragment } from '../context.ts';
+import type { ContextFragment } from '../fragments.ts';
 import { discoverSkillsInDirectory } from './loader.ts';
 import type { SkillMetadata, SkillsFragmentOptions } from './types.ts';
 

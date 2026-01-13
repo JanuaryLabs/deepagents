@@ -1,11 +1,11 @@
 import {
-  type Teachables,
+  type ContextFragment,
   clarification,
   guardrail,
   hint,
   styleGuide,
   workflow,
-} from './teachables.ts';
+} from '@deepagents/context';
 
 export interface TeachingsOptions {
   /**
@@ -16,10 +16,10 @@ export interface TeachingsOptions {
   date?: 'strict' | false;
 }
 
-export function guidelines(options: TeachingsOptions = {}): Teachables[] {
+export function guidelines(options: TeachingsOptions = {}): ContextFragment[] {
   const { date = 'strict' } = options;
 
-  const baseTeachings: Teachables[] = [
+  const baseTeachings: ContextFragment[] = [
     // Schema adherence
     hint(
       'Use only tables and columns that exist in the schema. Never reference non-existent entities.',

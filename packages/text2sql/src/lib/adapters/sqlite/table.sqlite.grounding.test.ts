@@ -1,22 +1,22 @@
+/* eslint-disable @nx/enforce-module-boundaries */
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { constraints, tables } from '@deepagents/text2sql/sqlite';
+
 import { init_db } from '../../../tests/sqlite.ts';
-import { tables } from './index.ts';
 
 describe('SqliteTableGrounding', () => {
   describe('Suite 1: Edge Cases', () => {
-    it('should return schema unavailable for empty database', async () => {
+    it('should return empty fragments for empty database', async () => {
       const { adapter } = await init_db('', {
         grounding: [tables()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(
-        output.includes('Schema unavailable'),
-        'Expected "Schema unavailable" in output',
-      );
+      assert.deepStrictEqual(tableFragments, []);
     });
 
     it('should handle self-referential foreign keys', async () => {
@@ -32,18 +32,20 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ forward: true, backward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(output.includes('employees'), 'Expected "employees" table');
-      assert.ok(
-        output.includes('manager_id'),
-        'Expected "manager_id" column in output',
-      );
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'employees',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+          { name: 'column', data: { name: 'name', type: 'TEXT' } },
+          { name: 'column', data: { name: 'manager_id', type: 'INTEGER' } },
+        ],
+      });
     });
 
     it('should handle circular foreign key references without infinite loop', async () => {
-      // SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so we create
-      // tables with FKs inline (requires creating referenced table first)
       const ddl = [
         'CREATE TABLE a (id INTEGER PRIMARY KEY, b_id INTEGER);',
         'CREATE TABLE b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES a(id));',
@@ -53,10 +55,28 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ forward: true, backward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: a'), 'Expected table "a" in output');
-      assert.ok(output.includes('Table: b'), 'Expected table "b" in output');
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'a',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'b_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'b',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'a_id', type: 'INTEGER' } },
+            ],
+          },
+        ],
+      );
     });
   });
 
@@ -71,19 +91,20 @@ describe('SqliteTableGrounding', () => {
       `;
 
       const { adapter } = await init_db(ddl, {
-        grounding: [tables()],
+        grounding: [tables(), constraints()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: users'), 'Expected "users" table');
-      assert.ok(output.includes('id (INTEGER)'), 'Expected id column');
-      assert.ok(output.includes('email (TEXT)'), 'Expected email column');
-      assert.ok(
-        output.includes('created_at (INTEGER)'),
-        'Expected created_at column',
-      );
-      assert.ok(output.includes('[PK]'), 'Expected primary key annotation');
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'users',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER', pk: true } },
+          { name: 'column', data: { name: 'email', type: 'TEXT' } },
+          { name: 'column', data: { name: 'created_at', type: 'INTEGER' } },
+        ],
+      });
     });
 
     it('should discover multiple unrelated tables', async () => {
@@ -96,15 +117,27 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables()],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(
-        output.includes('Table: products'),
-        'Expected "products" table',
-      );
-      assert.ok(
-        output.includes('Table: categories'),
-        'Expected "categories" table',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'categories',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'label', type: 'TEXT' } },
+            ],
+          },
+          {
+            name: 'products',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'name', type: 'TEXT' } },
+            ],
+          },
+        ],
       );
     });
   });
@@ -123,11 +156,28 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ forward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: authors'), 'Expected "authors" table');
-      assert.ok(output.includes('Table: books'), 'Expected "books" table');
-      assert.ok(output.includes('author_id'), 'Expected author_id column');
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'authors',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'name', type: 'TEXT' } },
+            ],
+          },
+          {
+            name: 'books',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'author_id', type: 'INTEGER' } },
+            ],
+          },
+        ],
+      );
     });
 
     it('should handle composite foreign keys', async () => {
@@ -149,18 +199,29 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ forward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(
-        output.includes('Table: warehouses'),
-        'Expected "warehouses" table',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'inventory',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'wh_region', type: 'TEXT' } },
+              { name: 'column', data: { name: 'wh_code', type: 'TEXT' } },
+            ],
+          },
+          {
+            name: 'warehouses',
+            columns: [
+              { name: 'column', data: { name: 'region', type: 'TEXT' } },
+              { name: 'column', data: { name: 'code', type: 'TEXT' } },
+            ],
+          },
+        ],
       );
-      assert.ok(
-        output.includes('Table: inventory'),
-        'Expected "inventory" table',
-      );
-      assert.ok(output.includes('wh_region'), 'Expected wh_region column');
-      assert.ok(output.includes('wh_code'), 'Expected wh_code column');
     });
 
     it('should handle multiple foreign keys from one table', async () => {
@@ -178,13 +239,34 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ forward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: users'), 'Expected "users" table');
-      assert.ok(output.includes('Table: products'), 'Expected "products" table');
-      assert.ok(output.includes('Table: orders'), 'Expected "orders" table');
-      assert.ok(output.includes('user_id'), 'Expected user_id column');
-      assert.ok(output.includes('product_id'), 'Expected product_id column');
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'orders',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'user_id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'product_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'products',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'users',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+        ],
+      );
     });
   });
 
@@ -199,12 +281,20 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: ['child'] })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: child'), 'Expected "child" table');
-      assert.ok(
-        !output.includes('Table: parent'),
-        'Should NOT include "parent" table without traversal',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'child',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'parent_id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
 
@@ -219,13 +309,33 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: ['child'], forward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: child'), 'Expected "child" table');
-      assert.ok(output.includes('Table: parent'), 'Expected "parent" table');
-      assert.ok(
-        output.includes('Table: grandparent'),
-        'Expected "grandparent" table',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'child',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'parent_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'parent',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'gp_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'grandparent',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
 
@@ -240,11 +350,34 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: ['parent'], backward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: parent'), 'Expected "parent" table');
-      assert.ok(output.includes('Table: child1'), 'Expected "child1" table');
-      assert.ok(output.includes('Table: child2'), 'Expected "child2" table');
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'parent',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'child1',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'parent_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'child2',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'parent_id', type: 'INTEGER' } },
+            ],
+          },
+        ],
+      );
     });
 
     it('should respect forward depth limit', async () => {
@@ -258,13 +391,28 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: ['c'], forward: 1 })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: c'), 'Expected "c" table');
-      assert.ok(output.includes('Table: b'), 'Expected "b" table at depth 1');
-      assert.ok(
-        !output.includes('Table: a'),
-        'Should NOT include "a" table (depth 2 exceeds limit)',
+      // c at depth 0, b at depth 1, a would be depth 2 (excluded)
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'c',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'b_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'b',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'a_id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
 
@@ -280,20 +428,40 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: ['hub'], forward: true, backward: true })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: hub'), 'Expected "hub" table');
-      assert.ok(
-        output.includes('Table: parent'),
-        'Expected "parent" table (forward)',
-      );
-      assert.ok(
-        output.includes('Table: spoke1'),
-        'Expected "spoke1" table (backward)',
-      );
-      assert.ok(
-        output.includes('Table: spoke2'),
-        'Expected "spoke2" table (backward)',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'hub',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'parent_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'parent',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'spoke1',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'hub_id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'spoke2',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+              { name: 'column', data: { name: 'hub_id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
   });
@@ -310,13 +478,25 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: ['users', 'posts'] })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(output.includes('Table: users'), 'Expected "users" table');
-      assert.ok(output.includes('Table: posts'), 'Expected "posts" table');
-      assert.ok(
-        !output.includes('Table: comments'),
-        'Should NOT include "comments" table',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'users',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'posts',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
 
@@ -331,19 +511,25 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: /^order/ })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(
-        output.includes('Table: order_items'),
-        'Expected "order_items" table',
-      );
-      assert.ok(
-        output.includes('Table: order_history'),
-        'Expected "order_history" table',
-      );
-      assert.ok(
-        !output.includes('Table: products'),
-        'Should NOT include "products" table',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'order_history',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'order_items',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
 
@@ -358,19 +544,25 @@ describe('SqliteTableGrounding', () => {
         grounding: [tables({ filter: (name) => name.startsWith('user_') })],
       });
 
-      const output = await adapter.introspect();
+      const fragments = await adapter.introspect();
+      const tableFragments = fragments.filter((f) => f.name === 'table');
 
-      assert.ok(
-        output.includes('Table: user_profiles'),
-        'Expected "user_profiles" table',
-      );
-      assert.ok(
-        output.includes('Table: user_settings'),
-        'Expected "user_settings" table',
-      );
-      assert.ok(
-        !output.includes('Table: products'),
-        'Should NOT include "products" table',
+      assert.deepStrictEqual(
+        tableFragments.map((f) => f.data),
+        [
+          {
+            name: 'user_profiles',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+          {
+            name: 'user_settings',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+          },
+        ],
       );
     });
   });

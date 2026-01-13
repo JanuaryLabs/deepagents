@@ -1,63 +1,51 @@
 import type { AgentModel } from '@deepagents/agent';
+import { type ContextFragment, XmlRenderer } from '@deepagents/context';
 
-import type { Adapter } from '../../adapters/adapter.ts';
 import { toTeachings } from '../../agents/teachables.agent.ts';
-import type { Teachables } from '../../teach/teachables.ts';
 
 export interface TeachingsGeneratorOptions {
   context?: string;
   model?: AgentModel;
+  maxRetries?: number;
 }
+
 /**
- * TeachingsGenerator - Generate domain-specific teachings from database schema.
- *
+ * Generate domain-specific teachings from database schema.
  * Analyzes the schema to generate teachings that improve SQL generation accuracy.
  * Teachings include domain vocabulary, SQL patterns, guardrails, and examples
  * that help the SQL generator understand the domain and produce semantically
  * correct queries.
+ *
+ * @param schemaFragments - Schema fragments from adapter.introspect()
+ * @param options - Generation options including context, model, and maxRetries
+ * @returns Array of teachings including vocabulary, patterns, and guardrails
  */
-export class TeachingsGenerator {
-  /**
-   * @param adapter - Database adapter for schema introspection
-   * @param options - Generation options including context and model
-   */
-  constructor(
-    private adapter: Adapter,
-    private options?: TeachingsGeneratorOptions,
-  ) {}
+export async function generateTeachings(
+  schemaFragments: ContextFragment[],
+  options?: TeachingsGeneratorOptions,
+): Promise<ContextFragment[]> {
+  const schema = new XmlRenderer().render(schemaFragments);
+  const maxRetries = options?.maxRetries ?? 3;
 
-  /**
-   * Generates domain-specific teachings by analyzing the database schema.
-   * Retries on transient generation errors up to maxRetries attempts.
-   * @param maxRetries - Maximum retry attempts for transient failures
-   * @returns Array of teachings including vocabulary, patterns, and guardrails
-   */
-  async generate(maxRetries = 3): Promise<Teachables[]> {
-    const schema = await this.adapter.introspect();
-
-    let lastError: Error | undefined;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        return await toTeachings(
-          {
-            schema,
-            context: this.options?.context,
-          },
-          { model: this.options?.model },
-        );
-      } catch (error) {
-        lastError = error as Error;
-        const isRetryable =
-          lastError.message.includes('parse') ||
-          lastError.message.includes('schema') ||
-          lastError.message.includes('No object generated') ||
-          lastError.name.includes('AI_');
-        if (!isRetryable) {
-          throw lastError;
-        }
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await toTeachings(
+        { schema, context: options?.context },
+        { model: options?.model },
+      );
+    } catch (error) {
+      lastError = error as Error;
+      const isRetryable =
+        lastError.message.includes('parse') ||
+        lastError.message.includes('schema') ||
+        lastError.message.includes('No object generated') ||
+        lastError.name.includes('AI_');
+      if (!isRetryable) {
+        throw lastError;
       }
     }
-
-    throw lastError;
   }
+
+  throw lastError;
 }

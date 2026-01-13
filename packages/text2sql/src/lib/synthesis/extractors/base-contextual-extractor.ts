@@ -101,13 +101,19 @@ export function formatConversation(messages: string[]): string {
 export abstract class BaseContextualExtractor extends PairProducer {
   protected context: string[] = [];
   protected results: SqlWithContext[] = [];
+  protected messages: UIMessage[];
+  protected adapter: Adapter;
+  protected options: BaseContextualExtractorOptions;
 
   constructor(
-    protected messages: UIMessage[],
-    protected adapter: Adapter,
-    protected options: BaseContextualExtractorOptions = {},
+    messages: UIMessage[],
+    adapter: Adapter,
+    options: BaseContextualExtractorOptions = {},
   ) {
     super();
+    this.messages = messages;
+    this.adapter = adapter;
+    this.options = options;
   }
 
   /**
@@ -130,7 +136,10 @@ export abstract class BaseContextualExtractor extends PairProducer {
     }
 
     // Step 2: Get introspection for schema context
-    const introspection = await this.adapter.introspect();
+    // TODO: Update to use fragments and render them
+    // const schemaFragments = await this.adapter.introspect();
+    // const introspection = new XmlRenderer().render(schemaFragments);
+    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
 
     // Step 3: Resolve each SQL's context into a standalone question
     yield* this.resolveQuestions(introspection);
@@ -242,10 +251,6 @@ export abstract class BaseContextualExtractor extends PairProducer {
       ];
     }
   }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // HOOKS - Subclasses override these to customize context management
-  // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Hook called when a user message is encountered.

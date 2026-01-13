@@ -14,30 +14,28 @@ import { createWriteStream } from 'node:fs';
 import pRetry from 'p-retry';
 import z from 'zod';
 
+import { type AgentModel } from '@deepagents/agent';
 import {
-  type AgentModel,
-  agent,
-  generate,
-  toOutput,
+  ContextEngine,
+  type ContextFragment,
+  InMemoryContextStore,
+  XmlRenderer,
+  persona,
+  structuredOutput,
   user,
-} from '@deepagents/agent';
+} from '@deepagents/context';
 
 import type { Adapter } from '../adapters/adapter.ts';
-import {
-  type Teachables,
-  persona,
-  toInstructions,
-} from '../teach/teachables.ts';
 
 export interface ToSqlOptions {
   /** The natural language input to convert to SQL */
   input: string;
   /** Database adapter for validation */
   adapter: Adapter;
-  /** Introspection/schema context */
-  introspection: string;
+  /** Schema fragments from adapter introspection */
+  schemaFragments: ContextFragment[];
   /** Instructions/teachings to include */
-  instructions: Teachables[];
+  instructions: ContextFragment[];
   /** Optional model override */
   model?: AgentModel;
   /** Maximum retry attempts on validation failure (default: 3) */
@@ -59,50 +57,8 @@ const logger = new Console({
   inspectOptions: { depth: null },
 });
 
-type SqlGeneratorState = {
-  // FIXME: this should not be here after creating the context package
-  introspection: string;
-  teachings: string;
-};
-
-type SqlGeneratorOutput =
-  | { sql: string; reasoning?: string }
-  | { error: string };
-
-/**
- * Agent that generates SQL queries from introspection and natural language questions.
- * Used for creating synthetic training data for text-to-SQL models.
- */
 /** Temperature progression for retries: deterministic first, then increasingly exploratory */
 const RETRY_TEMPERATURES = [0, 0.2, 0.3];
-
-const sqlQueryAgent = agent<SqlGeneratorOutput, SqlGeneratorState>({
-  name: 'text2sql',
-  model: groq('openai/gpt-oss-20b'),
-  logging: process.env.AGENT_LOGGING === 'true',
-  output: z.union([
-    z.object({
-      sql: z.string().describe('The SQL query that answers the question'),
-      reasoning: z
-        .string()
-        .optional()
-        .describe('The reasoning steps taken to generate the SQL'),
-    }),
-    z.object({
-      error: z
-        .string()
-        .describe(
-          'Error message explaining why the question cannot be answered with the given schema',
-        ),
-    }),
-  ]),
-  prompt: (state) => {
-    return `
-    ${state?.teachings || ''}
-    ${state?.introspection || ''}
-  `;
-  },
-});
 
 /** Extract SQL from markdown fenced code block if present */
 function extractSql(output: string): string {
@@ -144,9 +100,37 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
 
   return withRetry(
     async (attemptNumber, errors, attempts) => {
-      const agentInstance = sqlQueryAgent.clone({
+      const context = new ContextEngine({
+        store: new InMemoryContextStore(),
+        chatId: `sql-gen-${crypto.randomUUID()}`,
+      });
+
+      context.set(
+        persona({
+          name: 'Freya',
+          role: 'You are an expert SQL query generator. You translate natural language questions into precise, efficient SQL queries based on the provided database schema.',
+        }),
+        ...options.instructions,
+        ...options.schemaFragments,
+      );
+
+      // Add user message(s)
+      if (errors.length) {
+        context.set(
+          user(options.input),
+          user(
+            `<validation_error>Your previous SQL query had the following error: ${errors.at(-1)?.message}. Please fix the query.</validation_error>`,
+          ),
+        );
+      } else {
+        context.set(user(options.input));
+      }
+
+      // Create structured output with schema
+      const sqlOutput = structuredOutput({
+        name: 'text2sql',
         model: wrapLanguageModel({
-          model: options.model ?? sqlQueryAgent.model,
+          model: options.model ?? groq('openai/gpt-oss-20b'),
           middleware: defaultSettingsMiddleware({
             settings: {
               temperature: RETRY_TEMPERATURES[attemptNumber - 1] ?? 0.3,
@@ -154,30 +138,26 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
             },
           }),
         }),
+        context,
+        schema: z.union([
+          z.object({
+            sql: z.string().describe('The SQL query that answers the question'),
+            reasoning: z
+              .string()
+              .optional()
+              .describe('The reasoning steps taken to generate the SQL'),
+          }),
+          z.object({
+            error: z
+              .string()
+              .describe(
+                'Error message explaining why the question cannot be answered with the given schema',
+              ),
+          }),
+        ]),
       });
 
-      const messages = errors.length
-        ? [
-            user(options.input),
-            user(
-              `<validation_error>Your previous SQL query had the following error: ${errors.at(-1)?.message}. Please fix the query.</validation_error>`,
-            ),
-          ]
-        : [user(options.input)];
-
-      const output = await toOutput(
-        generate(agentInstance, messages, {
-          introspection: options.introspection,
-          teachings: toInstructions(
-            'instructions',
-            persona({
-              name: 'Freya',
-              role: 'You are an expert SQL query generator. You translate natural language questions into precise, efficient SQL queries based on the provided database schema.',
-            }),
-            ...options.instructions,
-          ),
-        }),
-      );
+      const output = await sqlOutput.generate();
 
       // Handle error responses (question is unanswerable with given schema)
       if ('error' in output) {

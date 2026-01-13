@@ -13,7 +13,7 @@ import { printer } from '@deepagents/agent';
 
 import { ContextEngine, InMemoryContextStore, role, user } from './index.ts';
 import { agent } from './lib/agent.ts';
-import type { ContextFragment } from './lib/context.ts';
+import type { ContextFragment } from './lib/fragments.ts';
 
 type ErrorType =
   | 'no_tools_available'
@@ -160,19 +160,21 @@ const errorRecoveryMiddleware: LanguageModelMiddleware = {
     const result = await doStream();
 
     const transformedStream = result.stream.pipeThrough(
-      new TransformStream<LanguageModelV2StreamPart, LanguageModelV2StreamPart>({
-        transform(chunk, controller) {
-          if (chunk.type === 'error' && isInvalidRequestError(chunk.error)) {
-            const parsed = parseError(chunk.error);
-            controller.enqueue({
-              type: 'error',
-              error: new EnrichedModelError(chunk.error, parsed),
-            });
-          } else {
-            controller.enqueue(chunk);
-          }
+      new TransformStream<LanguageModelV2StreamPart, LanguageModelV2StreamPart>(
+        {
+          transform(chunk, controller) {
+            if (chunk.type === 'error' && isInvalidRequestError(chunk.error)) {
+              const parsed = parseError(chunk.error);
+              controller.enqueue({
+                type: 'error',
+                error: new EnrichedModelError(chunk.error, parsed),
+              });
+            } else {
+              controller.enqueue(chunk);
+            }
+          },
         },
-      }),
+      ),
     );
 
     return { ...result, stream: transformedStream };
@@ -213,7 +215,9 @@ function streamWithRecovery(options: StreamWithRecoveryOptions) {
             const error = part.error;
 
             if (EnrichedModelError.isInstance(error) && error.isRecoverable) {
-              context.set(user(error.createFeedback({ availableTools, attempt })));
+              context.set(
+                user(error.createFeedback({ availableTools, attempt })),
+              );
               errorEncountered = true;
               break;
             }
@@ -222,7 +226,11 @@ function streamWithRecovery(options: StreamWithRecoveryOptions) {
           } else if (part.type === 'text-delta') {
             writer.write({ type: 'text-delta', delta: part.text, id: part.id });
           } else if (part.type === 'reasoning-delta') {
-            writer.write({ type: 'reasoning-delta', delta: part.text, id: part.id });
+            writer.write({
+              type: 'reasoning-delta',
+              delta: part.text,
+              id: part.id,
+            });
           } else {
             writer.write(part as never);
           }

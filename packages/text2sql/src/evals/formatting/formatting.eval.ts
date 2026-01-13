@@ -1,9 +1,11 @@
 /* eslint-disable @nx/enforce-module-boundaries */
+import { groq } from '@ai-sdk/groq';
 import { evalite } from 'evalite';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { InMemoryContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
 import { filterByIndex } from '../utils';
@@ -29,7 +31,8 @@ evalite('SQL Output Formatting', {
 
     const text2sql = new Text2Sql({
       version: randomUUID(), // Use unique version per run for cache isolation
-      history: new InMemoryHistory(),
+      store: new InMemoryContextStore(),
+      model: groq('gpt-oss-20b'),
       adapter: new sqlite.Sqlite({
         grounding: [sqlite.info(), sqlite.tables()],
         execute: (sql) => db.prepare(sql).all(),

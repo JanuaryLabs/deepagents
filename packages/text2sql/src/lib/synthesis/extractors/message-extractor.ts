@@ -21,15 +21,17 @@ export interface MessageExtractorOptions {
  * with the preceding user message.
  */
 export class MessageExtractor extends PairProducer {
+  #messages: UIMessage[];
+  #options: MessageExtractorOptions;
+
   /**
    * @param messages - Chat history to extract pairs from
    * @param options - Extraction configuration
    */
-  constructor(
-    private messages: UIMessage[],
-    private options: MessageExtractorOptions = {},
-  ) {
+  constructor(messages: UIMessage[], options: MessageExtractorOptions = {}) {
     super();
+    this.#messages = messages;
+    this.#options = options;
   }
 
   /**
@@ -37,10 +39,10 @@ export class MessageExtractor extends PairProducer {
    * @returns Pairs extracted from db_query tool invocations
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
-    const { includeFailures = false, toolName = 'db_query' } = this.options;
+    const { includeFailures = false, toolName = 'db_query' } = this.#options;
     let lastUserMessage: UIMessage | null = null;
 
-    for (const message of this.messages) {
+    for (const message of this.#messages) {
       if (message.role === 'user') {
         lastUserMessage = message;
         continue;

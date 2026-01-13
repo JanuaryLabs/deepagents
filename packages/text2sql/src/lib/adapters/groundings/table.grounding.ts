@@ -1,5 +1,3 @@
-import pluralize from 'pluralize';
-
 import type { Filter, Relationship, Table } from '../adapter.ts';
 import { AbstractGrounding } from './abstract.grounding.ts';
 import type { GroundingContext } from './context.ts';
@@ -11,14 +9,14 @@ export interface TableGroundingConfig {
   /** Filter to select seed tables */
   filter?: Filter;
   /**
-   * Traverse forward (child�parent) following FK direction.
+   * Traverse forward (child→parent) following FK direction.
    * - true: unlimited depth
    * - number: maximum depth
    * - false/undefined: no forward traversal
    */
   forward?: boolean | number;
   /**
-   * Traverse backward (parent�child) finding tables that reference us.
+   * Traverse backward (parent→child) finding tables that reference us.
    * - true: unlimited depth
    * - number: maximum depth
    * - false/undefined: no backward traversal
@@ -42,7 +40,7 @@ export abstract class TableGrounding extends AbstractGrounding {
   #backward?: boolean | number;
 
   constructor(config: TableGroundingConfig = {}) {
-    super('tables');
+    super('table');
     this.#filter = config.filter;
     this.#forward = config.forward;
     this.#backward = config.backward;
@@ -68,7 +66,7 @@ export abstract class TableGrounding extends AbstractGrounding {
    * Execute the grounding process.
    * Writes discovered tables and relationships to the context.
    */
-  async execute(ctx: GroundingContext) {
+  async execute(ctx: GroundingContext): Promise<void> {
     const seedTables = await this.applyFilter();
     const forward = this.#forward;
     const backward = this.#backward;
@@ -79,7 +77,7 @@ export abstract class TableGrounding extends AbstractGrounding {
         seedTables.map((name) => this.getTable(name)),
       );
       ctx.tables.push(...tables);
-      return () => this.#describeTables(tables);
+      return;
     }
 
     const tables: Record<string, Table> = {};
@@ -152,7 +150,6 @@ export abstract class TableGrounding extends AbstractGrounding {
     const tablesList = Object.values(tables);
     ctx.tables.push(...tablesList);
     ctx.relationships.push(...allRelationships);
-    return () => this.#describeTables(tablesList);
   }
 
   /**
@@ -188,214 +185,4 @@ export abstract class TableGrounding extends AbstractGrounding {
       all.push(rel);
     }
   }
-
-  #describeTables(tables: Table[]): string {
-    if (!tables.length) {
-      return 'Schema unavailable.';
-    }
-
-    return tables
-      .map((table) => {
-        const rowCountInfo =
-          table.rowCount != null
-            ? ` [rows: ${table.rowCount}${table.sizeHint ? `, size: ${table.sizeHint}` : ''}]`
-            : '';
-
-        // Build constraint lookup maps for column-level annotations
-        const pkConstraint = table.constraints?.find(
-          (c) => c.type === 'PRIMARY_KEY',
-        );
-        const pkColumns = new Set(pkConstraint?.columns ?? []);
-
-        const notNullColumns = new Set(
-          table.constraints
-            ?.filter((c) => c.type === 'NOT_NULL')
-            .flatMap((c) => c.columns ?? []) ?? [],
-        );
-
-        const defaultByColumn = new Map<string, string>();
-        for (const c of table.constraints?.filter(
-          (c) => c.type === 'DEFAULT',
-        ) ?? []) {
-          for (const col of c.columns ?? []) {
-            if (c.defaultValue != null) {
-              defaultByColumn.set(col, c.defaultValue);
-            }
-          }
-        }
-
-        // Single-column UNIQUE constraints
-        const uniqueColumns = new Set(
-          table.constraints
-            ?.filter((c) => c.type === 'UNIQUE' && c.columns?.length === 1)
-            .flatMap((c) => c.columns ?? []) ?? [],
-        );
-
-        // Foreign key lookup: column -> referenced table.column
-        const fkByColumn = new Map<string, string>();
-        for (const c of table.constraints?.filter(
-          (c) => c.type === 'FOREIGN_KEY',
-        ) ?? []) {
-          const cols = c.columns ?? [];
-          const refCols = c.referencedColumns ?? [];
-          for (let i = 0; i < cols.length; i++) {
-            const refCol = refCols[i] ?? refCols[0] ?? cols[i];
-            fkByColumn.set(cols[i], `${c.referencedTable}.${refCol}`);
-          }
-        }
-
-        const columns = table.columns
-          .map((column) => {
-            const annotations: string[] = [];
-            const isPrimaryKey = pkColumns.has(column.name);
-            if (isPrimaryKey) {
-              annotations.push('PK');
-            }
-            if (fkByColumn.has(column.name)) {
-              annotations.push(`FK -> ${fkByColumn.get(column.name)}`);
-            }
-            if (uniqueColumns.has(column.name)) {
-              annotations.push('UNIQUE');
-            }
-            if (notNullColumns.has(column.name)) {
-              annotations.push('NOT NULL');
-            }
-            if (defaultByColumn.has(column.name)) {
-              annotations.push(`DEFAULT: ${defaultByColumn.get(column.name)}`);
-            }
-            if (column.isIndexed && !isPrimaryKey) {
-              annotations.push('Indexed');
-            }
-            if (column.kind === 'Enum' && column.values?.length) {
-              annotations.push(`Enum: ${column.values.join(', ')}`);
-            } else if (
-              column.kind === 'LowCardinality' &&
-              column.values?.length
-            ) {
-              annotations.push(`LowCardinality: ${column.values.join(', ')}`);
-            }
-            if (column.stats) {
-              const statParts: string[] = [];
-              if (column.stats.min != null || column.stats.max != null) {
-                const minText = column.stats.min ?? 'n/a';
-                const maxText = column.stats.max ?? 'n/a';
-                statParts.push(`range ${minText} → ${maxText}`);
-              }
-              if (
-                column.stats.nullFraction != null &&
-                Number.isFinite(column.stats.nullFraction)
-              ) {
-                const percent =
-                  Math.round(column.stats.nullFraction * 1000) / 10;
-                statParts.push(`null≈${percent}%`);
-              }
-              if (statParts.length) {
-                annotations.push(statParts.join(', '));
-              }
-            }
-            const annotationText = annotations.length
-              ? ` [${annotations.join(', ')}]`
-              : '';
-            return `    - ${column.name} (${column.type})${annotationText}`;
-          })
-          .join('\n');
-
-        // Indexes section
-        const indexes = table.indexes?.length
-          ? `\n  Indexes:\n${table.indexes
-              .map((index) => {
-                const props: string[] = [];
-                if (index.unique) {
-                  props.push('UNIQUE');
-                }
-                if (index.type) {
-                  props.push(index.type);
-                }
-                const propsText = props.length ? ` (${props.join(', ')})` : '';
-                const columnsText = index.columns?.length
-                  ? index.columns.join(', ')
-                  : 'expression';
-                return `    - ${index.name}${propsText}: ${columnsText}`;
-              })
-              .join('\n')}`
-          : '';
-
-        // Multi-column UNIQUE constraints (not already shown in indexes)
-        const multiColumnUniques =
-          table.constraints?.filter(
-            (c) => c.type === 'UNIQUE' && (c.columns?.length ?? 0) > 1,
-          ) ?? [];
-        const uniqueConstraints = multiColumnUniques.length
-          ? `\n  Unique Constraints:\n${multiColumnUniques
-              .map((c) => `    - ${c.name}: (${c.columns?.join(', ')})`)
-              .join('\n')}`
-          : '';
-
-        // CHECK constraints
-        const checkConstraints =
-          table.constraints?.filter((c) => c.type === 'CHECK') ?? [];
-        const checks = checkConstraints.length
-          ? `\n  Check Constraints:\n${checkConstraints
-              .map((c) => `    - ${c.name}: ${c.definition}`)
-              .join('\n')}`
-          : '';
-
-        return `- Table: ${table.name}${rowCountInfo}\n  Columns:\n${columns}${indexes}${uniqueConstraints}${checks}`;
-      })
-      .join('\n\n');
-  }
-
-  #formatTableLabel = (tableName: string) => {
-    const base = tableName.split('.').pop() ?? tableName;
-    return base.replace(/_/g, ' ');
-  };
-
-  #describeRelationships = (tables: Table[], relationships: Relationship[]) => {
-    if (!relationships.length) {
-      return 'None detected';
-    }
-
-    const tableMap = new Map(tables.map((table) => [table.name, table]));
-
-    return relationships
-      .map((relationship) => {
-        const sourceLabel = this.#formatTableLabel(relationship.table);
-        const targetLabel = this.#formatTableLabel(
-          relationship.referenced_table,
-        );
-        const singularSource = pluralize.singular(sourceLabel);
-        const pluralSource = pluralize.plural(sourceLabel);
-        const singularTarget = pluralize.singular(targetLabel);
-        const pluralTarget = pluralize.plural(targetLabel);
-        const sourceTable = tableMap.get(relationship.table);
-        const targetTable = tableMap.get(relationship.referenced_table);
-        const sourceCount = sourceTable?.rowCount;
-        const targetCount = targetTable?.rowCount;
-        const ratio =
-          sourceCount != null && targetCount != null && targetCount > 0
-            ? sourceCount / targetCount
-            : null;
-
-        let cardinality = 'each';
-        if (ratio != null) {
-          if (ratio > 5) {
-            cardinality = `many-to-one (≈${sourceCount} vs ${targetCount})`;
-          } else if (ratio < 1.2 && ratio > 0.8) {
-            cardinality = `roughly 1:1 (${sourceCount} vs ${targetCount})`;
-          } else if (ratio < 0.2) {
-            cardinality = `one-to-many (${sourceCount} vs ${targetCount})`;
-          }
-        }
-        const mappings = relationship.from
-          .map((fromCol, idx) => {
-            const targetCol =
-              relationship.to[idx] ?? relationship.to[0] ?? fromCol;
-            return `${relationship.table}.${fromCol} -> ${relationship.referenced_table}.${targetCol}`;
-          })
-          .join(', ');
-
-        return `- ${relationship.table} (${relationship.from.join(', ')}) -> ${relationship.referenced_table} (${relationship.to.join(', ')}) [${cardinality}]`;
-      })
-      .join('\n');
-  };
 }

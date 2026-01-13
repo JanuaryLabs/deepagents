@@ -17,36 +17,39 @@ import { type AgentModel } from '@deepagents/agent';
 
 import { type ContextEngine, XmlRenderer } from '../index.ts';
 
-export interface CreateAgent<COut, CIn = COut, Output = never> {
+export interface CreateAgent<CIn, COut = CIn> {
   name: string;
-  context: ContextEngine;
+  context?: ContextEngine;
   tools?: ToolSet;
-  model: AgentModel;
+  model?: AgentModel;
   toolChoice?: ToolChoice<Record<string, COut>>;
-  output?: z.Schema<Output>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   logging?: boolean;
 }
 
-class Agent<COut, CIn = COut, Output = never> {
-  #options: CreateAgent<COut, CIn, Output>;
-  constructor(options: CreateAgent<COut, CIn, Output>) {
+class Agent<CIn, COut = CIn> {
+  #options: CreateAgent<CIn, COut>;
+  readonly tools: ToolSet;
+  constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
+    this.tools = options.tools || {};
   }
 
-  public async generate<COut, CIn = COut, Output = never>(
+  public async generate<COut, CIn = COut>(
     contextVariables: CIn,
     config?: {
       abortSignal?: AbortSignal;
     },
   ) {
+    if (!this.#options.context) {
+      throw new Error(`Agent ${this.#options.name} is missing a context.`);
+    }
+    if (!this.#options.model) {
+      throw new Error(`Agent ${this.#options.name} is missing a model.`);
+    }
     const { messages, systemPrompt } = await this.#options.context.resolve({
       renderer: new XmlRenderer(),
     });
-    // console.log({ messages, systemPrompt });
-    // if (messages.length) {
-    //   process.exit(1);
-    // }
     return generateText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
@@ -57,9 +60,6 @@ class Agent<COut, CIn = COut, Output = never> {
       tools: this.#options.tools,
       experimental_context: contextVariables,
       toolChoice: this.#options.toolChoice,
-      experimental_output: this.#options.output
-        ? Output.object({ schema: this.#options.output })
-        : undefined,
       onStepFinish: (step) => {
         const toolCall = step.toolCalls.at(-1);
         if (toolCall) {
@@ -71,13 +71,19 @@ class Agent<COut, CIn = COut, Output = never> {
     });
   }
 
-  public async stream<COut, CIn = COut, Output = never>(
+  public async stream<COut, CIn = COut>(
     contextVariables: CIn,
     config?: {
       abortSignal?: AbortSignal;
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     },
   ) {
+    if (!this.#options.context) {
+      throw new Error(`Agent ${this.#options.name} is missing a context.`);
+    }
+    if (!this.#options.model) {
+      throw new Error(`Agent ${this.#options.name} is missing a model.`);
+    }
     const { messages, systemPrompt } = await this.#options.context.resolve({
       renderer: new XmlRenderer(),
     });
@@ -93,18 +99,6 @@ class Agent<COut, CIn = COut, Output = never> {
       tools: this.#options.tools,
       experimental_context: contextVariables,
       toolChoice: this.#options.toolChoice,
-      onError: (error) => {
-        console.error(
-          chalk.red(
-            `Error during agent (${this.#options.name})(${runId}) execution: `,
-          ),
-          error instanceof Error ? error.message : error,
-        );
-        console.dir(error, { depth: null });
-      },
-      experimental_output: this.#options.output
-        ? Output.object({ schema: this.#options.output })
-        : undefined,
       onStepFinish: (step) => {
         const toolCall = step.toolCalls.at(-1);
         if (toolCall) {
@@ -115,41 +109,131 @@ class Agent<COut, CIn = COut, Output = never> {
       },
     });
     return stream;
-    // const textContent: Record<
-    //   string,
-    //   {
-    //     type: string;
-    //     text: string;
-    //     providerMetadata?: Record<string, unknown>;
-    //   }
-    // > = {};
-    // for await (const part of stream.fullStream) {
-    //   // console.log(event.type === 'text');
-    //   if (part.type === 'text-start') {
-    //     textContent[part.id] ??= {
-    //       type: 'text',
-    //       text: '',
-    //       providerMetadata: part.providerMetadata,
-    //     };
-    //   }
-    //   if (part.type === 'text-delta') {
-    //     if (!textContent[part.id]) {
-    //       throw new Error('Text part delta received without start');
-    //     }
-    //     textContent[part.id].text += part.text;
-    //   }
-    //   if (part.type === 'text-end') {
-    //     if (!textContent[part.id]) {
-    //       throw new Error('Text part end received without start');
-    //     }
-    //     textContent[part.id].providerMetadata ??= part.providerMetadata;
-    //   }
-    // }
+  }
+
+  clone(overrides?: Partial<CreateAgent<CIn, COut>>): Agent<CIn, COut> {
+    return new Agent<CIn, COut>({
+      ...this.#options,
+      ...overrides,
+    });
   }
 }
 
-export function agent<Output, CIn, COut = CIn>(
-  options: CreateAgent<COut, CIn, Output>,
-): Agent<COut, CIn, Output> {
+export function agent<CIn, COut = CIn>(
+  options: CreateAgent<CIn, COut>,
+): Agent<CIn, COut> {
   return new Agent(options);
+}
+
+/**
+ * Options for creating a structured output handler.
+ */
+export interface StructuredOutputOptions<TSchema extends z.ZodType> {
+  name: string;
+  context?: ContextEngine;
+  model?: AgentModel;
+  schema: TSchema;
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+}
+
+/**
+ * Create a structured output handler that provides simplified access to structured output.
+ *
+ * @param options - Configuration options including schema
+ * @returns Object with generate() and stream() methods
+ *
+ * @example
+ * ```typescript
+ * const output = structuredOutput({
+ *   name: 'extractor',
+ *   model: groq('...'),
+ *   context,
+ *   schema: z.object({
+ *     name: z.string(),
+ *     age: z.number(),
+ *   }),
+ * });
+ *
+ * // Generate - returns only the structured output
+ * const result = await output.generate({});
+ * // result: { name: string, age: number }
+ *
+ * // Stream - returns the full stream
+ * const stream = await output.stream({});
+ * ```
+ */
+export function structuredOutput<TSchema extends z.ZodType>(
+  options: StructuredOutputOptions<TSchema>,
+) {
+  return {
+    async generate<CIn>(
+      contextVariables?: CIn,
+      config?: { abortSignal?: AbortSignal },
+    ): Promise<z.infer<TSchema>> {
+      if (!options.context) {
+        throw new Error(
+          `structuredOutput "${options.name}" is missing a context.`,
+        );
+      }
+      if (!options.model) {
+        throw new Error(
+          `structuredOutput "${options.name}" is missing a model.`,
+        );
+      }
+
+      const { messages, systemPrompt } = await options.context.resolve({
+        renderer: new XmlRenderer(),
+      });
+
+      const result = await generateText({
+        abortSignal: config?.abortSignal,
+        providerOptions: options.providerOptions,
+        model: options.model,
+        system: systemPrompt,
+        messages: convertToModelMessages(messages as never),
+        stopWhen: stepCountIs(25),
+        experimental_context: contextVariables,
+        experimental_output: Output.object({ schema: options.schema }),
+      });
+
+      return result.experimental_output as z.infer<TSchema>;
+    },
+
+    async stream<CIn>(
+      contextVariables?: CIn,
+      config?: {
+        abortSignal?: AbortSignal;
+        transform?:
+          | StreamTextTransform<ToolSet>
+          | StreamTextTransform<ToolSet>[];
+      },
+    ) {
+      if (!options.context) {
+        throw new Error(
+          `structuredOutput "${options.name}" is missing a context.`,
+        );
+      }
+      if (!options.model) {
+        throw new Error(
+          `structuredOutput "${options.name}" is missing a model.`,
+        );
+      }
+
+      const { messages, systemPrompt } = await options.context.resolve({
+        renderer: new XmlRenderer(),
+      });
+
+      return streamText({
+        abortSignal: config?.abortSignal,
+        providerOptions: options.providerOptions,
+        model: options.model,
+        system: systemPrompt,
+        messages: convertToModelMessages(messages as never),
+        stopWhen: stepCountIs(25),
+        experimental_transform: config?.transform ?? smoothStream(),
+        experimental_context: contextVariables,
+        experimental_output: Output.object({ schema: options.schema }),
+      });
+    },
+  };
 }

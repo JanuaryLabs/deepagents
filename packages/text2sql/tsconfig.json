@@ -7,6 +7,9 @@
       "path": "../toolbox"
     },
     {
+      "path": "../context"
+    },
+    {
       "path": "../agent"
     },
     {

@@ -187,7 +187,10 @@ export class DepthEvolver extends PairProducer {
    * Removes batch barrier - no longer waits for all evolutions before yielding.
    */
   async *produce(): AsyncGenerator<ExtractedPair[]> {
-    const introspection = await this.adapter.introspect();
+    // TODO: Update to use fragments and render them
+    // const schemaFragments = await this.adapter.introspect();
+    // const introspection = new XmlRenderer().render(schemaFragments);
+    const introspection = '' as any; // Placeholder - synthesis needs to be updated to use fragments
     const count = this.options?.count ?? 1;
     const techniques = this.options?.techniques ?? ALL_TECHNIQUES;
 
@@ -233,10 +236,11 @@ export class DepthEvolver extends PairProducer {
 
     const evolvedQuestion = experimental_output.evolvedQuestion;
     try {
+      // TODO: Update to use schemaFragments instead of introspection string
       const sqlResult = await toSql({
         input: evolvedQuestion,
         adapter: this.adapter,
-        introspection,
+        schemaFragments: [], // Placeholder - needs to pass actual fragments
         instructions: [],
         model: this.options?.model,
       });

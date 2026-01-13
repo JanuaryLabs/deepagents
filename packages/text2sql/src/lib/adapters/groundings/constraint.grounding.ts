@@ -21,7 +21,7 @@ export interface ConstraintGroundingConfig {
  */
 export abstract class ConstraintGrounding extends AbstractGrounding {
   constructor(config: ConstraintGroundingConfig = {}) {
-    super('constraints');
+    super('constraint');
   }
 
   /**
@@ -35,7 +35,7 @@ export abstract class ConstraintGrounding extends AbstractGrounding {
    * Execute the grounding process.
    * Annotates tables in ctx.tables with their constraints.
    */
-  async execute(ctx: GroundingContext) {
+  async execute(ctx: GroundingContext): Promise<void> {
     for (const table of ctx.tables) {
       try {
         table.constraints = await this.getConstraints(table.name);
@@ -44,7 +44,5 @@ export abstract class ConstraintGrounding extends AbstractGrounding {
         console.warn('Error collecting constraints for', table.name, error);
       }
     }
-    // Return null - TableGrounding could describe constraints if needed
-    return () => null;
   }
 }

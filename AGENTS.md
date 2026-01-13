@@ -12,6 +12,38 @@
 
 - Always ask more questions using AskUserQuestionTool until you have enough context to give an accurate & confident answer.
 
+## Testing
+
+- **Do NOT write tests during feature implementation** unless explicitly asked. Complete the feature first, test later.
+- Focus on **integration tests** that test entire flows, not unit tests for individual functions.
+
+### Running Tests
+
+We write tests exclusively using Node.js test runner.
+
+```sh
+node --test path/to/package/test/file.test.ts
+```
+
+### Test Import Rules
+
+- **Always use package module specifiers** in test files, not relative source paths:
+
+  ```typescript
+  // ✅ CORRECT
+  import { tables, Sqlite } from '@deepagents/text2sql/sqlite';
+
+  // ❌ WRONG - causes type mismatches
+  import { tables } from './index.ts';
+  ```
+
+- **Why**: TypeScript treats private class members (`#field`) as unique per class declaration. Mixing imports from built packages and source files creates two incompatible types.
+
+- **ESLint**: Add this comment at the top of test files to allow cross-package imports:
+  ```typescript
+  /* eslint-disable @nx/enforce-module-boundaries */
+  ```
+
 ## Package Overview
 
 ### @deepagents/agent (`packages/agent`)
@@ -102,18 +134,6 @@ import { someFunction } from './some-file.ts';
 ```
 
 Otherwise, node will throw an error.
-
-### Running and Writing test
-
-We write tests exclusively using nodejs test running.
-
-To run tests for a specific package, use the following command:
-
-```sh
-node --test path/to/package/test/file.test.ts
-```
-
-It is very important to note that we focus on integration tests rather than unit tests. This means that we test the entire flow of a feature rather than individual functions. When writing tests, focus on testing the overall functionality and user experience.
 
 ### Running Evals
 
