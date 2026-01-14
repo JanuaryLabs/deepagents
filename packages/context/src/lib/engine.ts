@@ -265,6 +265,11 @@ export class ContextEngine {
     return this;
   }
 
+  // Unset a fragment by ID (not implemented yet)
+  public unset(fragmentId: string) {
+    //
+  }
+
   /**
    * Render all fragments using the provided renderer.
    * @internal Use resolve() instead for public API.
