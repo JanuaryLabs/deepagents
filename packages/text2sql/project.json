@@ -10,7 +10,6 @@
       "outputs": ["{options.outputPath}"],
       "options": {
         "additionalEntryPoints": [
-          "packages/text2sql/src/lib/instructions.ts",
           "packages/text2sql/src/lib/adapters/groundings/index.ts",
           "packages/text2sql/src/lib/adapters/sqlite/index.ts",
           "packages/text2sql/src/lib/adapters/postgres/index.ts",

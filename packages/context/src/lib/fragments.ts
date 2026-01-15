@@ -42,6 +42,8 @@ export interface ContextFragment<T extends FragmentData = FragmentData> {
 export type FragmentData =
   | string
   | number
+  | null
+  | undefined
   | boolean
   | ContextFragment
   | FragmentData[]

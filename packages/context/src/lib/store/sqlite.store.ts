@@ -7,10 +7,12 @@ import type {
   ChatInfo,
   CheckpointData,
   CheckpointInfo,
+  DeleteChatOptions,
   GraphBranch,
   GraphCheckpoint,
   GraphData,
   GraphNode,
+  ListChatsOptions,
   MessageData,
   SearchOptions,
   SearchResult,
@@ -23,6 +25,7 @@ const STORE_DDL = `
 -- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
 CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
   title TEXT,
   metadata TEXT,
   createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
@@ -30,6 +33,7 @@ CREATE TABLE IF NOT EXISTS chats (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
+CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
 
 -- Messages table (nodes in the DAG)
 CREATE TABLE IF NOT EXISTS messages (
@@ -112,11 +116,12 @@ export class SqliteContextStore extends ContextStore {
     // createdAt and updatedAt are auto-set by SQLite DEFAULT
     this.#db
       .prepare(
-        `INSERT INTO chats (id, title, metadata)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO chats (id, userId, title, metadata)
+         VALUES (?, ?, ?, ?)`,
       )
       .run(
         chat.id,
+        chat.userId,
         chat.title ?? null,
         chat.metadata ? JSON.stringify(chat.metadata) : null,
       );
@@ -126,17 +131,19 @@ export class SqliteContextStore extends ContextStore {
     // Insert if not exists, no-op update if exists (to trigger RETURNING)
     const row = this.#db
       .prepare(
-        `INSERT INTO chats (id, title, metadata)
-         VALUES (?, ?, ?)
+        `INSERT INTO chats (id, userId, title, metadata)
+         VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET id = excluded.id
          RETURNING *`,
       )
       .get(
         chat.id,
+        chat.userId,
         chat.title ?? null,
         chat.metadata ? JSON.stringify(chat.metadata) : null,
       ) as {
       id: string;
+      userId: string;
       title: string | null;
       metadata: string | null;
       createdAt: number;
@@ -145,6 +152,7 @@ export class SqliteContextStore extends ContextStore {
 
     return {
       id: row.id,
+      userId: row.userId,
       title: row.title ?? undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       createdAt: row.createdAt,
@@ -158,6 +166,7 @@ export class SqliteContextStore extends ContextStore {
       .get(chatId) as
       | {
           id: string;
+          userId: string;
           title: string | null;
           metadata: string | null;
           createdAt: number;
@@ -171,6 +180,7 @@ export class SqliteContextStore extends ContextStore {
 
     return {
       id: row.id,
+      userId: row.userId,
       title: row.title ?? undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       createdAt: row.createdAt,
@@ -201,6 +211,7 @@ export class SqliteContextStore extends ContextStore {
       )
       .get(...params) as {
       id: string;
+      userId: string;
       title: string | null;
       metadata: string | null;
       createdAt: number;
@@ -209,6 +220,7 @@ export class SqliteContextStore extends ContextStore {
 
     return {
       id: row.id,
+      userId: row.userId,
       title: row.title ?? undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       createdAt: row.createdAt,
@@ -216,11 +228,32 @@ export class SqliteContextStore extends ContextStore {
     };
   }
 
-  async listChats(): Promise<ChatInfo[]> {
+  async listChats(options?: ListChatsOptions): Promise<ChatInfo[]> {
+    const params: SQLInputValue[] = [];
+    let whereClause = '';
+    let limitClause = '';
+
+    // Build WHERE clause for userId filter
+    if (options?.userId) {
+      whereClause = 'WHERE c.userId = ?';
+      params.push(options.userId);
+    }
+
+    // Build LIMIT/OFFSET clause
+    if (options?.limit !== undefined) {
+      limitClause = ' LIMIT ?';
+      params.push(options.limit);
+      if (options.offset !== undefined) {
+        limitClause += ' OFFSET ?';
+        params.push(options.offset);
+      }
+    }
+
     const rows = this.#db
       .prepare(
         `SELECT
           c.id,
+          c.userId,
           c.title,
           c.createdAt,
           c.updatedAt,
@@ -229,11 +262,13 @@ export class SqliteContextStore extends ContextStore {
         FROM chats c
         LEFT JOIN messages m ON m.chatId = c.id
         LEFT JOIN branches b ON b.chatId = c.id
+        ${whereClause}
         GROUP BY c.id
-        ORDER BY c.updatedAt DESC`,
+        ORDER BY c.updatedAt DESC${limitClause}`,
       )
-      .all() as {
+      .all(...params) as {
       id: string;
+      userId: string;
       title: string | null;
       createdAt: number;
       updatedAt: number;
@@ -243,12 +278,55 @@ export class SqliteContextStore extends ContextStore {
 
     return rows.map((row) => ({
       id: row.id,
+      userId: row.userId,
       title: row.title ?? undefined,
       messageCount: row.messageCount,
       branchCount: row.branchCount,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
+  }
+
+  async deleteChat(
+    chatId: string,
+    options?: DeleteChatOptions,
+  ): Promise<boolean> {
+    // Wrap in transaction to ensure atomicity of chat deletion + FTS cleanup
+    this.#db.exec('BEGIN TRANSACTION');
+
+    try {
+      // Get message IDs before deletion for FTS cleanup
+      const messageIds = this.#db
+        .prepare('SELECT id FROM messages WHERE chatId = ?')
+        .all(chatId) as { id: string }[];
+
+      // Build the delete query with optional userId check
+      let sql = 'DELETE FROM chats WHERE id = ?';
+      const params: SQLInputValue[] = [chatId];
+
+      if (options?.userId !== undefined) {
+        sql += ' AND userId = ?';
+        params.push(options.userId);
+      }
+
+      const result = this.#db.prepare(sql).run(...params);
+
+      // Clean up FTS entries (CASCADE handles messages, branches, checkpoints)
+      if (result.changes > 0 && messageIds.length > 0) {
+        const placeholders = messageIds.map(() => '?').join(', ');
+        this.#db
+          .prepare(
+            `DELETE FROM messages_fts WHERE messageId IN (${placeholders})`,
+          )
+          .run(...messageIds.map((m) => m.id));
+      }
+
+      this.#db.exec('COMMIT');
+      return result.changes > 0;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   // ==========================================================================

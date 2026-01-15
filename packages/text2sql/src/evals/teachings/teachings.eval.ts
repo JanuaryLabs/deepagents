@@ -2,9 +2,9 @@
 import { evalite } from 'evalite';
 import { DatabaseSync } from 'node:sqlite';
 
+import { XmlRenderer } from '@deepagents/context';
 import sqlite from '@deepagents/text2sql/sqlite';
 
-import { toInstructions } from '../../lib/instructions.ts';
 import { generateTeachings } from '../../lib/synthesis/synthesizers/teachings-generator.ts';
 import { teachingsCoverage, teachingsQuality } from '../scorers';
 import { filterByIndex } from '../utils';
@@ -49,10 +49,7 @@ evalite('TeachingsGenerator Quality', {
 
     db.close();
 
-    // Convert teachings to string representation for scoring
-    const teachingsText = toInstructions('teachings', ...teachings);
-
-    return teachingsText;
+    return new XmlRenderer().render(teachings);
   },
   scorers: [teachingsQuality, teachingsCoverage],
   columns(opts) {

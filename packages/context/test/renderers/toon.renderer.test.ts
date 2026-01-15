@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '../src/lib/context.ts';
-import { ToonRenderer } from '../src/lib/renderers/abstract.renderer.ts';
+import type { ContextFragment } from '../../src/index.ts';
+import { ToonRenderer } from '../../src/lib/renderers/abstract.renderer.ts';
 
 describe('ToonRenderer', () => {
   describe('primitive data', () => {
@@ -239,7 +239,7 @@ describe('ToonRenderer', () => {
       const fragments: ContextFragment[] = [
         {
           name: 'item',
-          data: { a: 'value', b: null, c: 'other' } as Record<string, unknown>,
+          data: { a: 'value', b: null, c: 'other' },
         },
       ];
       const result = renderer.render(fragments);
@@ -334,7 +334,7 @@ describe('ToonRenderer', () => {
       ];
       const result = renderer.render(fragments);
       const expected = `items[2]{a,b}:
-  1,null
+  1,
   2,3`;
       assert.strictEqual(result, expected);
     });

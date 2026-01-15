@@ -16,6 +16,7 @@ describe('Branching', () => {
     it('should create "main" branch by default', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-branch-1',
       });
@@ -34,6 +35,7 @@ describe('Branching', () => {
     it('should use custom branch name from constructor', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-branch-2',
         branch: 'feature-x',
@@ -50,6 +52,7 @@ describe('Branching', () => {
     it('should expose branch name via getter', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-branch-3',
         branch: 'my-branch',
@@ -63,6 +66,7 @@ describe('Branching', () => {
     it('should set parentId to null for first message', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-chain-1',
       });
@@ -84,6 +88,7 @@ describe('Branching', () => {
     it('should link subsequent messages via parentId', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-chain-2',
       });
@@ -117,6 +122,7 @@ describe('Branching', () => {
     it('should update branch headMessageId after save', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-chain-3',
       });
@@ -138,6 +144,7 @@ describe('Branching', () => {
     it('should return messages in correct order (root to head)', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-chain-4',
       });
@@ -161,6 +168,7 @@ describe('Branching', () => {
     it('should create new branch pointing to rewind message', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-rewind-1',
       });
@@ -193,6 +201,7 @@ describe('Branching', () => {
     it('should deactivate old branch after rewind', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-rewind-2',
       });
@@ -220,6 +229,7 @@ describe('Branching', () => {
     it('should preserve original messages after rewind', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-rewind-3',
       });
@@ -249,6 +259,7 @@ describe('Branching', () => {
     it('should link new messages to fork point after rewind', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-rewind-4',
       });
@@ -279,6 +290,7 @@ describe('Branching', () => {
     it('should update engine branch name after rewind', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-rewind-5',
       });
@@ -302,6 +314,7 @@ describe('Branching', () => {
     it('should clear pending messages after rewind', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-rewind-6',
       });
@@ -330,6 +343,7 @@ describe('Branching', () => {
     it('should switch active branch', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-switch-1',
       });
@@ -359,6 +373,7 @@ describe('Branching', () => {
     it('should return different message chains per branch', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-switch-2',
       });
@@ -394,6 +409,7 @@ describe('Branching', () => {
     it('should throw when switching to non-existent branch', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-switch-3',
       });
@@ -410,6 +426,7 @@ describe('Branching', () => {
     it('should support multiple branches in one chat', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-multi-1',
       });
@@ -443,6 +460,7 @@ describe('Branching', () => {
     it('should maintain independent headMessageId per branch', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-multi-2',
       });
@@ -472,6 +490,7 @@ describe('Branching', () => {
     it('should have only one active branch at a time', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-multi-3',
       });
@@ -501,6 +520,7 @@ describe('Branching', () => {
     it('should create a new branch from current head without switching', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-btw-1',
       });
@@ -529,6 +549,7 @@ describe('Branching', () => {
     it('should throw when no messages exist', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-btw-2',
       });
@@ -546,6 +567,7 @@ describe('Branching', () => {
     it('should keep pending messages after btw', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-btw-3',
       });
@@ -568,6 +590,7 @@ describe('Branching', () => {
     it('should create incrementing branch names', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-btw-4',
       });
@@ -587,6 +610,7 @@ describe('Branching', () => {
     it('should allow switching to btw branch and adding messages', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
+        userId: 'test-user',
         store,
         chatId: 'test-btw-5',
       });

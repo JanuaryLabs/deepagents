@@ -1,8 +1,12 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { MarkdownRenderer, TomlRenderer, XmlRenderer } from '../src/index.ts';
-import type { ContextFragment } from '../src/index.ts';
+import type { ContextFragment } from '../../src/index.ts';
+import {
+  MarkdownRenderer,
+  TomlRenderer,
+  XmlRenderer,
+} from '../../src/index.ts';
 
 describe('XmlRenderer', () => {
   const renderer = new XmlRenderer();

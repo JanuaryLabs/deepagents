@@ -48,6 +48,8 @@ export interface ContextEngineOptions {
   store: ContextStore;
   /** Unique identifier for this chat (required) */
   chatId: string;
+  /** User who owns this chat (required) */
+  userId: string;
   /** Branch name (defaults to 'main') */
   branch?: string;
 }
@@ -58,6 +60,8 @@ export interface ContextEngineOptions {
 export interface ChatMeta {
   /** Unique chat identifier */
   id: string;
+  /** User who owns this chat */
+  userId: string;
   /** When the chat was created */
   createdAt: number;
   /** When the chat was last updated */
@@ -122,6 +126,7 @@ export class ContextEngine {
   #pendingMessages: ContextFragment[] = [];
   #store: ContextStore;
   #chatId: string;
+  #userId: string;
   #branchName: string;
   #branch: BranchData | null = null;
   #chatData: StoredChatData | null = null;
@@ -131,8 +136,12 @@ export class ContextEngine {
     if (!options.chatId) {
       throw new Error('chatId is required');
     }
+    if (!options.userId) {
+      throw new Error('userId is required');
+    }
     this.#store = options.store;
     this.#chatId = options.chatId;
+    this.#userId = options.userId;
     this.#branchName = options.branch ?? 'main';
   }
 
@@ -144,7 +153,10 @@ export class ContextEngine {
       return;
     }
 
-    this.#chatData = await this.#store.upsertChat({ id: this.#chatId });
+    this.#chatData = await this.#store.upsertChat({
+      id: this.#chatId,
+      userId: this.#userId,
+    });
 
     const existingBranch = await this.#store.getBranch(
       this.#chatId,
@@ -241,6 +253,7 @@ export class ContextEngine {
     }
     return {
       id: this.#chatData.id,
+      userId: this.#chatData.userId,
       createdAt: this.#chatData.createdAt,
       updatedAt: this.#chatData.updatedAt,
       title: this.#chatData.title,
@@ -288,7 +301,7 @@ export class ContextEngine {
    *
    * @example
    * ```ts
-   * const context = new ContextEngine({ store, chatId: 'chat-1' })
+   * const context = new ContextEngine({ store, chatId: 'chat-1', userId: 'user-1' })
    *   .set(role('You are helpful'), user('Hello'));
    *
    * const { systemPrompt, messages } = await context.resolve();

@@ -41,6 +41,7 @@ async function demonstrateContextEngine() {
   console.log('=== Basic Context Engine Example ===');
 
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: new InMemoryContextStore(),
     chatId: 'chat-1',
   });
@@ -105,6 +106,7 @@ async function demonstrateSessionRestore() {
 
   // New context instance, same store, same chatId - will load persisted messages
   const context = new ContextEngine({
+    userId: 'demo-user',
     store,
     chatId: 'demo-chat-1', // Same ID as previous example
   }).set(role('You are a helpful assistant.'));
@@ -127,6 +129,7 @@ async function demonstrateMultipleChats() {
 
   // Chat A
   const contextA = new ContextEngine({
+    userId: 'demo-user',
     store,
     chatId: 'chat-a',
   });
@@ -135,6 +138,7 @@ async function demonstrateMultipleChats() {
 
   // Chat B (same store, different ID)
   const contextB = new ContextEngine({
+    userId: 'demo-user',
     store,
     chatId: 'chat-b',
   });
@@ -160,6 +164,7 @@ async function demonstrateChatMetadata() {
   console.log('\n=== Chat Metadata ===');
 
   const context = new ContextEngine({
+    userId: 'demo-user',
     store,
     chatId: 'titled-chat',
   });
@@ -193,6 +198,7 @@ async function demonstrateRewind() {
 
   const rewindStore = new InMemoryContextStore();
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: rewindStore,
     chatId: 'rewind-demo',
   }).set(role('You are a helpful assistant.'));
@@ -263,6 +269,7 @@ async function demonstrateBranching() {
 
   const branchStore = new InMemoryContextStore();
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: branchStore,
     chatId: 'branch-demo',
   }).set(role('You are a helpful assistant.'));
@@ -328,6 +335,7 @@ async function demonstrateBranchSwitching() {
 
   const switchStore = new InMemoryContextStore();
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: switchStore,
     chatId: 'switch-demo',
   });
@@ -371,6 +379,7 @@ async function demonstrateVisualization() {
 
   const vizStore = new InMemoryContextStore();
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: vizStore,
     chatId: 'viz-demo',
   });
@@ -410,6 +419,7 @@ async function demonstrateSearch() {
 
   const searchStore = new InMemoryContextStore();
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: searchStore,
     chatId: 'search-demo',
   });
@@ -484,6 +494,7 @@ async function demonstrateSkills() {
   // Create context with skills metadata injected into system prompt
   const skillStore = new InMemoryContextStore();
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: skillStore,
     chatId: 'skill-demo',
   }).set(
@@ -522,6 +533,7 @@ async function main() {
 
 function engine(...fragments: ContextFragment[]) {
   const context = new ContextEngine({
+    userId: 'demo-user',
     // store: new SqliteContextStore('./context.sqlite'),
     store: new InMemoryContextStore(),
     chatId: 'demo-chat-1',
@@ -573,6 +585,7 @@ async function createSkillAwareAgent() {
   });
 
   const agentContext = new ContextEngine({
+    userId: 'demo-user',
     store: new InMemoryContextStore(),
     chatId: 'skill-agent-demo',
   }).set(
@@ -746,6 +759,7 @@ async function createDockerSkillAgent() {
 
   try {
     const context = new ContextEngine({
+      userId: 'demo-user',
       store: new InMemoryContextStore(),
       chatId: 'docker-skill-agent',
     }).set(

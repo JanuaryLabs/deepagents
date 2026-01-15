@@ -23,12 +23,6 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./instructions": {
-      "development": "./src/lib/instructions.ts",
-      "types": "./dist/lib/instructions.d.ts",
-      "import": "./dist/lib/instructions.js",
-      "default": "./dist/lib/instructions.js"
-    },
     "./grounding": {
       "development": "./src/lib/adapters/groundings/index.ts",
       "types": "./dist/lib/adapters/groundings/index.d.ts",

@@ -155,6 +155,7 @@ export class Text2Sql {
     const context = new ContextEngine({
       store: this.#config.store,
       chatId: params.chatId,
+      userId: params.userId,
     }).set(
       ...this.#config.instructions,
       ...this.#buildRenderingInstructions(),
@@ -205,6 +206,7 @@ export class Text2Sql {
     const context = new ContextEngine({
       store: this.#config.store,
       chatId: params.chatId,
+      userId: params.userId,
     }).set(
       ...developerExports.fragments,
       ...this.#config.instructions,

@@ -13,7 +13,7 @@ import type { SkillMetadata, SkillsFragmentOptions } from './types.ts';
  *
  * @example
  * ```ts
- * const context = new ContextEngine({ store, chatId: 'demo' })
+ * const context = new ContextEngine({ userId: 'demo-user', store, chatId: 'demo' })
  *   .set(
  *     role('You are a helpful assistant.'),
  *     skills({ paths: ['./skills'] }),  // Injects skill metadata into system prompt

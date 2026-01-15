@@ -1,8 +1,9 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '../src/lib/context.ts';
-import { MarkdownRenderer } from '../src/lib/renderers/abstract.renderer.ts';
+import type { ContextFragment } from '@deepagents/context';
+
+import { MarkdownRenderer } from '../../src/lib/renderers/abstract.renderer.ts';
 
 describe('MarkdownRenderer', () => {
   describe('primitive data', () => {
@@ -95,7 +96,7 @@ describe('MarkdownRenderer', () => {
       const fragments: ContextFragment[] = [
         {
           name: 'item',
-          data: { a: 'value', b: null, c: 'other' } as Record<string, unknown>,
+          data: { a: 'value', b: null, c: 'other' },
         },
       ];
       const result = renderer.render(fragments);
@@ -109,10 +110,7 @@ describe('MarkdownRenderer', () => {
       const fragments: ContextFragment[] = [
         {
           name: 'item',
-          data: { a: 'value', b: undefined, c: 'other' } as Record<
-            string,
-            unknown
-          >,
+          data: { a: 'value', b: undefined, c: 'other' },
         },
       ];
       const result = renderer.render(fragments);
@@ -136,7 +134,7 @@ describe('MarkdownRenderer', () => {
     it('skips null values in arrays', () => {
       const renderer = new MarkdownRenderer();
       const fragments: ContextFragment[] = [
-        { name: 'items', data: ['one', null, 'three'] as unknown[] },
+        { name: 'items', data: ['one', null, 'three'] },
       ];
       const result = renderer.render(fragments);
       assert.ok(!result.includes('null'));

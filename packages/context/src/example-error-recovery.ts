@@ -37,6 +37,7 @@ import type { ContextFragment } from './lib/fragments.ts';
 
 function engine(...fragments: ContextFragment[]) {
   const context = new ContextEngine({
+    userId: 'demo-user',
     store: new InMemoryContextStore(),
     chatId: randomUUID(),
   });

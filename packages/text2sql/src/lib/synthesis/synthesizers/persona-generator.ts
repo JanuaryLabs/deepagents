@@ -71,6 +71,7 @@ export async function generatePersonas(
   const context = new ContextEngine({
     store: new InMemoryContextStore(),
     chatId: `persona-gen-${crypto.randomUUID()}`,
+    userId: 'system',
   });
 
   context.set(

@@ -14,3 +14,4 @@ export * from './lib/store/sqlite.store.ts';
 export * from './lib/store/store.ts';
 export * from './lib/visualize.ts';
 export * from './lib/agent.ts';
+export * from './lib/render.ts';

@@ -88,6 +88,7 @@ import { SqliteContextStore } from '@deepagents/context';
 const context = new ContextEngine({
   store: new SqliteContextStore('./chat.db'),
   chatId: 'session-1',
+  userId: 'user-1',
 });
 
 context.set(role('You are helpful'), user('Hello'));

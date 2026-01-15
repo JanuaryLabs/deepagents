@@ -1,6 +1,6 @@
+import { Bash, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { Bash, ReadWriteFs } from 'just-bash';
 
 import { createBinaryBridges } from '../src/lib/sandbox/binary-bridges.ts';
 
@@ -49,7 +49,7 @@ describe('createBinaryBridges', () => {
       const bridges = createBinaryBridges(
         'echo',
         { name: 'python', binaryPath: 'python3' },
-        'node'
+        'node',
       );
       assert.strictEqual(bridges.length, 3);
       assert.strictEqual(bridges[0].name, 'echo');
@@ -59,7 +59,14 @@ describe('createBinaryBridges', () => {
 
     it('returns array of CustomCommand objects with execute function', () => {
       const bridges = createBinaryBridges('echo');
-      assert.strictEqual(typeof bridges[0].execute, 'function');
+      const cmd = bridges[0];
+      assert.ok(cmd);
+      assert.strictEqual(typeof cmd.name, 'string');
+      assert.strictEqual('load' in cmd, false);
+      assert.strictEqual('execute' in cmd, true);
+      if ('execute' in cmd) {
+        assert.strictEqual(typeof cmd.execute, 'function');
+      }
     });
   });
 
@@ -135,7 +142,7 @@ describe('path argument detection', () => {
       // If path was resolved, it should be an absolute path
       assert.ok(
         result.stdout.startsWith('/') || result.stdout.match(/^[A-Z]:\\/),
-        `Expected '${arg}' to be resolved to absolute path, got: ${result.stdout}`
+        `Expected '${arg}' to be resolved to absolute path, got: ${result.stdout}`,
       );
     } else {
       // If not resolved, should be passed through as-is

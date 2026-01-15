@@ -17,6 +17,7 @@
  */
 export interface ChatData {
   id: string;
+  userId: string;
   title?: string;
   metadata?: Record<string, unknown>;
 }
@@ -34,11 +35,32 @@ export interface StoredChatData extends ChatData {
  */
 export interface ChatInfo {
   id: string;
+  userId: string;
   title?: string;
   messageCount: number;
   branchCount: number;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * Options for listing chats.
+ */
+export interface ListChatsOptions {
+  /** Filter by user ID */
+  userId?: string;
+  /** Maximum number of results to return */
+  limit?: number;
+  /** Number of results to skip (for pagination) */
+  offset?: number;
+}
+
+/**
+ * Options for deleting a chat.
+ */
+export interface DeleteChatOptions {
+  /** If provided, only delete if chat belongs to this user */
+  userId?: string;
 }
 
 // ============================================================================
@@ -233,9 +255,19 @@ export abstract class ContextStore {
   ): Promise<StoredChatData>;
 
   /**
-   * List all chats, sorted by updatedAt descending.
+   * List chats, sorted by updatedAt descending.
+   * @param options - Optional filters for userId, limit, offset
    */
-  abstract listChats(): Promise<ChatInfo[]>;
+  abstract listChats(options?: ListChatsOptions): Promise<ChatInfo[]>;
+
+  /**
+   * Delete a chat and all associated data (messages, branches, checkpoints).
+   * Returns true if deleted, false if not found or userId mismatch.
+   */
+  abstract deleteChat(
+    chatId: string,
+    options?: DeleteChatOptions,
+  ): Promise<boolean>;
 
   // ==========================================================================
   // Message Operations (Graph Nodes)

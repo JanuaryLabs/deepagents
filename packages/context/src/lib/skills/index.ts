@@ -14,7 +14,7 @@
  * import { skills } from '@deepagents/context';
  *
  * // Add skills metadata to context
- * const context = new ContextEngine({ store, chatId: 'demo' })
+ * const context = new ContextEngine({ userId: 'demo-user', store, chatId: 'demo' })
  *   .set(
  *     role('You are a helpful assistant.'),
  *     skills({ paths: ['./skills', '~/.deepagents/skills'] }),

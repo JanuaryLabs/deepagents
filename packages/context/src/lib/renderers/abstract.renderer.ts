@@ -68,6 +68,83 @@ export abstract class ContextRenderer {
   }
 
   /**
+   * Remove null/undefined from fragments and fragment data recursively.
+   * This protects renderers from nullish values and ensures they are ignored
+   * consistently across all output formats.
+   */
+  protected sanitizeFragments(fragments: ContextFragment[]): ContextFragment[] {
+    const sanitized: ContextFragment[] = [];
+    for (const fragment of fragments) {
+      const cleaned = this.sanitizeFragment(fragment, new WeakSet<object>());
+      if (cleaned) {
+        sanitized.push(cleaned);
+      }
+    }
+    return sanitized;
+  }
+
+  protected sanitizeFragment(
+    fragment: ContextFragment,
+    seen: WeakSet<object>,
+  ): ContextFragment | null {
+    const data = this.sanitizeData(fragment.data, seen);
+    if (data == null) {
+      return null;
+    }
+    return {
+      ...fragment,
+      data,
+    };
+  }
+
+  protected sanitizeData(
+    data: FragmentData,
+    seen: WeakSet<object>,
+  ): FragmentData | undefined {
+    if (data == null) {
+      return undefined;
+    }
+
+    if (isFragment(data)) {
+      return this.sanitizeFragment(data, seen) ?? undefined;
+    }
+
+    if (Array.isArray(data)) {
+      if (seen.has(data)) {
+        return undefined;
+      }
+      seen.add(data);
+
+      const cleaned: FragmentData[] = [];
+      for (const item of data) {
+        const sanitizedItem = this.sanitizeData(item, seen);
+        if (sanitizedItem != null) {
+          cleaned.push(sanitizedItem);
+        }
+      }
+      return cleaned;
+    }
+
+    if (isFragmentObject(data)) {
+      if (seen.has(data)) {
+        return undefined;
+      }
+      seen.add(data);
+
+      const cleaned: FragmentObject = {};
+      for (const [key, value] of Object.entries(data)) {
+        const sanitizedValue = this.sanitizeData(value, seen);
+        if (sanitizedValue != null) {
+          cleaned[key] = sanitizedValue;
+        }
+      }
+      return cleaned;
+    }
+
+    return data;
+  }
+
+  /**
    * Template method - dispatches value to appropriate handler.
    */
   protected renderValue(
@@ -130,7 +207,8 @@ export abstract class ContextRenderer {
  */
 export class XmlRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
-    return fragments
+    const sanitized = this.sanitizeFragments(fragments);
+    return sanitized
       .map((f) => this.#renderTopLevel(f))
       .filter(Boolean)
       .join('\n');
@@ -147,10 +225,13 @@ export class XmlRenderer extends ContextRenderer {
       const child = this.renderFragment(fragment.data, { depth: 1, path: [] });
       return this.#wrap(fragment.name, [child]);
     }
-    return this.#wrap(
-      fragment.name,
-      this.renderEntries(fragment.data, { depth: 1, path: [] }),
-    );
+    if (isFragmentObject(fragment.data)) {
+      return this.#wrap(
+        fragment.name,
+        this.renderEntries(fragment.data, { depth: 1, path: [] }),
+      );
+    }
+    return '';
   }
 
   #renderArray(name: string, items: FragmentData[], depth: number): string {
@@ -212,8 +293,14 @@ export class XmlRenderer extends ContextRenderer {
     if (Array.isArray(data)) {
       return this.#renderArrayIndented(name, data, ctx.depth);
     }
-    const children = this.renderEntries(data, { ...ctx, depth: ctx.depth + 1 });
-    return this.#wrapIndented(name, children, ctx.depth);
+    if (isFragmentObject(data)) {
+      const children = this.renderEntries(data, {
+        ...ctx,
+        depth: ctx.depth + 1,
+      });
+      return this.#wrapIndented(name, children, ctx.depth);
+    }
+    return '';
   }
 
   #renderArrayIndented(
@@ -343,7 +430,7 @@ export class XmlRenderer extends ContextRenderer {
  */
 export class MarkdownRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
-    return fragments
+    return this.sanitizeFragments(fragments)
       .map((f) => {
         const title = `## ${titlecase(f.name)}`;
         if (this.isPrimitive(f.data)) {
@@ -355,7 +442,10 @@ export class MarkdownRenderer extends ContextRenderer {
         if (isFragment(f.data)) {
           return `${title}\n${this.renderFragment(f.data, { depth: 0, path: [] })}`;
         }
-        return `${title}\n${this.renderEntries(f.data, { depth: 0, path: [] }).join('\n')}`;
+        if (isFragmentObject(f.data)) {
+          return `${title}\n${this.renderEntries(f.data, { depth: 0, path: [] }).join('\n')}`;
+        }
+        return `${title}\n`;
       })
       .join('\n\n');
   }
@@ -432,11 +522,14 @@ export class MarkdownRenderer extends ContextRenderer {
         .map((item) => this.#arrayItem(item, ctx.depth + 1));
       return [header, ...children].join('\n');
     }
-    const children = this.renderEntries(data, {
-      ...ctx,
-      depth: ctx.depth + 1,
-    }).join('\n');
-    return [header, children].join('\n');
+    if (isFragmentObject(data)) {
+      const children = this.renderEntries(data, {
+        ...ctx,
+        depth: ctx.depth + 1,
+      }).join('\n');
+      return [header, children].join('\n');
+    }
+    return header;
   }
 
   protected renderPrimitive(
@@ -478,24 +571,26 @@ export class MarkdownRenderer extends ContextRenderer {
  */
 export class TomlRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
-    return fragments
-      .map((f) => {
-        if (this.isPrimitive(f.data)) {
-          return `${f.name} = ${this.#formatValue(f.data)}`;
-        }
-        if (Array.isArray(f.data)) {
-          return this.#renderTopLevelArray(f.name, f.data);
-        }
-        if (isFragment(f.data)) {
-          return [
-            `[${f.name}]`,
-            this.renderFragment(f.data, { depth: 0, path: [f.name] }),
-          ].join('\n');
-        }
+    const rendered: string[] = [];
+    for (const f of this.sanitizeFragments(fragments)) {
+      if (this.isPrimitive(f.data)) {
+        return `${f.name} = ${this.#formatValue(f.data)}`;
+      }
+      if (Array.isArray(f.data)) {
+        return this.#renderTopLevelArray(f.name, f.data);
+      }
+      if (isFragment(f.data)) {
+        return [
+          `[${f.name}]`,
+          this.renderFragment(f.data, { depth: 0, path: [f.name] }),
+        ].join('\n');
+      }
+      if (isFragmentObject(f.data)) {
         const entries = this.#renderObjectEntries(f.data, [f.name]);
-        return [`[${f.name}]`, ...entries].join('\n');
-      })
-      .join('\n\n');
+        rendered.push([`[${f.name}]`, ...entries].join('\n'));
+      }
+    }
+    return rendered.join('\n\n');
   }
 
   #renderTopLevelArray(name: string, items: FragmentData[]): string {
@@ -545,16 +640,18 @@ export class TomlRenderer extends ContextRenderer {
   protected renderPrimitive(
     key: string,
     value: string,
-    _ctx: RenderContext,
+    ctx: RenderContext,
   ): string {
+    void ctx;
     return `${key} = ${this.#formatValue(value)}`;
   }
 
   protected renderArray(
     key: string,
     items: FragmentData[],
-    _ctx: RenderContext,
+    ctx: RenderContext,
   ): string {
+    void ctx;
     const values = items
       .filter((item) => item != null)
       .map((item) => this.#formatValue(item));
@@ -626,8 +723,11 @@ export class TomlRenderer extends ContextRenderer {
       const values = nonFragmentItems.map((item) => this.#formatValue(item));
       return `${name} = [${values.join(', ')}]`;
     }
-    const entries = this.#renderObjectEntries(data, newPath);
-    return ['', `[${newPath.join('.')}]`, ...entries].join('\n');
+    if (isFragmentObject(data)) {
+      const entries = this.#renderObjectEntries(data, newPath);
+      return ['', `[${newPath.join('.')}]`, ...entries].join('\n');
+    }
+    return '';
   }
 
   #escape(value: string): string {
@@ -655,7 +755,8 @@ export class TomlRenderer extends ContextRenderer {
  */
 export class ToonRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
-    return fragments
+    const sanitized = this.sanitizeFragments(fragments);
+    return sanitized
       .map((f) => this.#renderTopLevel(f))
       .filter(Boolean)
       .join('\n');
@@ -724,23 +825,24 @@ export class ToonRenderer extends ContextRenderer {
     const objects = items.filter(isFragmentObject);
     if (objects.length !== items.length) return false;
 
-    // Get keys from first object
-    const firstKeys = Object.keys(objects[0]).sort().join(',');
-
-    // All objects must have same keys
+    // Determine if there is at least one shared field across all rows.
+    // We treat null/undefined/missing as "empty" cells, but we still require
+    // a non-empty key intersection so clearly non-uniform objects are not
+    // forced into a tabular shape.
+    let intersection = new Set<string>(Object.keys(objects[0]));
     for (const obj of objects) {
-      if (Object.keys(obj).sort().join(',') !== firstKeys) {
-        return false;
-      }
-      // All values must be primitives
+      const keys = new Set(Object.keys(obj));
+      intersection = new Set([...intersection].filter((k) => keys.has(k)));
+
       for (const value of Object.values(obj)) {
-        if (!this.#isPrimitiveValue(value) && value !== null) {
+        if (value == null) continue;
+        if (!this.#isPrimitiveValue(value)) {
           return false;
         }
       }
     }
 
-    return true;
+    return intersection.size > 0;
   }
 
   #renderPrimitiveArray(
@@ -761,11 +863,17 @@ export class ToonRenderer extends ContextRenderer {
       return `${this.#pad(depth)}${key}[0]:`;
     }
 
-    const fields = Object.keys(items[0]);
+    const fields = Array.from(
+      new Set(items.flatMap((obj) => Object.keys(obj))),
+    );
     const header = `${this.#pad(depth)}${key}[${items.length}]{${fields.join(',')}}:`;
 
     const rows = items.map((obj) => {
-      const values = fields.map((f) => this.#formatValue(obj[f]));
+      const values = fields.map((f) => {
+        const value = obj[f];
+        if (value == null) return '';
+        return this.#formatValue(value);
+      });
       return `${this.#pad(depth + 1)}${values.join(',')}`;
     });
 

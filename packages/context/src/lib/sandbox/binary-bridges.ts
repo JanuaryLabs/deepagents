@@ -1,7 +1,7 @@
-import { defineCommand, type CustomCommand } from 'just-bash';
+import { existsSync } from 'fs';
+import { type CustomCommand, defineCommand } from 'just-bash';
 import spawn from 'nano-spawn';
 import * as path from 'path';
-import { existsSync } from 'fs';
 
 export interface BinaryBridgeConfig {
   /** Command name in the sandbox (what the agent types) */
@@ -102,6 +102,23 @@ export function createBinaryBridges(
           exitCode: 0,
         };
       } catch (error) {
+        // nano-spawn wraps ENOENT (missing binary) into a SubprocessError
+        // with exitCode undefined and the real cause on error.cause.
+        if (error && typeof error === 'object') {
+          const err = error as { cause?: unknown; message?: string };
+          const cause = err.cause as
+            | { code?: string; path?: string; syscall?: string }
+            | undefined;
+
+          if (cause?.code === 'ENOENT') {
+            return {
+              stdout: '',
+              stderr: `${name}: ${binaryPath} not found`,
+              exitCode: 127,
+            };
+          }
+        }
+
         // nano-spawn throws SubprocessError for non-zero exits
         if (error && typeof error === 'object' && 'exitCode' in error) {
           const subprocessError = error as {
@@ -133,10 +150,7 @@ export function createBinaryBridges(
  * just-bash filesystems (ReadWriteFs, OverlayFs) use virtual paths like /home/user
  * but we need the actual host filesystem path for spawning processes.
  */
-function resolveRealCwd(ctx: {
-  cwd: string;
-  fs: unknown;
-}): string {
+function resolveRealCwd(ctx: { cwd: string; fs: unknown }): string {
   const fs = ctx.fs as {
     toRealPath?: (p: string) => string | null;
     root?: string;
@@ -149,7 +163,10 @@ function resolveRealCwd(ctx: {
     // ReadWriteFs - virtual paths are relative to root
     // e.g., root=/Users/x/project, cwd=/ -> /Users/x/project
     realCwd = path.join(fs.root, ctx.cwd);
-  } else if (typeof fs.getMountPoint === 'function' && typeof fs.toRealPath === 'function') {
+  } else if (
+    typeof fs.getMountPoint === 'function' &&
+    typeof fs.toRealPath === 'function'
+  ) {
     // OverlayFs - use toRealPath for proper path mapping
     const real = fs.toRealPath(ctx.cwd);
     realCwd = real ?? process.cwd();

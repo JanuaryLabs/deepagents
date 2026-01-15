@@ -103,6 +103,7 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
       const context = new ContextEngine({
         store: new InMemoryContextStore(),
         chatId: `sql-gen-${crypto.randomUUID()}`,
+        userId: 'system',
       });
 
       context.set(

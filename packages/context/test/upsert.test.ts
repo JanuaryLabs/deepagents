@@ -8,7 +8,7 @@ describe('Message Upsert', () => {
     const store = new InMemoryContextStore();
 
     // Need to create chat first due to foreign key constraint
-    await store.upsertChat({ id: 'chat-1' });
+    await store.upsertChat({ id: 'chat-1', userId: 'user-1' });
 
     // Insert first message
     await store.addMessage({
@@ -59,7 +59,7 @@ describe('Message Upsert', () => {
     const store = new InMemoryContextStore();
 
     // Need to create chat first for FTS search to work
-    await store.upsertChat({ id: 'chat-1' });
+    await store.upsertChat({ id: 'chat-1', userId: 'user-1' });
 
     // Insert first message
     await store.addMessage({
