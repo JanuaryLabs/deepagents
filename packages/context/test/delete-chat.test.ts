@@ -7,7 +7,7 @@ import {
   XmlRenderer,
   assistantText,
   user,
-} from '../src/index.ts';
+} from '@deepagents/context';
 
 const renderer = new XmlRenderer();
 

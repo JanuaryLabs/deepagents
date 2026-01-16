@@ -1,12 +1,12 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '../../src/index.ts';
 import {
+  type ContextFragment,
   MarkdownRenderer,
   TomlRenderer,
   XmlRenderer,
-} from '../../src/index.ts';
+} from '@deepagents/context';
 
 describe('XmlRenderer', () => {
   const renderer = new XmlRenderer();

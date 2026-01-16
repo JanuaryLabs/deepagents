@@ -108,56 +108,92 @@ export class SqliteContextStore extends ContextStore {
     this.#db.exec(STORE_DDL);
   }
 
+  /**
+   * Execute a function within a transaction.
+   * Automatically commits on success or rolls back on error.
+   */
+  #useTransaction<T>(fn: () => T): T {
+    this.#db.exec('BEGIN TRANSACTION');
+    try {
+      const result = fn();
+      this.#db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   // ==========================================================================
   // Chat Operations
   // ==========================================================================
 
   async createChat(chat: ChatData): Promise<void> {
-    // createdAt and updatedAt are auto-set by SQLite DEFAULT
-    this.#db
-      .prepare(
-        `INSERT INTO chats (id, userId, title, metadata)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(
-        chat.id,
-        chat.userId,
-        chat.title ?? null,
-        chat.metadata ? JSON.stringify(chat.metadata) : null,
-      );
+    this.#useTransaction(() => {
+      // Create chat (createdAt and updatedAt are auto-set by SQLite DEFAULT)
+      this.#db
+        .prepare(
+          `INSERT INTO chats (id, userId, title, metadata)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(
+          chat.id,
+          chat.userId,
+          chat.title ?? null,
+          chat.metadata ? JSON.stringify(chat.metadata) : null,
+        );
+
+      // Create "main" branch
+      this.#db
+        .prepare(
+          `INSERT INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+           VALUES (?, ?, 'main', NULL, 1, ?)`,
+        )
+        .run(crypto.randomUUID(), chat.id, Date.now());
+    });
   }
 
   async upsertChat(chat: ChatData): Promise<StoredChatData> {
-    // Insert if not exists, no-op update if exists (to trigger RETURNING)
-    const row = this.#db
-      .prepare(
-        `INSERT INTO chats (id, userId, title, metadata)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET id = excluded.id
-         RETURNING *`,
-      )
-      .get(
-        chat.id,
-        chat.userId,
-        chat.title ?? null,
-        chat.metadata ? JSON.stringify(chat.metadata) : null,
-      ) as {
-      id: string;
-      userId: string;
-      title: string | null;
-      metadata: string | null;
-      createdAt: number;
-      updatedAt: number;
-    };
+    return this.#useTransaction(() => {
+      // Insert if not exists, no-op update if exists (to trigger RETURNING)
+      const row = this.#db
+        .prepare(
+          `INSERT INTO chats (id, userId, title, metadata)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET id = excluded.id
+           RETURNING *`,
+        )
+        .get(
+          chat.id,
+          chat.userId,
+          chat.title ?? null,
+          chat.metadata ? JSON.stringify(chat.metadata) : null,
+        ) as {
+        id: string;
+        userId: string;
+        title: string | null;
+        metadata: string | null;
+        createdAt: number;
+        updatedAt: number;
+      };
 
-    return {
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
+      // Ensure "main" branch exists (INSERT OR IGNORE uses UNIQUE(chatId, name) constraint)
+      this.#db
+        .prepare(
+          `INSERT OR IGNORE INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+           VALUES (?, ?, 'main', NULL, 1, ?)`,
+        )
+        .run(crypto.randomUUID(), chat.id, Date.now());
+
+      return {
+        id: row.id,
+        userId: row.userId,
+        title: row.title ?? undefined,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    });
   }
 
   async getChat(chatId: string): Promise<StoredChatData | undefined> {
@@ -291,10 +327,7 @@ export class SqliteContextStore extends ContextStore {
     chatId: string,
     options?: DeleteChatOptions,
   ): Promise<boolean> {
-    // Wrap in transaction to ensure atomicity of chat deletion + FTS cleanup
-    this.#db.exec('BEGIN TRANSACTION');
-
-    try {
+    return this.#useTransaction(() => {
       // Get message IDs before deletion for FTS cleanup
       const messageIds = this.#db
         .prepare('SELECT id FROM messages WHERE chatId = ?')
@@ -321,12 +354,8 @@ export class SqliteContextStore extends ContextStore {
           .run(...messageIds.map((m) => m.id));
       }
 
-      this.#db.exec('COMMIT');
       return result.changes > 0;
-    } catch (error) {
-      this.#db.exec('ROLLBACK');
-      throw error;
-    }
+    });
   }
 
   // ==========================================================================
@@ -448,6 +477,20 @@ export class SqliteContextStore extends ContextStore {
       .get(messageId) as { hasChildren: number };
 
     return row.hasChildren === 1;
+  }
+
+  async getMessages(chatId: string): Promise<MessageData[]> {
+    const chat = await this.getChat(chatId);
+    if (!chat) {
+      throw new Error(`Chat "${chatId}" not found`);
+    }
+
+    const activeBranch = await this.getActiveBranch(chatId);
+    if (!activeBranch?.headMessageId) {
+      return [];
+    }
+
+    return this.getMessageChain(activeBranch.headMessageId);
   }
 
   // ==========================================================================

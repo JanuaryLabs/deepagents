@@ -50,8 +50,6 @@ export interface ContextEngineOptions {
   chatId: string;
   /** User who owns this chat (required) */
   userId: string;
-  /** Branch name (defaults to 'main') */
-  branch?: string;
 }
 
 /**
@@ -142,7 +140,7 @@ export class ContextEngine {
     this.#store = options.store;
     this.#chatId = options.chatId;
     this.#userId = options.userId;
-    this.#branchName = options.branch ?? 'main';
+    this.#branchName = 'main';
   }
 
   /**
@@ -158,23 +156,8 @@ export class ContextEngine {
       userId: this.#userId,
     });
 
-    const existingBranch = await this.#store.getBranch(
-      this.#chatId,
-      this.#branchName,
-    );
-    if (existingBranch) {
-      this.#branch = existingBranch;
-    } else {
-      this.#branch = {
-        id: crypto.randomUUID(),
-        chatId: this.#chatId,
-        name: this.#branchName,
-        headMessageId: null,
-        isActive: true,
-        createdAt: Date.now(),
-      };
-      await this.#store.createBranch(this.#branch);
-    }
+    // "main" branch is guaranteed to exist after upsertChat
+    this.#branch = (await this.#store.getActiveBranch(this.#chatId))!;
 
     this.#initialized = true;
   }

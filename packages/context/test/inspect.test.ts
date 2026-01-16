@@ -11,7 +11,7 @@ import {
   hint,
   role,
   user,
-} from '../src/index.ts';
+} from '@deepagents/context';
 
 describe('ContextEngine.inspect()', () => {
   before(async () => {

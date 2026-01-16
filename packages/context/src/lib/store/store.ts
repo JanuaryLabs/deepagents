@@ -290,6 +290,15 @@ export abstract class ContextStore {
   abstract getMessageChain(headId: string): Promise<MessageData[]>;
 
   /**
+   * Get all messages for a chat from the active branch.
+   * Returns messages in chronological order (oldest first).
+   *
+   * @throws Error if chat doesn't exist
+   * @returns Empty array if chat has no active branch or branch has no messages
+   */
+  abstract getMessages(chatId: string): Promise<MessageData[]>;
+
+  /**
    * Check if a message has children (is a fork point).
    */
   abstract hasChildren(messageId: string): Promise<boolean>;

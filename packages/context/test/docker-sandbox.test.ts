@@ -1,20 +1,20 @@
-import assert from 'node:assert';
-import { describe, it, before, after } from 'node:test';
-import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import spawn from 'nano-spawn';
+import assert from 'node:assert';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, describe, it } from 'node:test';
 
 import {
-  createDockerSandbox,
-  createContainerTool,
-  useSandbox,
   type DockerSandbox,
   // Error classes
   DockerSandboxError,
   MountPathError,
   PackageInstallError,
-} from '../src/lib/sandbox/index.ts';
+  createContainerTool,
+  createDockerSandbox,
+  useSandbox,
+} from '@deepagents/context';
 
 /**
  * Check if Docker is available on this machine.
@@ -194,9 +194,7 @@ describe('Docker Sandbox', async () => {
       });
 
       it('handles special characters in output', async () => {
-        const result = await sandbox.executeCommand(
-          'echo "hello $USER world"',
-        );
+        const result = await sandbox.executeCommand('echo "hello $USER world"');
         assert.strictEqual(result.exitCode, 0);
         // $USER should expand (or be empty) - just check it doesn't error
       });
@@ -464,7 +462,9 @@ describe('Docker Sandbox', async () => {
 
       const result = await useSandbox({}, async (sandbox) => {
         sandboxRef = sandbox;
-        const output = await sandbox.executeCommand('echo "hello from useSandbox"');
+        const output = await sandbox.executeCommand(
+          'echo "hello from useSandbox"',
+        );
         return output.stdout.trim();
       });
 
@@ -507,13 +507,16 @@ describe('Docker Sandbox', async () => {
     });
 
     it('returns the value from the callback', async () => {
-      const result = await useSandbox({ packages: ['curl'] }, async (sandbox) => {
-        const output = await sandbox.executeCommand('curl --version');
-        return {
-          exitCode: output.exitCode,
-          hasCurl: output.stdout.includes('curl'),
-        };
-      });
+      const result = await useSandbox(
+        { packages: ['curl'] },
+        async (sandbox) => {
+          const output = await sandbox.executeCommand('curl --version');
+          return {
+            exitCode: output.exitCode,
+            hasCurl: output.stdout.includes('curl'),
+          };
+        },
+      );
 
       assert.strictEqual(result.exitCode, 0);
       assert.strictEqual(result.hasCurl, true);
@@ -537,7 +540,10 @@ describe('Docker Sandbox', async () => {
             assert.ok(err instanceof DockerSandboxError);
             assert.strictEqual(err.name, 'MountPathError');
             const mountErr = err as MountPathError;
-            assert.strictEqual(mountErr.hostPath, '/nonexistent/path/that/does/not/exist');
+            assert.strictEqual(
+              mountErr.hostPath,
+              '/nonexistent/path/that/does/not/exist',
+            );
             assert.strictEqual(mountErr.containerPath, '/app');
             return true;
           },
@@ -556,7 +562,9 @@ describe('Docker Sandbox', async () => {
             assert.ok(err instanceof DockerSandboxError);
             assert.strictEqual(err.name, 'PackageInstallError');
             const pkgErr = err as PackageInstallError;
-            assert.deepStrictEqual(pkgErr.packages, ['nonexistent-package-xyz-12345']);
+            assert.deepStrictEqual(pkgErr.packages, [
+              'nonexistent-package-xyz-12345',
+            ]);
             assert.strictEqual(pkgErr.image, 'alpine:latest');
             assert.strictEqual(pkgErr.packageManager, 'apk');
             return true;
@@ -568,7 +576,12 @@ describe('Docker Sandbox', async () => {
     describe('DockerSandboxError base class', () => {
       it('all errors extend DockerSandboxError', () => {
         const mountErr = new MountPathError('/host', '/container');
-        const pkgErr = new PackageInstallError(['pkg'], 'alpine', 'apk', 'error');
+        const pkgErr = new PackageInstallError(
+          ['pkg'],
+          'alpine',
+          'apk',
+          'error',
+        );
 
         assert.ok(mountErr instanceof DockerSandboxError);
         assert.ok(pkgErr instanceof DockerSandboxError);

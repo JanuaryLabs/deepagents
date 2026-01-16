@@ -1,7 +1,10 @@
+import { groq } from '@ai-sdk/groq';
 import {
+  NoSuchToolError,
   Output,
   type StreamTextResult,
   type StreamTextTransform,
+  type ToolCallRepairFunction,
   type ToolChoice,
   type ToolSet,
   convertToModelMessages,
@@ -79,6 +82,7 @@ class Agent<CIn, COut = CIn> {
       stopWhen: stepCountIs(25),
       tools: this.#options.tools,
       experimental_context: contextVariables,
+      experimental_repairToolCall: repairToolCall,
       toolChoice: this.#options.toolChoice,
       onStepFinish: (step) => {
         const toolCall = step.toolCalls.at(-1);
@@ -145,6 +149,7 @@ class Agent<CIn, COut = CIn> {
     const { messages, systemPrompt } = await this.#options.context!.resolve({
       renderer: new XmlRenderer(),
     });
+
     const runId = generateId();
     return streamText({
       abortSignal: config?.abortSignal,
@@ -152,7 +157,8 @@ class Agent<CIn, COut = CIn> {
       model: this.#options.model!,
       system: systemPrompt,
       messages: convertToModelMessages(messages as never),
-      stopWhen: stepCountIs(25),
+      experimental_repairToolCall: repairToolCall,
+      stopWhen: stepCountIs(50),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.#options.tools,
       experimental_context: contextVariables,
@@ -386,6 +392,7 @@ export function structuredOutput<TSchema extends z.ZodType>(
         system: systemPrompt,
         messages: convertToModelMessages(messages as never),
         stopWhen: stepCountIs(25),
+        experimental_repairToolCall: repairToolCall,
         experimental_context: contextVariables,
         experimental_output: Output.object({ schema: options.schema }),
       });
@@ -422,8 +429,9 @@ export function structuredOutput<TSchema extends z.ZodType>(
         providerOptions: options.providerOptions,
         model: options.model,
         system: systemPrompt,
+        experimental_repairToolCall: repairToolCall,
         messages: convertToModelMessages(messages as never),
-        stopWhen: stepCountIs(25),
+        stopWhen: stepCountIs(50),
         experimental_transform: config?.transform ?? smoothStream(),
         experimental_context: contextVariables,
         experimental_output: Output.object({ schema: options.schema }),
@@ -431,3 +439,35 @@ export function structuredOutput<TSchema extends z.ZodType>(
     },
   };
 }
+
+const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
+  toolCall,
+  tools,
+  inputSchema,
+  error,
+}) => {
+  console.log(
+    `Debug: ${chalk.yellow('RepairingToolCall')}: ${toolCall.toolName}`,
+    error.name,
+  );
+  if (NoSuchToolError.isInstance(error)) {
+    return null; // do not attempt to fix invalid tool names
+  }
+
+  const tool = tools[toolCall.toolName as keyof typeof tools];
+
+  const { experimental_output } = await generateText({
+    model: groq('openai/gpt-oss-20b'),
+    experimental_output: Output.object({ schema: tool.inputSchema }),
+    prompt: [
+      `The model tried to call the tool "${toolCall.toolName}"` +
+        ` with the following inputs:`,
+      JSON.stringify(toolCall.input),
+      `The tool accepts the following schema:`,
+      JSON.stringify(inputSchema(toolCall)),
+      'Please fix the inputs.',
+    ].join('\n'),
+  });
+
+  return { ...toolCall, input: JSON.stringify(experimental_output) };
+};

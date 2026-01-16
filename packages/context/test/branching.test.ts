@@ -7,7 +7,7 @@ import {
   XmlRenderer,
   assistantText,
   user,
-} from '../src/index.ts';
+} from '@deepagents/context';
 
 const renderer = new XmlRenderer();
 
@@ -32,33 +32,16 @@ describe('Branching', () => {
       assert.strictEqual(branches[0].headMessageId, null);
     });
 
-    it('should use custom branch name from constructor', async () => {
+    it('should expose branch name via getter (defaults to main)', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         userId: 'test-user',
         store,
         chatId: 'test-branch-2',
-        branch: 'feature-x',
       });
 
-      await engine.resolve({ renderer });
-
-      const branches = await store.listBranches('test-branch-2');
-      assert.strictEqual(branches.length, 1);
-      assert.strictEqual(branches[0].name, 'feature-x');
-      assert.strictEqual(branches[0].isActive, true);
-    });
-
-    it('should expose branch name via getter', async () => {
-      const store = new InMemoryContextStore();
-      const engine = new ContextEngine({
-        userId: 'test-user',
-        store,
-        chatId: 'test-branch-3',
-        branch: 'my-branch',
-      });
-
-      assert.strictEqual(engine.branch, 'my-branch');
+      // Default branch is always 'main'
+      assert.strictEqual(engine.branch, 'main');
     });
   });
 

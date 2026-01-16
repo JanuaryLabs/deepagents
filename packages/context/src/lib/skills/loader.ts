@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import YAML from 'yaml';
+
 import type { ParsedSkillMd, SkillMetadata } from './types.ts';
 
 /**
@@ -32,7 +33,9 @@ export function parseFrontmatter(content: string): ParsedSkillMd {
   }
 
   if (!frontmatter.description || typeof frontmatter.description !== 'string') {
-    throw new Error('Invalid SKILL.md: frontmatter must have a "description" field');
+    throw new Error(
+      'Invalid SKILL.md: frontmatter must have a "description" field',
+    );
   }
 
   return {
@@ -71,7 +74,6 @@ export function discoverSkillsInDirectory(directory: string): SkillMetadata[] {
   const expandedDir = directory.startsWith('~')
     ? path.join(process.env.HOME || '', directory.slice(1))
     : directory;
-
   if (!fs.existsSync(expandedDir)) {
     return skills;
   }

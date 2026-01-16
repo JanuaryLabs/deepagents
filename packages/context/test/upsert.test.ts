@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { InMemoryContextStore } from '../src/index.ts';
+import { InMemoryContextStore } from '@deepagents/context';
 
 describe('Message Upsert', () => {
   it('should update existing message with same ID', async () => {

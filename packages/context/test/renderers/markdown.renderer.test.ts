@@ -1,9 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '@deepagents/context';
-
-import { MarkdownRenderer } from '../../src/lib/renderers/abstract.renderer.ts';
+import { type ContextFragment, MarkdownRenderer } from '@deepagents/context';
 
 describe('MarkdownRenderer', () => {
   describe('primitive data', () => {

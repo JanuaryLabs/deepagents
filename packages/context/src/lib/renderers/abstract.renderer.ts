@@ -243,9 +243,20 @@ export class XmlRenderer extends ContextRenderer {
     // Render non-fragment items
     for (const item of nonFragmentItems) {
       if (item != null) {
-        children.push(
-          this.#leaf(pluralize.singular(name), String(item), depth + 1),
-        );
+        if (isFragmentObject(item)) {
+          // Recursively render plain objects
+          children.push(
+            this.#wrapIndented(
+              pluralize.singular(name),
+              this.renderEntries(item, { depth: depth + 2, path: [] }),
+              depth + 1,
+            ),
+          );
+        } else {
+          children.push(
+            this.#leaf(pluralize.singular(name), String(item), depth + 1),
+          );
+        }
       }
     }
 
@@ -316,9 +327,20 @@ export class XmlRenderer extends ContextRenderer {
     // Render non-fragment items
     for (const item of nonFragmentItems) {
       if (item != null) {
-        children.push(
-          this.#leaf(pluralize.singular(name), String(item), depth + 1),
-        );
+        if (isFragmentObject(item)) {
+          // Recursively render plain objects
+          children.push(
+            this.#wrapIndented(
+              pluralize.singular(name),
+              this.renderEntries(item, { depth: depth + 2, path: [] }),
+              depth + 1,
+            ),
+          );
+        } else {
+          children.push(
+            this.#leaf(pluralize.singular(name), String(item), depth + 1),
+          );
+        }
       }
     }
 
@@ -362,7 +384,22 @@ export class XmlRenderer extends ContextRenderer {
     const itemTag = pluralize.singular(key);
     const children = items
       .filter((item) => item != null)
-      .map((item) => this.#leaf(itemTag, String(item), ctx.depth + 1));
+      .map((item) => {
+        // Check for ContextFragment first (has name + data properties)
+        if (isFragment(item)) {
+          return this.renderFragment(item, { ...ctx, depth: ctx.depth + 1 });
+        }
+        // Then check for plain objects
+        if (isFragmentObject(item)) {
+          return this.#wrapIndented(
+            itemTag,
+            this.renderEntries(item, { ...ctx, depth: ctx.depth + 2 }),
+            ctx.depth + 1,
+          );
+        }
+        // Primitives
+        return this.#leaf(itemTag, String(item), ctx.depth + 1);
+      });
     return this.#wrapIndented(key, children, ctx.depth);
   }
 
@@ -574,18 +611,17 @@ export class TomlRenderer extends ContextRenderer {
     const rendered: string[] = [];
     for (const f of this.sanitizeFragments(fragments)) {
       if (this.isPrimitive(f.data)) {
-        return `${f.name} = ${this.#formatValue(f.data)}`;
-      }
-      if (Array.isArray(f.data)) {
-        return this.#renderTopLevelArray(f.name, f.data);
-      }
-      if (isFragment(f.data)) {
-        return [
-          `[${f.name}]`,
-          this.renderFragment(f.data, { depth: 0, path: [f.name] }),
-        ].join('\n');
-      }
-      if (isFragmentObject(f.data)) {
+        rendered.push(`${f.name} = ${this.#formatValue(f.data)}`);
+      } else if (Array.isArray(f.data)) {
+        rendered.push(this.#renderTopLevelArray(f.name, f.data));
+      } else if (isFragment(f.data)) {
+        rendered.push(
+          [
+            `[${f.name}]`,
+            this.renderFragment(f.data, { depth: 0, path: [f.name] }),
+          ].join('\n'),
+        );
+      } else if (isFragmentObject(f.data)) {
         const entries = this.#renderObjectEntries(f.data, [f.name]);
         rendered.push([`[${f.name}]`, ...entries].join('\n'));
       }

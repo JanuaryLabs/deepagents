@@ -5,6 +5,7 @@ export * from './lib/fragments.ts';
 export * from './lib/fragments/domain.ts';
 export * from './lib/fragments/user.ts';
 export * from './lib/guardrail.ts';
+export * from './lib/guardrails/error-recovery.guardrail.ts';
 export * from './lib/models.generated.ts';
 export * from './lib/renderers/abstract.renderer.ts';
 export * from './lib/sandbox/index.ts';

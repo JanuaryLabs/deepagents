@@ -2,7 +2,7 @@ import { Bash, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { createBinaryBridges } from '../src/lib/sandbox/binary-bridges.ts';
+import { createBinaryBridges } from '@deepagents/context';
 
 /**
  * Comprehensive test suite for binary bridges.

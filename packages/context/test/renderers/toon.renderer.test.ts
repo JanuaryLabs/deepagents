@@ -1,8 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '../../src/index.ts';
-import { ToonRenderer } from '../../src/lib/renderers/abstract.renderer.ts';
+import { type ContextFragment, ToonRenderer } from '@deepagents/context';
 
 describe('ToonRenderer', () => {
   describe('primitive data', () => {

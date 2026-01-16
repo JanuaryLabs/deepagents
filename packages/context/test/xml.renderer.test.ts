@@ -1,8 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import type { ContextFragment } from '../src/lib/context.ts';
-import { XmlRenderer } from '../src/lib/renderers/abstract.renderer.ts';
+import { type ContextFragment, XmlRenderer } from '@deepagents/context';
 
 describe('XmlRenderer', () => {
   describe('primitive data', () => {
@@ -429,6 +428,76 @@ describe('XmlRenderer', () => {
       ];
       const result = renderer.render(fragments);
       assert.strictEqual(result, '<text>你好世界 🌍 émojis</text>');
+    });
+  });
+
+  describe('table schema structure (regression)', () => {
+    it('renders table with nested column fragments', () => {
+      const renderer = new XmlRenderer();
+      // This is the exact structure produced by SQLite table grounding
+      const fragments: ContextFragment[] = [
+        {
+          name: 'table',
+          data: {
+            name: 'users',
+            columns: [
+              {
+                name: 'column',
+                data: { name: 'id', type: 'INTEGER', pk: true },
+              },
+              { name: 'column', data: { name: 'email', type: 'TEXT' } },
+            ],
+          },
+        },
+      ];
+      const result = renderer.render(fragments);
+
+      // Should NOT contain [object Object]
+      assert.ok(
+        !result.includes('[object Object]'),
+        `Should not contain [object Object]. Got:\n${result}`,
+      );
+
+      // Should properly render nested fragments
+      assert.ok(
+        result.includes('<name>id</name>'),
+        'Should contain column name',
+      );
+      assert.ok(
+        result.includes('<type>INTEGER</type>'),
+        'Should contain column type',
+      );
+      assert.ok(
+        result.includes('<name>email</name>'),
+        'Should contain second column name',
+      );
+    });
+
+    it('renders table with indexes', () => {
+      const renderer = new XmlRenderer();
+      const fragments: ContextFragment[] = [
+        {
+          name: 'table',
+          data: {
+            name: 'users',
+            columns: [
+              { name: 'column', data: { name: 'id', type: 'INTEGER' } },
+            ],
+            indexes: [
+              {
+                name: 'index',
+                data: { name: 'idx_users_id', columns: ['id'] },
+              },
+            ],
+          },
+        },
+      ];
+      const result = renderer.render(fragments);
+
+      assert.ok(
+        !result.includes('[object Object]'),
+        `Should not contain [object Object]. Got:\n${result}`,
+      );
     });
   });
 
