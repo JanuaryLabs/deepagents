@@ -19,9 +19,10 @@ Build a content creation pipeline where a researcher gathers information, a writ
 ## Quick Start
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, generate, instructions } from '@deepagents/agent';
 
 // Schema for structured research output
 const ResearchSchema = z.object({
@@ -112,26 +113,26 @@ const editor = agent({
 async function createContent(topic: string) {
   // Step 1: Research
   console.log('Researching...');
-  const { experimental_output: research } = await generate(
+  const { output: research } = await generate(
     researcher,
     `Research this topic: ${topic}`,
-    {}
+    {},
   );
 
   // Step 2: Write
   console.log('Writing draft...');
-  const { experimental_output: draft } = await generate(
+  const { output: draft } = await generate(
     writer,
     `Write an article based on this research:\n${JSON.stringify(research, null, 2)}`,
-    {}
+    {},
   );
 
   // Step 3: Edit
   console.log('Editing...');
-  const { experimental_output: article } = await generate(
+  const { output: article } = await generate(
     editor,
     `Edit and polish this draft:\n${draft.content}`,
-    {}
+    {},
   );
 
   return article;
@@ -152,15 +153,16 @@ Gathers information with web search and outputs structured findings:
 ```typescript
 const researcher = agent({
   name: 'Researcher',
-  output: ResearchSchema,  // Structured output
+  output: ResearchSchema, // Structured output
   tools: {
-    browserSearch: groq.tools.browserSearch({}),  // Web search capability
+    browserSearch: groq.tools.browserSearch({}), // Web search capability
   },
   // ...
 });
 ```
 
 **Output structure:**
+
 ```typescript
 {
   topic: "AI agents",
@@ -217,17 +219,18 @@ const writer = agent<typeof DraftSchema, ContentContext>({
   name: 'Writer',
   model: groq('gpt-oss-20b'),
   output: DraftSchema,
-  prompt: (ctx) => instructions({
-    purpose: [
-      `You write for a ${ctx.targetAudience} audience.`,
-      `Use a ${ctx.tone} tone.`,
-    ],
-    routine: [
-      'Review the research provided',
-      'Create an outline appropriate for the audience',
-      `Write ${ctx.maxWords} words or less`,
-    ],
-  }),
+  prompt: (ctx) =>
+    instructions({
+      purpose: [
+        `You write for a ${ctx.targetAudience} audience.`,
+        `Use a ${ctx.tone} tone.`,
+      ],
+      routine: [
+        'Review the research provided',
+        'Create an outline appropriate for the audience',
+        `Write ${ctx.maxWords} words or less`,
+      ],
+    }),
 });
 
 // Run with context
@@ -237,11 +240,7 @@ const context: ContentContext = {
   maxWords: 1000,
 };
 
-const { experimental_output: draft } = await generate(
-  writer,
-  researchJson,
-  context
-);
+const { output: draft } = await generate(writer, researchJson, context);
 ```
 
 ## Streaming Version
@@ -253,10 +252,10 @@ import { execute } from '@deepagents/agent';
 
 async function createContentStreaming(topic: string) {
   // Research (non-streaming for structured output)
-  const { experimental_output: research } = await generate(
+  const { output: research } = await generate(
     researcher,
     `Research: ${topic}`,
-    {}
+    {},
   );
 
   // Write with streaming
@@ -264,28 +263,24 @@ async function createContentStreaming(topic: string) {
   const writeStream = execute(
     writer,
     `Write based on: ${JSON.stringify(research)}`,
-    {}
+    {},
   );
 
   for await (const chunk of writeStream.textStream) {
     process.stdout.write(chunk);
   }
 
-  const draft = await writeStream.experimental_output;
+  const draft = await writeStream.output;
 
   // Edit with streaming
   console.log('\n--- Editing ---\n');
-  const editStream = execute(
-    editor,
-    `Edit: ${draft.content}`,
-    {}
-  );
+  const editStream = execute(editor, `Edit: ${draft.content}`, {});
 
   for await (const chunk of editStream.textStream) {
     process.stdout.write(chunk);
   }
 
-  return editStream.experimental_output;
+  return editStream.output;
 }
 ```
 
@@ -316,22 +311,20 @@ const seoSpecialist = agent({
 });
 
 // Add to pipeline after editor
-const { experimental_output: seo } = await generate(
-  seoSpecialist,
-  article.content,
-  {}
-);
+const { output: seo } = await generate(seoSpecialist, article.content, {});
 ```
 
 ### Add fact-checking
 
 ```typescript
 const FactCheckSchema = z.object({
-  claims: z.array(z.object({
-    claim: z.string(),
-    verified: z.boolean(),
-    source: z.string().optional(),
-  })),
+  claims: z.array(
+    z.object({
+      claim: z.string(),
+      verified: z.boolean(),
+      source: z.string().optional(),
+    }),
+  ),
   overallAccuracy: z.number().min(0).max(100),
 });
 
@@ -360,12 +353,10 @@ Research multiple subtopics simultaneously:
 ```typescript
 async function parallelResearch(subtopics: string[]) {
   const results = await Promise.all(
-    subtopics.map((topic) =>
-      generate(researcher, `Research: ${topic}`, {})
-    )
+    subtopics.map((topic) => generate(researcher, `Research: ${topic}`, {})),
   );
 
-  return results.map((r) => r.experimental_output);
+  return results.map((r) => r.output);
 }
 
 // Usage

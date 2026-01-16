@@ -11,12 +11,7 @@
     }
   },
   "exclude": ["src/evals"],
-  "include": [
-    "src/**/*.test.ts",
-    "src/**/*.spec.ts",
-    "src/tests/**/*.ts",
-    "../../global.d.ts"
-  ],
+  "include": ["src/**/*.ts", "../../global.d.ts"],
   "references": [
     {
       "path": "../toolbox/tsconfig.lib.json"

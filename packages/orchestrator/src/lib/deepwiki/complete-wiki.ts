@@ -85,7 +85,7 @@ async function writeSection(
 ): Promise<string> {
   console.log(`Writing section: ${pathSegments.join(' > ')}`);
 
-  const result = execute(
+  const result = await execute(
     sectionWriterAgent,
     [
       user(
@@ -139,7 +139,7 @@ async function writeTocPage(
     .map((child) => `- [${child.title}](${child.path})`)
     .join('\n');
 
-  const result = execute(
+  const result = await execute(
     tocPageAgent,
     [
       user(

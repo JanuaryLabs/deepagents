@@ -156,3 +156,16 @@ Papers backing implementations in `packages/agent/src/lib/patterns/`.
 | CoE-SQL                   | 2405.02712 | 2024 | Chain-of-editions                    |
 | Multi-Granularity Prompts | 2305.14006 | 2023 | Topic shift detection                |
 | SQL-GEN                   | 2408.12733 | 2024 | Schema-driven synthesis              |
+
+/\*\*
+
+- Chain of Thought prompt for text-to-SQL.
+-
+- Research-backed approach:
+- - Keep reasoning concise to avoid error propagation (EMNLP 2023)
+- - Focus on schema linking and database operations (Struct-SQL 2025)
+- - Use intermediate representations for complex queries
+-
+- @see https://arxiv.org/abs/2305.14215
+- @see https://arxiv.org/html/2512.17053
+  \*/

@@ -51,17 +51,20 @@ This recipe demonstrates several advanced patterns:
 ## Quick Start
 
 ```typescript
-import { agent, instructions, generate, execute } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, execute, generate, instructions } from '@deepagents/agent';
 
 // ============ Schemas ============
 
 const SearchPlanSchema = z.object({
-  searches: z.array(z.object({
-    reason: z.string().describe('Why this search is relevant'),
-    query: z.string().describe('The search term'),
-  })),
+  searches: z.array(
+    z.object({
+      reason: z.string().describe('Why this search is relevant'),
+      query: z.string().describe('The search term'),
+    }),
+  ),
 });
 
 const AnalysisSummarySchema = z.object({
@@ -173,11 +176,7 @@ const verifier = agent({
 async function analyzeCompany(query: string) {
   // Step 1: Plan searches
   console.log('Planning research...');
-  const { experimental_output: plan } = await generate(
-    planner,
-    `Analyze: ${query}`,
-    {}
-  );
+  const { output: plan } = await generate(planner, `Analyze: ${query}`, {});
   console.log(`Planned ${plan.searches.length} searches`);
 
   // Step 2: Execute searches in parallel
@@ -187,10 +186,10 @@ async function analyzeCompany(query: string) {
       const result = execute(
         searcher,
         `Search: ${item.query}\nReason: ${item.reason}`,
-        {}
+        {},
       );
       return result.text;
-    })
+    }),
   );
 
   // Step 3: Write report with analyst tools
@@ -198,7 +197,7 @@ async function analyzeCompany(query: string) {
 
   // Convert analysts to tools with output extraction
   const outputExtractor = async (result: any) => {
-    return result.experimental_output.summary;
+    return result.output.summary;
   };
 
   const writerWithTools = writer.clone({
@@ -208,31 +207,34 @@ async function analyzeCompany(query: string) {
         outputExtractor,
       }),
       risk_analysis: riskAnalyst.asTool({
-        toolDescription: 'Get risk analysis (threats, regulatory, supply chain)',
+        toolDescription:
+          'Get risk analysis (threats, regulatory, supply chain)',
         outputExtractor,
       }),
     },
   });
 
-  const { experimental_output: report } = await generate(
+  const { output: report } = await generate(
     writerWithTools,
     `Query: ${query}\nResearch:\n${searchResults.join('\n\n')}`,
-    {}
+    {},
   );
 
   // Step 4: Verify
   console.log('Verifying...');
-  const { experimental_output: verification } = await generate(
+  const { output: verification } = await generate(
     verifier,
     report.markdown_report,
-    {}
+    {},
   );
 
   return { report, verification };
 }
 
 // Usage
-const { report, verification } = await analyzeCompany('Apple Inc Q4 2024 outlook');
+const { report, verification } = await analyzeCompany(
+  'Apple Inc Q4 2024 outlook',
+);
 
 console.log('Summary:', report.short_summary);
 console.log('Verified:', verification.verified);
@@ -250,7 +252,7 @@ Generates a structured search plan:
 ```typescript
 const planner = agent({
   name: 'FinancialPlanner',
-  output: SearchPlanSchema,  // Structured plan output
+  output: SearchPlanSchema, // Structured plan output
   prompt: instructions({
     purpose: ['Plan financial research by identifying key searches.'],
     routine: ['Generate 5-15 targeted search queries.'],
@@ -259,11 +261,15 @@ const planner = agent({
 ```
 
 **Output example:**
+
 ```json
 {
   "searches": [
     { "reason": "Recent earnings", "query": "Apple Q4 2024 earnings report" },
-    { "reason": "Analyst sentiment", "query": "Apple stock analyst ratings 2024" }
+    {
+      "reason": "Analyst sentiment",
+      "query": "Apple stock analyst ratings 2024"
+    }
   ]
 }
 ```
@@ -275,7 +281,7 @@ Executes web searches with required tool use:
 ```typescript
 const searcher = agent({
   name: 'FinancialSearcher',
-  toolChoice: 'required',  // Must use tool
+  toolChoice: 'required', // Must use tool
   tools: {
     browser_search: groq.tools.browserSearch({}),
   },
@@ -305,7 +311,7 @@ The key pattern—specialists become tools the writer can call:
 // Convert agent to tool
 const fundamentalsTool = fundamentalsAnalyst.asTool({
   toolDescription: 'Get fundamentals analysis',
-  outputExtractor: async (result) => result.experimental_output.summary,
+  outputExtractor: async (result) => result.output.summary,
 });
 
 // Clone writer with tools
@@ -318,6 +324,7 @@ const writerWithTools = writer.clone({
 ```
 
 When the writer calls `fundamentals_analysis`, it:
+
 1. Invokes the `fundamentalsAnalyst` agent
 2. Passes the input to the agent
 3. Extracts just the `summary` field via `outputExtractor`
@@ -330,7 +337,7 @@ Quality control with boolean verdict:
 ```typescript
 const verifier = agent({
   name: 'Verifier',
-  output: VerificationSchema,  // { verified: boolean, issues: string }
+  output: VerificationSchema, // { verified: boolean, issues: string }
 });
 ```
 
@@ -350,12 +357,12 @@ The `outputExtractor` function transforms structured agent output into tool-frie
 
 ```typescript
 type OutputExtractorFn = (
-  output: GenerateTextResult<ToolSet, any>
+  output: GenerateTextResult<ToolSet, any>,
 ) => string | Promise<string>;
 
 // Example: Extract just the summary field
 const summaryExtractor: OutputExtractorFn = async (result) => {
-  return result.experimental_output.summary;
+  return result.output.summary;
 };
 
 // Use with asTool
@@ -382,10 +389,11 @@ type AnalysisContext = {
 
 // Planner uses context
 const planner = agent<typeof SearchPlanSchema, AnalysisContext>({
-  prompt: (ctx) => instructions({
-    purpose: [`Plan research for ${ctx.company} (${ctx.timeframe})`],
-    routine: ['Generate targeted searches.'],
-  }),
+  prompt: (ctx) =>
+    instructions({
+      purpose: [`Plan research for ${ctx.company} (${ctx.timeframe})`],
+      routine: ['Generate targeted searches.'],
+    }),
 });
 
 // Execute with context
@@ -395,10 +403,10 @@ const context: AnalysisContext = {
   searchResults: [],
 };
 
-const { experimental_output: plan } = await generate(
+const { output: plan } = await generate(
   planner,
   'Analyze company outlook',
-  context
+  context,
 );
 ```
 
@@ -454,10 +462,12 @@ async function analyzeWithRetry(query: string, maxRetries = 2) {
 ```typescript
 const SearchResultSchema = z.object({
   content: z.string(),
-  sources: z.array(z.object({
-    title: z.string(),
-    url: z.string(),
-  })),
+  sources: z.array(
+    z.object({
+      title: z.string(),
+      url: z.string(),
+    }),
+  ),
 });
 
 const searcher = agent({

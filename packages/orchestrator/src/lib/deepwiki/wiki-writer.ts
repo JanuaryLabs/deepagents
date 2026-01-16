@@ -77,11 +77,13 @@ async function renderSection(
     ),
   ];
 
-  return execute(sectionWriter, messages, {
-    repo_path: ctx.repo_path,
-    section_path: path,
-    scratchpad: '## Scratchpad\n\n',
-  }).text;
+  return (
+    await execute(sectionWriter, messages, {
+      repo_path: ctx.repo_path,
+      section_path: path,
+      scratchpad: '## Scratchpad\n\n',
+    })
+  ).text;
 }
 
 async function renderOutline(

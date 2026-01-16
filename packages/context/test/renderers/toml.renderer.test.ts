@@ -124,7 +124,7 @@ definition = "Lifetime Value"`;
       const fragments: ContextFragment[] = [
         {
           name: 'item',
-          data: { a: 'value', b: null, c: 'other' } as Record<string, unknown>,
+          data: { a: 'value', b: null, c: 'other' },
         },
       ];
       const result = renderer.render(fragments);
@@ -138,10 +138,7 @@ definition = "Lifetime Value"`;
       const fragments: ContextFragment[] = [
         {
           name: 'item',
-          data: { a: 'value', b: undefined, c: 'other' } as Record<
-            string,
-            unknown
-          >,
+          data: { a: 'value', b: undefined, c: 'other' },
         },
       ];
       const result = renderer.render(fragments);
@@ -200,7 +197,7 @@ definition = "Lifetime Value"`;
     it('skips null values in arrays', () => {
       const renderer = new TomlRenderer();
       const fragments: ContextFragment[] = [
-        { name: 'items', data: ['one', null, 'three'] as unknown[] },
+        { name: 'items', data: ['one', null, 'three'] },
       ];
       const result = renderer.render(fragments);
       assert.strictEqual(result, 'items = ["one", "three"]');

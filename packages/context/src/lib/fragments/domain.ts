@@ -1,4 +1,4 @@
-import type { ContextFragment } from '../fragments.ts';
+import type { ContextFragment, FragmentData } from '../fragments.ts';
 
 /**
  * Domain knowledge fragment builders.
@@ -539,5 +539,129 @@ export function glossary(entries: Record<string, string>): ContextFragment {
       term,
       expression,
     })),
+  };
+}
+
+/**
+ * Create a role fragment for system prompt instructions.
+ */
+export function role(content: string): ContextFragment {
+  return {
+    name: 'role',
+    data: content,
+  };
+}
+
+/**
+ * Define a guiding principle that shapes agent behavior.
+ *
+ * Use this to establish high-level rules for decision-making, reasoning, or domain behavior.
+ * Principles can contain policies (specific rules that implement the principle).
+ *
+ * @param input.title - Name/title of the principle
+ * @param input.description - What this principle means and why it matters
+ * @param input.policies - Optional specific rules that implement this principle
+ *
+ * @example
+ * // Logical dependencies principle
+ * principle({
+ *   title: "Logical dependencies and constraints",
+ *   description: "Analyze intended actions against factors in order of importance",
+ *   policies: [
+ *     "Policy-based rules, mandatory prerequisites, and constraints",
+ *     "Order of operations: Ensure actions don't prevent subsequent necessary actions",
+ *     "Other prerequisites (information and/or actions needed)",
+ *     "Explicit user constraints or preferences"
+ *   ]
+ * })
+ *
+ * @example
+ * // Risk assessment principle
+ * principle({
+ *   title: "Risk assessment",
+ *   description: "Evaluate consequences before taking action",
+ *   policies: [
+ *     "For exploratory tasks, missing optional parameters is LOW risk",
+ *     "Prefer calling tools with available information over asking the user"
+ *   ]
+ * })
+ *
+ * @example
+ * // Design principle
+ * principle({
+ *   title: "Separation of concerns",
+ *   description: "Each module should have a single, well-defined responsibility",
+ *   policies: [
+ *     "Data access logic stays in repository layer",
+ *     "Business rules stay in service layer",
+ *     "Presentation logic stays in controller/view layer"
+ *   ]
+ * })
+ */
+export function principle(input: {
+  title: string;
+  description: string;
+  policies?: FragmentData[];
+}): ContextFragment {
+  return {
+    name: 'principle',
+    data: {
+      title: input.title,
+      description: input.description,
+      ...(input.policies?.length && { policies: input.policies }),
+    },
+  };
+}
+
+/**
+ * Define a policy rule, optionally with prerequisites or nested sub-policies.
+ *
+ * Policies can be used in two ways:
+ * 1. Prerequisite rules: "must do X before Y" using the `before` parameter
+ * 2. Sub-policies: nested rules within a principle using the `policies` parameter
+ *
+ * Policies differ from guardrails: policies are prerequisites (do this first),
+ * guardrails are prohibitions (never do this).
+ *
+ * @param input.rule - The policy rule to enforce
+ * @param input.before - What action this is a prerequisite for (optional for sub-policies)
+ * @param input.reason - Why this rule matters
+ * @param input.policies - Nested sub-policies for hierarchical structure
+ *
+ * @example
+ * // Prerequisite rule with "before"
+ * policy({
+ *   rule: "Validate SQL syntax",
+ *   before: "executing any query against the database",
+ *   reason: "Catches errors early and allows correction before execution"
+ * })
+ *
+ * @example
+ * // Sub-policy within a principle (no "before" needed)
+ * policy({ rule: "Policy-based rules, mandatory prerequisites, and constraints." })
+ *
+ * @example
+ * // Nested sub-policies (hierarchical structure like 1.2 → 1.2.1)
+ * policy({
+ *   rule: "Order of operations: Ensure taking an action does not prevent a subsequent necessary action.",
+ *   policies: [
+ *     "The user may request actions in a random order, but you may need to reorder operations.",
+ *   ],
+ * })
+ */
+export function policy(input: {
+  rule: string;
+  before?: string;
+  reason?: string;
+  policies?: FragmentData[];
+}): ContextFragment {
+  return {
+    name: 'policy',
+    data: {
+      rule: input.rule,
+      ...(input.before && { before: input.before }),
+      ...(input.reason && { reason: input.reason }),
+      ...(input.policies?.length && { policies: input.policies }),
+    },
   };
 }

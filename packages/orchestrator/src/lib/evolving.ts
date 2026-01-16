@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import { defaultSettingsMiddleware, tool, wrapLanguageModel } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import dedent from 'dedent';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
@@ -107,41 +107,49 @@ async function savePrompt(promptText: string): Promise<void> {
   console.log('Saved revised prompt to file');
 }
 
+const write_content_tool = tool({
+  description: 'Writes content based on given instructions.',
+  inputSchema: z.object({
+    fileName: z.string().describe('The name of the file to write to.'),
+    content: z.string().describe('The content to be written.'),
+  }),
+  execute: async (
+    { fileName, content }: { fileName: string; content: string },
+    _options: ToolExecutionOptions,
+  ) => {
+    if (extname(fileName) !== '.ts') {
+      return 'Error: Can only write .ts files.';
+    }
+    await mkdir(dirname(join(process.cwd(), '.evolving', fileName)), {
+      recursive: true,
+    });
+    await writeFile(
+      join(process.cwd(), '.evolving', fileName),
+      content,
+      'utf-8',
+    );
+    return `File written: ${fileName}`;
+  },
+});
+
+const run_code_tool = tool({
+  description: 'Executes provided code snippets and returns the output.',
+  inputSchema: z.object({
+    fileName: z
+      .string()
+      .describe('The name of the file containing the code to run.'),
+  }),
+  execute: async (
+    { fileName }: { fileName: string },
+    _options: ToolExecutionOptions,
+  ) => {
+    return await import(join(process.cwd(), '.evolving', fileName));
+  },
+});
+
 const executorTools = {
-  write_content: tool({
-    name: 'write_content',
-    description: 'Writes content based on given instructions.',
-    inputSchema: z.object({
-      fileName: z.string().describe('The name of the file to write to.'),
-      content: z.string().describe('The content to be written.'),
-    }),
-    execute: async ({ fileName, content }) => {
-      if (extname(fileName) !== '.ts') {
-        return 'Error: Can only write .ts files.';
-      }
-      await mkdir(dirname(join(process.cwd(), '.evolving', fileName)), {
-        recursive: true,
-      });
-      await writeFile(
-        join(process.cwd(), '.evolving', fileName),
-        content,
-        'utf-8',
-      );
-      return `File written: ${fileName}`;
-    },
-  }),
-  run_code: tool({
-    name: 'run_code',
-    description: 'Executes provided code snippets and returns the output.',
-    inputSchema: z.object({
-      fileName: z
-        .string()
-        .describe('The name of the file containing the code to run.'),
-    }),
-    execute: async ({ fileName }) => {
-      return await import(join(process.cwd(), '.evolving', fileName));
-    },
-  }),
+  write_content: write_content_tool,
+  run_code: run_code_tool,
 };
 
 const adaptingAgent = agent({
@@ -174,18 +182,13 @@ async function runAdaptationCycle() {
     // Create executor with current prompt
     const executor = agent({
       name: 'executor_agent',
-      model: wrapLanguageModel({
-        model: groq('openai/gpt-oss-120b'),
-        middleware: defaultSettingsMiddleware({
-          settings: { temperature: 0 },
-        }),
-      }),
+      model: groq('openai/gpt-oss-120b'),
       prompt: currentPrompt,
       tools: executorTools,
     });
 
     // Run executor
-    const result$ = stream(executor, [user(USER_TASK)], {});
+    const result$ = await stream(executor, [user(USER_TASK)], {});
     const messages = await Array.fromAsync(result$.toUIMessageStream());
     await result$.consumeStream();
 
@@ -202,9 +205,7 @@ async function runAdaptationCycle() {
     console.log('Final Result Text:', text);
 
     // Run adapting agent
-    const {
-      experimental_output: { revisedPrompt },
-    } = await generate(
+    const { output } = await generate(
       adaptingAgent,
       [
         user(
@@ -225,6 +226,7 @@ async function runAdaptationCycle() {
       ],
       {},
     );
+    const { revisedPrompt } = output as { revisedPrompt: string };
 
     // Save and use revised prompt for next iteration
     await savePrompt(revisedPrompt);

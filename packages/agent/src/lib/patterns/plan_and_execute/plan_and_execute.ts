@@ -122,11 +122,8 @@ export async function planAndExecute(
     plan: [],
     pastSteps: [],
   };
-  const { experimental_output: initialPlan } = await generate(
-    planner,
-    `Objective: ${objective}`,
-    {},
-  );
+  const { output } = await generate(planner, `Objective: ${objective}`, {});
+  const initialPlan = output as Plan;
   state.plan = initialPlan.steps;
   console.log('📋 Initial plan created:');
   state.plan.forEach((step, i) => console.log(`  ${i + 1}. ${step}`));
@@ -142,7 +139,7 @@ export async function planAndExecute(
     const currentTask = state.plan[0];
     console.log(`⚡ Executing: ${currentTask}`);
 
-    const taskResult = await execute(executor, currentTask, {}).text;
+    const taskResult = await (await execute(executor, currentTask, {})).text;
 
     state.pastSteps.push([currentTask, taskResult]);
     state.plan = state.plan.slice(1);
@@ -183,11 +180,12 @@ Based on the progress made, either:
 Only include steps that still NEED to be done. Do not repeat completed steps.
     `.trim();
 
-    const { experimental_output: replanResult } = await generate(
+    const { output: replanOutput } = await generate(
       replanner,
       replanPrompt,
       {},
     );
+    const replanResult = replanOutput as ReplanResult;
 
     if (replanResult.type === 'response') {
       state.response = replanResult.response;

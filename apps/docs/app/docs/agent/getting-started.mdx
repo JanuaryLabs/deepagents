@@ -38,8 +38,9 @@ export OPENAI_API_KEY=your-api-key
 Let's create a simple agent that can search the web and answer questions:
 
 ```typescript
-import { agent, instructions, execute } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
+
+import { agent, execute, instructions } from '@deepagents/agent';
 
 const assistant = agent({
   name: 'Assistant',
@@ -89,7 +90,7 @@ The `instructions()` helper structures prompts with purpose and routine:
 instructions({
   purpose: ['What this agent does'],
   routine: ['Step 1', 'Step 2', 'Step 3'],
-})
+});
 ```
 
 This generates a well-structured prompt that helps the model understand its role and follow a consistent process.
@@ -134,7 +135,7 @@ Best for pipelines where you need the complete result:
 const result = await generate(agent, 'Analyze this data', {});
 
 console.log(result.text);
-console.log(result.experimental_output); // If using structured output
+console.log(result.output); // If using structured output
 ```
 
 #### `swarm()` - UI Message Stream
@@ -193,14 +194,10 @@ const analyzer = agent({
   output: AnalysisSchema,
 });
 
-const { experimental_output } = await generate(
-  analyzer,
-  'I love this product!',
-  {}
-);
+const { output } = await generate(analyzer, 'I love this product!', {});
 
-console.log(experimental_output.sentiment);  // 'positive'
-console.log(experimental_output.confidence); // 0.95
+console.log(output.sentiment); // 'positive'
+console.log(output.confidence); // 0.95
 ```
 
 ## Multi-Agent with Handoffs
@@ -249,7 +246,7 @@ const coordinator = agent({
 const stream = execute(
   coordinator,
   'Write a blog post about TypeScript best practices',
-  {}
+  {},
 );
 ```
 
@@ -285,16 +282,19 @@ execute(assistant, 'Hello', {
 Here's a complete research assistant:
 
 ```typescript
-import { agent, instructions, generate, execute } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
+import { agent, execute, generate, instructions } from '@deepagents/agent';
+
 // Schema for research plan
 const PlanSchema = z.object({
-  searches: z.array(z.object({
-    query: z.string(),
-    reason: z.string(),
-  })),
+  searches: z.array(
+    z.object({
+      query: z.string(),
+      reason: z.string(),
+    }),
+  ),
 });
 
 // Schema for final report
@@ -342,25 +342,21 @@ const writer = agent({
 // Run the pipeline
 async function research(question: string) {
   // Step 1: Plan searches
-  const { experimental_output: plan } = await generate(
-    planner,
-    question,
-    {}
-  );
+  const { output: plan } = await generate(planner, question, {});
 
   // Step 2: Execute searches in parallel
   const results = await Promise.all(
     plan.searches.map(async (s) => {
       const stream = execute(researcher, s.query, {});
       return stream.text;
-    })
+    }),
   );
 
   // Step 3: Generate report
-  const { experimental_output: report } = await generate(
+  const { output: report } = await generate(
     writer,
     `Question: ${question}\nResearch: ${results.join('\n')}`,
-    {}
+    {},
   );
 
   return report;

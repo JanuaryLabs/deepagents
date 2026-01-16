@@ -1,20 +1,25 @@
 import { groq } from '@ai-sdk/groq';
-import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { type AgentModel, agent, generate, user } from '@deepagents/agent';
+import { type AgentModel } from '@deepagents/agent';
 import {
+  ContextEngine,
   type ContextFragment,
+  InMemoryContextStore,
   analogy,
   clarification,
   example,
   explain,
+  fragment,
   guardrail,
   hint,
+  persona,
   quirk,
+  structuredOutput,
   styleGuide,
   term,
+  user,
   workflow,
 } from '@deepagents/context';
 
@@ -102,56 +107,6 @@ const outputSchema = z.object({
 
 type TeachablesOutput = z.infer<typeof outputSchema>;
 
-const teachablesAuthorAgent = agent<
-  TeachablesOutput,
-  { schema: string; context?: string }
->({
-  name: 'teachables-author',
-  model: wrapLanguageModel({
-    model: groq('openai/gpt-oss-20b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.4, topP: 0.95 },
-    }),
-  }),
-  output: outputSchema,
-  prompt: (state) => dedent`
-    <identity>
-      You design "fragments" for a Text2SQL system. Fragments become structured XML instructions.
-      Choose only high-impact items that improve accuracy, safety, or clarity for this database.
-    </identity>
-
-    <database_schema>
-    ${state?.schema}
-    </database_schema>
-
-    ${state?.context ? `<additional_context>${state.context}</additional_context>` : ''}
-
-    <output_structure>
-      Output a JSON object with these optional arrays (include only relevant ones):
-      - terms: [{ name: string, definition: string }] - Domain terminology
-      - hints: [{ text: string }] - Helpful SQL generation hints
-      - guardrails: [{ rule: string, reason?: string, action?: string }] - Safety constraints
-      - explains: [{ concept: string, explanation: string, therefore?: string }] - Concept explanations
-      - examples: [{ question: string, answer: string, note?: string }] - Q&A examples
-      - clarifications: [{ when: string, ask: string, reason: string }] - Clarification triggers
-      - workflows: [{ task: string, steps: string[], triggers?: string[], notes?: string }] - Multi-step tasks
-      - quirks: [{ issue: string, workaround: string }] - Known issues
-      - styleGuides: [{ prefer: string, never?: string, always?: string }] - SQL style rules
-      - analogies: [{ concepts: string[], relationship: string, insight?: string, therefore?: string, pitfall?: string }]
-    </output_structure>
-
-    <instructions>
-      1. Analyze the schema to infer domain, relationships, and sensitive columns.
-      2. Generate 3-10 fragments total across all categories, prioritizing:
-         - guardrails for PII columns (email, ssn, phone, etc)
-         - hints for status/enum columns
-         - clarifications for ambiguous terms
-      3. Ground everything in the schema - do not invent tables/columns.
-      4. Only include categories that are relevant to this schema.
-    </instructions>
-  `,
-});
-
 export interface GenerateToTeachingsOptions {
   model?: AgentModel;
 }
@@ -160,15 +115,61 @@ export async function toTeachings(
   input: { schema: string; context?: string },
   options?: GenerateToTeachingsOptions,
 ): Promise<ContextFragment[]> {
-  const { experimental_output: result } = await generate(
-    teachablesAuthorAgent.clone({ model: options?.model }),
-    [
-      user(
-        `Analyze this database schema and generate fragments that will help an AI generate accurate SQL queries.`,
-      ),
-    ],
-    input,
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `teachables-gen-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
+
+  context.set(
+    persona({
+      name: 'teachables-author',
+      role: 'You design "fragments" for a Text2SQL system. Fragments become structured XML instructions.',
+      objective:
+        'Choose only high-impact items that improve accuracy, safety, or clarity for this database',
+    }),
+    fragment('database_schema', input.schema),
+    ...(input.context ? [fragment('additional_context', input.context)] : []),
+    fragment(
+      'output_structure',
+      dedent`
+        Output a JSON object with these optional arrays (include only relevant ones):
+        - terms: [{ name: string, definition: string }] - Domain terminology
+        - hints: [{ text: string }] - Helpful SQL generation hints
+        - guardrails: [{ rule: string, reason?: string, action?: string }] - Safety constraints
+        - explains: [{ concept: string, explanation: string, therefore?: string }] - Concept explanations
+        - examples: [{ question: string, answer: string, note?: string }] - Q&A examples
+        - clarifications: [{ when: string, ask: string, reason: string }] - Clarification triggers
+        - workflows: [{ task: string, steps: string[], triggers?: string[], notes?: string }] - Multi-step tasks
+        - quirks: [{ issue: string, workaround: string }] - Known issues
+        - styleGuides: [{ prefer: string, never?: string, always?: string }] - SQL style rules
+        - analogies: [{ concepts: string[], relationship: string, insight?: string, therefore?: string, pitfall?: string }]
+      `,
+    ),
+    fragment(
+      'task',
+      dedent`
+        1. Analyze the schema to infer domain, relationships, and sensitive columns.
+        2. Generate 3-10 fragments total across all categories, prioritizing:
+           - guardrails for PII columns (email, ssn, phone, etc)
+           - hints for status/enum columns
+           - clarifications for ambiguous terms
+        3. Ground everything in the schema - do not invent tables/columns.
+        4. Only include categories that are relevant to this schema.
+      `,
+    ),
+    user(
+      `Analyze this database schema and generate fragments that will help an AI generate accurate SQL queries.`,
+    ),
   );
+
+  const teachablesOutput = structuredOutput({
+    model: options?.model ?? groq('openai/gpt-oss-20b'),
+    context,
+    schema: outputSchema,
+  });
+
+  const result = await teachablesOutput.generate();
 
   const fragments: ContextFragment[] = [];
 

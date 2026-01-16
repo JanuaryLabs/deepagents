@@ -62,12 +62,16 @@ export type OutputExtractorFn = (
 export type PrepareHandoffFn = (
   messages: ModelMessage[],
 ) => void | Promise<void>;
-export type PrepareEndFn<C, O> = (config: {
+export type PrepareEndFn<C, _O = unknown> = (config: {
   messages: ResponseMessage[];
   responseMessage: ResponseMessage;
   contextVariables: C;
   abortSignal?: AbortSignal;
-}) => StreamTextResult<ToolSet, O> | undefined | void;
+}) =>
+  | StreamTextResult<ToolSet, never>
+  | Promise<StreamTextResult<ToolSet, never>>
+  | undefined
+  | void;
 
 export interface CreateAgent<Output, CIn, COut = CIn> {
   name: string;
@@ -231,7 +235,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             abortSignal: options.abortSignal,
             stopWhen: stepCountIs(25),
             experimental_context: options.experimental_context,
-            experimental_output: this.output
+            output: this.output
               ? Output.object({ schema: this.output })
               : undefined,
             onStepFinish: (step) => {

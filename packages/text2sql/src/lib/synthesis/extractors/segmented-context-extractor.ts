@@ -3,72 +3,95 @@ import type { UIMessage } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { agent, generate, user } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 import type { Adapter } from '../../adapters/adapter.ts';
 import {
   BaseContextualExtractor,
   type BaseContextualExtractorOptions,
-  contextResolverAgent,
   formatConversation,
+  resolveContext,
 } from './base-contextual-extractor.ts';
 
 export type SegmentedContextExtractorOptions = BaseContextualExtractorOptions;
 
-/** Agent that detects if a new message represents a topic change */
-const topicChangeAgent = agent<
-  { isTopicChange: boolean; reason: string },
-  { context: string; newMessage: string }
->({
-  name: 'topic_change_detector',
-  model: groq('openai/gpt-oss-20b'),
-  output: z.object({
-    isTopicChange: z
-      .boolean()
-      .describe('Whether the new message represents a topic change'),
-    reason: z.string().describe('Brief explanation for the decision'),
-  }),
-  prompt: (state) => dedent`
-    <identity>
-      You are an expert at understanding conversational flow and detecting topic changes.
-    </identity>
-
-    <conversation_context>
-    ${state?.context || '(no prior context)'}
-    </conversation_context>
-
-    <new_message>
-    ${state?.newMessage}
-    </new_message>
-
-    <task>
-      Determine if the new message represents a significant topic change from the
-      prior conversation context. A topic change occurs when:
-      1. The user asks about a completely different entity/table/domain
-      2. The user starts a new analytical question unrelated to prior discussion
-      3. There's a clear shift in what data or metrics are being discussed
-
-      NOT a topic change:
-      - Follow-up questions refining the same query ("filter by...", "sort by...")
-      - Questions about the same entities with different conditions
-      - Requests for more details on the same topic
-    </task>
-
-    <examples>
-      Context: "Show me customers in NY" → "Sort by revenue"
-      New: "Filter to those with orders over $1000"
-      Decision: NOT a topic change (still refining customer query)
-
-      Context: "Show me customers in NY" → "Sort by revenue"
-      New: "What were our total sales last quarter?"
-      Decision: Topic change (shifted from customers to sales metrics)
-
-      Context: "List all products"
-      New: "How many orders did we have last month?"
-      Decision: Topic change (products → orders/sales)
-    </examples>
-  `,
+const topicChangeSchema = z.object({
+  isTopicChange: z
+    .boolean()
+    .describe('Whether the new message represents a topic change'),
+  reason: z.string().describe('Brief explanation for the decision'),
 });
+
+/**
+ * Detects if a new message represents a topic change from the prior context.
+ */
+async function detectTopicChange(params: {
+  context: string;
+  newMessage: string;
+}): Promise<{ isTopicChange: boolean; reason: string }> {
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `topic-change-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
+
+  context.set(
+    persona({
+      name: 'topic_change_detector',
+      role: 'You are an expert at understanding conversational flow and detecting topic changes.',
+      objective: 'Detect significant topic changes in database conversations',
+    }),
+    fragment('conversation_context', params.context || '(no prior context)'),
+    fragment('new_message', params.newMessage),
+    fragment(
+      'task',
+      dedent`
+        Determine if the new message represents a significant topic change from the
+        prior conversation context. A topic change occurs when:
+        1. The user asks about a completely different entity/table/domain
+        2. The user starts a new analytical question unrelated to prior discussion
+        3. There's a clear shift in what data or metrics are being discussed
+
+        NOT a topic change:
+        - Follow-up questions refining the same query ("filter by...", "sort by...")
+        - Questions about the same entities with different conditions
+        - Requests for more details on the same topic
+      `,
+    ),
+    fragment(
+      'examples',
+      dedent`
+        Context: "Show me customers in NY" → "Sort by revenue"
+        New: "Filter to those with orders over $1000"
+        Decision: NOT a topic change (still refining customer query)
+
+        Context: "Show me customers in NY" → "Sort by revenue"
+        New: "What were our total sales last quarter?"
+        Decision: Topic change (shifted from customers to sales metrics)
+
+        Context: "List all products"
+        New: "How many orders did we have last month?"
+        Decision: Topic change (products → orders/sales)
+      `,
+    ),
+    user('Determine if this is a topic change.'),
+  );
+
+  const topicOutput = structuredOutput({
+    model: groq('openai/gpt-oss-20b'),
+    context,
+    schema: topicChangeSchema,
+  });
+
+  return topicOutput.generate();
+}
 
 /**
  * Extracts SQL pairs with topic-aware context segmentation.
@@ -105,7 +128,10 @@ export class SegmentedContextExtractor extends BaseContextualExtractor {
     if (this.context.length >= 2) {
       // Capture snapshot BEFORE async calls to prevent race conditions
       const contextSnapshot = [...this.context];
-      const isTopicChange = await this.detectTopicChange(text, contextSnapshot);
+      const { isTopicChange } = await detectTopicChange({
+        context: formatConversation(contextSnapshot),
+        newMessage: text,
+      });
       if (isTopicChange) {
         // Resolve the triggering message BEFORE resetting context
         const resolved = await this.resolveToStandalone(text, contextSnapshot);
@@ -125,27 +151,6 @@ export class SegmentedContextExtractor extends BaseContextualExtractor {
   }
 
   /**
-   * Detect if a new message represents a topic change using LLM.
-   * @param newMessage - The new user message to check
-   * @param contextSnapshot - Snapshot of context captured before this async call
-   */
-  private async detectTopicChange(
-    newMessage: string,
-    contextSnapshot: string[],
-  ): Promise<boolean> {
-    const { experimental_output } = await generate(
-      topicChangeAgent,
-      [user('Determine if this is a topic change.')],
-      {
-        context: formatConversation(contextSnapshot),
-        newMessage,
-      },
-    );
-
-    return experimental_output.isTopicChange;
-  }
-
-  /**
    * Resolve a context-dependent message into a standalone question.
    * Called when topic change is detected to preserve the meaning of
    * the triggering message before context is reset.
@@ -156,15 +161,11 @@ export class SegmentedContextExtractor extends BaseContextualExtractor {
     text: string,
     contextSnapshot: string[],
   ): Promise<string> {
-    const { experimental_output } = await generate(
-      contextResolverAgent,
-      [user('Generate a standalone question for this message.')],
-      {
-        conversation: formatConversation([...contextSnapshot, `User: ${text}`]),
-        sql: '', // No SQL yet, just resolving the question
-      },
-    );
+    const output = await resolveContext({
+      conversation: formatConversation([...contextSnapshot, `User: ${text}`]),
+      sql: '', // No SQL yet, just resolving the question
+    });
 
-    return experimental_output.question;
+    return output.question;
   }
 }

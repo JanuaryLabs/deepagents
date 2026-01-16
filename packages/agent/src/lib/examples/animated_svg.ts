@@ -1,7 +1,6 @@
-import { writeFile } from 'node:fs/promises';
-
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
+import { writeFile } from 'node:fs/promises';
 import z from 'zod';
 
 import { agent, instructions } from '../agent.ts';
@@ -46,7 +45,7 @@ const generator = agent({
   },
 });
 
-const result = execute(
+const result = await execute(
   generator,
   //   `Design an animated SVG credit card box with the following features:
   // - A rectangular box with rounded corners representing a credit card.

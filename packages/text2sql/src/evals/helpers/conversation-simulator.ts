@@ -1,10 +1,18 @@
 import { groq } from '@ai-sdk/groq';
-import type { LanguageModelV1, UIMessage } from 'ai';
+import type { UIMessage } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { agent, generate, user } from '@deepagents/agent';
-import { type ContextStore, InMemoryContextStore } from '@deepagents/context';
+import type { AgentModel } from '@deepagents/agent';
+import {
+  ContextEngine,
+  type ContextStore,
+  InMemoryContextStore,
+  fragment,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 import type { Adapter } from '../../lib/adapters/adapter.ts';
 import { Text2Sql } from '../../lib/sql.ts';
@@ -17,7 +25,7 @@ export interface ConversationSimulatorConfig {
   /** Number of turns (including initial question) */
   turns: number;
   /** Model for Text2Sql (defaults to groq gpt-oss-20b) */
-  model?: LanguageModelV1;
+  model?: AgentModel;
 }
 
 export interface SimulationResult {
@@ -29,49 +37,67 @@ export interface SimulationResult {
   questions: string[];
 }
 
-/**
- * Agent that generates natural follow-up questions based on conversation context.
- */
-const followUpAgent = agent<
-  { question: string },
-  { conversation: string; lastQuestion: string; lastResponse: string }
->({
-  name: 'follow_up_generator',
-  model: groq('openai/gpt-oss-20b'),
-  output: z.object({
-    question: z.string().describe('A natural follow-up question'),
-  }),
-  prompt: (state) => dedent`
-    <identity>
-      You are simulating a business user having a conversation with a database assistant.
-      Generate natural, realistic follow-up questions.
-    </identity>
-
-    <conversation_so_far>
-    ${state?.conversation || '(none)'}
-    </conversation_so_far>
-
-    <last_exchange>
-    User: ${state?.lastQuestion}
-    Assistant: ${state?.lastResponse}
-    </last_exchange>
-
-    <task>
-      Generate a natural follow-up question that a business user might ask next.
-
-      Good follow-ups:
-      - Refine the query: "Sort that by revenue", "Filter to just the top 10"
-      - Request different view: "Break it down by month", "Show me percentages instead"
-      - Drill deeper: "What about just Q4?", "Show me the details for the first one"
-      - Contextual references: "What about last year?", "Include the totals"
-
-      The question should:
-      - Feel natural and conversational
-      - Reference the previous result implicitly or explicitly
-      - Be something a business user would actually ask
-    </task>
-  `,
+const followUpSchema = z.object({
+  question: z.string().describe('A natural follow-up question'),
 });
+
+/**
+ * Generates a natural follow-up question based on conversation context.
+ */
+async function generateFollowUp(params: {
+  conversation: string;
+  lastQuestion: string;
+  lastResponse: string;
+}): Promise<{ question: string }> {
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `follow-up-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
+
+  context.set(
+    persona({
+      name: 'follow_up_generator',
+      role: 'Business user simulator',
+      objective:
+        'Generate natural, realistic follow-up questions for database conversations',
+    }),
+    fragment('conversation_so_far', params.conversation || '(none)'),
+    fragment(
+      'last_exchange',
+      dedent`
+        User: ${params.lastQuestion}
+        Assistant: ${params.lastResponse}
+      `,
+    ),
+    fragment(
+      'task',
+      dedent`
+        Generate a natural follow-up question that a business user might ask next.
+
+        Good follow-ups:
+        - Refine the query: "Sort that by revenue", "Filter to just the top 10"
+        - Request different view: "Break it down by month", "Show me percentages instead"
+        - Drill deeper: "What about just Q4?", "Show me the details for the first one"
+        - Contextual references: "What about last year?", "Include the totals"
+
+        The question should:
+        - Feel natural and conversational
+        - Reference the previous result implicitly or explicitly
+        - Be something a business user would actually ask
+      `,
+    ),
+    user('Generate a natural follow-up question.'),
+  );
+
+  const followUpOutput = structuredOutput({
+    model: groq('openai/gpt-oss-20b'),
+    context,
+    schema: followUpSchema,
+  });
+
+  return followUpOutput.generate();
+}
 
 /**
  * Extract a summary of the assistant's response for follow-up generation.
@@ -196,19 +222,15 @@ export async function simulateConversation(
       const allMessages = await getMessagesFromStore(store, chatId);
       const lastAssistant = allMessages.findLast((m) => m.role === 'assistant');
 
-      const { experimental_output } = await generate(
-        followUpAgent,
-        [user('Generate a natural follow-up question.')],
-        {
-          conversation: buildConversationSummary(allMessages.slice(0, -1)),
-          lastQuestion: currentQuestion,
-          lastResponse: lastAssistant
-            ? summarizeResponse(lastAssistant)
-            : '(no response)',
-        },
-      );
+      const output = await generateFollowUp({
+        conversation: buildConversationSummary(allMessages.slice(0, -1)),
+        lastQuestion: currentQuestion,
+        lastResponse: lastAssistant
+          ? summarizeResponse(lastAssistant)
+          : '(no response)',
+      });
 
-      currentQuestion = experimental_output.question;
+      currentQuestion = output.question;
     }
   }
 

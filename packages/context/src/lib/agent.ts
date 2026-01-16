@@ -1,5 +1,6 @@
 import { groq } from '@ai-sdk/groq';
 import {
+  type GenerateTextResult,
   NoSuchToolError,
   Output,
   type StreamTextResult,
@@ -63,7 +64,7 @@ class Agent<CIn, COut = CIn> {
     config?: {
       abortSignal?: AbortSignal;
     },
-  ) {
+  ): Promise<GenerateTextResult<ToolSet, Output.Output<string, string, any>>> {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
@@ -78,7 +79,7 @@ class Agent<CIn, COut = CIn> {
       providerOptions: this.#options.providerOptions,
       model: this.#options.model,
       system: systemPrompt,
-      messages: convertToModelMessages(messages as never),
+      messages: await convertToModelMessages(messages as never),
       stopWhen: stepCountIs(25),
       tools: this.#options.tools,
       experimental_context: contextVariables,
@@ -156,7 +157,7 @@ class Agent<CIn, COut = CIn> {
       providerOptions: this.#options.providerOptions,
       model: this.#options.model!,
       system: systemPrompt,
-      messages: convertToModelMessages(messages as never),
+      messages: await convertToModelMessages(messages as never),
       experimental_repairToolCall: repairToolCall,
       stopWhen: stepCountIs(50),
       experimental_transform: config?.transform ?? smoothStream(),
@@ -329,11 +330,11 @@ export function agent<CIn, COut = CIn>(
  * Options for creating a structured output handler.
  */
 export interface StructuredOutputOptions<TSchema extends z.ZodType> {
-  name: string;
   context?: ContextEngine;
   model?: AgentModel;
   schema: TSchema;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  tools?: ToolSet;
 }
 
 /**
@@ -362,23 +363,33 @@ export interface StructuredOutputOptions<TSchema extends z.ZodType> {
  * const stream = await output.stream({});
  * ```
  */
+export interface StructuredOutputResult<TSchema extends z.ZodType> {
+  generate<CIn>(
+    contextVariables?: CIn,
+    config?: { abortSignal?: AbortSignal },
+  ): Promise<z.infer<TSchema>>;
+  stream<CIn>(
+    contextVariables?: CIn,
+    config?: {
+      abortSignal?: AbortSignal;
+      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+    },
+  ): Promise<StreamTextResult<ToolSet, any>>;
+}
+
 export function structuredOutput<TSchema extends z.ZodType>(
   options: StructuredOutputOptions<TSchema>,
-) {
+): StructuredOutputResult<TSchema> {
   return {
     async generate<CIn>(
       contextVariables?: CIn,
       config?: { abortSignal?: AbortSignal },
     ): Promise<z.infer<TSchema>> {
       if (!options.context) {
-        throw new Error(
-          `structuredOutput "${options.name}" is missing a context.`,
-        );
+        throw new Error(`structuredOutput is missing a context.`);
       }
       if (!options.model) {
-        throw new Error(
-          `structuredOutput "${options.name}" is missing a model.`,
-        );
+        throw new Error(`structuredOutput is missing a model.`);
       }
 
       const { messages, systemPrompt } = await options.context.resolve({
@@ -390,14 +401,15 @@ export function structuredOutput<TSchema extends z.ZodType>(
         providerOptions: options.providerOptions,
         model: options.model,
         system: systemPrompt,
-        messages: convertToModelMessages(messages as never),
+        messages: await convertToModelMessages(messages as never),
         stopWhen: stepCountIs(25),
         experimental_repairToolCall: repairToolCall,
         experimental_context: contextVariables,
-        experimental_output: Output.object({ schema: options.schema }),
+        output: Output.object({ schema: options.schema }),
+        tools: options.tools,
       });
 
-      return result.experimental_output as z.infer<TSchema>;
+      return result.output as z.infer<TSchema>;
     },
 
     async stream<CIn>(
@@ -410,14 +422,10 @@ export function structuredOutput<TSchema extends z.ZodType>(
       },
     ) {
       if (!options.context) {
-        throw new Error(
-          `structuredOutput "${options.name}" is missing a context.`,
-        );
+        throw new Error(`structuredOutput is missing a context.`);
       }
       if (!options.model) {
-        throw new Error(
-          `structuredOutput "${options.name}" is missing a model.`,
-        );
+        throw new Error(`structuredOutput is missing a model.`);
       }
 
       const { messages, systemPrompt } = await options.context.resolve({
@@ -430,11 +438,12 @@ export function structuredOutput<TSchema extends z.ZodType>(
         model: options.model,
         system: systemPrompt,
         experimental_repairToolCall: repairToolCall,
-        messages: convertToModelMessages(messages as never),
+        messages: await convertToModelMessages(messages as never),
         stopWhen: stepCountIs(50),
         experimental_transform: config?.transform ?? smoothStream(),
         experimental_context: contextVariables,
-        experimental_output: Output.object({ schema: options.schema }),
+        output: Output.object({ schema: options.schema }),
+        tools: options.tools,
       });
     },
   };
@@ -456,9 +465,9 @@ const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
 
   const tool = tools[toolCall.toolName as keyof typeof tools];
 
-  const { experimental_output } = await generateText({
+  const { output } = await generateText({
     model: groq('openai/gpt-oss-20b'),
-    experimental_output: Output.object({ schema: tool.inputSchema }),
+    output: Output.object({ schema: tool.inputSchema }),
     prompt: [
       `The model tried to call the tool "${toolCall.toolName}"` +
         ` with the following inputs:`,
@@ -469,5 +478,5 @@ const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
     ].join('\n'),
   });
 
-  return { ...toolCall, input: JSON.stringify(experimental_output) };
+  return { ...toolCall, input: JSON.stringify(output) };
 };

@@ -1,6 +1,7 @@
 export * from './lib/adapters/adapter.ts';
 export * from './lib/agents/developer.agent.ts';
 export * from './lib/agents/result-tools.ts';
+export * from './lib/agents/sql.agent.ts';
 export * from './lib/agents/suggestions.agents.ts';
 export * from './lib/agents/text2sql.agent.ts';
 export * from './lib/checkpoint.ts';

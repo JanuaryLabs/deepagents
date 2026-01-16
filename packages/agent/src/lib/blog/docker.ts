@@ -515,12 +515,12 @@ export const docker_triage_agent: Agent = agent({
   ],
 });
 
-const response = execute(
+const response = await execute(
   docker_triage_agent,
   // [messageToUiMessage(await input())],
   [
     messageToUiMessage(
-      `Environment audit: show docker info, current contexts and plugins, and a concise summary of differences between client and server versions.”`,
+      `Environment audit: show docker info, current contexts and plugins, and a concise summary of differences between client and server versions."`,
     ),
   ],
   {},

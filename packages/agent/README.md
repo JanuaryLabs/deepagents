@@ -24,8 +24,9 @@ Requires Node.js LTS (20+) and a `zod` peer dependency.
 ### Simple Agent
 
 ```typescript
-import { agent, execute, user } from '@deepagents/agent';
 import { openai } from '@ai-sdk/openai';
+
+import { agent, execute, user } from '@deepagents/agent';
 
 const assistant = agent({
   name: 'assistant',
@@ -43,10 +44,11 @@ for await (const chunk of stream.textStream) {
 ### Agent with Tools
 
 ```typescript
-import { agent, execute } from '@deepagents/agent';
 import { openai } from '@ai-sdk/openai';
 import { tool } from 'ai';
 import { z } from 'zod';
+
+import { agent, execute } from '@deepagents/agent';
 
 const weatherTool = tool({
   description: 'Get weather for a location',
@@ -72,15 +74,18 @@ console.log(await stream.text);
 ### Multi-Agent with Handoffs
 
 ```typescript
-import { agent, instructions, swarm } from '@deepagents/agent';
 import { openai } from '@ai-sdk/openai';
+
+import { agent, instructions, swarm } from '@deepagents/agent';
 
 const researcher = agent({
   name: 'researcher',
   model: openai('gpt-4o'),
   prompt: 'You research topics and provide detailed information.',
   handoffDescription: 'Handles research and fact-finding tasks',
-  tools: { /* research tools */ },
+  tools: {
+    /* research tools */
+  },
 });
 
 const writer = agent({
@@ -111,9 +116,10 @@ const stream = swarm(coordinator, 'Write a blog post about AI agents', {});
 ### Structured Output
 
 ```typescript
-import { agent, generate } from '@deepagents/agent';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
+
+import { agent, generate } from '@deepagents/agent';
 
 const analyzer = agent({
   name: 'analyzer',
@@ -127,7 +133,7 @@ const analyzer = agent({
 });
 
 const result = await generate(analyzer, 'I love this product!', {});
-console.log(result.experimental_output);
+console.log(result.output);
 // { sentiment: 'positive', confidence: 0.95, keywords: ['love', 'product'] }
 ```
 
@@ -136,9 +142,10 @@ console.log(result.experimental_output);
 Share state between agents and tools:
 
 ```typescript
-import { agent, execute, toState } from '@deepagents/agent';
 import { tool } from 'ai';
 import { z } from 'zod';
+
+import { agent, execute, toState } from '@deepagents/agent';
 
 interface AppContext {
   userId: string;
@@ -238,14 +245,16 @@ toOutput<T>(result): Promise<T>
 Works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs):
 
 ```typescript
-import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
+import { openai } from '@ai-sdk/openai';
 
-const agent1 = agent({ model: openai('gpt-4o'), /* ... */ });
-const agent2 = agent({ model: anthropic('claude-sonnet-4-20250514'), /* ... */ });
-const agent3 = agent({ model: google('gemini-1.5-pro'), /* ... */ });
+const agent1 = agent({ model: openai('gpt-4o') /* ... */ });
+const agent2 = agent({
+  model: anthropic('claude-sonnet-4-20250514') /* ... */,
+});
+const agent3 = agent({ model: google('gemini-1.5-pro') /* ... */ });
 ```
 
 ## Documentation

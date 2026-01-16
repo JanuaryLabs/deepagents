@@ -79,12 +79,16 @@ export function pipe(
       execute: async ({ writer }) => {
         for (const it of processes) {
           if (it instanceof Agent) {
-            const result = execute(it, state.messages, state);
+            const result = await execute(it, state.messages, state);
             writer.merge(
               result.toUIMessageStream({
                 generateMessageId: generateId,
                 originalMessages: state.messages,
-                onFinish: async ({ responseMessage }) => {
+                onFinish: async ({
+                  responseMessage,
+                }: {
+                  responseMessage: UIMessage;
+                }) => {
                   state.messages.push(responseMessage);
                 },
               }),

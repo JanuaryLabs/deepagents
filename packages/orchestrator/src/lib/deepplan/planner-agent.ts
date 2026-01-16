@@ -290,10 +290,15 @@ export async function plan(
   userRequest: string,
   state: { environment?: PlanEnvironment } = {},
 ) {
-  const { experimental_output: plan } = await generate(
-    plannerAgent,
-    [user(userRequest)],
-    state,
+  const { output } = await generate(plannerAgent, [user(userRequest)], state);
+  return createExecutionContext(
+    userRequest,
+    output as {
+      understanding: string;
+      variables: Record<string, any>;
+      constraints: string[];
+      success_criteria: string;
+      steps: { description: string; expected_outcome: string }[];
+    },
   );
-  return createExecutionContext(userRequest, plan);
 }

@@ -2,11 +2,11 @@ import { tool } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { generate, toState } from '@deepagents/agent';
+import { toState } from '@deepagents/agent';
 import { type ContextFragment, hint, persona } from '@deepagents/context';
 
 import type { Adapter } from '../adapters/adapter.ts';
-import { explainerAgent } from './explainer.agent.ts';
+import { explainSql } from './explainer.agent.ts';
 
 /**
  * Context variables passed to the developer agent tools via stream().
@@ -83,10 +83,7 @@ const tools = {
       sql: z.string().min(1).describe('The SQL query to explain'),
     }),
     execute: async ({ sql }) => {
-      const { experimental_output } = await generate(explainerAgent, [], {
-        sql,
-      });
-      return { explanation: experimental_output.explanation };
+      return explainSql(sql);
     },
   }),
 };
@@ -98,6 +95,8 @@ const fragments: ContextFragment[] = [
   persona({
     name: 'developer_assistant',
     role: 'You are an expert SQL developer assistant helping power users build and refine queries.',
+    objective:
+      'Help power users build and refine SQL queries with precision and clarity',
   }),
   hint('Be transparent: show the SQL you generate before explaining it'),
   hint('Be precise: provide exact column names and table references'),

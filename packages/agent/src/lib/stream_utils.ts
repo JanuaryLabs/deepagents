@@ -1,8 +1,9 @@
 import {
   type GenerateTextResult,
   type InferUIMessageChunk,
+  type Output,
   type StreamTextResult,
-  type ToolCallOptions,
+  type ToolExecutionOptions,
   type ToolSet,
   type UIDataTypes,
   type UIMessage,
@@ -80,7 +81,7 @@ export const printer = {
     }
   },
   stdout: async (
-    response: StreamTextResult<ToolSet, unknown>,
+    response: StreamTextResult<ToolSet, never>,
     options?: { reasoning?: boolean; text?: boolean; wrapInTags?: boolean },
   ) => {
     const includeReasoning = options?.reasoning ?? true;
@@ -169,16 +170,16 @@ export async function finished<T>(iterable: AsyncIterable<T>) {
   await Array.fromAsync(iterable);
 }
 
-export function toOutput<T>(
+export function toOutput<T extends Output.Output>(
   result:
     | Promise<GenerateTextResult<ToolSet, T>>
     | StreamTextResult<ToolSet, T>,
 ) {
   return isPromise(result)
-    ? result.then((res) => res.experimental_output)
-    : last(result.experimental_partialOutputStream);
+    ? result.then((res) => res.output)
+    : last(result.partialOutputStream);
 }
 
-export function toState<C>(options: ToolCallOptions) {
+export function toState<C>(options: ToolExecutionOptions): C {
   return options.experimental_context as C;
 }

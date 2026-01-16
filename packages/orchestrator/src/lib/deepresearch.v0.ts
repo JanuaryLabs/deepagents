@@ -83,14 +83,15 @@ async function generateSearchQueries(
   input: string,
   repoContext: string,
 ): Promise<string[]> {
-  const { experimental_output: output } = await generate(
+  const { output } = await generate(
     searchQueryAgent,
     `User Query: ${input}\n\nRepository Context Summary:\n${repoContext}`,
     {},
   );
+  const result = output as { items?: string[] };
   return uniqBy(
-    (output.items ?? []).map((s) => s.trim()).filter(Boolean),
-    (s) => s.toLowerCase(),
+    (result.items ?? []).map((s: string) => s.trim()).filter(Boolean),
+    (s: string) => s.toLowerCase(),
   );
 }
 
@@ -131,26 +132,28 @@ ${repoContext}
 Based on the above information, determine if further research is needed. If yes, provide up to four new search queries. If the research is complete and sufficient, indicate that no more research is needed.`;
 
   try {
-    const { experimental_output: output } = await generate(
-      newSearchQueriesAgent,
-      prompt,
-      {},
-    );
+    const { output } = await generate(newSearchQueriesAgent, prompt, {});
+    const result = output as {
+      needsMoreResearch: boolean;
+      newQueries: string[];
+      reasoning?: string;
+    };
 
-    if (!output.needsMoreResearch) {
+    if (!result.needsMoreResearch) {
       console.log(
         'Research assessment: No further research needed.',
-        output.reasoning,
+        result.reasoning,
       );
       return [];
     }
 
     console.log(
-      `Research assessment: ${output.newQueries.length} new queries generated.`,
-      output.reasoning,
+      `Research assessment: ${result.newQueries.length} new queries generated.`,
+      result.reasoning,
     );
-    return uniqBy(output.newQueries.map((s) => s.trim()).filter(Boolean), (s) =>
-      s.toLowerCase(),
+    return uniqBy(
+      result.newQueries.map((s: string) => s.trim()).filter(Boolean),
+      (s: string) => s.toLowerCase(),
     );
   } catch (error) {
     console.error('Error generating new search queries:', error);
@@ -171,15 +174,14 @@ Formatting: ${formatting}
 Gathered Relevant Contexts:
 ${contextCombined}`;
 
-  return execute(finalReportAgent, prompt, {}).text;
+  return (await execute(finalReportAgent, prompt, {})).text;
 }
 
 async function isPageUseful(userQuery: string, pageText: string) {
   const prompt = `User Query: ${userQuery}\n\nRepo file content\n\n${pageText}\n\nDecide if the page is useful.`;
-  const {
-    experimental_output: { answer },
-  } = await generate(pageUsefulnessAgent, prompt, {} as const);
-  return answer === 'Yes';
+  const { output } = await generate(pageUsefulnessAgent, prompt, {} as const);
+  const result = output as { answer: 'Yes' | 'No' };
+  return result.answer === 'Yes';
 }
 
 async function extractRelevantContext(
@@ -188,7 +190,7 @@ async function extractRelevantContext(
   pageText: string,
 ): Promise<string> {
   const prompt = `User Query: ${userQuery}\nSearch Query: ${searchQuery}\n\nRepo file content\n\n${pageText}\n\nExtract the relevant context.`;
-  return execute(extractRelevantContextAgent, prompt, {} as const).text;
+  return (await execute(extractRelevantContextAgent, prompt, {} as const)).text;
 }
 
 async function processFile(
@@ -227,10 +229,12 @@ async function gatherRepoContext(): Promise<string> {
     .map((r, i) => `(${i + 1}) Path: ${r.source}\nSnippet:\n${r.snippet}`)
     .join('\n\n---\n\n');
 
-  const summary = await execute(
-    repoContextAgent,
-    `Repository Samples (path + snippet):\n\n${bundle}\n\nSummarize as requested.`,
-    {},
+  const summary = (
+    await execute(
+      repoContextAgent,
+      `Repository Samples (path + snippet):\n\n${bundle}\n\nSummarize as requested.`,
+      {},
+    )
   ).text;
   return summary;
 }

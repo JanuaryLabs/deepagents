@@ -39,11 +39,6 @@ node --test path/to/package/test/file.test.ts
 
 - **Why**: TypeScript treats private class members (`#field`) as unique per class declaration. Mixing imports from built packages and source files creates two incompatible types.
 
-- **ESLint**: Add this comment at the top of test files to allow cross-package imports:
-  ```typescript
-  /* eslint-disable @nx/enforce-module-boundaries */
-  ```
-
 ## Package Overview
 
 ### @deepagents/agent (`packages/agent`)

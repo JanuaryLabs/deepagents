@@ -1,14 +1,12 @@
 import type { UIMessage } from 'ai';
 
-import { generate, user } from '@deepagents/agent';
-
 import type { Adapter } from '../../adapters/adapter.ts';
 import type { ExtractedPair } from '../types.ts';
 import {
   BaseContextualExtractor,
   type BaseContextualExtractorOptions,
-  contextResolverAgent,
   formatConversation,
+  resolveContext,
 } from './base-contextual-extractor.ts';
 
 export type LastQueryExtractorOptions = BaseContextualExtractorOptions;
@@ -56,19 +54,15 @@ export class LastQueryExtractor extends BaseContextualExtractor {
     }
 
     const last = this.results.at(-1)!;
-    const { experimental_output } = await generate(
-      contextResolverAgent,
-      [user('Generate a standalone question for this SQL query.')],
-      {
-        conversation: formatConversation(last.conversationContext),
-        sql: last.sql,
-        introspection,
-      },
-    );
+    const output = await resolveContext({
+      conversation: formatConversation(last.conversationContext),
+      sql: last.sql,
+      introspection,
+    });
 
     yield [
       {
-        question: experimental_output.question,
+        question: output.question,
         sql: last.sql,
         context: last.conversationContext,
         success: last.success,

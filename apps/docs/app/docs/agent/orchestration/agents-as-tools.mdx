@@ -10,9 +10,10 @@ Convert an agent into a tool that another agent can call. Unlike handoffs, the c
 Use `agent.asTool()` to convert any agent into a callable tool:
 
 ```typescript
-import { agent, instructions } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, instructions } from '@deepagents/agent';
 
 const summarizer = agent({
   name: 'Summarizer',
@@ -62,11 +63,11 @@ By default, `asTool()` returns the agent's full output. Use `outputExtractor` to
 
 ```typescript
 type OutputExtractorFn = (
-  result: GenerateTextResult<ToolSet, any>
+  result: GenerateTextResult<ToolSet, any>,
 ) => string | Promise<string>;
 
 const summaryExtractor: OutputExtractorFn = async (result) => {
-  return result.experimental_output.summary;
+  return result.output.summary;
 };
 
 const tool = summarizer.asTool({
@@ -86,26 +87,26 @@ The extractor receives the full `GenerateTextResult` and returns a string. This 
 **Extract a single field:**
 
 ```typescript
-outputExtractor: async (result) => result.experimental_output.summary
+outputExtractor: async (result) => result.output.summary;
 ```
 
 **Format structured output:**
 
 ```typescript
 outputExtractor: async (result) => {
-  const { score, analysis } = result.experimental_output;
+  const { score, analysis } = result.output;
   return `Score: ${score}/100\n\n${analysis}`;
-}
+};
 ```
 
 **Combine with metadata:**
 
 ```typescript
 outputExtractor: async (result) => {
-  const { summary } = result.experimental_output;
+  const { summary } = result.output;
   const tokens = result.usage.totalTokens;
   return `${summary}\n\n(Generated using ${tokens} tokens)`;
-}
+};
 ```
 
 ## Multiple Agent Tools
@@ -113,9 +114,10 @@ outputExtractor: async (result) => {
 A parent agent can orchestrate multiple specialists:
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, generate, instructions } from '@deepagents/agent';
 
 // Specialist 1: Fundamentals analysis
 const fundamentalsAgent = agent({
@@ -160,11 +162,11 @@ const writer = agent({
   tools: {
     fundamentals_analysis: fundamentalsAgent.asTool({
       toolDescription: 'Get fundamentals analysis (revenue, margins, growth)',
-      outputExtractor: async (r) => r.experimental_output.summary,
+      outputExtractor: async (r) => r.output.summary,
     }),
     risk_analysis: riskAgent.asTool({
       toolDescription: 'Get risk analysis (threats, red flags)',
-      outputExtractor: async (r) => r.experimental_output.summary,
+      outputExtractor: async (r) => r.output.summary,
     }),
   },
 });
@@ -192,11 +194,11 @@ const writerWithAnalysts = baseWriter.clone({
   tools: {
     fundamentals: fundamentalsAgent.asTool({
       toolDescription: 'Get fundamentals analysis',
-      outputExtractor: async (r) => r.experimental_output.summary,
+      outputExtractor: async (r) => r.output.summary,
     }),
     risk: riskAgent.asTool({
       toolDescription: 'Get risk analysis',
-      outputExtractor: async (r) => r.experimental_output.summary,
+      outputExtractor: async (r) => r.output.summary,
     }),
   },
 });
@@ -222,9 +224,10 @@ This keeps the base writer reusable while creating a specialized variant.
 ## Complete Example: Analysis Pipeline
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, generate, instructions } from '@deepagents/agent';
 
 // Define schemas
 const AnalysisSchema = z.object({
@@ -235,10 +238,12 @@ const AnalysisSchema = z.object({
 const ReportSchema = z.object({
   title: z.string(),
   executive_summary: z.string(),
-  sections: z.array(z.object({
-    heading: z.string(),
-    content: z.string(),
-  })),
+  sections: z.array(
+    z.object({
+      heading: z.string(),
+      content: z.string(),
+    }),
+  ),
 });
 
 // Specialist agents
@@ -274,7 +279,7 @@ const financialAnalyst = agent({
 
 // Output extractor for all analysts
 const extractAnalysis = async (result) => {
-  const { summary, score } = result.experimental_output;
+  const { summary, score } = result.output;
   return `${summary} (Score: ${score}/100)`;
 };
 
@@ -309,10 +314,10 @@ const reportWriter = agent({
 });
 
 // Usage
-const { experimental_output: report } = await generate(
+const { output: report } = await generate(
   reportWriter,
   'Create an investment report for Apple Inc.',
-  {}
+  {},
 );
 
 console.log(report.title);
@@ -320,6 +325,7 @@ console.log(report.executive_summary);
 ```
 
 In this pipeline:
+
 1. The report writer receives a request
 2. It calls each analyst tool to gather specialized insights
 3. Each analyst runs independently and returns extracted summaries

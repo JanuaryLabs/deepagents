@@ -10,8 +10,9 @@ Handoffs enable agent-to-agent delegation, allowing a coordinator to transfer co
 A handoff is a delegation pattern where one agent (the parent) can transfer execution control to another agent (a specialist). The parent agent uses a generated transfer function—named `transfer_to_{agent_name}`—to hand off to specialists when their expertise is needed.
 
 ```typescript
-import { agent, instructions } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
+
+import { agent, instructions } from '@deepagents/agent';
 
 const writerAgent = agent({
   name: 'WriterAgent',
@@ -116,7 +117,7 @@ const supervisor = agent({
 The simplest approach passes agent instances directly:
 
 ```typescript
-handoffs: [agentA, agentB, agentC]
+handoffs: [agentA, agentB, agentC];
 ```
 
 ### Lazy Functions
@@ -124,7 +125,7 @@ handoffs: [agentA, agentB, agentC]
 To avoid circular references or defer agent initialization, use lazy functions:
 
 ```typescript
-handoffs: [() => agentA, () => agentB]
+handoffs: [() => agentA, () => agentB];
 ```
 
 The functions are invoked when the agent's handoff toolset is constructed. This pattern is essential when agents reference each other bidirectionally:
@@ -171,9 +172,12 @@ const riskAnalyst = agent({
   model: groq('gpt-oss-20b'),
   prompt: instructions({
     purpose: ['You analyze financial risks and red flags.'],
-    routine: ['Identify competitive threats, regulatory issues, supply chain problems'],
+    routine: [
+      'Identify competitive threats, regulatory issues, supply chain problems',
+    ],
   }),
-  handoffDescription: 'Use to get a short write-up of potential red flags in financial data',
+  handoffDescription:
+    'Use to get a short write-up of potential red flags in financial data',
 });
 ```
 
@@ -253,7 +257,7 @@ This table is injected at the `<specialized_agents_placeholder>` marker in your 
 prompt: instructions({
   purpose: ['You coordinate between specialists.'],
   routine: ['Analyze the request and transfer to the appropriate specialist'],
-})
+});
 ```
 
 The generated prompt includes:
@@ -280,10 +284,11 @@ Handoffs compose hierarchically. A supervisor can delegate to specialists, and t
 ### Example: Supervisor with Sub-Specialists
 
 ```typescript
-import { agent, instructions } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import { agent, instructions } from '@deepagents/agent';
 
 // Leaf agents: Data fetchers
 const stockDataAgent = agent({
@@ -331,7 +336,9 @@ const financialAnalyst = agent({
   name: 'FinancialAnalyst',
   model: groq('gpt-oss-20b'),
   prompt: instructions({
-    purpose: ['You perform financial analysis by gathering data from specialists.'],
+    purpose: [
+      'You perform financial analysis by gathering data from specialists.',
+    ],
     routine: [
       'Gather stock data from StockDataAgent',
       'Gather news from NewsDataAgent',
@@ -375,12 +382,14 @@ Each level in the hierarchy is independent. Agents only know their immediate chi
 ### When to Use Handoffs
 
 **Use handoffs when**:
+
 - You have distinct capabilities that benefit from specialized prompts and tools
 - You want to enforce separation of concerns (e.g., planner vs. executor)
 - You need dynamic routing logic where the LLM decides which specialist to invoke
 - You want to scale by adding specialists without modifying the coordinator
 
 **Avoid handoffs when**:
+
 - The task is simple and a single agent suffices
 - All logic fits naturally into one agent's routine
 - The overhead of delegation exceeds the benefit of specialization
@@ -427,6 +436,7 @@ const agentB = agent({
 ```
 
 However, circular handoffs introduce risks:
+
 - **Infinite loops**: Without clear termination logic, agents can ping-pong indefinitely.
 - **Unclear responsibility**: If both agents can do each other's job, the design likely needs refinement.
 
@@ -437,10 +447,11 @@ Prefer tree-like or DAG structures where responsibility flows in one direction.
 This example shows a coordinator with multiple specialists, each with tools and handoff descriptions:
 
 ```typescript
-import { agent, instructions, execute } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import { agent, execute, instructions } from '@deepagents/agent';
 
 // Analyst for company fundamentals
 const fundamentalsAnalyst = agent({
@@ -513,7 +524,9 @@ const writer = agent({
   output: z.object({
     short_summary: z.string().describe('2-3 sentence executive summary'),
     markdown_report: z.string().describe('Full markdown report'),
-    follow_up_questions: z.array(z.string()).describe('Suggested follow-up topics'),
+    follow_up_questions: z
+      .array(z.string())
+      .describe('Suggested follow-up topics'),
   }),
 });
 
@@ -522,11 +535,11 @@ const writerWithSpecialists = writer.clone({
   tools: {
     fundamentals_analysis: fundamentalsAnalyst.asTool({
       toolDescription: 'Call to get a fundamentals analysis summary',
-      outputExtractor: async (result) => result.experimental_output.summary,
+      outputExtractor: async (result) => result.output.summary,
     }),
     risk_analysis: riskAnalyst.asTool({
       toolDescription: 'Call to get a risk analysis summary',
-      outputExtractor: async (result) => result.experimental_output.summary,
+      outputExtractor: async (result) => result.output.summary,
     }),
   },
 });
@@ -557,6 +570,7 @@ console.log(await response.text);
 ```
 
 In this system:
+
 - The **coordinator** orchestrates the flow: plan → search → write.
 - The **planner** generates search queries.
 - The **writer** synthesizes reports and can call the **fundamentalsAnalyst** and **riskAnalyst** as tools (not handoffs) for focused sub-analyses.

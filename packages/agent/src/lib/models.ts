@@ -41,7 +41,7 @@ export async function embed(documents: string[]): Promise<{
 }> {
   const dimensions = 1024;
   const { embeddings } = await embedMany({
-    model: lmstudio.textEmbeddingModel('text-embedding-qwen3-embedding-0.6b'),
+    model: lmstudio.embeddingModel('text-embedding-qwen3-embedding-0.6b'),
     values: documents,
     providerOptions: { lmstudio: { dimensions } },
   });

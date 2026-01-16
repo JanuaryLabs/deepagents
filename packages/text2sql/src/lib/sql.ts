@@ -14,6 +14,7 @@ import {
   type ContextStore,
   agent,
   assistant,
+  errorRecoveryGuardrail,
   fragment,
   hint,
   styleGuide,
@@ -25,7 +26,7 @@ import type { Adapter } from './adapters/adapter.ts';
 import developerExports from './agents/developer.agent.ts';
 import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
-import { type RenderingTools, t_a_g } from './agents/text2sql.agent.ts';
+import { type RenderingTools } from './agents/text2sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
 import { type TeachingsOptions, guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
@@ -198,13 +199,16 @@ export class Text2Sql {
       messageId,
     });
 
-    const chatAgent = t_a_g.clone({
+    const chatAgent = agent({
+      name: 'text2sql',
       model: this.#config.model,
       context,
       tools: {
         bash,
         ...this.#config.tools,
       },
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
     });
 
     const result = await chatAgent.stream({});

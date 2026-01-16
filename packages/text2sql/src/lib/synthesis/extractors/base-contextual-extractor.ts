@@ -8,7 +8,14 @@ import {
 import dedent from 'dedent';
 import z from 'zod';
 
-import { agent, generate, user } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 import type { Adapter } from '../../adapters/adapter.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
@@ -28,55 +35,75 @@ export interface BaseContextualExtractorOptions {
   includeFailures?: boolean;
   toolName?: string;
 }
-export const contextResolverAgent = agent<
-  { question: string },
-  { conversation: string; sql: string; introspection?: string }
->({
-  name: 'context_resolver',
-  model: groq('openai/gpt-oss-20b'),
-  output: z.object({
-    question: z
-      .string()
-      .describe(
-        'A standalone natural language question that the SQL query answers',
-      ),
-  }),
-  prompt: (state) => dedent`
-    <identity>
-      You are an expert at understanding conversational context and generating clear,
-      standalone questions from multi-turn conversations.
-    </identity>
 
-    ${state?.introspection ? `<schema>\n${state.introspection}\n</schema>` : ''}
-
-    <conversation>
-    ${state?.conversation}
-    </conversation>
-
-    <sql>
-    ${state?.sql}
-    </sql>
-
-    <task>
-      Given the conversation above and the SQL query that was executed,
-      generate a single, standalone natural language question that:
-      1. Fully captures the user's intent without needing prior context
-      2. Uses natural business language (not SQL terminology)
-      3. Could be asked by someone who hasn't seen the conversation
-      4. Accurately represents what the SQL query answers
-    </task>
-
-    <examples>
-      Conversation: "Show me customers" → "Filter to NY" → "Sort by revenue"
-      SQL: SELECT * FROM customers WHERE region = 'NY' ORDER BY revenue DESC
-      Question: "Show me customers in the NY region sorted by revenue"
-
-      Conversation: "What were sales last month?" → "Break it down by category"
-      SQL: SELECT category, SUM(amount) FROM sales WHERE date >= '2024-11-01' GROUP BY category
-      Question: "What were sales by category for last month?"
-    </examples>
-  `,
+const contextResolverSchema = z.object({
+  question: z
+    .string()
+    .describe(
+      'A standalone natural language question that the SQL query answers',
+    ),
 });
+
+/**
+ * Resolves a SQL query with conversation context into a standalone question.
+ */
+export async function resolveContext(params: {
+  conversation: string;
+  sql: string;
+  introspection?: string;
+}): Promise<{ question: string }> {
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `context-resolver-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
+
+  context.set(
+    persona({
+      name: 'context_resolver',
+      role: 'You are an expert at understanding conversational context and generating clear, standalone questions from multi-turn conversations.',
+      objective:
+        'Transform context-dependent messages into standalone questions that fully capture user intent',
+    }),
+    ...(params.introspection
+      ? [fragment('database_schema', params.introspection)]
+      : []),
+    fragment('conversation', params.conversation),
+    fragment('sql', params.sql),
+    fragment(
+      'task',
+      dedent`
+        Given the conversation above and the SQL query that was executed,
+        generate a single, standalone natural language question that:
+        1. Fully captures the user's intent without needing prior context
+        2. Uses natural business language (not SQL terminology)
+        3. Could be asked by someone who hasn't seen the conversation
+        4. Accurately represents what the SQL query answers
+      `,
+    ),
+    fragment(
+      'examples',
+      dedent`
+        Conversation: "Show me customers" → "Filter to NY" → "Sort by revenue"
+        SQL: SELECT * FROM customers WHERE region = 'NY' ORDER BY revenue DESC
+        Question: "Show me customers in the NY region sorted by revenue"
+
+        Conversation: "What were sales last month?" → "Break it down by category"
+        SQL: SELECT category, SUM(amount) FROM sales WHERE date >= '2024-11-01' GROUP BY category
+        Question: "What were sales by category for last month?"
+      `,
+    ),
+    user('Generate a standalone question for this SQL query.'),
+  );
+
+  const resolverOutput = structuredOutput({
+    model: groq('openai/gpt-oss-20b'),
+    context,
+    schema: contextResolverSchema,
+  });
+
+  return resolverOutput.generate();
+}
 
 export function getMessageText(message: UIMessage): string {
   const textParts = message.parts.filter(isTextUIPart).map((part) => part.text);
@@ -231,19 +258,15 @@ export abstract class BaseContextualExtractor extends PairProducer {
     introspection: string,
   ): AsyncGenerator<ExtractedPair[]> {
     for (const item of this.results) {
-      const { experimental_output } = await generate(
-        contextResolverAgent,
-        [user('Generate a standalone question for this SQL query.')],
-        {
-          conversation: formatConversation(item.conversationContext),
-          sql: item.sql,
-          introspection,
-        },
-      );
+      const output = await resolveContext({
+        conversation: formatConversation(item.conversationContext),
+        sql: item.sql,
+        introspection,
+      });
 
       yield [
         {
-          question: experimental_output.question,
+          question: output.question,
           sql: item.sql,
           context: item.conversationContext,
           success: item.success,

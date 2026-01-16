@@ -1,34 +1,47 @@
 import { APICallError } from '@ai-sdk/provider';
-import { MockLanguageModelV2 } from 'ai/test';
+import { MockLanguageModelV3 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { init_db } from '../../tests/sqlite.ts';
 import {
   SQLValidationError,
   UnanswerableSQLError,
   toSql,
-} from './sql.agent.ts';
+} from '@deepagents/text2sql';
+
+import { init_db } from '../../tests/sqlite.ts';
 
 type MockModelResponse =
   | { sql: string; reasoning?: string }
   | { error: string };
-
+const testUsage = {
+  inputTokens: {
+    total: 3,
+    noCache: 3,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+  },
+  outputTokens: {
+    total: 10,
+    text: 10,
+    reasoning: undefined,
+  },
+} as const;
 /** Helper to create a MockLanguageModelV2 that returns a structured response */
 function createMockModel(response: MockModelResponse) {
-  return new MockLanguageModelV2({
-    doGenerate: async () => ({
-      finishReason: 'stop',
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  return new MockLanguageModelV3({
+    doGenerate: {
+      finishReason: { unified: 'stop', raw: '' },
+      usage: testUsage,
       content: [{ type: 'text', text: JSON.stringify(response) }],
       warnings: [],
-    }),
+    },
   });
 }
 
 /** Helper to create a MockLanguageModelV2 that throws an error */
 function createThrowingModel(errorFactory: () => Error) {
-  return new MockLanguageModelV2({
+  return new MockLanguageModelV3({
     doGenerate: async () => {
       throw errorFactory();
     },
@@ -41,7 +54,7 @@ function createCapturingModel(responses: Array<MockModelResponse | Error>) {
   let callIndex = 0;
   return {
     calls,
-    model: new MockLanguageModelV2({
+    model: new MockLanguageModelV3({
       doGenerate: async (options) => {
         calls.push({ messages: options.prompt, settings: options });
         const response = responses[callIndex++];
@@ -49,8 +62,8 @@ function createCapturingModel(responses: Array<MockModelResponse | Error>) {
           throw response;
         }
         return {
-          finishReason: 'stop' as const,
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          finishReason: { unified: 'stop', raw: '' },
+          usage: testUsage,
           content: [{ type: 'text' as const, text: JSON.stringify(response) }],
           warnings: [],
         };
@@ -119,7 +132,7 @@ describe('toSql', () => {
     // Arrange
     const { adapter } = await init_db('', { validate: () => undefined });
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {
@@ -131,8 +144,8 @@ describe('toSql', () => {
           });
         }
         return {
-          finishReason: 'stop',
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          finishReason: { unified: 'stop', raw: '' },
+          usage: testUsage,
           content: [
             { type: 'text', text: JSON.stringify({ sql: 'SELECT 1' }) },
           ],
@@ -244,7 +257,7 @@ describe('toSql', () => {
         }),
       (error) => {
         assert(SQLValidationError.isInstance(error));
-        assert(error.message === 'validation error');
+        assert((error as SQLValidationError).message === 'validation error');
         return true;
       },
     );
@@ -297,7 +310,7 @@ describe('toSql', () => {
       validate: () => validateResponses.shift(),
     });
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {
@@ -309,8 +322,8 @@ describe('toSql', () => {
           });
         }
         return {
-          finishReason: 'stop',
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          finishReason: { unified: 'stop', raw: '' },
+          usage: testUsage,
           content: [
             { type: 'text', text: JSON.stringify({ sql: 'SELECT 1' }) },
           ],
@@ -351,7 +364,7 @@ describe('toSql', () => {
         }),
       (error) => {
         assert(UnanswerableSQLError.isInstance(error));
-        assert(error.message === 'No matching table');
+        assert((error as UnanswerableSQLError).message === 'No matching table');
         return true;
       },
     );
@@ -592,7 +605,11 @@ describe('toSql', () => {
           }),
         (error) => {
           assert(SQLValidationError.isInstance(error));
-          assert(error.message.includes('Database connection lost'));
+          assert(
+            (error as SQLValidationError).message.includes(
+              'Database connection lost',
+            ),
+          );
           return true;
         },
       );

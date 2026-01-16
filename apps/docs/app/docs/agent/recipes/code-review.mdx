@@ -31,18 +31,21 @@ Build a code review system where multiple specialist agents analyze code in para
 ## Quick Start
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
 
+import { agent, generate, instructions } from '@deepagents/agent';
+
 // Schema for individual review findings
 const FindingsSchema = z.object({
-  issues: z.array(z.object({
-    severity: z.enum(['critical', 'warning', 'suggestion']),
-    line: z.number().optional(),
-    description: z.string(),
-    suggestion: z.string().optional(),
-  })),
+  issues: z.array(
+    z.object({
+      severity: z.enum(['critical', 'warning', 'suggestion']),
+      line: z.number().optional(),
+      description: z.string(),
+      suggestion: z.string().optional(),
+    }),
+  ),
   score: z.number().min(0).max(100),
   summary: z.string(),
 });
@@ -141,21 +144,25 @@ async function reviewCode(code: string) {
   // Run specialists in parallel
   const [logic, security, style] = await Promise.all([
     generate(logicAnalyzer, `Review this code:\n\`\`\`\n${code}\n\`\`\``, {}),
-    generate(securityReviewer, `Review this code:\n\`\`\`\n${code}\n\`\`\``, {}),
+    generate(
+      securityReviewer,
+      `Review this code:\n\`\`\`\n${code}\n\`\`\``,
+      {},
+    ),
     generate(styleChecker, `Review this code:\n\`\`\`\n${code}\n\`\`\``, {}),
   ]);
 
   // Synthesize findings
   const findings = {
-    logic: logic.experimental_output,
-    security: security.experimental_output,
-    style: style.experimental_output,
+    logic: logic.output,
+    security: security.output,
+    style: style.output,
   };
 
-  const { experimental_output: review } = await generate(
+  const { output: review } = await generate(
     summaryAgent,
     `Synthesize these code review findings:\n${JSON.stringify(findings, null, 2)}`,
-    {}
+    {},
   );
 
   return review;
@@ -277,20 +284,21 @@ const securityReviewer = agent<typeof FindingsSchema, ReviewContext>({
   name: 'SecurityReviewer',
   model: groq('gpt-oss-20b'),
   output: FindingsSchema,
-  prompt: (ctx) => instructions({
-    purpose: [
-      `You review ${ctx.language} code for security.`,
-      ctx.framework ? `This uses the ${ctx.framework} framework.` : '',
-      ctx.strictness === 'strict'
-        ? 'Apply the strictest security standards.'
-        : 'Apply standard security checks.',
-    ],
-    routine: [
-      'Check for injection vulnerabilities',
-      'Review authentication patterns',
-      ...(ctx.focusAreas || []).map((a) => `Focus on: ${a}`),
-    ],
-  }),
+  prompt: (ctx) =>
+    instructions({
+      purpose: [
+        `You review ${ctx.language} code for security.`,
+        ctx.framework ? `This uses the ${ctx.framework} framework.` : '',
+        ctx.strictness === 'strict'
+          ? 'Apply the strictest security standards.'
+          : 'Apply standard security checks.',
+      ],
+      routine: [
+        'Check for injection vulnerabilities',
+        'Review authentication patterns',
+        ...(ctx.focusAreas || []).map((a) => `Focus on: ${a}`),
+      ],
+    }),
 });
 
 // Run with context
@@ -308,12 +316,14 @@ const review = await reviewCode(code, {
 
 ```typescript
 const PerformanceSchema = z.object({
-  issues: z.array(z.object({
-    severity: z.enum(['critical', 'warning', 'suggestion']),
-    description: z.string(),
-    impact: z.string(),
-    suggestion: z.string(),
-  })),
+  issues: z.array(
+    z.object({
+      severity: z.enum(['critical', 'warning', 'suggestion']),
+      description: z.string(),
+      impact: z.string(),
+      suggestion: z.string(),
+    }),
+  ),
   score: z.number().min(0).max(100),
   bigOAnalysis: z.string().optional(),
 });
@@ -338,7 +348,7 @@ const [logic, security, style, performance] = await Promise.all([
   generate(logicAnalyzer, codePrompt, {}),
   generate(securityReviewer, codePrompt, {}),
   generate(styleChecker, codePrompt, {}),
-  generate(performanceAnalyzer, codePrompt, {}),  // Added
+  generate(performanceAnalyzer, codePrompt, {}), // Added
 ]);
 ```
 
@@ -346,11 +356,13 @@ const [logic, security, style, performance] = await Promise.all([
 
 ```typescript
 const TestCoverageSchema = z.object({
-  missingTests: z.array(z.object({
-    function: z.string(),
-    scenario: z.string(),
-    priority: z.enum(['high', 'medium', 'low']),
-  })),
+  missingTests: z.array(
+    z.object({
+      function: z.string(),
+      scenario: z.string(),
+      priority: z.enum(['high', 'medium', 'low']),
+    }),
+  ),
   suggestedTests: z.array(z.string()),
   coverageEstimate: z.number().min(0).max(100),
 });
@@ -398,15 +410,15 @@ async function calculateScore(findings: {
   style: typeof FindingsSchema._type;
 }) {
   const weights = {
-    security: 0.4,  // 40%
-    logic: 0.35,    // 35%
-    style: 0.25,    // 25%
+    security: 0.4, // 40%
+    logic: 0.35, // 35%
+    style: 0.25, // 25%
   };
 
   return Math.round(
     findings.security.score * weights.security +
-    findings.logic.score * weights.logic +
-    findings.style.score * weights.style
+      findings.logic.score * weights.logic +
+      findings.style.score * weights.style,
   );
 }
 ```

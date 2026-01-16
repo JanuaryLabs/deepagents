@@ -64,8 +64,9 @@ const tools: ToolSet = {
 When creating an agent, you pass this toolset to the `tools` field:
 
 ```typescript
-import { agent, instructions } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
+
+import { agent, instructions } from '@deepagents/agent';
 
 const researchAgent = agent({
   name: 'Researcher',
@@ -95,6 +96,7 @@ OpenAI provides a web search tool that integrates with models like GPT-4:
 
 ```typescript
 import { openai } from '@ai-sdk/openai';
+
 import { agent, instructions } from '@deepagents/agent';
 
 const research = agent({
@@ -119,6 +121,7 @@ const research = agent({
 ```
 
 The `searchContextSize` parameter controls how much context the search returns:
+
 - `'low'`: Quick searches with minimal context
 - `'medium'`: Balanced detail
 - `'high'`: Maximum context for comprehensive research
@@ -129,6 +132,7 @@ Groq provides browser search capabilities for its models:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
+
 import { agent, instructions } from '@deepagents/agent';
 
 const executor = agent({
@@ -192,8 +196,8 @@ const searchAgent = agent({
 Forces the model to use a particular tool:
 
 ```typescript
-import { writeFile } from 'node:fs/promises';
 import { tool } from 'ai';
+import { writeFile } from 'node:fs/promises';
 import z from 'zod';
 
 const svgGenerator = agent({
@@ -252,7 +256,7 @@ const riskAgent = agent({
   }),
   prompt: instructions({
     purpose: [
-      "You analyze potential red flags in company outlooks.",
+      'You analyze potential red flags in company outlooks.',
       'Focus on competitive threats, regulatory issues, and risks.',
     ],
     routine: ['Keep analysis under 2 paragraphs.'],
@@ -264,7 +268,7 @@ const riskTool = riskAgent.asTool({
   toolDescription: 'Use to get a short write-up of potential red flags',
   outputExtractor: async (result) => {
     // Extract just the summary field from structured output
-    return result.experimental_output.summary;
+    return result.output.summary;
   },
 });
 ```
@@ -297,7 +301,7 @@ const financialsAgent = agent({
 // Extract only the summary for tool consumers
 const fundamentalsTool = financialsAgent.asTool({
   toolDescription: 'Get financial metrics analysis',
-  outputExtractor: async (result) => result.experimental_output.summary,
+  outputExtractor: async (result) => result.output.summary,
 });
 ```
 
@@ -529,8 +533,11 @@ Here's a comprehensive example showing all tool patterns working together:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { agent, instructions } from '@deepagents/agent';
 import z from 'zod';
+
+import { agent, instructions } from '@deepagents/agent';
+// Example usage
+import { generate } from '@deepagents/agent';
 
 // Schemas for structured output
 const AnalysisSummarySchema = z.object({
@@ -545,7 +552,7 @@ const FinancialReportSchema = z.object({
 
 // Output extractor for specialist agents
 const summaryExtractor = async (result) => {
-  return result.experimental_output.summary;
+  return result.output.summary;
 };
 
 // Specialist: Risk analysis
@@ -555,7 +562,7 @@ const riskAgent = agent({
   output: AnalysisSummarySchema,
   prompt: instructions({
     purpose: [
-      "You identify red flags in company outlooks.",
+      'You identify red flags in company outlooks.',
       'Focus on competitive threats, regulatory issues, risks.',
     ],
     routine: ['Keep analysis under 2 paragraphs.'],
@@ -621,9 +628,6 @@ const writerAgent = agent({
   },
 });
 
-// Example usage
-import { generate } from '@deepagents/agent';
-
 async function analyzeCompany(query: string) {
   // First, search for information
   const searchResult = await execute(
@@ -634,7 +638,7 @@ async function analyzeCompany(query: string) {
   const searchData = await searchResult.text;
 
   // Then, generate comprehensive report
-  const { experimental_output: report } = await generate(
+  const { output: report } = await generate(
     writerAgent,
     `Query: ${query}\nResearch: ${searchData}`,
     {},

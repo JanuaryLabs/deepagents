@@ -1,16 +1,20 @@
 import { groq } from '@ai-sdk/groq';
-import {
-  NoObjectGeneratedError,
-  NoOutputGeneratedError,
-  defaultSettingsMiddleware,
-  wrapLanguageModel,
-} from 'ai';
+import { NoObjectGeneratedError, NoOutputGeneratedError } from 'ai';
 import dedent from 'dedent';
 import pLimit from 'p-limit';
 import pRetry from 'p-retry';
 import z from 'zod';
 
-import { type AgentModel, agent, generate, user } from '@deepagents/agent';
+import { type AgentModel } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  guardrail,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 import type { Adapter } from '../../adapters/adapter.ts';
 import { UnanswerableSQLError, toSql } from '../../agents/sql.agent.ts';
@@ -77,58 +81,52 @@ export interface DepthEvolverOptions {
   concurrency?: number;
 }
 
-type EvolverState = {
+const evolverOutputSchema = z.object({
+  evolvedQuestion: z
+    .string()
+    .describe('The evolved, more complex version of the original question'),
+});
+
+/**
+ * Evolves a simple question into a more complex version using a specific technique.
+ */
+async function evolveQuestion(params: {
   question: string;
   sql: string;
   schema: string;
   technique: DepthTechnique;
   techniqueInstruction: string;
-};
+  model?: AgentModel;
+}): Promise<{ evolvedQuestion: string }> {
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `evolver-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
 
-type EvolverOutput = {
-  evolvedQuestion: string;
-};
-
-const questionEvolverAgent = agent<EvolverOutput, EvolverState>({
-  name: 'question_evolver',
-  model: wrapLanguageModel({
-    model: groq('openai/gpt-oss-20b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.7, topP: 0.95 },
+  context.set(
+    persona({
+      name: 'question_evolver',
+      role: 'You are an expert at evolving simple database questions into more complex ones. Your task is to take a basic question and transform it into a more sophisticated version that requires advanced SQL techniques to answer.',
+      objective:
+        'Transform simple questions into complex versions requiring advanced SQL techniques',
     }),
-  }),
-  output: z.object({
-    evolvedQuestion: z
-      .string()
-      .describe('The evolved, more complex version of the original question'),
-  }),
-  prompt: (state) => {
-    return dedent`
-      <identity>
-        You are an expert at evolving simple database questions into more complex ones.
-        Your task is to take a basic question and transform it into a more sophisticated
-        version that requires advanced SQL techniques to answer.
-      </identity>
-
-      <original_question>
-        ${state?.question}
-      </original_question>
-
-      <original_sql>
-        ${state?.sql}
-        (This shows what the original question required)
-      </original_sql>
-
-      <database_schema>
-        ${state?.schema}
-      </database_schema>
-
-      <technique name="${state?.technique}">
-        ${state?.techniqueInstruction}
-      </technique>
-
-      <task>
-        Evolve the original question using the "${state?.technique}" technique.
+    fragment('original_question', params.question),
+    fragment(
+      'original_sql',
+      params.sql,
+      '(This shows what the original question required)',
+    ),
+    fragment('database_schema', params.schema),
+    fragment(
+      'technique',
+      { name: params.technique },
+      params.techniqueInstruction,
+    ),
+    fragment(
+      'task',
+      dedent`
+        Evolve the original question using the "${params.technique}" technique.
 
         Requirements:
         1. The evolved question must be MORE COMPLEX than the original
@@ -137,17 +135,31 @@ const questionEvolverAgent = agent<EvolverOutput, EvolverState>({
         4. Use natural language - no SQL keywords
         5. Keep the question realistic and practical
         6. The evolved question should build upon the original topic/domain
-      </task>
+      `,
+    ),
+    guardrail({
+      rule: 'The evolved question MUST require more complex SQL than the original',
+    }),
+    guardrail({
+      rule: 'Do not ask for data that does not exist in the schema',
+    }),
+    guardrail({
+      rule: 'Keep the question grounded in the same domain as the original',
+    }),
+    guardrail({ rule: 'Make sure the question is clear and unambiguous' }),
+    user(
+      `Evolve this question using "${params.technique}": "${params.question}"`,
+    ),
+  );
 
-      <guardrails>
-        - The evolved question MUST require more complex SQL than the original
-        - Do not ask for data that doesn't exist in the schema
-        - Keep the question grounded in the same domain as the original
-        - Make sure the question is clear and unambiguous
-      </guardrails>
-    `;
-  },
-});
+  const evolverOutput = structuredOutput({
+    model: params.model ?? groq('openai/gpt-oss-20b'),
+    context,
+    schema: evolverOutputSchema,
+  });
+
+  return evolverOutput.generate();
+}
 
 const ALL_TECHNIQUES: DepthTechnique[] = [
   'add-aggregation',
@@ -218,23 +230,18 @@ export class DepthEvolver extends PairProducer {
     technique: DepthTechnique,
     introspection: string,
   ) {
-    const { experimental_output } = await withRetry(() =>
-      generate(
-        questionEvolverAgent.clone({
-          model: this.options?.model,
-        }),
-        [user(`Evolve this question using "${technique}": "${pair.question}"`)],
-        {
-          question: pair.question,
-          sql: pair.sql,
-          schema: introspection,
-          technique,
-          techniqueInstruction: techniqueInstructions[technique],
-        },
-      ),
+    const output = await withRetry(() =>
+      evolveQuestion({
+        question: pair.question,
+        sql: pair.sql,
+        schema: introspection,
+        technique,
+        techniqueInstruction: techniqueInstructions[technique],
+        model: this.options?.model,
+      }),
     );
 
-    const evolvedQuestion = experimental_output.evolvedQuestion;
+    const evolvedQuestion = output.evolvedQuestion;
     try {
       // TODO: Update to use schemaFragments instead of introspection string
       const sqlResult = await toSql({

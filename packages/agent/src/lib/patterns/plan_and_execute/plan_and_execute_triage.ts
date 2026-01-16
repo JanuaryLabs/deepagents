@@ -135,7 +135,7 @@ const executor = agent<unknown, PlanExecuteState>({
   },
 });
 
-const replanner = agent<unknown,PlanExecuteState>({
+const replanner = agent<unknown, PlanExecuteState>({
   name: 'ReplannerAgent',
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   handoffDescription:
@@ -234,6 +234,6 @@ if (import.meta.main) {
     response: undefined,
   };
 
-  const result = execute(triage, objective, state);
+  const result = await execute(triage, objective, state);
   await printer.stdout(result, { wrapInTags: false });
 }

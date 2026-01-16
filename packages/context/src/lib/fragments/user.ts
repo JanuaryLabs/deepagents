@@ -47,30 +47,31 @@ export function identity(input: {
 }
 
 /**
- * Define an AI persona with a name, role, and communication tone.
+ * Define an AI persona with a name, role, objective, and communication tone.
  *
- * Use this to customize the assistant's personality and how it communicates.
- * The persona influences the style and approach of responses.
+ * Use this to customize the assistant's identity and what it should accomplish.
  *
  * @param input.name - The persona's name
- * @param input.role - The persona's role or expertise
+ * @param input.role - The persona's expertise/identity (what they are)
+ * @param input.objective - What the persona should accomplish (the goal)
  * @param input.tone - The communication style (e.g., friendly, professional, concise)
  *
  * @example
- * persona({ name: "DataBot", role: "SQL Expert", tone: "friendly and encouraging" })
- * persona({ name: "QueryMaster", role: "Database Analyst", tone: "professional and concise" })
- * persona({ name: "SQLHelper", role: "Data Assistant", tone: "casual and approachable" })
+ * persona({ name: "DataBot", role: "SQL Expert", objective: "Generate accurate SQL queries from natural language" })
+ * persona({ name: "QueryMaster", role: "Database Analyst", objective: "Help users explore database schemas" })
  */
 export function persona(input: {
   name: string;
-  role: string;
+  role?: string;
+  objective?: string;
   tone?: string;
 }): ContextFragment {
   return {
     name: 'persona',
     data: {
       name: input.name,
-      role: input.role,
+      ...(input.role && { role: input.role }),
+      ...(input.objective && { objective: input.objective }),
       ...(input.tone && { tone: input.tone }),
     },
   };

@@ -1,5 +1,4 @@
 import { groq } from '@ai-sdk/groq';
-import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
@@ -9,8 +8,9 @@ import {
   type ContextFragment,
   InMemoryContextStore,
   XmlRenderer,
+  fragment,
+  guardrail,
   persona as personaFragment,
-  role,
   structuredOutput,
   user,
 } from '@deepagents/context';
@@ -78,42 +78,46 @@ export async function generatePersonas(
     personaFragment({
       name: 'persona_generator',
       role: 'You are an expert at understanding database schemas and inferring who would use them.',
+      objective:
+        'Generate realistic personas representing users who would query this database',
     }),
-    role(dedent`
-      Your task is to analyze a database schema and generate realistic personas representing
-      the different types of users who would query this database.
+    fragment('database_schema', schema),
+    fragment(
+      'task',
+      dedent`
+        Analyze the database schema and generate realistic personas representing
+        the different types of users who would query this database.
 
-      <database_schema>
-        ${schema}
-      </database_schema>
+        For each persona, provide:
+        1. **role**: Their job title or role (e.g., "Financial Analyst", "Customer Support Rep")
+        2. **perspective**: A rich description of what they care about, including:
+           - What questions they typically ask
+           - What metrics/data points matter to them
+           - How they prefer data formatted or presented
+           - Their priorities (speed vs accuracy, detail vs summary)
+           - Domain-specific concerns relevant to their role
+        3. **styles**: 1-3 communication styles typical for this persona. Choose from:
+           - formal: Professional business language, complete sentences
+           - colloquial: Casual everyday speech, contractions
+           - imperative: Commands like "Show me...", "Get...", "List..."
+           - interrogative: Questions like "What is...", "How many..."
+           - descriptive: Verbose, detailed phrasing
+           - concise: Brief, minimal words
+           - vague: Ambiguous, hedging language
+           - metaphorical: Figurative language, analogies
+           - conversational: Chat-like, casual tone
 
-      For each persona, provide:
-      1. **role**: Their job title or role (e.g., "Financial Analyst", "Customer Support Rep")
-      2. **perspective**: A rich description of what they care about, including:
-         - What questions they typically ask
-         - What metrics/data points matter to them
-         - How they prefer data formatted or presented
-         - Their priorities (speed vs accuracy, detail vs summary)
-         - Domain-specific concerns relevant to their role
-      3. **styles**: 1-3 communication styles typical for this persona. Choose from:
-         - formal: Professional business language, complete sentences
-         - colloquial: Casual everyday speech, contractions
-         - imperative: Commands like "Show me...", "Get...", "List..."
-         - interrogative: Questions like "What is...", "How many..."
-         - descriptive: Verbose, detailed phrasing
-         - concise: Brief, minimal words
-         - vague: Ambiguous, hedging language
-         - metaphorical: Figurative language, analogies
-         - conversational: Chat-like, casual tone
-
-      Requirements:
-      - Personas should be realistic for the given schema
-      - Each persona should have distinct concerns and priorities
-      - Perspectives should be detailed enough to guide question paraphrasing
-      - Cover different levels of technical expertise (some technical, some business-focused)
-      - Styles should match how this persona would naturally communicate
-
-      <example>
+        Requirements:
+        - Personas should be realistic for the given schema
+        - Each persona should have distinct concerns and priorities
+        - Perspectives should be detailed enough to guide question paraphrasing
+        - Cover different levels of technical expertise (some technical, some business-focused)
+        - Styles should match how this persona would naturally communicate
+      `,
+    ),
+    fragment(
+      'example',
+      dedent`
         For an e-commerce schema with orders, customers, products tables:
 
         {
@@ -127,27 +131,24 @@ export async function generatePersonas(
           "perspective": "As inventory manager, I care about:\\n- Current stock levels and reorder points\\n- Product availability across warehouses\\n- Slow-moving inventory identification\\n- Supplier lead times and pending orders\\n- I need accurate counts, often aggregated by location",
           "styles": ["formal", "interrogative"]
         }
-      </example>
-
-      <guardrails>
-        - Only generate personas relevant to the actual schema provided
-        - Do not invent tables or data that don't exist in the schema
-        - Ensure perspectives are specific to the domain, not generic
-      </guardrails>
-    `),
+      `,
+    ),
+    guardrail({
+      rule: 'Only generate personas relevant to the actual schema provided',
+    }),
+    guardrail({
+      rule: 'Do not invent tables or data that do not exist in the schema',
+    }),
+    guardrail({
+      rule: 'Ensure perspectives are specific to the domain, not generic',
+    }),
     user(
       `Generate exactly ${count} distinct personas who would query this database.`,
     ),
   );
 
   const personaOutput = structuredOutput({
-    name: 'persona_generator',
-    model: wrapLanguageModel({
-      model: options?.model ?? groq('openai/gpt-oss-20b'),
-      middleware: defaultSettingsMiddleware({
-        settings: { temperature: 0.8, topP: 0.95, presencePenalty: 0.2 },
-      }),
-    }),
+    model: options?.model ?? groq('openai/gpt-oss-20b'),
     context,
     schema: outputSchema,
   });

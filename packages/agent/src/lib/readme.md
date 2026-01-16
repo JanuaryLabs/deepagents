@@ -471,7 +471,10 @@ const data_extractor = agent({
   // ... other config
 });
 
-const {experimental_output: structuredData} = await generate(data_extractor, 'Analyze this data...');
+const { output: structuredData } = await generate(
+  data_extractor,
+  'Analyze this data...',
+);
 console.log(structuredData.summary);
 ```
 

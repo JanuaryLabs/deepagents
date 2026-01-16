@@ -12,20 +12,21 @@ Both patterns enable multi-agent systems, but they differ in control flow, deleg
 
 ## The Core Difference
 
-| Aspect | Handoffs | Agents as Tools |
-|--------|----------|-----------------|
-| Control flow | Transfers control; sub-agent becomes active | Calling agent stays active |
-| Further delegation | Sub-agent can hand off to others | Sub-agent returns result only |
-| Return value | Full conversation continues | Extracted string or structured data |
-| Use case | Dynamic routing, conversational | Encapsulated sub-tasks |
+| Aspect             | Handoffs                                    | Agents as Tools                     |
+| ------------------ | ------------------------------------------- | ----------------------------------- |
+| Control flow       | Transfers control; sub-agent becomes active | Calling agent stays active          |
+| Further delegation | Sub-agent can hand off to others            | Sub-agent returns result only       |
+| Return value       | Full conversation continues                 | Extracted string or structured data |
+| Use case           | Dynamic routing, conversational             | Encapsulated sub-tasks              |
 
 ## Handoffs: Transfer Control
 
 With handoffs, the parent agent transfers control to a specialist. The specialist becomes the active agent and can delegate further if needed.
 
 ```typescript
-import { agent, instructions } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
+
+import { agent, instructions } from '@deepagents/agent';
 
 const billingAgent = agent({
   name: 'BillingAgent',
@@ -65,9 +66,10 @@ When `triage` calls `transfer_to_billing_agent()`, control transfers to `billing
 With `asTool()`, the parent agent calls a specialist as a function. The parent stays active and receives a return value.
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, generate, instructions } from '@deepagents/agent';
 
 const AnalysisSchema = z.object({
   summary: z.string().describe('Brief analysis summary'),
@@ -94,7 +96,7 @@ const coordinator = agent({
   tools: {
     analyze: analyst.asTool({
       toolDescription: 'Get analysis with score and summary',
-      outputExtractor: async (result) => result.experimental_output.summary,
+      outputExtractor: async (result) => result.output.summary,
     }),
   },
 });
@@ -179,19 +181,20 @@ const coordinator = agent({
 ```
 
 In this design:
+
 - The `coordinator` uses **handoffs** to route to `researcher` or `support`
 - The `researcher` uses **asTool** to call specialist analysts
 
 ## Decision Matrix
 
-| Scenario | Pattern | Why |
-|----------|---------|-----|
-| Customer support routing | Handoffs | User interacts with specialist directly |
-| Report with multiple analyses | asTool | Need structured data from each specialist |
-| Chatbot with specialists | Handoffs | Conversational, may need further routing |
-| Pipeline processing | asTool | Sequential, self-contained steps |
-| Unknown user intent | Handoffs | Let LLM decide routing at runtime |
-| Predefined orchestration | asTool | Parent controls the flow |
+| Scenario                      | Pattern  | Why                                       |
+| ----------------------------- | -------- | ----------------------------------------- |
+| Customer support routing      | Handoffs | User interacts with specialist directly   |
+| Report with multiple analyses | asTool   | Need structured data from each specialist |
+| Chatbot with specialists      | Handoffs | Conversational, may need further routing  |
+| Pipeline processing           | asTool   | Sequential, self-contained steps          |
+| Unknown user intent           | Handoffs | Let LLM decide routing at runtime         |
+| Predefined orchestration      | asTool   | Parent controls the flow                  |
 
 ## Next Steps
 

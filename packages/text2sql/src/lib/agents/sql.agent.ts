@@ -6,8 +6,6 @@ import {
   NoObjectGeneratedError,
   NoOutputGeneratedError,
   TypeValidationError,
-  defaultSettingsMiddleware,
-  wrapLanguageModel,
 } from 'ai';
 import { Console } from 'node:console';
 import { createWriteStream } from 'node:fs';
@@ -110,6 +108,8 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
         persona({
           name: 'Freya',
           role: 'You are an expert SQL query generator. You translate natural language questions into precise, efficient SQL queries based on the provided database schema.',
+          objective:
+            'Translate natural language questions into precise, efficient SQL queries',
         }),
         ...options.instructions,
         ...options.schemaFragments,
@@ -128,17 +128,9 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
       }
 
       // Create structured output with schema
+      // Note: In AI SDK v6, temperature settings are passed via providerOptions
       const sqlOutput = structuredOutput({
-        name: 'text2sql',
-        model: wrapLanguageModel({
-          model: options.model ?? groq('openai/gpt-oss-20b'),
-          middleware: defaultSettingsMiddleware({
-            settings: {
-              temperature: RETRY_TEMPERATURES[attemptNumber - 1] ?? 0.3,
-              topP: 1,
-            },
-          }),
-        }),
+        model: options.model ?? groq('openai/gpt-oss-20b'),
         context,
         schema: z.union([
           z.object({

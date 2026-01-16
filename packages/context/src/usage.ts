@@ -718,7 +718,7 @@ async function demonstrateDockerSandbox() {
 /**
  * Example: Docker Sandbox with Skill-Aware Agent
  *
- * Combines Docker sandbox with skills for a powerful agent that can:
+ * Combines Docker sandbox with skills for an agent that can:
  * - Execute real binaries (python, node, presenterm, etc.)
  * - Access skill instructions via progressive disclosure
  * - Work in an isolated, reproducible environment

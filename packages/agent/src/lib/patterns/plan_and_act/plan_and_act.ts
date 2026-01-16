@@ -174,16 +174,19 @@ export async function runPlanAndAct(
 
   // Step 1: Generate initial plan
   console.log('\n📋 PLANNING PHASE');
-  const { experimental_output: initialPlanResponse } = await generate(
+  const { output } = await generate(
     planner,
     `Create a plan to accomplish this task: ${query}`,
     {},
   );
+  const initialPlanResponse = output as PlanningResponse;
 
   console.log('💭 Reasoning:', initialPlanResponse.reasoning);
   console.log(
     '📝 Plan:',
-    initialPlanResponse.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
+    initialPlanResponse.plan.steps
+      .map((s: string, i: number) => `${i + 1}. ${s}`)
+      .join('\n'),
   );
 
   // Initialize state
@@ -211,7 +214,7 @@ export async function runPlanAndAct(
     console.log(`🔄 Executing Step ${stepIndex + 1}: ${currentStep}`);
 
     // Execute the current step
-    const { experimental_output: executionResult } = await generate(
+    const { output: execOutput } = await generate(
       executor,
       `Execute this step: ${currentStep}
 
@@ -219,6 +222,7 @@ Context: You are working on this overall task: "${query}"
 Previous steps completed: ${state.executionHistory.length}`,
       {},
     );
+    const executionResult = execOutput as ExecutionResult;
 
     console.log(`💭 Execution reasoning: ${executionResult.reasoning}`);
     console.log(`🎬 Action taken: ${executionResult.action_taken}`);
@@ -259,11 +263,12 @@ Analyze the progress and decide whether to continue with more steps or provide t
 
     // Replan based on execution results
     console.log('\n🔄 REPLANNING PHASE');
-    const { experimental_output: replanningDecision } = await generate(
+    const { output: replanOutput } = await generate(
       replanner,
       contextForReplanning,
       {},
     );
+    const replanningDecision = replanOutput as ReplanningDecision;
 
     // Record this execution cycle
     state.executionHistory.push({

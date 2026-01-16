@@ -45,7 +45,7 @@ export const researchTopicAgent = agent({
 });
 
 export async function transformMessagesIntoResearchTopic(userQuery: string) {
-  const { experimental_output: output } = await generate(
+  const { output: output } = await generate(
     researchTopicAgent,
     `
 			Today's date is ${new Date().toISOString()}.

@@ -23,12 +23,13 @@ const SentimentSchema = z.object({
   reasoning: z.string(),
 });
 
-const { experimental_output } = await generate(agent, 'Analyze sentiment', {});
-// experimental_output is typed as:
+const { output } = await generate(agent, 'Analyze sentiment', {});
+// output is typed as:
 // { sentiment: 'positive' | 'negative' | 'neutral'; confidence: number; reasoning: string }
 ```
 
 Benefits:
+
 - **Type safety**: TypeScript knows the response shape
 - **Validation**: Invalid responses are rejected
 - **Reliability**: Consistent format every time
@@ -73,9 +74,10 @@ const FlexibleSchema = z.object({
 Pass the schema to the `output` field:
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, generate, instructions } from '@deepagents/agent';
 
 const ReportSchema = z.object({
   summary: z.string(),
@@ -97,11 +99,11 @@ const analyst = agent({
   }),
 });
 
-const { experimental_output } = await generate(analyst, data, {});
+const { output } = await generate(analyst, data, {});
 
-console.log(experimental_output.summary);
-console.log(experimental_output.findings);       // string[]
-console.log(experimental_output.recommendations); // string[]
+console.log(output.summary);
+console.log(output.findings); // string[]
+console.log(output.recommendations); // string[]
 ```
 
 ## Type Inference
@@ -110,11 +112,13 @@ Zod provides automatic type inference:
 
 ```typescript
 const PlanSchema = z.object({
-  steps: z.array(z.object({
-    action: z.string(),
-    tool: z.string(),
-    reasoning: z.string(),
-  })),
+  steps: z.array(
+    z.object({
+      action: z.string(),
+      tool: z.string(),
+      reasoning: z.string(),
+    }),
+  ),
   estimatedTime: z.number(),
 });
 
@@ -130,8 +134,8 @@ const planner = agent({
   // ...
 });
 
-// experimental_output is typed as Plan
-const { experimental_output } = await generate(planner, task, {});
+// output is typed as Plan
+const { output } = await generate(planner, task, {});
 ```
 
 ## Complex Schemas
@@ -180,7 +184,7 @@ const TreeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
   z.object({
     value: z.string(),
     children: z.array(TreeNodeSchema),
-  })
+  }),
 );
 ```
 
@@ -194,7 +198,7 @@ The execution uses `Output.object()` from the AI SDK:
 
 ```typescript
 // Internal (simplified from swarm.ts)
-experimental_output: agent.output
+output: agent.output
   ? Output.object({ schema: agent.output })
   : undefined,
 ```
@@ -235,7 +239,7 @@ This ensures the model produces valid JSON matching your schema.
 const result = await generate(agent, input, context);
 
 // Typed access
-const output = result.experimental_output;
+const output = result.output;
 console.log(output.summary);
 
 // Also available
@@ -249,7 +253,7 @@ const stream = execute(agent, input, context);
 await stream.consumeStream();
 
 // Access after streaming completes
-const output = await stream.experimental_output;
+const output = await stream.output;
 ```
 
 ## Schema Design Tips
@@ -260,11 +264,16 @@ Descriptions guide the model:
 
 ```typescript
 const Schema = z.object({
-  sentiment: z.enum(['positive', 'negative', 'neutral'])
+  sentiment: z
+    .enum(['positive', 'negative', 'neutral'])
     .describe('Overall emotional tone of the text'),
-  confidence: z.number()
-    .min(0).max(1)
-    .describe('How confident the analysis is, from 0 (uncertain) to 1 (certain)'),
+  confidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe(
+      'How confident the analysis is, from 0 (uncertain) to 1 (certain)',
+    ),
 });
 ```
 
@@ -317,13 +326,16 @@ const agent = agent({
 
 ```typescript
 const WebSearchPlanSchema = z.object({
-  searches: z.array(z.object({
-    reason: z.string()
-      .describe('Why this search is important to the query'),
-    query: z.string()
-      .describe('The search term to use'),
-  }))
-  .describe('A list of web searches to perform'),
+  searches: z
+    .array(
+      z.object({
+        reason: z
+          .string()
+          .describe('Why this search is important to the query'),
+        query: z.string().describe('The search term to use'),
+      }),
+    )
+    .describe('A list of web searches to perform'),
 });
 
 const planner = agent({
@@ -341,11 +353,10 @@ const planner = agent({
 
 ```typescript
 const FinancialReportSchema = z.object({
-  short_summary: z.string()
-    .describe('A short 2-3 sentence executive summary'),
-  markdown_report: z.string()
-    .describe('The full markdown report'),
-  follow_up_questions: z.array(z.string())
+  short_summary: z.string().describe('A short 2-3 sentence executive summary'),
+  markdown_report: z.string().describe('The full markdown report'),
+  follow_up_questions: z
+    .array(z.string())
     .describe('Suggested follow-up questions for further research'),
 });
 
@@ -368,9 +379,11 @@ const writer = agent({
 
 ```typescript
 const VerificationSchema = z.object({
-  verified: z.boolean()
+  verified: z
+    .boolean()
     .describe('Whether the report seems coherent and plausible'),
-  issues: z.string()
+  issues: z
+    .string()
     .describe('If not verified, describe the main issues or concerns'),
 });
 
@@ -391,7 +404,7 @@ When using `agent.asTool()`, you can extract structured output:
 
 ```typescript
 const summaryExtractor = async (result) => {
-  return result.experimental_output.summary;
+  return result.output.summary;
 };
 
 const writerWithTools = writerAgent.clone({

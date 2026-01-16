@@ -105,13 +105,13 @@ export const leadResearcherAgent = agent<unknown, LeadResearcherState>({
       execute: async ({ research_topic }, options) => {
         const context = toState<LeadResearcherState>(options);
         context.research_iterations++;
-        const result = execute(
+        const result = await execute(
           researcherAgent,
           [user(research_topic)],
           {},
           { providerOptions: { groq: { reasoningEffort: 'low' } } },
         );
-        return result.text;
+        return await result.text;
       },
     }),
   },

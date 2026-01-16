@@ -24,6 +24,7 @@ const stream = execute(agent, messages, {
 ```
 
 This context is available throughout execution:
+
 - In prompt functions
 - In tool execution via `experimental_context`
 - Across agent handoffs
@@ -92,6 +93,7 @@ Tools access context via `experimental_context` in their options:
 
 ```typescript
 import { tool } from 'ai';
+
 import { toState } from '@deepagents/agent';
 
 type Context = {
@@ -154,7 +156,9 @@ type SharedContext = {
 const researcher = agent<unknown, SharedContext>({
   name: 'Researcher',
   prompt: (ctx) => `Research for user ${ctx.userId}...`,
-  tools: { /* ... */ },
+  tools: {
+    /* ... */
+  },
 });
 
 const writer = agent<unknown, SharedContext>({
@@ -305,12 +309,12 @@ type Ctx = {
 progress.add({
   title: 'Planning searches',
   task: async (ctx, task) => {
-    const { experimental_output: plan } = await generate(
+    const { output: plan } = await generate(
       plannerAgent,
       `Query: ${query}`,
-      {}
+      {},
     );
-    ctx.plan = plan;  // Store in context
+    ctx.plan = plan; // Store in context
   },
 });
 
@@ -318,9 +322,7 @@ progress.add({
   title: 'Searching',
   task: async (ctx) => {
     // Use ctx.plan from previous stage
-    ctx.searchResults = await Promise.all(
-      ctx.plan!.searches.map(/* ... */)
-    );
+    ctx.searchResults = await Promise.all(ctx.plan!.searches.map(/* ... */));
   },
 });
 
@@ -328,10 +330,10 @@ progress.add({
   title: 'Writing report',
   task: async (ctx) => {
     // Use ctx.searchResults from previous stage
-    const { experimental_output: report } = await generate(
+    const { output: report } = await generate(
       writerAgent,
       `Results: ${ctx.searchResults}`,
-      {}
+      {},
     );
     ctx.report = report;
   },

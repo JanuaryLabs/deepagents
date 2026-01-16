@@ -75,11 +75,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "2.0.26",
+    "@ai-sdk/groq": "^3.0.10",
     "@deepagents/agent": "0.11.0",
     "@deepagents/context": "0.11.0",
     "@deepagents/toolbox": "0.11.0",
-    "ai": "^5.0.100",
+    "ai": "^6.0.39",
     "autoevals": "^0.0.131",
     "bash-tool": "^1.1.0",
     "dedent": "1.7.0",
@@ -89,7 +89,7 @@
     "p-limit": "^6.2.0",
     "zod": "^3.25.76 || ^4.0.0",
     "chalk": "^5.6.0",
-    "@ai-sdk/openai": "2.0.76",
+    "@ai-sdk/openai": "^3.0.12",
     "nano-spawn": "^1.0.3",
     "p-retry": "^7.1.1",
     "pg": "^8.16.3",

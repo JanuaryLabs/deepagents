@@ -16,7 +16,7 @@ export async function init_db(
   try {
     db.exec('PRAGMA foreign_keys = ON;');
   } catch {
-    // ignore — best effort
+    // best effort
   }
 
   if (Array.isArray(ddl)) {

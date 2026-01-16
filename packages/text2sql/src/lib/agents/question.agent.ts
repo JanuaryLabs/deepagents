@@ -1,25 +1,23 @@
 import { groq } from '@ai-sdk/groq';
-import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
-import { type AgentModel, agent, generate, user } from '@deepagents/agent';
+import { type AgentModel } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  guardrail,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 export type QuestionComplexity =
   | 'simple'
   | 'moderate'
   | 'complex'
   | 'high complex';
-
-type QuestionGeneratorState = {
-  introspection: string;
-  complexity: QuestionComplexity;
-  count: number;
-};
-
-type QuestionGeneratorOutput = {
-  questions: string[];
-};
 
 const complexityInstructions: Record<QuestionComplexity, string> = {
   simple: dedent`
@@ -60,63 +58,11 @@ const complexityInstructions: Record<QuestionComplexity, string> = {
   `,
 };
 
-/**
- * Agent that generates natural language questions from database introspection.
- */
-const questionGeneratorAgent = agent<
-  QuestionGeneratorOutput,
-  QuestionGeneratorState
->({
-  name: 'question_generator',
-  model: wrapLanguageModel({
-    model: groq('openai/gpt-oss-20b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.8, topP: 0.95 },
-    }),
-  }),
-  handoffDescription:
-    'Generates natural language questions that users might ask about the database schema.',
-  output: z.object({
-    questions: z
-      .array(z.string().describe('A natural language question about the data'))
-      .min(1)
-      .describe('List of natural language questions a user might ask'),
-  }),
-  prompt: (state) => {
-    const count = state?.count;
-    const complexity = state?.complexity ?? 'moderate';
-
-    return dedent`
-      <identity>
-        You are a synthetic data generator specializing in creating realistic natural language questions
-        that users might ask about a database. You understand database schemas and can generate diverse,
-        practical questions that would require SQL queries to answer.
-      </identity>
-
-      ${state?.introspection || ''}
-
-      <complexity level="${complexity}">
-        ${complexityInstructions[complexity]}
-      </complexity>
-
-      <task>
-        Generate exactly ${count} natural language questions at the "${complexity}" complexity level.
-        The questions should:
-        1. Match the complexity requirements above
-        2. Use natural business language, not technical SQL terms
-        3. Be realistic questions a non-technical user would actually ask
-        4. Cover different tables and relationships when possible
-      </task>
-
-      <guardrails>
-        - Questions MUST ONLY reference tables and columns that exist in the schema above
-        - Before generating each question, verify that ALL entities (tables, columns, relationships) you reference are explicitly listed in the schema
-        - DO NOT invent or assume tables/columns that aren't explicitly shown in the schema
-        - Use natural language without SQL keywords like SELECT, WHERE, etc.
-        - All questions must match the specified complexity level
-      </guardrails>
-    `;
-  },
+const outputSchema = z.object({
+  questions: z
+    .array(z.string().describe('A natural language question about the data'))
+    .min(1)
+    .describe('List of natural language questions a user might ask'),
 });
 
 export interface GenerateQuestionsParams {
@@ -145,23 +91,62 @@ export async function generateQuestions(
 ): Promise<GenerateQuestionsResult> {
   const { introspection, complexity, count, prompt, model } = params;
 
-  const agentInstance = model
-    ? questionGeneratorAgent.clone({ model })
-    : questionGeneratorAgent;
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `question-gen-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
 
-  const userPrompt =
-    prompt ??
-    `Generate ${count} questions at ${complexity} complexity given db schema.`;
-
-  const { experimental_output } = await generate(
-    agentInstance,
-    [user(userPrompt)],
-    {
-      introspection,
-      complexity,
-      count,
-    },
+  context.set(
+    persona({
+      name: 'question_generator',
+      role: 'You are a synthetic data generator specializing in creating realistic natural language questions that users might ask about a database.',
+      objective:
+        'Generate diverse, realistic natural language questions that match the specified complexity level',
+    }),
+    fragment('database_schema', introspection || ''),
+    fragment(
+      'complexity',
+      { level: complexity },
+      complexityInstructions[complexity],
+    ),
+    fragment(
+      'task',
+      dedent`
+        Generate exactly ${count} natural language questions at the "${complexity}" complexity level.
+        The questions should:
+        1. Match the complexity requirements above
+        2. Use natural business language, not technical SQL terms
+        3. Be realistic questions a non-technical user would actually ask
+        4. Cover different tables and relationships when possible
+      `,
+    ),
+    guardrail({
+      rule: 'Questions MUST ONLY reference tables and columns that exist in the schema above',
+    }),
+    guardrail({
+      rule: 'Before generating each question, verify that ALL entities (tables, columns, relationships) you reference are explicitly listed in the schema',
+    }),
+    guardrail({
+      rule: 'DO NOT invent or assume tables/columns that are not explicitly shown in the schema',
+    }),
+    guardrail({
+      rule: 'Use natural language without SQL keywords like SELECT, WHERE, etc.',
+    }),
+    guardrail({
+      rule: 'All questions must match the specified complexity level',
+    }),
+    user(
+      prompt ??
+        `Generate ${count} questions at ${complexity} complexity given db schema.`,
+    ),
   );
 
-  return { questions: experimental_output.questions };
+  const questionOutput = structuredOutput({
+    model: model ?? groq('openai/gpt-oss-20b'),
+    context,
+    schema: outputSchema,
+  });
+
+  return questionOutput.generate();
 }

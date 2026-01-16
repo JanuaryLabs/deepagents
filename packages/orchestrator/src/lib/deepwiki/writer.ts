@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import { defaultSettingsMiddleware, tool, wrapLanguageModel } from 'ai';
+import { type ToolExecutionOptions, tool } from 'ai';
 import { snakeCase } from 'lodash-es';
 import { readFile, writeFile } from 'node:fs/promises';
 import z from 'zod';
@@ -27,6 +27,37 @@ type SectionAgentContext = {
   section_path: Record<string, string>;
 };
 
+// Define tool outside agent to help TypeScript with type inference
+const write_section_tool = tool({
+  description:
+    'Use this tool to return the final markdown content for the current section. You MUST use this tool to return your final output.',
+  inputSchema: z.object({
+    sectionTitle: z
+      .string()
+      .describe(
+        'The title of the section being written. Prefer the FULL hierarchical path like "Parent > Child" to ensure uniqueness.',
+      ),
+    sectionContent: z
+      .string()
+      .describe(
+        'The markdown content for the section excluding section heading.',
+      ),
+  }),
+  execute: async (
+    {
+      sectionTitle,
+      sectionContent,
+    }: { sectionTitle: string; sectionContent: string },
+    options: ToolExecutionOptions,
+  ) => {
+    const context = toState<SectionAgentContext>(options);
+    const p = `./docs/section_${snakeCase(sectionTitle)}.md`;
+    await writeFile(p, sectionContent, 'utf-8');
+    context.section_path[sectionTitle] = p;
+    return `Section "${sectionTitle}" written to file.`;
+  },
+});
+
 const writer = agent<SectionAgentContext>({
   name: 'Wiki Writer',
   model: lmstudio('qwen/qwen3-8b'),
@@ -49,46 +80,7 @@ const writer = agent<SectionAgentContext>({
     read_file: read_file_tool,
     // read_dir: read_dir_tool,
     // search_files: search_files_tool,
-    write_section: tool({
-      name: 'write_section',
-      description:
-        'Use this tool to return the final markdown content for the current section. You MUST use this tool to return your final output.',
-      inputSchema: z.object({
-        sectionTitle: z
-          .string()
-          .describe(
-            'The title of the section being written. Prefer the FULL hierarchical path like "Parent > Child" to ensure uniqueness.',
-          ),
-        sectionContent: z
-          .string()
-          .describe(
-            'The markdown content for the section excluding section heading.',
-          ),
-      }),
-      execute: async ({ sectionTitle, sectionContent }, options) => {
-        const context = toState<SectionAgentContext>(options);
-        //         const text = await execute(
-        //           sectionWriter,
-        //           [
-        //             user(`You are writing the section at path: ${path}. The section should comprehensively cover this topic based on the repository contents.
-
-        // You have identified the following related files that may contain relevant information for this section:
-        // ${related_files.map((f) => `- ${f}`).join('\n')}
-
-        // Use the tools to inspect these files and gather information. Summarize key points, code examples, and explanations that will help create a thorough and accurate documentation section.
-
-        // Remember to keep your writing clear, concise, and focused on the current section topic. Do not include information about other sections or subsections.
-
-        //           ],
-        //           {},
-        //         ).text;
-        const p = `./docs/section_${snakeCase(sectionTitle)}.md`;
-        await writeFile(p, sectionContent, 'utf-8');
-        context.section_path[sectionTitle] = p;
-        return `Section "${sectionTitle}" written to file.`;
-        // return text;
-      },
-    }),
+    write_section: write_section_tool,
     search_content: search_content_tool,
     update_scratchpad: scratchpad_tool,
   },
@@ -230,12 +222,7 @@ type StitchAgentContext = {
 };
 const stitchAgent = agent<StitchAgentContext>({
   name: 'Stitch Agent',
-  model: wrapLanguageModel({
-    model: groq('moonshotai/kimi-k2-instruct-0905'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.1 },
-    }),
-  }),
+  model: groq('moonshotai/kimi-k2-instruct-0905'),
   prompt: instructions({
     purpose: [
       'You synthesize and stitch together child subsections into a cohesive parent section for a wiki.',
@@ -251,9 +238,12 @@ const stitchAgent = agent<StitchAgentContext>({
   }),
 });
 
-function write(state: IsolatedSectionAgentContext, item: Outline[number]) {
+async function write(
+  state: IsolatedSectionAgentContext,
+  item: Outline[number],
+) {
   console.log(buildToc([item]));
-  return execute(
+  return await execute(
     sectionWriterAgent,
     [
       user(
@@ -293,7 +283,7 @@ Remember to keep your writing clear, concise, and focused on the current section
   );
 }
 
-function stitch(
+async function stitch(
   state: StitchAgentContext,
   item: Outline[number],
   childSections: Array<{ title: string; content: string }>,
@@ -307,7 +297,7 @@ ${child.content}
     )
     .join('\n');
 
-  return execute(
+  return await execute(
     stitchAgent,
     [
       user(
@@ -389,7 +379,7 @@ export async function singlePageWiki(state: {
     { title: root.title },
     async (item) => {
       if (!item.sections || item.sections.length === 0) {
-        const result = write(
+        const result = await write(
           {
             repo_path: state.repo_path,
             tree: state.tree,
@@ -402,7 +392,7 @@ export async function singlePageWiki(state: {
         return result.text;
       } else {
         // Stitch the parent section from child sections
-        const stitchResult = stitch(
+        const stitchResult = await stitch(
           {
             repo_path: state.repo_path,
             tree: state.tree,

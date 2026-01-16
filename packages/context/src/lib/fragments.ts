@@ -88,21 +88,11 @@ export function isMessageFragment(fragment: ContextFragment): boolean {
 
 export function fragment(
   name: string,
-  ...children: ContextFragment[]
+  ...children: FragmentData[]
 ): ContextFragment {
   return {
     name,
     data: children,
-  };
-}
-
-/**
- * Create a role fragment for system prompt instructions.
- */
-export function role(content: string): ContextFragment {
-  return {
-    name: 'role',
-    data: content,
   };
 }
 

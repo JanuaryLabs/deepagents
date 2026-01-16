@@ -1,11 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import {
-  type UIMessage,
-  defaultSettingsMiddleware,
-  generateId,
-  tool,
-  wrapLanguageModel,
-} from 'ai';
+import { type UIMessage, generateId, tool } from 'ai';
 import z from 'zod';
 
 import {
@@ -113,13 +107,7 @@ export const outlineAgent = agent<unknown, OutlineAgentContext>({
 
 export const outlineCondensedAgent = agent<unknown, OutlineAgentContext>({
   name: 'Outline Condensed Agent',
-  model: wrapLanguageModel({
-    model: groq('moonshotai/kimi-k2-instruct-0905'),
-    // model: lmstudio('openai/gpt-oss-20b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0 },
-    }),
-  }),
+  model: groq('moonshotai/kimi-k2-instruct-0905'),
   prompt: instructions({
     purpose: [
       'To intelligently condense and optimize an existing outline by merging redundant sections, removing overly granular subdivisions, and creating a more streamlined, maintainable documentation structure.',
@@ -154,19 +142,25 @@ export async function generateOutline(state: OutlineAgentContext) {
   let current_iteration = 0;
   while (current_iteration < max_iterations) {
     console.log(`\n=== Outline Iteration ${current_iteration + 1} ===\n`);
-    const result = execute(outlineAgent, messages, state);
+    const result = await execute(outlineAgent, messages, state);
     await Array.fromAsync(
       result.toUIMessageStream({
         generateMessageId: generateId,
         originalMessages: messages,
-        onFinish: async ({ responseMessage }) => {
+        onFinish: async ({
+          responseMessage,
+        }: {
+          responseMessage: UIMessage;
+        }) => {
           messages.push(responseMessage);
         },
       }),
     );
     await result.consumeStream();
     const calls = await result.toolCalls;
-    const outlineCall = calls.find((t) => t.toolName === 'store_outline');
+    const outlineCall = calls.find(
+      (t: { toolName: string }) => t.toolName === 'store_outline',
+    );
     if (outlineCall) {
       console.log('\n=== Outline Generation Complete ===\n');
       state.outline = outlineCall.input.outline;
@@ -181,7 +175,7 @@ export async function generateOutline(state: OutlineAgentContext) {
     outlineCondensedAgent,
     `Condense and optimize the following outline:\n\n${buildToc(state.outline)}`,
     state,
-  ).then(({ experimental_output }) => experimental_output);
+  ).then(({ output }) => output);
 }
 
 function slugify(text: string) {

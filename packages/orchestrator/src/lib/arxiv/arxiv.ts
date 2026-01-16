@@ -181,14 +181,16 @@ if (import.meta.main) {
       continue;
     }
 
-    const answer = await execute(
-      arxivAgent,
-      [
-        user(
-          `Based on these sections from the paper, answer: ${question}\n\nSections:\n${results.map((r) => r.content).join('\n\n')}`,
-        ),
-      ],
-      context,
+    const answer = (
+      await execute(
+        arxivAgent,
+        [
+          user(
+            `Based on these sections from the paper, answer: ${question}\n\nSections:\n${results.map((r) => r.content).join('\n\n')}`,
+          ),
+        ],
+        context,
+      )
     ).text;
 
     console.log(`\n=� Answer:\n${answer}\n`);

@@ -12,7 +12,7 @@ type ToolCallState =
   | 'output-error'
   | 'input-streaming'
   | 'input-available';
-type ToolCallOptions = {
+type ToolExecutionOptions = {
   toolName?: string;
   toolCallId?: string;
   input?: Record<string, unknown> | undefined;
@@ -51,7 +51,7 @@ function createAssistantMessage(parts: UIMessage['parts']): UIMessage {
 function createToolCall(
   state: ToolCallState,
   sql: string | undefined,
-  options: ToolCallOptions = {},
+  options: ToolExecutionOptions = {},
 ): ToolPart {
   const {
     toolName = 'db_query',
@@ -95,28 +95,28 @@ function createToolCall(
 
 function createOutputAvailableToolCall(
   sql: string | undefined,
-  options: ToolCallOptions = {},
+  options: ToolExecutionOptions = {},
 ): ToolPart {
   return createToolCall('output-available', sql, options);
 }
 
 function createOutputErrorToolCall(
   sql: string | undefined,
-  options: ToolCallOptions = {},
+  options: ToolExecutionOptions = {},
 ): ToolPart {
   return createToolCall('output-error', sql, options);
 }
 
 function createInputStreamingToolCall(
   sql: string | undefined,
-  options: ToolCallOptions = {},
+  options: ToolExecutionOptions = {},
 ): ToolPart {
   return createToolCall('input-streaming', sql, options);
 }
 
 function createInputAvailableToolCall(
   sql: string | undefined,
-  options: ToolCallOptions = {},
+  options: ToolExecutionOptions = {},
 ): ToolPart {
   return createToolCall('input-available', sql, options);
 }

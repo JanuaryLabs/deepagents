@@ -1,6 +1,11 @@
 import { type UIToolInvocation, tool } from 'ai';
 import { z } from 'zod';
 
+const GetWeatherInputSchema = z.object({
+  location: z.string().describe('City name, address or coordinates'),
+  unit: z.enum(['C', 'F']).default('C'),
+});
+
 export const GetWeatherSchema = z.object({
   location: z.string(),
   unit: z.enum(['C', 'F']),
@@ -13,15 +18,12 @@ export const GetWeatherSchema = z.object({
   icon: z.string().optional(),
 });
 
+type GetWeatherInput = z.infer<typeof GetWeatherInputSchema>;
 export type GetWeatherResult = z.infer<typeof GetWeatherSchema>;
 
-export const getWeatherTool = tool({
-  name: 'weather',
+export const getWeatherTool = tool<GetWeatherInput, GetWeatherResult>({
   description: 'Get the current weather for a location.',
-  inputSchema: z.object({
-    location: z.string().describe('City name, address or coordinates'),
-    unit: z.enum(['C', 'F']).default('C'),
-  }),
+  inputSchema: GetWeatherInputSchema,
   outputSchema: GetWeatherSchema,
   execute: async ({ location, unit }) => {
     const { latitude, longitude, name } = await geocodeLocation(location);

@@ -120,28 +120,35 @@ const finalReportAgent = agent<{ userQuery: string }>({
   `,
 });
 
+type OutlineOutput = z.infer<typeof OutlineOutputSchema>;
+
 async function planOutline(userQuery: string) {
-  const { experimental_output: output } = await generate(
+  const { output } = await generate(
     outlineAgent,
     `USER QUERY: ${userQuery}`,
     {},
   );
+  const result = output as OutlineOutput;
   return {
-    reportTitle: output.reportTitle,
-    paragraphs: output.sections.map((p) => ({
-      title: p.title.trim(),
-      content: p.content.trim(),
-      research: {
-        latestSummary: '',
-        reflectionIteration: 0,
-        searchHistory: [],
-      },
-    })),
+    reportTitle: result.reportTitle,
+    paragraphs: result.sections.map(
+      (p: { title: string; content: string }) => ({
+        title: p.title.trim(),
+        content: p.content.trim(),
+        research: {
+          latestSummary: '',
+          reflectionIteration: 0,
+          searchHistory: [],
+        },
+      }),
+    ),
   } satisfies ResearchState;
 }
 
+type FirstSearchOutput = z.infer<typeof FirstSearchOutputSchema>;
+
 async function planFirstSearch(userQuery: string, paragraph: ParagraphPlan) {
-  const { experimental_output: output } = await generate(
+  const { output } = await generate(
     firstSearchPlannerAgent,
     [
       user(
@@ -150,14 +157,16 @@ async function planFirstSearch(userQuery: string, paragraph: ParagraphPlan) {
     ],
     { userQuery },
   );
-  return output;
+  return output as FirstSearchOutput;
 }
+
+type ReflectionSearchOutput = z.infer<typeof ReflectionSearchOutputSchema>;
 
 async function planReflectionSearch(
   userQuery: string,
   paragraph: ParagraphPlan,
 ) {
-  const { experimental_output: output } = await generate(
+  const { output } = await generate(
     reflectionSearchPlannerAgent,
     `USER QUERY: ${userQuery}\n${JSON.stringify({
       title: paragraph.title,
@@ -166,7 +175,7 @@ async function planReflectionSearch(
     })}`,
     { userQuery },
   );
-  return output;
+  return output as ReflectionSearchOutput;
 }
 
 async function summarizeParagraph(
@@ -182,7 +191,8 @@ async function summarizeParagraph(
     search_query: searchQuery,
     search_results: snippets.slice(0, 8),
   };
-  const { experimental_output: out } = await generate(
+  type ParagraphSummaryOutput = z.infer<typeof ParagraphSummaryOutputSchema>;
+  const { output } = await generate(
     paragraphSummaryAgent,
     [
       user(
@@ -197,6 +207,7 @@ async function summarizeParagraph(
     ],
     { userQuery },
   );
+  const out = output as ParagraphSummaryOutput;
   paragraph.research.latestSummary = out.paragraph_latest_state.trim();
 }
 
@@ -292,7 +303,7 @@ export async function deepresearch(
     title: p.title,
     paragraph_latest_state: p.research.latestSummary,
   }));
-  const finalReportMd = await execute(
+  const result = await execute(
     finalReportAgent,
     [
       user(
@@ -300,7 +311,8 @@ export async function deepresearch(
       ),
     ],
     { userQuery },
-  ).text;
+  );
+  const finalReportMd = await result.text;
   return { state, markdown: finalReportMd };
 }
 

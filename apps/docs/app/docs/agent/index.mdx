@@ -19,8 +19,9 @@ When we build AI applications, we often start with a single agent that handles a
 DeepAgents solves this through composition. Instead of one agent with everything, we create specialists that each excel at one thing:
 
 ```typescript
-import { agent, instructions, execute } from '@deepagents/agent';
 import { groq } from '@ai-sdk/groq';
+
+import { agent, execute, instructions } from '@deepagents/agent';
 
 // A specialist that researches topics
 const researcher = agent({
@@ -90,16 +91,16 @@ const agent = agent({
 Handoffs enable agent-to-agent delegation. When you add agents to the `handoffs` array, transfer tools are automatically generated:
 
 ```typescript
-handoffs: [researcher, writer]
+handoffs: [researcher, writer];
 // Creates: transfer_to_researcher, transfer_to_writer
 ```
 
 The parent agent's system prompt includes a table of available specialists:
 
-| Agent Name | Agent Description |
-| --- | --- |
+| Agent Name | Agent Description                                    |
+| ---------- | ---------------------------------------------------- |
 | researcher | Use for researching topics and gathering information |
-| writer | Use for writing and drafting content |
+| writer     | Use for writing and drafting content                 |
 
 ### Context Variables
 
@@ -134,19 +135,19 @@ const analyst = agent({
   // ...
 });
 
-const { experimental_output } = await generate(analyst, prompt, {});
-// experimental_output is typed as { summary: string; findings: string[] }
+const { output } = await generate(analyst, prompt, {});
+// output is typed as { summary: string; findings: string[] }
 ```
 
 ## Execution Functions
 
 Three ways to run agents:
 
-| Function | Use Case | Returns |
-| --- | --- | --- |
-| `execute()` | Streaming responses for real-time UI | `StreamTextResult` |
-| `generate()` | Non-streaming for pipelines | `GenerateTextResult` |
-| `swarm()` | UI-compatible stream with lifecycle hooks | `UIMessageStream` |
+| Function     | Use Case                                  | Returns              |
+| ------------ | ----------------------------------------- | -------------------- |
+| `execute()`  | Streaming responses for real-time UI      | `StreamTextResult`   |
+| `generate()` | Non-streaming for pipelines               | `GenerateTextResult` |
+| `swarm()`    | UI-compatible stream with lifecycle hooks | `UIMessageStream`    |
 
 ```typescript
 // Streaming
@@ -156,7 +157,7 @@ for await (const chunk of stream.textStream) {
 }
 
 // Non-streaming
-const { text, experimental_output } = await generate(agent, 'Hello', context);
+const { text, output } = await generate(agent, 'Hello', context);
 
 // UI-compatible
 const uiStream = swarm(agent, messages, context);
@@ -205,9 +206,7 @@ const writer = agent({
 // Orchestrate the pipeline
 const plan = await generate(planner, query, {});
 const results = await Promise.all(
-  plan.experimental_output.searches.map((s) =>
-    execute(research, s.query, {}).text
-  )
+  plan.output.searches.map((s) => execute(research, s.query, {}).text),
 );
 const report = await generate(writer, JSON.stringify(results), {});
 ```
@@ -215,12 +214,14 @@ const report = await generate(writer, JSON.stringify(results), {});
 ## When to Use This Package
 
 **Ideal for:**
+
 - Multi-step workflows requiring coordination
 - Tasks needing different expertise (research, analysis, writing)
 - Systems where specialists should have focused toolsets
 - Applications requiring type-safe context flow
 
 **Consider alternatives when:**
+
 - A single prompt suffices
 - You don't need agent coordination
 - Simple function calling is enough

@@ -96,11 +96,8 @@ const writer = agent({
 
 async function planSearches(query: string): Promise<WebSearchPlan> {
   console.log('Planning searches...');
-  const { experimental_output: plan } = await generate(
-    planner,
-    `Query: ${query}`,
-    {},
-  );
+  const { output } = await generate(planner, `Query: ${query}`, {});
+  const plan = output as WebSearchPlan;
   console.log(`Will perform ${plan.searches.length} searches`);
   return plan;
 }
@@ -111,7 +108,7 @@ async function performSearches(plan: WebSearchPlan) {
     plan.searches.map(async (item) => {
       console.log(`Searching for: ${item.query}`);
       const input = `Search term: ${item.query}\nReason for searching: ${item.reason}`;
-      const result = execute(research, input, {});
+      const result = await execute(research, input, {});
       const text = await result.text;
       const sources = await result.sources;
       return {
@@ -125,15 +122,14 @@ async function performSearches(plan: WebSearchPlan) {
   return results;
 }
 
-async function writeReport(query: string, searchResults: SearchResult[]) {
+async function writeReport(
+  query: string,
+  searchResults: SearchResult[],
+): Promise<ReportData> {
   console.log('Thinking about report...');
   const writerInput = `Original query: ${query}\nSummarized search results: ${JSON.stringify(searchResults)}`;
-  const { experimental_output: report } = await generate(
-    writer,
-    writerInput,
-    {},
-  );
-  return report;
+  const { output } = await generate(writer, writerInput, {});
+  return output as ReportData;
 }
 
 async function run(query: string) {

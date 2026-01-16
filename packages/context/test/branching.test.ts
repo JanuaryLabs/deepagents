@@ -141,9 +141,10 @@ describe('Branching', () => {
 
       assert.strictEqual(messages.length, 3);
       // resolve() returns decoded UIMessage objects
-      assert.strictEqual(messages[0].parts[0].text, 'First');
-      assert.strictEqual(messages[1].parts[0].text, 'Second');
-      assert.strictEqual(messages[2].parts[0].text, 'Third');
+      assert.deepStrictEqual(
+        messages.map((m: any) => m.parts[0].text),
+        ['First', 'Second', 'Third'],
+      );
     });
   });
 
@@ -236,7 +237,10 @@ describe('Branching', () => {
       assert.ok(msg1);
       assert.ok(msg2);
       // Assistant messages store UIMessage object in data
-      assert.strictEqual(msg2!.data.parts[0].text, 'Original response');
+      assert.strictEqual(
+        (msg2!.data as any).parts[0].text,
+        'Original response',
+      );
     });
 
     it('should link new messages to fork point after rewind', async () => {
@@ -380,13 +384,16 @@ describe('Branching', () => {
       // Get messages from forked branch
       const { messages: forkedMessages } = await engine.resolve({ renderer });
       assert.strictEqual(forkedMessages.length, 2);
-      assert.strictEqual(forkedMessages[1].parts[0].text, 'Response B');
+      assert.strictEqual(
+        (forkedMessages[1] as any).parts[0].text,
+        'Response B',
+      );
 
       // Switch to main and get its messages
       await engine.switchBranch('main');
       const { messages: mainMessages } = await engine.resolve({ renderer });
       assert.strictEqual(mainMessages.length, 2);
-      assert.strictEqual(mainMessages[1].parts[0].text, 'Response A');
+      assert.strictEqual((mainMessages[1] as any).parts[0].text, 'Response A');
     });
 
     it('should throw when switching to non-existent branch', async () => {

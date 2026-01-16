@@ -309,9 +309,9 @@ export const managerAgent: Agent = agent({
   ],
 });
 
-const response = execute(
+const response = await execute(
   managerAgent,
-  [messageToUiMessage(`“Which packages miss license or repository fields?”`)],
+  [messageToUiMessage(`"Which packages miss license or repository fields?"`)],
   {},
 );
 

@@ -3,13 +3,15 @@ import { tool } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
+import { type AgentModel } from '@deepagents/agent';
 import {
-  type AgentModel,
+  ContextEngine,
+  InMemoryContextStore,
   agent,
-  generate,
-  toState,
+  fragment,
+  persona,
   user,
-} from '@deepagents/agent';
+} from '@deepagents/context';
 
 import type { Adapter } from '../adapter.ts';
 import { AbstractGrounding } from './abstract.grounding.ts';
@@ -34,51 +36,6 @@ export interface ReportGroundingConfig {
   /** Force regeneration even if cached */
   forceRefresh?: boolean;
 }
-
-const reportAgent = agent<unknown, { adapter: Adapter }>({
-  name: 'db-report-agent',
-  model: groq('openai/gpt-oss-20b'),
-  prompt: () => dedent`
-        <identity>
-          You are a database analyst expert. Your job is to understand what
-          a database represents and provide business context about it.
-          You have READ-ONLY access to the database.
-        </identity>
-
-        <instructions>
-          Write a business context that helps another agent answer questions accurately.
-
-          For EACH table, do queries ONE AT A TIME:
-          1. SELECT COUNT(*) to get row count
-          2. SELECT * LIMIT 3 to see sample data
-
-          Then write a report with:
-          - What business this database is for
-          - For each table: purpose, row count, and example of what the data looks like
-
-          Include concrete examples like "Track prices are $0.99",
-          "Customer names like 'Luís Gonçalves'", etc.
-
-          Keep it 400-600 words, conversational style.
-        </instructions>
-      `,
-  tools: {
-    query_database: tool({
-      description:
-        'Execute a SELECT query to explore the database and gather insights.',
-      inputSchema: z.object({
-        sql: z.string().describe('The SELECT query to execute'),
-        purpose: z
-          .string()
-          .describe('What insight you are trying to gather with this query'),
-      }),
-      execute: ({ sql }, options) => {
-        const state = toState<{ adapter: Adapter }>(options);
-        return state.adapter.execute(sql);
-      },
-    }),
-  },
-});
 
 /**
  * Grounding that generates a business context report about the database.
@@ -125,16 +82,69 @@ export class ReportGrounding extends AbstractGrounding {
   }
 
   async #generateReport(): Promise<string> {
-    const { text } = await generate(
-      reportAgent.clone({ model: this.#model }),
-      [
-        user(
-          'Please analyze the database and write a contextual report about what this database represents.',
-        ),
-      ],
-      { adapter: this.#adapter },
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: `report-gen-${crypto.randomUUID()}`,
+      userId: 'system',
+    });
+
+    context.set(
+      persona({
+        name: 'db-report-agent',
+        role: 'Database analyst',
+        objective:
+          'Analyze the database and write a contextual report about what it represents',
+      }),
+      fragment(
+        'instructions',
+        dedent`
+          Write a business context that helps another agent answer questions accurately.
+
+          For EACH table, do queries ONE AT A TIME:
+          1. SELECT COUNT(*) to get row count
+          2. SELECT * LIMIT 3 to see sample data
+
+          Then write a report with:
+          - What business this database is for
+          - For each table: purpose, row count, and example of what the data looks like
+
+          Include concrete examples like "Track prices are $0.99",
+          "Customer names like 'Luís Gonçalves'", etc.
+
+          Keep it 400-600 words, conversational style.
+        `,
+      ),
+      user(
+        'Please analyze the database and write a contextual report about what this database represents.',
+      ),
     );
 
-    return text;
+    const adapter = this.#adapter;
+
+    const reportAgent = agent({
+      name: 'db-report-agent',
+      model: this.#model,
+      context,
+      tools: {
+        query_database: tool({
+          description:
+            'Execute a SELECT query to explore the database and gather insights.',
+          inputSchema: z.object({
+            sql: z.string().describe('The SELECT query to execute'),
+            purpose: z
+              .string()
+              .describe(
+                'What insight you are trying to gather with this query',
+              ),
+          }),
+          execute: ({ sql }) => {
+            return adapter.execute(sql);
+          },
+        }),
+      },
+    });
+
+    const result = await reportAgent.generate({});
+    return result.text;
   }
 }

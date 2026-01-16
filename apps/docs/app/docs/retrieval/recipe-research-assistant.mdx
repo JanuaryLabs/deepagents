@@ -21,12 +21,18 @@ npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
 ## Complete Implementation
 
 ```typescript
-import { agent, instructions, execute, generate } from '@deepagents/agent';
-import { similaritySearch, fastembed, nodeSQLite, ingest } from '@deepagents/retrieval';
-import { pdfFile } from '@deepagents/retrieval/connectors';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import { agent, execute, generate, instructions } from '@deepagents/agent';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { pdfFile } from '@deepagents/retrieval/connectors';
 
 // Set up retrieval infrastructure
 const store = nodeSQLite('./research.db', 384);
@@ -49,7 +55,9 @@ async function indexPaper(source: string) {
 const searchPapersTool = tool({
   description: 'Search research papers for relevant information about a topic',
   parameters: z.object({
-    query: z.string().describe('Search query about research topics, methods, or findings'),
+    query: z
+      .string()
+      .describe('Search query about research topics, methods, or findings'),
   }),
   execute: async ({ query }) => {
     const results = await similaritySearch(query, {
@@ -58,7 +66,7 @@ const searchPapersTool = tool({
       embedder,
     });
 
-    return results.slice(0, 8).map(r => ({
+    return results.slice(0, 8).map((r) => ({
       paper: r.document_id,
       content: r.content,
       relevance: r.similarity.toFixed(3),
@@ -71,11 +79,15 @@ const SummarySchema = z.object({
   title: z.string().describe('Paper title'),
   authors: z.array(z.string()).describe('Author names'),
   abstract: z.string().describe('Paper abstract or summary'),
-  keyContributions: z.array(z.string()).describe('Main contributions of the paper'),
+  keyContributions: z
+    .array(z.string())
+    .describe('Main contributions of the paper'),
   methodology: z.string().describe('Research methodology used'),
   results: z.string().describe('Key results and findings'),
   limitations: z.array(z.string()).describe('Stated limitations'),
-  futureWork: z.array(z.string()).describe('Suggested future research directions'),
+  futureWork: z
+    .array(z.string())
+    .describe('Suggested future research directions'),
 });
 
 // Paper summarizer agent
@@ -127,22 +139,25 @@ async function summarizePaper(paperUrl: string) {
   await indexPaper(paperUrl);
 
   // Search for content from this specific paper
-  const results = await similaritySearch('abstract introduction methodology results conclusion', {
-    connector: pdfFile(paperUrl),
-    store,
-    embedder,
-  });
+  const results = await similaritySearch(
+    'abstract introduction methodology results conclusion',
+    {
+      connector: pdfFile(paperUrl),
+      store,
+      embedder,
+    },
+  );
 
   const paperContent = results
     .slice(0, 10)
-    .map(r => r.content)
+    .map((r) => r.content)
     .join('\n\n');
 
   // Generate structured summary
-  const { experimental_output: summary } = await generate(
+  const { output: summary } = await generate(
     summarizer,
     `Summarize this research paper:\n\n${paperContent}`,
-    {}
+    {},
   );
 
   return summary;
@@ -166,9 +181,9 @@ async function askResearch(question: string) {
 async function main() {
   // Index some foundational papers
   const papers = [
-    'https://arxiv.org/pdf/1706.03762.pdf',  // Attention Is All You Need
-    'https://arxiv.org/pdf/2005.14165.pdf',  // GPT-3
-    'https://arxiv.org/pdf/2303.08774.pdf',  // GPT-4 Technical Report
+    'https://arxiv.org/pdf/1706.03762.pdf', // Attention Is All You Need
+    'https://arxiv.org/pdf/2005.14165.pdf', // GPT-3
+    'https://arxiv.org/pdf/2303.08774.pdf', // GPT-4 Technical Report
   ];
 
   console.log('Indexing research papers...\n');
@@ -183,7 +198,9 @@ async function main() {
 
   // Ask research questions
   console.log('\n--- Research Q&A ---\n');
-  await askResearch('What are the key differences between attention mechanisms in transformers and previous sequence-to-sequence models?');
+  await askResearch(
+    'What are the key differences between attention mechanisms in transformers and previous sequence-to-sequence models?',
+  );
   await askResearch('How does GPT-3 handle few-shot learning?');
 }
 
@@ -287,11 +304,13 @@ Generate a literature review on a topic:
 const LitReviewSchema = z.object({
   topic: z.string(),
   background: z.string(),
-  keyPapers: z.array(z.object({
-    title: z.string(),
-    contribution: z.string(),
-    year: z.string(),
-  })),
+  keyPapers: z.array(
+    z.object({
+      title: z.string(),
+      contribution: z.string(),
+      year: z.string(),
+    }),
+  ),
   researchGaps: z.array(z.string()),
   futureDirections: z.array(z.string()),
 });
@@ -304,12 +323,15 @@ async function generateLitReview(topic: string) {
     embedder,
   });
 
-  const context = results.slice(0, 15).map(r => r.content).join('\n\n---\n\n');
+  const context = results
+    .slice(0, 15)
+    .map((r) => r.content)
+    .join('\n\n---\n\n');
 
-  const { experimental_output: review } = await generate(
+  const { output: review } = await generate(
     litReviewAgent,
     `Generate a literature review on: ${topic}\n\nPapers:\n${context}`,
-    {}
+    {},
   );
 
   return review;
@@ -333,7 +355,7 @@ async function compareMethodologies(topics: string[]) {
 
     comparisons.push({
       topic,
-      papers: results.slice(0, 3).map(r => ({
+      papers: results.slice(0, 3).map((r) => ({
         source: r.document_id,
         methodology: r.content,
       })),

@@ -1,5 +1,3 @@
-import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
-
 import { agent, execute, lmstudio, user } from '@deepagents/agent';
 
 /**
@@ -8,12 +6,7 @@ import { agent, execute, lmstudio, user } from '@deepagents/agent';
  */
 const synthesizer = agent({
   name: 'synthesizer_agent',
-  model: wrapLanguageModel({
-    model: lmstudio('google/gemma-3-12b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.4 },
-    }),
-  }),
+  model: lmstudio('google/gemma-3-12b'),
   prompt: `
 		<SystemContext>
 			You are a synthesizer agent that compiles the results of executed plan steps into a final answer.
@@ -68,7 +61,10 @@ const synthesizer = agent({
 	`,
 });
 
-export function synthesize(stepResults: string[], originalRequest: string) {
+export async function synthesize(
+  stepResults: string[],
+  originalRequest: string,
+) {
   const stepResultsText = stepResults
     .map((step, index) => `Step ${index + 1} Result:\n${step}`)
     .join('\n\n');
@@ -82,5 +78,5 @@ ${originalRequest}
 ${stepResultsText}
   `.trim();
 
-  return execute(synthesizer, [user(prompt)], {}).text;
+  return (await execute(synthesizer, [user(prompt)], {})).text;
 }

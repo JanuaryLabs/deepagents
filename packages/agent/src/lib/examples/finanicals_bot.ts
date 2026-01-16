@@ -48,12 +48,13 @@ const VerificationResultSchema = z.object({
 type FinancialSearchPlan = z.infer<typeof FinancialSearchPlanSchema>;
 type FinancialReportData = z.infer<typeof FinancialReportDataSchema>;
 type VerificationResult = z.infer<typeof VerificationResultSchema>;
+type AnalysisSummary = z.infer<typeof AnalysisSummarySchema>;
 
 // Custom output extractor for sub-agents that return an AnalysisSummary
 const summaryExtractor: OutputExtractorFn = async (result) => {
   // The financial/risk analyst agents emit an AnalysisSummary with a `summary` field.
   // We want the tool call to return just that summary text so the writer can drop it inline.
-  return result.experimental_output.summary;
+  return (result.output as AnalysisSummary).summary;
 };
 
 const plannerAgent = agent({
@@ -156,11 +157,8 @@ const progress = createProgress<Ctx>();
 progress.add({
   title: 'Planning searches',
   task: async (ctx, task) => {
-    const { experimental_output: plan } = await generate(
-      plannerAgent,
-      `Query: ${query}`,
-      {},
-    );
+    const { output } = await generate(plannerAgent, `Query: ${query}`, {});
+    const plan = output as FinancialSearchPlan;
     ctx.plan = plan;
     task.title = `Planned ${plan.searches.length} searches`;
   },
@@ -176,7 +174,7 @@ progress.add({
             title: `🔍 ${item.query}`,
             rendererOptions: { persistentOutput: true },
             task: async (_subCtx, subTask) => {
-              const result = execute(
+              const result = await execute(
                 searchAgent,
                 `Search term: ${item.query}\nReason: ${item.reason}`,
                 {},
@@ -227,11 +225,12 @@ progress.add({
       task.output = `📝 ${message}`;
     });
 
-    const { experimental_output: report } = await generate(
+    const { output } = await generate(
       writerWithTools,
       `Original query: ${query}\nSummarized search results: ${ctx.searchResults}`,
       {},
     );
+    const report = output as FinancialReportData;
 
     progressUpdater[Symbol.dispose]?.();
 
@@ -248,11 +247,12 @@ progress.add({
     task.output = '🔍 Checking report quality and consistency...';
     task.title = '🔍 Verifying report';
 
-    const { experimental_output: verification } = await generate(
+    const { output } = await generate(
       verifierAgent,
       ctx.report!.markdown_report,
       {},
     );
+    const verification = output as VerificationResult;
 
     ctx.verification = verification;
 

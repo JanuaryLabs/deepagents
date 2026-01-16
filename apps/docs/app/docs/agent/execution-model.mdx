@@ -27,6 +27,7 @@ const steps = await stream.steps;
 ```
 
 **Use when:**
+
 - Building chat interfaces with real-time feedback
 - Users need to see responses as they generate
 - Long-running tasks where progress matters
@@ -41,11 +42,12 @@ import { generate } from '@deepagents/agent';
 const result = await generate(agent, 'Analyze this', contextVariables);
 
 console.log(result.text);
-console.log(result.experimental_output); // Structured output
-console.log(result.steps);               // All execution steps
+console.log(result.output); // Structured output
+console.log(result.steps); // All execution steps
 ```
 
 **Use when:**
+
 - Building pipelines where you need complete results
 - Processing in batches
 - Working with structured output
@@ -65,6 +67,7 @@ const uiStream = swarm(agent, messages, contextVariables);
 **Key difference:** `swarm()` supports the `prepareEnd` lifecycle hook, allowing parent agents to re-engage after specialists complete.
 
 **Use when:**
+
 - Integrating with frontend frameworks
 - Building conversational UIs
 - Need lifecycle hooks for multi-agent coordination
@@ -113,7 +116,7 @@ When a transfer tool executes, it sets `currentActiveAgent` in the context. The 
 By default, execution stops after 25 steps to prevent infinite loops:
 
 ```typescript
-stopWhen: stepCountIs(25)
+stopWhen: stepCountIs(25);
 ```
 
 A step is one model invocation. If you have complex workflows with many tool calls, you may need to adjust:
@@ -122,7 +125,7 @@ A step is one model invocation. If you have complex workflows with many tool cal
 import { stepCountIs } from 'ai';
 
 // In your agent configuration or execution options
-stopWhen: stepCountIs(50)
+stopWhen: stepCountIs(50);
 ```
 
 ## Tool Call Repair
@@ -138,9 +141,9 @@ const repairToolCall = async ({ toolCall, tools, inputSchema, error }) => {
 
   const tool = tools[toolCall.toolName];
 
-  const { experimental_output } = await generateText({
+  const { output } = await generateText({
     model: groq('gpt-oss-20b'),
-    experimental_output: Output.object({ schema: tool.inputSchema }),
+    output: Output.object({ schema: tool.inputSchema }),
     prompt: [
       `The model tried to call "${toolCall.toolName}" with:`,
       JSON.stringify(toolCall.input),
@@ -150,7 +153,7 @@ const repairToolCall = async ({ toolCall, tools, inputSchema, error }) => {
     ].join('\n'),
   });
 
-  return { ...toolCall, input: JSON.stringify(experimental_output) };
+  return { ...toolCall, input: JSON.stringify(output) };
 };
 ```
 
@@ -166,7 +169,7 @@ Returns all messages generated during execution:
 
 ```typescript
 const result = await generate(agent, input, context, {
-  outputMode: 'full_history'
+  outputMode: 'full_history',
 });
 // result includes all intermediate messages
 ```
@@ -177,7 +180,7 @@ Returns only the final message:
 
 ```typescript
 const result = await generate(agent, input, context, {
-  outputMode: 'last_message'
+  outputMode: 'last_message',
 });
 // result includes only the last assistant message
 ```
@@ -207,7 +210,7 @@ interface StreamTextResult {
   consumeStream(): Promise<void>;
 
   // Extended by DeepAgents
-  state: COut;  // Output context
+  state: COut; // Output context
 }
 ```
 
@@ -216,7 +219,7 @@ interface StreamTextResult {
 ```typescript
 interface GenerateTextResult {
   text: string;
-  experimental_output: Output;  // Typed if using output schema
+  output: Output; // Typed if using output schema
   steps: StepResult[];
   toolCalls: ToolCall[];
   toolResults: ToolResult[];
@@ -224,7 +227,7 @@ interface GenerateTextResult {
   finishReason: FinishReason;
 
   // Extended by DeepAgents
-  state: COut;  // Output context
+  state: COut; // Output context
 }
 ```
 
@@ -249,7 +252,7 @@ const stream = execute(agent, input, context);
 stream.consumeStream({
   onError: (error) => {
     console.error('Stream error:', error);
-  }
+  },
 });
 ```
 
@@ -261,7 +264,7 @@ Cancel execution with an abort signal:
 const controller = new AbortController();
 
 const stream = execute(agent, input, context, {
-  abortSignal: controller.signal
+  abortSignal: controller.signal,
 });
 
 // Later, to cancel:
@@ -339,12 +342,12 @@ const results = await Promise.all(
     const result = execute(
       searchAgent,
       `Search term: ${item.query}\nReason: ${item.reason}`,
-      {}
+      {},
     );
 
     // Stream each search independently
     return result.text;
-  })
+  }),
 );
 ```
 
@@ -352,27 +355,23 @@ Sequential orchestration with `generate()`:
 
 ```typescript
 // Step 1: Plan
-const { experimental_output: plan } = await generate(
-  plannerAgent,
-  `Query: ${query}`,
-  {}
-);
+const { output: plan } = await generate(plannerAgent, `Query: ${query}`, {});
 
 // Step 2: Search (parallel)
 const searchResults = await Promise.all(/* ... */);
 
 // Step 3: Write report
-const { experimental_output: report } = await generate(
+const { output: report } = await generate(
   writerAgent,
   `Query: ${query}\nResults: ${searchResults}`,
-  {}
+  {},
 );
 
 // Step 4: Verify
-const { experimental_output: verification } = await generate(
+const { output: verification } = await generate(
   verifierAgent,
   report.markdown_report,
-  {}
+  {},
 );
 ```
 

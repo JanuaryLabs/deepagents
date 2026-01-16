@@ -82,7 +82,7 @@ export interface InspectOptions {
 
 /**
  * Result of inspecting context state.
- * Provides a comprehensive JSON-serializable snapshot for debugging.
+ * JSON-serializable snapshot for debugging.
  */
 export interface InspectResult {
   /** Token usage and cost estimation */
@@ -693,7 +693,7 @@ export class ContextEngine {
 
   /**
    * Inspect the full context state for debugging.
-   * Returns a comprehensive JSON-serializable object with all context information.
+   * Returns a JSON-serializable object with context information.
    *
    * @param options - Inspection options (modelId and renderer required)
    * @returns Complete inspection data including estimates, rendered output, fragments, and graph

@@ -21,18 +21,27 @@ npm install @deepagents/retrieval @deepagents/agent @ai-sdk/groq ai zod
 ## Complete Implementation
 
 ```typescript
-import { agent, instructions, generate } from '@deepagents/agent';
-import { ingest, similaritySearch, fastembed, nodeSQLite } from '@deepagents/retrieval';
-import { rss } from '@deepagents/retrieval/connectors';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import { agent, generate, instructions } from '@deepagents/agent';
+import {
+  fastembed,
+  ingest,
+  nodeSQLite,
+  similaritySearch,
+} from '@deepagents/retrieval';
+import { rss } from '@deepagents/retrieval/connectors';
 
 // Configure news feeds
 const feeds = [
   { name: 'Hacker News', url: 'https://news.ycombinator.com/rss' },
   { name: 'TechCrunch', url: 'https://techcrunch.com/feed/' },
   { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml' },
-  { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/technology-lab' },
+  {
+    name: 'Ars Technica',
+    url: 'https://feeds.arstechnica.com/arstechnica/technology-lab',
+  },
 ];
 
 // Set up retrieval infrastructure
@@ -77,13 +86,19 @@ async function searchNews(query: string, limit = 10) {
 // Define the digest schema
 const DigestSchema = z.object({
   summary: z.string().describe('2-3 sentence overview of top stories'),
-  topStories: z.array(z.object({
-    title: z.string(),
-    source: z.string(),
-    keyPoints: z.array(z.string()).describe('2-3 key points'),
-  })).describe('Top 5 most important stories'),
+  topStories: z
+    .array(
+      z.object({
+        title: z.string(),
+        source: z.string(),
+        keyPoints: z.array(z.string()).describe('2-3 key points'),
+      }),
+    )
+    .describe('Top 5 most important stories'),
   trends: z.array(z.string()).describe('3-5 emerging trends'),
-  categories: z.record(z.array(z.string())).describe('Stories grouped by category'),
+  categories: z
+    .record(z.array(z.string()))
+    .describe('Stories grouped by category'),
 });
 
 // Create the digest agent
@@ -112,7 +127,13 @@ async function generateDigest() {
   console.log('Generating daily digest...\n');
 
   // Search across multiple topics to get diverse content
-  const topics = ['AI', 'startups', 'cybersecurity', 'developer tools', 'tech industry'];
+  const topics = [
+    'AI',
+    'startups',
+    'cybersecurity',
+    'developer tools',
+    'tech industry',
+  ];
   const allResults: any[] = [];
 
   for (const topic of topics) {
@@ -121,22 +142,26 @@ async function generateDigest() {
   }
 
   // Deduplicate by document_id
-  const unique = [...new Map(allResults.map(r => [r.document_id, r])).values()];
-  const top = unique
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, 20);
+  const unique = [
+    ...new Map(allResults.map((r) => [r.document_id, r])).values(),
+  ];
+  const top = unique.sort((a, b) => b.similarity - a.similarity).slice(0, 20);
 
   // Format content for the agent
-  const context = top.map((r, i) => `
+  const context = top
+    .map(
+      (r, i) => `
 Article ${i + 1}:
 ${r.content}
----`).join('\n');
+---`,
+    )
+    .join('\n');
 
   // Generate structured digest
-  const { experimental_output: digest } = await generate(
+  const { output: digest } = await generate(
     digestAgent,
     `Create a daily tech news digest from these articles:\n\n${context}`,
-    {}
+    {},
   );
 
   return digest;
@@ -187,7 +212,9 @@ async function main() {
   console.log('\n--- Search Results: "AI regulation" ---\n');
   const searchResults = await searchNews('AI regulation', 3);
   for (const result of searchResults) {
-    console.log(`[${result.similarity.toFixed(2)}] ${result.content.slice(0, 200)}...\n`);
+    console.log(
+      `[${result.similarity.toFixed(2)}] ${result.content.slice(0, 200)}...\n`,
+    );
   }
 }
 
@@ -243,7 +270,7 @@ Set different TTLs for different feeds:
 
 ```typescript
 const feedConfigs = [
-  { url: 'https://breaking-news.com/rss', ttl: 15 * 60 * 1000 },  // 15 min
+  { url: 'https://breaking-news.com/rss', ttl: 15 * 60 * 1000 }, // 15 min
   { url: 'https://weekly-digest.com/rss', ttl: 24 * 60 * 60 * 1000 }, // 24 hours
 ];
 ```

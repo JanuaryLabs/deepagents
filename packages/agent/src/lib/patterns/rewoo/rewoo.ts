@@ -137,7 +137,8 @@ export const rewooSolver = agent({
 
 export async function runRewoo(query: string) {
   // 1) Plan
-  const { experimental_output: plan } = await generate(rewooPlanner, query, {});
+  const { output } = await generate(rewooPlanner, query, {});
+  const plan = output as RewooPlan;
 
   // 2) Execute tool calls (in parallel)
   const evidences: Evidence[] = await Promise.all(
@@ -149,7 +150,7 @@ export async function runRewoo(query: string) {
         call.input,
       )}, source: ${JSON.stringify(source)}, maxResults: 5 }`;
 
-      const res = execute(rewooToolExecutor, execInput, {});
+      const res = await execute(rewooToolExecutor, execInput, {});
       const text = await res.text;
       const summary = text?.slice(0, 1500) ?? '';
       return { id: call.id, tool: call.tool, input: call.input, summary };
@@ -167,7 +168,7 @@ export async function runRewoo(query: string) {
     ...evidences.map((e) => `${e.id} (${e.tool}): ${e.summary}`),
   ].join('\n');
 
-  const answer = await execute(rewooSolver, solverInput, {}).text;
+  const answer = await (await execute(rewooSolver, solverInput, {})).text;
 
   return { plan, evidences, answer } as const;
 }

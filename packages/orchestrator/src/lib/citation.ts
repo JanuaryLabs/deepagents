@@ -6,11 +6,11 @@ import { cwd } from 'node:process';
 import { Readable } from 'node:stream';
 
 import {
+  type StepBackExample,
   agent,
   stepBackPrompt,
   stream,
   user,
-  type StepBackExample,
 } from '@deepagents/agent';
 
 import { repoTree, search_content_tool } from './deepwiki/tools.ts';
@@ -25,9 +25,9 @@ const CODE_SEARCH_STEP_BACK_EXAMPLES: StepBackExample[] = [
     stepBackQuestion:
       'What is agent architecture? What are the core components and patterns for building agents?',
     stepBackAnswer:
-      'Agent architecture consists of: 1) An agent definition with model and prompt, 2) Tools that provide capabilities, 3) State management for context, 4) A streaming interface for responses. The core pattern involves defining the agent\'s behavior through prompts and equipping it with tools to accomplish tasks.',
+      "Agent architecture consists of: 1) An agent definition with model and prompt, 2) Tools that provide capabilities, 3) State management for context, 4) A streaming interface for responses. The core pattern involves defining the agent's behavior through prompts and equipping it with tools to accomplish tasks.",
     finalAnswer:
-      'Use the agent() function from @deepagents/agent with a prompt, model, and tools. Define the agent\'s behavior in the prompt and provide tools for specific capabilities.',
+      "Use the agent() function from @deepagents/agent with a prompt, model, and tools. Define the agent's behavior in the prompt and provide tools for specific capabilities.",
   },
   {
     originalQuestion: 'How does code search work in this codebase?',
@@ -129,10 +129,12 @@ const state = {
 //   stream(searchAgent, [user(`How do I build an agent?`)], state),
 // );
 
-Readable.fromWeb(
-  stream(
-    searchAgent,
-    [user(`How can we build an sqlite readonly agent chatbot?`)],
-    state,
-  ).textStream as any,
-).pipe(createWriteStream('output.md'));
+stream(
+  searchAgent,
+  [user(`How can we build an sqlite readonly agent chatbot?`)],
+  state,
+).then((result) => {
+  Readable.fromWeb(result.textStream as any).pipe(
+    createWriteStream('output.md'),
+  );
+});

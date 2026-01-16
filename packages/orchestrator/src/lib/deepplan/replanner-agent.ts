@@ -1,4 +1,3 @@
-import { groq } from '@ai-sdk/groq';
 import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import z from 'zod';
 
@@ -254,11 +253,15 @@ Consider:
 
 export async function replan(context: ExecutionContext) {
   const remainingSteps = context.current_plan.slice(1);
-  const { experimental_output: decision } = await generate(
+  const { output } = await generate(
     replannerAgent,
     [user(formatReplannerPrompt(context, remainingSteps))],
     {},
   );
+  const decision = output as {
+    remaining_steps: typeof context.current_plan;
+    should_continue: boolean;
+  };
   return {
     ...context,
     current_plan: decision.remaining_steps,

@@ -61,7 +61,7 @@ export const clarrifyAgent = agent({
 });
 
 export async function clarrifyUserQuery(state: any, query: string) {
-  const { experimental_output: output } = await generate(
+  const { output: output } = await generate(
     clarrifyAgent,
     `User Query: ${query}.
 						Today's date is ${new Date().toISOString()}.`,

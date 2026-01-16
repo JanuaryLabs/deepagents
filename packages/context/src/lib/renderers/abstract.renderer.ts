@@ -863,7 +863,7 @@ export class ToonRenderer extends ContextRenderer {
 
     // Determine if there is at least one shared field across all rows.
     // We treat null/undefined/missing as "empty" cells, but we still require
-    // a non-empty key intersection so clearly non-uniform objects are not
+    // a non-empty key intersection so non-uniform objects are not
     // forced into a tabular shape.
     let intersection = new Set<string>(Object.keys(objects[0]));
     for (const obj of objects) {
