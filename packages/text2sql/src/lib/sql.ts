@@ -14,18 +14,21 @@ import {
   type ContextStore,
   agent,
   assistant,
+  fragment,
   hint,
   styleGuide,
   user as userFragment,
+  workflow,
 } from '@deepagents/context';
 
 import type { Adapter } from './adapters/adapter.ts';
 import developerExports from './agents/developer.agent.ts';
+import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { type RenderingTools, t_a_g } from './agents/text2sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
+import { type TeachingsOptions, guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
-import { type TeachingsOptions, guidelines } from './teach/teachings.ts';
 
 export class Text2Sql {
   #config: {
@@ -157,9 +160,27 @@ export class Text2Sql {
       chatId: params.chatId,
       userId: params.userId,
     }).set(
-      ...this.#config.instructions,
-      ...this.#buildRenderingInstructions(),
       ...schemaFragments,
+      ...this.#buildRenderingInstructions(),
+      fragment(
+        'Bash tool usage',
+        workflow({
+          task: 'Query execution',
+          steps: [
+            'Execute SQL through bash tool: sql run "SELECT ..."',
+            'Read the output: file path, column names, and row count.',
+            "Use column names to construct jq filters: cat <path> | jq '.[] | {col1, col2}'",
+            "For large results, slice first: cat <path> | jq '.[:10]'",
+          ],
+        }),
+        hint(
+          'The sql command outputs: file path, column names (comma-separated), and row count. Use column names to construct precise jq queries.',
+        ),
+        hint(
+          'If a query fails, the sql command returns an error message in stderr.',
+        ),
+      ),
+      ...this.#config.instructions,
     );
 
     const userMsg = messages.at(-1);
@@ -168,10 +189,22 @@ export class Text2Sql {
       await context.save();
     }
 
+    // Use message ID for turn-level artifact isolation
+    const messageId = userMsg?.id ?? generateId();
+
+    const { bash } = await createResultTools({
+      adapter: this.#config.adapter,
+      chatId: params.chatId,
+      messageId,
+    });
+
     const chatAgent = t_a_g.clone({
       model: this.#config.model,
       context,
-      tools: { ...t_a_g.tools, ...this.#config.tools },
+      tools: {
+        bash,
+        ...this.#config.tools,
+      },
     });
 
     const result = await chatAgent.stream({});

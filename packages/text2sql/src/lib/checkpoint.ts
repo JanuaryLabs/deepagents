@@ -38,13 +38,17 @@ interface CheckpointFile {
 
 export class Checkpoint {
   private points: Record<string, PointData>;
+  private path: string;
+  private configHash: string | undefined;
 
   private constructor(
-    private path: string,
-    private configHash: string | undefined,
+    path: string,
+    configHash: string | undefined,
     points: Record<string, PointData>,
   ) {
     this.points = points;
+    this.path = path;
+    this.configHash = configHash;
   }
 
   /**
@@ -192,14 +196,15 @@ function hash(value: unknown): string {
  */
 export class Point<T> {
   #cache: Map<string, T>;
+  private data: PointData;
+  private persist: () => Promise<void>;
 
-  constructor(
-    private data: PointData,
-    private persist: () => Promise<void>,
-  ) {
+  constructor(data: PointData, persist: () => Promise<void>) {
     this.#cache = new Map(
       data.entries.map((e) => [e.inputHash, e.output as T]),
     );
+    this.data = data;
+    this.persist = persist;
   }
 
   /**

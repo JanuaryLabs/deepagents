@@ -3,7 +3,7 @@ import { type Tool, tool } from 'ai';
 import z from 'zod';
 
 import { toState } from '@deepagents/agent';
-import { agent } from '@deepagents/context';
+import { agent, errorRecoveryGuardrail } from '@deepagents/context';
 import { scratchpad_tool } from '@deepagents/toolbox';
 
 import type { Adapter } from '../adapters/adapter.ts';
@@ -158,16 +158,12 @@ SQL: SELECT c.name, SUM(oi.amount) as total FROM orders o JOIN order_items oi ON
 /**
  * An agent that does Table Augmented Generation for Text-to-SQL tasks.
  */
-export const t_a_g = agent<
-  { sql: string },
-  {
-    introspection: string;
-    teachings: string;
-  }
->({
+export const t_a_g = agent({
   model: groq('openai/gpt-oss-20b'),
   tools,
   name: 'text2sql',
+  guardrails: [errorRecoveryGuardrail],
+  maxGuardrailRetries: 3,
   // prompt: (state) => {
   //   return `
   //   ${state?.teachings || ''}

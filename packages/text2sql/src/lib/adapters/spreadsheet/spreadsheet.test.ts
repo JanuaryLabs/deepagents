@@ -456,7 +456,9 @@ describe('Spreadsheet Adapter', () => {
       assert.ok(dialectFragment);
       assert.deepStrictEqual(dialectFragment.data, {
         dialect: 'sqlite',
-        version: dialectFragment.data.version, // version is dynamic
+        version: await adapter
+          .execute('SELECT sqlite_version() AS version')
+          .then((rows) => rows[0].version),
       });
 
       adapter.close();

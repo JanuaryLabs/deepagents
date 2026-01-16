@@ -1,4 +1,3 @@
-/* eslint-disable @nx/enforce-module-boundaries */
 import { DatabaseSync } from 'node:sqlite';
 
 import { Sqlite, type SqliteAdapterOptions } from '@deepagents/text2sql/sqlite';
