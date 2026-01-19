@@ -14,7 +14,6 @@
 
 ## Testing
 
-- **Do NOT write tests during feature implementation** unless explicitly asked. Complete the feature first, test later.
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.
 
 ### Running Tests

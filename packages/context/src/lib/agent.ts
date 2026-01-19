@@ -8,6 +8,7 @@ import {
   type ToolCallRepairFunction,
   type ToolChoice,
   type ToolSet,
+  type UIMessageStreamWriter,
   convertToModelMessages,
   createUIMessageStream,
   generateId,
@@ -22,11 +23,10 @@ import z from 'zod';
 import { type AgentModel } from '@deepagents/agent';
 
 import { type ContextEngine, XmlRenderer } from '../index.ts';
-import { assistantText } from './fragments.ts';
+import { lastAssistantMessage } from './fragments.ts';
 import {
   type Guardrail,
   type GuardrailContext,
-  type StreamPart,
   runGuardrailChain,
 } from './guardrail.ts';
 
@@ -230,11 +230,10 @@ class Agent<CIn, COut = CIn> {
                 ? originalToUIMessageStream(options)
                 : currentResult.toUIMessageStream(options);
 
-            // Iterate over toUIMessageStream() - run ALL parts through guardrails
             for await (const part of uiStream) {
               // Run through guardrail chain - guardrails can handle any part type
               const checkResult = runGuardrailChain(
-                part as StreamPart,
+                part,
                 this.#guardrails,
                 guardrailContext,
               );
@@ -254,8 +253,7 @@ class Agent<CIn, COut = CIn> {
 
               // Guardrail passed - track text for self-correction context
               if (checkResult.part.type === 'text-delta') {
-                accumulatedText += (checkResult.part as { delta: string })
-                  .delta;
+                accumulatedText += checkResult.part.delta;
               }
 
               // Write the (possibly modified) part to output
@@ -281,15 +279,12 @@ class Agent<CIn, COut = CIn> {
 
             // Guardrail failed but we have retries left - prepare for retry
             // Write the self-correction feedback to the output stream
-            writer.write({
-              type: 'text-delta',
-              id: generateId(),
-              delta: ` ${failureFeedback}`,
-            });
+            writeText(writer, failureFeedback);
 
             // Add the partial assistant message + feedback to context
+            // Uses lastAssistantMessage which finds/reuses the last assistant ID
             const selfCorrectionText = accumulatedText + ' ' + failureFeedback;
-            context.set(assistantText(selfCorrectionText));
+            context.set(lastAssistantMessage(selfCorrectionText));
 
             // Save to persist the self-correction (prevents duplicate messages on next resolve)
             await context.save();
@@ -480,3 +475,20 @@ const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
 
   return { ...toolCall, input: JSON.stringify(output) };
 };
+
+function writeText(writer: UIMessageStreamWriter, text: string) {
+  const feedbackPartId = generateId();
+  writer.write({
+    id: feedbackPartId,
+    type: 'text-start',
+  });
+  writer.write({
+    id: feedbackPartId,
+    type: 'text-delta',
+    delta: ` ${text}`,
+  });
+  writer.write({
+    id: feedbackPartId,
+    type: 'text-end',
+  });
+}

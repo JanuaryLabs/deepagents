@@ -2,6 +2,7 @@ import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
 import {
   Bash,
+  InMemoryFs,
   MountableFs,
   OverlayFs,
   ReadWriteFs,
@@ -9,12 +10,11 @@ import {
 } from 'just-bash';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { v7 } from 'uuid';
+
+import type { SkillPathMapping } from '@deepagents/context';
 
 import type { Adapter } from '../adapters/adapter.ts';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Command Helper Types & Utilities
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface CommandResult {
   stdout: string;
@@ -124,7 +124,7 @@ function createSqlCommand(adapter: Adapter) {
           const rows = await adapter.execute(query);
           const rowsArray = Array.isArray(rows) ? rows : [];
 
-          const filePath = `/results/${crypto.randomUUID()}.json`;
+          const filePath = `/results/${v7()}.json`;
           await ctx.fs.writeFile(filePath, JSON.stringify(rowsArray, null, 2));
 
           const columns =
@@ -192,6 +192,8 @@ export interface ResultToolsOptions {
   chatId: string;
   /** Message ID for turn-level artifact isolation */
   messageId: string;
+  /** Skill mounts mapping host paths to sandbox paths */
+  skillMounts?: SkillPathMapping[];
 }
 
 /**
@@ -210,19 +212,33 @@ export interface ResultToolsOptions {
  * @param options.messageId - Message ID for turn-level isolation
  */
 export async function createResultTools(options: ResultToolsOptions) {
-  const { adapter, chatId, messageId } = options;
+  const { adapter, chatId, messageId, skillMounts = [] } = options;
   const sqlCommand = createSqlCommand(adapter);
 
   // Artifact directories
-  const chatDir = path.join(process.cwd(), 'artifacts', chatId);
+  const root = process.env.TEXT2SQL_FS_ROOT || process.cwd();
+  const chatDir = path.join(root, 'artifacts', chatId);
   const resultsDir = path.join(chatDir, messageId, 'results');
 
   await fs.mkdir(resultsDir, { recursive: true });
 
-  // Dual mount: /results for current turn, /artifacts for browsing all turns
+  // Build skill mounts (read-only access to skill directories)
+  // Set mountPoint: '/' so files appear at the root of the mount, not under /home/user/project
+  const fsMounts = skillMounts.map(({ host, sandbox }) => ({
+    mountPoint: sandbox,
+    filesystem: new OverlayFs({
+      root: host,
+      mountPoint: '/',
+      readOnly: true,
+    }),
+  }));
+
+  // Create sandboxed filesystem - empty base, explicit mounts only
+  // This ensures complete isolation between chats
   const filesystem = new MountableFs({
-    base: new OverlayFs({ root: process.cwd() }),
+    base: new InMemoryFs(),
     mounts: [
+      ...fsMounts,
       {
         mountPoint: '/results',
         filesystem: new ReadWriteFs({ root: resultsDir }),
@@ -242,10 +258,6 @@ export async function createResultTools(options: ResultToolsOptions) {
   const { bash, sandbox } = await createBashTool({
     sandbox: bashInstance,
     destination: '/',
-    uploadDirectory: {
-      source: process.cwd(),
-      include: 'packages/text2sql/src/skills/**/*.md',
-    },
     onBeforeBashCall: ({ command }) => {
       console.log(chalk.cyan(`[onBeforeBashCall]: ${command}`));
       return { command };

@@ -77,7 +77,7 @@ const techniqueInstructions: Record<DepthTechnique, string> = {
 export interface DepthEvolverOptions {
   techniques?: DepthTechnique[];
   count?: number;
-  model?: AgentModel;
+  model: AgentModel;
   concurrency?: number;
 }
 
@@ -188,7 +188,7 @@ export class DepthEvolver extends PairProducer {
   constructor(
     private source: PairProducer | ExtractedPair[],
     private adapter: Adapter,
-    private options?: DepthEvolverOptions,
+    private options: DepthEvolverOptions,
   ) {
     super();
     this.#limit = pLimit(this.options?.concurrency ?? 4);

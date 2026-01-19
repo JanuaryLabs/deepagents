@@ -21,7 +21,7 @@ export interface SchemaSynthesizerOptions {
   complexity?: QuestionComplexity | QuestionComplexity[];
   personas?: Persona[];
   teachings?: ContextFragment[];
-  model?: AgentModel;
+  model: AgentModel;
   concurrency?: number;
 }
 /**

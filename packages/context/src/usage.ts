@@ -499,7 +499,11 @@ async function demonstrateSkills() {
     chatId: 'skill-demo',
   }).set(
     role('You are a helpful assistant with access to specialized skills.'),
-    skills({ paths: ['packages/context/src/skills'] }), // Injects <available_skills> into system prompt
+    skills({
+      paths: [
+        { host: 'packages/context/src/skills', sandbox: '/skills/skills' },
+      ],
+    }), // Injects <available_skills> into system prompt
   );
 
   // Resolve to see what the LLM receives
@@ -592,7 +596,11 @@ async function createSkillAwareAgent() {
     role(
       `You are a helpful assistant with access to specialized skills. your main tool is bash tool to read files and execute commands on the user's behalf.`,
     ),
-    skills({ paths: ['packages/**/src/skills'] }),
+    skills({
+      paths: [
+        { host: 'packages/context/src/skills', sandbox: '/skills/skills' },
+      ],
+    }),
   );
   const skillAwareAgent = agent({
     name: 'skill_agent',
@@ -764,7 +772,11 @@ async function createDockerSkillAgent() {
       chatId: 'docker-skill-agent',
     }).set(
       role(`You are a system admin.`),
-      skills({ paths: ['packages/context/src/skills'] }),
+      skills({
+        paths: [
+          { host: 'packages/context/src/skills', sandbox: '/skills/skills' },
+        ],
+      }),
     );
 
     // Create the agent

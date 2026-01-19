@@ -15,11 +15,34 @@ export interface SkillMetadata {
 }
 
 /**
+ * A skill path mapping from host filesystem to sandbox mount.
+ */
+export interface SkillPathMapping {
+  /** Original filesystem path where skills are located */
+  host: string;
+  /** Sandbox mount path that the LLM will use to access skills */
+  sandbox: string;
+}
+
+/**
  * Options for the skills() fragment helper.
  */
 export interface SkillsFragmentOptions {
-  /** Directories to scan for skills (required) */
-  paths: string[];
+  /**
+   * Skill directories to scan, with host-to-sandbox path mapping.
+   *
+   * @example
+   * ```ts
+   * skills({
+   *   paths: [
+   *     { host: 'apps/backend/dist/skills', sandbox: '/skills/skills' }
+   *   ]
+   * })
+   * // Result: skill.data.path = '/skills/skills/dev/SKILL.md'
+   * //         skill.metadata.originalPath = 'apps/backend/dist/skills/dev/SKILL.md'
+   * ```
+   */
+  paths: SkillPathMapping[];
   /** Skill names to exclude from the fragment */
   exclude?: string[];
   /** Skill names to include (if set, only these are included) */

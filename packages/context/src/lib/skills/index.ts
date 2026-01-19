@@ -13,14 +13,19 @@
  * ```ts
  * import { skills } from '@deepagents/context';
  *
- * // Add skills metadata to context
+ * // Add skills metadata to context with sandbox path mapping
  * const context = new ContextEngine({ userId: 'demo-user', store, chatId: 'demo' })
  *   .set(
  *     role('You are a helpful assistant.'),
- *     skills({ paths: ['./skills', '~/.deepagents/skills'] }),
+ *     skills({
+ *       paths: [
+ *         { host: './skills', sandbox: '/skills/local' },
+ *         { host: '~/.deepagents/skills', sandbox: '/skills/global' }
+ *       ]
+ *     }),
  *   );
  *
- * // LLM sees available skills and reads full content when needed
+ * // LLM sees sandbox paths and reads full content when needed
  * ```
  *
  * @module

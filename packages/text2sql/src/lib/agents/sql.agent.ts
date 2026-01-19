@@ -6,6 +6,8 @@ import {
   NoObjectGeneratedError,
   NoOutputGeneratedError,
   TypeValidationError,
+  defaultSettingsMiddleware,
+  wrapLanguageModel,
 } from 'ai';
 import { Console } from 'node:console';
 import { createWriteStream } from 'node:fs';
@@ -17,7 +19,6 @@ import {
   ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
-  XmlRenderer,
   persona,
   structuredOutput,
   user,
@@ -35,7 +36,7 @@ export interface ToSqlOptions {
   /** Instructions/teachings to include */
   instructions: ContextFragment[];
   /** Optional model override */
-  model?: AgentModel;
+  model: AgentModel;
   /** Maximum retry attempts on validation failure (default: 3) */
   maxRetries?: number;
 }
@@ -128,9 +129,16 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
       }
 
       // Create structured output with schema
-      // Note: In AI SDK v6, temperature settings are passed via providerOptions
+      const temperature =
+        RETRY_TEMPERATURES[attemptNumber - 1] ??
+        RETRY_TEMPERATURES[RETRY_TEMPERATURES.length - 1];
+      const baseModel = options.model ?? groq('openai/gpt-oss-20b');
+      const model = wrapLanguageModel({
+        model: baseModel,
+        middleware: defaultSettingsMiddleware({ settings: { temperature } }),
+      });
       const sqlOutput = structuredOutput({
-        model: options.model ?? groq('openai/gpt-oss-20b'),
+        model: model,
         context,
         schema: z.union([
           z.object({

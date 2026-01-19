@@ -3,13 +3,20 @@ import {
   type FragmentEstimate,
   getModelsRegistry,
 } from './estimate.ts';
-import type { ContextFragment } from './fragments.ts';
-import { isMessageFragment, message } from './fragments.ts';
+import type { ContextFragment, LazyFragment } from './fragments.ts';
+import {
+  LAZY_ID,
+  assistantText,
+  isLazyFragment,
+  isMessageFragment,
+  message,
+} from './fragments.ts';
 import type { Models } from './models.generated.ts';
 import {
   type ContextRenderer,
   XmlRenderer,
 } from './renderers/abstract.renderer.ts';
+import type { SkillPathMapping } from './skills/types.ts';
 import {
   type BranchData,
   type BranchInfo,
@@ -338,6 +345,14 @@ export class ContextEngine {
       return;
     }
 
+    // Resolve any lazy fragments before processing
+    for (let i = 0; i < this.#pendingMessages.length; i++) {
+      const fragment = this.#pendingMessages[i];
+      if (isLazyFragment(fragment)) {
+        this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
+      }
+    }
+
     let parentId = this.#branch!.headMessageId;
     const now = Date.now();
 
@@ -363,6 +378,47 @@ export class ContextEngine {
 
     // Clear pending messages
     this.#pendingMessages = [];
+  }
+
+  /**
+   * Resolve a lazy fragment by finding the appropriate ID.
+   */
+  async #resolveLazyFragment(fragment: LazyFragment): Promise<ContextFragment> {
+    const lazy = fragment[LAZY_ID]!;
+
+    if (lazy.type === 'last-assistant') {
+      const lastId = await this.#getLastAssistantId();
+      return assistantText(lazy.content, { id: lastId ?? crypto.randomUUID() });
+    }
+
+    throw new Error(`Unknown lazy fragment type: ${lazy.type}`);
+  }
+
+  /**
+   * Find the most recent assistant message ID (pending or persisted).
+   */
+  async #getLastAssistantId(): Promise<string | undefined> {
+    // Check pending messages first (excluding lazy ones)
+    for (let i = this.#pendingMessages.length - 1; i >= 0; i--) {
+      const msg = this.#pendingMessages[i];
+      if (msg.name === 'assistant' && !isLazyFragment(msg)) {
+        return msg.id;
+      }
+    }
+
+    // Check persisted messages at branch head
+    if (this.#branch?.headMessageId) {
+      const chain = await this.#store.getMessageChain(
+        this.#branch.headMessageId,
+      );
+      for (let i = chain.length - 1; i >= 0; i--) {
+        if (chain[i].name === 'assistant') {
+          return chain[i].id;
+        }
+      }
+    }
+
+    return undefined;
   }
 
   /**
@@ -689,6 +745,47 @@ export class ContextEngine {
    */
   public consolidate(): void {
     return void 0;
+  }
+
+  /**
+   * Extract skill path mappings from available_skills fragments.
+   * Returns array of { host, sandbox } for mounting in sandbox filesystem.
+   *
+   * Reads the original `paths` configuration stored in fragment metadata
+   * by the skills() fragment helper.
+   *
+   * @example
+   * ```ts
+   * const context = new ContextEngine({ store, chatId, userId })
+   *   .set(skills({ paths: [{ host: './skills', sandbox: '/skills' }] }));
+   *
+   * const mounts = context.getSkillMounts();
+   * // [{ host: './skills', sandbox: '/skills' }]
+   * ```
+   */
+  public getSkillMounts(): SkillPathMapping[] {
+    const mounts: SkillPathMapping[] = [];
+
+    for (const fragment of this.#fragments) {
+      if (
+        fragment.name === 'available_skills' &&
+        fragment.metadata &&
+        Array.isArray(fragment.metadata.paths)
+      ) {
+        for (const mapping of fragment.metadata.paths) {
+          if (
+            typeof mapping === 'object' &&
+            mapping !== null &&
+            typeof mapping.host === 'string' &&
+            typeof mapping.sandbox === 'string'
+          ) {
+            mounts.push({ host: mapping.host, sandbox: mapping.sandbox });
+          }
+        }
+      }
+    }
+
+    return mounts;
   }
 
   /**

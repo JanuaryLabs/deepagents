@@ -34,6 +34,11 @@ export interface ContextFragment<T extends FragmentData = FragmentData> {
    * Used by resolve() to convert to AI SDK format.
    */
   codec?: FragmentCodec;
+  /**
+   * Optional metadata for internal tracking.
+   * Not rendered to prompt, used for operational purposes like path remapping.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -170,13 +175,13 @@ export function message(content: string | UIMessage): ContextFragment {
     typeof content === 'string'
       ? {
           id: generateId(),
-          role: 'user',
+          role: 'user' as const,
           parts: [{ type: 'text', text: content }],
         }
       : content;
   return {
     id: message.id,
-    name: 'message',
+    name: message.role,
     data: 'content',
     type: 'message',
     persist: true,
@@ -214,4 +219,63 @@ export function assistantText(
     role: 'assistant',
     parts: [{ type: 'text', text: content }],
   });
+}
+
+/**
+ * Symbol to mark fragments for lazy ID resolution.
+ * @internal
+ */
+export const LAZY_ID = Symbol('lazy-id');
+
+/**
+ * Lazy fragment configuration for ID resolution.
+ */
+export interface LazyConfig {
+  type: 'last-assistant';
+  content: string;
+}
+
+/**
+ * Lazy fragment that gets its ID resolved during save().
+ */
+export interface LazyFragment extends ContextFragment {
+  [LAZY_ID]?: LazyConfig;
+}
+
+/**
+ * Check if a fragment needs lazy ID resolution.
+ */
+export function isLazyFragment(
+  fragment: ContextFragment,
+): fragment is LazyFragment {
+  return LAZY_ID in fragment;
+}
+
+/**
+ * Create an assistant message fragment that uses the last assistant's ID.
+ *
+ * - If a pending/persisted assistant message exists, updates it
+ * - If none exists, creates a new assistant message
+ *
+ * Useful for self-correction flows where retries should update
+ * the same message instead of creating duplicates.
+ *
+ * @example
+ * ```ts
+ * // In guardrail retry loop:
+ * context.set(lastAssistantMessage(correctedContent));
+ * await context.save(); // ID resolved here
+ * ```
+ */
+export function lastAssistantMessage(content: string): ContextFragment {
+  return {
+    name: 'assistant',
+    type: 'message',
+    persist: true,
+    data: 'content',
+    [LAZY_ID]: {
+      type: 'last-assistant',
+      content,
+    },
+  } as LazyFragment;
 }

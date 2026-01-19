@@ -16,17 +16,27 @@ import type { SkillMetadata, SkillsFragmentOptions } from './types.ts';
  * const context = new ContextEngine({ userId: 'demo-user', store, chatId: 'demo' })
  *   .set(
  *     role('You are a helpful assistant.'),
- *     skills({ paths: ['./skills'] }),  // Injects skill metadata into system prompt
+ *     skills({
+ *       paths: [
+ *         { host: './skills', sandbox: '/skills/skills' }
+ *       ]
+ *     }),
  *   );
  *
- * // LLM now sees skill metadata and can read full SKILL.md when needed
+ * // LLM now sees skill metadata with sandbox paths and can read full SKILL.md
  * ```
  */
 export function skills(options: SkillsFragmentOptions): ContextFragment {
-  // Discover skills from all paths (later paths override earlier ones)
+  // Build host-to-sandbox mapping for path rewriting
+  const pathMapping = new Map<string, string>();
+  for (const { host, sandbox } of options.paths) {
+    pathMapping.set(host, sandbox);
+  }
+
+  // Discover skills from all host paths (later paths override earlier ones)
   const skillsMap = new Map<string, SkillMetadata>();
-  for (const dir of options.paths) {
-    const discovered = discoverSkillsInDirectory(dir);
+  for (const { host } of options.paths) {
+    const discovered = discoverSkillsInDirectory(host);
     for (const skill of discovered) {
       skillsMap.set(skill.name, skill);
     }
@@ -44,15 +54,30 @@ export function skills(options: SkillsFragmentOptions): ContextFragment {
     );
   }
 
-  // Convert skills to ContextFragments for proper rendering
-  const skillFragments: ContextFragment[] = filteredSkills.map((skill) => ({
-    name: 'skill',
-    data: {
-      name: skill.name,
-      path: skill.skillMdPath,
-      description: skill.description,
-    },
-  }));
+  // Convert skills to ContextFragments with sandbox paths
+  const skillFragments: ContextFragment[] = filteredSkills.map((skill) => {
+    const originalPath = skill.skillMdPath;
+    let sandboxPath = originalPath;
+
+    // Rewrite path from host to sandbox
+    for (const [host, sandbox] of pathMapping) {
+      if (originalPath.startsWith(host)) {
+        const relativePath = originalPath.slice(host.length);
+        sandboxPath = sandbox + relativePath;
+        break;
+      }
+    }
+
+    return {
+      name: 'skill',
+      data: {
+        name: skill.name,
+        path: sandboxPath,
+        description: skill.description,
+      },
+      metadata: { originalPath },
+    };
+  });
 
   return {
     name: 'available_skills',
@@ -63,6 +88,9 @@ export function skills(options: SkillsFragmentOptions): ContextFragment {
       } as ContextFragment,
       ...skillFragments,
     ],
+    metadata: {
+      paths: options.paths, // Store original path mappings for getSkillMounts()
+    },
   };
 }
 

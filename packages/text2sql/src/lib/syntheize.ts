@@ -1,3 +1,4 @@
+import { groq } from '@ai-sdk/groq';
 import { writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import pg from 'pg';
@@ -94,6 +95,7 @@ const seed = (
         `Generating pairs for persona: ${persona.role}, complexity: ${complexity}`,
       );
       const producer = new SchemaSynthesizer(adapter, {
+        model: groq('openai/gpt-oss-20b'),
         count: CONFIG.pairsPerComplexity,
         complexity: [complexity],
         personas: [persona],
@@ -115,6 +117,7 @@ const evolvedPairs = (
       console.log('Depth pair:', pair.question);
       const producer = new DepthEvolver([pair], adapter, {
         count: CONFIG.depthEvolutionCount,
+        model: groq('openai/gpt-oss-20b'),
       });
       return producer.toPairs();
     },

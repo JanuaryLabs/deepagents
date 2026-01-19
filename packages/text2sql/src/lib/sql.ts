@@ -17,8 +17,8 @@ import {
   errorRecoveryGuardrail,
   fragment,
   hint,
+  message,
   styleGuide,
-  user as userFragment,
   workflow,
 } from '@deepagents/context';
 
@@ -175,7 +175,13 @@ export class Text2Sql {
           ],
         }),
         hint(
+          `You cannot access sql through a tool, it'll fail so the proper way to access it is through the bash tool using "sql run" and "sql validate" commands.`,
+        ),
+        hint(
           'The sql command outputs: file path, column names (comma-separated), and row count. Use column names to construct precise jq queries.',
+        ),
+        hint(
+          'This is virtual bash environment and "sql" commands proxy to the database hence you cannot access sql files directly.',
         ),
         hint(
           'If a query fails, the sql command returns an error message in stderr.',
@@ -186,17 +192,21 @@ export class Text2Sql {
 
     const userMsg = messages.at(-1);
     if (userMsg) {
-      context.set(userFragment(userMsg));
+      context.set(message(userMsg));
       await context.save();
     }
 
     // Use message ID for turn-level artifact isolation
     const messageId = userMsg?.id ?? generateId();
 
+    // Extract skill mounts from context fragments for sandbox filesystem
+    const skillMounts = context.getSkillMounts();
+
     const { bash } = await createResultTools({
       adapter: this.#config.adapter,
       chatId: params.chatId,
       messageId,
+      skillMounts,
     });
 
     const chatAgent = agent({
@@ -219,6 +229,7 @@ export class Text2Sql {
       sendFinish: true,
       sendReasoning: true,
       sendSources: true,
+      originalMessages: messages,
       generateMessageId: generateId,
       onFinish: async ({ responseMessage }) => {
         context.set(assistant(responseMessage));
@@ -252,7 +263,7 @@ export class Text2Sql {
 
     const userMsg = messages.at(-1);
     if (userMsg) {
-      context.set(userFragment(userMsg));
+      context.set(message(userMsg));
       await context.save();
     }
 

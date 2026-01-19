@@ -1,6 +1,6 @@
+import { type LanguageModelV3 } from '@ai-sdk/provider';
 import {
   type GenerateTextResult,
-  type LanguageModel,
   type ModelMessage,
   Output,
   type StreamTextResult,
@@ -55,7 +55,7 @@ export function agent<Output, CIn = ContextVariables, COut = CIn>(
 
 export type ResponseMessage = UIMessage<unknown, UIDataTypes, UITools>;
 
-export type AgentModel = Exclude<LanguageModel, string>;
+export type AgentModel = LanguageModelV3;
 export type OutputExtractorFn = (
   output: GenerateTextResult<ToolSet, any>,
 ) => string | Promise<string>;

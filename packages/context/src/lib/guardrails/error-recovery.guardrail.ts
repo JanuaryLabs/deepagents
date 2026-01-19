@@ -36,7 +36,7 @@ export const errorRecoveryGuardrail: Guardrail = {
       return pass(part);
     }
 
-    const errorText = (part as { errorText?: string }).errorText || '';
+    const errorText = part.errorText || '';
     const prefix = chalk.bold.magenta('[ErrorRecovery]');
 
     console.log(
@@ -110,7 +110,7 @@ export const errorRecoveryGuardrail: Guardrail = {
     // Unknown error - still try to recover
     return logAndFail(
       'Unknown error',
-      `An error occurred: ${errorText.slice(0, 100)}. Let me try a different approach.`,
+      `An error occurred: ${errorText}. Let me try a different approach.`,
     );
   },
 };
