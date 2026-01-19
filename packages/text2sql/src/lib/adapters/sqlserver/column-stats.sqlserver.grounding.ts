@@ -69,8 +69,7 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
       return false;
     }
     const normalized = type.toLowerCase();
-    return /int|real|numeric|float|decimal|date|time|bit|money/.test(
-      normalized,
-    );
+    // Note: bit excluded because SQL Server doesn't support MIN/MAX on bit types
+    return /int|real|numeric|float|decimal|date|time|money/.test(normalized);
   }
 }
