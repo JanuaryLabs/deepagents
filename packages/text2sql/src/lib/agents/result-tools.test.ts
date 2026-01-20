@@ -424,7 +424,7 @@ describe('sql command integration', () => {
     await fs.rm(testDir, { recursive: true, force: true });
   });
 
-  it('sql run writes results to /results', async () => {
+  it('sql run writes results and returns /artifacts path', async () => {
     const mockRows = [
       { id: 1, name: 'Alice' },
       { id: 2, name: 'Bob' },
@@ -447,11 +447,14 @@ describe('sql command integration', () => {
     );
 
     assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-    assert.ok(result.stdout.includes('/results/'), 'Should output file path');
+    assert.ok(
+      result.stdout.includes('/artifacts/'),
+      'Should output cross-turn accessible path',
+    );
     assert.ok(result.stdout.includes('rows: 2'), 'Should show row count');
   });
 
-  it('sql run results are readable via cat', async () => {
+  it('sql run results are readable via returned path', async () => {
     const mockRows = [{ value: 42 }];
     const sqlAdapter = {
       execute: async () => mockRows,
@@ -471,14 +474,57 @@ describe('sql command integration', () => {
     );
     assert.strictEqual(sqlResult.exitCode, 0);
 
-    // Extract the file path from output (first line)
-    const filePath = sqlResult.stdout.split('\n')[0].trim();
-    assert.ok(filePath.startsWith('/results/'), 'Path should be in /results');
+    // Extract the file path from output (first line: "results stored in <path>")
+    const firstLine = sqlResult.stdout.split('\n')[0].trim();
+    const filePath = firstLine.replace('results stored in ', '');
+    assert.ok(
+      filePath.startsWith('/artifacts/'),
+      'Path should be in /artifacts',
+    );
 
     // Read the result file
     const catResult = await sandbox.executeCommand(`cat ${filePath}`);
     assert.strictEqual(catResult.exitCode, 0);
     assert.ok(catResult.stdout.includes('"value": 42'));
+  });
+
+  it('sql run results are accessible across turns via /artifacts', async () => {
+    const mockRows = [{ id: 1, name: 'Test' }];
+    const sqlAdapter = {
+      execute: async () => mockRows,
+      validate: async () => undefined,
+      introspect: async () => ({ tables: [], enums: [] }),
+    };
+
+    // Turn 1: Execute SQL and get path
+    const { sandbox: sandbox1 } = await createResultTools({
+      adapter: sqlAdapter,
+      chatId: 'test-chat',
+      messageId: 'turn-1',
+    });
+
+    const sqlResult = await sandbox1.executeCommand(
+      'sql run "SELECT * FROM users"',
+    );
+    assert.strictEqual(sqlResult.exitCode, 0);
+    const firstLine = sqlResult.stdout.split('\n')[0].trim();
+    const filePath = firstLine.replace('results stored in ', '');
+
+    // Turn 2: New sandbox with different messageId
+    const { sandbox: sandbox2 } = await createResultTools({
+      adapter: sqlAdapter,
+      chatId: 'test-chat',
+      messageId: 'turn-2',
+    });
+
+    // Should be able to read file from turn 1 using the same path
+    const catResult = await sandbox2.executeCommand(`cat ${filePath}`);
+    assert.strictEqual(
+      catResult.exitCode,
+      0,
+      `Should access turn-1 result from turn-2. stderr: ${catResult.stderr}`,
+    );
+    assert.ok(catResult.stdout.includes('"name": "Test"'));
   });
 
   it('sql validate returns valid for SELECT', async () => {

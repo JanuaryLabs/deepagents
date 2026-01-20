@@ -1,7 +1,9 @@
+import { tool } from 'ai';
 import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
 import {
   Bash,
+  type CommandContext,
   InMemoryFs,
   MountableFs,
   OverlayFs,
@@ -20,16 +22,6 @@ interface CommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
-}
-
-interface CommandContext {
-  fs: {
-    writeFile: (path: string, content: string) => Promise<void>;
-    readFile: (path: string) => Promise<string>;
-  };
-  cwd: string;
-  env: Record<string, string>;
-  stdin: string;
 }
 
 interface SubcommandDefinition {
@@ -66,7 +58,7 @@ function createCommand(
     const restArgs = args.slice(1);
 
     if (subcommand && subcommand in subcommands) {
-      return subcommands[subcommand].handler(restArgs, ctx as CommandContext);
+      return subcommands[subcommand].handler(restArgs, ctx);
     }
 
     return {
@@ -123,9 +115,17 @@ function createSqlCommand(adapter: Adapter) {
         try {
           const rows = await adapter.execute(query);
           const rowsArray = Array.isArray(rows) ? rows : [];
+          const content = JSON.stringify(rowsArray, null, 2);
 
-          const filePath = `/results/${v7()}.json`;
-          await ctx.fs.writeFile(filePath, JSON.stringify(rowsArray, null, 2));
+          const filename = `${v7()}.json`;
+          const isolatedPath = `/results/${filename}`;
+          const sharedPath = `/artifacts/${filename}`;
+
+          // Write to both locations atomically - fail if either fails
+          await Promise.all([
+            ctx.fs.writeFile(isolatedPath, content), // Current turn's isolated copy
+            ctx.fs.writeFile(sharedPath, content), // Shared copy for cross-turn access
+          ]);
 
           const columns =
             rowsArray.length > 0 ? Object.keys(rowsArray[0] as object) : [];
@@ -133,7 +133,7 @@ function createSqlCommand(adapter: Adapter) {
           return {
             stdout:
               [
-                filePath,
+                `results stored in ${sharedPath}`,
                 `columns: ${columns.join(', ') || '(none)'}`,
                 `rows: ${rowsArray.length}`,
               ].join('\n') + '\n',
@@ -202,9 +202,15 @@ export interface ResultToolsOptions {
  * The agent sees only one tool: `bash`
  * SQL is executed via: sql run "SELECT ..."
  *
- * Dual-level artifact storage:
- * - `/results/` → `./artifacts/{chatId}/{messageId}/results/` (current turn, write)
- * - `/artifacts/` → `./artifacts/{chatId}/` (all turns, browse previous)
+ * Artifact storage:
+ * - `/results/` → `./artifacts/{chatId}/{messageId}/results/` (current turn, isolated)
+ * - `/artifacts/` → `./artifacts/{chatId}/` (shared across turns)
+ *
+ * SQL results are written to both locations:
+ * 1. Isolated: `/results/{uuid}.json` for per-turn organization
+ * 2. Shared: `/artifacts/{uuid}.json` for cross-turn access
+ *
+ * The returned path is `/artifacts/{uuid}.json` which works in any turn.
  *
  * @param options - Configuration options
  * @param options.adapter - Database adapter for SQL execution
@@ -233,8 +239,6 @@ export async function createResultTools(options: ResultToolsOptions) {
     }),
   }));
 
-  // Create sandboxed filesystem - empty base, explicit mounts only
-  // This ensures complete isolation between chats
   const filesystem = new MountableFs({
     base: new InMemoryFs(),
     mounts: [
