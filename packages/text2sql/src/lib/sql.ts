@@ -11,15 +11,12 @@ import { type AgentModel } from '@deepagents/agent';
 import {
   ContextEngine,
   type ContextFragment,
-  type ContextStore,
   agent,
   assistant,
   errorRecoveryGuardrail,
-  fragment,
   hint,
   message,
   styleGuide,
-  workflow,
 } from '@deepagents/context';
 
 import type { Adapter } from './adapters/adapter.ts';
@@ -35,18 +32,17 @@ export class Text2Sql {
   #config: {
     model: AgentModel;
     adapter: Adapter;
-    store: ContextStore;
+    context: (...fragments: ContextFragment[]) => ContextEngine;
     tools?: RenderingTools;
-    instructions: ContextFragment[];
     introspection: JsonCache<ContextFragment[]>;
+    teachingsOptions?: TeachingsOptions;
   };
 
   constructor(config: {
     adapter: Adapter;
-    store: ContextStore;
+    context: (...fragments: ContextFragment[]) => ContextEngine;
     version: string;
     tools?: RenderingTools;
-    instructions?: ContextFragment[];
     model: AgentModel;
     /**
      * Configure teachings behavior
@@ -55,12 +51,9 @@ export class Text2Sql {
     teachingsOptions?: TeachingsOptions;
   }) {
     this.#config = {
+      teachingsOptions: config.teachingsOptions,
       adapter: config.adapter,
-      store: config.store,
-      instructions: [
-        ...guidelines(config.teachingsOptions),
-        ...(config.instructions ?? []),
-      ],
+      context: config.context,
       tools: config.tools ?? {},
       model: config.model,
       introspection: new JsonCache<ContextFragment[]>(
@@ -71,15 +64,13 @@ export class Text2Sql {
 
   public async toSql(input: string): Promise<string> {
     const schemaFragments = await this.index();
-
     const result = await toSql({
       input,
       adapter: this.#config.adapter,
       schemaFragments,
-      instructions: this.#config.instructions,
+      instructions: [],
       model: this.#config.model,
     });
-
     return result.sql;
   }
 
@@ -147,47 +138,11 @@ export class Text2Sql {
     ];
   }
 
-  public async chat(
-    messages: UIMessage[],
-    params: {
-      chatId: string;
-      userId: string;
-    },
-  ) {
-    const schemaFragments = await this.index();
-
-    const context = new ContextEngine({
-      store: this.#config.store,
-      chatId: params.chatId,
-      userId: params.userId,
-    }).set(
-      ...schemaFragments,
+  public async chat(messages: UIMessage[]) {
+    const context = this.#config.context(
+      ...guidelines(this.#config.teachingsOptions),
+      ...(await this.index()),
       ...this.#buildRenderingInstructions(),
-      fragment(
-        'Bash tool usage',
-        workflow({
-          task: 'Query execution',
-          steps: [
-            'Execute SQL through bash tool: sql run "SELECT ..."',
-            'Read the output: file path, column names, and row count.',
-            "Use column names to construct jq filters: cat <path> | jq '.[] | {col1, col2}'",
-            "For large results, slice first: cat <path> | jq '.[:10]'",
-          ],
-        }),
-        hint(
-          `You cannot access sql through a tool, it'll fail so the proper way to access it is through the bash tool using "sql run" and "sql validate" commands.`,
-        ),
-        hint(
-          'The sql command outputs: file path, column names (comma-separated), and row count. Use column names to construct precise jq queries.',
-        ),
-        hint(
-          'This is virtual bash environment and "sql" commands proxy to the database hence you cannot access sql files directly.',
-        ),
-        hint(
-          'If a query fails, the sql command returns an error message in stderr.',
-        ),
-      ),
-      ...this.#config.instructions,
     );
 
     const userMsg = messages.at(-1);
@@ -204,7 +159,7 @@ export class Text2Sql {
 
     const { bash } = await createResultTools({
       adapter: this.#config.adapter,
-      chatId: params.chatId,
+      chatId: context.chatId,
       messageId,
       skillMounts,
     });
@@ -238,27 +193,12 @@ export class Text2Sql {
     });
   }
 
-  /**
-   * Developer chat interface - power-user mode for SQL generation.
-   * Uses db_query tool for direct SQL execution (LLM writes SQL).
-   */
-  public async developer(
-    messages: UIMessage[],
-    params: {
-      chatId: string;
-      userId: string;
-    },
-  ) {
-    const schemaFragments = await this.index();
-
-    const context = new ContextEngine({
-      store: this.#config.store,
-      chatId: params.chatId,
-      userId: params.userId,
-    }).set(
+  public async developer(messages: UIMessage[]) {
+    const context = this.#config.context(
+      ...guidelines(this.#config.teachingsOptions),
       ...developerExports.fragments,
-      ...this.#config.instructions,
-      ...schemaFragments,
+      ...(await this.index()),
+      ...this.#buildRenderingInstructions(),
     );
 
     const userMsg = messages.at(-1);

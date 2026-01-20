@@ -401,6 +401,30 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
       notes:
         'If reference is ambiguous, ask which previous result or entity the user means.',
     }),
+    fragment(
+      'Bash tool usage',
+      workflow({
+        task: 'Query execution',
+        steps: [
+          'Execute SQL through bash tool: sql run "SELECT ..."',
+          'Read the output: file path, column names, and row count.',
+          "Use column names to construct jq filters: cat <path> | jq '.[] | {col1, col2}'",
+          "For large results, slice first: cat <path> | jq '.[:10]'",
+        ],
+      }),
+      hint(
+        `You cannot access sql through a tool, it'll fail so the proper way to access it is through the bash tool using "sql run" and "sql validate" commands.`,
+      ),
+      hint(
+        'The sql command outputs: file path, column names (comma-separated), and row count. Use column names to construct precise jq queries.',
+      ),
+      hint(
+        'This is virtual bash environment and "sql" commands proxy to the database hence you cannot access sql files directly.',
+      ),
+      hint(
+        'If a query fails, the sql command returns an error message in stderr.',
+      ),
+    ),
   ];
 
   // Date-specific clarifications (only when strict)
