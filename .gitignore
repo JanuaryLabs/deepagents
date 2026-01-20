@@ -86,3 +86,4 @@ __pycache__/
 .cache/
 
 .finetune/
+artifacts/

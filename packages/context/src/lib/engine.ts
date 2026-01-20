@@ -1,3 +1,6 @@
+import type { LanguageModelUsage } from 'ai';
+import { mergeWith } from 'lodash-es';
+
 import {
   type EstimateResult,
   type FragmentEstimate,
@@ -57,6 +60,8 @@ export interface ContextEngineOptions {
   chatId: string;
   /** User who owns this chat (required) */
   userId: string;
+  /** Optional initial metadata for the chat (merged with existing if chat exists) */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -136,6 +141,8 @@ export class ContextEngine {
   #branch: BranchData | null = null;
   #chatData: StoredChatData | null = null;
   #initialized = false;
+  /** Initial metadata to merge on first initialization */
+  #initialMetadata: Record<string, unknown> | undefined;
 
   constructor(options: ContextEngineOptions) {
     if (!options.chatId) {
@@ -148,6 +155,7 @@ export class ContextEngine {
     this.#chatId = options.chatId;
     this.#userId = options.userId;
     this.#branchName = 'main';
+    this.#initialMetadata = options.metadata;
   }
 
   /**
@@ -162,6 +170,18 @@ export class ContextEngine {
       id: this.#chatId,
       userId: this.#userId,
     });
+
+    // Merge initial metadata if provided (handles both new and existing chats)
+    if (this.#initialMetadata) {
+      this.#chatData = await this.#store.updateChat(this.#chatId, {
+        metadata: {
+          ...this.#chatData.metadata,
+          ...this.#initialMetadata,
+        },
+      });
+      // Clear after use to prevent memory leak
+      this.#initialMetadata = undefined;
+    }
 
     // "main" branch is guaranteed to exist after upsertChat
     this.#branch = (await this.#store.getActiveBranch(this.#chatId))!;
@@ -733,6 +753,45 @@ export class ContextEngine {
     }
 
     this.#chatData = await this.#store.updateChat(this.#chatId, storeUpdates);
+  }
+
+  /**
+   * Track token usage for the current chat.
+   * Accumulates usage metrics in chat.metadata.usage.
+   *
+   * @param usage - Token usage from AI SDK (LanguageModelUsage)
+   *
+   * @example
+   * ```ts
+   * // In onFinish callback
+   * const usage = await result.totalUsage;
+   * await context.trackUsage(usage);
+   * ```
+   */
+  public async trackUsage(usage: LanguageModelUsage): Promise<void> {
+    await this.#ensureInitialized();
+
+    // Read fresh data from store to prevent race conditions with concurrent calls
+    const freshChatData = await this.#store.getChat(this.#chatId);
+
+    // Get current usage from metadata (if any)
+    const currentUsage = (freshChatData?.metadata?.usage ??
+      {}) as Partial<LanguageModelUsage>;
+
+    // Accumulate usage - recursively add all numeric fields
+    const updatedUsage = mergeWith({}, currentUsage, usage, (a, b) =>
+      typeof a === 'number' || typeof b === 'number'
+        ? (a ?? 0) + (b ?? 0)
+        : undefined,
+    ) as LanguageModelUsage;
+
+    // Update chat metadata with accumulated usage
+    this.#chatData = await this.#store.updateChat(this.#chatId, {
+      metadata: {
+        ...freshChatData?.metadata,
+        usage: updatedUsage,
+      },
+    });
   }
 
   /**

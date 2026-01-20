@@ -11,6 +11,238 @@ import {
 
 const renderer = new XmlRenderer();
 
+describe('Metadata Filtering', () => {
+  describe('listChats with metadata filter', () => {
+    it('should filter chats by metadata string field', async () => {
+      const store = new InMemoryContextStore();
+
+      // Create chats with different metadata
+      await store.upsertChat({
+        id: 'chat-1',
+        userId: 'user-1',
+        metadata: { projectId: 'project-a', status: 'active' },
+      });
+      await store.upsertChat({
+        id: 'chat-2',
+        userId: 'user-1',
+        metadata: { projectId: 'project-b', status: 'active' },
+      });
+      await store.upsertChat({
+        id: 'chat-3',
+        userId: 'user-1',
+        metadata: { projectId: 'project-a', status: 'archived' },
+      });
+
+      // Filter by projectId
+      const projectAChats = await store.listChats({
+        metadata: { key: 'projectId', value: 'project-a' },
+      });
+
+      assert.strictEqual(projectAChats.length, 2);
+      assert.ok(
+        projectAChats.every((c) => c.metadata?.projectId === 'project-a'),
+      );
+    });
+
+    it('should filter chats by metadata number field', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'chat-1',
+        userId: 'user-1',
+        metadata: { priority: 1 },
+      });
+      await store.upsertChat({
+        id: 'chat-2',
+        userId: 'user-1',
+        metadata: { priority: 2 },
+      });
+      await store.upsertChat({
+        id: 'chat-3',
+        userId: 'user-1',
+        metadata: { priority: 1 },
+      });
+
+      const priority1Chats = await store.listChats({
+        metadata: { key: 'priority', value: 1 },
+      });
+
+      assert.strictEqual(priority1Chats.length, 2);
+      assert.ok(priority1Chats.every((c) => c.metadata?.priority === 1));
+    });
+
+    it('should filter chats by metadata boolean field', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'chat-1',
+        userId: 'user-1',
+        metadata: { isArchived: true },
+      });
+      await store.upsertChat({
+        id: 'chat-2',
+        userId: 'user-1',
+        metadata: { isArchived: false },
+      });
+      await store.upsertChat({
+        id: 'chat-3',
+        userId: 'user-1',
+        metadata: { isArchived: true },
+      });
+
+      const archivedChats = await store.listChats({
+        metadata: { key: 'isArchived', value: true },
+      });
+
+      assert.strictEqual(archivedChats.length, 2);
+    });
+
+    it('should combine userId and metadata filters', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'alice-1',
+        userId: 'alice',
+        metadata: { projectId: 'shared' },
+      });
+      await store.upsertChat({
+        id: 'alice-2',
+        userId: 'alice',
+        metadata: { projectId: 'personal' },
+      });
+      await store.upsertChat({
+        id: 'bob-1',
+        userId: 'bob',
+        metadata: { projectId: 'shared' },
+      });
+
+      // Filter by both userId and metadata
+      const aliceSharedChats = await store.listChats({
+        userId: 'alice',
+        metadata: { key: 'projectId', value: 'shared' },
+      });
+
+      assert.strictEqual(aliceSharedChats.length, 1);
+      assert.strictEqual(aliceSharedChats[0].id, 'alice-1');
+      assert.strictEqual(aliceSharedChats[0].userId, 'alice');
+    });
+
+    it('should return empty array when no chats match metadata filter', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'chat-1',
+        userId: 'user-1',
+        metadata: { projectId: 'existing' },
+      });
+
+      const result = await store.listChats({
+        metadata: { key: 'projectId', value: 'nonexistent' },
+      });
+
+      assert.strictEqual(result.length, 0);
+    });
+
+    it('should return empty array when filtering by non-existent metadata key', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'chat-1',
+        userId: 'user-1',
+        metadata: { projectId: 'test' },
+      });
+
+      const result = await store.listChats({
+        metadata: { key: 'nonExistentKey', value: 'value' },
+      });
+
+      assert.strictEqual(result.length, 0);
+    });
+
+    it('should include metadata in ChatInfo response', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'chat-1',
+        userId: 'user-1',
+        metadata: { projectId: 'test', status: 'active', count: 42 },
+      });
+
+      const chats = await store.listChats();
+
+      assert.strictEqual(chats.length, 1);
+      assert.deepStrictEqual(chats[0].metadata, {
+        projectId: 'test',
+        status: 'active',
+        count: 42,
+      });
+    });
+
+    it('should handle chats without metadata when filtering', async () => {
+      const store = new InMemoryContextStore();
+
+      await store.upsertChat({
+        id: 'chat-with-metadata',
+        userId: 'user-1',
+        metadata: { projectId: 'test' },
+      });
+      await store.upsertChat({
+        id: 'chat-without-metadata',
+        userId: 'user-1',
+        // no metadata
+      });
+
+      const result = await store.listChats({
+        metadata: { key: 'projectId', value: 'test' },
+      });
+
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].id, 'chat-with-metadata');
+    });
+
+    it('should support pagination with metadata filter', async () => {
+      const store = new InMemoryContextStore();
+
+      // Create 5 chats with same metadata
+      for (let i = 0; i < 5; i++) {
+        await store.upsertChat({
+          id: `chat-${i}`,
+          userId: 'user-1',
+          metadata: { category: 'important' },
+        });
+      }
+      // Create 3 chats with different metadata
+      for (let i = 0; i < 3; i++) {
+        await store.upsertChat({
+          id: `other-${i}`,
+          userId: 'user-1',
+          metadata: { category: 'other' },
+        });
+      }
+
+      const page1 = await store.listChats({
+        metadata: { key: 'category', value: 'important' },
+        limit: 2,
+        offset: 0,
+      });
+
+      const page2 = await store.listChats({
+        metadata: { key: 'category', value: 'important' },
+        limit: 2,
+        offset: 2,
+      });
+
+      assert.strictEqual(page1.length, 2);
+      assert.strictEqual(page2.length, 2);
+
+      // No overlap
+      const page1Ids = page1.map((c) => c.id);
+      const page2Ids = page2.map((c) => c.id);
+      assert.ok(page1Ids.every((id) => !page2Ids.includes(id)));
+    });
+  });
+});
+
 describe('User Chat Management', () => {
   describe('Chat Creation with userId', () => {
     it('should create a chat associated with a specific user', async () => {

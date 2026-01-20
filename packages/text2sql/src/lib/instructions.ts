@@ -155,6 +155,12 @@ function reasoningFramework(): ContextFragment[] {
         description:
           "Only take an action after all the above reasoning is completed. Once you've taken an action, you cannot take it back.",
       }),
+
+      principle({
+        title: 'Continuous self-monitoring',
+        description:
+          'Constantly evaluate your own reasoning process for any gaps, biases, or errors. Apply the above principles iteratively as needed.',
+      }),
     ),
   ];
 }

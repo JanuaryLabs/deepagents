@@ -106,7 +106,7 @@ export const errorRecoveryGuardrail: Guardrail = {
         'My response format was invalid. Let me try again with a properly formatted response.',
       );
     }
-
+    console.dir({ part }, { depth: null });
     // Unknown error - still try to recover
     return logAndFail(
       'Unknown error',

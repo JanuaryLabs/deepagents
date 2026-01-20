@@ -189,6 +189,7 @@ export class Text2Sql {
       onFinish: async ({ responseMessage }) => {
         context.set(assistant(responseMessage));
         await context.save();
+        await context.trackUsage(await result.totalUsage);
       },
     });
   }
@@ -228,6 +229,7 @@ export class Text2Sql {
       onFinish: async ({ responseMessage }) => {
         context.set(assistant(responseMessage));
         await context.save();
+        await context.trackUsage(await result.totalUsage);
       },
     });
   }
