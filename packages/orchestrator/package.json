@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/orchestrator",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -37,13 +37,13 @@
     "access": "public"
   },
   "dependencies": {
-    "@deepagents/agent": "0.12.1",
+    "@deepagents/agent": "0.13.0",
     "@ai-sdk/groq": "^3.0.10",
     "zod": "^3.25.76 || ^4.0.0",
     "ai": "^6.0.39",
     "lodash-es": "^4.17.21",
-    "@deepagents/retrieval": "0.12.1",
-    "@deepagents/toolbox": "0.12.1",
+    "@deepagents/retrieval": "0.13.0",
+    "@deepagents/toolbox": "0.13.0",
     "p-limit": "^7.2.0",
     "@ai-sdk/openai": "^3.0.12",
     "@tavily/core": "^0.5.12",
