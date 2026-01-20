@@ -37,6 +37,7 @@ export interface ChatInfo {
   id: string;
   userId: string;
   title?: string;
+  metadata?: Record<string, unknown>;
   messageCount: number;
   branchCount: number;
   createdAt: number;
@@ -49,6 +50,8 @@ export interface ChatInfo {
 export interface ListChatsOptions {
   /** Filter by user ID */
   userId?: string;
+  /** Filter by metadata field (exact match on top-level primitive) */
+  metadata?: { key: string; value: string | number | boolean };
   /** Maximum number of results to return */
   limit?: number;
   /** Number of results to skip (for pagination) */

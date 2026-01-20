@@ -266,14 +266,30 @@ export class SqliteContextStore extends ContextStore {
 
   async listChats(options?: ListChatsOptions): Promise<ChatInfo[]> {
     const params: SQLInputValue[] = [];
-    let whereClause = '';
+    const whereClauses: string[] = [];
     let limitClause = '';
 
     // Build WHERE clause for userId filter
     if (options?.userId) {
-      whereClause = 'WHERE c.userId = ?';
+      whereClauses.push('c.userId = ?');
       params.push(options.userId);
     }
+
+    // Build WHERE clause for metadata filter (exact match on top-level field)
+    if (options?.metadata) {
+      whereClauses.push(`json_extract(c.metadata, '$.' || ?) = ?`);
+      params.push(options.metadata.key);
+      params.push(
+        typeof options.metadata.value === 'boolean'
+          ? options.metadata.value
+            ? 1
+            : 0
+          : options.metadata.value,
+      );
+    }
+
+    const whereClause =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     // Build LIMIT/OFFSET clause
     if (options?.limit !== undefined) {
@@ -291,6 +307,7 @@ export class SqliteContextStore extends ContextStore {
           c.id,
           c.userId,
           c.title,
+          c.metadata,
           c.createdAt,
           c.updatedAt,
           COUNT(DISTINCT m.id) as messageCount,
@@ -306,6 +323,7 @@ export class SqliteContextStore extends ContextStore {
       id: string;
       userId: string;
       title: string | null;
+      metadata: string | null;
       createdAt: number;
       updatedAt: number;
       messageCount: number;
@@ -316,6 +334,7 @@ export class SqliteContextStore extends ContextStore {
       id: row.id,
       userId: row.userId,
       title: row.title ?? undefined,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       messageCount: row.messageCount,
       branchCount: row.branchCount,
       createdAt: row.createdAt,
@@ -363,13 +382,20 @@ export class SqliteContextStore extends ContextStore {
   // ==========================================================================
 
   async addMessage(message: MessageData): Promise<void> {
-    // Upsert the message
+    // Upsert message; CASE handles self-reference (parentId === id) by preserving existing parentId
     this.#db
       .prepare(
         `INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+         VALUES (
+           ?1,
+           ?2,
+           CASE WHEN ?3 = ?1 THEN (SELECT parentId FROM messages WHERE id = ?1) ELSE ?3 END,
+           ?4,
+           ?5,
+           ?6,
+           ?7
+         )
          ON CONFLICT(id) DO UPDATE SET
-           parentId = excluded.parentId,
            name = excluded.name,
            type = excluded.type,
            data = excluded.data`,
