@@ -7,7 +7,12 @@
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "types": ["node"]
   },
-  "exclude": ["src/tests", "src/evals", "src/**/*.test.ts"],
+  "exclude": [
+    "src/tests",
+    "src/evals",
+    "src/**/*.test.ts",
+    "evalite.config.ts"
+  ],
   "include": ["src/**/*.ts", "../../global.d.ts"],
   "references": [
     {

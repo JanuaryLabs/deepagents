@@ -744,7 +744,9 @@ describe('artifacts persistence to disk', () => {
         recursive: true,
         force: true,
       })
-      .catch(() => {});
+      .catch((error) => {
+        void error;
+      });
   });
 
   it('files written to /results appear on real filesystem', async () => {

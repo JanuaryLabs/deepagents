@@ -2,7 +2,9 @@ import {
   APICallError,
   InvalidToolInputError,
   NoSuchToolError,
+  type StreamTextTransform,
   ToolCallRepairError,
+  type ToolSet,
   type UIMessage,
   generateId,
 } from 'ai';
@@ -36,6 +38,7 @@ export class Text2Sql {
     tools?: RenderingTools;
     introspection: JsonCache<ContextFragment[]>;
     teachingsOptions?: TeachingsOptions;
+    transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   };
 
   constructor(config: {
@@ -44,6 +47,7 @@ export class Text2Sql {
     version: string;
     tools?: RenderingTools;
     model: AgentModel;
+    transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     /**
      * Configure teachings behavior
      * @see TeachingsOptions
@@ -56,6 +60,7 @@ export class Text2Sql {
       context: config.context,
       tools: config.tools ?? {},
       model: config.model,
+      transform: config.transform,
       introspection: new JsonCache<ContextFragment[]>(
         'introspection-' + config.version,
       ),
@@ -176,7 +181,10 @@ export class Text2Sql {
       maxGuardrailRetries: 3,
     });
 
-    const result = await chatAgent.stream({});
+    const result = await chatAgent.stream(
+      {},
+      { transform: this.#config.transform },
+    );
 
     return result.toUIMessageStream({
       onError: (error) => this.#formatError(error),

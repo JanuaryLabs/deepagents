@@ -83,7 +83,6 @@
     "autoevals": "^0.0.131",
     "bash-tool": "^1.1.0",
     "dedent": "1.7.0",
-    "evalite": "^0.19.0",
     "just-bash": "^2.5.2",
     "openai": "5.12.2",
     "p-limit": "^6.2.0",
@@ -93,6 +92,10 @@
     "nano-spawn": "^1.0.3",
     "p-retry": "^7.1.1",
     "pg": "^8.16.3",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "evalite": "^0.19.0"
   }
 }
