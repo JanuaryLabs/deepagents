@@ -111,6 +111,23 @@ export const errorRecoveryGuardrail: Guardrail = {
       );
     }
 
+    // Pattern: Tool schema validation failed
+    if (
+      errorText.includes('validation failed') &&
+      errorText.includes('did not match schema')
+    ) {
+      const toolMatch = errorText.match(/parameters for tool (\w+)/);
+      const toolName = toolMatch ? toolMatch[1] : 'unknown';
+
+      // Extract schema errors from the message
+      const schemaErrors = errorText.match(/errors: \[([^\]]+)\]/)?.[1] || '';
+
+      return logAndFail(
+        `Schema validation: ${toolName}`,
+        `I called "${toolName}" with invalid parameters. Schema errors: ${schemaErrors}. Let me fix the parameters and try again.`,
+      );
+    }
+
     // Pattern: Parsing failed (generic)
     if (errorText.includes('Parsing failed')) {
       return logAndFail(
