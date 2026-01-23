@@ -54,8 +54,7 @@ export function skills(options: SkillsFragmentOptions): ContextFragment {
     );
   }
 
-  // Convert skills to ContextFragments with sandbox paths
-  const skillFragments: ContextFragment[] = filteredSkills.map((skill) => {
+  const mounts = filteredSkills.map((skill) => {
     const originalPath = skill.skillMdPath;
     let sandboxPath = originalPath;
 
@@ -69,13 +68,21 @@ export function skills(options: SkillsFragmentOptions): ContextFragment {
     }
 
     return {
+      name: skill.name,
+      description: skill.description,
+      host: originalPath,
+      sandbox: sandboxPath,
+    } as const;
+  });
+
+  const skillFragments: ContextFragment[] = mounts.map((skill) => {
+    return {
       name: 'skill',
       data: {
         name: skill.name,
-        path: sandboxPath,
+        path: skill.sandbox,
         description: skill.description,
       },
-      metadata: { originalPath },
     };
   });
 
@@ -89,7 +96,7 @@ export function skills(options: SkillsFragmentOptions): ContextFragment {
       ...skillFragments,
     ],
     metadata: {
-      paths: options.paths, // Store original path mappings for getSkillMounts()
+      mounts,
     },
   };
 }

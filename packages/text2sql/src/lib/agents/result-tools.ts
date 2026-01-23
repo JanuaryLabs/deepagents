@@ -1,4 +1,3 @@
-import { tool } from 'ai';
 import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
 import {
@@ -193,7 +192,7 @@ export interface ResultToolsOptions {
   /** Message ID for turn-level artifact isolation */
   messageId: string;
   /** Skill mounts mapping host paths to sandbox paths */
-  skillMounts?: SkillPathMapping[];
+  skillMounts: SkillPathMapping[];
 }
 
 /**
@@ -218,7 +217,7 @@ export interface ResultToolsOptions {
  * @param options.messageId - Message ID for turn-level isolation
  */
 export async function createResultTools(options: ResultToolsOptions) {
-  const { adapter, chatId, messageId, skillMounts = [] } = options;
+  const { adapter, chatId, messageId, skillMounts } = options;
   const sqlCommand = createSqlCommand(adapter);
 
   // Artifact directories
@@ -231,9 +230,9 @@ export async function createResultTools(options: ResultToolsOptions) {
   // Build skill mounts (read-only access to skill directories)
   // Set mountPoint: '/' so files appear at the root of the mount, not under /home/user/project
   const fsMounts = skillMounts.map(({ host, sandbox }) => ({
-    mountPoint: sandbox,
+    mountPoint: path.dirname(sandbox),
     filesystem: new OverlayFs({
-      root: host,
+      root: path.dirname(host),
       mountPoint: '/',
       readOnly: true,
     }),

@@ -160,7 +160,7 @@ export class Text2Sql {
     const messageId = userMsg?.id ?? generateId();
 
     // Extract skill mounts from context fragments for sandbox filesystem
-    const skillMounts = context.getSkillMounts();
+    const { mounts: skillMounts } = context.getSkillMounts();
 
     const { bash } = await createResultTools({
       adapter: this.#config.adapter,

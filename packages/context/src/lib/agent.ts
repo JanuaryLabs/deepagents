@@ -207,9 +207,11 @@ class Agent<CIn, COut = CIn> {
           let currentResult: StreamTextResult<ToolSet, never> = result;
           let attempt = 0;
 
-          // Create guardrail context with available tools
+          // Create guardrail context with available tools and skills
+          const { mounts } = context.getSkillMounts();
           const guardrailContext: GuardrailContext = {
             availableTools: Object.keys(this.tools),
+            availableSkills: mounts,
           };
 
           while (attempt < maxRetries) {

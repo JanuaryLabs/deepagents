@@ -34,6 +34,8 @@
  */
 import type { InferUIMessageChunk, UIDataTypes, UIMessage } from 'ai';
 
+import type { SkillPathMapping } from './skills/types.ts';
+
 /**
  * Type alias for stream parts from the AI SDK's UI message stream.
  * This is the full chunk type that includes text-delta, error, reasoning-delta, etc.
@@ -58,6 +60,8 @@ export type GuardrailResult =
 export interface GuardrailContext {
   /** Names of tools available to the agent */
   availableTools: string[];
+  /** Skills available in context (for detecting skill/tool confusion) */
+  availableSkills: SkillPathMapping[];
 }
 
 /**

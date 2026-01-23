@@ -807,44 +807,28 @@ export class ContextEngine {
   }
 
   /**
-   * Extract skill path mappings from available_skills fragments.
-   * Returns array of { host, sandbox } for mounting in sandbox filesystem.
-   *
-   * Reads the original `paths` configuration stored in fragment metadata
-   * by the skills() fragment helper.
+   * Extract skill mounts from available_skills fragments.
+   * Returns unified mount array where entries with `name` are individual skills.
    *
    * @example
    * ```ts
    * const context = new ContextEngine({ store, chatId, userId })
    *   .set(skills({ paths: [{ host: './skills', sandbox: '/skills' }] }));
    *
-   * const mounts = context.getSkillMounts();
-   * // [{ host: './skills', sandbox: '/skills' }]
+   * const { mounts } = context.getSkillMounts();
+   * // mounts: [{ name: 'bi-dashboards', host: './skills/bi-dashboards/SKILL.md', sandbox: '/skills/bi-dashboards/SKILL.md' }]
+   *
+   * // Extract skills only (entries with name)
+   * const skills = mounts.filter(m => m.name);
    * ```
    */
-  public getSkillMounts(): SkillPathMapping[] {
-    const mounts: SkillPathMapping[] = [];
-
+  public getSkillMounts() {
     for (const fragment of this.#fragments) {
-      if (
-        fragment.name === 'available_skills' &&
-        fragment.metadata &&
-        Array.isArray(fragment.metadata.paths)
-      ) {
-        for (const mapping of fragment.metadata.paths) {
-          if (
-            typeof mapping === 'object' &&
-            mapping !== null &&
-            typeof mapping.host === 'string' &&
-            typeof mapping.sandbox === 'string'
-          ) {
-            mounts.push({ host: mapping.host, sandbox: mapping.sandbox });
-          }
-        }
+      if (fragment.name === 'available_skills' && fragment.metadata?.mounts) {
+        return { mounts: fragment.metadata.mounts as SkillPathMapping[] };
       }
     }
-
-    return mounts;
+    return { mounts: [] };
   }
 
   /**

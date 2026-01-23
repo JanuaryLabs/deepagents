@@ -75,6 +75,18 @@ export const errorRecoveryGuardrail: Guardrail = {
     ) {
       const toolMatch = errorText.match(/tool '([^']+)'/);
       const toolName = toolMatch ? toolMatch[1] : 'unknown';
+
+      // Check if the "tool" is actually a skill
+      const matchingSkill = context.availableSkills.find(
+        (skill) => skill.name === toolName,
+      );
+      if (matchingSkill) {
+        return logAndFail(
+          `Skill confused as tool: ${toolName}`,
+          `"${toolName}" is a skill, not a tool. Read the skill at ${matchingSkill.sandbox} to use it.`,
+        );
+      }
+
       if (context.availableTools.length > 0) {
         return logAndFail(
           `Unregistered tool: ${toolName}`,

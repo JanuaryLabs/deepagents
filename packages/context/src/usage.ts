@@ -501,7 +501,10 @@ async function demonstrateSkills() {
     role('You are a helpful assistant with access to specialized skills.'),
     skills({
       paths: [
-        { host: 'packages/context/src/skills', sandbox: '/skills/skills' },
+        {
+          host: 'packages/context/src/skills',
+          sandbox: '/skills/skills',
+        },
       ],
     }), // Injects <available_skills> into system prompt
   );
@@ -598,7 +601,10 @@ async function createSkillAwareAgent() {
     ),
     skills({
       paths: [
-        { host: 'packages/context/src/skills', sandbox: '/skills/skills' },
+        {
+          host: 'packages/context/src/skills',
+          sandbox: '/skills/skills',
+        },
       ],
     }),
   );
@@ -774,7 +780,10 @@ async function createDockerSkillAgent() {
       role(`You are a system admin.`),
       skills({
         paths: [
-          { host: 'packages/context/src/skills', sandbox: '/skills/skills' },
+          {
+            host: 'packages/context/src/skills',
+            sandbox: '/skills/skills',
+          },
         ],
       }),
     );
