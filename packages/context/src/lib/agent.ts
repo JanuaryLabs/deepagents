@@ -253,13 +253,25 @@ class Agent<CIn, COut = CIn> {
                 break; // Exit stream processing
               }
 
+              if (checkResult.type === 'stop') {
+                // Stop immediately without retry - write part and finish
+                console.log(
+                  chalk.red(
+                    `[${this.#options.name}] Guardrail stopped - unrecoverable error, no retry`,
+                  ),
+                );
+                writer.write(part);
+                writer.write({ type: 'finish' });
+                return;
+              }
+
               // Guardrail passed - track text for self-correction context
               if (checkResult.part.type === 'text-delta') {
                 accumulatedText += checkResult.part.delta;
               }
 
               // Write the (possibly modified) part to output
-              writer.write(checkResult.part as typeof part);
+              writer.write(part);
             }
 
             if (!guardrailFailed) {

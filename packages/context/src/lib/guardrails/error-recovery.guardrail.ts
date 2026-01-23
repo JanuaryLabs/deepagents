@@ -25,7 +25,7 @@
 import chalk from 'chalk';
 
 import type { Guardrail } from '../guardrail.ts';
-import { fail, pass } from '../guardrail.ts';
+import { fail, pass, stop } from '../guardrail.ts';
 
 export const errorRecoveryGuardrail: Guardrail = {
   id: 'error-recovery',
@@ -135,11 +135,10 @@ export const errorRecoveryGuardrail: Guardrail = {
         'My response format was invalid. Let me try again with a properly formatted response.',
       );
     }
-    console.dir({ part }, { depth: null });
-    // Unknown error - still try to recover
-    return logAndFail(
-      'Unknown error',
-      `An error occurred: ${errorText}. Let me try a different approach.`,
+    // Unknown error - don't retry, let it propagate
+    console.log(
+      `${prefix} ${chalk.yellow('Unknown error - stopping without retry')}`,
     );
+    return stop(part);
   },
 };

@@ -4,6 +4,7 @@
  * Guardrails inspect streaming parts and can either:
  * - `pass(part)`: Allow the part through (optionally modified)
  * - `fail(feedback)`: Abort the stream and retry with self-correction feedback
+ * - `stop(part)`: Abort the stream immediately without retry (for unrecoverable errors)
  *
  * When a guardrail fails, the accumulated text is combined with the feedback
  * to create a "self-correction" that appears as if the agent caught itself.
@@ -48,10 +49,12 @@ export type StreamPart = InferUIMessageChunk<
  * Result of a guardrail check.
  * - `pass`: The part is allowed through (optionally modified)
  * - `fail`: The stream should abort and retry with feedback
+ * - `stop`: The stream should abort immediately without retry (let error propagate)
  */
 export type GuardrailResult =
   | { type: 'pass'; part: StreamPart }
-  | { type: 'fail'; feedback: string };
+  | { type: 'fail'; feedback: string }
+  | { type: 'stop'; part: StreamPart };
 
 /**
  * Context passed to guardrails during stream processing.
@@ -77,7 +80,7 @@ export interface Guardrail {
    *
    * @param part - The full stream part to inspect (text-delta, error, etc.)
    * @param context - Context with agent capabilities (available tools, etc.)
-   * @returns Either `pass(part)` to allow or `fail(feedback)` to abort and retry
+   * @returns `pass(part)` to allow, `fail(feedback)` to retry, or `stop(part)` to abort without retry
    */
   handle: (part: StreamPart, context: GuardrailContext) => GuardrailResult;
 }
@@ -141,6 +144,34 @@ export function fail(feedback: string): GuardrailResult {
 }
 
 /**
+ * Stop the stream immediately without retry.
+ *
+ * Use this for unrecoverable errors where retrying won't help.
+ * The error part will be passed through and the stream will terminate.
+ *
+ * @param part - The part to pass through (typically an error part)
+ * @returns A stop result
+ *
+ * @example
+ * ```typescript
+ * handle: (part) => {
+ *   if (part.type === 'error') {
+ *     // Known recoverable error - retry
+ *     if (part.errorText?.includes('rate limit')) {
+ *       return fail('Rate limited. Let me try again.');
+ *     }
+ *     // Unknown error - don't retry, let it propagate
+ *     return stop(part);
+ *   }
+ *   return pass(part);
+ * }
+ * ```
+ */
+export function stop(part: StreamPart): GuardrailResult {
+  return { type: 'stop', part };
+}
+
+/**
  * Run a part through a chain of guardrails sequentially.
  *
  * @param part - The stream part to check
@@ -158,7 +189,7 @@ export function runGuardrailChain(
   for (const guardrail of guardrails) {
     const result = guardrail.handle(currentPart, context);
 
-    if (result.type === 'fail') {
+    if (result.type === 'fail' || result.type === 'stop') {
       return result;
     }
 

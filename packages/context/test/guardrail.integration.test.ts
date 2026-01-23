@@ -7,6 +7,7 @@ import {
   fail,
   pass,
   runGuardrailChain,
+  stop,
 } from '@deepagents/context';
 
 describe('Guardrail System', () => {
@@ -107,7 +108,7 @@ describe('Guardrail System', () => {
       assert.ok(result.feedback.includes('invalid parameters'));
     });
 
-    it('should handle unknown errors with fallback', () => {
+    it('should stop on unknown errors without retry', () => {
       const errorPart = {
         type: 'error' as const,
         errorText: 'Some random unknown error occurred',
@@ -118,8 +119,8 @@ describe('Guardrail System', () => {
         availableSkills: [],
       });
 
-      assert.strictEqual(result.type, 'fail');
-      assert.ok(result.feedback.includes('Some random unknown error'));
+      assert.strictEqual(result.type, 'stop');
+      assert.deepStrictEqual(result.part, errorPart);
     });
   });
 
@@ -241,6 +242,68 @@ describe('Guardrail System', () => {
       assert.strictEqual(result.type, 'fail');
       assert.deepStrictEqual(callOrder, ['failing']);
     });
+
+    it('should stop chain on stop result', () => {
+      const callOrder: string[] = [];
+
+      const stoppingGuardrail: Guardrail = {
+        id: 'stopping',
+        name: 'Stops',
+        handle: (part) => {
+          callOrder.push('stopping');
+          return stop(part);
+        },
+      };
+
+      const neverCalledGuardrail: Guardrail = {
+        id: 'never-called',
+        name: 'Never Called',
+        handle: (part) => {
+          callOrder.push('never-called');
+          return pass(part);
+        },
+      };
+
+      const part = { type: 'error' as const, errorText: 'Some error' };
+      const result = runGuardrailChain(
+        part,
+        [stoppingGuardrail, neverCalledGuardrail],
+        { availableTools: [], availableSkills: [] },
+      );
+
+      assert.strictEqual(result.type, 'stop');
+      assert.deepStrictEqual(result.part, part);
+      assert.deepStrictEqual(callOrder, ['stopping']);
+    });
+
+    it('should support custom guardrail that stops', () => {
+      const customGuardrail: Guardrail = {
+        id: 'custom-stop',
+        name: 'Stop on Error',
+        handle: (part) => {
+          if (part.type === 'error') {
+            return stop(part);
+          }
+          return pass(part);
+        },
+      };
+
+      const textPart = { type: 'text-delta' as const, id: 'p1', delta: 'test' };
+      const errorPart = { type: 'error' as const, errorText: 'Unrecoverable' };
+
+      const textResult = runGuardrailChain(textPart, [customGuardrail], {
+        availableTools: [],
+        availableSkills: [],
+      });
+      const errorResult = runGuardrailChain(errorPart, [customGuardrail], {
+        availableTools: [],
+        availableSkills: [],
+      });
+
+      assert.strictEqual(textResult.type, 'pass');
+      assert.strictEqual(errorResult.type, 'stop');
+      assert.deepStrictEqual(errorResult.part, errorPart);
+    });
   });
 
   describe('Error Recovery Guardrail Edge Cases', () => {
@@ -259,7 +322,7 @@ describe('Guardrail System', () => {
       assert.ok(result.feedback.includes('no tools are available'));
     });
 
-    it('should handle empty error text', () => {
+    it('should stop on empty error text (unknown error)', () => {
       const errorPart = {
         type: 'error' as const,
         errorText: '',
@@ -270,8 +333,9 @@ describe('Guardrail System', () => {
         availableSkills: [],
       });
 
-      // Should still trigger with unknown error fallback
-      assert.strictEqual(result.type, 'fail');
+      // Empty error text is unknown - should stop without retry
+      assert.strictEqual(result.type, 'stop');
+      assert.deepStrictEqual(result.part, errorPart);
     });
   });
 
