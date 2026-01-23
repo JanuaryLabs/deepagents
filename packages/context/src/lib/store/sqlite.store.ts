@@ -29,11 +29,36 @@ import { ContextStore } from './store.ts';
  */
 export class SqliteContextStore extends ContextStore {
   #db: DatabaseSync;
+  #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
+
+  /**
+   * Get or create a prepared statement.
+   * Statements are cached for the lifetime of the store to avoid
+   * repeated SQL parsing and compilation overhead.
+   */
+  #stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
+    let stmt = this.#statements.get(sql);
+    if (!stmt) {
+      stmt = this.#db.prepare(sql);
+      this.#statements.set(sql, stmt);
+    }
+    return stmt;
+  }
 
   constructor(path: string) {
     super();
     this.#db = new DatabaseSync(path);
+
+    // Performance PRAGMAs (set before schema/data operations)
+    this.#db.exec('PRAGMA journal_mode = WAL'); // Concurrent reads, faster writes
+    this.#db.exec('PRAGMA synchronous = NORMAL'); // Safe for crashes, 10x faster than FULL
+    this.#db.exec('PRAGMA cache_size = -64000'); // 64MB page cache
+    this.#db.exec('PRAGMA temp_store = MEMORY'); // Temp tables in RAM
+    this.#db.exec('PRAGMA mmap_size = 268435456'); // 256MB memory-mapped I/O
+
+    // Integrity PRAGMAs
     this.#db.exec('PRAGMA foreign_keys = ON');
+
     this.#db.exec(STORE_DDL);
   }
 
@@ -333,25 +358,23 @@ export class SqliteContextStore extends ContextStore {
       throw new Error(`Message ${message.id} cannot be its own parent`);
     }
 
-    // Upsert message
-    this.#db
-      .prepare(
-        `INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           name = excluded.name,
-           type = excluded.type,
-           data = excluded.data`,
-      )
-      .run(
-        message.id,
-        message.chatId,
-        message.parentId,
-        message.name,
-        message.type ?? null,
-        JSON.stringify(message.data),
-        message.createdAt,
-      );
+    // Upsert message (using cached statement)
+    this.#stmt(
+      `INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         type = excluded.type,
+         data = excluded.data`,
+    ).run(
+      message.id,
+      message.chatId,
+      message.parentId,
+      message.name,
+      message.type ?? null,
+      JSON.stringify(message.data),
+      message.createdAt,
+    );
 
     // Index in FTS for search
     const content =
@@ -360,21 +383,17 @@ export class SqliteContextStore extends ContextStore {
         : JSON.stringify(message.data);
 
     // Delete existing FTS entry if any (for upsert), then insert new one
-    this.#db
-      .prepare(`DELETE FROM messages_fts WHERE messageId = ?`)
-      .run(message.id);
-    this.#db
-      .prepare(
-        `INSERT INTO messages_fts(messageId, chatId, name, content)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(message.id, message.chatId, message.name, content);
+    this.#stmt(`DELETE FROM messages_fts WHERE messageId = ?`).run(message.id);
+    this.#stmt(
+      `INSERT INTO messages_fts(messageId, chatId, name, content)
+       VALUES (?, ?, ?, ?)`,
+    ).run(message.id, message.chatId, message.name, content);
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {
-    const row = this.#db
-      .prepare('SELECT * FROM messages WHERE id = ?')
-      .get(messageId) as
+    const row = this.#stmt('SELECT * FROM messages WHERE id = ?').get(
+      messageId,
+    ) as
       | {
           id: string;
           chatId: string;
@@ -405,20 +424,18 @@ export class SqliteContextStore extends ContextStore {
     // Walk up the parent chain using recursive CTE with depth tracking
     // The CTE walks from head (newest) to root (oldest), so we track depth
     // and order by depth DESC to get chronological order (root first)
-    // Depth limit of 10000 prevents infinite loops from circular references
-    const rows = this.#db
-      .prepare(
-        `WITH RECURSIVE chain AS (
-          SELECT *, 0 as depth FROM messages WHERE id = ?
-          UNION ALL
-          SELECT m.*, c.depth + 1 FROM messages m
-          INNER JOIN chain c ON m.id = c.parentId
-          WHERE c.depth < 10000
-        )
-        SELECT * FROM chain
-        ORDER BY depth DESC`,
+    // Depth limit of 100000 prevents infinite loops from circular references
+    const rows = this.#stmt(
+      `WITH RECURSIVE chain AS (
+        SELECT *, 0 as depth FROM messages WHERE id = ?
+        UNION ALL
+        SELECT m.*, c.depth + 1 FROM messages m
+        INNER JOIN chain c ON m.id = c.parentId
+        WHERE c.depth < 100000
       )
-      .all(headId) as {
+      SELECT * FROM chain
+      ORDER BY depth DESC`,
+    ).all(headId) as {
       id: string;
       chatId: string;
       parentId: string | null;
@@ -441,11 +458,9 @@ export class SqliteContextStore extends ContextStore {
   }
 
   async hasChildren(messageId: string): Promise<boolean> {
-    const row = this.#db
-      .prepare(
-        'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ?) as hasChildren',
-      )
-      .get(messageId) as { hasChildren: number };
+    const row = this.#stmt(
+      'SELECT EXISTS(SELECT 1 FROM messages WHERE parentId = ?) as hasChildren',
+    ).get(messageId) as { hasChildren: number };
 
     return row.hasChildren === 1;
   }
@@ -516,9 +531,9 @@ export class SqliteContextStore extends ContextStore {
   }
 
   async getActiveBranch(chatId: string): Promise<BranchData | undefined> {
-    const row = this.#db
-      .prepare('SELECT * FROM branches WHERE chatId = ? AND isActive = 1')
-      .get(chatId) as
+    const row = this.#stmt(
+      'SELECT * FROM branches WHERE chatId = ? AND isActive = 1',
+    ).get(chatId) as
       | {
           id: string;
           chatId: string;
@@ -559,21 +574,35 @@ export class SqliteContextStore extends ContextStore {
     branchId: string,
     messageId: string | null,
   ): Promise<void> {
-    this.#db
-      .prepare('UPDATE branches SET headMessageId = ? WHERE id = ?')
-      .run(messageId, branchId);
+    this.#stmt('UPDATE branches SET headMessageId = ? WHERE id = ?').run(
+      messageId,
+      branchId,
+    );
   }
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {
-    // Get branches with message count by walking the chain
-    const branches = this.#db
+    // Single query with correlated subquery to count messages per branch
+    // Eliminates N+1 pattern (was: 1 query + N recursive CTEs)
+    const rows = this.#db
       .prepare(
         `SELECT
           b.id,
           b.name,
           b.headMessageId,
           b.isActive,
-          b.createdAt
+          b.createdAt,
+          COALESCE(
+            (
+              WITH RECURSIVE chain AS (
+                SELECT id, parentId FROM messages WHERE id = b.headMessageId
+                UNION ALL
+                SELECT m.id, m.parentId FROM messages m
+                INNER JOIN chain c ON m.id = c.parentId
+              )
+              SELECT COUNT(*) FROM chain
+            ),
+            0
+          ) as messageCount
         FROM branches b
         WHERE b.chatId = ?
         ORDER BY b.createdAt ASC`,
@@ -584,38 +613,17 @@ export class SqliteContextStore extends ContextStore {
       headMessageId: string | null;
       isActive: number;
       createdAt: number;
+      messageCount: number;
     }[];
 
-    // For each branch, count messages in the chain
-    const result: BranchInfo[] = [];
-    for (const branch of branches) {
-      let messageCount = 0;
-      if (branch.headMessageId) {
-        const countRow = this.#db
-          .prepare(
-            `WITH RECURSIVE chain AS (
-              SELECT id, parentId FROM messages WHERE id = ?
-              UNION ALL
-              SELECT m.id, m.parentId FROM messages m
-              INNER JOIN chain c ON m.id = c.parentId
-            )
-            SELECT COUNT(*) as count FROM chain`,
-          )
-          .get(branch.headMessageId) as { count: number };
-        messageCount = countRow.count;
-      }
-
-      result.push({
-        id: branch.id,
-        name: branch.name,
-        headMessageId: branch.headMessageId,
-        isActive: branch.isActive === 1,
-        messageCount,
-        createdAt: branch.createdAt,
-      });
-    }
-
-    return result;
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      headMessageId: row.headMessageId,
+      isActive: row.isActive === 1,
+      messageCount: row.messageCount,
+      createdAt: row.createdAt,
+    }));
   }
 
   // ==========================================================================

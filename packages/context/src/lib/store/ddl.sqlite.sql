@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS chats (
 
 CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
 CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
+-- Composite index for listChats(): WHERE userId = ? ORDER BY updatedAt DESC
+CREATE INDEX IF NOT EXISTS idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
 
 -- Messages table (nodes in the DAG)
 CREATE TABLE IF NOT EXISTS messages (
@@ -30,6 +32,8 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages(chatId);
 CREATE INDEX IF NOT EXISTS idx_messages_parentId ON messages(parentId);
+-- Composite index for recursive CTE parent traversal in getMessageChain()
+CREATE INDEX IF NOT EXISTS idx_messages_chatId_parentId ON messages(chatId, parentId);
 
 -- Branches table (pointers to head messages)
 CREATE TABLE IF NOT EXISTS branches (
@@ -45,6 +49,8 @@ CREATE TABLE IF NOT EXISTS branches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_branches_chatId ON branches(chatId);
+-- Composite index for getActiveBranch(): WHERE chatId = ? AND isActive = 1
+CREATE INDEX IF NOT EXISTS idx_branches_chatId_isActive ON branches(chatId, isActive);
 
 -- Checkpoints table (pointers to message nodes)
 CREATE TABLE IF NOT EXISTS checkpoints (

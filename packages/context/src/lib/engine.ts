@@ -336,8 +336,21 @@ export class ContextEngine {
     }
 
     // Add pending messages (not yet saved)
+    // Resolve any lazy fragments first (like save() does)
+    for (let i = 0; i < this.#pendingMessages.length; i++) {
+      const fragment = this.#pendingMessages[i];
+      if (isLazyFragment(fragment)) {
+        this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
+      }
+    }
+
     for (const fragment of this.#pendingMessages) {
-      const decoded = fragment.codec!.decode();
+      if (!fragment.codec) {
+        throw new Error(
+          `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before decode.`,
+        );
+      }
+      const decoded = fragment.codec.decode();
       messages.push(decoded);
     }
 
@@ -378,13 +391,18 @@ export class ContextEngine {
 
     // Add each pending message to the graph
     for (const fragment of this.#pendingMessages) {
+      if (!fragment.codec) {
+        throw new Error(
+          `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before encode.`,
+        );
+      }
       const messageData: MessageData = {
         id: fragment.id ?? crypto.randomUUID(),
         chatId: this.#chatId,
         parentId,
         name: fragment.name,
         type: fragment.type,
-        data: fragment.codec!.encode(),
+        data: fragment.codec.encode(),
         createdAt: now,
       };
 

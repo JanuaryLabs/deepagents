@@ -12,6 +12,7 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
+  lastAssistantMessage,
   user,
 } from '@deepagents/context';
 
@@ -319,7 +320,7 @@ describe('Sqlite ContextEngine Integration', () => {
     });
   });
 
-  it('handles tool clarification output without creating a cycle', async () => {
+  it('rejects self-referential messages (circular reference protection)', async () => {
     await withTempDb('tool-cycle', async (dbPath) => {
       const store = new SqliteContextStore(dbPath);
       const engine = new ContextEngine({
@@ -334,33 +335,25 @@ describe('Sqlite ContextEngine Integration', () => {
       await withTimeout('save tool user message', 10000, () => engine.save());
 
       const toolMessage = makeToolClarificationMessage('msg-2');
-      await store.addMessage({
-        id: toolMessage.id,
-        chatId: 'chat-tool-cycle',
-        parentId: toolMessage.id,
-        name: 'user',
-        type: 'message',
-        data: toolMessage,
-        createdAt: Date.now(),
-      });
 
-      const activeBranch = await store.getActiveBranch('chat-tool-cycle');
-      if (activeBranch) {
-        await store.updateBranchHead(activeBranch.id, toolMessage.id);
-      }
+      // Attempting to add a message where parentId === id should be rejected
+      await assert.rejects(async () => {
+        await store.addMessage({
+          id: toolMessage.id,
+          chatId: 'chat-tool-cycle',
+          parentId: toolMessage.id, // Self-referential - should be rejected
+          name: 'user',
+          type: 'message',
+          data: toolMessage,
+          createdAt: Date.now(),
+        });
+      }, /cannot be its own parent/);
 
-      const nextEngine = new ContextEngine({
-        store,
-        chatId: 'chat-tool-cycle',
-        userId: 'user-1',
-      });
-
-      const result = await withTimeout('resolve tool cycle', 10000, () =>
-        nextEngine.resolve({ renderer }),
+      // The original message should still be accessible
+      const result = await withTimeout('resolve after rejection', 10000, () =>
+        engine.resolve({ renderer }),
       );
-      assert.ok(result.messages.length >= 1);
-      const last = result.messages[result.messages.length - 1];
-      assert.strictEqual((last as { id: string }).id, toolMessage.id);
+      assert.strictEqual(result.messages.length, 1);
     });
   });
 
@@ -463,4 +456,99 @@ describe('Sqlite ContextEngine Integration', () => {
       });
     },
   );
+
+  it('handles lastAssistantMessage in save() without encode error', async () => {
+    await withTempDb('last-assistant-message', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-last-assistant',
+        userId: 'user-1',
+      });
+
+      // First, add a user message and save
+      engine.set(user(makeUserMessage('msg-1', 'Hello')));
+      await withTimeout('save user message', 10000, () => engine.save());
+
+      // Now simulate guardrail retry: set lastAssistantMessage and save
+      // This should NOT throw "Cannot read properties of undefined (reading 'encode')"
+      engine.set(
+        lastAssistantMessage(
+          'I tried something but it failed. Let me try again.',
+        ),
+      );
+      await withTimeout('save lastAssistantMessage', 10000, () =>
+        engine.save(),
+      );
+
+      // Verify the message was saved
+      const result = await engine.resolve({ renderer });
+      assert.strictEqual(result.messages.length, 2);
+    });
+  });
+
+  it('handles lastAssistantMessage with existing pending user message', async () => {
+    await withTempDb('last-assistant-with-pending', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-pending-mix',
+        userId: 'user-1',
+      });
+
+      // Simulate the real guardrail flow:
+      // 1. User message is set but NOT saved yet
+      // 2. LLM tries to respond, guardrail catches error
+      // 3. lastAssistantMessage is set for self-correction
+      // 4. save() is called with BOTH messages pending
+
+      engine.set(user(makeUserMessage('msg-1', 'Hello')));
+      // Note: NOT saving here - user message is still pending
+
+      // Now add lastAssistantMessage (simulating guardrail retry)
+      engine.set(
+        lastAssistantMessage(
+          'I tried to call read_file but it does not exist. Let me try again.',
+        ),
+      );
+
+      // This save should handle BOTH: user message (has codec) and lazy fragment
+      await withTimeout('save mixed pending', 10000, () => engine.save());
+
+      const result = await engine.resolve({ renderer });
+      assert.strictEqual(result.messages.length, 2);
+    });
+  });
+
+  it('resolve() handles pending lastAssistantMessage without encode error', async () => {
+    await withTempDb('resolve-with-lazy', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-resolve-lazy',
+        userId: 'user-1',
+      });
+
+      // Add user message and save first
+      engine.set(user(makeUserMessage('msg-1', 'Hello')));
+      await withTimeout('save user', 10000, () => engine.save());
+
+      // Set lastAssistantMessage but DON'T save yet
+      engine.set(
+        lastAssistantMessage(
+          'I tried to call read_file but it does not exist. Let me try again.',
+        ),
+      );
+
+      // Now call resolve() with pending lazy fragment
+      // This simulates what happens during retry when createRawStream calls resolve()
+      // BEFORE save() has been called
+      const result = await withTimeout('resolve with pending lazy', 10000, () =>
+        engine.resolve({ renderer }),
+      );
+
+      // Should include both the saved user message and pending assistant message
+      assert.strictEqual(result.messages.length, 2);
+    });
+  });
 });

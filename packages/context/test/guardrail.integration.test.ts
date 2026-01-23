@@ -274,4 +274,28 @@ describe('Guardrail System', () => {
       assert.strictEqual(result.type, 'fail');
     });
   });
+
+  describe('lastAssistantMessage Lazy Fragment', () => {
+    it('should handle lastAssistantMessage in save() without encode error', async () => {
+      const { ContextEngine, InMemoryContextStore, lastAssistantMessage } =
+        await import('@deepagents/context');
+
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        userId: 'test-user',
+        chatId: 'test-chat',
+        store,
+      });
+
+      // Simulate guardrail retry: set lastAssistantMessage and save
+      context.set(
+        lastAssistantMessage(
+          'I tried something but it failed. Let me try again.',
+        ),
+      );
+
+      // This should NOT throw "Cannot read properties of undefined (reading 'encode')"
+      await context.save();
+    });
+  });
 });
