@@ -47,6 +47,15 @@
     "lodash-es": "^4.17.21"
   },
   "devDependencies": {
-    "@types/debug": "^4.1.12"
+    "@types/debug": "^4.1.12",
+    "@types/pg": "^8.16.0"
+  },
+  "peerDependencies": {
+    "pg": "^8.17.2"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
   }
 }

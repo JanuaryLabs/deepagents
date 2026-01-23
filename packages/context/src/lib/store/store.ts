@@ -233,8 +233,9 @@ export abstract class ContextStore {
 
   /**
    * Create a new chat.
+   * @returns the stored chat data with timestamps.
    */
-  abstract createChat(chat: ChatData): Promise<void>;
+  abstract createChat(chat: ChatData): Promise<StoredChatData>;
 
   /**
    * Create a chat if it doesn't exist, or return existing one.

@@ -1,0 +1,668 @@
+import assert from 'node:assert';
+import { after, before, describe, it } from 'node:test';
+
+import {
+  ContextEngine,
+  PostgresContextStore,
+  XmlRenderer,
+  assistantText,
+  user,
+} from '@deepagents/context';
+
+import {
+  type PostgresContainer,
+  createPostgresContainer,
+  isDockerAvailable,
+} from '../helpers/postgres-container.ts';
+
+const renderer = new XmlRenderer();
+
+describe('User Chat Management', async () => {
+  const dockerAvailable = await isDockerAvailable();
+
+  if (!dockerAvailable) {
+    console.log('Skipping User Chat Management tests: Docker not available');
+    return;
+  }
+
+  let container: PostgresContainer;
+  let store: PostgresContextStore;
+
+  before(async () => {
+    container = await createPostgresContainer();
+    store = new PostgresContextStore({ pool: container.connectionString });
+  });
+
+  after(async () => {
+    await store.close();
+    await container.cleanup();
+  });
+
+  describe('Chat Creation with userId', () => {
+    it('should create chat associated with specific user via ContextEngine', async () => {
+      const engine = new ContextEngine({
+        store,
+        chatId: 'user-chat-1',
+        userId: 'alice',
+      });
+
+      await engine.resolve({ renderer });
+
+      const chat = await store.getChat('user-chat-1');
+      assert.ok(chat);
+      assert.strictEqual(chat.userId, 'alice');
+    });
+
+    it('should expose userId via chat metadata getter', async () => {
+      const engine = new ContextEngine({
+        store,
+        chatId: 'user-chat-2',
+        userId: 'bob',
+      });
+
+      await engine.resolve({ renderer });
+
+      const chatMeta = engine.chat;
+      assert.ok(chatMeta);
+      assert.strictEqual(chatMeta.userId, 'bob');
+      assert.strictEqual(chatMeta.id, 'user-chat-2');
+    });
+  });
+
+  describe('Listing Chats by User', () => {
+    it('should list only chats belonging to specific user', async () => {
+      const aliceChat1 = new ContextEngine({
+        store,
+        chatId: 'alice-list-1',
+        userId: 'alice-list',
+      });
+      await aliceChat1.resolve({ renderer });
+
+      const aliceChat2 = new ContextEngine({
+        store,
+        chatId: 'alice-list-2',
+        userId: 'alice-list',
+      });
+      await aliceChat2.resolve({ renderer });
+
+      const bobChat = new ContextEngine({
+        store,
+        chatId: 'bob-list-1',
+        userId: 'bob-list',
+      });
+      await bobChat.resolve({ renderer });
+
+      const aliceChats = await store.listChats({ userId: 'alice-list' });
+      assert.strictEqual(aliceChats.length, 2);
+      assert.ok(aliceChats.every((c) => c.userId === 'alice-list'));
+
+      const bobChats = await store.listChats({ userId: 'bob-list' });
+      assert.strictEqual(bobChats.length, 1);
+      assert.strictEqual(bobChats[0].userId, 'bob-list');
+    });
+
+    it('should return empty array for user with no chats', async () => {
+      const noChats = await store.listChats({ userId: 'nonexistent-user-xyz' });
+      assert.strictEqual(noChats.length, 0);
+    });
+  });
+
+  describe('Multi-User Conversations', () => {
+    it('should isolate conversation history per user', async () => {
+      const aliceEngine = new ContextEngine({
+        store,
+        chatId: 'alice-iso-private',
+        userId: 'alice-iso',
+      });
+
+      aliceEngine.set(user('Hello, this is Alice'));
+      aliceEngine.set(assistantText('Hi Alice!'));
+      await aliceEngine.save();
+
+      const bobEngine = new ContextEngine({
+        store,
+        chatId: 'bob-iso-private',
+        userId: 'bob-iso',
+      });
+      bobEngine.set(user('Hey, Bob here'));
+      bobEngine.set(assistantText('Hello Bob!'));
+      await bobEngine.save();
+
+      const aliceChats = await store.listChats({ userId: 'alice-iso' });
+      assert.strictEqual(aliceChats.length, 1);
+      assert.strictEqual(aliceChats[0].messageCount, 2);
+
+      const bobChats = await store.listChats({ userId: 'bob-iso' });
+      assert.strictEqual(bobChats.length, 1);
+      assert.strictEqual(bobChats[0].messageCount, 2);
+    });
+
+    it('should include userId in ChatInfo when listing', async () => {
+      await new ContextEngine({
+        store,
+        chatId: 'chatinfo-test',
+        userId: 'user-abc-info',
+      }).resolve({ renderer });
+
+      const chats = await store.listChats({ userId: 'user-abc-info' });
+      assert.strictEqual(chats[0].userId, 'user-abc-info');
+    });
+  });
+
+  describe('Security & Data Integrity', () => {
+    it('should not return cross-user chats when filtering by userId', async () => {
+      await store.upsertChat({ id: 'sec-alice-1', userId: 'sec-alice' });
+      await store.upsertChat({ id: 'sec-alice-2', userId: 'sec-alice' });
+      await store.upsertChat({ id: 'sec-bob-1', userId: 'sec-bob' });
+      await store.upsertChat({ id: 'sec-charlie-1', userId: 'sec-charlie' });
+
+      const aliceChats = await store.listChats({ userId: 'sec-alice' });
+
+      assert.strictEqual(aliceChats.length, 2);
+      for (const chat of aliceChats) {
+        assert.strictEqual(chat.userId, 'sec-alice');
+        assert.ok(
+          !['sec-bob-1', 'sec-charlie-1'].includes(chat.id),
+          `Should not include other users' chats, got: ${chat.id}`,
+        );
+      }
+    });
+
+    it('should preserve userId when getChat retrieves stored chat', async () => {
+      await store.upsertChat({
+        id: 'preserve-test-chat',
+        userId: 'specific-user-id-12345',
+        title: 'Test',
+      });
+
+      const retrieved = await store.getChat('preserve-test-chat');
+      assert.ok(retrieved);
+      assert.strictEqual(retrieved.userId, 'specific-user-id-12345');
+    });
+
+    it('should handle userId with special characters', async () => {
+      const specialUserIds = [
+        'user@example.com',
+        'user-with-dashes',
+        'user_with_underscores',
+        'user.with.dots',
+        'uuid-550e8400-e29b-41d4-a716-446655440000',
+      ];
+
+      for (const userId of specialUserIds) {
+        await store.upsertChat({ id: `special-chat-${userId}`, userId });
+        const chats = await store.listChats({ userId });
+        assert.strictEqual(chats.length, 1, `Failed for userId: ${userId}`);
+        assert.strictEqual(chats[0].userId, userId);
+      }
+    });
+
+    it('should handle userId with unicode characters', async () => {
+      const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم'];
+
+      for (const userId of unicodeUserIds) {
+        await store.upsertChat({ id: `unicode-chat-${userId}`, userId });
+        const chats = await store.listChats({ userId });
+        assert.strictEqual(
+          chats.length,
+          1,
+          `Failed for unicode userId: ${userId}`,
+        );
+        assert.strictEqual(chats[0].userId, userId);
+      }
+    });
+
+    it('should treat userId filtering as case-sensitive', async () => {
+      await store.upsertChat({ id: 'case-chat-lower', userId: 'case-alice' });
+      await store.upsertChat({ id: 'case-chat-upper', userId: 'case-Alice' });
+      await store.upsertChat({ id: 'case-chat-mixed', userId: 'case-ALICE' });
+
+      const lowerChats = await store.listChats({ userId: 'case-alice' });
+      const upperChats = await store.listChats({ userId: 'case-Alice' });
+      const allCapsChats = await store.listChats({ userId: 'case-ALICE' });
+
+      assert.strictEqual(lowerChats.length, 1);
+      assert.strictEqual(upperChats.length, 1);
+      assert.strictEqual(allCapsChats.length, 1);
+      assert.strictEqual(lowerChats[0].id, 'case-chat-lower');
+      assert.strictEqual(upperChats[0].id, 'case-chat-upper');
+      assert.strictEqual(allCapsChats[0].id, 'case-chat-mixed');
+    });
+  });
+
+  describe('userId with Branching & Checkpoints', () => {
+    it('should preserve userId through branching operations', async () => {
+      const engine = new ContextEngine({
+        store,
+        chatId: 'branch-user-chat',
+        userId: 'branch-user',
+      });
+
+      engine.set(user('First message'));
+      await engine.save();
+
+      engine.set(assistantText('Response'));
+      await engine.save();
+
+      await engine.checkpoint('before-branch');
+
+      engine.set(user('More messages'));
+      await engine.save();
+
+      await engine.restore('before-branch');
+
+      const chat = await store.getChat('branch-user-chat');
+      assert.ok(chat);
+      assert.strictEqual(chat.userId, 'branch-user');
+
+      assert.strictEqual(engine.chat?.userId, 'branch-user');
+    });
+
+    it('should preserve userId through checkpoint restore', async () => {
+      const engine = new ContextEngine({
+        store,
+        chatId: 'checkpoint-user-chat',
+        userId: 'checkpoint-user',
+      });
+
+      engine.set(user('Message 1'));
+      await engine.save();
+      await engine.checkpoint('cp1');
+
+      engine.set(user('Message 2'));
+      await engine.save();
+
+      await engine.restore('cp1');
+
+      const chat = await store.getChat('checkpoint-user-chat');
+      assert.ok(chat);
+      assert.strictEqual(chat.userId, 'checkpoint-user');
+    });
+  });
+
+  describe('userId with Search', () => {
+    it('should return correct messageCount per user chat', async () => {
+      const aliceEngine = new ContextEngine({
+        store,
+        chatId: 'alice-count-chat',
+        userId: 'alice-count',
+      });
+      aliceEngine.set(user('Msg 1'));
+      aliceEngine.set(assistantText('Response 1'));
+      aliceEngine.set(user('Msg 2'));
+      await aliceEngine.save();
+
+      const bobEngine = new ContextEngine({
+        store,
+        chatId: 'bob-count-chat',
+        userId: 'bob-count',
+      });
+      bobEngine.set(user('Only message'));
+      await bobEngine.save();
+
+      const aliceChats = await store.listChats({ userId: 'alice-count' });
+      const bobChats = await store.listChats({ userId: 'bob-count' });
+
+      assert.strictEqual(aliceChats[0].messageCount, 3);
+      assert.strictEqual(bobChats[0].messageCount, 1);
+    });
+
+    it('should scope searchMessages to correct chat', async () => {
+      const aliceEngine = new ContextEngine({
+        store,
+        chatId: 'alice-search-chat',
+        userId: 'alice-search',
+      });
+      aliceEngine.set(user('I love pizza and pasta'));
+      await aliceEngine.save();
+
+      const bobEngine = new ContextEngine({
+        store,
+        chatId: 'bob-search-chat',
+        userId: 'bob-search',
+      });
+      bobEngine.set(user('I prefer sushi and ramen'));
+      await bobEngine.save();
+
+      const aliceResults = await store.searchMessages(
+        'alice-search-chat',
+        'pizza',
+      );
+      assert.strictEqual(aliceResults.length, 1);
+
+      const wrongResults = await store.searchMessages(
+        'alice-search-chat',
+        'sushi',
+      );
+      assert.strictEqual(wrongResults.length, 0);
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle very long userId strings', async () => {
+      const longUserId = 'u'.repeat(200);
+
+      await store.upsertChat({ id: 'long-user-chat', userId: longUserId });
+
+      const chats = await store.listChats({ userId: longUserId });
+      assert.strictEqual(chats.length, 1);
+      assert.strictEqual(chats[0].userId, longUserId);
+    });
+
+    it('should handle pagination correctly with userId filter', async () => {
+      for (let i = 0; i < 10; i++) {
+        await store.upsertChat({ id: `page-alice-${i}`, userId: 'page-alice' });
+      }
+      for (let i = 0; i < 5; i++) {
+        await store.upsertChat({ id: `page-bob-${i}`, userId: 'page-bob' });
+      }
+
+      const page1 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 0,
+      });
+      const page2 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 3,
+      });
+      const page3 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 6,
+      });
+      const page4 = await store.listChats({
+        userId: 'page-alice',
+        limit: 3,
+        offset: 9,
+      });
+
+      assert.strictEqual(page1.length, 3);
+      assert.strictEqual(page2.length, 3);
+      assert.strictEqual(page3.length, 3);
+      assert.strictEqual(page4.length, 1);
+
+      const allPages = [...page1, ...page2, ...page3, ...page4];
+      assert.strictEqual(allPages.length, 10);
+      assert.ok(allPages.every((c) => c.userId === 'page-alice'));
+    });
+
+    it('should return empty when offset exceeds total chats', async () => {
+      await store.upsertChat({ id: 'only-offset-chat', userId: 'offset-user' });
+
+      const result = await store.listChats({
+        userId: 'offset-user',
+        limit: 10,
+        offset: 100,
+      });
+      assert.strictEqual(result.length, 0);
+    });
+  });
+
+  describe('userId Immutability', () => {
+    it('should not change userId when upserting existing chat', async () => {
+      await store.upsertChat({
+        id: 'immutable-pg-chat',
+        userId: 'original-pg-owner',
+        title: 'Original',
+      });
+
+      await store.upsertChat({
+        id: 'immutable-pg-chat',
+        userId: 'attacker-trying-to-hijack',
+        title: 'Hijacked?',
+      });
+
+      const chat = await store.getChat('immutable-pg-chat');
+      assert.ok(chat);
+      assert.strictEqual(chat.userId, 'original-pg-owner');
+      assert.strictEqual(chat.title, 'Original');
+    });
+
+    it('should preserve userId when ContextEngine reconnects', async () => {
+      const engine1 = new ContextEngine({
+        store,
+        chatId: 'reconnect-pg-chat',
+        userId: 'original-pg-user',
+      });
+      engine1.set(user('First message'));
+      await engine1.save();
+
+      const engine2 = new ContextEngine({
+        store,
+        chatId: 'reconnect-pg-chat',
+        userId: 'different-pg-user',
+      });
+      await engine2.resolve({ renderer });
+
+      const storedChat = await store.getChat('reconnect-pg-chat');
+      assert.ok(storedChat);
+      assert.strictEqual(storedChat.userId, 'original-pg-user');
+    });
+  });
+
+  describe('Concurrent Operations', () => {
+    it('should handle concurrent chat creation for same user', async () => {
+      const createPromises = Array.from({ length: 10 }, (_, i) =>
+        store.upsertChat({
+          id: `concurrent-same-${i}`,
+          userId: 'concurrent-same-user',
+          title: `Chat ${i}`,
+        }),
+      );
+
+      const results = await Promise.all(createPromises);
+
+      assert.strictEqual(results.length, 10);
+      for (const result of results) {
+        assert.strictEqual(result.userId, 'concurrent-same-user');
+      }
+
+      const chats = await store.listChats({ userId: 'concurrent-same-user' });
+      assert.strictEqual(chats.length, 10);
+    });
+
+    it('should handle concurrent chat creation for different users', async () => {
+      const users = [
+        'conc-user-a',
+        'conc-user-b',
+        'conc-user-c',
+        'conc-user-d',
+        'conc-user-e',
+      ];
+      const createPromises = users.flatMap((userId, userIndex) =>
+        Array.from({ length: 5 }, (_, i) =>
+          store.upsertChat({
+            id: `multi-conc-${userId}-${i}`,
+            userId,
+            title: `Chat ${userIndex}-${i}`,
+          }),
+        ),
+      );
+
+      await Promise.all(createPromises);
+
+      for (const userId of users) {
+        const userChats = await store.listChats({ userId });
+        assert.strictEqual(
+          userChats.length,
+          5,
+          `User ${userId} should have 5 chats`,
+        );
+        assert.ok(userChats.every((c) => c.userId === userId));
+      }
+    });
+
+    it('should handle concurrent reads and writes', async () => {
+      await store.upsertChat({ id: 'rw-pg-chat', userId: 'rw-pg-user' });
+
+      const operations = [
+        store.getChat('rw-pg-chat'),
+        store.listChats({ userId: 'rw-pg-user' }),
+        store.upsertChat({ id: 'rw-pg-chat-2', userId: 'rw-pg-user' }),
+        store.getChat('rw-pg-chat'),
+        store.listChats({ userId: 'rw-pg-user' }),
+        store.upsertChat({ id: 'rw-pg-chat-3', userId: 'rw-pg-user' }),
+      ];
+
+      const results = await Promise.all(operations);
+
+      assert.ok(results[0]);
+      assert.ok(Array.isArray(results[1]));
+      assert.ok(results[2]);
+
+      const finalChats = await store.listChats({ userId: 'rw-pg-user' });
+      assert.strictEqual(finalChats.length, 3);
+    });
+  });
+});
+
+describe('Message Upsert', async () => {
+  const dockerAvailable = await isDockerAvailable();
+
+  if (!dockerAvailable) {
+    return;
+  }
+
+  let container: PostgresContainer;
+  let store: PostgresContextStore;
+
+  before(async () => {
+    container = await createPostgresContainer();
+    store = new PostgresContextStore({ pool: container.connectionString });
+  });
+
+  after(async () => {
+    await store.close();
+    await container.cleanup();
+  });
+
+  it('should update existing message with same ID', async () => {
+    await store.upsertChat({ id: 'upsert-chat-1', userId: 'user-1' });
+
+    await store.addMessage({
+      id: 'upsert-msg-1',
+      chatId: 'upsert-chat-1',
+      parentId: null,
+      name: 'user',
+      type: 'message',
+      data: { text: 'Original content' },
+      createdAt: 1000,
+    });
+
+    await store.addMessage({
+      id: 'upsert-msg-2',
+      chatId: 'upsert-chat-1',
+      parentId: 'upsert-msg-1',
+      name: 'assistant',
+      type: 'message',
+      data: { text: 'Response' },
+      createdAt: 1500,
+    });
+
+    await store.addMessage({
+      id: 'upsert-msg-1',
+      chatId: 'upsert-chat-1',
+      parentId: null,
+      name: 'assistant',
+      type: 'message',
+      data: { text: 'Updated content' },
+      createdAt: 2000,
+    });
+
+    const msg = await store.getMessage('upsert-msg-1');
+    assert.ok(msg);
+
+    assert.deepStrictEqual(msg.data, { text: 'Updated content' });
+    assert.strictEqual(msg.name, 'assistant');
+    assert.strictEqual(msg.parentId, null);
+    assert.strictEqual(msg.createdAt, 1000);
+  });
+
+  it('should update FTS/tsvector index on upsert', async () => {
+    await store.upsertChat({ id: 'upsert-fts-chat', userId: 'user-1' });
+
+    await store.addMessage({
+      id: 'upsert-fts-msg',
+      chatId: 'upsert-fts-chat',
+      parentId: null,
+      name: 'user',
+      type: 'message',
+      data: 'original searchable content',
+      createdAt: 1000,
+    });
+
+    let results = await store.searchMessages('upsert-fts-chat', 'original');
+    assert.strictEqual(results.length, 1);
+
+    await store.addMessage({
+      id: 'upsert-fts-msg',
+      chatId: 'upsert-fts-chat',
+      parentId: null,
+      name: 'user',
+      type: 'message',
+      data: 'updated searchable content',
+      createdAt: 1000,
+    });
+
+    results = await store.searchMessages('upsert-fts-chat', 'original');
+    assert.strictEqual(results.length, 0);
+
+    results = await store.searchMessages('upsert-fts-chat', 'updated');
+    assert.strictEqual(results.length, 1);
+  });
+
+  it('should preserve original parentId on upsert', async () => {
+    await store.upsertChat({ id: 'upsert-parent-chat', userId: 'user-1' });
+
+    await store.addMessage({
+      id: 'upsert-parent-msg',
+      chatId: 'upsert-parent-chat',
+      parentId: null,
+      name: 'user',
+      data: 'Original',
+      createdAt: 1000,
+    });
+
+    await store.addMessage({
+      id: 'upsert-parent-msg',
+      chatId: 'upsert-parent-chat',
+      parentId: 'some-other-parent',
+      name: 'user',
+      data: 'Updated',
+      createdAt: 1000,
+    });
+
+    const msg = await store.getMessage('upsert-parent-msg');
+    assert.ok(msg);
+    assert.strictEqual(msg.parentId, null);
+    assert.strictEqual(msg.data, 'Updated');
+  });
+
+  it('should preserve original createdAt on upsert', async () => {
+    await store.upsertChat({ id: 'upsert-time-chat', userId: 'user-1' });
+
+    await store.addMessage({
+      id: 'upsert-time-msg',
+      chatId: 'upsert-time-chat',
+      parentId: null,
+      name: 'user',
+      data: 'Original',
+      createdAt: 1000,
+    });
+
+    await store.addMessage({
+      id: 'upsert-time-msg',
+      chatId: 'upsert-time-chat',
+      parentId: null,
+      name: 'user',
+      data: 'Updated',
+      createdAt: 9999,
+    });
+
+    const msg = await store.getMessage('upsert-time-msg');
+    assert.ok(msg);
+    assert.strictEqual(msg.createdAt, 1000);
+  });
+});

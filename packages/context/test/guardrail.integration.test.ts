@@ -21,7 +21,7 @@ describe('Guardrail System', () => {
       const result = runGuardrailChain(
         textDeltaPart,
         [errorRecoveryGuardrail],
-        { availableTools: ['bash', 'sql'] },
+        { availableTools: ['bash', 'sql'], availableSkills: [] },
       );
 
       assert.strictEqual(result.type, 'pass');
@@ -36,6 +36,7 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: ['bash', 'sql'],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'fail');
@@ -51,6 +52,7 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: ['bash'],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'fail');
@@ -66,6 +68,7 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'fail');
@@ -80,10 +83,28 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'fail');
       assert.ok(result.feedback.includes('invalid'));
+    });
+
+    it('should handle tool schema validation errors', () => {
+      const errorPart = {
+        type: 'error' as const,
+        errorText:
+          'Tool call validation failed: tool call validation failed: parameters for tool render_ask_user_question did not match schema: errors: [`/questions/0/type`: value must be "free_form", `/questions/0`: additionalProperties \'options\' not allowed, `/questions/0/options`: maximum 5 items required, but found 6 items]',
+      };
+
+      const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
+        availableTools: ['render_ask_user_question'],
+        availableSkills: [],
+      });
+
+      assert.strictEqual(result.type, 'fail');
+      assert.ok(result.feedback.includes('render_ask_user_question'));
+      assert.ok(result.feedback.includes('invalid parameters'));
     });
 
     it('should handle unknown errors with fallback', () => {
@@ -94,6 +115,7 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'fail');
@@ -112,6 +134,7 @@ describe('Guardrail System', () => {
       const textPart = { type: 'text-delta' as const, id: 'p1', delta: 'test' };
       const result = runGuardrailChain(textPart, [customGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'pass');
@@ -145,9 +168,11 @@ describe('Guardrail System', () => {
 
       const goodResult = runGuardrailChain(goodPart, [customGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
       const badResult = runGuardrailChain(badPart, [customGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
 
       assert.strictEqual(goodResult.type, 'pass');
@@ -177,7 +202,10 @@ describe('Guardrail System', () => {
       };
 
       const part = { type: 'text-delta' as const, id: 'p1', delta: 'test' };
-      runGuardrailChain(part, [guardrail1, guardrail2], { availableTools: [] });
+      runGuardrailChain(part, [guardrail1, guardrail2], {
+        availableTools: [],
+        availableSkills: [],
+      });
 
       assert.deepStrictEqual(callOrder, ['g1', 'g2']);
     });
@@ -207,7 +235,7 @@ describe('Guardrail System', () => {
       const result = runGuardrailChain(
         part,
         [failingGuardrail, neverCalledGuardrail],
-        { availableTools: [] },
+        { availableTools: [], availableSkills: [] },
       );
 
       assert.strictEqual(result.type, 'fail');
@@ -224,6 +252,7 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: [],
+        availableSkills: [],
       });
 
       assert.strictEqual(result.type, 'fail');
@@ -238,6 +267,7 @@ describe('Guardrail System', () => {
 
       const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
         availableTools: ['bash'],
+        availableSkills: [],
       });
 
       // Should still trigger with unknown error fallback

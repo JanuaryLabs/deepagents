@@ -1,5 +1,6 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
+import STORE_DDL from './ddl.sqlite.sql';
 import type {
   BranchData,
   BranchInfo,
@@ -19,78 +20,6 @@ import type {
   StoredChatData,
 } from './store.ts';
 import { ContextStore } from './store.ts';
-
-const STORE_DDL = `
--- Chats table
--- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
-CREATE TABLE IF NOT EXISTS chats (
-  id TEXT PRIMARY KEY,
-  userId TEXT NOT NULL,
-  title TEXT,
-  metadata TEXT,
-  createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
-  updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
-);
-
-CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
-CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
-
--- Messages table (nodes in the DAG)
-CREATE TABLE IF NOT EXISTS messages (
-  id TEXT PRIMARY KEY,
-  chatId TEXT NOT NULL,
-  parentId TEXT,
-  name TEXT NOT NULL,
-  type TEXT,
-  data TEXT NOT NULL,
-  createdAt INTEGER NOT NULL,
-  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-  FOREIGN KEY (parentId) REFERENCES messages(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages(chatId);
-CREATE INDEX IF NOT EXISTS idx_messages_parentId ON messages(parentId);
-
--- Branches table (pointers to head messages)
-CREATE TABLE IF NOT EXISTS branches (
-  id TEXT PRIMARY KEY,
-  chatId TEXT NOT NULL,
-  name TEXT NOT NULL,
-  headMessageId TEXT,
-  isActive INTEGER NOT NULL DEFAULT 0,
-  createdAt INTEGER NOT NULL,
-  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-  FOREIGN KEY (headMessageId) REFERENCES messages(id),
-  UNIQUE(chatId, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_branches_chatId ON branches(chatId);
-
--- Checkpoints table (pointers to message nodes)
-CREATE TABLE IF NOT EXISTS checkpoints (
-  id TEXT PRIMARY KEY,
-  chatId TEXT NOT NULL,
-  name TEXT NOT NULL,
-  messageId TEXT NOT NULL,
-  createdAt INTEGER NOT NULL,
-  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-  FOREIGN KEY (messageId) REFERENCES messages(id),
-  UNIQUE(chatId, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
-
--- FTS5 virtual table for full-text search
--- messageId/chatId/name are UNINDEXED (stored but not searchable, used for filtering/joining)
--- Only 'content' is indexed for full-text search
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-  messageId UNINDEXED,
-  chatId UNINDEXED,
-  name UNINDEXED,
-  content,
-  tokenize='porter unicode61'
-);
-`;
 
 /**
  * SQLite-based context store using graph model.
@@ -128,20 +57,28 @@ export class SqliteContextStore extends ContextStore {
   // Chat Operations
   // ==========================================================================
 
-  async createChat(chat: ChatData): Promise<void> {
-    this.#useTransaction(() => {
+  async createChat(chat: ChatData): Promise<StoredChatData> {
+    return this.#useTransaction(() => {
       // Create chat (createdAt and updatedAt are auto-set by SQLite DEFAULT)
-      this.#db
+      const row = this.#db
         .prepare(
           `INSERT INTO chats (id, userId, title, metadata)
-           VALUES (?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?)
+           RETURNING *`,
         )
-        .run(
+        .get(
           chat.id,
           chat.userId,
           chat.title ?? null,
           chat.metadata ? JSON.stringify(chat.metadata) : null,
-        );
+        ) as {
+        id: string;
+        userId: string;
+        title: string | null;
+        metadata: string | null;
+        createdAt: number;
+        updatedAt: number;
+      };
 
       // Create "main" branch
       this.#db
@@ -150,6 +87,15 @@ export class SqliteContextStore extends ContextStore {
            VALUES (?, ?, 'main', NULL, 1, ?)`,
         )
         .run(crypto.randomUUID(), chat.id, Date.now());
+
+      return {
+        id: row.id,
+        userId: row.userId,
+        title: row.title ?? undefined,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
     });
   }
 
@@ -382,19 +328,16 @@ export class SqliteContextStore extends ContextStore {
   // ==========================================================================
 
   async addMessage(message: MessageData): Promise<void> {
-    // Upsert message; CASE handles self-reference (parentId === id) by preserving existing parentId
+    // Prevent circular reference - a message cannot be its own parent
+    if (message.parentId === message.id) {
+      throw new Error(`Message ${message.id} cannot be its own parent`);
+    }
+
+    // Upsert message
     this.#db
       .prepare(
         `INSERT INTO messages (id, chatId, parentId, name, type, data, createdAt)
-         VALUES (
-           ?1,
-           ?2,
-           CASE WHEN ?3 = ?1 THEN (SELECT parentId FROM messages WHERE id = ?1) ELSE ?3 END,
-           ?4,
-           ?5,
-           ?6,
-           ?7
-         )
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            type = excluded.type,
@@ -462,6 +405,7 @@ export class SqliteContextStore extends ContextStore {
     // Walk up the parent chain using recursive CTE with depth tracking
     // The CTE walks from head (newest) to root (oldest), so we track depth
     // and order by depth DESC to get chronological order (root first)
+    // Depth limit of 10000 prevents infinite loops from circular references
     const rows = this.#db
       .prepare(
         `WITH RECURSIVE chain AS (
@@ -469,6 +413,7 @@ export class SqliteContextStore extends ContextStore {
           UNION ALL
           SELECT m.*, c.depth + 1 FROM messages m
           INNER JOIN chain c ON m.id = c.parentId
+          WHERE c.depth < 10000
         )
         SELECT * FROM chain
         ORDER BY depth DESC`,

@@ -375,22 +375,29 @@ description: ${name.charAt(0).toUpperCase() + name.slice(1)} skill
       }
     });
 
-    it('preserves original path in metadata', () => {
+    it('stores skill mounts in parent metadata', () => {
       const fragment = skills({
         paths: [{ host: fragmentDir, sandbox: '/skills/mounted' }],
       });
 
-      const data = fragment.data as ContextFragment[];
-      const skillFragments = data.filter((f) => f.name === 'skill');
+      // Parent fragment should have mounts array in metadata
+      assert.ok(fragment.metadata, 'fragment should have metadata');
+      const mounts = (
+        fragment.metadata as {
+          mounts: { name: string; host: string; sandbox: string }[];
+        }
+      ).mounts;
+      assert.ok(Array.isArray(mounts), 'metadata should have mounts array');
+      assert.ok(mounts.length > 0, 'mounts should not be empty');
 
-      // All skills should have originalPath in metadata
-      for (const skill of skillFragments) {
-        assert.ok(skill.metadata, 'skill should have metadata');
+      // All mounts should have name, host, and sandbox
+      for (const mount of mounts) {
+        assert.ok(mount.name, 'mount should have name');
+        assert.ok(mount.host, 'mount should have host');
+        assert.ok(mount.sandbox, 'mount should have sandbox');
         assert.ok(
-          (skill.metadata as { originalPath: string }).originalPath.startsWith(
-            fragmentDir,
-          ),
-          'metadata should contain original host path',
+          mount.host.startsWith(fragmentDir),
+          'host should contain original path',
         );
       }
     });
