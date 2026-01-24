@@ -62,34 +62,6 @@ The `resolve()` method automatically:
 | Cost Estimation | Token counting and pricing via models.dev for 1000+ models |
 | AI SDK Integration | `resolve()` returns `systemPrompt` + `messages` ready for `generateText()` |
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      ContextEngine                          │
-├─────────────────────────────────────────────────────────────┤
-│  set(fragments...)  →  Internal Fragment Store              │
-│                              │                              │
-│  resolve()  ─────────────────┼──────────────────────────▶  │
-│                              │                              │
-│              ┌───────────────┴───────────────┐              │
-│              │                               │              │
-│       Regular Fragments              Message Fragments      │
-│              │                               │              │
-│              ▼                               ▼              │
-│     ┌─────────────┐                 ┌──────────────┐       │
-│     │  Renderer   │                 │ decodeMsg()  │       │
-│     └─────────────┘                 └──────────────┘       │
-│              │                               │              │
-│              ▼                               ▼              │
-│        systemPrompt                     messages[]          │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                      { systemPrompt, messages }
-                      Ready for AI SDK
-```
-
 ## Renderers at a Glance
 
 Same context, four output formats:
@@ -150,6 +122,7 @@ const domainContext = new ContextEngine({ store })
 ## Next Steps
 
 - [Getting Started](/docs/context/getting-started) - Installation and first example
-- [Fragments](/docs/context/fragments) - Deep dive into fragment types and composition
+- [Architecture](/docs/context/architecture) - Deep-dive into package design
+- [Fragments](/docs/context/fragments) - Fragment types and composition
 - [Renderers Overview](/docs/context/renderers-overview) - Choosing the right output format
 - [Recipes](/docs/context/recipes) - Real-world integration patterns

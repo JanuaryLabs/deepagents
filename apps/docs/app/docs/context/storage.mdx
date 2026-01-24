@@ -1,145 +1,696 @@
 ---
 title: Storage
-description: Persist conversation history and context fragments with SQLite or custom stores
+description: Persist conversations with SQLite, PostgreSQL, or SQL Server
 ---
 
-The storage system enables persistence of context fragments across sessions. The package provides SQLite-based storage out of the box, with an abstract base class for custom implementations.
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+The storage system persists conversation history using a graph-based model. Messages are stored as nodes in a DAG (directed acyclic graph), with branches and checkpoints as pointers.
 
 ## Built-in Stores
 
-### InMemoryContextStore
+<Tabs groupId="context-store" items={['SQLite', 'PostgreSQL', 'SQL Server', 'In-Memory']}>
+<Tab value="SQLite">
 
-Uses SQLite's in-memory mode. Data is lost when the process exits. Ideal for testing and development:
+File-based persistence using Node.js 22+ native SQLite.
 
 ```typescript
-import { InMemoryContextStore, ContextEngine } from '@deepagents/context';
+import { ContextEngine, SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
+```
+
+**Requirements:**
+- Node.js 22+ (uses `node:sqlite` module)
+- No additional packages needed
+
+**Features:**
+- Auto-creates database and schema on first use
+- FTS5 full-text search
+- Single file, easy to backup
+
+</Tab>
+<Tab value="PostgreSQL">
+
+Production-ready persistence with PostgreSQL.
+
+```typescript
+import { ContextEngine, PostgresContextStore } from '@deepagents/context';
+
+// Connection string
+const store = new PostgresContextStore({
+  pool: 'postgresql://user:password@localhost:5432/mydb',
+});
+
+// Or PoolConfig object
+const store = new PostgresContextStore({
+  pool: {
+    host: 'localhost',
+    port: 5432,
+    user: 'postgres',
+    password: 'secret',
+    database: 'mydb',
+  },
+});
+
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
+
+// Close connection when done
+await store.close();
+```
+
+**Requirements:**
+- `npm install pg`
+- PostgreSQL 12+
+
+**Features:**
+- Connection pooling via `pg.Pool`
+- Full-text search with `tsvector`
+- JSONB metadata support
+- Production-grade performance
+
+</Tab>
+<Tab value="SQL Server">
+
+Enterprise persistence with Microsoft SQL Server.
+
+```typescript
+import { ContextEngine, SqlServerContextStore } from '@deepagents/context';
+
+// Connection string
+const store = new SqlServerContextStore({
+  pool: 'Server=localhost;Database=mydb;User Id=sa;Password=secret;TrustServerCertificate=true',
+});
+
+// Or config object
+const store = new SqlServerContextStore({
+  pool: {
+    server: 'localhost',
+    database: 'mydb',
+    user: 'sa',
+    password: 'secret',
+    options: {
+      trustServerCertificate: true,
+    },
+  },
+});
+
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
+
+// Close connection when done
+await store.close();
+```
+
+**Requirements:**
+- `npm install mssql`
+- SQL Server 2016+
+
+**Features:**
+- Connection pooling via `mssql.ConnectionPool`
+- Full-text search (when FTS is installed)
+- Falls back to LIKE search if FTS unavailable
+- Enterprise integration
+
+</Tab>
+<Tab value="In-Memory">
+
+Ephemeral storage for testing and development.
+
+```typescript
+import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
 
 const store = new InMemoryContextStore();
-const context = new ContextEngine({ store });
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
 ```
 
-### SqliteContextStore
+**Behavior:**
+- Uses SQLite's in-memory mode (`:memory:`)
+- Data lost when process exits
+- No file created
 
-Persists to a SQLite database file. Data survives process restarts:
+**Use cases:**
+- Unit tests
+- Development/prototyping
+- Stateless serverless functions
 
-```typescript
-import { SqliteContextStore, ContextEngine } from '@deepagents/context';
+</Tab>
+</Tabs>
 
-const store = new SqliteContextStore('./conversation.db');
-const context = new ContextEngine({ store });
+## Schema
+
+All stores use the same graph-based schema. Select your database to see the exact DDL:
+
+<Tabs groupId="schema-format" items={['SQL', 'Prisma']}>
+<Tab value="SQL">
+
+<Tabs groupId="schema-db" items={['SQLite', 'PostgreSQL', 'SQL Server']}>
+<Tab value="SQLite">
+
+```sql
+-- Context Store DDL for SQLite
+-- This schema implements a DAG-based message history with branching and checkpoints.
+
+-- Performance PRAGMAs (session-level, run on each connection)
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -64000;
+PRAGMA temp_store = MEMORY;
+PRAGMA mmap_size = 268435456;
+
+-- Integrity
+PRAGMA foreign_keys = ON;
+
+-- Chats table
+-- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  title TEXT,
+  metadata TEXT,
+  createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
+CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
+-- Composite index for listChats(): WHERE userId = ? ORDER BY updatedAt DESC
+CREATE INDEX IF NOT EXISTS idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
+
+-- Messages table (nodes in the DAG)
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  parentId TEXT,
+  name TEXT NOT NULL,
+  type TEXT,
+  data TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (parentId) REFERENCES messages(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages(chatId);
+CREATE INDEX IF NOT EXISTS idx_messages_parentId ON messages(parentId);
+-- Composite index for recursive CTE parent traversal in getMessageChain()
+CREATE INDEX IF NOT EXISTS idx_messages_chatId_parentId ON messages(chatId, parentId);
+
+-- Branches table (pointers to head messages)
+CREATE TABLE IF NOT EXISTS branches (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  headMessageId TEXT,
+  isActive INTEGER NOT NULL DEFAULT 0,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (headMessageId) REFERENCES messages(id),
+  UNIQUE(chatId, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_branches_chatId ON branches(chatId);
+-- Composite index for getActiveBranch(): WHERE chatId = ? AND isActive = 1
+CREATE INDEX IF NOT EXISTS idx_branches_chatId_isActive ON branches(chatId, isActive);
+
+-- Checkpoints table (pointers to message nodes)
+CREATE TABLE IF NOT EXISTS checkpoints (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  messageId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (messageId) REFERENCES messages(id),
+  UNIQUE(chatId, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
+
+-- FTS5 virtual table for full-text search
+-- messageId/chatId/name are UNINDEXED (stored but not searchable, used for filtering/joining)
+-- Only 'content' is indexed for full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  messageId UNINDEXED,
+  chatId UNINDEXED,
+  name UNINDEXED,
+  content,
+  tokenize='porter unicode61'
+);
 ```
 
-The store creates the database and schema automatically on first use.
+</Tab>
+<Tab value="PostgreSQL">
+
+```sql
+-- Context Store DDL for PostgreSQL
+-- This schema implements a DAG-based message history with branching and checkpoints.
+
+-- Chats table
+-- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  title TEXT,
+  metadata JSONB,
+  createdAt BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+  updatedAt BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
+CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
+CREATE INDEX IF NOT EXISTS idx_chats_metadata ON chats USING GIN (metadata);
+
+-- Messages table (nodes in the DAG)
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  parentId TEXT,
+  name TEXT NOT NULL,
+  type TEXT,
+  data JSONB NOT NULL,
+  createdAt BIGINT NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (parentId) REFERENCES messages(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages(chatId);
+CREATE INDEX IF NOT EXISTS idx_messages_parentId ON messages(parentId);
+
+-- Branches table (pointers to head messages)
+CREATE TABLE IF NOT EXISTS branches (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  headMessageId TEXT,
+  isActive BOOLEAN NOT NULL DEFAULT FALSE,
+  createdAt BIGINT NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (headMessageId) REFERENCES messages(id),
+  UNIQUE(chatId, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_branches_chatId ON branches(chatId);
+
+-- Checkpoints table (pointers to message nodes)
+CREATE TABLE IF NOT EXISTS checkpoints (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  messageId TEXT NOT NULL,
+  createdAt BIGINT NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (messageId) REFERENCES messages(id),
+  UNIQUE(chatId, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
+
+-- Full-text search using tsvector + GIN index
+CREATE TABLE IF NOT EXISTS messages_fts (
+  messageId TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  content_vector TSVECTOR
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_fts_vector ON messages_fts USING GIN(content_vector);
+CREATE INDEX IF NOT EXISTS idx_messages_fts_chatId ON messages_fts(chatId);
+
+-- Trigger to automatically update tsvector on insert/update
+CREATE OR REPLACE FUNCTION messages_fts_update_vector() RETURNS TRIGGER AS $$
+BEGIN
+  NEW.content_vector := to_tsvector('english', NEW.content);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS messages_fts_vector_update ON messages_fts;
+CREATE TRIGGER messages_fts_vector_update
+  BEFORE INSERT OR UPDATE ON messages_fts
+  FOR EACH ROW
+  EXECUTE FUNCTION messages_fts_update_vector();
+```
+
+</Tab>
+<Tab value="SQL Server">
+
+```sql
+-- Context Store DDL for SQL Server
+-- This schema implements a DAG-based message history with branching and checkpoints.
+
+-- Chats table
+-- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
+IF OBJECT_ID('chats', 'U') IS NULL
+BEGIN
+  CREATE TABLE chats (
+    id NVARCHAR(255) PRIMARY KEY,
+    userId NVARCHAR(255) NOT NULL,
+    title NVARCHAR(MAX),
+    metadata NVARCHAR(MAX),
+    createdAt BIGINT NOT NULL DEFAULT DATEDIFF_BIG(ms, '1970-01-01', GETUTCDATE()),
+    updatedAt BIGINT NOT NULL DEFAULT DATEDIFF_BIG(ms, '1970-01-01', GETUTCDATE())
+  );
+END;
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_chats_updatedAt' AND object_id = OBJECT_ID('chats'))
+  CREATE INDEX idx_chats_updatedAt ON chats(updatedAt);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_chats_userId' AND object_id = OBJECT_ID('chats'))
+  CREATE INDEX idx_chats_userId ON chats(userId);
+
+-- Messages table (nodes in the DAG)
+IF OBJECT_ID('messages', 'U') IS NULL
+BEGIN
+  CREATE TABLE messages (
+    id NVARCHAR(255) PRIMARY KEY,
+    chatId NVARCHAR(255) NOT NULL,
+    parentId NVARCHAR(255),
+    name NVARCHAR(255) NOT NULL,
+    type NVARCHAR(255),
+    data NVARCHAR(MAX) NOT NULL,
+    createdAt BIGINT NOT NULL,
+    FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (parentId) REFERENCES messages(id)
+  );
+END;
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_chatId' AND object_id = OBJECT_ID('messages'))
+  CREATE INDEX idx_messages_chatId ON messages(chatId);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_parentId' AND object_id = OBJECT_ID('messages'))
+  CREATE INDEX idx_messages_parentId ON messages(parentId);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_chatId_parentId' AND object_id = OBJECT_ID('messages'))
+  CREATE INDEX idx_messages_chatId_parentId ON messages(chatId, parentId);
+
+-- Branches table (pointers to head messages)
+IF OBJECT_ID('branches', 'U') IS NULL
+BEGIN
+  CREATE TABLE branches (
+    id NVARCHAR(255) PRIMARY KEY,
+    chatId NVARCHAR(255) NOT NULL,
+    name NVARCHAR(255) NOT NULL,
+    headMessageId NVARCHAR(255),
+    isActive BIT NOT NULL DEFAULT 0,
+    createdAt BIGINT NOT NULL,
+    FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (headMessageId) REFERENCES messages(id),
+    CONSTRAINT UQ_branches_chatId_name UNIQUE(chatId, name)
+  );
+END;
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_branches_chatId' AND object_id = OBJECT_ID('branches'))
+  CREATE INDEX idx_branches_chatId ON branches(chatId);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_branches_chatId_isActive' AND object_id = OBJECT_ID('branches'))
+  CREATE INDEX idx_branches_chatId_isActive ON branches(chatId, isActive);
+
+-- Checkpoints table (pointers to message nodes)
+IF OBJECT_ID('checkpoints', 'U') IS NULL
+BEGIN
+  CREATE TABLE checkpoints (
+    id NVARCHAR(255) PRIMARY KEY,
+    chatId NVARCHAR(255) NOT NULL,
+    name NVARCHAR(255) NOT NULL,
+    messageId NVARCHAR(255) NOT NULL,
+    createdAt BIGINT NOT NULL,
+    FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (messageId) REFERENCES messages(id),
+    CONSTRAINT UQ_checkpoints_chatId_name UNIQUE(chatId, name)
+  );
+END;
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_checkpoints_chatId' AND object_id = OBJECT_ID('checkpoints'))
+  CREATE INDEX idx_checkpoints_chatId ON checkpoints(chatId);
+
+-- Full-text search table
+IF OBJECT_ID('messages_fts', 'U') IS NULL
+BEGIN
+  CREATE TABLE messages_fts (
+    messageId NVARCHAR(255) NOT NULL,
+    chatId NVARCHAR(255) NOT NULL,
+    name NVARCHAR(255) NOT NULL,
+    content NVARCHAR(MAX) NOT NULL,
+    CONSTRAINT PK_messages_fts PRIMARY KEY (messageId),
+    FOREIGN KEY (messageId) REFERENCES messages(id) ON DELETE CASCADE
+  );
+END;
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_fts_chatId' AND object_id = OBJECT_ID('messages_fts'))
+  CREATE INDEX idx_messages_fts_chatId ON messages_fts(chatId);
+
+-- Full-text catalog and index (only if FTS is installed)
+-- FTS is optional - search will gracefully degrade without it
+IF SERVERPROPERTY('IsFullTextInstalled') = 1
+BEGIN
+  -- Create catalog if not exists
+  IF NOT EXISTS (SELECT * FROM sys.fulltext_catalogs WHERE name = 'context_store_catalog')
+    CREATE FULLTEXT CATALOG context_store_catalog AS DEFAULT;
+
+  -- Create full-text index on messages_fts.content
+  -- Note: This requires the table to have a unique index, which PK provides
+  IF NOT EXISTS (SELECT * FROM sys.fulltext_indexes WHERE object_id = OBJECT_ID('messages_fts'))
+  BEGIN
+    CREATE FULLTEXT INDEX ON messages_fts(content)
+      KEY INDEX PK_messages_fts
+      ON context_store_catalog
+      WITH STOPLIST = SYSTEM;
+  END;
+END;
+```
+
+</Tab>
+</Tabs>
+
+</Tab>
+<Tab value="Prisma">
+
+Prisma schema is portable across providers. Change `datasource.provider` to match your database:
+
+```prisma
+datasource db {
+  provider = "postgresql" // or "sqlite" or "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Chat {
+  id        String   @id
+  userId    String
+  title     String?
+  metadata  Json?
+  createdAt BigInt
+  updatedAt BigInt
+
+  messages    Message[]
+  branches    Branch[]
+  checkpoints Checkpoint[]
+}
+
+model Message {
+  id        String  @id
+  chatId    String
+  parentId  String?
+  name      String
+  type      String?
+  data      Json
+  createdAt BigInt
+
+  chat     Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  parent   Message?  @relation("MessageParent", fields: [parentId], references: [id])
+  children Message[] @relation("MessageParent")
+  fts      MessageFts?
+}
+
+model Branch {
+  id            String  @id
+  chatId        String
+  name          String
+  headMessageId String?
+  isActive      Boolean @default(false)
+  createdAt     BigInt
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, name])
+}
+
+model Checkpoint {
+  id        String @id
+  chatId    String
+  name      String
+  messageId String
+  createdAt BigInt
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, name])
+}
+
+model MessageFts {
+  messageId String @id
+  chatId    String
+  name      String
+  content   String
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+```
+
+**Type mappings by provider:**
+
+| Prisma Type | SQLite | PostgreSQL | SQL Server |
+|-------------|--------|------------|------------|
+| `String` | TEXT | TEXT | NVARCHAR(255) |
+| `Boolean` | INTEGER (0/1) | BOOLEAN | BIT |
+| `Json` | TEXT | JSONB | NVARCHAR(MAX) |
+| `BigInt` | INTEGER | BIGINT | BIGINT |
+
+</Tab>
+</Tabs>
 
 ## How Storage Works
 
-### Schema
-
-The SQLite store uses a simple key-value schema:
-
-```sql
-CREATE TABLE IF NOT EXISTS "context_store" (
-  "key" VARCHAR PRIMARY KEY,
-  "value" TEXT NOT NULL,
-  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS "context_store_updated_at_idx"
-  ON "context_store" ("updatedAt");
-```
-
-Values are stored as JSON strings.
-
 ### The Persistence Flow
 
-1. **set()**: Add fragments to context (not persisted yet)
-2. **save()**: Persist fragments with `persist: true`
-3. **resolve()**: Load persisted fragments (first call only)
-
 ```typescript
-// Session 1
-const store = new SqliteContextStore('./chat.db');
-const context = new ContextEngine({ store });
+// 1. Create context
+const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
 
-context.set(user('Hello!'));              // Added to context
-context.set(assistant('Hi there!'));      // Added to context
-await context.save();                      // Now persisted to SQLite
+// 2. Add messages (queued in memory)
+context.set(user('Hello!'));
+context.set(assistant('Hi there!'));
 
-// Session 2 (new process)
-const store2 = new SqliteContextStore('./chat.db');
-const context2 = new ContextEngine({ store: store2 });
+// 3. Persist to store
+await context.save();
+// Messages now in database, branch head updated
 
-const { messages } = await context2.resolve();  // Loads from SQLite
-// messages = [
-//   { role: 'user', content: 'Hello!' },
-//   { role: 'assistant', content: 'Hi there!' },
-// ]
+// 4. New session loads from store
+const context2 = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
+const { messages } = await context2.resolve({ renderer: new XmlRenderer() });
+// messages loaded from database
 ```
 
 ### What Gets Persisted
 
-Only fragments with `persist: true` are saved:
+Only message fragments (with `type: 'message'`) are saved:
 
 ```typescript
-// Auto-persist (user/assistant helpers set persist: true)
-context.set(user('Hello'));        // Will be saved
-context.set(assistant('Hi!'));     // Will be saved
+// Auto-persisted (user/assistant set type: 'message')
+context.set(user('Hello'));        // ✅ Saved
+context.set(assistant('Hi!'));     // ✅ Saved
 
-// No auto-persist
-context.set(role('Be helpful'));   // Won't be saved
-context.set(hint('Be concise'));   // Won't be saved
+// Not persisted (context fragments stay in memory)
+context.set(role('Be helpful'));   // ❌ Memory only
+context.set(hint('Be concise'));   // ❌ Memory only
+```
 
-// Manual persist
-context.set({
-  name: 'metadata',
-  data: { topic: 'TypeScript' },
-  persist: true,                    // Will be saved
+## Store API
+
+All stores implement the `ContextStore` abstract class. These methods are used internally by `ContextEngine`, but you can call them directly for advanced use cases.
+
+### Chat Operations
+
+```typescript
+// Create or get chat
+const chat = await store.upsertChat({
+  id: 'chat-001',
+  userId: 'user-001',
 });
 
-await context.save();  // Saves only persist: true fragments
+// Update metadata
+await store.updateChat('chat-001', {
+  title: 'Python Help',
+  metadata: { tags: ['python', 'learning'] },
+});
+
+// List user's chats
+const chats = await store.listChats({
+  userId: 'user-001',
+  limit: 20,
+  offset: 0,
+});
+
+// Delete chat (cascades to messages, branches, checkpoints)
+await store.deleteChat('chat-001');
 ```
 
-## ContextStore Interface
-
-All stores extend the abstract `ContextStore` class:
+### Branch Operations
 
 ```typescript
-abstract class ContextStore {
-  abstract get<T>(key: string): Promise<T | undefined>;
-  abstract set<T>(key: string, value: T): Promise<void>;
-  abstract delete(key: string): Promise<void>;
-}
+// List branches
+const branches = await store.listBranches('chat-001');
+// [{ name: 'main', headMessageId: '...', isActive: true, messageCount: 5 }]
+
+// Get active branch
+const active = await store.getActiveBranch('chat-001');
 ```
 
-### get(key)
-
-Retrieve a value by key. Returns `undefined` if not found:
+### Search Operations
 
 ```typescript
-const fragments = await store.get<ContextFragment[]>('fragments');
+// Full-text search messages
+const results = await store.searchMessages('chat-001', 'python tutorial', {
+  limit: 10,
+  roles: ['user', 'assistant'],  // Filter by message type
+});
+
+// results: [{ message: {...}, rank: 0.8, snippet: '...python...' }]
 ```
 
-### set(key, value)
-
-Store a value. Overwrites if key exists:
+### Graph Operations
 
 ```typescript
-await store.set('fragments', [user('Hello'), assistant('Hi')]);
-```
-
-### delete(key)
-
-Remove a value by key:
-
-```typescript
-await store.delete('fragments');
+// Get full conversation graph
+const graph = await store.getGraph('chat-001');
+// {
+//   nodes: [{ id, parentId, role, content, createdAt }],
+//   branches: [{ name, headMessageId, isActive }],
+//   checkpoints: [{ name, messageId }],
+// }
 ```
 
 ## Storage Patterns
 
-### User-Scoped Storage
+### Multi-Tenant Setup
 
-Create separate databases per user:
+One database, multiple users:
+
+```typescript
+const store = new PostgresContextStore({
+  pool: process.env.DATABASE_URL,
+});
+
+// Each user has their own chats
+const context = new ContextEngine({
+  store,
+  chatId: `user-${userId}-chat-${chatId}`,
+  userId,
+});
+
+// List only this user's chats
+const chats = await store.listChats({ userId });
+```
+
+### Per-User SQLite Files
+
+Isolate data by user:
 
 ```typescript
 function getStoreForUser(userId: string) {
@@ -147,141 +698,52 @@ function getStoreForUser(userId: string) {
 }
 
 const store = getStoreForUser('user-123');
-const context = new ContextEngine({ store });
 ```
 
-### Session-Based Storage
+### Metadata Filtering
 
-Create databases per session:
-
-```typescript
-function getStoreForSession(sessionId: string) {
-  return new SqliteContextStore(`./data/sessions/${sessionId}.db`);
-}
-
-// New session
-const sessionId = crypto.randomUUID();
-const store = getStoreForSession(sessionId);
-```
-
-### Clearing History
-
-Delete the fragments key to clear conversation:
+Store and query custom metadata:
 
 ```typescript
-await store.delete('fragments');
-```
+// Set metadata on chat
+await context.updateChat({
+  metadata: {
+    archived: false,
+    tags: ['support', 'billing'],
+  },
+});
 
-Or delete the database file:
-
-```typescript
-import { unlink } from 'fs/promises';
-await unlink('./conversation.db');
+// Query by metadata
+const activeCahts = await store.listChats({
+  userId: 'user-001',
+  metadata: { key: 'archived', value: false },
+});
 ```
 
 ## Custom Store Implementation
 
-Implement `ContextStore` for other backends:
-
-### Redis Example
+Implement `ContextStore` for other databases. The abstract class defines all required methods:
 
 ```typescript
 import { ContextStore } from '@deepagents/context';
-import { createClient } from 'redis';
 
 class RedisContextStore extends ContextStore {
-  #client;
-
-  constructor(url: string) {
-    super();
-    this.#client = createClient({ url });
-  }
-
-  async connect() {
-    await this.#client.connect();
-  }
-
-  async get<T>(key: string): Promise<T | undefined> {
-    const value = await this.#client.get(key);
-    if (!value) return undefined;
-    return JSON.parse(value) as T;
-  }
-
-  async set<T>(key: string, value: T): Promise<void> {
-    await this.#client.set(key, JSON.stringify(value));
-  }
-
-  async delete(key: string): Promise<void> {
-    await this.#client.del(key);
-  }
-}
-
-// Usage
-const store = new RedisContextStore('redis://localhost:6379');
-await store.connect();
-const context = new ContextEngine({ store });
-```
-
-### PostgreSQL Example
-
-```typescript
-import { ContextStore } from '@deepagents/context';
-import { Pool } from 'pg';
-
-class PostgresContextStore extends ContextStore {
-  #pool: Pool;
-
-  constructor(connectionString: string) {
-    super();
-    this.#pool = new Pool({ connectionString });
-  }
-
-  async init() {
-    await this.#pool.query(`
-      CREATE TABLE IF NOT EXISTS context_store (
-        key VARCHAR PRIMARY KEY,
-        value JSONB NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-  }
-
-  async get<T>(key: string): Promise<T | undefined> {
-    const result = await this.#pool.query(
-      'SELECT value FROM context_store WHERE key = $1',
-      [key]
-    );
-    if (result.rows.length === 0) return undefined;
-    return result.rows[0].value as T;
-  }
-
-  async set<T>(key: string, value: T): Promise<void> {
-    await this.#pool.query(
-      `INSERT INTO context_store (key, value, updated_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-      [key, JSON.stringify(value)]
-    );
-  }
-
-  async delete(key: string): Promise<void> {
-    await this.#pool.query('DELETE FROM context_store WHERE key = $1', [key]);
-  }
+  // Implement all abstract methods:
+  // createChat, upsertChat, getChat, updateChat, listChats, deleteChat
+  // addMessage, getMessage, getMessageChain, hasChildren, getMessages
+  // createBranch, getBranch, getActiveBranch, setActiveBranch, updateBranchHead, listBranches
+  // createCheckpoint, getCheckpoint, listCheckpoints, deleteCheckpoint
+  // searchMessages, getGraph
 }
 ```
 
-## Node.js SQLite Requirement
-
-The built-in SQLite stores use Node.js 22+'s native `node:sqlite` module:
-
-```typescript
-import { DatabaseSync } from 'node:sqlite';
-```
-
-If you're on an older Node.js version, implement a custom store using `better-sqlite3` or another SQLite library.
+See the built-in implementations for reference:
+- `packages/context/src/lib/store/sqlite.store.ts`
+- `packages/context/src/lib/store/postgres.store.ts`
+- `packages/context/src/lib/store/sqlserver.store.ts`
 
 ## Next Steps
 
-- [Getting Started](/docs/context/getting-started) - Basic setup with stores
 - [Context Engine](/docs/context/context-engine) - Using save() and resolve()
-- [Recipes: Multi-Session Context](/docs/context/recipes/multi-session-context) - Real-world persistence patterns
+- [Branching](/docs/context/branching) - Graph operations
+- [Recipes: Multi-Session Context](/docs/context/recipes/multi-session-context) - Real-world patterns

@@ -1,0 +1,366 @@
+---
+title: Core Concepts
+description: Fragment layer, codec system, lazy fragments, and engine orchestration
+---
+
+This page explores the foundational concepts that power the context package: the fragment data model, the codec encode/decode system, lazy fragment resolution, and how the engine orchestrates everything.
+
+## Fragment Layer
+
+At the heart of the context system is the `ContextFragment<T>` interface. Fragments are the atomic building blocks that hold context data.
+
+### ContextFragment Interface
+
+```typescript
+interface ContextFragment<T extends FragmentData = FragmentData> {
+  id?: string;              // Auto-generated for messages, optional otherwise
+  name: string;             // Tag name: 'role', 'user', 'hint', etc.
+  data: T;                  // The actual content
+  type?: FragmentType;      // 'fragment' | 'message'
+  persist?: boolean;        // Save to store on save()
+  codec?: FragmentCodec;    // Encode/decode for messages
+  metadata?: Record<string, unknown>;  // Internal tracking
+}
+```
+
+**Source:** `packages/context/src/lib/fragments.ts:15-42`
+
+### FragmentData Union
+
+Fragment data can be any of these types, enabling deep nesting:
+
+```typescript
+type FragmentData =
+  | string
+  | number
+  | null
+  | undefined
+  | boolean
+  | ContextFragment        // Nested fragment
+  | FragmentData[]         // Array of any above
+  | { [key: string]: FragmentData };  // Plain object
+```
+
+This recursive definition allows fragments to contain other fragments, creating hierarchical context structures:
+
+```typescript
+fragment('database',
+  hint('PostgreSQL 15'),
+  hint('Tables: users, orders'),
+  fragment('constraints',
+    hint('No DELETE without audit'),
+  ),
+)
+```
+
+### Type Guards
+
+The package provides type guards to identify fragment types at runtime:
+
+| Guard | Purpose |
+|-------|---------|
+| `isFragment(data)` | Check if data is a `ContextFragment` |
+| `isFragmentObject(data)` | Check if data is a plain object (not array/fragment/primitive) |
+| `isMessageFragment(fragment)` | Check if fragment has `type: 'message'` |
+| `isLazyFragment(fragment)` | Check if fragment needs lazy ID resolution |
+
+```typescript
+// isFragment checks for name + data properties
+function isFragment(data: unknown): data is ContextFragment {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'name' in data &&
+    'data' in data &&
+    typeof (data as ContextFragment).name === 'string'
+  );
+}
+```
+
+**Source:** `packages/context/src/lib/fragments.ts:60-68`
+
+## Codec System
+
+The codec system handles conversion between storage format and AI SDK format. Message fragments require codecs; context fragments don't.
+
+### FragmentCodec Interface
+
+```typescript
+interface FragmentCodec {
+  decode(): unknown;  // Storage → AI SDK (for resolve())
+  encode(): unknown;  // AI SDK → Storage (for save())
+}
+```
+
+**Source:** `packages/context/src/lib/codec.ts:12-16`
+
+### Encode/Decode Flow
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    Message Lifecycle                    │
+├────────────────────────────────────────────────────────┤
+│                                                        │
+│  user('Hello')                                         │
+│       │                                                │
+│       ▼                                                │
+│  ┌─────────────────────────────────────────┐          │
+│  │ Fragment with attached codec:           │          │
+│  │   codec: {                              │          │
+│  │     decode() { return UIMessage; }      │          │
+│  │     encode() { return UIMessage; }      │          │
+│  │   }                                     │          │
+│  └─────────────────────────────────────────┘          │
+│       │                                                │
+│       ├──── resolve() ────▶ codec.decode() → messages[]│
+│       │                                                │
+│       └──── save() ───────▶ codec.encode() → store    │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+```
+
+### Built-in Codecs
+
+The `user()` and `assistant()` helpers attach codecs automatically:
+
+```typescript
+function user(content: string | UIMessage): ContextFragment {
+  const message = typeof content === 'string'
+    ? {
+        id: generateId(),
+        role: 'user',
+        parts: [{ type: 'text', text: content }],
+      }
+    : content;
+  return {
+    id: message.id,
+    name: 'user',
+    data: 'content',
+    type: 'message',
+    persist: true,
+    codec: {
+      decode() { return message; },  // Returns UIMessage for AI SDK
+      encode() { return message; },  // Same format for storage
+    },
+  };
+}
+```
+
+**Source:** `packages/context/src/lib/fragments.ts:117-141`
+
+## Lazy Fragments
+
+Lazy fragments defer ID resolution until `save()` time. This enables patterns like updating the "most recent assistant message" without knowing its ID upfront.
+
+### LAZY_ID Symbol
+
+```typescript
+const LAZY_ID = Symbol('lazy-id');
+
+interface LazyConfig {
+  type: 'last-assistant';
+  content: string;
+}
+
+interface LazyFragment extends ContextFragment {
+  [LAZY_ID]?: LazyConfig;
+}
+```
+
+**Source:** `packages/context/src/lib/fragments.ts:228-243`
+
+### lastAssistantMessage()
+
+The primary lazy fragment helper:
+
+```typescript
+function lastAssistantMessage(content: string): ContextFragment {
+  return {
+    name: 'assistant',
+    type: 'message',
+    persist: true,
+    data: 'content',
+    [LAZY_ID]: {
+      type: 'last-assistant',
+      content,
+    },
+  } as LazyFragment;
+}
+```
+
+**Use case:** Self-correction flows where retries should update the same message:
+
+```typescript
+// In guardrail retry loop:
+context.set(lastAssistantMessage(correctedContent));
+await context.save();  // ID resolved here, updates existing message
+```
+
+**Source:** `packages/context/src/lib/fragments.ts:270-281`
+
+### Resolution Process
+
+During `save()`, lazy fragments are resolved before processing:
+
+```typescript
+async #resolveLazyFragment(fragment: LazyFragment): Promise<ContextFragment> {
+  const lazy = fragment[LAZY_ID]!;
+
+  if (lazy.type === 'last-assistant') {
+    const lastId = await this.#getLastAssistantId();
+    return assistantText(lazy.content, { id: lastId ?? crypto.randomUUID() });
+  }
+
+  throw new Error(`Unknown lazy fragment type: ${lazy.type}`);
+}
+```
+
+The engine searches for the last assistant ID in:
+1. Pending messages (newest first, excluding other lazy fragments)
+2. Persisted messages at branch head
+
+**Source:** `packages/context/src/lib/engine.ts:449-485`
+
+## Engine Orchestration
+
+The `ContextEngine` manages two distinct fragment lists and coordinates all operations.
+
+### Dual Fragment Lists
+
+```typescript
+class ContextEngine {
+  #fragments: ContextFragment[] = [];       // Non-message fragments
+  #pendingMessages: ContextFragment[] = []; // Queued message fragments
+}
+```
+
+**Why two lists?**
+- `#fragments`: Context for system prompt (role, hints, etc.). Not persisted to graph.
+- `#pendingMessages`: Messages to be saved as graph nodes. Persisted on `save()`.
+
+### set() Routing
+
+The `set()` method routes fragments by type:
+
+```typescript
+public set(...fragments: ContextFragment[]) {
+  for (const fragment of fragments) {
+    if (isMessageFragment(fragment)) {
+      this.#pendingMessages.push(fragment);
+    } else {
+      this.#fragments.push(fragment);
+    }
+  }
+  return this;
+}
+```
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    set() Routing                     │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  set(role(...), user(...), hint(...))               │
+│       │                                             │
+│       ▼                                             │
+│  ┌─────────────────────────────────────────┐        │
+│  │ isMessageFragment(fragment) ?           │        │
+│  │   YES → #pendingMessages.push()         │        │
+│  │   NO  → #fragments.push()               │        │
+│  └─────────────────────────────────────────┘        │
+│       │                    │                        │
+│       ▼                    ▼                        │
+│  #pendingMessages     #fragments                    │
+│  [user]               [role, hint]                  │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Source:** `packages/context/src/lib/engine.ts:290-299`
+
+## Resolve Flow
+
+The `resolve()` method produces AI SDK-compatible output through a specific sequence.
+
+### Flow Diagram
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        resolve()                              │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  1. Initialize (if first call)                               │
+│     ├── Upsert chat in store                                 │
+│     ├── Merge initial metadata                               │
+│     └── Get/create "main" branch                             │
+│                                                              │
+│  2. Render context fragments                                 │
+│     └── renderer.render(#fragments) → systemPrompt           │
+│                                                              │
+│  3. Load persisted message chain                             │
+│     └── store.getMessageChain(branch.headMessageId)          │
+│                                                              │
+│  4. Decode persisted messages                                │
+│     └── message(msg.data).codec.decode() → messages[]        │
+│                                                              │
+│  5. Resolve lazy fragments in pending                        │
+│     └── #resolveLazyFragment() for each lazy                 │
+│                                                              │
+│  6. Decode pending messages                                  │
+│     └── fragment.codec.decode() → append to messages[]       │
+│                                                              │
+│  7. Return { systemPrompt, messages }                        │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### ResolveResult Interface
+
+```typescript
+interface ResolveResult {
+  systemPrompt: string;  // Rendered non-message fragments
+  messages: unknown[];   // Decoded message fragments (AI SDK format)
+}
+```
+
+### Code Flow
+
+```typescript
+public async resolve(options: ResolveOptions): Promise<ResolveResult> {
+  await this.#ensureInitialized();
+
+  // Render context fragments to system prompt
+  const systemPrompt = options.renderer.render(this.#fragments);
+
+  // Load persisted messages from graph
+  const messages: unknown[] = [];
+  if (this.#branch?.headMessageId) {
+    const chain = await this.#store.getMessageChain(this.#branch.headMessageId);
+    for (const msg of chain) {
+      messages.push(message(msg.data as never).codec?.decode());
+    }
+  }
+
+  // Resolve lazy fragments, then decode pending
+  for (let i = 0; i < this.#pendingMessages.length; i++) {
+    const fragment = this.#pendingMessages[i];
+    if (isLazyFragment(fragment)) {
+      this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
+    }
+  }
+
+  for (const fragment of this.#pendingMessages) {
+    messages.push(fragment.codec!.decode());
+  }
+
+  return { systemPrompt, messages };
+}
+```
+
+**Source:** `packages/context/src/lib/engine.ts:331-368`
+
+## Next Steps
+
+- [State Management](/docs/context/architecture-state-management) – DAG model, branches, and checkpoints
+- [Renderers](/docs/context/architecture-renderers) – Template Method pattern and renderer implementations
+- [Persistence](/docs/context/architecture-persistence) – Store interface and database adapters

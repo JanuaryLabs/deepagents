@@ -1,0 +1,436 @@
+---
+title: Renderers
+description: Template Method pattern, sanitization, and renderer implementations
+---
+
+Renderers transform context fragments into text formats suitable for LLM prompts. The system uses the Template Method pattern to share common logic while allowing format-specific customization.
+
+## Template Method Pattern
+
+### ContextRenderer Abstract Class
+
+The base class defines the skeleton algorithm with hook methods that subclasses override:
+
+```typescript
+abstract class ContextRenderer {
+  protected options: RendererOptions;
+
+  abstract render(fragments: ContextFragment[]): string;
+
+  // Template method - dispatches to type-specific handlers
+  protected renderValue(key: string, value: unknown, ctx: RenderContext): string {
+    if (value == null) return '';
+    if (isFragment(value)) return this.renderFragment(value, ctx);
+    if (Array.isArray(value)) return this.renderArray(key, value, ctx);
+    if (isFragmentObject(value)) return this.renderObject(key, value, ctx);
+    return this.renderPrimitive(key, String(value), ctx);
+  }
+
+  // Hooks - subclasses implement these
+  protected abstract renderFragment(fragment: ContextFragment, ctx: RenderContext): string;
+  protected abstract renderPrimitive(key: string, value: string, ctx: RenderContext): string;
+  protected abstract renderArray(key: string, items: FragmentData[], ctx: RenderContext): string;
+  protected abstract renderObject(key: string, obj: FragmentObject, ctx: RenderContext): string;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:35-202`
+
+### renderValue() Dispatch
+
+The `renderValue()` method acts as a dispatcher, routing values to the appropriate handler based on type:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   renderValue() Dispatch                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  value                                                      │
+│    │                                                        │
+│    ├── null/undefined ──────────▶ return ''                 │
+│    │                                                        │
+│    ├── isFragment(value) ───────▶ renderFragment()          │
+│    │                                                        │
+│    ├── Array.isArray(value) ────▶ renderArray()             │
+│    │                                                        │
+│    ├── isFragmentObject(value) ─▶ renderObject()            │
+│    │                                                        │
+│    └── else (primitive) ────────▶ renderPrimitive()         │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:150-168`
+
+### RenderContext
+
+Context passed through rendering for state tracking:
+
+```typescript
+interface RenderContext {
+  depth: number;   // Current nesting level (for indentation)
+  path: string[];  // Current path (for TOML sections)
+}
+```
+
+## Sanitization
+
+### sanitizeFragments()
+
+Before rendering, fragments pass through sanitization to remove null/undefined values and detect cycles:
+
+```typescript
+protected sanitizeFragments(fragments: ContextFragment[]): ContextFragment[] {
+  const sanitized: ContextFragment[] = [];
+  for (const fragment of fragments) {
+    const cleaned = this.sanitizeFragment(fragment, new WeakSet<object>());
+    if (cleaned) {
+      sanitized.push(cleaned);
+    }
+  }
+  return sanitized;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:75-84`
+
+### Cycle Detection with WeakSet
+
+A `WeakSet` tracks seen objects to prevent infinite loops from circular references:
+
+```typescript
+protected sanitizeData(data: FragmentData, seen: WeakSet<object>): FragmentData | undefined {
+  if (data == null) return undefined;
+
+  if (Array.isArray(data)) {
+    if (seen.has(data)) return undefined;  // Cycle detected
+    seen.add(data);
+    // ... process array
+  }
+
+  if (isFragmentObject(data)) {
+    if (seen.has(data)) return undefined;  // Cycle detected
+    seen.add(data);
+    // ... process object
+  }
+
+  return data;
+}
+```
+
+**Why WeakSet?**
+- Doesn't prevent garbage collection of seen objects
+- O(1) lookup for cycle detection
+- Automatically cleared when objects go out of scope
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:100-145`
+
+## XmlRenderer
+
+XML output for Claude and GPT-4, which handle structured XML tags well.
+
+### Structure
+
+```
+<role>You are a SQL expert.</role>
+<hints>
+  <hint>Use CTEs for complex queries</hint>
+  <hint>Prefer explicit JOINs</hint>
+</hints>
+```
+
+### #wrap() and #wrapIndented()
+
+Two helper methods for creating XML tags:
+
+```typescript
+#wrap(tag: string, children: string[]): string {
+  const content = children.filter(Boolean).join('\n');
+  if (!content) return '';
+  return `<${tag}>\n${content}\n</${tag}>`;
+}
+
+#wrapIndented(tag: string, children: string[], depth: number): string {
+  const content = children.filter(Boolean).join('\n');
+  if (!content) return '';
+  const pad = '  '.repeat(depth);
+  return `${pad}<${tag}>\n${content}\n${pad}</${tag}>`;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:447-462`
+
+### #escape()
+
+Special characters are escaped for valid XML:
+
+```typescript
+#escape(value: string): string {
+  return value
+    .replaceAll(/&/g, '&amp;')
+    .replaceAll(/</g, '&lt;')
+    .replaceAll(/>/g, '&gt;')
+    .replaceAll(/"/g, '&quot;')
+    .replaceAll(/'/g, '&apos;');
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:415-425`
+
+### Multiline Handling
+
+Multiline content gets indented within tags:
+
+```typescript
+#leaf(tag: string, value: string, depth: number): string {
+  const safe = this.#escape(value);
+  const pad = '  '.repeat(depth);
+  if (safe.includes('\n')) {
+    return `${pad}<${tag}>\n${this.#indent(safe, (depth + 1) * 2)}\n${pad}</${tag}>`;
+  }
+  return `${pad}<${tag}>${safe}</${tag}>`;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:438-445`
+
+## MarkdownRenderer
+
+Markdown output using headers and bullet lists.
+
+### Structure
+
+```markdown
+## Role
+You are a SQL expert.
+
+## Hints
+- **hint**: Use CTEs for complex queries
+- **hint**: Prefer explicit JOINs
+```
+
+### Header and Nesting
+
+Top-level fragments become `## Headers`, nested items become bullet lists:
+
+```typescript
+render(fragments: ContextFragment[]): string {
+  return this.sanitizeFragments(fragments)
+    .map((f) => {
+      const title = `## ${titlecase(f.name)}`;
+      if (this.isPrimitive(f.data)) {
+        return `${title}\n${String(f.data)}`;
+      }
+      // ... handle arrays, objects, nested fragments
+    })
+    .join('\n\n');
+}
+
+#leaf(key: string, value: string, depth: number): string {
+  return `${this.#pad(depth)}- **${key}**: ${value}`;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:468-488`
+
+## TomlRenderer
+
+TOML output for config-like structured data.
+
+### Structure
+
+```toml
+[role]
+content = "You are a SQL expert."
+
+[hints]
+items = ["Use CTEs", "Prefer JOINs"]
+```
+
+### Path Tracking
+
+TOML uses dot-notation for nested sections. The renderer tracks the current path:
+
+```typescript
+protected renderObject(key: string, obj: FragmentObject, ctx: RenderContext): string {
+  const newPath = [...ctx.path, key];
+  const entries = this.#renderObjectEntries(obj, newPath);
+  return ['', `[${newPath.join('.')}]`, ...entries].join('\n');
+}
+```
+
+**Example path progression:**
+- `[database]`
+- `[database.connection]`
+- `[database.connection.pool]`
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:697-705`
+
+### #formatValue() Type Preservation
+
+TOML distinguishes types, so values are formatted appropriately:
+
+```typescript
+#formatValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return `"${this.#escape(value)}"`;
+  }
+  if (typeof value === 'boolean' || typeof value === 'number') {
+    return String(value);  // No quotes for booleans/numbers
+  }
+  if (typeof value === 'object' && value !== null) {
+    return JSON.stringify(value);
+  }
+  return `"${String(value)}"`;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:773-784`
+
+## ToonRenderer
+
+Token-Oriented Object Notation (TOON) for minimal token usage.
+
+### Structure
+
+```
+role: You are a SQL expert.
+hints[2]:
+  - Use CTEs for complex queries
+  - Prefer explicit JOINs
+users[3]{id,name,email}:
+  1,Alice,alice@ex.com
+  2,Bob,bob@ex.com
+  3,Carol,carol@ex.com
+```
+
+### #isTabularArray()
+
+TOON optimizes arrays of uniform objects into CSV-like tables:
+
+```typescript
+#isTabularArray(items: FragmentData[]): items is FragmentObject[] {
+  if (items.length === 0) return false;
+
+  const objects = items.filter(isFragmentObject);
+  if (objects.length !== items.length) return false;
+
+  // Check for shared fields across all rows
+  let intersection = new Set<string>(Object.keys(objects[0]));
+  for (const obj of objects) {
+    const keys = new Set(Object.keys(obj));
+    intersection = new Set([...intersection].filter((k) => keys.has(k)));
+
+    // All values must be primitives
+    for (const value of Object.values(obj)) {
+      if (value == null) continue;
+      if (!this.#isPrimitiveValue(value)) return false;
+    }
+  }
+
+  return intersection.size > 0;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:857-882`
+
+### CSV-like Output
+
+For tabular arrays, TOON outputs a header with field names and rows as CSV:
+
+```typescript
+#renderTabularArray(key: string, items: FragmentObject[], depth: number): string {
+  const fields = Array.from(new Set(items.flatMap((obj) => Object.keys(obj))));
+  const header = `${this.#pad(depth)}${key}[${items.length}]{${fields.join(',')}}:`;
+
+  const rows = items.map((obj) => {
+    const values = fields.map((f) => {
+      const value = obj[f];
+      if (value == null) return '';
+      return this.#formatValue(value);
+    });
+    return `${this.#pad(depth + 1)}${values.join(',')}`;
+  });
+
+  return [header, ...rows].join('\n');
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:892-917`
+
+### Minimal Quoting
+
+TOON only quotes strings when necessary:
+
+```typescript
+#needsQuoting(value: string): boolean {
+  if (value === '') return true;
+  if (value !== value.trim()) return true;  // Leading/trailing whitespace
+  if (['true', 'false', 'null'].includes(value.toLowerCase())) return true;
+  if (/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value)) return true;  // Looks like number
+  if (/[:\\"'[\]{}|,\t\n\r]/.test(value)) return true;  // Special chars
+  if (value.startsWith('-')) return true;  // Could be list item
+  return false;
+}
+```
+
+**Source:** `packages/context/src/lib/renderers/abstract.renderer.ts:1043-1051`
+
+## Renderer Comparison
+
+| Aspect | XML | Markdown | TOML | TOON |
+|--------|-----|----------|------|------|
+| Token efficiency | Medium | Medium | Medium | High |
+| Human readability | Medium | High | High | Medium |
+| Model preference | Claude/GPT | General | Config-heavy | Token-constrained |
+| Nested structures | Tags | Bullets | Sections | Indentation |
+| Arrays | `<items>` | `- item` | `[values]` | `[n]:` or CSV |
+
+### Same Input, Different Outputs
+
+```typescript
+const fragments = [
+  fragment('config',
+    { debug: true, timeout: 30 },
+    fragment('database', { host: 'localhost', port: 5432 }),
+  ),
+];
+```
+
+**XmlRenderer:**
+```xml
+<config>
+  <debug>true</debug>
+  <timeout>30</timeout>
+  <database>
+    <host>localhost</host>
+    <port>5432</port>
+  </database>
+</config>
+```
+
+**MarkdownRenderer:**
+```markdown
+## Config
+- **debug**: true
+- **timeout**: 30
+- **database**:
+  - **host**: localhost
+  - **port**: 5432
+```
+
+**ToonRenderer:**
+```
+config:
+  debug: true
+  timeout: 30
+  database:
+    host: localhost
+    port: 5432
+```
+
+## Next Steps
+
+- [Core Concepts](/docs/context/architecture-core-concepts) – Fragments, codecs, and engine orchestration
+- [State Management](/docs/context/architecture-state-management) – DAG model, branches, and checkpoints
+- [Persistence](/docs/context/architecture-persistence) – Store interface and database adapters

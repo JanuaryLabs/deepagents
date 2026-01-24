@@ -1,0 +1,407 @@
+---
+title: Persistence
+description: ContextStore interface, database adapters, and schema design
+---
+
+The persistence layer provides durable storage for conversation graphs. An abstract interface enables multiple backend implementations while maintaining consistent behavior.
+
+## ContextStore Abstract Class
+
+### Interface Overview
+
+The `ContextStore` abstract class defines 30+ methods organized into 6 categories:
+
+```typescript
+abstract class ContextStore {
+  // Chat Operations (6 methods)
+  abstract createChat(chat: ChatData): Promise<StoredChatData>;
+  abstract upsertChat(chat: ChatData): Promise<StoredChatData>;
+  abstract getChat(chatId: string): Promise<StoredChatData | undefined>;
+  abstract updateChat(chatId: string, updates: Partial<...>): Promise<StoredChatData>;
+  abstract listChats(options?: ListChatsOptions): Promise<ChatInfo[]>;
+  abstract deleteChat(chatId: string, options?: DeleteChatOptions): Promise<boolean>;
+
+  // Message Operations (4 methods)
+  abstract addMessage(message: MessageData): Promise<void>;
+  abstract getMessage(messageId: string): Promise<MessageData | undefined>;
+  abstract getMessageChain(headId: string): Promise<MessageData[]>;
+  abstract getMessages(chatId: string): Promise<MessageData[]>;
+  abstract hasChildren(messageId: string): Promise<boolean>;
+
+  // Branch Operations (6 methods)
+  abstract createBranch(branch: BranchData): Promise<void>;
+  abstract getBranch(chatId: string, name: string): Promise<BranchData | undefined>;
+  abstract getActiveBranch(chatId: string): Promise<BranchData | undefined>;
+  abstract setActiveBranch(chatId: string, branchId: string): Promise<void>;
+  abstract updateBranchHead(branchId: string, messageId: string | null): Promise<void>;
+  abstract listBranches(chatId: string): Promise<BranchInfo[]>;
+
+  // Checkpoint Operations (4 methods)
+  abstract createCheckpoint(checkpoint: CheckpointData): Promise<void>;
+  abstract getCheckpoint(chatId: string, name: string): Promise<CheckpointData | undefined>;
+  abstract listCheckpoints(chatId: string): Promise<CheckpointInfo[]>;
+  abstract deleteCheckpoint(chatId: string, name: string): Promise<void>;
+
+  // Search Operations (1 method)
+  abstract searchMessages(chatId: string, query: string, options?: SearchOptions): Promise<SearchResult[]>;
+
+  // Visualization Operations (1 method)
+  abstract getGraph(chatId: string): Promise<GraphData>;
+}
+```
+
+**Source:** `packages/context/src/lib/store/store.ts:229-404`
+
+### Method Categories
+
+| Category | Methods | Purpose |
+|----------|---------|---------|
+| Chat | 6 | Container lifecycle: create, read, update, delete, list |
+| Message | 5 | Graph nodes: add, retrieve, traverse chain |
+| Branch | 6 | Pointers: create, switch, update head |
+| Checkpoint | 4 | Bookmarks: create, retrieve, delete |
+| Search | 1 | Full-text search across messages |
+| Visualization | 1 | Export complete graph for debugging |
+
+## SQLite Adapter
+
+The `SqliteContextStore` uses Node.js's built-in `node:sqlite` module for local persistence.
+
+### Initialization
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+class SqliteContextStore extends ContextStore {
+  #db: DatabaseSync;
+  #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
+
+  constructor(path: string) {
+    super();
+    this.#db = new DatabaseSync(path);
+    this.#db.exec(STORE_DDL);  // Apply schema
+  }
+}
+```
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:30-52`
+
+### Statement Caching
+
+Prepared statements are cached for performance:
+
+```typescript
+#stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
+  let stmt = this.#statements.get(sql);
+  if (!stmt) {
+    stmt = this.#db.prepare(sql);
+    this.#statements.set(sql, stmt);
+  }
+  return stmt;
+}
+```
+
+**Why cache statements?**
+- Avoids repeated SQL parsing
+- Compilation overhead paid once
+- Significant speedup for repeated queries
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:39-46`
+
+### Recursive CTE for Message Chain
+
+SQLite's recursive CTE walks the parent chain:
+
+```sql
+WITH RECURSIVE chain AS (
+  SELECT *, 0 as depth FROM messages WHERE id = ?
+  UNION ALL
+  SELECT m.*, c.depth + 1 FROM messages m
+  INNER JOIN chain c ON m.id = c.parentId
+  WHERE c.depth < 100000
+)
+SELECT * FROM chain
+ORDER BY depth DESC
+```
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:418-426`
+
+### Transaction Handling
+
+Transactions use synchronous `exec()` calls:
+
+```typescript
+#useTransaction<T>(fn: () => T): T {
+  this.#db.exec('BEGIN TRANSACTION');
+  try {
+    const result = fn();
+    this.#db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    this.#db.exec('ROLLBACK');
+    throw error;
+  }
+}
+```
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:58-68`
+
+## PostgreSQL Adapter
+
+The `PostgresContextStore` uses the `pg` package for production-grade persistence.
+
+### Pool-Based Connections
+
+```typescript
+import type { Pool, PoolConfig } from 'pg';
+
+class PostgresContextStore extends ContextStore {
+  #pool: Pool;
+  #initialized: Promise<void>;
+
+  constructor(options: PostgresStoreOptions) {
+    super();
+    const pg = PostgresContextStore.#requirePg();
+    this.#pool = typeof options.pool === 'string'
+      ? new pg.Pool({ connectionString: options.pool })
+      : new pg.Pool(options.pool);
+
+    this.#initialized = this.#initialize();
+  }
+}
+```
+
+**Source:** `packages/context/src/lib/store/postgres.store.ts:44-58`
+
+### JSONB for Metadata
+
+PostgreSQL uses JSONB for metadata, enabling indexed queries:
+
+```sql
+CREATE TABLE chats (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  title TEXT,
+  metadata JSONB,
+  "createdAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+  "updatedAt" BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+);
+```
+
+### tsvector + GIN for Full-Text Search
+
+PostgreSQL uses `tsvector` columns with GIN indexes:
+
+```sql
+CREATE TABLE messages_fts (
+  "messageId" TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  "chatId" TEXT NOT NULL,
+  name TEXT NOT NULL,
+  content_vector TSVECTOR NOT NULL
+);
+
+CREATE INDEX idx_messages_fts_vector ON messages_fts USING GIN(content_vector);
+```
+
+**Search query:**
+```sql
+SELECT m.*, ts_rank(f.content_vector, plainto_tsquery($2)) as rank
+FROM messages_fts f
+JOIN messages m ON m.id = f."messageId"
+WHERE f."chatId" = $1
+  AND f.content_vector @@ plainto_tsquery($2)
+ORDER BY rank DESC
+LIMIT $3
+```
+
+### Async Transaction Handling
+
+PostgreSQL uses client-based transactions:
+
+```typescript
+async #useTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await this.#ensureInitialized();
+  const client = await this.#pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+```
+
+**Source:** `packages/context/src/lib/store/postgres.store.ts:86-100`
+
+## SQL Server Adapter
+
+The `SqlServerContextStore` uses the `mssql` package with graceful FTS degradation.
+
+### Graceful FTS Degradation
+
+SQL Server requires full-text catalog setup. The adapter checks for availability:
+
+```typescript
+async #checkFtsSupport(): Promise<boolean> {
+  try {
+    const result = await this.#pool.request()
+      .query(`SELECT FULLTEXTSERVICEPROPERTY('IsFullTextInstalled') as installed`);
+    return result.recordset[0]?.installed === 1;
+  } catch {
+    return false;
+  }
+}
+```
+
+If FTS isn't available, search falls back to `LIKE` queries.
+
+## Schema Design
+
+### TEXT IDs
+
+All IDs use TEXT/VARCHAR instead of integers:
+
+```sql
+id TEXT PRIMARY KEY
+```
+
+**Why TEXT IDs?**
+- UUIDs generated client-side (no round-trip)
+- Distributed generation without coordination
+- Human-readable in debugging
+
+### BIGINT Timestamps
+
+Timestamps use BIGINT milliseconds since Unix epoch:
+
+```sql
+createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+```
+
+**Why BIGINT milliseconds?**
+- JavaScript-native (Date.now())
+- No timezone issues
+- Consistent across databases
+
+### CASCADE Deletes
+
+Foreign keys use CASCADE for cleanup:
+
+```sql
+FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE
+```
+
+**Cascade chain:**
+```
+DELETE FROM chats WHERE id = ?
+  → Deletes all messages (chatId FK)
+  → Deletes all branches (chatId FK)
+  → Deletes all checkpoints (chatId FK)
+  → FTS entries cleaned separately
+```
+
+### Complete SQLite Schema
+
+```sql
+-- Performance PRAGMAs
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -64000;
+PRAGMA temp_store = MEMORY;
+PRAGMA mmap_size = 268435456;
+PRAGMA foreign_keys = ON;
+
+-- Chats table
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  title TEXT,
+  metadata TEXT,
+  createdAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
+  updatedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chats_userId_updatedAt ON chats(userId, updatedAt DESC);
+
+-- Messages table (DAG nodes)
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  parentId TEXT,
+  name TEXT NOT NULL,
+  type TEXT,
+  data TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (parentId) REFERENCES messages(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_chatId_parentId ON messages(chatId, parentId);
+
+-- Branches table (pointers)
+CREATE TABLE IF NOT EXISTS branches (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  headMessageId TEXT,
+  isActive INTEGER NOT NULL DEFAULT 0,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (headMessageId) REFERENCES messages(id),
+  UNIQUE(chatId, name)
+);
+
+-- Checkpoints table (bookmarks)
+CREATE TABLE IF NOT EXISTS checkpoints (
+  id TEXT PRIMARY KEY,
+  chatId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  messageId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (messageId) REFERENCES messages(id),
+  UNIQUE(chatId, name)
+);
+
+-- FTS5 for full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  messageId UNINDEXED,
+  chatId UNINDEXED,
+  name UNINDEXED,
+  content,
+  tokenize='porter unicode61'
+);
+```
+
+**Source:** `packages/context/src/lib/store/ddl.sqlite.sql`
+
+### Index Strategy
+
+| Index | Purpose |
+|-------|---------|
+| `idx_chats_userId_updatedAt` | Fast `listChats()` with userId filter |
+| `idx_messages_chatId_parentId` | Fast recursive CTE traversal |
+| `idx_branches_chatId_isActive` | Fast `getActiveBranch()` |
+| `idx_checkpoints_chatId` | Fast checkpoint listing |
+
+## Adapter Comparison
+
+| Feature | SQLite | PostgreSQL | SQL Server |
+|---------|--------|------------|------------|
+| Use case | Local/embedded | Production | Enterprise |
+| FTS | FTS5 (built-in) | tsvector + GIN | Optional catalog |
+| JSON | TEXT | JSONB | NVARCHAR |
+| Timestamps | INTEGER | BIGINT | BIGINT |
+| Connection | Single file | Pool | Pool |
+| Dependency | `node:sqlite` | `pg` | `mssql` |
+
+## Next Steps
+
+- [Core Concepts](/docs/context/architecture-core-concepts) – Fragments, codecs, and engine orchestration
+- [State Management](/docs/context/architecture-state-management) – DAG model, branches, and checkpoints
+- [Renderers](/docs/context/architecture-renderers) – Template Method pattern and implementations

@@ -1,148 +1,125 @@
 ---
 title: Checkpoints
-description: Save and restore chat state with checkpoints for undo and branching workflows
+description: Named restore points for conversation branching
 ---
 
-Checkpoints capture a snapshot of your chat's context at a point in time. Use them to save state before risky operations and restore if needed.
+Checkpoints are named pointers to specific messages in the conversation graph. Create checkpoints before risky operations; restore to return to that point.
 
-## The Problem
+## How Checkpoints Work
 
-When interacting with AI:
-- Responses can be unsatisfactory
-- You might want to try different approaches
-- Users expect "undo" functionality
-- A/B testing requires state restoration
+```
+Conversation: msg-1 → msg-2 → msg-3 → msg-4
+                         ↑
+              checkpoint('before-choice')
+
+Restore creates a new branch from the checkpoint:
+    main → msg-4
+    main-v2 → msg-2 (restored, now active)
+```
+
+Checkpoints persist in the database. Create them with `checkpoint()`; return to them with `restore()`.
 
 ## Creating Checkpoints
-
-Use `checkpoint()` to save the current state:
 
 ```typescript
 import {
   ContextEngine,
-  InMemoryContextStore,
+  SqliteContextStore,
+  XmlRenderer,
   role,
   user,
   assistant,
 } from '@deepagents/context';
 
-const store = new InMemoryContextStore();
-const context = new ContextEngine({ store, chatId: 'chat-001' })
-  .set(role('You are a helpful assistant.'));
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(role('You are helpful.'));
 
-// Add some conversation
-context.set(user('What is TypeScript?'));
-context.set(assistant('TypeScript is a typed superset of JavaScript.'));
+// Build conversation
+context.set(user('I want to learn programming.'));
+context.set(assistant('Great! Would you prefer Python or JavaScript?'));
+await context.save();
 
-// Create a checkpoint
-const checkpoint = await context.checkpoint();
-
-console.log(checkpoint);
+// Save checkpoint before user's choice
+const cp = await context.checkpoint('before-choice');
+console.log(cp);
 // {
 //   id: 'uuid-xxx',
-//   fragments: [...],  // Snapshot of all fragments
-//   timestamp: 1703123456789,
+//   name: 'before-choice',
+//   messageId: 'msg-xxx',  // points to the assistant message
+//   createdAt: 1703123456789
 // }
 ```
 
-## Anonymous vs Named Checkpoints
+**Note:** Checkpoints require at least one saved message. You cannot checkpoint an empty conversation.
 
-### Anonymous Checkpoints
+## Restoring Checkpoints
 
-Return a checkpoint object that you manage in memory:
-
-```typescript
-const cp = await context.checkpoint();
-
-// ... make changes ...
-
-// Restore using the object
-await context.restore(cp);
-```
-
-Best for: Temporary undo within a single session.
-
-### Named Checkpoints
-
-Stored in the database for later retrieval:
+`restore()` creates a new branch from the checkpoint's message:
 
 ```typescript
-// Create named checkpoint (stored)
-await context.checkpoint('before-question');
+// User chose Python
+context.set(user('I want to learn Python.'));
+context.set(assistant('Python is great for beginners!'));
+await context.save();
+// main → ... → assistant → user → assistant
 
-// ... make changes ...
+// User wants to try JavaScript path instead
+await context.restore('before-choice');
+// Creates 'main-v2' branch from checkpoint
+// Now at: main-v2 → ... → assistant (the checkpoint message)
 
-// Restore by name (even in a new session)
-await context.restore('before-question');
+context.set(user('I want to learn JavaScript.'));
+context.set(assistant('JavaScript is excellent for web development!'));
+await context.save();
+// main-v2 → ... → assistant → user → assistant
 ```
 
-Best for: Persistent state, branching workflows, cross-session recovery.
+Both branches are preserved:
+- `main`: Python learning path
+- `main-v2`: JavaScript learning path
 
-## Checkpoint Interface
+## Listing Checkpoints
 
 ```typescript
-interface Checkpoint {
-  id: string;           // Unique identifier
-  name?: string;        // Name (if stored)
-  fragments: ContextFragment[];  // Snapshot
-  timestamp: number;    // When created
-}
+const checkpoints = await store.listCheckpoints(context.chatId);
+// [
+//   { id: 'uuid-1', name: 'before-choice', messageId: 'msg-2', createdAt: ... },
+//   { id: 'uuid-2', name: 'before-analysis', messageId: 'msg-5', createdAt: ... },
+// ]
 ```
 
-## Restoring from Checkpoints
-
-The `restore()` method replaces current fragments with the checkpoint's snapshot:
+## Deleting Checkpoints
 
 ```typescript
-const context = new ContextEngine({ store, chatId: 'chat-001' })
-  .set(role('You are helpful.'));
-
-// Initial conversation
-context.set(user('Hello'));
-context.set(assistant('Hi there!'));
-
-// Save state
-const checkpoint = await context.checkpoint();
-
-// Continue conversation
-context.set(user('Tell me a joke'));
-context.set(assistant('Why did the chicken...'));
-
-// Oops, bad joke - restore to before
-await context.restore(checkpoint);
-
-// Now we're back to just Hello/Hi there!
-const { messages } = await context.resolve();
-// messages = [{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hi there!' }]
+await store.deleteCheckpoint(context.chatId, 'before-choice');
 ```
 
-## Restore by Name
+## Checkpoints vs Rewind
 
-For named checkpoints, pass the name as a string:
+| Feature | `checkpoint()` + `restore()` | `rewind()` |
+|---------|------------------------------|------------|
+| Target | Named pointer | Message ID directly |
+| Requires ID | No (uses name) | Yes |
+| Persistence | Stored in database | N/A |
+| Use case | Save decision points | Quick retry from known message |
 
-```typescript
-// Save a named checkpoint
-await context.checkpoint('good-state');
+Use checkpoints when:
+- You want to name restore points semantically
+- You might restore from a different session
+- You're building undo/redo UI
 
-// Later (even in a new session)
-const context2 = new ContextEngine({ store, chatId: 'chat-001' });
-await context2.restore('good-state');
-```
+Use `rewind()` when:
+- You have the message ID already
+- You want a quick one-off branch
+- You're retrying immediately
 
-Named checkpoints are scoped to the chat, so `chat:chat-001:checkpoint:good-state` won't conflict with other chats.
+## Retry Loop Pattern
 
-## Auto-Persistence
-
-After `restore()`, the restored state is automatically saved:
-
-```typescript
-await context.restore('before-question');
-// Fragments are now saved to store
-```
-
-This ensures consistency between memory and storage.
-
-## Complete Example: Retry Loop
+Use checkpoints to retry until successful:
 
 ```typescript
 import { generateText } from 'ai';
@@ -153,21 +130,24 @@ async function askWithRetry(
   question: string,
   maxRetries = 3,
 ): Promise<string> {
-  // Save state before asking
-  const checkpoint = await context.checkpoint();
+  context.set(user(question));
+  await context.save();
+
+  // Checkpoint after saving question
+  await context.checkpoint('before-response');
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    context.set(user(question));
-
-    const { systemPrompt, messages } = await context.resolve();
+    const { systemPrompt, messages } = await context.resolve({
+      renderer: new XmlRenderer(),
+    });
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
       system: systemPrompt,
       messages,
+      temperature: 0.7 + attempt * 0.1, // Increase temperature on retries
     });
 
-    // Check if response is satisfactory
     if (isGoodResponse(response.text)) {
       context.set(assistant(response.text));
       await context.save();
@@ -176,74 +156,90 @@ async function askWithRetry(
 
     // Bad response - restore and try again
     console.log(`Attempt ${attempt + 1} failed, retrying...`);
-    await context.restore(checkpoint);
+    await context.restore('before-response');
   }
 
   throw new Error('Max retries exceeded');
 }
 
 function isGoodResponse(text: string): boolean {
-  // Your validation logic
   return text.length > 10 && !text.includes('I cannot');
 }
 ```
 
-## Multiple Checkpoints
+## Multi-Stage Workflow
 
-Create checkpoints at different stages:
+Create checkpoints at each stage of a complex workflow:
 
 ```typescript
-// Initial setup
-context.set(role('You are a research assistant.'));
-await context.checkpoint('initial');
+// Stage 1: Gather requirements
+context.set(user('Help me build a todo app'));
+context.set(assistant('What features do you need?'));
+await context.save();
+await context.checkpoint('requirements');
 
-// After gathering context
-context.set(user('Research topic: AI safety'));
-context.set(assistant('I found several key papers...'));
-await context.checkpoint('research-complete');
+// Stage 2: Design
+context.set(user('I need tasks with due dates and priorities'));
+context.set(assistant('Here is the proposed architecture...'));
+await context.save();
+await context.checkpoint('design');
 
-// After analysis
-context.set(user('Summarize the findings'));
-context.set(assistant('The main themes are...'));
-await context.checkpoint('summary-complete');
+// Stage 3: Implementation
+context.set(user('Start with the data model'));
+context.set(assistant('Here is the schema...'));
+await context.save();
+await context.checkpoint('implementation');
 
-// Can restore to any stage
-await context.restore('research-complete');
-// Back to after research, before summary
+// User wants to revisit design
+await context.restore('design');
+// Now back at design stage, can take different direction
 ```
 
-## Checkpoint Storage
+## Checkpoint Naming Conventions
 
-Named checkpoints are stored with keys like:
+Use descriptive names that indicate the decision point:
 
+```typescript
+// Good
+await context.checkpoint('before-language-choice');
+await context.checkpoint('after-requirements-gathered');
+await context.checkpoint('pre-final-review');
+
+// Less clear
+await context.checkpoint('checkpoint-1');
+await context.checkpoint('save');
 ```
-chat:{chatId}:checkpoint:{name}
+
+## Error Handling
+
+```typescript
+try {
+  await context.checkpoint('my-checkpoint');
+} catch (error) {
+  // "Cannot create checkpoint: no messages in conversation"
+}
+
+try {
+  await context.restore('nonexistent');
+} catch (error) {
+  // 'Checkpoint "nonexistent" not found in chat "chat-001"'
+}
 ```
 
-They persist until explicitly deleted or the chat is deleted.
+## Checkpoints in the Graph
 
-## When to Use Checkpoints
+Checkpoints appear in the graph data:
 
-| Scenario | Recommendation |
-| --- | --- |
-| Retry bad responses | Anonymous checkpoint |
-| A/B test conversation paths | Named checkpoints |
-| User "undo" feature | Named checkpoint per turn |
-| Long-running workflows | Named checkpoints at stages |
-
-## Checkpoints vs Rewind
-
-| Feature | Checkpoint/Restore | Rewind |
-| --- | --- | --- |
-| Scope | Full snapshot | By fragment ID |
-| Direction | Jump to any saved state | Remove from target onward |
-| Storage | Optional (named) | N/A |
-| Use case | Branching, full rollback | Surgical removal |
-
-Use checkpoints for full state snapshots. Use [rewind](/docs/context/rewind) for removing specific fragments.
+```typescript
+const graph = await store.getGraph(context.chatId);
+console.log(graph.checkpoints);
+// [
+//   { id: '...', name: 'before-choice', messageId: 'msg-2', createdAt: ... },
+// ]
+```
 
 ## Next Steps
 
-- [Rewind](/docs/context/rewind) - Remove fragments by ID
-- [Branching](/docs/context/branching) - Combine checkpoints and rewind
-- [Chat Management](/docs/context/chat) - Managing multiple chats
+- [Rewind](/docs/context/rewind) - Direct message branching
+- [Branching](/docs/context/branching) - Full branching guide
+- [Storage](/docs/context/storage) - Store implementations

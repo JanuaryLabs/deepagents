@@ -1,40 +1,46 @@
 ---
 title: Branching
-description: Explore multiple conversation paths using checkpoints and rewind
+description: Explore conversation paths with graph-based branching
 ---
 
-Branching lets you explore different conversation paths from the same starting point. Combine checkpoints and rewind to implement A/B testing, response comparison, and user choice workflows.
+The Context package uses a DAG (directed acyclic graph) to store messages. Branching creates new paths in this graph, preserving all history.
 
-## The Problem
-
-AI conversations often need:
-- Try multiple response strategies
-- Let users choose between options
-- A/B test different prompts
-- Explore "what if" scenarios
-
-## Branching Concept
+## The Graph Model
 
 ```
-         ┌── Branch A: "Explain simply"
-         │
-Start ───┤
-         │
-         └── Branch B: "Explain technically"
+Messages are immutable nodes linked by parentId:
+
+    User: "Hi"  →  Assistant: "Hello!"  →  User: "Tell me a joke"  →  Assistant: "Why did..."
+       (msg-1)         (msg-2)                  (msg-3)                    (msg-4)
+
+Branches are just pointers to head messages:
+    main → msg-4
+
+After rewind('msg-2'):
+    main → msg-4
+    main-v2 → msg-2  (new branch, you're here now)
 ```
 
-At any point, you can:
-1. Save a checkpoint
-2. Explore one path
-3. Restore and explore another path
-4. Compare results
+Key insight: **Nothing is deleted.** Branching creates new pointers; original messages stay intact.
 
-## Basic Branching Pattern
+## Why Branch?
+
+- **Retry responses**: Bad answer? Branch from the question, try again.
+- **A/B test**: Compare responses with different prompts.
+- **User choice**: Let users pick from multiple AI responses.
+- **What-if analysis**: Explore alternative conversation paths.
+
+## Branch Operations
+
+### rewind(messageId)
+
+Create a new branch from a specific message and switch to it.
 
 ```typescript
 import {
   ContextEngine,
-  InMemoryContextStore,
+  SqliteContextStore,
+  XmlRenderer,
   role,
   user,
   assistant,
@@ -42,51 +48,170 @@ import {
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 
-const store = new InMemoryContextStore();
-const context = new ContextEngine({ store, chatId: 'chat-001' })
-  .set(role('You are a helpful assistant.'));
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(role('You are helpful.'));
 
-// User asks a question
-context.set(user('Explain quantum computing'));
+// Initial conversation
+context.set(user('Explain monads', { id: 'q1' }));
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
 
-// Save checkpoint before responding
-await context.checkpoint('before-response');
-
-// Branch A: Simple explanation
-const { systemPrompt, messages } = await context.resolve();
-const simpleResponse = await generateText({
+const response = await generateText({
   model: groq('gpt-oss-20b'),
-  system: systemPrompt + '\nExplain in simple terms for beginners.',
+  system: systemPrompt,
   messages,
 });
 
-console.log('Simple:', simpleResponse.text);
-
-// Restore to try a different approach
-await context.restore('before-response');
-
-// Branch B: Technical explanation
-const technicalResponse = await generateText({
-  model: groq('gpt-oss-20b'),
-  system: systemPrompt + '\nExplain with technical depth for experts.',
-  messages,
-});
-
-console.log('Technical:', technicalResponse.text);
-
-// Choose the better one
-const chosenResponse = simpleResponse.text; // or technicalResponse.text
-context.set(assistant(chosenResponse));
+context.set(assistant(response.text));
 await context.save();
+// Branch: main → q1 → a1
+
+// Response too complex - rewind to question
+const newBranch = await context.rewind('q1');
+console.log(newBranch.name); // 'main-v2'
+console.log(context.branch); // 'main-v2'
+
+// Add simpler prompt and retry
+context.set(hint('Explain simply, no jargon.'));
+const { systemPrompt: sp2, messages: m2 } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
+
+const simpler = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: sp2,
+  messages: m2,
+});
+
+context.set(assistant(simpler.text));
+await context.save();
+// Branch: main-v2 → q1 → a2 (simpler)
+// Branch: main → q1 → a1 (original, preserved)
+```
+
+### switchBranch(name)
+
+Switch to an existing branch.
+
+```typescript
+// Currently on main-v2 with simpler explanation
+await context.switchBranch('main');
+// Now on main with original explanation
+
+const { messages } = await context.resolve({ renderer: new XmlRenderer() });
+// messages contains the original complex explanation
+```
+
+Switching clears pending (unsaved) messages.
+
+### btw()
+
+Create a parallel branch without switching ("by the way").
+
+```typescript
+// User asked a question, waiting for response
+context.set(user('What is the weather?'));
+await context.save();
+
+// User wants to ask another question without waiting
+const parallelBranch = await context.btw();
+// parallelBranch = { name: 'main-v2', ... }
+// Still on 'main', pending messages preserved
+
+// Later, switch and ask the other question
+await context.switchBranch(parallelBranch.name);
+context.set(user('What time is it?'));
+await context.save();
+```
+
+Use `btw()` when you want to fork without abandoning current work.
+
+## Listing Branches
+
+Use the store directly to list branches:
+
+```typescript
+const branches = await store.listBranches(context.chatId);
+// [
+//   { name: 'main', headMessageId: 'msg-4', messageCount: 4, isActive: false, ... },
+//   { name: 'main-v2', headMessageId: 'msg-2', messageCount: 2, isActive: true, ... },
+// ]
+```
+
+## Branch Naming
+
+Branches auto-name based on the parent branch:
+
+```
+main → (rewind) → main-v2 → (rewind) → main-v2-v2
+     → (rewind) → main-v3
+```
+
+## A/B Testing Pattern
+
+Compare responses with different system prompts:
+
+```typescript
+async function abTest(
+  context: ContextEngine,
+  store: ContextStore,
+  question: string,
+): Promise<{ a: string; b: string }> {
+  // Setup
+  context.set(user(question, { id: 'question' }));
+  await context.save();
+
+  // Variant A
+  context.set(hint('Be formal and detailed.'));
+  const { systemPrompt: spA, messages: mA } = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
+
+  const responseA = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: spA,
+    messages: mA,
+  });
+
+  context.set(assistant(responseA.text));
+  await context.save();
+  // main → question → answerA
+
+  // Variant B - rewind to question
+  await context.rewind('question');
+  // main-v2 → question
+
+  context.set(hint('Be casual and brief.'));
+  const { systemPrompt: spB, messages: mB } = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
+
+  const responseB = await generateText({
+    model: groq('gpt-oss-20b'),
+    system: spB,
+    messages: mB,
+  });
+
+  context.set(assistant(responseB.text));
+  await context.save();
+  // main-v2 → question → answerB
+
+  return { a: responseA.text, b: responseB.text };
+}
 ```
 
 ## User Choice Pattern
 
-Let users pick from multiple AI responses:
+Generate multiple responses, let user pick:
 
 ```typescript
 interface ResponseOption {
-  id: string;
+  branchName: string;
   text: string;
   style: string;
 }
@@ -95,32 +220,40 @@ async function generateOptions(
   context: ContextEngine,
   question: string,
 ): Promise<ResponseOption[]> {
-  context.set(user(question));
-  await context.checkpoint('before-options');
+  context.set(user(question, { id: 'q' }));
+  await context.save();
 
   const styles = [
-    { id: 'concise', prompt: 'Be brief and to the point.' },
-    { id: 'detailed', prompt: 'Provide comprehensive detail.' },
-    { id: 'examples', prompt: 'Use practical examples.' },
+    { hint: 'Be concise.', label: 'Brief' },
+    { hint: 'Be detailed with examples.', label: 'Detailed' },
+    { hint: 'Use analogies to explain.', label: 'Analogies' },
   ];
 
   const options: ResponseOption[] = [];
 
-  for (const style of styles) {
-    await context.restore('before-options');
+  for (let i = 0; i < styles.length; i++) {
+    if (i > 0) {
+      await context.rewind('q');
+    }
 
-    const { systemPrompt, messages } = await context.resolve();
+    context.set(hint(styles[i].hint));
+    const { systemPrompt, messages } = await context.resolve({
+      renderer: new XmlRenderer(),
+    });
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt + '\n' + style.prompt,
+      system: systemPrompt,
       messages,
     });
 
+    context.set(assistant(response.text));
+    await context.save();
+
     options.push({
-      id: style.id,
+      branchName: context.branch,
       text: response.text,
-      style: style.prompt,
+      style: styles[i].label,
     });
   }
 
@@ -131,255 +264,75 @@ async function selectOption(
   context: ContextEngine,
   option: ResponseOption,
 ): Promise<void> {
-  await context.restore('before-options');
-  context.set(assistant(option.text));
-  await context.save();
+  await context.switchBranch(option.branchName);
 }
 
 // Usage
-const options = await generateOptions(context, 'What is TypeScript?');
-
+const options = await generateOptions(context, 'Explain quantum computing');
 // Show options to user...
-console.log('Choose a response:');
-options.forEach((opt, i) => {
-  console.log(`${i + 1}. [${opt.style}] ${opt.text.slice(0, 50)}...`);
+
+// User picks "Analogies"
+await selectOption(context, options[2]);
+// Conversation continues on that branch
+```
+
+## Graph Visualization
+
+Get the full graph for debugging:
+
+```typescript
+const graph = await store.getGraph(context.chatId);
+// {
+//   nodes: [
+//     { id: 'msg-1', parentId: null, name: 'user', data: 'Hi', ... },
+//     { id: 'msg-2', parentId: 'msg-1', name: 'assistant', data: 'Hello!', ... },
+//   ],
+//   branches: [
+//     { name: 'main', headMessageId: 'msg-2', isActive: true, ... },
+//   ],
+//   checkpoints: [
+//     { name: 'before-choice', messageId: 'msg-1', ... },
+//   ],
+// }
+```
+
+Use `inspect()` for a complete snapshot including token estimates:
+
+```typescript
+const snapshot = await context.inspect({
+  modelId: 'openai:gpt-4o',
+  renderer: new XmlRenderer(),
 });
-
-// User picks one
-const userChoice = options[0];
-await selectOption(context, userChoice);
 ```
 
-## A/B Testing Responses
+## When to Use What
 
-Compare response quality programmatically:
-
-```typescript
-interface ABTestResult {
-  variantA: { text: string; score: number };
-  variantB: { text: string; score: number };
-  winner: 'A' | 'B';
-}
-
-async function abTestResponses(
-  context: ContextEngine,
-  question: string,
-  scorer: (response: string) => Promise<number>,
-): Promise<ABTestResult> {
-  context.set(user(question));
-  await context.checkpoint('ab-test');
-
-  // Variant A: Default temperature
-  const { systemPrompt, messages } = await context.resolve();
-  const responseA = await generateText({
-    model: groq('gpt-oss-20b'),
-    system: systemPrompt,
-    messages,
-    temperature: 0.7,
-  });
-
-  await context.restore('ab-test');
-
-  // Variant B: Higher temperature
-  const responseB = await generateText({
-    model: groq('gpt-oss-20b'),
-    system: systemPrompt,
-    messages,
-    temperature: 1.0,
-  });
-
-  const scoreA = await scorer(responseA.text);
-  const scoreB = await scorer(responseB.text);
-
-  const result: ABTestResult = {
-    variantA: { text: responseA.text, score: scoreA },
-    variantB: { text: responseB.text, score: scoreB },
-    winner: scoreA >= scoreB ? 'A' : 'B',
-  };
-
-  // Commit the winner
-  await context.restore('ab-test');
-  context.set(assistant(result.winner === 'A' ? responseA.text : responseB.text));
-  await context.save();
-
-  return result;
-}
-```
-
-## Multi-Step Branching
-
-Branch at multiple decision points:
-
-```typescript
-async function exploratoryConversation(context: ContextEngine) {
-  // Stage 1: Initial question
-  context.set(user('Help me learn Python'));
-  await context.checkpoint('stage-1');
-
-  const { systemPrompt, messages } = await context.resolve();
-
-  const response1 = await generateText({
-    model: groq('gpt-oss-20b'),
-    system: systemPrompt,
-    messages,
-  });
-
-  context.set(assistant(response1.text));
-  await context.checkpoint('stage-2');
-
-  // Stage 2: Follow-up options
-  const followUps = [
-    'Show me a hello world example',
-    'Explain data types',
-    'How do functions work?',
-  ];
-
-  for (const followUp of followUps) {
-    await context.restore('stage-2');
-    context.set(user(followUp));
-
-    const result = await context.resolve();
-    const response2 = await generateText({
-      model: groq('gpt-oss-20b'),
-      system: result.systemPrompt,
-      messages: result.messages,
-    });
-
-    console.log(`\nPath: "${followUp}"`);
-    console.log(`Response: ${response2.text.slice(0, 100)}...`);
-  }
-
-  // Commit the best path
-  await context.restore('stage-2');
-  context.set(user('Show me a hello world example'));
-  // ... continue with chosen path
-}
-```
-
-## Tree-Based Branching
-
-For complex exploration, track branches as a tree:
-
-```typescript
-interface BranchNode {
-  id: string;
-  checkpoint: string;
-  messages: Array<{ role: string; content: string }>;
-  children: BranchNode[];
-}
-
-class ConversationTree {
-  private context: ContextEngine;
-  private root: BranchNode;
-  private current: BranchNode;
-
-  constructor(store: ContextStore, chatId: string) {
-    this.context = new ContextEngine({ store, chatId })
-      .set(role('You are helpful.'));
-
-    this.root = {
-      id: 'root',
-      checkpoint: 'root',
-      messages: [],
-      children: [],
-    };
-    this.current = this.root;
-  }
-
-  async initialize(): Promise<void> {
-    await this.context.checkpoint('root');
-  }
-
-  async branch(userMessage: string): Promise<BranchNode> {
-    const branchId = `branch-${Date.now()}`;
-    const checkpointName = `checkpoint-${branchId}`;
-
-    // Save current state
-    await this.context.checkpoint(checkpointName);
-
-    // Create new branch
-    const newBranch: BranchNode = {
-      id: branchId,
-      checkpoint: checkpointName,
-      messages: [{ role: 'user', content: userMessage }],
-      children: [],
-    };
-
-    this.current.children.push(newBranch);
-
-    // Execute the branch
-    this.context.set(user(userMessage));
-    const { systemPrompt, messages } = await this.context.resolve();
-
-    const response = await generateText({
-      model: groq('gpt-oss-20b'),
-      system: systemPrompt,
-      messages,
-    });
-
-    this.context.set(assistant(response.text));
-    newBranch.messages.push({ role: 'assistant', content: response.text });
-
-    this.current = newBranch;
-    return newBranch;
-  }
-
-  async switchBranch(branchId: string): Promise<void> {
-    const branch = this.findBranch(this.root, branchId);
-    if (!branch) {
-      throw new Error(`Branch ${branchId} not found`);
-    }
-
-    await this.context.restore(branch.checkpoint);
-    this.current = branch;
-  }
-
-  private findBranch(node: BranchNode, id: string): BranchNode | null {
-    if (node.id === id) return node;
-    for (const child of node.children) {
-      const found = this.findBranch(child, id);
-      if (found) return found;
-    }
-    return null;
-  }
-}
-```
-
-## When to Use Branching
-
-| Scenario | Approach |
-| --- | --- |
-| Retry bad response | Single checkpoint + restore |
-| A/B test | Named checkpoint + 2 branches |
-| User picks response | Named checkpoint + N options |
-| Complex exploration | Tree-based branching |
-| What-if analysis | Multiple named checkpoints |
-
-## Branching vs Rewind
-
-| Need | Use |
-| --- | --- |
-| Try multiple options from same point | Checkpoint + restore |
-| Remove specific fragments | Rewind |
-| Full state restoration | Checkpoint |
-| Surgical undo | Rewind |
-
-Branching uses checkpoints for exploration. [Rewind](/docs/context/rewind) removes specific fragments.
+| Need | Method |
+|------|--------|
+| Retry bad response | `rewind()` to question |
+| Compare approaches | `rewind()` + generate multiple |
+| Fork without switching | `btw()` |
+| Return to previous branch | `switchBranch()` |
+| Save position for later | `checkpoint()` |
 
 ## Best Practices
 
-1. **Name checkpoints meaningfully**: Use descriptive names like `before-analysis`, `stage-1-complete`
+1. **Use custom message IDs** for rewind targets:
+   ```typescript
+   user('Question', { id: 'turn-1-question' })
+   ```
 
-2. **Clean up branches**: Delete unused checkpoints when done exploring
+2. **List branches** to understand the graph:
+   ```typescript
+   const branches = await store.listBranches(chatId);
+   ```
 
-3. **Track branch metadata**: Store which path was chosen for analytics
+3. **Remember: nothing is deleted.** All branches and messages persist.
 
-4. **Consider memory**: Each checkpoint stores all fragments - manage for long conversations
-
-5. **Commit the winner**: After branching, always commit the chosen path with `save()`
+4. **Pending messages clear on switch.** Save before switching branches.
 
 ## Next Steps
 
-- [Checkpoints](/docs/context/checkpoints) - Checkpoint API details
-- [Rewind](/docs/context/rewind) - Surgical fragment removal
-- [Chat Management](/docs/context/chat) - Managing multiple chats
+- [Checkpoints](/docs/context/checkpoints) - Named restore points
+- [Rewind](/docs/context/rewind) - Rewind API details
+- [Storage](/docs/context/storage) - Store implementations

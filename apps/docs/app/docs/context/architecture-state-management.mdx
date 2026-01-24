@@ -1,0 +1,373 @@
+---
+title: State Management
+description: DAG philosophy, message chains, branches, and checkpoints
+---
+
+The context package uses a DAG (Directed Acyclic Graph) model for conversation state. This design preserves all history through immutable nodes and branch pointers.
+
+## DAG Philosophy
+
+### Messages as Nodes
+
+Every message becomes an immutable node in the graph. Messages are never modified or deleted—new branches capture alternative paths.
+
+```
+Traditional linear chat:
+msg-1 → msg-2 → msg-3 (history lost if you "undo")
+
+DAG-based chat:
+msg-1 ← msg-2 ← msg-3 (main)
+              ↖
+                msg-4 ← msg-5 (main-v2, created by rewind)
+```
+
+**Why immutable nodes?**
+- **History preservation:** Every conversation path is retained
+- **Auditability:** Complete trace of what was said
+- **Branching:** Natural support for "what if" explorations
+
+### parentId as Edges
+
+Each message points to its parent via `parentId`. This forms the edges of the DAG:
+
+```typescript
+interface MessageData {
+  id: string;
+  chatId: string;
+  parentId: string | null;  // null for root messages
+  name: string;             // 'user', 'assistant', etc.
+  type?: string;            // 'message', 'fragment'
+  data: unknown;            // JSON-serializable content
+  createdAt: number;
+}
+```
+
+**Source:** `packages/context/src/lib/store/store.ts:76-84`
+
+### No Deletion
+
+The system never deletes message nodes. Instead:
+- **Rewind** creates a new branch from an earlier point
+- **Delete chat** removes the entire conversation (CASCADE deletes all related data)
+- **Individual messages** remain forever as part of the graph
+
+## Message Chain
+
+### Recursive CTE for Chain Walking
+
+To retrieve a conversation history, the store walks up the parent chain using a recursive Common Table Expression (CTE):
+
+```sql
+WITH RECURSIVE chain AS (
+  SELECT *, 0 as depth FROM messages WHERE id = ?
+  UNION ALL
+  SELECT m.*, c.depth + 1 FROM messages m
+  INNER JOIN chain c ON m.id = c.parentId
+  WHERE c.depth < 100000
+)
+SELECT * FROM chain
+ORDER BY depth DESC
+```
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:417-426`
+
+### Depth Limit Protection
+
+The depth limit of 100,000 prevents infinite loops if circular references somehow enter the data:
+
+```sql
+WHERE c.depth < 100000
+```
+
+This is a safety net—circular references shouldn't occur due to the validation in `addMessage()`:
+
+```typescript
+async addMessage(message: MessageData): Promise<void> {
+  // Prevent circular reference
+  if (message.parentId === message.id) {
+    throw new Error(`Message ${message.id} cannot be its own parent`);
+  }
+  // ...
+}
+```
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:346-348`
+
+### Chronological Ordering
+
+The CTE walks from head (newest) to root (oldest), tracking depth. The final `ORDER BY depth DESC` returns messages in chronological order (root first):
+
+```
+CTE traversal: msg-3 → msg-2 → msg-1 (with depths 0, 1, 2)
+Final order:   msg-1, msg-2, msg-3 (root first)
+```
+
+## Branch Pointers
+
+### BranchData Structure
+
+A branch is simply a named pointer to a head message:
+
+```typescript
+interface BranchData {
+  id: string;
+  chatId: string;
+  name: string;              // 'main', 'main-v2', etc.
+  headMessageId: string | null;  // null if empty branch
+  isActive: boolean;
+  createdAt: number;
+}
+```
+
+**Source:** `packages/context/src/lib/store/store.ts:101-108`
+
+### Auto-Naming Convention
+
+When creating a new branch via `rewind()` or `btw()`, the engine generates names based on prefix counting:
+
+```typescript
+const branches = await this.#store.listBranches(this.#chatId);
+const samePrefix = branches.filter(
+  (it) =>
+    it.name === this.#branchName ||
+    it.name.startsWith(`${this.#branchName}-v`),
+);
+const newBranchName = `${this.#branchName}-v${samePrefix.length + 1}`;
+```
+
+**Naming progression:**
+- `main` (original)
+- `main-v2` (first rewind)
+- `main-v3` (second rewind)
+- `main-v2-v2` (rewind from `main-v2`)
+
+**Source:** `packages/context/src/lib/engine.ts:201-207`
+
+### Single Active Branch
+
+Only one branch per chat can be active. Switching branches deactivates all others:
+
+```typescript
+async setActiveBranch(chatId: string, branchId: string): Promise<void> {
+  // Deactivate all branches for this chat
+  this.#db
+    .prepare('UPDATE branches SET isActive = 0 WHERE chatId = ?')
+    .run(chatId);
+
+  // Activate the specified branch
+  this.#db
+    .prepare('UPDATE branches SET isActive = 1 WHERE id = ?')
+    .run(branchId);
+}
+```
+
+**Source:** `packages/context/src/lib/store/sqlite.store.ts:550-559`
+
+### Branch Operations Diagram
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                     Branch Operations                          │
+├───────────────────────────────────────────────────────────────┤
+│                                                               │
+│  rewind(messageId)                                            │
+│  ├── Creates new branch at that message                       │
+│  ├── Switches to new branch (isActive = true)                 │
+│  └── Clears pending messages                                  │
+│                                                               │
+│  btw()                                                        │
+│  ├── Creates new branch at current HEAD                       │
+│  ├── Does NOT switch (stays on current branch)                │
+│  └── Preserves pending messages                               │
+│                                                               │
+│  switchBranch(name)                                           │
+│  ├── Finds branch by name                                     │
+│  ├── Sets it as active                                        │
+│  └── Clears pending messages                                  │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+```
+
+## Checkpoint Pointers
+
+### CheckpointData Structure
+
+Checkpoints are named pointers to specific messages—bookmarks for easy return:
+
+```typescript
+interface CheckpointData {
+  id: string;
+  chatId: string;
+  name: string;
+  messageId: string;
+  createdAt: number;
+}
+```
+
+**Source:** `packages/context/src/lib/store/store.ts:130-136`
+
+### UNIQUE Constraint
+
+Checkpoint names are unique per chat. Creating a checkpoint with an existing name updates it:
+
+```sql
+UNIQUE(chatId, name)
+
+INSERT INTO checkpoints (id, chatId, name, messageId, createdAt)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chatId, name) DO UPDATE SET
+  messageId = excluded.messageId,
+  createdAt = excluded.createdAt
+```
+
+**Source:** `packages/context/src/lib/store/ddl.sqlite.sql:74` and `packages/context/src/lib/store/sqlite.store.ts:622-631`
+
+### Checkpoint vs Branch
+
+| Aspect | Checkpoint | Branch |
+|--------|------------|--------|
+| Purpose | Named bookmark to return to | Active conversation path |
+| Modifiable | Points to fixed message | Head moves with new messages |
+| Per-chat limit | Unique names only | Unique names only |
+| Activation | Restoring creates new branch | Only one active at a time |
+
+### Restore Creates Branch
+
+Restoring a checkpoint doesn't "jump back"—it creates a new branch from that point:
+
+```typescript
+async restore(name: string): Promise<BranchInfo> {
+  const checkpoint = await this.#store.getCheckpoint(this.#chatId, name);
+  if (!checkpoint) {
+    throw new Error(`Checkpoint "${name}" not found`);
+  }
+  // Rewind creates a new branch from the checkpoint's message
+  return this.rewind(checkpoint.messageId);
+}
+```
+
+**Source:** `packages/context/src/lib/engine.ts:681-693`
+
+## Save Flow
+
+The `save()` method persists pending messages to the graph with careful handling of lazy fragments and updates.
+
+### Flow Diagram
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                         save()                                │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  1. Ensure initialized                                       │
+│     └── Upsert chat, get/create branch                       │
+│                                                              │
+│  2. Early return if no pending messages                      │
+│                                                              │
+│  3. Resolve lazy fragments                                   │
+│     └── Replace LAZY_ID fragments with concrete ones         │
+│                                                              │
+│  4. Check for updates to existing messages                   │
+│     ├── If fragment.id matches existing message              │
+│     ├── Rewind to parent (preserves pending)                 │
+│     └── Regenerate ID to avoid modifying original            │
+│                                                              │
+│  5. Chain messages with parentId                             │
+│     ├── Start with current branch.headMessageId              │
+│     └── Each message's id becomes next's parentId            │
+│                                                              │
+│  6. Add messages to store                                    │
+│     └── store.addMessage() for each                          │
+│                                                              │
+│  7. Update branch head                                       │
+│     └── Point to last added message                          │
+│                                                              │
+│  8. Clear pending messages                                   │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Code Walkthrough
+
+```typescript
+public async save(): Promise<void> {
+  await this.#ensureInitialized();
+
+  if (this.#pendingMessages.length === 0) {
+    return;
+  }
+
+  // 1. Resolve lazy fragments
+  for (let i = 0; i < this.#pendingMessages.length; i++) {
+    const fragment = this.#pendingMessages[i];
+    if (isLazyFragment(fragment)) {
+      this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
+    }
+  }
+
+  // 2. Check for updates - rewind if needed
+  for (const fragment of this.#pendingMessages) {
+    if (fragment.id) {
+      const existing = await this.#store.getMessage(fragment.id);
+      if (existing && existing.parentId) {
+        await this.#rewindForUpdate(existing.parentId);
+        fragment.id = crypto.randomUUID();  // New ID, old message untouched
+        break;
+      }
+    }
+  }
+
+  // 3. Chain messages
+  let parentId = this.#branch!.headMessageId;
+  const now = Date.now();
+
+  for (const fragment of this.#pendingMessages) {
+    const messageData: MessageData = {
+      id: fragment.id ?? crypto.randomUUID(),
+      chatId: this.#chatId,
+      parentId,
+      name: fragment.name,
+      type: fragment.type,
+      data: fragment.codec!.encode(),
+      createdAt: now,
+    };
+
+    await this.#store.addMessage(messageData);
+    parentId = messageData.id;
+  }
+
+  // 4. Update branch head
+  await this.#store.updateBranchHead(this.#branch!.id, parentId);
+  this.#branch!.headMessageId = parentId;
+
+  // 5. Clear pending
+  this.#pendingMessages = [];
+}
+```
+
+**Source:** `packages/context/src/lib/engine.ts:384-444`
+
+### Update Detection
+
+When a pending message has an ID matching an existing message, the engine:
+
+1. Rewinds to the parent of that message (creating a new branch)
+2. Regenerates the fragment's ID
+3. Saves the new message on the new branch
+
+This ensures the original message stays intact on the original branch.
+
+```
+Before update to msg-2:
+main: msg-1 ← msg-2 ← msg-3 (HEAD)
+
+After save() with updated msg-2:
+main:    msg-1 ← msg-2 ← msg-3 (HEAD)
+main-v2: msg-1 ← msg-2' (HEAD, new ID, new content)
+```
+
+## Next Steps
+
+- [Core Concepts](/docs/context/architecture-core-concepts) – Fragments, codecs, and engine orchestration
+- [Renderers](/docs/context/architecture-renderers) – Template Method pattern and implementations
+- [Persistence](/docs/context/architecture-persistence) – Store interface and database adapters

@@ -1,224 +1,270 @@
 ---
 title: Context Engine
-description: Complete API reference for the ContextEngine class - the orchestrator for context management
+description: Complete API reference for ContextEngine - the graph-based context manager
 ---
 
-The `ContextEngine` class is the central orchestrator for managing context fragments. It handles fragment storage, rendering, persistence, and cost estimation.
+The `ContextEngine` manages AI conversation context using a graph-based storage model. Messages form a DAG (directed acyclic graph) where branches and checkpoints are pointers to message nodes.
 
-## Creating a Context Engine
+For a deep-dive into internals, see [Architecture](/docs/context/architecture).
 
-Every context engine requires a store:
+## Creating an Engine
 
-```typescript
-import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
-
-const store = new InMemoryContextStore();
-const context = new ContextEngine({ store });
-```
-
-For persistent storage across sessions:
+Every engine requires a store, chatId, and userId:
 
 ```typescript
 import { ContextEngine, SqliteContextStore } from '@deepagents/context';
 
 const store = new SqliteContextStore('./context.db');
-const context = new ContextEngine({ store });
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+  metadata: { source: 'web' }, // optional initial metadata
+});
 ```
+
+The engine lazily initializes on first `resolve()` or `save()` call. A `main` branch is created automatically.
 
 ## API Reference
 
-### set(...fragments)
+### Properties
 
-Add fragments to the context. Returns `this` for chaining.
+#### chatId
+
+Returns the current chat ID.
 
 ```typescript
-import { role, hint, user } from '@deepagents/context';
+console.log(context.chatId); // 'chat-001'
+```
 
-// Add multiple fragments
+#### branch
+
+Returns the current branch name.
+
+```typescript
+console.log(context.branch); // 'main' or 'main-v2', etc.
+```
+
+#### chat
+
+Returns chat metadata, or `null` if not yet initialized.
+
+```typescript
+const meta = context.chat;
+// {
+//   id: 'chat-001',
+//   userId: 'user-001',
+//   createdAt: 1703123456789,
+//   updatedAt: 1703123456789,
+//   title: 'My Chat',
+//   metadata: { source: 'web' }
+// }
+```
+
+### Core Methods
+
+#### set(...fragments)
+
+Add fragments to context. Message fragments queue for persistence; others stay in memory for system prompt.
+
+```typescript
+import { role, hint, user, assistant } from '@deepagents/context';
+
 context.set(
-  role('You are helpful.'),
-  hint('Be concise.'),
+  role('You are helpful.'),  // → system prompt
+  hint('Be concise.'),       // → system prompt
+  user('Hello!'),            // → queued for save()
 );
 
-// Chain calls
+// Chainable
 context
   .set(role('You are helpful.'))
-  .set(hint('Be concise.'))
   .set(user('Hello!'));
 ```
 
-Fragments are stored in order and rendered in the order they were added.
+#### resolve(options)
 
-### resolve(options?)
-
-Resolves the context into AI SDK-ready format. This is the primary method for getting output.
-
-```typescript
-interface ResolveOptions {
-  renderer?: ContextRenderer; // Default: XmlRenderer
-}
-
-interface ResolveResult {
-  systemPrompt: string;  // Rendered non-message fragments
-  messages: Message[];   // Message fragments as AI SDK format
-}
-```
-
-**Behavior:**
-1. Loads persisted fragments from store (first call only)
-2. Separates message fragments from regular fragments
-3. Renders regular fragments to `systemPrompt`
-4. Converts message fragments to AI SDK `Message[]`
-
-```typescript
-const context = new ContextEngine({ store })
-  .set(
-    role('You are a helpful assistant.'),
-    hint('Be brief.'),
-    user('Hello!'),
-  );
-
-const { systemPrompt, messages } = await context.resolve();
-
-// systemPrompt:
-// <role>You are a helpful assistant.</role>
-// <hint>Be brief.</hint>
-
-// messages:
-// [{ role: 'user', content: 'Hello!' }]
-```
-
-**Using a different renderer:**
-
-```typescript
-import { MarkdownRenderer } from '@deepagents/context';
-
-const { systemPrompt } = await context.resolve({
-  renderer: new MarkdownRenderer(),
-});
-
-// systemPrompt:
-// ## Role
-// You are a helpful assistant.
-//
-// ## Hint
-// Be brief.
-```
-
-### save()
-
-Persists fragments with `persist: true` to the store.
-
-```typescript
-context.set(user('Hello!'));           // persist: true (automatic)
-context.set(assistant('Hi there!'));   // persist: true (automatic)
-context.set(hint('Be helpful'));       // persist: false (default)
-
-await context.save();
-// Only user and assistant messages are saved
-```
-
-**Persistence flow:**
-
-```
-Session 1:
-  context.set(user('Hello'))
-  context.set(assistant('Hi'))
-  await context.save()  →  Store: [user, assistant]
-
-Session 2:
-  const context = new ContextEngine({ store })
-  await context.resolve()  ←  Loads [user, assistant] from store
-```
-
-### render(renderer)
-
-Low-level method to render all fragments. Prefer `resolve()` for normal use.
+Convert context to AI SDK format. **Requires a renderer.**
 
 ```typescript
 import { XmlRenderer } from '@deepagents/context';
 
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
+
+// systemPrompt: rendered non-message fragments
+// messages: array of { role, content } for AI SDK
+```
+
+Behavior:
+1. Initializes chat/branch if needed
+2. Loads persisted messages from graph (walks parent chain)
+3. Renders context fragments to `systemPrompt`
+4. Appends pending messages to `messages[]`
+
+#### save()
+
+Persist pending messages to the graph.
+
+```typescript
+context.set(user('Hello'));
+context.set(assistant('Hi there!'));
+await context.save();
+// Messages now in graph, pending cleared
+```
+
+Each message becomes a node with `parentId` pointing to the previous message. The branch head updates to the last message.
+
+#### render(renderer)
+
+Low-level render of context fragments. Use `resolve()` instead.
+
+```typescript
 const xml = context.render(new XmlRenderer());
 ```
 
-### estimate(modelId, options?)
+### Graph Operations
 
-Estimates token count and cost for the current context.
+#### rewind(messageId)
+
+Create a new branch from a specific message. The original branch is preserved.
 
 ```typescript
-const estimate = await context.estimate('openai:gpt-4o');
+// Conversation: q1 → a1 (wrong answer)
+context.set(user('What is 2+2?', { id: 'q1' }));
+context.set(assistant('The answer is 5.'));
+await context.save();
 
-console.log(estimate);
-// {
-//   model: 'gpt-4o',
-//   provider: 'openai',
-//   tokens: 156,
-//   cost: 0.00078,
-//   limits: {
-//     context: 128000,
-//     output: 16384,
-//     exceedsContext: false,
-//   },
-// }
+// Rewind to q1, creates new branch 'main-v2'
+const newBranch = await context.rewind('q1');
+// newBranch = { name: 'main-v2', headMessageId: 'q1', ... }
+
+// Now on main-v2, add correct answer
+context.set(assistant('The answer is 4.'));
+await context.save();
+
+// Original 'main' branch still has the wrong answer
 ```
 
-**Model ID format**: `provider:model-name`
-- `openai:gpt-4o`
-- `anthropic:claude-3-5-sonnet`
-- `groq:llama-3.3-70b-versatile`
+Returns `BranchInfo` with the new branch details.
 
-**With custom renderer:**
+#### checkpoint(name)
+
+Create a named pointer to the current branch head.
 
 ```typescript
-import { ToonRenderer } from '@deepagents/context';
+context.set(user('Should I learn Python or JavaScript?'));
+context.set(assistant('Both are great! What interests you more?'));
+await context.save();
 
-// Estimate with TOON (more token-efficient)
-const estimate = await context.estimate('openai:gpt-4o', {
-  renderer: new ToonRenderer(),
+// Save this decision point
+const cp = await context.checkpoint('before-choice');
+// cp = { name: 'before-choice', messageId: 'msg-xxx', ... }
+```
+
+Checkpoints are stored in the database and survive across sessions.
+
+#### restore(name)
+
+Restore to a checkpoint by creating a new branch from that point.
+
+```typescript
+// User chose Python, but wants to explore JavaScript path
+await context.restore('before-choice');
+// Now on new branch 'main-v2', at the checkpoint message
+
+context.set(user('I want to learn JavaScript.'));
+await context.save();
+```
+
+Internally calls `rewind()` on the checkpoint's message.
+
+#### switchBranch(name)
+
+Switch to an existing branch by name.
+
+```typescript
+// See all branches
+const branches = await store.listBranches(context.chatId);
+// [{ name: 'main', ... }, { name: 'main-v2', ... }]
+
+// Switch back to original
+await context.switchBranch('main');
+```
+
+Clears pending messages when switching.
+
+#### btw()
+
+Create a parallel branch without switching ("by the way").
+
+```typescript
+// User asks question, model is generating...
+context.set(user('What is the weather?'));
+await context.save();
+
+// User wants to ask something else without waiting
+const newBranch = await context.btw();
+// newBranch = { name: 'main-v2', ... }
+// Still on 'main', pending messages intact
+
+// Later, switch to ask the other question
+await context.switchBranch(newBranch.name);
+context.set(user('Also, what time is it?'));
+await context.save();
+```
+
+Unlike `rewind()`:
+- Uses current HEAD (no messageId needed)
+- Does NOT switch to new branch
+- Keeps pending messages intact
+
+### Chat Metadata
+
+#### updateChat(updates)
+
+Update chat title and metadata.
+
+```typescript
+await context.updateChat({
+  title: 'Python Learning Session',
+  metadata: { tags: ['python', 'beginner'] },
 });
 ```
 
-### consolidate()
+Metadata is merged with existing values.
 
-Placeholder for future context merging functionality. Currently a no-op.
+### Debugging
 
-```typescript
-context.consolidate(); // Does nothing yet
-```
+#### inspect(options)
 
-## Chaining Pattern
-
-All mutating methods return `this`, enabling fluent chains:
+Get a complete snapshot for debugging.
 
 ```typescript
-const context = new ContextEngine({ store })
-  .set(role('You are helpful.'))
-  .set(hint('Be concise.'))
-  .set(hint('Use examples.'));
+import { XmlRenderer } from '@deepagents/context';
 
-const { systemPrompt, messages } = await context.resolve();
+const snapshot = await context.inspect({
+  modelId: 'openai:gpt-4o',
+  renderer: new XmlRenderer(),
+});
+
+console.log(snapshot);
+// {
+//   estimate: { tokens: 156, cost: 0.00078, ... },
+//   rendered: '<role>You are helpful.</role>...',
+//   fragments: {
+//     context: [...],   // non-message fragments
+//     pending: [...],   // unsaved messages
+//     persisted: [...], // messages from store
+//   },
+//   graph: { nodes: [...], branches: [...], checkpoints: [...] },
+//   meta: { chatId: 'chat-001', branch: 'main', timestamp: ... }
+// }
+
+// Write to file for analysis
+await fs.writeFile('debug.json', JSON.stringify(snapshot, null, 2));
 ```
-
-## Fragment Loading
-
-On the first `resolve()` call, the engine loads any persisted fragments from the store:
-
-```typescript
-// Fragments already in store: [user('Previous message')]
-
-const context = new ContextEngine({ store })
-  .set(role('You are helpful.'));
-
-// First resolve() loads from store
-const { messages } = await context.resolve();
-// messages includes the previous user message
-
-// Subsequent calls don't reload
-context.set(user('New message'));
-const result2 = await context.resolve();
-```
-
-This happens exactly once per engine instance.
 
 ## Complete Example
 
@@ -228,6 +274,7 @@ import { groq } from '@ai-sdk/groq';
 import {
   ContextEngine,
   SqliteContextStore,
+  XmlRenderer,
   role,
   hint,
   user,
@@ -236,25 +283,25 @@ import {
 
 async function chat(userMessage: string) {
   const store = new SqliteContextStore('./chat.db');
-  const context = new ContextEngine({ store })
-    .set(
-      role('You are a friendly assistant.'),
-      hint('Keep responses brief.'),
-    );
+  const context = new ContextEngine({
+    store,
+    chatId: 'chat-001',
+    userId: 'user-001',
+  });
 
-  // Add new user message
+  // Set system context
+  context.set(
+    role('You are a friendly assistant.'),
+    hint('Keep responses brief.'),
+  );
+
+  // Add user message
   context.set(user(userMessage));
 
-  // Check cost before calling API
-  const estimate = await context.estimate('groq:llama-3.3-70b-versatile');
-  if (estimate.limits.exceedsContext) {
-    throw new Error('Context too large for model');
-  }
-
-  console.log(`Estimated cost: $${estimate.cost.toFixed(6)}`);
-
   // Resolve and call API
-  const { systemPrompt, messages } = await context.resolve();
+  const { systemPrompt, messages } = await context.resolve({
+    renderer: new XmlRenderer(),
+  });
 
   const response = await generateText({
     model: groq('gpt-oss-20b'),
@@ -270,9 +317,50 @@ async function chat(userMessage: string) {
 }
 ```
 
+## Branching Workflow
+
+```typescript
+// Setup
+const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
+  .set(role('You are helpful.'));
+
+// Conversation
+context.set(user('Explain recursion', { id: 'q1' }));
+const { systemPrompt, messages } = await context.resolve({ renderer: new XmlRenderer() });
+
+const response = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: systemPrompt,
+  messages,
+});
+
+context.set(assistant(response.text));
+await context.save();
+
+// Response was too technical - try again
+await context.rewind('q1');
+// Now on 'main-v2' branch
+
+context.set(hint('Explain like I am 5 years old.'));
+const { systemPrompt: sp2, messages: m2 } = await context.resolve({ renderer: new XmlRenderer() });
+
+const simpler = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: sp2,
+  messages: m2,
+});
+
+context.set(assistant(simpler.text));
+await context.save();
+
+// Both branches preserved:
+// main: original technical explanation
+// main-v2: simpler explanation
+```
+
 ## Next Steps
 
-- [Resolve and Render](/docs/context/resolve-and-render) - Understanding the resolution pipeline
-- [Renderers Overview](/docs/context/renderers-overview) - Output format options
-- [Storage](/docs/context/storage) - Persistence implementations
-- [Cost Estimation](/docs/context/cost-estimation) - Token counting and pricing
+- [Fragments](/docs/context/fragments) - Building blocks of context
+- [Branching](/docs/context/branching) - Graph operations in depth
+- [Checkpoints](/docs/context/checkpoints) - Named restore points
+- [Renderers](/docs/context/renderers-overview) - Output format options
