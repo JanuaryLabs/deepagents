@@ -135,6 +135,24 @@ export const errorRecoveryGuardrail: Guardrail = {
         'My response format was invalid. Let me try again with a properly formatted response.',
       );
     }
+
+    // Pattern: Failed to call a function (invalid_request_error from providers)
+    if (
+      errorText.includes('Failed to call a function') ||
+      errorText.includes('failed_generation')
+    ) {
+      if (context.availableTools.length > 0) {
+        return logAndFail(
+          'Failed function call',
+          `My function call was malformed. Available tools: ${context.availableTools.join(', ')}. Let me format my tool call correctly.`,
+        );
+      }
+      return logAndFail(
+        'Failed function call (no tools)',
+        'My function call was malformed. Let me respond with plain text instead.',
+      );
+    }
+
     // Unknown error - don't retry, let it propagate
     console.log(
       `${prefix} ${chalk.yellow('Unknown error - stopping without retry')}`,
