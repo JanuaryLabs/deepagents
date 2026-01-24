@@ -8,14 +8,14 @@ import {
   user,
 } from '@deepagents/context';
 
-import { withTempDb } from '../helpers/sqlite-test-helpers.ts';
+import { withSqliteContainer } from '../helpers/sqlite-container.ts';
 
 const renderer = new XmlRenderer();
 
 describe('Branching', () => {
   describe('Basic Branch Creation', () => {
     it('should create "main" branch by default', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -35,7 +35,7 @@ describe('Branching', () => {
     });
 
     it('should expose branch name via getter (defaults to main)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -50,7 +50,7 @@ describe('Branching', () => {
 
   describe('Message Chain (parentId linking)', () => {
     it('should set parentId to null for first message', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -73,7 +73,7 @@ describe('Branching', () => {
     });
 
     it('should link subsequent messages via parentId', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -108,7 +108,7 @@ describe('Branching', () => {
     });
 
     it('should update branch headMessageId after save', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -131,7 +131,7 @@ describe('Branching', () => {
     });
 
     it('should return messages in correct order (root to head)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -157,7 +157,7 @@ describe('Branching', () => {
 
   describe('Rewind (Forking)', () => {
     it('should create new branch pointing to rewind message', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -191,7 +191,7 @@ describe('Branching', () => {
     });
 
     it('should deactivate old branch after rewind', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -220,7 +220,7 @@ describe('Branching', () => {
     });
 
     it('should preserve original messages after rewind', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -254,7 +254,7 @@ describe('Branching', () => {
     });
 
     it('should link new messages to fork point after rewind', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -286,7 +286,7 @@ describe('Branching', () => {
     });
 
     it('should update engine branch name after rewind', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -311,7 +311,7 @@ describe('Branching', () => {
     });
 
     it('should clear pending messages after rewind', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -341,7 +341,7 @@ describe('Branching', () => {
 
   describe('Switch Branch', () => {
     it('should switch active branch', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -372,7 +372,7 @@ describe('Branching', () => {
     });
 
     it('should return different message chains per branch', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -415,7 +415,7 @@ describe('Branching', () => {
     });
 
     it('should throw when switching to non-existent branch', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -433,7 +433,7 @@ describe('Branching', () => {
 
   describe('Multiple Branches', () => {
     it('should support multiple branches in one chat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -468,7 +468,7 @@ describe('Branching', () => {
     });
 
     it('should maintain independent headMessageId per branch', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -499,7 +499,7 @@ describe('Branching', () => {
     });
 
     it('should have only one active branch at a time', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -530,7 +530,7 @@ describe('Branching', () => {
 
   describe('btw (By The Way branching)', () => {
     it('should create a new branch from current head without switching', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -560,7 +560,7 @@ describe('Branching', () => {
     });
 
     it('should throw when no messages exist', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -579,7 +579,7 @@ describe('Branching', () => {
     });
 
     it('should keep pending messages after btw', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -603,7 +603,7 @@ describe('Branching', () => {
     });
 
     it('should create incrementing branch names', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,
@@ -624,7 +624,7 @@ describe('Branching', () => {
     });
 
     it('should allow switching to btw branch and adding messages', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           userId: 'test-user',
           store,

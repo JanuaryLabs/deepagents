@@ -1,5 +1,7 @@
 import spawn from 'nano-spawn';
 
+import { checkDockerAvailable, createContainer } from './container.ts';
+
 /**
  * PostgreSQL container configuration.
  */
@@ -37,27 +39,6 @@ export interface PostgresContainer {
 }
 
 /**
- * Check if Docker is available on this machine.
- */
-export async function isDockerAvailable(): Promise<boolean> {
-  try {
-    await spawn('docker', ['info']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Find an available port by letting the OS assign one.
- */
-async function getRandomPort(): Promise<number> {
-  // Use a simple approach: let Docker assign a random port
-  // We'll extract it from docker port command after container starts
-  return 0; // Placeholder, we'll use -P flag
-}
-
-/**
  * Wait for PostgreSQL to be ready to accept connections.
  */
 async function waitForPostgres(
@@ -87,128 +68,10 @@ async function waitForPostgres(
 }
 
 /**
- * Get the mapped host port for a container's internal port.
- */
-async function getMappedPort(
-  containerId: string,
-  internalPort: number,
-): Promise<number> {
-  const result = await spawn('docker', [
-    'port',
-    containerId,
-    String(internalPort),
-  ]);
-
-  // Output format: "0.0.0.0:32768" or ":::32768"
-  const output = result.stdout.trim();
-  const match = output.match(/:(\d+)$/);
-
-  if (!match) {
-    throw new Error(
-      `Failed to get mapped port for container ${containerId}: ${output}`,
-    );
-  }
-
-  return parseInt(match[1], 10);
-}
-
-/**
- * Create a PostgreSQL Docker container for testing.
- *
- * The container is created with a random host port and the
- * postgres:16-alpine image by default. The container is configured
- * to be removed automatically when stopped.
- *
- * @example
- * ```typescript
- * const container = await createPostgresContainer();
- * try {
- *   const store = new PostgresContextStore({ pool: container.connectionString });
- *   // ... run tests
- * } finally {
- *   await container.cleanup();
- * }
- * ```
- */
-export async function createPostgresContainer(
-  config?: PostgresContainerConfig,
-): Promise<PostgresContainer> {
-  const image = config?.image ?? 'postgres:16-alpine';
-  const password = config?.password ?? 'testpassword';
-  const database = config?.database ?? 'testdb';
-  const user = config?.user ?? 'postgres';
-
-  // Generate a unique container name to avoid conflicts
-  const containerName = `postgres-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  // Start the container with:
-  // - Random port mapping (-P publishes all exposed ports to random host ports)
-  // - Auto-remove on stop (--rm)
-  // - Detached mode (-d)
-  // - Environment variables for PostgreSQL setup
-  const runResult = await spawn('docker', [
-    'run',
-    '-d',
-    '--rm',
-    '--name',
-    containerName,
-    '-e',
-    `POSTGRES_PASSWORD=${password}`,
-    '-e',
-    `POSTGRES_DB=${database}`,
-    '-e',
-    `POSTGRES_USER=${user}`,
-    '-P', // Publish all exposed ports to random ports
-    image,
-  ]);
-
-  const containerId = runResult.stdout.trim();
-
-  if (!containerId) {
-    throw new Error(
-      `Failed to start PostgreSQL container: ${runResult.stderr}`,
-    );
-  }
-
-  try {
-    // Get the mapped port for PostgreSQL (internal port 5432)
-    const port = await getMappedPort(containerId, 5432);
-
-    // Wait for PostgreSQL to be ready
-    await waitForPostgres(containerId, user);
-
-    const connectionString = `postgresql://${user}:${password}@localhost:${port}/${database}`;
-
-    return {
-      connectionString,
-      containerId,
-      host: 'localhost',
-      port,
-      user,
-      password,
-      database,
-      cleanup: async () => {
-        try {
-          await spawn('docker', ['stop', containerId]);
-        } catch {
-          // Container might already be stopped, ignore errors
-        }
-      },
-    };
-  } catch (error) {
-    // Cleanup on failure
-    try {
-      await spawn('docker', ['stop', containerId]);
-    } catch {
-      // Ignore cleanup errors
-    }
-    throw error;
-  }
-}
-
-/**
  * Helper to run a test function with a PostgreSQL container.
  * Automatically handles setup and cleanup.
+ *
+ * If Docker is not available, returns undefined and logs a skip message.
  *
  * @example
  * ```typescript
@@ -222,10 +85,47 @@ export async function createPostgresContainer(
 export async function withPostgresContainer<T>(
   fn: (container: PostgresContainer) => Promise<T>,
   config?: PostgresContainerConfig,
-): Promise<T> {
-  const container = await createPostgresContainer(config);
+): Promise<T | undefined> {
+  const dockerAvailable = await checkDockerAvailable('PostgreSQL tests');
+  if (!dockerAvailable) {
+    return undefined;
+  }
+
+  const image = config?.image ?? 'postgres:16-alpine';
+  const password = config?.password ?? 'testpassword';
+  const database = config?.database ?? 'testdb';
+  const user = config?.user ?? 'postgres';
+
+  const containerName = `postgres-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const container = await createContainer({
+    image,
+    name: containerName,
+    env: {
+      POSTGRES_PASSWORD: password,
+      POSTGRES_DB: database,
+      POSTGRES_USER: user,
+    },
+    internalPort: 5432,
+  });
+
   try {
-    return await fn(container);
+    await waitForPostgres(container.containerId, user);
+
+    const connectionString = `postgresql://${user}:${password}@localhost:${container.port}/${database}`;
+
+    const postgresContainer: PostgresContainer = {
+      connectionString,
+      containerId: container.containerId,
+      host: container.host,
+      port: container.port,
+      user,
+      password,
+      database,
+      cleanup: container.cleanup,
+    };
+
+    return await fn(postgresContainer);
   } finally {
     await container.cleanup();
   }

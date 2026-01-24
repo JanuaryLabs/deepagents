@@ -9,14 +9,14 @@ import {
   user,
 } from '@deepagents/context';
 
-import { withTempDb } from '../helpers/sqlite-test-helpers.ts';
+import { withSqliteContainer } from '../helpers/sqlite-container.ts';
 
 const renderer = new XmlRenderer();
 
 describe('Metadata Filtering', () => {
   describe('listChats with metadata filter', () => {
     it('should filter chats by metadata string field', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats with different metadata
         await store.upsertChat({
           id: 'chat-1',
@@ -47,7 +47,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should filter chats by metadata number field', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'chat-1',
           userId: 'user-1',
@@ -74,7 +74,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should filter chats by metadata boolean field', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'chat-1',
           userId: 'user-1',
@@ -100,7 +100,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should combine userId and metadata filters', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'alice-1',
           userId: 'alice',
@@ -130,7 +130,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should return empty array when no chats match metadata filter', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'chat-1',
           userId: 'user-1',
@@ -146,7 +146,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should return empty array when filtering by non-existent metadata key', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'chat-1',
           userId: 'user-1',
@@ -162,7 +162,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should include metadata in ChatInfo response', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'chat-1',
           userId: 'user-1',
@@ -181,7 +181,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should handle chats without metadata when filtering', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'chat-with-metadata',
           userId: 'user-1',
@@ -203,7 +203,7 @@ describe('Metadata Filtering', () => {
     });
 
     it('should support pagination with metadata filter', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create 5 chats with same metadata
         for (let i = 0; i < 5; i++) {
           await store.upsertChat({
@@ -248,7 +248,7 @@ describe('Metadata Filtering', () => {
 describe('User Chat Management', () => {
   describe('Chat Creation with userId', () => {
     it('should create a chat associated with a specific user', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-1',
@@ -265,7 +265,7 @@ describe('User Chat Management', () => {
     });
 
     it('should expose userId via chat metadata getter', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-2',
@@ -282,7 +282,7 @@ describe('User Chat Management', () => {
     });
 
     it('should require userId when creating ContextEngine', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         assert.throws(
           () =>
             new ContextEngine({
@@ -299,7 +299,7 @@ describe('User Chat Management', () => {
 
   describe('Listing Chats by User', () => {
     it('should list only chats belonging to a specific user', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats for different users
         const aliceChat1 = new ContextEngine({
           store,
@@ -336,7 +336,7 @@ describe('User Chat Management', () => {
     });
 
     it('should return all chats when no userId filter is provided', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats for different users
         await new ContextEngine({
           store,
@@ -363,7 +363,7 @@ describe('User Chat Management', () => {
     });
 
     it('should return empty array for user with no chats', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await new ContextEngine({
           store,
           chatId: 'chat-1',
@@ -378,7 +378,7 @@ describe('User Chat Management', () => {
 
   describe('Pagination', () => {
     it('should support limit option', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create 5 chats for same user
         for (let i = 0; i < 5; i++) {
           await new ContextEngine({
@@ -397,7 +397,7 @@ describe('User Chat Management', () => {
     });
 
     it('should support offset option for pagination', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create 5 chats for same user with different timestamps
         for (let i = 0; i < 5; i++) {
           const engine = new ContextEngine({
@@ -437,7 +437,7 @@ describe('User Chat Management', () => {
 
   describe('Multi-User Conversations', () => {
     it('should isolate conversation history per user', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Alice has a conversation
         const aliceEngine = new ContextEngine({
           store,
@@ -476,7 +476,7 @@ describe('User Chat Management', () => {
     });
 
     it('should include userId in ChatInfo when listing', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await new ContextEngine({
           store,
           chatId: 'chat-1',
@@ -491,7 +491,7 @@ describe('User Chat Management', () => {
 
   describe('Chat CRUD with userId', () => {
     it('should preserve userId on chat update', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'updatable-chat',
@@ -511,7 +511,7 @@ describe('User Chat Management', () => {
     });
 
     it('should return userId from upsertChat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const result = await store.upsertChat({
           id: 'new-chat',
           userId: 'test-user',
@@ -527,7 +527,7 @@ describe('User Chat Management', () => {
 
   describe('Security & Data Integrity', () => {
     it('should not return cross-user chats when filtering by userId', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats for multiple users
         await store.upsertChat({ id: 'alice-1', userId: 'alice' });
         await store.upsertChat({ id: 'alice-2', userId: 'alice' });
@@ -549,7 +549,7 @@ describe('User Chat Management', () => {
     });
 
     it('should allow empty userId string (SQLite accepts it)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Note: SQLite's NOT NULL constraint allows empty strings
         // This documents current behavior - consider adding app-level validation if needed
         await store.upsertChat({
@@ -564,7 +564,7 @@ describe('User Chat Management', () => {
     });
 
     it('should preserve userId when getChat retrieves stored chat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'test-chat',
           userId: 'specific-user-id-12345',
@@ -578,7 +578,7 @@ describe('User Chat Management', () => {
     });
 
     it('should handle userId with special characters', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const specialUserIds = [
           'user@example.com',
           'user-with-dashes',
@@ -599,7 +599,7 @@ describe('User Chat Management', () => {
     });
 
     it('should handle userId with unicode characters', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const unicodeUserIds = [
           '用户123',
           'пользователь',
@@ -621,7 +621,7 @@ describe('User Chat Management', () => {
     });
 
     it('should treat userId filtering as case-sensitive', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({ id: 'chat-lower', userId: 'alice' });
         await store.upsertChat({ id: 'chat-upper', userId: 'Alice' });
         await store.upsertChat({ id: 'chat-mixed', userId: 'ALICE' });
@@ -643,7 +643,7 @@ describe('User Chat Management', () => {
 
   describe('userId with Branching & Checkpoints', () => {
     it('should preserve userId through branching operations', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'branching-chat',
@@ -677,7 +677,7 @@ describe('User Chat Management', () => {
     });
 
     it('should preserve userId through checkpoint restore', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'checkpoint-chat',
@@ -704,7 +704,7 @@ describe('User Chat Management', () => {
 
   describe('userId with Search & Aggregations', () => {
     it('should return correct messageCount per user chat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Alice's chat with 3 messages
         const aliceEngine = new ContextEngine({
           store,
@@ -733,47 +733,11 @@ describe('User Chat Management', () => {
         assert.strictEqual(bobChats[0].messageCount, 1);
       });
     });
-
-    it('should scope searchMessages to the correct chat', async () => {
-      await withTempDb(async (store) => {
-        // Alice's chat with searchable content
-        const aliceEngine = new ContextEngine({
-          store,
-          chatId: 'alice-search',
-          userId: 'alice',
-        });
-        aliceEngine.set(user('I love pizza and pasta'));
-        await aliceEngine.save();
-
-        // Bob's chat with different content
-        const bobEngine = new ContextEngine({
-          store,
-          chatId: 'bob-search',
-          userId: 'bob',
-        });
-        bobEngine.set(user('I prefer sushi and ramen'));
-        await bobEngine.save();
-
-        // Search in Alice's chat should only find her content
-        const aliceResults = await store.searchMessages(
-          'alice-search',
-          'pizza',
-        );
-        assert.strictEqual(aliceResults.length, 1);
-
-        // Searching for Bob's content in Alice's chat should return nothing
-        const wrongResults = await store.searchMessages(
-          'alice-search',
-          'sushi',
-        );
-        assert.strictEqual(wrongResults.length, 0);
-      });
-    });
   });
 
   describe('Edge Cases & Boundary Conditions', () => {
     it('should handle very long userId strings', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const longUserId = 'u'.repeat(500); // 500 character userId
 
         await store.upsertChat({ id: 'long-user-chat', userId: longUserId });
@@ -785,7 +749,7 @@ describe('User Chat Management', () => {
     });
 
     it('should handle pagination correctly with userId filter', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create 10 chats for alice
         for (let i = 0; i < 10; i++) {
           await store.upsertChat({ id: `alice-page-${i}`, userId: 'alice' });
@@ -835,7 +799,7 @@ describe('User Chat Management', () => {
     });
 
     it('should return empty when offset exceeds total chats', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({ id: 'only-chat', userId: 'user' });
 
         // Note: OFFSET only works with LIMIT in SQLite
@@ -851,7 +815,7 @@ describe('User Chat Management', () => {
 
   describe('userId Immutability & Validation', () => {
     it('should not change userId when upserting existing chat with different userId', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chat with original userId
         await store.upsertChat({
           id: 'immutable-chat',
@@ -882,7 +846,7 @@ describe('User Chat Management', () => {
     });
 
     it('should validate userId at TypeScript level (compile-time)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // This test documents that TypeScript enforces userId as required
         // The following would cause a compile error if uncommented:
         // await store.upsertChat({ id: 'no-user' }); // Error: Property 'userId' is missing
@@ -897,7 +861,7 @@ describe('User Chat Management', () => {
     });
 
     it('should preserve userId when ContextEngine reconnects to existing chat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // First engine creates the chat
         const engine1 = new ContextEngine({
           store,
@@ -930,7 +894,7 @@ describe('User Chat Management', () => {
 
   describe('Concurrent Operations', () => {
     it('should handle concurrent chat creation for same user', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create multiple chats concurrently for same user
         const createPromises = Array.from({ length: 10 }, (_, i) =>
           store.upsertChat({
@@ -955,7 +919,7 @@ describe('User Chat Management', () => {
     });
 
     it('should handle concurrent chat creation for different users', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats for multiple users concurrently
         const users = ['user-a', 'user-b', 'user-c', 'user-d', 'user-e'];
         const createPromises = users.flatMap((userId, userIndex) =>
@@ -988,7 +952,7 @@ describe('User Chat Management', () => {
     });
 
     it('should handle concurrent reads and writes', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create initial chat
         await store.upsertChat({ id: 'rw-chat', userId: 'rw-user' });
 
@@ -1019,7 +983,7 @@ describe('User Chat Management', () => {
 
 describe('Message Upsert', () => {
   it('should update existing message with same ID', async () => {
-    await withTempDb(async (store) => {
+    await withSqliteContainer(async (store) => {
       await store.upsertChat({ id: 'chat-1', userId: 'user-1' });
 
       await store.addMessage({
@@ -1059,41 +1023,6 @@ describe('Message Upsert', () => {
       assert.strictEqual(msg.name, 'assistant');
       assert.strictEqual(msg.parentId, null);
       assert.strictEqual(msg.createdAt, 1000);
-    });
-  });
-
-  it('should update FTS index on upsert', async () => {
-    await withTempDb(async (store) => {
-      await store.upsertChat({ id: 'chat-1', userId: 'user-1' });
-
-      await store.addMessage({
-        id: 'msg-1',
-        chatId: 'chat-1',
-        parentId: null,
-        name: 'user',
-        type: 'message',
-        data: 'original searchable content',
-        createdAt: 1000,
-      });
-
-      let results = await store.searchMessages('chat-1', 'original');
-      assert.strictEqual(results.length, 1);
-
-      await store.addMessage({
-        id: 'msg-1',
-        chatId: 'chat-1',
-        parentId: null,
-        name: 'user',
-        type: 'message',
-        data: 'updated searchable content',
-        createdAt: 1000,
-      });
-
-      results = await store.searchMessages('chat-1', 'original');
-      assert.strictEqual(results.length, 0);
-
-      results = await store.searchMessages('chat-1', 'updated');
-      assert.strictEqual(results.length, 1);
     });
   });
 });

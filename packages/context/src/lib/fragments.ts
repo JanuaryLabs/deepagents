@@ -223,9 +223,10 @@ export function assistantText(
 
 /**
  * Symbol to mark fragments for lazy ID resolution.
+ * Uses Symbol.for() to ensure consistent identity across module instances.
  * @internal
  */
-export const LAZY_ID = Symbol('lazy-id');
+export const LAZY_ID = Symbol.for('@deepagents/context:lazy-id');
 
 /**
  * Lazy fragment configuration for ID resolution.

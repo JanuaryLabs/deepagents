@@ -91,6 +91,38 @@ describe('Guardrail System', () => {
       assert.ok(result.feedback.includes('invalid'));
     });
 
+    it('should handle failed function call errors', () => {
+      const errorPart = {
+        type: 'error' as const,
+        errorText:
+          "Failed to call a function. Please adjust your prompt. See 'failed_generation' for more details.",
+      };
+
+      const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
+        availableTools: ['bash', 'sql'],
+        availableSkills: [],
+      });
+
+      assert.strictEqual(result.type, 'fail');
+      assert.ok(result.feedback.includes('malformed'));
+      assert.ok(result.feedback.includes('Available tools: bash, sql'));
+    });
+
+    it('should handle failed function call errors with no tools', () => {
+      const errorPart = {
+        type: 'error' as const,
+        errorText: "Failed to call a function. See 'failed_generation'",
+      };
+
+      const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
+        availableTools: [],
+        availableSkills: [],
+      });
+
+      assert.strictEqual(result.type, 'fail');
+      assert.ok(result.feedback.includes('plain text'));
+    });
+
     it('should handle tool schema validation errors', () => {
       const errorPart = {
         type: 'error' as const,
@@ -359,6 +391,41 @@ describe('Guardrail System', () => {
       );
 
       // This should NOT throw "Cannot read properties of undefined (reading 'encode')"
+      await context.save();
+    });
+
+    it('should handle second guardrail retry when assistant message exists', async () => {
+      const {
+        ContextEngine,
+        InMemoryContextStore,
+        lastAssistantMessage,
+        user,
+        assistantText,
+      } = await import('@deepagents/context');
+
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        userId: 'test-user',
+        chatId: 'test-chat-2',
+        store,
+      });
+
+      // Step 1: User message
+      context.set(user('Hello'));
+      await context.save();
+
+      // Step 2: First assistant response (simulating successful stream)
+      context.set(assistantText('Hi there!', { id: 'first-assistant' }));
+      await context.save();
+
+      // Step 3: Simulate SECOND guardrail retry
+      // This uses lastAssistantMessage which will resolve to 'first-assistant' ID
+      // Then the new rewindForUpdate logic kicks in because the ID exists
+      context.set(
+        lastAssistantMessage('I made an error. Let me correct myself.'),
+      );
+
+      // This should NOT throw "Fragment 'assistant' is missing codec"
       await context.save();
     });
   });

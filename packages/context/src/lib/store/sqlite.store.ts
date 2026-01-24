@@ -48,17 +48,6 @@ export class SqliteContextStore extends ContextStore {
   constructor(path: string) {
     super();
     this.#db = new DatabaseSync(path);
-
-    // Performance PRAGMAs (set before schema/data operations)
-    this.#db.exec('PRAGMA journal_mode = WAL'); // Concurrent reads, faster writes
-    this.#db.exec('PRAGMA synchronous = NORMAL'); // Safe for crashes, 10x faster than FULL
-    this.#db.exec('PRAGMA cache_size = -64000'); // 64MB page cache
-    this.#db.exec('PRAGMA temp_store = MEMORY'); // Temp tables in RAM
-    this.#db.exec('PRAGMA mmap_size = 268435456'); // 256MB memory-mapped I/O
-
-    // Integrity PRAGMAs
-    this.#db.exec('PRAGMA foreign_keys = ON');
-
     this.#db.exec(STORE_DDL);
   }
 

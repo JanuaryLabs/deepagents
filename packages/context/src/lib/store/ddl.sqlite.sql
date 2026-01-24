@@ -1,6 +1,16 @@
 -- Context Store DDL for SQLite
 -- This schema implements a DAG-based message history with branching and checkpoints.
 
+-- Performance PRAGMAs (session-level, run on each connection)
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -64000;
+PRAGMA temp_store = MEMORY;
+PRAGMA mmap_size = 268435456;
+
+-- Integrity
+PRAGMA foreign_keys = ON;
+
 -- Chats table
 -- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
 CREATE TABLE IF NOT EXISTS chats (

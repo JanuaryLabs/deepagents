@@ -566,17 +566,17 @@ Body`,
       assert.strictEqual(skillData.description, 'From second2');
     });
 
-    it('returns empty skills list for non-existent directory', () => {
+    it('returns empty fragment for non-existent directory', () => {
       const fragment = skills({
         paths: [{ host: '/nonexistent/path', sandbox: '/skills' }],
       });
 
-      const data = fragment.data as ContextFragment[];
-      const skillFragments = data.filter((f) => f.name === 'skill');
-
-      // Should still have instructions but no skills
-      assert.ok(data.find((f) => f.name === 'instructions'));
-      assert.strictEqual(skillFragments.length, 0);
+      // When no skills are found, returns empty data array
+      assert.deepStrictEqual(fragment.data, []);
+      assert.deepStrictEqual(
+        (fragment.metadata as { mounts: unknown[] }).mounts,
+        [],
+      );
     });
 
     it('handles include filter with non-existent skill names', () => {

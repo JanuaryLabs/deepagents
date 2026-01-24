@@ -200,9 +200,9 @@ export class ContextEngine {
     // Generate branch name based on same-prefix count (e.g., main-v2, main-v3)
     const branches = await this.#store.listBranches(this.#chatId);
     const samePrefix = branches.filter(
-      (b) =>
-        b.name === this.#branchName ||
-        b.name.startsWith(`${this.#branchName}-v`),
+      (it) =>
+        it.name === this.#branchName ||
+        it.name.startsWith(`${this.#branchName}-v`),
     );
     const newBranchName = `${this.#branchName}-v${samePrefix.length + 1}`;
 
@@ -237,6 +237,16 @@ export class ContextEngine {
       messageCount: chain.length,
       createdAt: newBranch.createdAt,
     };
+  }
+
+  /**
+   * Rewind to a message without clearing pending messages.
+   * Used internally when saving an update to an existing message.
+   */
+  async #rewindForUpdate(messageId: string): Promise<void> {
+    const pendingBackup = [...this.#pendingMessages];
+    await this.rewind(messageId);
+    this.#pendingMessages = pendingBackup;
   }
 
   /**
@@ -383,6 +393,21 @@ export class ContextEngine {
       const fragment = this.#pendingMessages[i];
       if (isLazyFragment(fragment)) {
         this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
+      }
+    }
+
+    // Check if any fragment is an update to an existing message.
+    // If so, rewind to the parent to create a new branch, preserving the original.
+    for (const fragment of this.#pendingMessages) {
+      if (fragment.id) {
+        const existing = await this.#store.getMessage(fragment.id);
+        if (existing && existing.parentId) {
+          // Rewind to parent, creates new branch, preserves pending
+          await this.#rewindForUpdate(existing.parentId);
+          // Regenerate ID so the original message stays untouched on old branch
+          fragment.id = crypto.randomUUID();
+          break; // Only need to rewind once
+        }
       }
     }
 

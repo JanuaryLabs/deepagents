@@ -551,4 +551,148 @@ describe('Sqlite ContextEngine Integration', () => {
       assert.strictEqual(result.messages.length, 2);
     });
   });
+
+  it('creates new branch when saving message with existing ID (tool result scenario)', async () => {
+    await withTempDb('tool-result-branch', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-tool-result',
+        userId: 'user-1',
+      });
+
+      // 1. User message → save
+      engine.set(user(makeUserMessage('user-msg-1', 'What is the weather?')));
+      await engine.save();
+
+      // 2. Assistant message with pending tool → save (head = assistant-pending)
+      const pendingToolMessage = {
+        id: 'assistant-pending',
+        role: 'assistant' as const,
+        parts: [
+          { type: 'step-start' as const },
+          {
+            type: 'tool-render_ask_user_question' as const,
+            toolCallId: 'fc_123',
+            state: 'pending' as const,
+            input: { questions: [{ question: 'Which city?', type: 'text' }] },
+          },
+        ],
+      };
+      engine.set(
+        assistantText(JSON.stringify(pendingToolMessage), {
+          id: 'assistant-pending',
+        }),
+      );
+      await engine.save();
+
+      // Verify we're on main branch with 2 messages
+      assert.strictEqual(engine.branch, 'main');
+      const beforeBranches = await store.listBranches('chat-tool-result');
+      assert.strictEqual(beforeBranches.length, 1);
+
+      // 3. Tool result comes back - set fragment with SAME ID (answered version)
+      const answeredToolMessage = {
+        id: 'assistant-pending',
+        role: 'assistant' as const,
+        parts: [
+          { type: 'step-start' as const },
+          {
+            type: 'tool-render_ask_user_question' as const,
+            toolCallId: 'fc_123',
+            state: 'output-available' as const,
+            input: { questions: [{ question: 'Which city?', type: 'text' }] },
+            output: { answers: [{ type: 'text', answer: 'New York' }] },
+          },
+        ],
+      };
+      engine.set(
+        assistantText(JSON.stringify(answeredToolMessage), {
+          id: 'assistant-pending',
+        }),
+      );
+      await engine.save();
+
+      // 4. Verify new branch was created
+      const afterBranches = await store.listBranches('chat-tool-result');
+      assert.strictEqual(afterBranches.length, 2, 'Should have 2 branches now');
+      assert.strictEqual(engine.branch, 'main-v2', 'Should be on new branch');
+
+      // 5. Verify main-v2 chain: user → new_assistant (2 messages)
+      const result = await engine.resolve({ renderer });
+      assert.strictEqual(result.messages.length, 2);
+
+      // 6. Verify main branch is preserved with original assistant message
+      await engine.switchBranch('main');
+      const mainResult = await engine.resolve({ renderer });
+      assert.strictEqual(mainResult.messages.length, 2);
+      const mainAssistant = mainResult.messages[1] as { id?: string };
+      assert.strictEqual(mainAssistant.id, 'assistant-pending');
+    });
+  });
+
+  it('creates new branch when lastAssistantMessage resolves to head (guardrail retry scenario)', async () => {
+    await withTempDb('lazy-resolve-branch', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-lazy-resolve',
+        userId: 'user-1',
+      });
+
+      // 1. User message → save
+      engine.set(user(makeUserMessage('user-msg-1', 'Help me with code')));
+      await engine.save();
+
+      // 2. Assistant message → save (head = assistant message)
+      engine.set(
+        assistantText('Let me try to read the file...', {
+          id: 'assistant-msg-1',
+        }),
+      );
+      await engine.save();
+
+      // Verify we're on main branch with 2 messages
+      assert.strictEqual(engine.branch, 'main');
+      const beforeBranches = await store.listBranches('chat-lazy-resolve');
+      assert.strictEqual(beforeBranches.length, 1);
+
+      // 3. lastAssistantMessage (simulating guardrail retry)
+      //    This resolves to assistant-msg-1 which IS the current head
+      engine.set(
+        lastAssistantMessage(
+          'Oops, read_file failed. Let me try again with the correct path.',
+        ),
+      );
+      await engine.save();
+
+      // 4. Verify new branch was created
+      const afterBranches = await store.listBranches('chat-lazy-resolve');
+      assert.strictEqual(afterBranches.length, 2, 'Should have 2 branches now');
+      assert.strictEqual(engine.branch, 'main-v2', 'Should be on new branch');
+
+      // 5. Verify main-v2 chain: user → new_assistant (2 messages)
+      const result = await engine.resolve({ renderer });
+      assert.strictEqual(result.messages.length, 2);
+      const newAssistant = result.messages[1] as {
+        parts?: Array<{ type: string; text?: string }>;
+      };
+      assert.ok(
+        newAssistant.parts?.[0]?.text?.includes('try again'),
+        'Should have corrected message',
+      );
+
+      // 6. Verify main branch is preserved with original assistant message
+      await engine.switchBranch('main');
+      const mainResult = await engine.resolve({ renderer });
+      assert.strictEqual(mainResult.messages.length, 2);
+      const mainAssistant = mainResult.messages[1] as {
+        parts?: Array<{ type: string; text?: string }>;
+      };
+      assert.ok(
+        mainAssistant.parts?.[0]?.text?.includes('try to read'),
+        'Should have original message',
+      );
+    });
+  });
 });

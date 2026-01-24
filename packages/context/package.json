@@ -48,12 +48,17 @@
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
+    "@types/mssql": "^9.1.6",
     "@types/pg": "^8.16.0"
   },
   "peerDependencies": {
+    "mssql": "^11.0.1",
     "pg": "^8.17.2"
   },
   "peerDependenciesMeta": {
+    "mssql": {
+      "optional": true
+    },
     "pg": {
       "optional": true
     }

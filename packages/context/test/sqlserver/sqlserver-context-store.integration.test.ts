@@ -1,25 +1,28 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { PostgresContextStore } from '@deepagents/context';
+import { SqlServerContextStore } from '@deepagents/context';
 
-import { withPostgresContainer } from '../helpers/postgres-container.ts';
+import {
+  waitForFtsReady,
+  withSqlServerContainer,
+} from '../helpers/sqlserver-container.ts';
 
 /**
- * Integration tests for PostgreSQL ContextStore.
+ * Integration tests for SQL Server ContextStore.
  *
  * These tests require Docker to be installed and running.
  * Tests are skipped gracefully if Docker is not available.
  */
-describe('PostgreSQL ContextStore Integration', () => {
+describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
   // Chat Operations
   // ==========================================================================
 
   describe('Chat Operations', () => {
     it('should create a chat with auto timestamps', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -47,8 +50,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should upsert chat idempotently', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -77,8 +80,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should return undefined for non-existent chat', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -90,8 +93,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should update chat title and metadata', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -121,8 +124,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should list chats with pagination', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -160,8 +163,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should list chats filtered by userId', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -180,8 +183,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should delete chat and return true', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -198,8 +201,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should return false when deleting non-existent chat', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -211,8 +214,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should respect userId constraint on delete', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -245,8 +248,8 @@ describe('PostgreSQL ContextStore Integration', () => {
 
   describe('Message Operations', () => {
     it('should add and retrieve a message', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -276,8 +279,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should return undefined for non-existent message', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -289,8 +292,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should build message chain with parentId linking', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -336,19 +339,19 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should reject self-reference parentId', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
           await store.createChat({ id: 'chat-self-ref', userId: 'user-1' });
 
           await assert.rejects(
-            () =>
+            async () =>
               store.addMessage({
                 id: 'self-ref-msg',
                 chatId: 'chat-self-ref',
-                parentId: 'self-ref-msg',
+                parentId: 'self-ref-msg', // Self-reference
                 name: 'user',
                 data: 'Should fail',
                 createdAt: Date.now(),
@@ -361,8 +364,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should check if message has children', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -399,8 +402,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should get messages from active branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -432,8 +435,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should throw error when getting messages for non-existent chat', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -453,8 +456,8 @@ describe('PostgreSQL ContextStore Integration', () => {
 
   describe('Branch Operations', () => {
     it('should create main branch automatically with chat', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -472,8 +475,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should create and retrieve a branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -505,8 +508,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should get active branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -523,8 +526,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should set active branch and deactivate others', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -563,8 +566,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should update branch head', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -592,8 +595,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should list branches with message counts', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -656,8 +659,8 @@ describe('PostgreSQL ContextStore Integration', () => {
 
   describe('Checkpoint Operations', () => {
     it('should create and retrieve a checkpoint', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -694,8 +697,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should return undefined for non-existent checkpoint', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -715,8 +718,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should upsert checkpoint on conflict', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -773,8 +776,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should list checkpoints ordered by createdAt descending', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -832,8 +835,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should delete a checkpoint', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -876,18 +879,271 @@ describe('PostgreSQL ContextStore Integration', () => {
   });
 
   // ==========================================================================
+  // Search Operations (CONTAINSTABLE)
+  // ==========================================================================
+
+  describe('Search Operations', () => {
+    it('should search messages by keyword', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+        });
+        try {
+          await store.createChat({ id: 'chat-search', userId: 'user-1' });
+
+          const branch = await store.getActiveBranch('chat-search');
+          let lastMsgId: string | null = null;
+
+          const messages = [
+            { id: 'search-msg-1', name: 'user', data: 'Hello world' },
+            {
+              id: 'search-msg-2',
+              name: 'assistant',
+              data: 'Welcome to the application',
+            },
+            {
+              id: 'search-msg-3',
+              name: 'user',
+              data: 'How do I configure settings?',
+            },
+            {
+              id: 'search-msg-4',
+              name: 'assistant',
+              data: 'You can configure settings in the preferences menu',
+            },
+            { id: 'search-msg-5', name: 'user', data: 'Thanks for the help!' },
+          ];
+
+          for (const msg of messages) {
+            await store.addMessage({
+              id: msg.id,
+              chatId: 'chat-search',
+              parentId: lastMsgId,
+              name: msg.name,
+              data: msg.data,
+              createdAt: Date.now(),
+            });
+            lastMsgId = msg.id;
+          }
+
+          await store.updateBranchHead(branch!.id, lastMsgId);
+
+          // Wait for full-text index to populate (SQL Server FTS is async)
+          await waitForFtsReady(container.connectionString);
+
+          const results = await store.searchMessages(
+            'chat-search',
+            'configure',
+          );
+
+          assert.ok(results.length > 0);
+          assert.ok(
+            results.some((r) =>
+              JSON.stringify(r.message.data).includes('configure'),
+            ),
+          );
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should return ranked results', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+        });
+        try {
+          await store.createChat({ id: 'chat-rank', userId: 'user-1' });
+
+          await store.addMessage({
+            id: 'rank-msg-1',
+            chatId: 'chat-rank',
+            parentId: null,
+            name: 'user',
+            data: 'I need to change my settings',
+            createdAt: Date.now(),
+          });
+
+          await store.addMessage({
+            id: 'rank-msg-2',
+            chatId: 'chat-rank',
+            parentId: 'rank-msg-1',
+            name: 'assistant',
+            data: 'Settings settings settings are important',
+            createdAt: Date.now(),
+          });
+
+          // Wait for full-text index to populate (SQL Server FTS is async)
+          await waitForFtsReady(container.connectionString);
+
+          const results = await store.searchMessages('chat-rank', 'settings');
+
+          assert.ok(results.length > 0);
+
+          // Results should have a rank
+          assert.ok(results.every((r) => typeof r.rank === 'number'));
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should return snippets', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+        });
+        try {
+          await store.createChat({ id: 'chat-snippet', userId: 'user-1' });
+
+          await store.addMessage({
+            id: 'snippet-msg-1',
+            chatId: 'chat-snippet',
+            parentId: null,
+            name: 'user',
+            data: 'How do I configure my settings?',
+            createdAt: Date.now(),
+          });
+
+          // Wait for full-text index to populate (SQL Server FTS is async)
+          await waitForFtsReady(container.connectionString);
+
+          const results = await store.searchMessages(
+            'chat-snippet',
+            'configure',
+          );
+
+          assert.ok(results.length > 0);
+          assert.ok(results[0].snippet);
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should filter by roles', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+        });
+        try {
+          await store.createChat({ id: 'chat-roles', userId: 'user-1' });
+
+          await store.addMessage({
+            id: 'role-msg-1',
+            chatId: 'chat-roles',
+            parentId: null,
+            name: 'user',
+            data: 'Hello from user',
+            createdAt: Date.now(),
+          });
+
+          await store.addMessage({
+            id: 'role-msg-2',
+            chatId: 'chat-roles',
+            parentId: 'role-msg-1',
+            name: 'assistant',
+            data: 'Welcome back!',
+            createdAt: Date.now(),
+          });
+
+          // Wait for full-text index to populate (SQL Server FTS is async)
+          await waitForFtsReady(container.connectionString);
+
+          const userResults = await store.searchMessages(
+            'chat-roles',
+            'Hello',
+            { roles: ['user'] },
+          );
+
+          const assistantResults = await store.searchMessages(
+            'chat-roles',
+            'Welcome',
+            { roles: ['assistant'] },
+          );
+
+          assert.ok(userResults.every((r) => r.message.name === 'user'));
+          assert.ok(
+            assistantResults.every((r) => r.message.name === 'assistant'),
+          );
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should respect limit option', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+        });
+        try {
+          await store.createChat({ id: 'chat-limit', userId: 'user-1' });
+
+          for (let i = 0; i < 5; i++) {
+            await store.addMessage({
+              id: `limit-msg-${i}`,
+              chatId: 'chat-limit',
+              parentId: null,
+              name: 'user',
+              data: 'The quick brown fox',
+              createdAt: Date.now() + i,
+            });
+          }
+
+          // Wait for full-text index to populate (SQL Server FTS is async)
+          await waitForFtsReady(container.connectionString);
+
+          const results = await store.searchMessages('chat-limit', 'quick', {
+            limit: 2,
+          });
+
+          assert.ok(results.length <= 2);
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should return empty array for no matches', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+        });
+        try {
+          await store.createChat({ id: 'chat-nomatch', userId: 'user-1' });
+
+          await store.addMessage({
+            id: 'nomatch-msg-1',
+            chatId: 'chat-nomatch',
+            parentId: null,
+            name: 'user',
+            data: 'Hello world',
+            createdAt: Date.now(),
+          });
+
+          const results = await store.searchMessages(
+            'chat-nomatch',
+            'xyznonexistent',
+          );
+
+          assert.strictEqual(results.length, 0);
+        } finally {
+          await store.close();
+        }
+      }));
+  });
+
+  // ==========================================================================
   // Graph Visualization
   // ==========================================================================
 
   describe('Graph Visualization', () => {
     it('should return complete graph data', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
           await store.createChat({ id: 'chat-graph', userId: 'user-1' });
 
+          // Add messages
           await store.addMessage({
             id: 'graph-msg-1',
             chatId: 'chat-graph',
@@ -906,9 +1162,11 @@ describe('PostgreSQL ContextStore Integration', () => {
             createdAt: Date.now(),
           });
 
+          // Update branch head
           const branch = await store.getActiveBranch('chat-graph');
           await store.updateBranchHead(branch!.id, 'graph-msg-2');
 
+          // Add checkpoint
           await store.createCheckpoint({
             id: 'graph-cp-1',
             chatId: 'chat-graph',
@@ -924,6 +1182,7 @@ describe('PostgreSQL ContextStore Integration', () => {
           assert.strictEqual(graph.branches.length, 1);
           assert.strictEqual(graph.checkpoints.length, 1);
 
+          // Check node structure
           const node1 = graph.nodes.find((n) => n.id === 'graph-msg-1');
           assert.ok(node1);
           assert.strictEqual(node1.role, 'user');
@@ -933,9 +1192,11 @@ describe('PostgreSQL ContextStore Integration', () => {
           assert.ok(node2);
           assert.strictEqual(node2.parentId, 'graph-msg-1');
 
+          // Check branch structure
           assert.strictEqual(graph.branches[0].name, 'main');
           assert.strictEqual(graph.branches[0].isActive, true);
 
+          // Check checkpoint structure
           assert.strictEqual(graph.checkpoints[0].name, 'checkpoint-1');
           assert.strictEqual(graph.checkpoints[0].messageId, 'graph-msg-1');
         } finally {
@@ -944,8 +1205,8 @@ describe('PostgreSQL ContextStore Integration', () => {
       }));
 
     it('should truncate long content in graph nodes', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -974,14 +1235,14 @@ describe('PostgreSQL ContextStore Integration', () => {
   });
 
   // ==========================================================================
-  // PostgreSQL-Specific Tests
+  // SQL Server-Specific Tests
   // ==========================================================================
 
-  describe('PostgreSQL-Specific', () => {
-    describe('JSONB Metadata', () => {
+  describe('SQL Server-Specific', () => {
+    describe('NVARCHAR(MAX) JSON Metadata', () => {
       it('should store and retrieve complex nested metadata', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
+        withSqlServerContainer(async (container) => {
+          const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
           try {
@@ -993,130 +1254,29 @@ describe('PostgreSQL ContextStore Integration', () => {
             };
 
             await store.createChat({
-              id: 'chat-jsonb-nested',
+              id: 'chat-json-nested',
               userId: 'user-1',
               metadata,
             });
 
-            const chat = await store.getChat('chat-jsonb-nested');
+            const chat = await store.getChat('chat-json-nested');
             assert.deepStrictEqual(chat?.metadata, metadata);
-          } finally {
-            await store.close();
-          }
-        }));
-
-      it('should filter by string metadata value', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
-            pool: container.connectionString,
-          });
-          try {
-            await store.createChat({
-              id: 'chat-meta-string',
-              userId: 'user-meta-test',
-              metadata: { category: 'support' },
-            });
-
-            await store.createChat({
-              id: 'chat-meta-string-2',
-              userId: 'user-meta-test',
-              metadata: { category: 'sales' },
-            });
-
-            const results = await store.listChats({
-              userId: 'user-meta-test',
-              metadata: { key: 'category', value: 'support' },
-            });
-
-            assert.strictEqual(results.length, 1);
-            assert.strictEqual(results[0].id, 'chat-meta-string');
-          } finally {
-            await store.close();
-          }
-        }));
-
-      it('should filter by boolean metadata value', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
-            pool: container.connectionString,
-          });
-          try {
-            await store.createChat({
-              id: 'chat-meta-bool-true',
-              userId: 'user-bool-test',
-              metadata: { active: true },
-            });
-
-            await store.createChat({
-              id: 'chat-meta-bool-false',
-              userId: 'user-bool-test',
-              metadata: { active: false },
-            });
-
-            const activeChats = await store.listChats({
-              userId: 'user-bool-test',
-              metadata: { key: 'active', value: true },
-            });
-
-            assert.strictEqual(activeChats.length, 1);
-            assert.strictEqual(activeChats[0].id, 'chat-meta-bool-true');
-
-            const inactiveChats = await store.listChats({
-              userId: 'user-bool-test',
-              metadata: { key: 'active', value: false },
-            });
-
-            assert.strictEqual(inactiveChats.length, 1);
-            assert.strictEqual(inactiveChats[0].id, 'chat-meta-bool-false');
-          } finally {
-            await store.close();
-          }
-        }));
-
-      it('should filter by number metadata value', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
-            pool: container.connectionString,
-          });
-          try {
-            await store.createChat({
-              id: 'chat-meta-num-1',
-              userId: 'user-num-test',
-              metadata: { priority: 1 },
-            });
-
-            await store.createChat({
-              id: 'chat-meta-num-2',
-              userId: 'user-num-test',
-              metadata: { priority: 2 },
-            });
-
-            const results = await store.listChats({
-              userId: 'user-num-test',
-              metadata: { key: 'priority', value: 1 },
-            });
-
-            assert.strictEqual(results.length, 1);
-            assert.strictEqual(results[0].id, 'chat-meta-num-1');
           } finally {
             await store.close();
           }
         }));
     });
 
-    describe('Native Boolean Type', () => {
+    describe('BIT to Boolean Conversion', () => {
       it('should return native boolean for isActive', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
+        withSqlServerContainer(async (container) => {
+          const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
           try {
-            await store.createChat({
-              id: 'chat-bool-active',
-              userId: 'user-1',
-            });
+            await store.createChat({ id: 'chat-bit-test', userId: 'user-1' });
 
-            const branch = await store.getActiveBranch('chat-bool-active');
+            const branch = await store.getActiveBranch('chat-bit-test');
 
             assert.strictEqual(typeof branch?.isActive, 'boolean');
             assert.strictEqual(branch?.isActive, true);
@@ -1126,26 +1286,26 @@ describe('PostgreSQL ContextStore Integration', () => {
         }));
 
       it('should return native boolean for hasChildren', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
+        withSqlServerContainer(async (container) => {
+          const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
           try {
             await store.createChat({
-              id: 'chat-bool-children',
+              id: 'chat-bit-children',
               userId: 'user-1',
             });
 
             await store.addMessage({
-              id: 'bool-parent',
-              chatId: 'chat-bool-children',
+              id: 'bit-parent',
+              chatId: 'chat-bit-children',
               parentId: null,
               name: 'user',
               data: 'Parent',
               createdAt: Date.now(),
             });
 
-            const hasChildren = await store.hasChildren('bool-parent');
+            const hasChildren = await store.hasChildren('bit-parent');
 
             assert.strictEqual(typeof hasChildren, 'boolean');
             assert.strictEqual(hasChildren, false);
@@ -1157,13 +1317,14 @@ describe('PostgreSQL ContextStore Integration', () => {
 
     describe('Connection Pool', () => {
       it('should handle concurrent operations', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
+        withSqlServerContainer(async (container) => {
+          const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
           try {
             await store.createChat({ id: 'chat-concurrent', userId: 'user-1' });
 
+            // Run multiple operations concurrently
             const operations = Array.from({ length: 10 }, (_, i) =>
               store.addMessage({
                 id: `concurrent-msg-${i}`,
@@ -1177,6 +1338,7 @@ describe('PostgreSQL ContextStore Integration', () => {
 
             await Promise.all(operations);
 
+            // Verify all messages were created
             for (let i = 0; i < 10; i++) {
               const msg = await store.getMessage(`concurrent-msg-${i}`);
               assert.ok(msg);
@@ -1187,10 +1349,10 @@ describe('PostgreSQL ContextStore Integration', () => {
         }));
     });
 
-    describe('Transaction Rollback', () => {
+    describe('Cascade Delete', () => {
       it('should cascade delete messages when chat is deleted', () =>
-        withPostgresContainer(async (container) => {
-          const store = new PostgresContextStore({
+        withSqlServerContainer(async (container) => {
+          const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
           try {
@@ -1205,11 +1367,14 @@ describe('PostgreSQL ContextStore Integration', () => {
               createdAt: Date.now(),
             });
 
+            // Verify message exists
             const msgBefore = await store.getMessage('cascade-msg');
             assert.ok(msgBefore);
 
+            // Delete chat
             await store.deleteChat('chat-cascade');
 
+            // Message should be cascade deleted
             const msgAfter = await store.getMessage('cascade-msg');
             assert.strictEqual(msgAfter, undefined);
           } finally {

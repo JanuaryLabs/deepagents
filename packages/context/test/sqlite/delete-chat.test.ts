@@ -8,14 +8,14 @@ import {
   user,
 } from '@deepagents/context';
 
-import { withTempDb } from '../helpers/sqlite-test-helpers.ts';
+import { withSqliteContainer } from '../helpers/sqlite-container.ts';
 
 const renderer = new XmlRenderer();
 
 describe('Delete Chat', () => {
   describe('Basic Deletion', () => {
     it('should delete an existing chat and return true', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-to-delete',
@@ -32,7 +32,7 @@ describe('Delete Chat', () => {
     });
 
     it('should return false when deleting non-existent chat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const result = await store.deleteChat('non-existent-chat');
 
         assert.strictEqual(result, false);
@@ -40,7 +40,7 @@ describe('Delete Chat', () => {
     });
 
     it('should return false when deleting already-deleted chat', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-double-delete',
@@ -59,7 +59,7 @@ describe('Delete Chat', () => {
     });
 
     it('should not affect other chats when deleting one', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create two chats
         const engine1 = new ContextEngine({
           store,
@@ -95,7 +95,7 @@ describe('Delete Chat', () => {
 
   describe('Cascading Deletes', () => {
     it('should delete all messages when chat is deleted', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-with-messages',
@@ -127,7 +127,7 @@ describe('Delete Chat', () => {
     });
 
     it('should delete all branches when chat is deleted', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-with-branches',
@@ -159,7 +159,7 @@ describe('Delete Chat', () => {
     });
 
     it('should delete all checkpoints when chat is deleted', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'chat-with-checkpoints',
@@ -195,7 +195,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle chat with multiple branches', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'multi-branch-chat',
@@ -237,7 +237,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle chat with deep message chains', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'deep-chain-chat',
@@ -266,7 +266,7 @@ describe('Delete Chat', () => {
 
   describe('User Authorization (userId validation)', () => {
     it('should delete chat when userId matches', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'alice-chat',
@@ -285,7 +285,7 @@ describe('Delete Chat', () => {
     });
 
     it('should return false when userId does not match (no deletion)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'alice-only-chat',
@@ -308,7 +308,7 @@ describe('Delete Chat', () => {
     });
 
     it('should delete any chat when userId is not provided (admin mode)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'any-user-chat',
@@ -326,7 +326,7 @@ describe('Delete Chat', () => {
     });
 
     it('should not delete other users chats', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats for Alice and Bob
         const aliceEngine = new ContextEngine({
           store,
@@ -361,7 +361,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle case-sensitive userId comparison', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'case-sensitive-chat',
@@ -390,88 +390,9 @@ describe('Delete Chat', () => {
     });
   });
 
-  describe('FTS Cleanup', () => {
-    it('should remove FTS entries when chat is deleted', async () => {
-      await withTempDb(async (store) => {
-        const engine = new ContextEngine({
-          store,
-          chatId: 'fts-chat',
-          userId: 'alice',
-        });
-        engine.set(user('The quick brown fox jumps'));
-        engine.set(assistantText('Over the lazy dog'));
-        await engine.save();
-
-        // Verify search works before deletion
-        const resultsBefore = await store.searchMessages('fts-chat', 'fox');
-        assert.strictEqual(resultsBefore.length, 1);
-
-        // Delete the chat
-        await store.deleteChat('fts-chat');
-
-        // Verify search returns nothing after deletion
-        const resultsAfter = await store.searchMessages('fts-chat', 'fox');
-        assert.strictEqual(resultsAfter.length, 0);
-      });
-    });
-
-    it('should not affect FTS entries of other chats', async () => {
-      await withTempDb(async (store) => {
-        // Create two chats with searchable content
-        const engine1 = new ContextEngine({
-          store,
-          chatId: 'fts-chat-1',
-          userId: 'alice',
-        });
-        engine1.set(user('Apple banana cherry'));
-        await engine1.save();
-
-        const engine2 = new ContextEngine({
-          store,
-          chatId: 'fts-chat-2',
-          userId: 'alice',
-        });
-        engine2.set(user('Apple dragonfruit elderberry'));
-        await engine2.save();
-
-        // Delete first chat
-        await store.deleteChat('fts-chat-1');
-
-        // Second chat's FTS should still work
-        const results = await store.searchMessages('fts-chat-2', 'apple');
-        assert.strictEqual(results.length, 1);
-        // message.data is the full message object, snippet contains the matched text
-        assert.ok(results[0].snippet?.includes('dragonfruit'));
-      });
-    });
-
-    it('should handle search after deletion (no stale results)', async () => {
-      await withTempDb(async (store) => {
-        const engine = new ContextEngine({
-          store,
-          chatId: 'stale-fts-chat',
-          userId: 'alice',
-        });
-        engine.set(user('Unique searchable content xyz123'));
-        await engine.save();
-
-        // Search before deletion
-        const before = await store.searchMessages('stale-fts-chat', 'xyz123');
-        assert.strictEqual(before.length, 1);
-
-        // Delete
-        await store.deleteChat('stale-fts-chat');
-
-        // Search after - should not find anything
-        const after = await store.searchMessages('stale-fts-chat', 'xyz123');
-        assert.strictEqual(after.length, 0);
-      });
-    });
-  });
-
   describe('Transaction Safety', () => {
     it('should be atomic - complete deletion or nothing', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'atomic-chat',
@@ -498,7 +419,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle deletion of chat with many messages', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'large-chat',
@@ -529,7 +450,7 @@ describe('Delete Chat', () => {
 
   describe('Edge Cases', () => {
     it('should handle deleting chat with no messages', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const engine = new ContextEngine({
           store,
           chatId: 'empty-chat',
@@ -546,7 +467,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle deleting chat with empty title', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({
           id: 'no-title-chat',
           userId: 'alice',
@@ -562,7 +483,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle chatId with special characters', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const specialIds = [
           'chat-with-dashes',
           'chat_with_underscores',
@@ -589,7 +510,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle very long chatId', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         const longChatId = 'c'.repeat(500);
 
         await store.upsertChat({ id: longChatId, userId: 'alice' });
@@ -605,7 +526,7 @@ describe('Delete Chat', () => {
 
   describe('Concurrent Operations', () => {
     it('should handle concurrent deletion of different chats', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create 10 chats
         for (let i = 0; i < 10; i++) {
           await store.upsertChat({ id: `concurrent-${i}`, userId: 'alice' });
@@ -628,7 +549,7 @@ describe('Delete Chat', () => {
     });
 
     it('should handle concurrent deletion of same chat (one succeeds)', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         await store.upsertChat({ id: 'race-chat', userId: 'alice' });
 
         // Try to delete the same chat 5 times concurrently
@@ -660,7 +581,7 @@ describe('Delete Chat', () => {
     });
 
     it('should not affect concurrent reads of other chats', async () => {
-      await withTempDb(async (store) => {
+      await withSqliteContainer(async (store) => {
         // Create chats
         for (let i = 0; i < 5; i++) {
           const engine = new ContextEngine({

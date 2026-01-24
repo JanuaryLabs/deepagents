@@ -3,21 +3,21 @@ import { describe, it } from 'node:test';
 
 import {
   ContextEngine,
-  PostgresContextStore,
+  SqlServerContextStore,
   XmlRenderer,
   assistantText,
   user,
 } from '@deepagents/context';
 
-import { withPostgresContainer } from '../helpers/postgres-container.ts';
+import { withSqlServerContainer } from '../helpers/sqlserver-container.ts';
 
 const renderer = new XmlRenderer();
 
 describe('Branching', () => {
   describe('Basic Branch Creation', () => {
     it('should create "main" branch by default', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -40,8 +40,8 @@ describe('Branching', () => {
       }));
 
     it('should expose branch name via getter (defaults to main)', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -60,8 +60,8 @@ describe('Branching', () => {
 
   describe('Message Chain (parentId linking)', () => {
     it('should set parentId to null for first message', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -89,8 +89,8 @@ describe('Branching', () => {
       }));
 
     it('should link subsequent messages via parentId', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -130,8 +130,8 @@ describe('Branching', () => {
       }));
 
     it('should update branch headMessageId after save', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -159,8 +159,8 @@ describe('Branching', () => {
       }));
 
     it('should return messages in correct order (root to head)', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -190,8 +190,8 @@ describe('Branching', () => {
 
   describe('Rewind (Forking)', () => {
     it('should create new branch pointing to rewind message', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -229,8 +229,8 @@ describe('Branching', () => {
       }));
 
     it('should deactivate old branch after rewind', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -264,8 +264,8 @@ describe('Branching', () => {
       }));
 
     it('should preserve original messages after rewind', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -302,8 +302,8 @@ describe('Branching', () => {
       }));
 
     it('should link new messages to fork point after rewind', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -337,8 +337,8 @@ describe('Branching', () => {
       }));
 
     it('should update engine branch name after rewind', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -368,8 +368,8 @@ describe('Branching', () => {
       }));
 
     it('should clear pending messages after rewind', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -400,8 +400,8 @@ describe('Branching', () => {
       }));
 
     it('should throw when rewinding to non-existent message', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -425,8 +425,8 @@ describe('Branching', () => {
 
   describe('Switch Branch', () => {
     it('should switch active branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -460,8 +460,8 @@ describe('Branching', () => {
       }));
 
     it('should return different message chains per branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -507,8 +507,8 @@ describe('Branching', () => {
       }));
 
     it('should throw when switching to non-existent branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -529,8 +529,8 @@ describe('Branching', () => {
       }));
 
     it('should clear pending messages when switching', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -565,8 +565,8 @@ describe('Branching', () => {
 
   describe('Multiple Branches', () => {
     it('should support multiple branches in one chat', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -605,8 +605,8 @@ describe('Branching', () => {
       }));
 
     it('should maintain independent headMessageId per branch', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -643,8 +643,8 @@ describe('Branching', () => {
       }));
 
     it('should have only one active branch at a time', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -679,8 +679,8 @@ describe('Branching', () => {
 
   describe('btw (By The Way branching)', () => {
     it('should create new branch from current head without switching', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -710,8 +710,8 @@ describe('Branching', () => {
       }));
 
     it('should throw when no messages exist', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -733,8 +733,8 @@ describe('Branching', () => {
       }));
 
     it('should keep pending messages after btw', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -759,8 +759,8 @@ describe('Branching', () => {
       }));
 
     it('should create incrementing branch names', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
@@ -786,8 +786,8 @@ describe('Branching', () => {
       }));
 
     it('should allow switching to btw branch and adding messages', () =>
-      withPostgresContainer(async (container) => {
-        const store = new PostgresContextStore({
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
         try {
