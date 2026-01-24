@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/text2sql",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -76,9 +76,9 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "^3.0.10",
-    "@deepagents/agent": "0.13.1",
-    "@deepagents/context": "0.13.1",
-    "@deepagents/toolbox": "0.13.1",
+    "@deepagents/agent": "0.14.0",
+    "@deepagents/context": "0.14.0",
+    "@deepagents/toolbox": "0.14.0",
     "ai": "^6.0.39",
     "autoevals": "^0.0.131",
     "bash-tool": "^1.1.0",
