@@ -7,5 +7,6 @@ export * from './lib/agents/text2sql.agent.ts';
 export * from './lib/checkpoint.ts';
 export * from './lib/file-cache.ts';
 export * from './lib/fragments/schema.ts';
+export * from './lib/fs/index.ts';
 export * from './lib/instructions.ts';
 export * from './lib/sql.ts';

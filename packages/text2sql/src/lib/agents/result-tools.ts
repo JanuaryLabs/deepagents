@@ -3,13 +3,11 @@ import chalk from 'chalk';
 import {
   Bash,
   type CommandContext,
-  InMemoryFs,
+  type IFileSystem,
   MountableFs,
   OverlayFs,
-  ReadWriteFs,
   defineCommand,
 } from 'just-bash';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { v7 } from 'uuid';
 
@@ -117,14 +115,10 @@ function createSqlCommand(adapter: Adapter) {
           const content = JSON.stringify(rowsArray, null, 2);
 
           const filename = `${v7()}.json`;
-          const isolatedPath = `/results/${filename}`;
-          const sharedPath = `/artifacts/${filename}`;
+          const sqlPath = `/sql/${filename}`;
 
-          // Write to both locations atomically - fail if either fails
-          await Promise.all([
-            ctx.fs.writeFile(isolatedPath, content), // Current turn's isolated copy
-            ctx.fs.writeFile(sharedPath, content), // Shared copy for cross-turn access
-          ]);
+          await ctx.fs.mkdir('/sql', { recursive: true });
+          await ctx.fs.writeFile(sqlPath, content);
 
           const columns =
             rowsArray.length > 0 ? Object.keys(rowsArray[0] as object) : [];
@@ -132,7 +126,7 @@ function createSqlCommand(adapter: Adapter) {
           return {
             stdout:
               [
-                `results stored in ${sharedPath}`,
+                `results stored in ${sqlPath}`,
                 `columns: ${columns.join(', ') || '(none)'}`,
                 `rows: ${rowsArray.length}`,
               ].join('\n') + '\n',
@@ -187,12 +181,10 @@ function createSqlCommand(adapter: Adapter) {
 export interface ResultToolsOptions {
   /** Database adapter for executing SQL queries */
   adapter: Adapter;
-  /** Chat ID for artifact organization (session-level) */
-  chatId: string;
-  /** Message ID for turn-level artifact isolation */
-  messageId: string;
   /** Skill mounts mapping host paths to sandbox paths */
   skillMounts: SkillPathMapping[];
+  /** Filesystem for storage */
+  filesystem: IFileSystem;
 }
 
 /**
@@ -200,35 +192,11 @@ export interface ResultToolsOptions {
  *
  * The agent sees only one tool: `bash`
  * SQL is executed via: sql run "SELECT ..."
- *
- * Artifact storage:
- * - `/results/` → `./artifacts/{chatId}/{messageId}/results/` (current turn, isolated)
- * - `/artifacts/` → `./artifacts/{chatId}/` (shared across turns)
- *
- * SQL results are written to both locations:
- * 1. Isolated: `/results/{uuid}.json` for per-turn organization
- * 2. Shared: `/artifacts/{uuid}.json` for cross-turn access
- *
- * The returned path is `/artifacts/{uuid}.json` which works in any turn.
- *
- * @param options - Configuration options
- * @param options.adapter - Database adapter for SQL execution
- * @param options.chatId - Chat ID for session-level organization
- * @param options.messageId - Message ID for turn-level isolation
  */
 export async function createResultTools(options: ResultToolsOptions) {
-  const { adapter, chatId, messageId, skillMounts } = options;
+  const { adapter, skillMounts, filesystem: baseFs } = options;
   const sqlCommand = createSqlCommand(adapter);
 
-  // Artifact directories
-  const root = process.env.TEXT2SQL_FS_ROOT || process.cwd();
-  const chatDir = path.join(root, 'artifacts', chatId);
-  const resultsDir = path.join(chatDir, messageId, 'results');
-
-  await fs.mkdir(resultsDir, { recursive: true });
-
-  // Build skill mounts (read-only access to skill directories)
-  // Set mountPoint: '/' so files appear at the root of the mount, not under /home/user/project
   const fsMounts = skillMounts.map(({ host, sandbox }) => ({
     mountPoint: path.dirname(sandbox),
     filesystem: new OverlayFs({
@@ -239,18 +207,8 @@ export async function createResultTools(options: ResultToolsOptions) {
   }));
 
   const filesystem = new MountableFs({
-    base: new InMemoryFs(),
-    mounts: [
-      ...fsMounts,
-      {
-        mountPoint: '/results',
-        filesystem: new ReadWriteFs({ root: resultsDir }),
-      },
-      {
-        mountPoint: '/artifacts',
-        filesystem: new ReadWriteFs({ root: chatDir }),
-      },
-    ],
+    base: baseFs,
+    mounts: fsMounts,
   });
 
   const bashInstance = new Bash({
@@ -258,7 +216,7 @@ export async function createResultTools(options: ResultToolsOptions) {
     fs: filesystem,
   });
 
-  const { bash, sandbox } = await createBashTool({
+  const { sandbox, tools } = await createBashTool({
     sandbox: bashInstance,
     destination: '/',
     onBeforeBashCall: ({ command }) => {
@@ -273,5 +231,5 @@ export async function createResultTools(options: ResultToolsOptions) {
     },
   });
 
-  return { bash, sandbox };
+  return { sandbox, tools };
 }

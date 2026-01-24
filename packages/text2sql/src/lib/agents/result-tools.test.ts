@@ -1,11 +1,25 @@
+import { InMemoryFs, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { createResultTools } from '@deepagents/text2sql';
+import type { SkillPathMapping } from '@deepagents/context';
+import { TrackedFs, createResultTools } from '@deepagents/text2sql';
 
 import { init_db } from '../../tests/sqlite.ts';
+
+/** Helper to create properly typed skill mount for tests */
+const fakeSkillMount = (
+  host: string,
+  sandbox = '/skills/skills',
+): SkillPathMapping => ({
+  name: 'test-skill',
+  description: 'Test skill for sandbox isolation',
+  host,
+  sandbox,
+});
 
 describe('createResultTools sandbox isolation', () => {
   const testDir = path.join(process.cwd(), '.test-sandbox');
@@ -13,23 +27,19 @@ describe('createResultTools sandbox isolation', () => {
   const otherChatDir = path.join(testDir, 'artifacts', 'other-chat-id');
 
   beforeEach(async () => {
-    // Create test directory structure
     await fs.mkdir(path.join(skillsDir, 'test-skill'), { recursive: true });
     await fs.mkdir(otherChatDir, { recursive: true });
 
-    // Create a test skill file
     await fs.writeFile(
       path.join(skillsDir, 'test-skill', 'SKILL.md'),
       '---\nname: test-skill\ndescription: A test skill\n---\n\n# Test Skill\nThis is a test skill.',
     );
 
-    // Create a file in another chat's artifacts (should not be accessible)
     await fs.writeFile(
       path.join(otherChatDir, 'secret.json'),
       '{"secret": "should-not-be-accessible"}',
     );
 
-    // Create a file in project root (should not be accessible)
     await fs.writeFile(
       path.join(testDir, 'root-file.txt'),
       'This is a root file',
@@ -37,25 +47,20 @@ describe('createResultTools sandbox isolation', () => {
   });
 
   afterEach(async () => {
-    // Cleanup test directory
     await fs.rm(testDir, { recursive: true, force: true });
   });
 
   it('can read skills from mounted skill directories', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // First check the mount structure
     const lsRoot = await sandbox.executeCommand('ls /skills');
-    // Mount point is /skills/{basename} = /skills/skills
-    // Inside that, we have the content of skillsDir which contains test-skill/SKILL.md
+    // Mount: /skills/{basename} → skillsDir containing test-skill/SKILL.md
     const lsSkills = await sandbox.executeCommand('ls /skills/skills');
 
-    // Read skill file through the sandbox
     const result = await sandbox.executeCommand(
       'cat /skills/skills/test-skill/SKILL.md',
     );
@@ -74,12 +79,10 @@ describe('createResultTools sandbox isolation', () => {
   it('cannot access project root files', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // Try to read a file from project root
     const result = await sandbox.executeCommand(`cat ${testDir}/root-file.txt`);
 
     assert.notStrictEqual(
@@ -92,12 +95,10 @@ describe('createResultTools sandbox isolation', () => {
   it('cannot access other chats artifacts', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // Try to access another chat's artifacts via path traversal
     const result = await sandbox.executeCommand(
       'cat /artifacts/../other-chat-id/secret.json',
     );
@@ -112,12 +113,10 @@ describe('createResultTools sandbox isolation', () => {
   it('can write to /results directory', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // Write a file to results
     const writeResult = await sandbox.executeCommand(
       'echo "test content" > /results/test.txt',
     );
@@ -127,7 +126,6 @@ describe('createResultTools sandbox isolation', () => {
       `Write should succeed. stderr: ${writeResult.stderr}`,
     );
 
-    // Read it back
     const readResult = await sandbox.executeCommand('cat /results/test.txt');
     assert.strictEqual(readResult.exitCode, 0);
     assert.ok(readResult.stdout.includes('test content'));
@@ -136,12 +134,10 @@ describe('createResultTools sandbox isolation', () => {
   it('can write to /artifacts directory', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // Write a file to artifacts
     const writeResult = await sandbox.executeCommand(
       'echo "artifact content" > /artifacts/artifact.txt',
     );
@@ -151,7 +147,6 @@ describe('createResultTools sandbox isolation', () => {
       `Write should succeed. stderr: ${writeResult.stderr}`,
     );
 
-    // Read it back
     const readResult = await sandbox.executeCommand(
       'cat /artifacts/artifact.txt',
     );
@@ -162,12 +157,10 @@ describe('createResultTools sandbox isolation', () => {
   it('cannot write to skills directory (read-only)', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // Try to write to skills directory - should throw EROFS error
     await assert.rejects(
       () =>
         sandbox.executeCommand('echo "malicious" > /skills/skills/hack.txt'),
@@ -179,39 +172,26 @@ describe('createResultTools sandbox isolation', () => {
   it('lists only mounted directories at root', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     const result = await sandbox.executeCommand('ls /');
 
     assert.strictEqual(result.exitCode, 0);
-    // Should see skills, results, artifacts - nothing else
+    // Should see skills mount (results/artifacts go to base filesystem)
     assert.ok(result.stdout.includes('skills'), 'Should have /skills mount');
-    assert.ok(result.stdout.includes('results'), 'Should have /results mount');
-    assert.ok(
-      result.stdout.includes('artifacts'),
-      'Should have /artifacts mount',
-    );
   });
 
   it('handles empty skillPaths gracefully', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
     });
 
-    // Should still work, just no skills mounted
     const result = await sandbox.executeCommand('ls /');
-
     assert.strictEqual(result.exitCode, 0);
-    assert.ok(result.stdout.includes('results'), 'Should have /results mount');
-    assert.ok(
-      result.stdout.includes('artifacts'),
-      'Should have /artifacts mount',
-    );
   });
 });
 
@@ -242,9 +222,8 @@ describe('path resolution edge cases', () => {
     // After fix: files appear at /skills/skills/my-skill/SKILL.md
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     // The WRONG path (before fix) should NOT work
@@ -272,12 +251,10 @@ describe('path resolution edge cases', () => {
   it('relative paths work with cd command', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
-    // cd to skills dir and use relative path
     const result = await sandbox.executeCommand(
       'cd /skills/skills && cat my-skill/SKILL.md',
     );
@@ -289,9 +266,8 @@ describe('path resolution edge cases', () => {
   it('handles absolute paths to skill files', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     const result = await sandbox.executeCommand(
@@ -314,7 +290,6 @@ describe('multiple skill directories', () => {
   const skillsDir2 = path.join(testDir, 'skills-b');
 
   beforeEach(async () => {
-    // Create two separate skill directories
     await fs.mkdir(path.join(skillsDir1, 'skill-alpha'), { recursive: true });
     await fs.mkdir(path.join(skillsDir2, 'skill-beta'), { recursive: true });
 
@@ -335,12 +310,11 @@ describe('multiple skill directories', () => {
   it('mounts multiple skill directories independently', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
       skillMounts: [
-        { host: skillsDir1, sandbox: '/skills/skills-a' },
-        { host: skillsDir2, sandbox: '/skills/skills-b' },
+        fakeSkillMount(skillsDir1, '/skills/skills-a'),
+        fakeSkillMount(skillsDir2, '/skills/skills-b'),
       ],
+      filesystem: new InMemoryFs(),
     });
 
     // Both skill directories should be mounted
@@ -385,12 +359,11 @@ describe('multiple skill directories', () => {
 
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
       skillMounts: [
-        { host: skillsDir1, sandbox: '/skills/skills-a' },
-        { host: skillsDir2, sandbox: '/skills/skills-b' },
+        fakeSkillMount(skillsDir1, '/skills/skills-a'),
+        fakeSkillMount(skillsDir2, '/skills/skills-b'),
       ],
+      filesystem: new InMemoryFs(),
     });
 
     // Each common skill should be accessible at its own mount point
@@ -424,97 +397,70 @@ describe('sql command integration', () => {
     await fs.rm(testDir, { recursive: true, force: true });
   });
 
-  it('sql run writes results and returns /artifacts path', async () => {
-    const mockRows = [
-      { id: 1, name: 'Alice' },
-      { id: 2, name: 'Bob' },
-    ];
-    const sqlAdapter = {
-      execute: async () => mockRows,
-      validate: async () => undefined,
-      introspect: async () => ({ tables: [], enums: [] }),
-    };
+  it('sql run writes results and returns /sql path', async () => {
+    const { adapter } = await init_db('');
 
     const { sandbox } = await createResultTools({
-      adapter: sqlAdapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
     });
 
-    // Execute SQL
-    const result = await sandbox.executeCommand(
-      'sql run "SELECT * FROM users"',
-    );
+    const result = await sandbox.executeCommand('sql run "SELECT 1 as test"');
 
     assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-    assert.ok(
-      result.stdout.includes('/artifacts/'),
-      'Should output cross-turn accessible path',
-    );
-    assert.ok(result.stdout.includes('rows: 2'), 'Should show row count');
+    assert.ok(result.stdout.includes('/sql/'), 'Should output path in /sql');
+    assert.ok(result.stdout.includes('rows:'), 'Should show row count');
   });
 
   it('sql run results are readable via returned path', async () => {
-    const mockRows = [{ value: 42 }];
-    const sqlAdapter = {
-      execute: async () => mockRows,
-      validate: async () => undefined,
-      introspect: async () => ({ tables: [], enums: [] }),
-    };
+    const { adapter } = await init_db('');
 
     const { sandbox } = await createResultTools({
-      adapter: sqlAdapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
     });
 
-    // Execute SQL and capture the output path
     const sqlResult = await sandbox.executeCommand(
       'sql run "SELECT 42 as value"',
     );
     assert.strictEqual(sqlResult.exitCode, 0);
 
-    // Extract the file path from output (first line: "results stored in <path>")
     const firstLine = sqlResult.stdout.split('\n')[0].trim();
     const filePath = firstLine.replace('results stored in ', '');
-    assert.ok(
-      filePath.startsWith('/artifacts/'),
-      'Path should be in /artifacts',
-    );
+    assert.ok(filePath.startsWith('/sql/'), 'Path should be in /sql');
 
-    // Read the result file
     const catResult = await sandbox.executeCommand(`cat ${filePath}`);
     assert.strictEqual(catResult.exitCode, 0);
-    assert.ok(catResult.stdout.includes('"value": 42'));
+    assert.ok(catResult.stdout.includes('42'));
   });
 
   it('sql run results are accessible across turns via /artifacts', async () => {
-    const mockRows = [{ id: 1, name: 'Test' }];
-    const sqlAdapter = {
-      execute: async () => mockRows,
-      validate: async () => undefined,
-      introspect: async () => ({ tables: [], enums: [] }),
-    };
+    const { adapter } = await init_db('');
+
+    // Shared artifacts filesystem (simulates chat-level storage)
+    const sharedArtifactsFs = new InMemoryFs();
 
     // Turn 1: Execute SQL and get path
     const { sandbox: sandbox1 } = await createResultTools({
-      adapter: sqlAdapter,
-      chatId: 'test-chat',
-      messageId: 'turn-1',
+      adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs, // Shared artifacts
     });
 
     const sqlResult = await sandbox1.executeCommand(
-      'sql run "SELECT * FROM users"',
+      'sql run "SELECT \'Test\' as name"',
     );
     assert.strictEqual(sqlResult.exitCode, 0);
     const firstLine = sqlResult.stdout.split('\n')[0].trim();
     const filePath = firstLine.replace('results stored in ', '');
 
-    // Turn 2: New sandbox with different messageId
+    // Turn 2: New sandbox with same artifactsFilesystem
     const { sandbox: sandbox2 } = await createResultTools({
-      adapter: sqlAdapter,
-      chatId: 'test-chat',
-      messageId: 'turn-2',
+      adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs, // Same shared artifacts
     });
 
     // Should be able to read file from turn 1 using the same path
@@ -524,14 +470,14 @@ describe('sql command integration', () => {
       0,
       `Should access turn-1 result from turn-2. stderr: ${catResult.stderr}`,
     );
-    assert.ok(catResult.stdout.includes('"name": "Test"'));
+    assert.ok(catResult.stdout.includes('Test'));
   });
 
   it('sql validate returns valid for SELECT', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
     });
 
     const result = await sandbox.executeCommand('sql validate "SELECT 1"');
@@ -543,8 +489,8 @@ describe('sql command integration', () => {
   it('sql validate rejects non-SELECT queries', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
     });
 
     const dropResult = await sandbox.executeCommand(
@@ -572,24 +518,21 @@ describe('sql command integration', () => {
   });
 
   it('sql run handles adapter errors gracefully', async () => {
-    const errorAdapter = {
-      execute: async () => {
-        throw new Error('Connection timeout');
-      },
-      validate: async () => undefined,
-      introspect: async () => ({ tables: [], enums: [] }),
-    };
+    const { adapter } = await init_db('');
 
     const { sandbox } = await createResultTools({
-      adapter: errorAdapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
     });
 
-    const result = await sandbox.executeCommand('sql run "SELECT 1"');
+    // Query a non-existent table to trigger an error
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT * FROM nonexistent_table_xyz"',
+    );
 
     assert.notStrictEqual(result.exitCode, 0);
-    assert.ok(result.stderr.includes('Connection timeout'));
+    assert.ok(result.stderr.length > 0, 'Should have error message');
   });
 });
 
@@ -620,9 +563,8 @@ describe('path traversal security', () => {
   it('blocks ../../ traversal from /artifacts', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     const result = await sandbox.executeCommand(
@@ -639,9 +581,8 @@ describe('path traversal security', () => {
   it('blocks /../ traversal from /results', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     const result = await sandbox.executeCommand(
@@ -658,9 +599,8 @@ describe('path traversal security', () => {
   it('blocks absolute paths outside mounts', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     // Try to access /etc/passwd (common attack target)
@@ -695,9 +635,8 @@ describe('path traversal security', () => {
   it('blocks traversal via cd command', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     // Try to cd out of sandbox and access files
@@ -711,9 +650,8 @@ describe('path traversal security', () => {
   it('blocks access via skills mount traversal', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'test-chat',
-      messageId: 'test-message',
-      skillMounts: [{ host: skillsDir, sandbox: '/skills/skills' }],
+      skillMounts: [fakeSkillMount(skillsDir)],
+      filesystem: new InMemoryFs(),
     });
 
     const result = await sandbox.executeCommand(
@@ -730,99 +668,381 @@ describe('path traversal security', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Artifacts Persistence
-// Tests for files being written to the real filesystem
+// Tests for files being written to the real filesystem using ReadWriteFs
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('artifacts persistence to disk', () => {
-  const testDir = path.join(process.cwd(), '.test-persistence');
+  let persistDir: string;
 
-  afterEach(async () => {
-    await fs.rm(testDir, { recursive: true, force: true });
-    // Also clean up artifacts directory
-    await fs
-      .rm(path.join(process.cwd(), 'artifacts', 'persist-chat'), {
-        recursive: true,
-        force: true,
-      })
-      .catch((error) => {
-        void error;
-      });
+  beforeEach(async () => {
+    persistDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'result-tools-persist-'),
+    );
   });
 
-  it('files written to /results appear on real filesystem', async () => {
+  afterEach(async () => {
+    await fs.rm(persistDir, { recursive: true, force: true });
+  });
+
+  it('files written via sandbox appear on real filesystem (scoped by chatId)', async () => {
+    const dataDir = path.join(persistDir, 'data');
+    await fs.mkdir(dataDir, { recursive: true });
+
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'persist-chat',
-      messageId: 'persist-message',
+      skillMounts: [],
+      filesystem: new ReadWriteFs({ root: dataDir }),
     });
 
-    // Write file via sandbox
     await sandbox.executeCommand(
-      'echo "persisted content" > /results/test.txt',
+      'mkdir -p /mydata && echo "persisted content" > /mydata/test.txt',
     );
 
-    // Verify it exists on real filesystem
-    const realPath = path.join(
-      process.cwd(),
-      'artifacts',
-      'persist-chat',
-      'persist-message',
-      'results',
-      'test.txt',
-    );
+    const realPath = path.join(dataDir, 'mydata', 'test.txt');
     const content = await fs.readFile(realPath, 'utf-8');
     assert.ok(content.includes('persisted content'));
   });
 
-  it('files written to /artifacts appear on real filesystem', async () => {
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      chatId: 'persist-chat',
-      messageId: 'persist-message',
-    });
+  it('results from previous turns are accessible in /artifacts via shared filesystem', async () => {
+    // Shared artifacts filesystem (simulates chat-level storage)
+    const sharedArtifactsFs = new InMemoryFs();
 
-    // Write file via sandbox
-    await sandbox.executeCommand('echo "artifact data" > /artifacts/data.json');
-
-    // Verify it exists on real filesystem
-    const realPath = path.join(
-      process.cwd(),
-      'artifacts',
-      'persist-chat',
-      'data.json',
-    );
-    const content = await fs.readFile(realPath, 'utf-8');
-    assert.ok(content.includes('artifact data'));
-  });
-
-  it('results from previous turns are accessible in /artifacts', async () => {
-    // First turn - write to results
+    // First turn - write to results (also goes to shared artifacts)
     const { sandbox: sandbox1 } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'persist-chat',
-      messageId: 'turn-1',
+      skillMounts: [],
+      filesystem: sharedArtifactsFs, // Shared artifacts
     });
-    await sandbox1.executeCommand('echo "turn 1 data" > /results/turn1.txt');
+    await sandbox1.executeCommand('echo "turn 1 data" > /artifacts/turn1.txt');
 
-    // Second turn - should see first turn's results in artifacts
+    // Second turn - should see first turn's results in shared artifacts
     const { sandbox: sandbox2 } = await createResultTools({
       adapter: (await init_db('')).adapter,
-      chatId: 'persist-chat',
-      messageId: 'turn-2',
+      skillMounts: [],
+      filesystem: sharedArtifactsFs, // Same shared artifacts
     });
 
-    // List artifacts - should see turn-1 directory
-    const lsResult = await sandbox2.executeCommand('ls /artifacts');
-    assert.ok(
-      lsResult.stdout.includes('turn-1'),
-      'Should see previous turn directory',
-    );
-
-    // Read previous turn's results
-    const catResult = await sandbox2.executeCommand(
-      'cat /artifacts/turn-1/results/turn1.txt',
-    );
+    // Read previous turn's artifact
+    const catResult = await sandbox2.executeCommand('cat /artifacts/turn1.txt');
     assert.strictEqual(catResult.exitCode, 0, `stderr: ${catResult.stderr}`);
     assert.ok(catResult.stdout.includes('turn 1 data'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unmounted Path Isolation
+// Tests for shared writes across turns via artifactsFilesystem
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('unmounted path isolation with chat-level reads', () => {
+  it('writes to unmounted paths are visible from chat-level in next turn', async () => {
+    const sharedArtifactsFs = new InMemoryFs();
+
+    // Turn 1: write to /mydata (unmounted path)
+    const { sandbox: sandbox1 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+
+    await sandbox1.executeCommand('mkdir -p /mydata');
+    await sandbox1.executeCommand('echo "turn1" > /mydata/test.txt');
+
+    // Verify write succeeded in turn 1
+    const readTurn1 = await sandbox1.executeCommand('cat /mydata/test.txt');
+    assert.strictEqual(
+      readTurn1.exitCode,
+      0,
+      `read in turn1 failed: ${readTurn1.stderr}`,
+    );
+
+    // Turn 2: can READ turn 1's file (from chat-level)
+    const { sandbox: sandbox2 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+
+    const read = await sandbox2.executeCommand('cat /mydata/test.txt');
+    assert.strictEqual(
+      read.exitCode,
+      0,
+      `Turn 2 should read from chat-level. stderr: ${read.stderr}`,
+    );
+    assert.ok(
+      read.stdout.includes('turn1'),
+      'Turn 2 should read content from chat-level',
+    );
+  });
+
+  it('latest write to unmounted path wins in chat-level (flat paths)', async () => {
+    const sharedArtifactsFs = new InMemoryFs();
+
+    // Turn 1: write to /tmp/file.txt
+    const { sandbox: sandbox1 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+    await sandbox1.executeCommand(
+      'mkdir -p /tmp && echo "version1" > /tmp/file.txt',
+    );
+
+    // Turn 2: overwrite /tmp/file.txt (directory already exists in chat-level)
+    const { sandbox: sandbox2 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+    await sandbox2.executeCommand(
+      'mkdir -p /tmp && echo "version2" > /tmp/file.txt',
+    );
+
+    // Turn 3: should see version2 (latest wins)
+    const { sandbox: sandbox3 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+
+    const read = await sandbox3.executeCommand('cat /tmp/file.txt');
+    assert.strictEqual(read.exitCode, 0);
+    assert.ok(read.stdout.includes('version2'), 'Should see latest version');
+    assert.ok(!read.stdout.includes('version1'), 'Should not see old version');
+  });
+
+  it('unmounted subdirectories work correctly', async () => {
+    const sharedArtifactsFs = new InMemoryFs();
+
+    // Turn 1: create nested directory and file
+    const { sandbox: sandbox1 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+    await sandbox1.executeCommand(
+      'mkdir -p /data && echo "nested" > /data/file.txt',
+    );
+
+    // Turn 2: can read the nested file
+    const { sandbox: sandbox2 } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedArtifactsFs,
+    });
+
+    const read = await sandbox2.executeCommand('cat /data/file.txt');
+    assert.strictEqual(read.exitCode, 0, `stderr: ${read.stderr}`);
+    assert.ok(read.stdout.includes('nested'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Markdown Report Generation (Replicating Agent File Storage Issue)
+// Tests for creating markdown reports from SQL results using bash commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('markdown report generation from sql results', () => {
+  it('can create markdown report from sql json output using sequential writes', async () => {
+    const { adapter } = await init_db('');
+    const sharedFs = new InMemoryFs();
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: sharedFs,
+    });
+
+    const sqlResult = await sandbox.executeCommand(
+      'sql run "SELECT 1 as store_id, 100 as rentals_2022"',
+    );
+    assert.strictEqual(
+      sqlResult.exitCode,
+      0,
+      `sql run failed: ${sqlResult.stderr}`,
+    );
+
+    const firstLine = sqlResult.stdout.split('\n')[0].trim();
+    const sqlFilePath = firstLine.replace('results stored in ', '');
+    assert.ok(
+      sqlFilePath.startsWith('/sql/'),
+      `Expected /sql/ path, got: ${sqlFilePath}`,
+    );
+
+    await sandbox.executeCommand(
+      'echo "# Rentals per Store for 2022" > /report.md',
+    );
+    await sandbox.executeCommand('echo "" >> /report.md');
+    await sandbox.executeCommand('echo "| Store ID | Rentals |" >> /report.md');
+    await sandbox.executeCommand('echo "|----------|---------|" >> /report.md');
+    const jqCmd = `cat ${sqlFilePath} | jq -r '.[] | "| \\(.store_id) | \\(.rentals_2022) |"' >> /report.md`;
+    await sandbox.executeCommand(jqCmd);
+
+    const catResult = await sandbox.executeCommand('cat /report.md');
+    assert.strictEqual(
+      catResult.exitCode,
+      0,
+      `cat /report.md failed: ${catResult.stderr}`,
+    );
+    assert.ok(
+      catResult.stdout.includes('# Rentals per Store for 2022'),
+      'Should have title',
+    );
+    assert.ok(
+      catResult.stdout.includes('| Store ID | Rentals |'),
+      'Should have table header',
+    );
+  });
+
+  it('file persists across turns when using shared filesystem', async () => {
+    const { adapter } = await init_db('');
+    const sharedFs = new InMemoryFs();
+
+    // Turn 1: Create report
+    const { sandbox: sandbox1 } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: sharedFs,
+    });
+
+    const sqlResult = await sandbox1.executeCommand(
+      'sql run "SELECT 42 as value"',
+    );
+    assert.strictEqual(sqlResult.exitCode, 0);
+
+    const writeResult = await sandbox1.executeCommand(
+      'echo "# My Report" > /report.md',
+    );
+    assert.strictEqual(
+      writeResult.exitCode,
+      0,
+      `Write failed: ${writeResult.stderr}`,
+    );
+
+    // Turn 2: Read report from new sandbox
+    const { sandbox: sandbox2 } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: sharedFs,
+    });
+
+    const readResult = await sandbox2.executeCommand('cat /report.md');
+    assert.strictEqual(
+      readResult.exitCode,
+      0,
+      `Read failed in turn 2: ${readResult.stderr}`,
+    );
+    assert.ok(readResult.stdout.includes('# My Report'));
+  });
+
+  it('jq command processes json correctly', async () => {
+    const sharedFs = new InMemoryFs();
+
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedFs,
+    });
+
+    // Write JSON file manually
+    await sandbox.executeCommand(
+      'mkdir -p /sql && echo \'[{"id": 1, "name": "test"}]\' > /sql/data.json',
+    );
+
+    // Test jq processing
+    const jqResult = await sandbox.executeCommand(
+      'cat /sql/data.json | jq -r \'.[] | "ID: \\(.id), Name: \\(.name)"\'',
+    );
+    assert.strictEqual(jqResult.exitCode, 0, `jq failed: ${jqResult.stderr}`);
+    assert.ok(
+      jqResult.stdout.includes('ID: 1'),
+      `Expected "ID: 1" in output, got: ${jqResult.stdout}`,
+    );
+  });
+
+  it('sequential writes create multi-line file', async () => {
+    const sharedFs = new InMemoryFs();
+
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: sharedFs,
+    });
+
+    const cmd =
+      'echo "Line 1" > /output.md && echo "Line 2" >> /output.md && echo "Line 3" >> /output.md';
+    const result = await sandbox.executeCommand(cmd);
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Sequential writes failed: ${result.stderr}`,
+    );
+
+    const catResult = await sandbox.executeCommand('cat /output.md');
+    assert.strictEqual(
+      catResult.exitCode,
+      0,
+      `cat failed: ${catResult.stderr}`,
+    );
+    assert.ok(catResult.stdout.includes('Line 1'), 'Should have Line 1');
+    assert.ok(catResult.stdout.includes('Line 2'), 'Should have Line 2');
+    assert.ok(catResult.stdout.includes('Line 3'), 'Should have Line 3');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TrackedFs Concurrency
+// Tests for concurrent chat sessions with separate TrackedFs instances
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('TrackedFs concurrency', () => {
+  it('concurrent chats with separate TrackedFs instances track files independently', async () => {
+    const { adapter } = await init_db('');
+    const sharedFs = new InMemoryFs();
+
+    const trackedFs1 = new TrackedFs(sharedFs);
+    const trackedFs2 = new TrackedFs(sharedFs);
+
+    const { sandbox: sandbox1 } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: trackedFs1,
+    });
+
+    const { sandbox: sandbox2 } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: trackedFs2,
+    });
+
+    await Promise.all([
+      sandbox1.executeCommand(
+        'mkdir -p /sql && echo "chat1" > /sql/chat1.json',
+      ),
+      sandbox2.executeCommand(
+        'mkdir -p /sql && echo "chat2" > /sql/chat2.json',
+      ),
+    ]);
+
+    const files1 = trackedFs1.getCreatedFiles();
+    const files2 = trackedFs2.getCreatedFiles();
+
+    assert.ok(
+      files1.includes('/sql/chat1.json'),
+      'TrackedFs1 should track chat1.json',
+    );
+    assert.ok(
+      !files1.includes('/sql/chat2.json'),
+      'TrackedFs1 should NOT track chat2.json',
+    );
+
+    assert.ok(
+      files2.includes('/sql/chat2.json'),
+      'TrackedFs2 should track chat2.json',
+    );
+    assert.ok(
+      !files2.includes('/sql/chat1.json'),
+      'TrackedFs2 should NOT track chat1.json',
+    );
   });
 });

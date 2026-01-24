@@ -29,6 +29,8 @@ export class PostgresInfoGrounding extends InfoGrounding {
       database: dbRows[0]?.db,
       details: {
         parameterPlaceholder: '$1, $2, $3, ...',
+        identifierQuoting:
+          'PostgreSQL lowercases unquoted identifiers. To preserve mixed-case names, wrap table and column names in double quotes: SELECT "columnName" FROM "TableName"',
       },
     };
   }

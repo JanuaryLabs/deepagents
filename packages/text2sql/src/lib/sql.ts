@@ -8,6 +8,7 @@ import {
   type UIMessage,
   generateId,
 } from 'ai';
+import { type IFileSystem } from 'just-bash';
 
 import { type AgentModel } from '@deepagents/agent';
 import {
@@ -27,6 +28,7 @@ import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { type RenderingTools } from './agents/text2sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
+import { TrackedFs } from './fs/tracked-fs.ts';
 import { type TeachingsOptions, guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
@@ -39,6 +41,7 @@ export class Text2Sql {
     introspection: JsonCache<ContextFragment[]>;
     teachingsOptions?: TeachingsOptions;
     transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+    filesystem: IFileSystem;
   };
 
   constructor(config: {
@@ -48,11 +51,9 @@ export class Text2Sql {
     tools?: RenderingTools;
     model: AgentModel;
     transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-    /**
-     * Configure teachings behavior
-     * @see TeachingsOptions
-     */
+    /** @see TeachingsOptions */
     teachingsOptions?: TeachingsOptions;
+    filesystem: IFileSystem;
   }) {
     this.#config = {
       teachingsOptions: config.teachingsOptions,
@@ -61,6 +62,7 @@ export class Text2Sql {
       tools: config.tools ?? {},
       model: config.model,
       transform: config.transform,
+      filesystem: config.filesystem,
       introspection: new JsonCache<ContextFragment[]>(
         'introspection-' + config.version,
       ),
@@ -144,6 +146,8 @@ export class Text2Sql {
   }
 
   public async chat(messages: UIMessage[]) {
+    const trackedFs = new TrackedFs(this.#config.filesystem);
+
     const context = this.#config.context(
       ...guidelines(this.#config.teachingsOptions),
       ...(await this.index()),
@@ -156,17 +160,12 @@ export class Text2Sql {
       await context.save();
     }
 
-    // Use message ID for turn-level artifact isolation
-    const messageId = userMsg?.id ?? generateId();
-
-    // Extract skill mounts from context fragments for sandbox filesystem
     const { mounts: skillMounts } = context.getSkillMounts();
 
-    const { bash } = await createResultTools({
+    const { tools } = await createResultTools({
       adapter: this.#config.adapter,
-      chatId: context.chatId,
-      messageId,
       skillMounts,
+      filesystem: trackedFs,
     });
 
     const chatAgent = agent({
@@ -174,7 +173,7 @@ export class Text2Sql {
       model: this.#config.model,
       context,
       tools: {
-        bash,
+        ...tools,
         ...this.#config.tools,
       },
       guardrails: [errorRecoveryGuardrail],
@@ -195,7 +194,15 @@ export class Text2Sql {
       originalMessages: messages,
       generateMessageId: generateId,
       onFinish: async ({ responseMessage }) => {
-        context.set(assistant(responseMessage));
+        const createdFiles = trackedFs.getCreatedFiles();
+        const messageWithMetadata = {
+          ...responseMessage,
+          metadata: {
+            ...((responseMessage.metadata as object) ?? {}),
+            createdFiles,
+          },
+        };
+        context.set(assistant(messageWithMetadata));
         await context.save();
         await context.trackUsage(await result.totalUsage);
       },
