@@ -3,6 +3,7 @@ import {
   InvalidToolInputError,
   NoSuchToolError,
   type StreamTextTransform,
+  type Tool,
   ToolCallRepairError,
   type ToolSet,
   type UIMessage,
@@ -17,20 +18,19 @@ import {
   agent,
   assistant,
   errorRecoveryGuardrail,
-  hint,
   message,
-  styleGuide,
 } from '@deepagents/context';
 
 import type { Adapter } from './adapters/adapter.ts';
 import developerExports from './agents/developer.agent.ts';
 import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
-import { type RenderingTools } from './agents/text2sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
 import { TrackedFs } from './fs/tracked-fs.ts';
 import { type TeachingsOptions, guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
+
+export type RenderingTools = Record<string, Tool<unknown, never>>;
 
 export class Text2Sql {
   #config: {
@@ -121,37 +121,12 @@ export class Text2Sql {
     return producer.toPairs();
   }
 
-  /**
-   * Build instructions for rendering tools (hint + styleGuide).
-   * Returns fragments to include when render_* tools are available.
-   */
-  #buildRenderingInstructions(): ContextFragment[] {
-    const renderToolNames = Object.keys(this.#config.tools ?? {}).filter(
-      (name) => name.startsWith('render_'),
-    );
-
-    if (!renderToolNames.length) {
-      return [];
-    }
-
-    return [
-      hint(`Rendering tools available: ${renderToolNames.join(', ')}.`),
-      styleGuide({
-        prefer:
-          'Use render_* tools for trend/over time/monthly requests or chart asks',
-        always:
-          'Include text insight alongside visualizations. Prefer line charts for time-based data.',
-      }),
-    ];
-  }
-
   public async chat(messages: UIMessage[]) {
     const trackedFs = new TrackedFs(this.#config.filesystem);
 
     const context = this.#config.context(
       ...guidelines(this.#config.teachingsOptions),
       ...(await this.index()),
-      ...this.#buildRenderingInstructions(),
     );
 
     const userMsg = messages.at(-1);
@@ -214,7 +189,6 @@ export class Text2Sql {
       ...guidelines(this.#config.teachingsOptions),
       ...developerExports.fragments,
       ...(await this.index()),
-      ...this.#buildRenderingInstructions(),
     );
 
     const userMsg = messages.at(-1);
