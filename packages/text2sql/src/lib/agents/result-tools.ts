@@ -109,6 +109,15 @@ function createSqlCommand(adapter: Adapter) {
           };
         }
 
+        const syntaxError = await adapter.validate(query);
+        if (syntaxError) {
+          return {
+            stdout: '',
+            stderr: `sql run: ${syntaxError}`,
+            exitCode: 1,
+          };
+        }
+
         try {
           const rows = await adapter.execute(query);
           const rowsArray = Array.isArray(rows) ? rows : [];
@@ -145,7 +154,7 @@ function createSqlCommand(adapter: Adapter) {
     validate: {
       usage: 'validate "SELECT ..."',
       description: 'Validate query syntax',
-      handler: (args) => {
+      handler: async (args) => {
         const query = args.join(' ').trim();
 
         if (!query) {
@@ -161,6 +170,15 @@ function createSqlCommand(adapter: Adapter) {
           return {
             stdout: '',
             stderr: `sql validate: ${validation.error}`,
+            exitCode: 1,
+          };
+        }
+
+        const syntaxError = await adapter.validate(query);
+        if (syntaxError) {
+          return {
+            stdout: '',
+            stderr: `sql validate: ${syntaxError}`,
             exitCode: 1,
           };
         }
