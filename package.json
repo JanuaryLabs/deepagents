@@ -109,7 +109,7 @@
     "framer-motion": "^12.19.1",
     "ignore": "^7.0.5",
     "isbot": "^4.4.0",
-    "just-bash": "2.5.5",
+    "just-bash": "2.9.6",
     "langchain": "^0.3.35",
     "lint-staged": "^16.2.7",
     "lodash-es": "^4.17.21",

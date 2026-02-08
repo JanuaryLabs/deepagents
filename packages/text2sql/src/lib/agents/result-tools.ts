@@ -1,3 +1,4 @@
+import { tool } from 'ai';
 import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
 import {
@@ -10,6 +11,7 @@ import {
 } from 'just-bash';
 import * as path from 'node:path';
 import { v7 } from 'uuid';
+import z from 'zod';
 
 import type { SkillPathMapping } from '@deepagents/context';
 
@@ -237,6 +239,8 @@ export async function createResultTools(options: ResultToolsOptions) {
   const { sandbox, tools } = await createBashTool({
     sandbox: bashInstance,
     destination: '/',
+    extraInstructions:
+      'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.',
     onBeforeBashCall: ({ command }) => {
       console.log(chalk.cyan(`[onBeforeBashCall]: ${command}`));
       return { command };
@@ -249,5 +253,28 @@ export async function createResultTools(options: ResultToolsOptions) {
     },
   });
 
-  return { sandbox, tools };
+  const bash = tool({
+    ...(tools as any).bash,
+    inputSchema: z.object({
+      command: z.string().describe('The bash command to execute'),
+      reasoning: z
+        .string()
+        .trim()
+        .describe('Brief reason for executing this command'),
+    }),
+    execute: async ({ command }, execOptions) => {
+      if (!tools.bash.execute) {
+        throw new Error('bash tool execution is not available');
+      }
+      return tools.bash.execute({ command }, execOptions);
+    },
+  });
+
+  return {
+    sandbox,
+    tools: {
+      ...tools,
+      bash,
+    },
+  };
 }

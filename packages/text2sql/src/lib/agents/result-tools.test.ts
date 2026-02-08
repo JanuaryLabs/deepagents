@@ -1,3 +1,5 @@
+import { generateText, stepCountIs } from 'ai';
+import { MockLanguageModelV3 } from 'ai/test';
 import { InMemoryFs, ReadWriteFs } from 'just-bash';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
@@ -192,6 +194,119 @@ describe('createResultTools sandbox isolation', () => {
 
     const result = await sandbox.executeCommand('ls /');
     assert.strictEqual(result.exitCode, 0);
+  });
+});
+
+describe('bash tool reasoning contract', () => {
+  const testUsage = {
+    inputTokens: {
+      total: 3,
+      noCache: 3,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: {
+      total: 10,
+      text: 10,
+      reasoning: undefined,
+    },
+  } as const;
+
+  const createBashToolCallModel = (input: string) =>
+    new MockLanguageModelV3({
+      doGenerate: {
+        finishReason: { unified: 'tool-calls', raw: undefined },
+        usage: testUsage,
+        warnings: [],
+        content: [
+          {
+            type: 'tool-call',
+            toolCallType: 'function',
+            toolCallId: 'call-1',
+            toolName: 'bash',
+            input,
+          },
+        ],
+      },
+    });
+
+  const runBashToolCall = async (input: string) => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await generateText({
+      model: createBashToolCallModel(input),
+      prompt: 'test-input',
+      stopWhen: stepCountIs(1),
+      tools: { bash: tools.bash },
+    });
+
+    return result.content as Array<{
+      type: string;
+      toolName?: string;
+      error?: unknown;
+      output?: {
+        stdout: string;
+        stderr: string;
+        exitCode: number;
+      };
+    }>;
+  };
+
+  it('schema rejects missing reasoning', async () => {
+    const content = await runBashToolCall(`{"command":"echo hello"}`);
+
+    const toolError = content.find(
+      (part) => part.type === 'tool-error' && part.toolName === 'bash',
+    );
+    assert.ok(toolError, 'Expected bash tool call to fail validation');
+    assert.match(String(toolError.error), /reasoning/i);
+  });
+
+  it('schema rejects empty or whitespace-only reasoning', async () => {
+    const content = await runBashToolCall(
+      `{"command":"echo hello","reasoning":"   "}`,
+    );
+
+    const toolError = content.find(
+      (part) => part.type === 'tool-error' && part.toolName === 'bash',
+    );
+    assert.ok(toolError, 'Expected bash tool call to fail validation');
+    assert.match(String(toolError.error), /reasoning/i);
+  });
+
+  it('schema accepts command with non-empty reasoning', async () => {
+    const content = await runBashToolCall(
+      `{"command":"echo hello","reasoning":"Read command output for report assembly."}`,
+    );
+
+    const toolError = content.find(
+      (part) => part.type === 'tool-error' && part.toolName === 'bash',
+    );
+    assert.strictEqual(toolError, undefined);
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool call to succeed');
+  });
+
+  it('execution succeeds and output shape is unchanged when reasoning is provided', async () => {
+    const content = await runBashToolCall(
+      `{"command":"echo hello","reasoning":"Verify wrapped bash execution path."}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool call to succeed');
+    assert.ok(toolResult.output, 'Expected bash tool output');
+    assert.strictEqual(toolResult.output.exitCode, 0);
+    assert.strictEqual(toolResult.output.stderr, '');
+    assert.ok(toolResult.output.stdout.includes('hello'));
   });
 });
 
