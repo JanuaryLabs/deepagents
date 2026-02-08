@@ -1,7 +1,13 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { type ContextFragment, XmlRenderer } from '@deepagents/context';
+import {
+  type ContextFragment,
+  XmlRenderer,
+  fragment,
+  glossary,
+  hint,
+} from '@deepagents/context';
 
 describe('XmlRenderer', () => {
   describe('primitive data', () => {
@@ -516,6 +522,63 @@ describe('XmlRenderer', () => {
         result.includes('<container>plain text</container>') ||
           result.includes('<container>'),
       );
+    });
+  });
+
+  describe('single child fragment unwrapping', () => {
+    it('should not duplicate wrapper when fragment has single fragment child', () => {
+      const renderer = new XmlRenderer();
+      const frag = fragment(
+        'sql_flags',
+        glossary({
+          is_active:
+            'Indicates whether a user is currently active (1) or not (0)',
+          Analyst: 'finance_level = 1',
+        }),
+      );
+      const result = renderer.render([frag]);
+      assert.ok(
+        !result.includes('<sql_flags>\n  <glossary>\n    <glossary>'),
+        `Should not have nested duplicate glossary tags. Got:\n${result}`,
+      );
+      assert.ok(result.includes('<sql_flags>'), 'Should have outer wrapper');
+      assert.ok(result.includes('<glossary>'), 'Should have glossary tag');
+      assert.ok(
+        result.includes('<term>is_active</term>'),
+        'Should have glossary content',
+      );
+    });
+
+    it('should not duplicate wrapper when fragment has single string child', () => {
+      const renderer = new XmlRenderer();
+      const frag = fragment(
+        'available_sections',
+        'The available sections found in /sections directory.',
+      );
+      const result = renderer.render([frag]);
+      assert.ok(
+        !result.includes('<available_sections>\n  <available_section>'),
+        `Should not singularize and nest when there is only one string. Got:\n${result}`,
+      );
+      assert.strictEqual(
+        result,
+        '<available_sections>The available sections found in /sections directory.</available_sections>',
+      );
+    });
+
+    it('should still work with multiple children (no unwrapping)', () => {
+      const renderer = new XmlRenderer();
+      const frag = fragment(
+        'proposal_context',
+        hint('Current proposal: "New Test" for client "Gavi"'),
+        hint('No team members selected yet for this proposal.'),
+      );
+      const result = renderer.render([frag]);
+      const expected = `<proposal_context>
+  <hint>Current proposal: &quot;New Test&quot; for client &quot;Gavi&quot;</hint>
+  <hint>No team members selected yet for this proposal.</hint>
+</proposal_context>`;
+      assert.strictEqual(result, expected);
     });
   });
 });

@@ -219,11 +219,33 @@ export class XmlRenderer extends ContextRenderer {
       return this.#leafRoot(fragment.name, String(fragment.data));
     }
     if (Array.isArray(fragment.data)) {
+      if (fragment.data.length === 1) {
+        const single = fragment.data[0];
+        if (this.isPrimitive(single)) {
+          return this.#leafRoot(fragment.name, String(single));
+        }
+        if (isFragment(single)) {
+          return this.#renderFragmentContentsUnderParent(
+            fragment.name,
+            single,
+            0,
+          );
+        }
+        if (isFragmentObject(single)) {
+          return this.#wrap(
+            fragment.name,
+            this.renderEntries(single, { depth: 1, path: [] }),
+          );
+        }
+      }
       return this.#renderArray(fragment.name, fragment.data, 0);
     }
     if (isFragment(fragment.data)) {
-      const child = this.renderFragment(fragment.data, { depth: 1, path: [] });
-      return this.#wrap(fragment.name, [child]);
+      return this.#renderFragmentContentsUnderParent(
+        fragment.name,
+        fragment.data,
+        0,
+      );
     }
     if (isFragmentObject(fragment.data)) {
       return this.#wrap(
@@ -232,6 +254,98 @@ export class XmlRenderer extends ContextRenderer {
       );
     }
     return '';
+  }
+
+  #renderFragmentContentsUnderParent(
+    parentName: string,
+    childFragment: ContextFragment,
+    depth: number,
+  ): string {
+    const { name: childName, data: childData } = childFragment;
+    if (this.isPrimitive(childData)) {
+      return this.#wrap(parentName, [
+        this.#leaf(childName, String(childData), depth + 1),
+      ]);
+    }
+    if (isFragment(childData)) {
+      const grandchild = this.renderFragment(childData, {
+        depth: depth + 2,
+        path: [],
+      });
+      return this.#wrap(parentName, [
+        this.#wrapIndented(childName, [grandchild], depth + 1),
+      ]);
+    }
+    if (Array.isArray(childData)) {
+      const hasNonFragmentItems = childData.some(
+        (item) => item != null && !isFragment(item),
+      );
+      if (hasNonFragmentItems) {
+        const children = this.#renderArrayContents(childName, childData, depth);
+        return this.#wrap(parentName, children);
+      }
+      const child = this.renderFragment(childFragment, {
+        depth: depth + 1,
+        path: [],
+      });
+      return this.#wrap(parentName, [child]);
+    }
+    if (isFragmentObject(childData)) {
+      const entries = this.renderEntries(childData, {
+        depth: depth + 2,
+        path: [],
+      });
+      return this.#wrap(parentName, [
+        this.#wrapIndented(childName, entries, depth + 1),
+      ]);
+    }
+    return this.#wrap(parentName, []);
+  }
+
+  #renderArrayContents(
+    itemName: string,
+    items: FragmentData[],
+    depth: number,
+  ): string[] {
+    const fragmentItems = items.filter(isFragment);
+    const nonFragmentItems = items.filter((item) => !isFragment(item));
+
+    const children: string[] = [];
+
+    for (const item of nonFragmentItems) {
+      if (item != null) {
+        if (isFragmentObject(item)) {
+          children.push(
+            this.#wrapIndented(
+              itemName,
+              this.renderEntries(item, { depth: depth + 2, path: [] }),
+              depth + 1,
+            ),
+          );
+        } else {
+          children.push(this.#leaf(itemName, String(item), depth + 1));
+        }
+      }
+    }
+
+    if (this.options.groupFragments && fragmentItems.length > 0) {
+      const groups = this.groupByName(fragmentItems);
+      for (const [groupName, groupFragments] of groups) {
+        const groupChildren = groupFragments.map((frag) =>
+          this.renderFragment(frag, { depth: depth + 2, path: [] }),
+        );
+        const pluralName = pluralize.plural(groupName);
+        children.push(this.#wrapIndented(pluralName, groupChildren, depth + 1));
+      }
+    } else {
+      for (const frag of fragmentItems) {
+        children.push(
+          this.renderFragment(frag, { depth: depth + 1, path: [] }),
+        );
+      }
+    }
+
+    return children;
   }
 
   #renderArray(name: string, items: FragmentData[], depth: number): string {
