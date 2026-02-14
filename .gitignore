@@ -87,3 +87,4 @@ __pycache__/
 
 .finetune/
 artifacts/
+agent-sandbox-test

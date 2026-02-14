@@ -1,4 +1,9 @@
-import { type UIMessage, generateId } from 'ai';
+import {
+  type UIMessage,
+  extractReasoningMiddleware,
+  generateId,
+  wrapLanguageModel,
+} from 'ai';
 import { join } from 'node:path';
 
 import { input, last, minimax, printer } from '@deepagents/agent';
@@ -75,7 +80,7 @@ const messages: UIMessage[] = [
   {
     id: generateId(),
     role: 'user',
-    parts: [{ type: 'text', text: 'Create pdf about the next wave of ai' }],
+    parts: [{ type: 'text', text: 'My name is adam, and you?' }],
   },
 ];
 const store = new InMemoryContextStore();
@@ -96,6 +101,7 @@ context.set(
   }),
 );
 shutdown(disposeSandbox);
+
 while (true) {
   const userMsg = messages.at(-1);
   if (userMsg) {
@@ -105,7 +111,10 @@ while (true) {
 
   const ai = agent({
     name: 'Assistant',
-    model: minimax('MiniMax-M2.5highfast'),
+    model: wrapLanguageModel({
+      model: minimax('MiniMax-M2.5'),
+      middleware: extractReasoningMiddleware({ tagName: 'think' }),
+    }),
     // model: groq('moonshotai/kimi-k2-instruct-0905'),
     context: context,
     tools: { bash },
