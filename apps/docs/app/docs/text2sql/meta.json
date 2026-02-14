@@ -9,6 +9,7 @@
     "sqlite",
     "sqlserver",
     "mysql",
+    "bigquery",
     "spreadsheet",
     "---Guides---",
     "to-sql",

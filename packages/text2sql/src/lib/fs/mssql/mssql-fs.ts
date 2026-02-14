@@ -195,6 +195,21 @@ export class MssqlFs implements IFileSystem {
     return path.posix.join(this.#root, p);
   }
 
+  #unprefixPath(p: string): string {
+    if (!this.#root) {
+      return p;
+    }
+    if (p === this.#root) {
+      return '/';
+    }
+    if (p.startsWith(this.#root + '/')) {
+      return p.slice(this.#root.length) || '/';
+    }
+    // Should not happen unless a symlink escapes the configured root.
+    // Return the best-effort canonical path to avoid breaking callers.
+    return p;
+  }
+
   #normalizePath(p: string): string {
     return path.posix.resolve('/', p);
   }
@@ -940,6 +955,37 @@ export class MssqlFs implements IFileSystem {
       'SELECT path FROM fs_entries ORDER BY path',
     );
     return rows.map((row) => row.path);
+  }
+
+  async realpath(filePath: string): Promise<string> {
+    const normalized = this.#normalizePath(filePath);
+    const prefixed = this.#prefixPath(normalized);
+    const resolved = await this.#resolveSymlink(prefixed);
+
+    const rows = await this.#query<{ exists: number }>(
+      'SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]',
+      [resolved],
+    );
+    if (rows[0].exists !== 1) {
+      throw new Error(`ENOENT: no such file or directory: ${filePath}`);
+    }
+
+    return this.#unprefixPath(resolved);
+  }
+
+  async utimes(filePath: string, _atime: Date, mtime: Date): Promise<void> {
+    const normalized = this.#normalizePath(filePath);
+    const prefixed = this.#prefixPath(normalized);
+    const resolved = await this.#resolveSymlink(prefixed);
+
+    const result = await this.#exec(
+      'UPDATE fs_entries SET mtime = @p0 WHERE path = @p1',
+      [mtime.getTime(), resolved],
+    );
+
+    if (result === 0) {
+      throw new Error(`ENOENT: no such file or directory: ${filePath}`);
+    }
   }
 
   async chmod(filePath: string, mode: number): Promise<void> {

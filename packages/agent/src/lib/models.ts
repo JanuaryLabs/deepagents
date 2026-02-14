@@ -35,6 +35,14 @@ export const nebius = createOpenAICompatible({
   supportsStructuredOutputs: true,
 });
 
+export const minimax = createOpenAICompatible({
+  name: 'minimax',
+  baseURL: 'https://api.minimax.io/v1',
+  apiKey: process.env.MINIMAX_API_KEY!,
+  includeUsage: true,
+  supportsStructuredOutputs: true,
+});
+
 export async function embed(documents: string[]): Promise<{
   embeddings: number[][];
   dimensions: number;

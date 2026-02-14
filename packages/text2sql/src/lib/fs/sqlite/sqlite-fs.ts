@@ -160,6 +160,21 @@ export class SqliteFs implements IFileSystem {
     return path.posix.join(this.#root, p);
   }
 
+  #unprefixPath(p: string): string {
+    if (!this.#root) {
+      return p;
+    }
+    if (p === this.#root) {
+      return '/';
+    }
+    if (p.startsWith(this.#root + '/')) {
+      return p.slice(this.#root.length) || '/';
+    }
+    // Should not happen unless a symlink escapes the configured root.
+    // Return the best-effort canonical path to avoid breaking callers.
+    return p;
+  }
+
   #useTransaction<T>(fn: () => T): T {
     this.#db.exec('BEGIN TRANSACTION');
     try {
@@ -775,6 +790,35 @@ export class SqliteFs implements IFileSystem {
       path: string;
     }[];
     return rows.map((row) => row.path);
+  }
+
+  async realpath(filePath: string): Promise<string> {
+    const normalized = this.#normalizePath(filePath);
+    const prefixed = this.#prefixPath(normalized);
+    const resolved = this.#resolveSymlink(prefixed);
+
+    const exists = this.#stmt('SELECT 1 FROM fs_entries WHERE path = ?').get(
+      resolved,
+    );
+    if (!exists) {
+      throw new Error(`ENOENT: no such file or directory: ${filePath}`);
+    }
+
+    return this.#unprefixPath(resolved);
+  }
+
+  async utimes(filePath: string, _atime: Date, mtime: Date): Promise<void> {
+    const normalized = this.#normalizePath(filePath);
+    const prefixed = this.#prefixPath(normalized);
+    const resolved = this.#resolveSymlink(prefixed);
+
+    const result = this.#stmt(
+      'UPDATE fs_entries SET mtime = ? WHERE path = ?',
+    ).run(mtime.getTime(), resolved);
+
+    if (result.changes === 0) {
+      throw new Error(`ENOENT: no such file or directory: ${filePath}`);
+    }
   }
 
   async chmod(filePath: string, mode: number): Promise<void> {

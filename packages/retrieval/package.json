@@ -49,7 +49,7 @@
     "fastembed": "^2.0.0",
     "@huggingface/transformers": "^3.7.5",
     "langchain": "^0.3.35",
-    "ai": "^6.0.39",
+    "ai": "^6.0.86",
     "sqlite-vec": "^0.1.7-alpha.2",
     "dedent": "1.7.0",
     "lodash-es": "^4.17.21"

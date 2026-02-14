@@ -40,7 +40,7 @@
     "@deepagents/agent": "0.14.0",
     "@ai-sdk/groq": "^3.0.10",
     "zod": "^3.25.76 || ^4.0.0",
-    "ai": "^6.0.39",
+    "ai": "^6.0.86",
     "lodash-es": "^4.17.21",
     "@deepagents/retrieval": "0.14.0",
     "@deepagents/toolbox": "0.14.0",

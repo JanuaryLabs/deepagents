@@ -139,4 +139,10 @@ export class TrackedFs implements IFileSystem {
   getAllPaths(): string[] {
     return this.#base.getAllPaths?.() ?? [];
   }
+  realpath(path: string): Promise<string> {
+    return this.#base.realpath(path);
+  }
+  utimes(path: string, atime: Date, mtime: Date): Promise<void> {
+    return this.#base.utimes(path, atime, mtime);
+  }
 }

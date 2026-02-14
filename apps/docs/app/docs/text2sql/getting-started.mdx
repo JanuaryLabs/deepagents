@@ -15,12 +15,12 @@ npm install @deepagents/text2sql
 
 Text2SQL requires four components:
 
-1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, or MySQL/MariaDB)
+1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, or BigQuery)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Version** - A string used to manage cache invalidation (bump when schema changes)
 4. **History** - Stores conversation history (optional for single queries)
 
-<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB']}>
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
@@ -125,6 +125,40 @@ const text2sql = new Text2Sql({
 });
 ```
 </Tab>
+<Tab value="BigQuery">
+```typescript
+import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
+
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { BigQuery } from '@deepagents/text2sql/bigquery';
+import * as bigquery from '@deepagents/text2sql/bigquery';
+
+const projectId = process.env.BQ_PROJECT_ID!;
+const client = new BigQueryClient({ projectId });
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new BigQuery({
+    projectId,
+    datasets: ['analytics'],
+    execute: async (sql) => {
+      const [job] = await client.createQueryJob({ query: sql });
+      const [rows] = await job.getQueryResults();
+      return rows;
+    },
+    validate: async (sql) => {
+      await client.createQueryJob({
+        query: sql,
+        dryRun: true,
+        useQueryCache: false,
+      });
+    },
+    grounding: [bigquery.tables(), bigquery.info()],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
 </Tabs>
 
 ## Your First Query
@@ -188,6 +222,7 @@ export GROQ_API_KEY=your-api-key
 
 - [Grounding](/docs/text2sql/grounding) - Configure database introspection for richer context
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features
+- [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific features
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific features
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific features
 - [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific features

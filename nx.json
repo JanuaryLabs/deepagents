@@ -81,7 +81,8 @@
         "esbuildOptions": {
           "loader": {
             ".txt": "text",
-            ".sql": "text"
+            ".sql": "text",
+            ".md": "text"
           }
         },
         "external": [

@@ -93,7 +93,7 @@
     "@types/jsdom": "^27.0.0",
     "@types/mdx": "^2.0.13",
     "@upstash/qstash": "^2.8.4",
-    "ai": "^6.0.39",
+    "ai": "^6.0.86",
     "conf": "^15.0.2",
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",

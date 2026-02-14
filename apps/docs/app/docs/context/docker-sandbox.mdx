@@ -1,0 +1,255 @@
+---
+title: Docker Sandbox
+description: Execute real binaries in isolated Docker containers with three creation strategies
+---
+
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+The Docker sandbox provides isolated code execution by running commands inside Docker containers. It supports three strategies for creating sandboxes, each suited to different use cases.
+
+## Strategies
+
+<Tabs groupId="strategy" items={['Runtime', 'Dockerfile', 'Compose']}>
+<Tab value="Runtime">
+
+Starts a vanilla image and installs packages/binaries at container startup. Best for quick experiments and when dependencies change frequently.
+
+```typescript
+import { createDockerSandbox } from '@deepagents/context';
+
+const sandbox = await createDockerSandbox({
+  image: 'alpine:latest',
+  packages: ['curl', 'jq', 'python3'],
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
+  resources: { memory: '512m', cpus: 1 },
+});
+
+try {
+  await sandbox.executeCommand('python3 --version');
+} finally {
+  await sandbox.dispose();
+}
+```
+
+**Default image:** `alpine:latest`
+
+**Package manager detection:** Alpine images use `apk`, Debian-based images (debian, ubuntu, node, python) use `apt-get`.
+
+</Tab>
+<Tab value="Dockerfile">
+
+Builds a custom image from a Dockerfile. Best for reproducible environments with many dependencies. Uses content-based hashing for automatic image caching — same Dockerfile content means same image tag, so Docker skips the rebuild.
+
+```typescript
+import { createDockerSandbox } from '@deepagents/context';
+
+// Inline Dockerfile
+const sandbox = await createDockerSandbox({
+  dockerfile: `
+    FROM python:3.11-slim
+    RUN pip install pandas numpy matplotlib
+  `,
+  context: '.',
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+    },
+  ],
+});
+
+// Or reference a Dockerfile path
+const sandbox2 = await createDockerSandbox({
+  dockerfile: './Dockerfile.sandbox',
+  context: '.',
+});
+```
+
+**Caching:** The image tag is `sandbox-<sha256-first-12-chars>`. Same Dockerfile content produces the same tag, so subsequent calls skip the build entirely.
+
+**Detection:** Inline vs path is determined by whether the string contains `\n`.
+
+</Tab>
+<Tab value="Compose">
+
+Manages multi-container environments using Docker Compose. Best for applications that need databases, APIs, or other services alongside the sandbox.
+
+```typescript
+import { createDockerSandbox } from '@deepagents/context';
+
+const sandbox = await createDockerSandbox({
+  compose: './docker-compose.yml',
+  service: 'app',
+});
+
+try {
+  // Commands run in the 'app' service
+  await sandbox.executeCommand('node --version');
+
+  // Can reach other services by name
+  await sandbox.executeCommand('curl http://db:5432');
+} finally {
+  // Stops ALL services
+  await sandbox.dispose();
+}
+```
+
+**Volumes:** Must be defined in the compose file itself, not via `mounts`.
+
+**Lifecycle:** `dispose()` runs `docker compose down`, stopping all services.
+
+</Tab>
+</Tabs>
+
+## Mounts
+
+Mount host directories into the container. Read-only by default for security.
+
+```typescript
+const sandbox = await createDockerSandbox({
+  mounts: [
+    {
+      hostPath: '/absolute/path/on/host',
+      containerPath: '/workspace',
+      readOnly: true,   // default
+    },
+    {
+      hostPath: process.cwd(),
+      containerPath: '/project',
+      readOnly: false,  // allow writes
+    },
+  ],
+});
+```
+
+Mount paths are validated at creation time — a `MountPathError` is thrown if the `hostPath` doesn't exist on the host.
+
+## Resource Limits
+
+```typescript
+const sandbox = await createDockerSandbox({
+  resources: {
+    memory: '512m',  // default: '1g'
+    cpus: 1,         // default: 2
+  },
+});
+```
+
+## Installing Binaries from URLs
+
+For tools not available in package managers, install pre-built binaries directly from URLs. Architecture is auto-detected via `uname -m`.
+
+```typescript
+const sandbox = await createDockerSandbox({
+  packages: ['curl'],  // curl required for downloads
+  binaries: [
+    {
+      name: 'presenterm',
+      url: {
+        x86_64: 'https://github.com/.../presenterm-x86_64-linux-musl.tar.gz',
+        aarch64: 'https://github.com/.../presenterm-aarch64-linux-musl.tar.gz',
+      },
+      binaryPath: 'presenterm',  // filename inside the archive
+    },
+  ],
+});
+```
+
+**Supported formats:**
+- `.tar.gz` / `.tgz` — extracted, binary found by name, moved to `/usr/local/bin/`
+- Raw binary URL — downloaded directly to `/usr/local/bin/`
+
+## File I/O
+
+Read and write files inside the container using base64 encoding for binary safety:
+
+```typescript
+// Write files
+await sandbox.writeFiles([
+  { path: '/tmp/data.json', content: '{"key": "value"}' },
+  { path: '/tmp/script.py', content: 'print("hello")' },
+]);
+
+// Read files
+const content = await sandbox.readFile('/tmp/data.json');
+```
+
+Parent directories are created automatically during writes.
+
+## Container Lifecycle
+
+### Manual Disposal
+
+Always wrap sandbox usage in `try/finally`:
+
+```typescript
+const sandbox = await createDockerSandbox({ packages: ['curl'] });
+try {
+  await sandbox.executeCommand('curl --version');
+} finally {
+  await sandbox.dispose();
+}
+```
+
+### Auto-Disposal with `useSandbox`
+
+```typescript
+import { useSandbox } from '@deepagents/context';
+
+const version = await useSandbox(
+  { packages: ['curl'] },
+  async (sandbox) => {
+    const result = await sandbox.executeCommand('curl --version');
+    return result.stdout.split('\n')[0];
+  },
+);
+```
+
+Containers are created with `--rm`, so they're removed automatically when stopped. `dispose()` calls `docker stop` (or `docker compose down` for Compose).
+
+## Error Handling
+
+All errors extend `DockerSandboxError`:
+
+| Error | When |
+|-------|------|
+| `DockerNotAvailableError` | Docker daemon is not running |
+| `ContainerCreationError` | Container fails to start |
+| `PackageInstallError` | Package installation fails (includes package names, manager type, stderr) |
+| `BinaryInstallError` | Binary download/install fails (includes binary name, URL, reason) |
+| `MountPathError` | Host path doesn't exist (includes both host and container paths) |
+| `DockerfileBuildError` | Dockerfile build fails (includes stderr) |
+| `ComposeStartError` | Docker Compose startup fails (includes compose file path, stderr) |
+
+```typescript
+import {
+  createDockerSandbox,
+  DockerNotAvailableError,
+  PackageInstallError,
+} from '@deepagents/context';
+
+try {
+  const sandbox = await createDockerSandbox({
+    packages: ['nonexistent-package'],
+  });
+} catch (error) {
+  if (error instanceof DockerNotAvailableError) {
+    console.error('Start Docker first');
+  } else if (error instanceof PackageInstallError) {
+    console.error(`Failed packages: ${error.packages.join(', ')}`);
+    console.error(`Package manager: ${error.packageManager}`);
+  }
+}
+```
+
+## Next Steps
+
+- [Container Tool](/docs/context/container-tool) - High-level wrapper for AI agents
+- [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach
+- [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern internals

@@ -1,0 +1,27 @@
+# Tasks: Add BigQuery Adapter
+
+- [x] Create `@deepagents/text2sql/bigquery` subpath export in `packages/text2sql/package.json`
+- [x] Implement BigQuery adapter class (driver-agnostic, requires `validate`)
+  - [x] `quoteIdentifier()` uses BigQuery backticks and supports dotted paths (quote each segment)
+  - [x] `buildSampleRowsQuery()` supports dotted column paths (no quoting bug for nested fields)
+  - [x] `defaultSchema` is set only when exactly one dataset is configured
+- [x] Implement BigQuery groundings:
+  - [x] `info()` returns dialect metadata (dialect `bigquery`, quoting and parameter hints)
+  - [x] `tables()` reads tables from configured datasets only, flattens nested field paths
+  - [x] `views()` reads views + materialized views and includes view definition
+  - [x] `constraints()` reads informational constraints + NOT NULL/DEFAULT from metadata (best effort)
+  - [x] `rowCount()` reads row counts from metadata only (no `COUNT(*)`)
+  - [x] `indexes()` maps clustering/partitioning metadata into index hints and marks indexed columns
+  - [x] `report()` re-exports the generic `ReportGrounding`
+  - [x] Do NOT implement/export `columnStats()` or `columnValues()` for BigQuery V1
+- [x] Add integration tests (Node test runner) that validate end-to-end `adapter.introspect()` behavior using a stubbed `execute()` returner:
+  - [x] tables + nested field paths are present as columns
+  - [x] views include materialized views and definitions
+  - [x] constraints annotate PK/FK/NOT NULL in the resulting fragments
+  - [x] relationships are produced when FK metadata is returned
+  - [x] rowCount uses metadata and produces sizeHint
+  - [x] indexes marks clustering/partition columns as indexed
+- [x] Add docs:
+  - [x] `apps/docs/app/docs/text2sql/bigquery.mdx`
+  - [x] Add BigQuery tab to `apps/docs/app/docs/text2sql/getting-started.mdx`
+- [x] Run `openspec validate add-bigquery-adapter --strict`

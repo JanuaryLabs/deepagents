@@ -85,9 +85,9 @@ export function createBinaryBridges(
 
         // Merge environments but preserve process.env.PATH for binary resolution
         // ctx.env.PATH is the virtual PATH (/bin:/usr/bin) which doesn't include host binaries
-        const mergedEnv = {
+        const mergedEnv: Partial<Record<string, string>> = {
           ...process.env,
-          ...ctx.env,
+          ...Object.fromEntries(ctx.env), // ctx.env is a Map, convert to object
           PATH: process.env.PATH, // Always use host PATH for binary bridges
         };
 

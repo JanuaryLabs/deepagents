@@ -1,0 +1,195 @@
+---
+title: Container Tool
+description: High-level wrapper combining Docker sandbox with bash-tool for AI agent integration
+---
+
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+`createContainerTool` combines `createDockerSandbox` and `createBashTool` into a single call, giving you a bash tool ready for AI SDK agents running inside an isolated Docker container.
+
+## Basic Usage
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { printer } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  createContainerTool,
+  role,
+  user,
+} from '@deepagents/context';
+
+const { bash, tools, sandbox } = await createContainerTool({
+  packages: ['curl', 'jq'],
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: false,
+    },
+  ],
+});
+
+try {
+  const context = new ContextEngine({
+    chatId: 'demo',
+    userId: 'user-1',
+    store: new InMemoryContextStore(),
+  }).set(
+    role('You are a system admin with bash access.'),
+    user('Show me disk usage for /workspace'),
+  );
+
+  const assistant = agent({
+    name: 'Admin',
+    model: groq('gpt-oss-20b'),
+    context,
+    tools: { bash },
+  });
+
+  await printer.stdout(await assistant.stream({}));
+} finally {
+  await sandbox.dispose();
+}
+```
+
+## Return Value
+
+`createContainerTool` returns three things:
+
+```typescript
+const { bash, tools, sandbox } = await createContainerTool({ ... });
+```
+
+| Property | Type | Purpose |
+|----------|------|---------|
+| `bash` | `BashExecuteTool` | Single bash tool — pass to agent as `tools: { bash }` |
+| `tools` | `{ bash, readFile, writeFile }` | Full toolkit — pass to `generateText({ tools })` |
+| `sandbox` | `DockerSandbox` | Container handle — call `sandbox.dispose()` for cleanup |
+
+## Strategy Options
+
+All three Docker sandbox strategies are supported:
+
+<Tabs groupId="container-strategy" items={['Runtime', 'Dockerfile', 'Compose']}>
+<Tab value="Runtime">
+
+```typescript
+const { bash, sandbox } = await createContainerTool({
+  image: 'alpine:latest',     // default
+  packages: ['python3', 'nodejs'],
+  binaries: [
+    {
+      name: 'presenterm',
+      url: {
+        x86_64: 'https://github.com/.../presenterm-x86_64-musl.tar.gz',
+        aarch64: 'https://github.com/.../presenterm-aarch64-musl.tar.gz',
+      },
+    },
+  ],
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+    },
+  ],
+  resources: { memory: '1g', cpus: 2 },
+});
+```
+
+</Tab>
+<Tab value="Dockerfile">
+
+```typescript
+const { bash, sandbox } = await createContainerTool({
+  dockerfile: `
+    FROM python:3.11-slim
+    RUN pip install pandas numpy
+  `,
+  context: '.',
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+    },
+  ],
+});
+```
+
+</Tab>
+<Tab value="Compose">
+
+```typescript
+const { bash, sandbox } = await createContainerTool({
+  compose: './docker-compose.yml',
+  service: 'app',
+});
+```
+
+</Tab>
+</Tabs>
+
+## Bash Tool Hooks
+
+Intercept command execution for logging, auditing, or command transformation:
+
+```typescript
+import chalk from 'chalk';
+
+const { bash, sandbox } = await createContainerTool({
+  packages: ['curl', 'jq'],
+  onBeforeBashCall: ({ command }) => {
+    console.log(chalk.blue(`[Container] Running: ${command}`));
+    return { command };
+  },
+  onAfterBashCall: ({ command, result }) => {
+    if (result.exitCode !== 0) {
+      console.log(chalk.yellow(`[Container] Failed (${result.exitCode}): ${command}`));
+    }
+    return { result };
+  },
+});
+```
+
+`onBeforeBashCall` can modify the command before execution. `onAfterBashCall` can modify the result before it's returned to the agent.
+
+## With AI SDK Directly
+
+Instead of using the `agent()` wrapper, pass `tools` directly to `generateText` or `streamText`:
+
+```typescript
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+import { createContainerTool } from '@deepagents/context';
+
+const { tools, sandbox } = await createContainerTool({
+  packages: ['python3'],
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/project',
+      readOnly: false,
+    },
+  ],
+});
+
+try {
+  const result = await generateText({
+    model: groq('gpt-oss-20b'),
+    tools,
+    prompt: 'Run python3 --version and tell me what version is installed',
+  });
+
+  console.log(result.text);
+} finally {
+  await sandbox.dispose();
+}
+```
+
+## Next Steps
+
+- [Docker Sandbox](/docs/context/docker-sandbox) - Low-level container control and strategies
+- [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach
+- [Architecture: Sandbox](/docs/context/architecture-sandbox) - How it works internally

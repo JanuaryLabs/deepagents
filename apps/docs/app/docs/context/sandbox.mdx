@@ -1,0 +1,146 @@
+---
+title: Sandbox
+description: Execute code in isolated environments with Docker containers or virtual file systems
+---
+
+The sandbox system lets AI agents execute real commands in isolated environments. Choose between Docker containers for full binary execution, virtual file systems for lightweight simulation, or combine both with binary bridges.
+
+## When to Use What
+
+| Approach | Use Case | Requires Docker? |
+|----------|----------|-------------------|
+| `createContainerTool` | Agent needs real binaries in isolated container | Yes |
+| `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
+| `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
+
+## Quick Start: Container Tool
+
+The fastest path for giving an AI agent a bash tool that runs in Docker:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { printer } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  createContainerTool,
+  role,
+  user,
+} from '@deepagents/context';
+
+const { bash, sandbox } = await createContainerTool({
+  packages: ['curl', 'jq'],
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
+});
+
+try {
+  const context = new ContextEngine({
+    chatId: 'demo',
+    userId: 'user-1',
+    store: new InMemoryContextStore(),
+  });
+
+  context.set(
+    role('You are a helpful assistant with bash access.'),
+    user('List all TypeScript files in the workspace.'),
+  );
+
+  const assistant = agent({
+    name: 'Assistant',
+    model: groq('gpt-oss-20b'),
+    context,
+    tools: { bash },
+  });
+
+  await printer.stdout(await assistant.stream({}));
+} finally {
+  await sandbox.dispose();
+}
+```
+
+## Quick Start: Docker Sandbox
+
+For direct container control without AI agent wiring:
+
+```typescript
+import { createDockerSandbox } from '@deepagents/context';
+
+const sandbox = await createDockerSandbox({
+  image: 'alpine:latest',
+  packages: ['curl', 'jq'],
+  mounts: [
+    {
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
+  resources: { memory: '512m', cpus: 1 },
+});
+
+try {
+  const result = await sandbox.executeCommand('curl --version');
+  console.log(result.stdout);
+
+  await sandbox.writeFiles([
+    { path: '/tmp/hello.txt', content: 'Hello from Docker!' },
+  ]);
+
+  const content = await sandbox.readFile('/tmp/hello.txt');
+  console.log(content);
+} finally {
+  await sandbox.dispose();
+}
+```
+
+Or use `useSandbox` for automatic cleanup:
+
+```typescript
+import { useSandbox } from '@deepagents/context';
+
+const output = await useSandbox(
+  { packages: ['curl'] },
+  async (sandbox) => {
+    const result = await sandbox.executeCommand('curl --version');
+    return result.stdout;
+  },
+);
+```
+
+## Quick Start: Binary Bridges
+
+Bridge specific host binaries into a just-bash virtual file system (no Docker needed):
+
+```typescript
+import { createBashTool } from 'bash-tool';
+import { Bash, ReadWriteFs } from 'just-bash';
+import { createBinaryBridges } from '@deepagents/context';
+
+const bridges = createBinaryBridges(
+  'node',
+  { name: 'python', binaryPath: 'python3' },
+  { name: 'git', allowedArgs: /^(status|log|diff|show)/ },
+);
+
+const { bash } = await createBashTool({
+  sandbox: new Bash({
+    fs: new ReadWriteFs({ root: process.cwd() }),
+    customCommands: bridges,
+  }),
+});
+```
+
+Binary bridges resolve virtual paths to real host paths and use the host's `PATH` for binary resolution, while restricting access via optional `allowedArgs` regex.
+
+## Next Steps
+
+- [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
+- [Container Tool](/docs/context/container-tool) - High-level agent integration
+- [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern and internals

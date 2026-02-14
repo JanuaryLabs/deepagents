@@ -1,0 +1,173 @@
+---
+title: "Architecture: Sandbox"
+description: Strategy pattern, binary bridges internals, and the integration pipeline
+---
+
+This page explains the internal architecture of the sandbox system. Read this if you want to understand how the pieces fit together, extend the system with custom strategies, or debug issues.
+
+## Strategy Pattern
+
+The Docker sandbox uses the Strategy pattern with a Template Method base class. Three concrete strategies handle different container creation approaches:
+
+```
+DockerSandboxStrategy (abstract)
+├── RuntimeStrategy      — install packages/binaries at runtime
+├── DockerfileStrategy   — build image from Dockerfile (cached)
+└── ComposeStrategy      — multi-container via docker compose
+```
+
+### Template Method Flow
+
+The base class defines the creation algorithm. Subclasses override `getImage()` and `configure()`:
+
+```
+create()
+  │
+  ├─ 1. validateMounts()     ← common: check host paths exist
+  │
+  ├─ 2. getImage()           ← strategy-specific
+  │     ├─ Runtime:    return image name (e.g., 'alpine:latest')
+  │     ├─ Dockerfile: build image, return cached tag
+  │     └─ Compose:    return '' (compose manages images)
+  │
+  ├─ 3. startContainer()     ← common: docker run -d --rm
+  │     └─ Compose override:  docker compose up -d
+  │
+  ├─ 4. configure()          ← strategy-specific
+  │     ├─ Runtime:    install packages (apk/apt), install binaries (curl)
+  │     ├─ Dockerfile: no-op (image already configured)
+  │     └─ Compose:    no-op (compose file defines everything)
+  │
+  └─ 5. createSandboxMethods()  ← common: return { executeCommand, readFile, writeFiles, dispose }
+```
+
+If `configure()` throws, the base class auto-stops the container before re-throwing.
+
+### Container Startup
+
+All single-container strategies start containers with:
+
+```
+docker run -d --rm \
+  --name sandbox-<uuid> \
+  --memory=1g --cpus=2 \
+  -w /workspace \
+  -v /host/path:/container/path:ro \
+  alpine:latest tail -f /dev/null
+```
+
+`tail -f /dev/null` keeps the container alive. Commands execute via `docker exec <id> sh -c "<command>"`.
+
+### Dockerfile Image Caching
+
+The `DockerfileStrategy` generates deterministic image tags from Dockerfile content:
+
+```
+Dockerfile content → SHA-256 → first 12 chars → "sandbox-a1b2c3d4e5f6"
+```
+
+Same Dockerfile produces the same tag. Docker's layer cache handles the rest — if the image exists locally, the build is skipped entirely.
+
+### Compose Overrides
+
+`ComposeStrategy` overrides three base class methods:
+
+| Method | Standard | Compose Override |
+|--------|----------|------------------|
+| `startContainer()` | `docker run` | `docker compose up -d` |
+| `exec()` | `docker exec <id>` | `docker compose exec -T <service>` |
+| `stopContainer()` | `docker stop` | `docker compose down` |
+
+## Binary Bridges
+
+Binary bridges connect just-bash virtual environments to real host binaries. They solve three path resolution problems:
+
+### Virtual CWD to Real CWD
+
+just-bash uses virtual paths like `/home/user`. Binary bridges resolve them to real host paths:
+
+```
+ReadWriteFs:  root + cwd → path.join(fs.root, ctx.cwd)
+OverlayFs:    fs.toRealPath(ctx.cwd)
+InMemoryFs:   fallback to process.cwd()
+```
+
+### Virtual PATH to Real PATH
+
+just-bash sets `PATH=/bin:/usr/bin` which doesn't include host binary locations (nvm, homebrew, etc.). Binary bridges always use `process.env.PATH` for binary resolution.
+
+### File Argument Detection
+
+Arguments that look like file paths are resolved relative to the real CWD:
+
+```
+Detected as path:     Has file extension (.md, .py), contains /, starts with .
+Passed through:       Starts with - (flags), no path indicators
+```
+
+### Security via allowedArgs
+
+```typescript
+createBinaryBridges({
+  name: 'git',
+  allowedArgs: /^(status|log|diff|show)/,
+});
+
+// Allowed:  git status, git log, git diff
+// Blocked:  git log --oneline (flags are also tested), git reset --hard
+```
+
+Each argument is tested individually against the regex. Any non-matching argument returns exit code 1 with a security policy error.
+
+## Integration Pipeline
+
+`createContainerTool` composes two independent systems:
+
+```
+createContainerTool(options)
+  │
+  ├─ 1. Split options into sandbox options + bash options
+  │
+  ├─ 2. createDockerSandbox(sandboxOptions)
+  │     └─ Returns: DockerSandbox { executeCommand, readFile, writeFiles, dispose }
+  │
+  └─ 3. createBashTool({ sandbox, ...bashOptions })
+        └─ Returns: { bash, tools }
+```
+
+The `DockerSandbox` interface matches what `createBashTool` expects from its `sandbox` parameter — both use `executeCommand(command) → { stdout, stderr, exitCode }`. This is why Docker sandboxes can be plugged directly into `bash-tool`.
+
+### File Operations: Base64 Encoding
+
+`readFile` and `writeFiles` use base64 encoding internally because `nano-spawn` strips trailing newlines from stdout:
+
+```
+readFile:   docker exec <id> sh -c 'base64 "/path/to/file"'  → decode on host
+writeFiles: echo "<base64>" | base64 -d > "/path/to/file"    → decode in container
+```
+
+## Extending with Custom Strategies
+
+Subclass `DockerSandboxStrategy` to add new container creation approaches:
+
+```typescript
+import { DockerSandboxStrategy, type DockerSandbox } from '@deepagents/context';
+
+class KubernetesStrategy extends DockerSandboxStrategy {
+  protected async getImage(): Promise<string> {
+    return 'my-registry/my-image:latest';
+  }
+
+  protected async configure(): Promise<void> {
+    // Post-creation configuration
+  }
+
+  // Override exec/startContainer/stopContainer for k8s
+}
+```
+
+## Next Steps
+
+- [Docker Sandbox](/docs/context/docker-sandbox) - Usage guide for all three strategies
+- [Container Tool](/docs/context/container-tool) - Agent integration
+- [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach

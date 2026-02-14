@@ -14,6 +14,7 @@
           "packages/text2sql/src/lib/adapters/sqlite/index.ts",
           "packages/text2sql/src/lib/adapters/postgres/index.ts",
           "packages/text2sql/src/lib/adapters/mysql/index.ts",
+          "packages/text2sql/src/lib/adapters/bigquery/index.ts",
           "packages/text2sql/src/lib/adapters/sqlserver/index.ts",
           "packages/text2sql/src/lib/adapters/spreadsheet/index.ts",
           "packages/text2sql/src/lib/synthesis/index.ts"

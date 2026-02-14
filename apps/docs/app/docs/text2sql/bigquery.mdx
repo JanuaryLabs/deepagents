@@ -1,0 +1,101 @@
+---
+title: BigQuery
+description: Configure Text2SQL with Google BigQuery (driver-agnostic)
+---
+
+The BigQuery adapter is **driver-agnostic**: you provide `execute(sql)` and a required `validate(sql)` function (recommended: BigQuery dry-run). All introspection is scoped to an explicit list of datasets.
+
+## Basic Setup
+
+```typescript
+import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
+
+import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { BigQuery } from '@deepagents/text2sql/bigquery';
+import * as bigquery from '@deepagents/text2sql/bigquery';
+
+const projectId = process.env.BQ_PROJECT_ID!;
+const client = new BigQueryClient({ projectId });
+
+const text2sql = new Text2Sql({
+  version: 'v1', // Bump this when your schema changes
+  adapter: new BigQuery({
+    projectId,
+    datasets: ['analytics'], // Only these datasets will be introspected
+    execute: async (sql) => {
+      const [job] = await client.createQueryJob({ query: sql });
+      const [rows] = await job.getQueryResults();
+      return rows;
+    },
+    validate: async (sql) => {
+      // Dry-run validation (recommended)
+      await client.createQueryJob({
+        query: sql,
+        dryRun: true,
+        useQueryCache: false,
+      });
+    },
+    grounding: [
+      bigquery.tables(),
+      bigquery.views(),
+      bigquery.info(),
+      bigquery.indexes(),
+      bigquery.constraints(),
+      bigquery.rowCount(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+
+## Configuration Options
+
+```typescript
+import * as bigquery from '@deepagents/text2sql/bigquery';
+
+new BigQuery({
+  // Required: datasets to introspect (scopes all metadata discovery)
+  datasets: ['analytics', 'billing'],
+
+  // Optional: used to qualify INFORMATION_SCHEMA references
+  projectId: process.env.BQ_PROJECT_ID,
+
+  // Required: execute SQL and return rows
+  execute: async (sql) => rows,
+
+  // Required: validate SQL (recommended: BigQuery dry-run)
+  validate: async (sql) => {},
+
+  // Required: grounding functions for schema introspection
+  grounding: [bigquery.tables(), bigquery.info()],
+});
+```
+
+## Dataset Scoping
+
+- Table and view fragments are named as `dataset.table`.
+- Only configured datasets are introspected.
+- Foreign keys that reference tables outside configured datasets are ignored (no traversal, no relationship fragments).
+
+## Nested Field Paths
+
+BigQuery nested STRUCT paths are flattened into dot-delimited column names (e.g. `user.address.city`) in schema fragments.
+
+## Available Grounding Functions
+
+Import these from `@deepagents/text2sql/bigquery`:
+
+| Function | Description |
+|----------|-------------|
+| `tables()` | Discovers tables in configured datasets, flattens nested field paths |
+| `views()` | Discovers views and materialized views (includes definitions) |
+| `info()` | Emits dialect metadata (`bigquery`) and identifier/parameter hints |
+| `constraints()` | Best-effort PK/FK + NOT NULL/DEFAULT from metadata |
+| `rowCount()` | Metadata-only row counts (no `COUNT(*)`) + size hints |
+| `indexes()` | Maps partitioning/clustering metadata into index-like hints (marks indexed columns) |
+| `report()` | Generic LLM-driven business context report grounding (optional; can be expensive) |
+
+### Not Included In V1
+
+BigQuery V1 does **not** export `columnStats()` or `columnValues()`.
+

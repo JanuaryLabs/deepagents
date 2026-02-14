@@ -52,6 +52,16 @@ export class ScopedFs implements IFileSystem {
     return `${this.#prefix}${path}`;
   }
 
+  #unscope(path: string): string {
+    if (path === this.#prefix) {
+      return '/';
+    }
+    if (path.startsWith(this.#prefix + '/')) {
+      return path.slice(this.#prefix.length) || '/';
+    }
+    return path;
+  }
+
   async writeFile(
     path: string,
     content: FileContent,
@@ -129,6 +139,14 @@ export class ScopedFs implements IFileSystem {
 
   readlink(path: string): Promise<string> {
     return this.#base.readlink(this.#scope(path));
+  }
+
+  realpath(path: string): Promise<string> {
+    return this.#base.realpath(this.#scope(path)).then((p) => this.#unscope(p));
+  }
+
+  utimes(path: string, atime: Date, mtime: Date): Promise<void> {
+    return this.#base.utimes(this.#scope(path), atime, mtime);
   }
 
   resolvePath(base: string, relativePath: string): string {
