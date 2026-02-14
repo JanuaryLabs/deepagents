@@ -5,18 +5,6 @@ import {
   type ColumnValuesGroundingConfig,
 } from '../groundings/column-values.grounding.ts';
 
-type EnumValueRow = {
-  enum_value: string;
-};
-
-/**
- * PostgreSQL implementation of ColumnValuesGrounding.
- *
- * Supports:
- * - Native ENUM types via pg_enum/pg_type
- * - CHECK constraints with IN clauses (inherited from base)
- * - Low cardinality data scan (inherited from base)
- */
 export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
   #enumCache: Map<string, string[]> = new Map();
@@ -80,7 +68,10 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
 
     // Get the actual type name for this column
     const { schema, table } = this.#adapter.parseTableName(tableName);
-    const rows = await this.#adapter.runQuery<{ udt_name: string; udt_schema: string }>(`
+    const rows = await this.#adapter.runQuery<{
+      udt_name: string;
+      udt_schema: string;
+    }>(`
       SELECT udt_name, udt_schema
       FROM information_schema.columns
       WHERE table_schema = '${this.#adapter.escapeString(schema)}'
@@ -96,7 +87,8 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
 
     // Look up in cache
     const fullKey = `${udt_schema}.${udt_name}`;
-    const values = this.#enumCache.get(fullKey) ?? this.#enumCache.get(udt_name);
+    const values =
+      this.#enumCache.get(fullKey) ?? this.#enumCache.get(udt_name);
 
     return values?.length ? values : undefined;
   }
@@ -105,6 +97,10 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
     tableName: string,
     column: Column,
   ): Promise<string[] | undefined> {
+    if (this.#isHighCardinality(column)) {
+      return undefined;
+    }
+
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const tableIdentifier = `${this.#adapter.quoteIdentifier(schema)}.${this.#adapter.quoteIdentifier(table)}`;
     const columnIdentifier = this.#adapter.quoteIdentifier(column.name);
@@ -132,5 +128,12 @@ export class PostgresColumnValuesGrounding extends ColumnValuesGrounding {
     }
 
     return values.length ? values : undefined;
+  }
+
+  #isHighCardinality(column: Column): boolean {
+    const nDistinct = column.stats?.nDistinct;
+    if (nDistinct == null) return false;
+    if (nDistinct > 0) return nDistinct > this.lowCardinalityLimit;
+    return true;
   }
 }

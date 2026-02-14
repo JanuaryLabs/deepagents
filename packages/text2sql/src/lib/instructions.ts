@@ -250,6 +250,27 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
       ),
     ),
 
+    fragment(
+      'Column statistics',
+      explain({
+        concept: 'nDistinct in column stats',
+        explanation:
+          'Positive values are the estimated count of distinct values. Negative values represent the fraction of unique rows (e.g., -1 means all rows are unique, -0.5 means 50% unique)',
+        therefore:
+          'Use nDistinct to decide if GROUP BY is meaningful, if a column is a good filter candidate, or if COUNT(DISTINCT) will be expensive',
+      }),
+      explain({
+        concept: 'correlation in column stats',
+        explanation:
+          'Measures how closely the physical row order matches the logical sort order of the column. Values near 1 or -1 mean the data is well-ordered; near 0 means scattered',
+        therefore:
+          'High correlation means range queries (BETWEEN, >, <) on that column benefit from index scans. Low correlation means the index is less effective for ranges',
+      }),
+      hint(
+        'When min/max stats are available, use them to validate filter values. If a user asks for values outside the known range, warn them the query may return no results.',
+      ),
+    ),
+
     // Joins - use relationship metadata
     hint(
       'Use JOINs based on schema relationships. Favor PK/indexed columns; follow relationship metadata for direction and cardinality.',

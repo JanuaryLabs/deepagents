@@ -69,6 +69,8 @@ export interface ColumnStats {
   min?: string;
   max?: string;
   nullFraction?: number;
+  nDistinct?: number;
+  correlation?: number;
 }
 
 export type Relationship = {

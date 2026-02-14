@@ -133,6 +133,8 @@ export function column(input: {
     min?: string;
     max?: string;
     nullFraction?: number;
+    nDistinct?: number;
+    correlation?: number;
   };
 }): ContextFragment {
   return {
