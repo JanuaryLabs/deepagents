@@ -37,7 +37,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^3.0.10",
+    "@ai-sdk/groq": "^3.0.24",
     "@deepagents/agent": "0.14.0",
     "ai": "^6.0.86",
     "duck-duck-scrape": "^2.2.7",
