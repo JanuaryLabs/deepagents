@@ -64,7 +64,7 @@ export class MssqlFs implements IFileSystem {
   #root: string;
   #schema: string;
   #ownsPool: boolean;
-  #initialized: Promise<void>;
+  #isInitialized = false;
 
   constructor(options: MssqlFsOptions) {
     this.#chunkSize = options.chunkSize ?? 1024 * 1024;
@@ -84,8 +84,6 @@ export class MssqlFs implements IFileSystem {
       this.#pool = new mssql.ConnectionPool(options.pool);
       this.#ownsPool = true;
     }
-
-    this.#initialized = this.#initialize();
   }
 
   static #requireMssql(): typeof import('mssql') {
@@ -103,7 +101,7 @@ export class MssqlFs implements IFileSystem {
     return `[${this.#schema}].[${name}]`;
   }
 
-  async #initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     if (this.#ownsPool) {
       await this.#pool.connect();
     }
@@ -150,10 +148,16 @@ export class MssqlFs implements IFileSystem {
         );
       }
     }
+
+    this.#isInitialized = true;
   }
 
-  async #ensureInitialized(): Promise<void> {
-    await this.#initialized;
+  #ensureInitialized(): void {
+    if (!this.#isInitialized) {
+      throw new Error(
+        'MssqlFs not initialized. Call await fs.initialize() after construction.',
+      );
+    }
   }
 
   async #createParentDirs(p: string): Promise<void> {
@@ -201,19 +205,19 @@ export class MssqlFs implements IFileSystem {
     sql: string,
     params?: unknown[],
   ): Promise<T[]> {
-    await this.#ensureInitialized();
+    this.#ensureInitialized();
     return this.#rawQuery<T>(sql, params);
   }
 
   async #exec(sql: string, params?: unknown[]): Promise<number> {
-    await this.#ensureInitialized();
+    this.#ensureInitialized();
     return this.#rawExec(sql, params);
   }
 
   async #useTransaction<T>(
     fn: (transaction: Transaction) => Promise<T>,
   ): Promise<T> {
-    await this.#ensureInitialized();
+    this.#ensureInitialized();
     const mssql = MssqlFs.#requireMssql();
     const transaction = new mssql.Transaction(this.#pool);
     try {
@@ -376,11 +380,6 @@ export class MssqlFs implements IFileSystem {
   }
 
   async close(): Promise<void> {
-    try {
-      await this.#initialized;
-    } catch {
-      // Ignore initialization errors when closing
-    }
     if (this.#ownsPool) {
       await this.#pool.close();
     }
@@ -551,9 +550,9 @@ export class MssqlFs implements IFileSystem {
       isFile: entry.type === 'file',
       isDirectory: entry.type === 'directory',
       isSymbolicLink: false,
-      mode: entry.mode,
-      size: entry.size,
-      mtime: new Date(entry.mtime),
+      mode: Number(entry.mode),
+      size: Number(entry.size),
+      mtime: new Date(Number(entry.mtime)),
     };
   }
 
@@ -575,9 +574,9 @@ export class MssqlFs implements IFileSystem {
       isFile: entry.type === 'file',
       isDirectory: entry.type === 'directory',
       isSymbolicLink: entry.type === 'symlink',
-      mode: entry.mode,
-      size: entry.size,
-      mtime: new Date(entry.mtime),
+      mode: Number(entry.mode),
+      size: Number(entry.size),
+      mtime: new Date(Number(entry.mtime)),
     };
   }
 

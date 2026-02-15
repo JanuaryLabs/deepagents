@@ -8,18 +8,18 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-
-import { withSqlServerContainer } from '../helpers/sqlserver-container.ts';
+import { withSqlServerContainer } from '@deepagents/test';
 
 const renderer = new XmlRenderer();
 
 describe('Branching', () => {
   describe('Basic Branch Creation', () => {
-    it('should create "main" branch by default', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create "main" branch by default', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -44,6 +44,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -64,6 +65,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -93,6 +95,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -134,6 +137,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -163,6 +167,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -194,6 +199,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -233,6 +239,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -268,6 +275,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -306,6 +314,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -341,6 +350,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -372,6 +382,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -404,6 +415,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -429,6 +441,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -464,6 +477,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -511,6 +525,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -533,6 +548,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -569,6 +585,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -609,6 +626,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -647,6 +665,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -683,6 +702,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -714,6 +734,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -737,6 +758,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -763,6 +785,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -790,6 +813,7 @@ describe('Branching', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',

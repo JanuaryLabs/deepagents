@@ -1,5 +1,6 @@
 import sql from 'mssql';
 import spawn from 'nano-spawn';
+import { randomUUID } from 'node:crypto';
 
 import { checkDockerAvailable, createContainer } from './container.ts';
 
@@ -182,6 +183,7 @@ async function createDatabase(
  * ```typescript
  * await withSqlServerContainer(async (container) => {
  *   const store = new SqlServerContextStore({ pool: container.connectionString });
+ *   await store.initialize();
  *   // ... run tests
  *   await store.close();
  * });
@@ -201,7 +203,7 @@ export async function withSqlServerContainer<T>(
   const database = config?.database ?? 'testdb';
   const user = 'sa';
 
-  const containerName = `sqlserver-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const containerName = `sqlserver-test-${randomUUID()}`;
 
   const container = await createContainer({
     image,

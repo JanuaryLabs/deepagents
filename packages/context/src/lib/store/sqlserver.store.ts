@@ -50,7 +50,7 @@ export class SqlServerContextStore extends ContextStore {
   #pool: ConnectionPool;
   #schema: string;
   #ownsPool: boolean;
-  #initialized: Promise<void>;
+  #isInitialized = false;
 
   constructor(options: SqlServerStoreOptions) {
     super();
@@ -67,8 +67,6 @@ export class SqlServerContextStore extends ContextStore {
       this.#pool = new mssql.ConnectionPool(options.pool);
       this.#ownsPool = true;
     }
-
-    this.#initialized = this.#initialize();
   }
 
   static #requireMssql(): typeof import('mssql') {
@@ -86,7 +84,7 @@ export class SqlServerContextStore extends ContextStore {
     return `[${this.#schema}].[${name}]`;
   }
 
-  async #initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     if (this.#ownsPool) {
       await this.#pool.connect();
     }
@@ -108,13 +106,15 @@ export class SqlServerContextStore extends ContextStore {
         await this.#pool.request().batch(batch);
       }
     }
+    this.#isInitialized = true;
   }
 
-  /**
-   * Ensure initialization is complete before any operation.
-   */
-  async #ensureInitialized(): Promise<void> {
-    await this.#initialized;
+  #ensureInitialized(): void {
+    if (!this.#isInitialized) {
+      throw new Error(
+        'SqlServerContextStore not initialized. Call await store.initialize() after construction.',
+      );
+    }
   }
 
   /**
@@ -124,7 +124,7 @@ export class SqlServerContextStore extends ContextStore {
   async #useTransaction<T>(
     fn: (transaction: Transaction) => Promise<T>,
   ): Promise<T> {
-    await this.#ensureInitialized();
+    this.#ensureInitialized();
     const mssql = SqlServerContextStore.#requireMssql();
     const transaction = new mssql.Transaction(this.#pool);
     try {
@@ -146,7 +146,7 @@ export class SqlServerContextStore extends ContextStore {
     sql: string,
     params?: unknown[],
   ): Promise<T[]> {
-    await this.#ensureInitialized();
+    this.#ensureInitialized();
     const request = this.#pool.request();
 
     // Add parameters: @p0, @p1, @p2...
@@ -163,11 +163,6 @@ export class SqlServerContextStore extends ContextStore {
    * Call this when done with the store.
    */
   async close(): Promise<void> {
-    try {
-      await this.#initialized;
-    } catch {
-      // Ignore initialization errors when closing
-    }
     if (this.#ownsPool) {
       await this.#pool.close();
     }

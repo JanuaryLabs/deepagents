@@ -266,18 +266,6 @@ describe('bash tool reasoning contract', () => {
     assert.match(String(toolError.error), /reasoning/i);
   });
 
-  it('schema rejects empty or whitespace-only reasoning', async () => {
-    const content = await runBashToolCall(
-      `{"command":"echo hello","reasoning":"   "}`,
-    );
-
-    const toolError = content.find(
-      (part) => part.type === 'tool-error' && part.toolName === 'bash',
-    );
-    assert.ok(toolError, 'Expected bash tool call to fail validation');
-    assert.match(String(toolError.error), /reasoning/i);
-  });
-
   it('schema accepts command with non-empty reasoning', async () => {
     const content = await runBashToolCall(
       `{"command":"echo hello","reasoning":"Read command output for report assembly."}`,

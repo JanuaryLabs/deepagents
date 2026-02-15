@@ -8,8 +8,7 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-
-import { withSqlServerContainer } from '../helpers/sqlserver-container.ts';
+import { withSqlServerContainer } from '@deepagents/test';
 
 const renderer = new XmlRenderer();
 
@@ -20,6 +19,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -38,11 +38,12 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should return false when deleting non-existent chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return false when deleting non-existent chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const result = await store.deleteChat('non-existent-chat-12345');
 
@@ -52,11 +53,12 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should return false when deleting already-deleted chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return false when deleting already-deleted chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -80,6 +82,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine1 = new ContextEngine({
             store,
@@ -114,6 +117,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -150,6 +154,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -184,6 +189,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -223,6 +229,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -266,6 +273,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -296,6 +304,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -321,6 +330,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -348,6 +358,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -371,6 +382,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const aliceEngine = new ContextEngine({
             store,
@@ -413,6 +425,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -439,6 +452,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -462,6 +476,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const specialIds = [
             'chat-with-dashes-ss',
@@ -493,6 +508,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const longChatId = 'c'.repeat(200);
 
@@ -515,6 +531,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           for (let i = 0; i < 10; i++) {
             await store.upsertChat({
@@ -540,6 +557,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({ id: 'race-chat', userId: 'alice' });
 
@@ -571,6 +589,7 @@ describe('Delete Chat', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           for (let i = 0; i < 5; i++) {
             const engine = new ContextEngine({

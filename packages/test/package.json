@@ -10,6 +10,7 @@
   "bugs": {
     "url": "https://github.com/JanuaryLabs/deepagents/issues"
   },
+  "private": true,
   "homepage": "https://github.com/JanuaryLabs/deepagents#readme",
   "type": "module",
   "main": "./dist/index.js",

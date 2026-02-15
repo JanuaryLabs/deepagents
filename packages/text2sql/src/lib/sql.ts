@@ -168,6 +168,7 @@ export class Text2Sql {
       sendSources: true,
       originalMessages: messages,
       generateMessageId: generateId,
+      messageMetadata: (options) => options.part,
       onFinish: async ({ responseMessage }) => {
         const createdFiles = trackedFs.getCreatedFiles();
         const messageWithMetadata = {

@@ -12,6 +12,7 @@ export * from './lib/render.ts';
 export * from './lib/renderers/abstract.renderer.ts';
 export * from './lib/sandbox/index.ts';
 export * from './lib/skills/index.ts';
+export * from './lib/soul/fragments.ts';
 export * from './lib/store/memory.store.ts';
 export * from './lib/store/postgres.store.ts';
 export * from './lib/store/sqlite.store.ts';

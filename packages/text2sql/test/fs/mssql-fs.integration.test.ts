@@ -7,12 +7,13 @@ import { MssqlFs } from '@deepagents/text2sql';
 
 describe('MssqlFs', () => {
   describe('file operations', () => {
-    it('should write and read a file', () =>
-      withSqlServerContainer(async (container) => {
+    it('should write and read a file', async () =>
+      await withSqlServerContainer(async (container) => {
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/test.txt', 'Hello, World!');
 
@@ -23,12 +24,13 @@ describe('MssqlFs', () => {
         }
       }));
 
-    it('should write and read binary content', () =>
-      withSqlServerContainer(async (container) => {
+    it('should write and read binary content', async () =>
+      await withSqlServerContainer(async (container) => {
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           const content = new Uint8Array([0x00, 0x01, 0x02, 0xff, 0xfe]);
           await fs.writeFile('/binary.bin', content);
@@ -40,12 +42,13 @@ describe('MssqlFs', () => {
         }
       }));
 
-    it('should overwrite existing file', () =>
-      withSqlServerContainer(async (container) => {
+    it('should overwrite existing file', async () =>
+      await withSqlServerContainer(async (container) => {
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/overwrite.txt', 'original');
           await fs.writeFile('/overwrite.txt', 'updated');
@@ -57,12 +60,13 @@ describe('MssqlFs', () => {
         }
       }));
 
-    it('should append to file', () =>
-      withSqlServerContainer(async (container) => {
+    it('should append to file', async () =>
+      await withSqlServerContainer(async (container) => {
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/append.txt', 'Hello');
           await fs.appendFile('/append.txt', ', World!');
@@ -74,12 +78,13 @@ describe('MssqlFs', () => {
         }
       }));
 
-    it('should throw on reading non-existent file', () =>
-      withSqlServerContainer(async (container) => {
+    it('should throw on reading non-existent file', async () =>
+      await withSqlServerContainer(async (container) => {
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await assert.rejects(() => fs.readFile('/nonexistent.txt'), /ENOENT/);
         } finally {
@@ -87,12 +92,13 @@ describe('MssqlFs', () => {
         }
       }));
 
-    it('should auto-create parent directories on write', () =>
-      withSqlServerContainer(async (container) => {
+    it('should auto-create parent directories on write', async () =>
+      await withSqlServerContainer(async (container) => {
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/deep/nested/path/file.txt', 'content');
 
@@ -109,14 +115,15 @@ describe('MssqlFs', () => {
   });
 
   describe('large file chunking', () => {
-    it('should handle files larger than chunk size', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle files larger than chunk size', async () =>
+      await withSqlServerContainer(async (container) => {
         const chunkSize = 1024;
         const fs = new MssqlFs({
           pool: container.connectionString,
           root: '/',
           chunkSize,
         });
+        await fs.initialize();
         try {
           const size = chunkSize * 3 + 500;
           const content = new Uint8Array(size);
@@ -142,6 +149,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/newdir');
           const stat = await fs.stat('/newdir');
@@ -157,6 +165,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/a/b/c/d', { recursive: true });
 
@@ -175,6 +184,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/listdir');
           await fs.writeFile('/listdir/file1.txt', 'content1');
@@ -197,6 +207,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/typedir');
           await fs.writeFile('/typedir/file.txt', 'content');
@@ -223,6 +234,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/toremove.txt', 'content');
           assert.strictEqual(await fs.exists('/toremove.txt'), true);
@@ -240,6 +252,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/rmdir');
           await fs.writeFile('/rmdir/file.txt', 'content');
@@ -259,6 +272,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.rm('/nonexistent', { force: true });
         } finally {
@@ -274,6 +288,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/original.txt', 'original content');
           await fs.cp('/original.txt', '/copied.txt');
@@ -291,6 +306,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/srcdir');
           await fs.writeFile('/srcdir/file.txt', 'content');
@@ -316,6 +332,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/tomove.txt', 'moving');
           await fs.mv('/tomove.txt', '/moved.txt');
@@ -335,6 +352,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/statfile.txt', 'content');
           const stat = await fs.stat('/statfile.txt');
@@ -353,6 +371,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.mkdir('/statdir');
           const stat = await fs.stat('/statdir');
@@ -370,6 +389,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/modefile.txt', 'content');
           await fs.chmod('/modefile.txt', 0o755);
@@ -389,6 +409,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/target.txt', 'target content');
           await fs.symlink('/target.txt', '/link.txt');
@@ -409,6 +430,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/lstat-target.txt', 'content');
           await fs.symlink('/lstat-target.txt', '/lstat-link.txt');
@@ -431,6 +453,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/prefix',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/file.txt', 'prefixed content');
 
@@ -457,6 +480,7 @@ describe('MssqlFs', () => {
           pool: container.connectionString,
           root: '/chat/123/results',
         });
+        await fs.initialize();
         try {
           const allPaths = await fs.getAllPathsAsync();
 
@@ -477,7 +501,9 @@ describe('MssqlFs', () => {
         await pool.connect();
         try {
           const fs1 = new MssqlFs({ pool, root: '/chat-1' });
+          await fs1.initialize();
           const fs2 = new MssqlFs({ pool, root: '/chat-2' });
+          await fs2.initialize();
 
           await fs1.writeFile('/data.json', '{"chat": 1}');
           await fs2.writeFile('/data.json', '{"chat": 2}');
@@ -500,6 +526,7 @@ describe('MssqlFs', () => {
         await pool.connect();
         try {
           const fs = new MssqlFs({ pool, root: '/' });
+          await fs.initialize();
           try {
             await fs.writeFile('/pool-test.txt', 'injected pool');
 
@@ -521,6 +548,7 @@ describe('MssqlFs', () => {
         await pool.connect();
         try {
           const fs = new MssqlFs({ pool, root: '/' });
+          await fs.initialize();
           await fs.writeFile('/no-close.txt', 'data');
           await fs.close();
 
@@ -542,6 +570,7 @@ describe('MssqlFs', () => {
           root: '/',
           schema: 'custom_fs_schema',
         });
+        await fs.initialize();
         try {
           await fs.writeFile('/schema-test.txt', 'custom schema data');
 

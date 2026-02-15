@@ -8,11 +8,7 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-
-import {
-  waitForFtsReady,
-  withSqlServerContainer,
-} from '../helpers/sqlserver-container.ts';
+import { waitForFtsReady, withSqlServerContainer } from '@deepagents/test';
 
 const renderer = new XmlRenderer();
 
@@ -23,6 +19,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -46,6 +43,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -72,6 +70,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const aliceChat1 = new ContextEngine({
             store,
@@ -112,6 +111,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const noChats = await store.listChats({
             userId: 'nonexistent-user-xyz',
@@ -130,6 +130,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const aliceEngine = new ContextEngine({
             store,
@@ -168,6 +169,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await new ContextEngine({
             store,
@@ -190,6 +192,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({ id: 'sec-alice-1', userId: 'sec-alice' });
           await store.upsertChat({ id: 'sec-alice-2', userId: 'sec-alice' });
@@ -220,6 +223,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({
             id: 'preserve-test-chat',
@@ -241,6 +245,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const specialUserIds = [
             'user@example.com',
@@ -267,6 +272,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const unicodeUserIds = ['用户123', 'пользователь', 'المستخدم'];
 
@@ -296,6 +302,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           // Create chats with same "userId" but stored with different cases
           await store.upsertChat({
@@ -334,6 +341,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -370,6 +378,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -402,6 +411,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const aliceEngine = new ContextEngine({
             store,
@@ -439,6 +449,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const longUserId = 'u'.repeat(200);
 
@@ -458,6 +469,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           for (let i = 0; i < 10; i++) {
             await store.upsertChat({
@@ -509,6 +521,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({
             id: 'only-offset-chat',
@@ -534,6 +547,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({
             id: 'immutable-ss-chat',
@@ -562,6 +576,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine1 = new ContextEngine({
             store,
@@ -594,6 +609,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const createPromises = Array.from({ length: 10 }, (_, i) =>
             store.upsertChat({
@@ -625,6 +641,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const users = [
             'conc-user-a',
@@ -665,6 +682,7 @@ describe('User Chat Management', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({ id: 'rw-ss-chat', userId: 'rw-ss-user' });
 
@@ -699,6 +717,7 @@ describe('Message Upsert', () => {
       const store = new SqlServerContextStore({
         pool: container.connectionString,
       });
+      await store.initialize();
       try {
         await store.upsertChat({ id: 'upsert-chat-1', userId: 'user-1' });
 
@@ -750,6 +769,7 @@ describe('Message Upsert', () => {
       const store = new SqlServerContextStore({
         pool: container.connectionString,
       });
+      await store.initialize();
       try {
         await store.upsertChat({ id: 'upsert-fts-chat', userId: 'user-1' });
 
@@ -798,6 +818,7 @@ describe('Message Upsert', () => {
       const store = new SqlServerContextStore({
         pool: container.connectionString,
       });
+      await store.initialize();
       try {
         await store.upsertChat({ id: 'upsert-parent-chat', userId: 'user-1' });
 
@@ -834,6 +855,7 @@ describe('Message Upsert', () => {
       const store = new SqlServerContextStore({
         pool: container.connectionString,
       });
+      await store.initialize();
       try {
         await store.upsertChat({ id: 'upsert-time-chat', userId: 'user-1' });
 

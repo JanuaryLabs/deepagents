@@ -7,11 +7,7 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-
-import {
-  waitForFtsReady,
-  withSqlServerContainer,
-} from '../helpers/sqlserver-container.ts';
+import { waitForFtsReady, withSqlServerContainer } from '@deepagents/test';
 
 /**
  * SQL Server Full-Text Search tests.
@@ -26,6 +22,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.createChat({ id: 'chat-search', userId: 'user-1' });
 
@@ -90,6 +87,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.createChat({ id: 'chat-rank', userId: 'user-1' });
 
@@ -131,6 +129,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.createChat({ id: 'chat-snippet', userId: 'user-1' });
 
@@ -167,6 +166,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.createChat({ id: 'chat-roles', userId: 'user-1' });
 
@@ -217,6 +217,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.createChat({ id: 'chat-limit', userId: 'user-1' });
 
@@ -249,6 +250,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.createChat({ id: 'chat-nomatch', userId: 'user-1' });
 
@@ -279,6 +281,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const aliceEngine = new ContextEngine({
             store,
@@ -323,6 +326,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -353,6 +357,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine1 = new ContextEngine({
             store,
@@ -387,6 +392,7 @@ describe('Full-Text Search', () => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
