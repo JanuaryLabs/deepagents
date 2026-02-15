@@ -8,8 +8,7 @@ import {
   assistantText,
   user,
 } from '@deepagents/context';
-
-import { withPostgresContainer } from '../helpers/postgres-container.ts';
+import { withPostgresContainer } from '@deepagents/test';
 
 const renderer = new XmlRenderer();
 

@@ -2,8 +2,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { PostgresContextStore } from '@deepagents/context';
-
-import { withPostgresContainer } from '../helpers/postgres-container.ts';
+import { withPostgresContainer } from '@deepagents/test';
 
 /**
  * Integration tests for PostgreSQL ContextStore.

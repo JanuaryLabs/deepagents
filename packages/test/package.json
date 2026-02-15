@@ -1,11 +1,11 @@
 {
-  "name": "@deepagents/toolbox",
+  "name": "@deepagents/test",
   "version": "0.15.0",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/JanuaryLabs/deepagents",
-    "directory": "packages/toolbox"
+    "directory": "packages/test"
   },
   "bugs": {
     "url": "https://github.com/JanuaryLabs/deepagents/issues"
@@ -30,21 +30,13 @@
   },
   "files": [
     "dist",
-    "!**/*.tsbuildinfo",
-    "!**/*.test.*"
+    "!**/*.tsbuildinfo"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "dependencies": {
-    "@ai-sdk/groq": "^3.0.24",
-    "@deepagents/agent": "0.15.0",
-    "ai": "^6.0.86",
-    "duck-duck-scrape": "^2.2.7",
-    "lodash-es": "^4.17.21",
     "nano-spawn": "^2.0.0",
-    "zod": "^3.25.76 || ^4.0.0"
+    "mssql": "^12.2.0"
   },
+  "peerDependencies": {},
   "devDependencies": {
     "@types/debug": "^4.1.12"
   }
