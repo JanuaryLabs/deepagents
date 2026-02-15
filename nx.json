@@ -90,7 +90,8 @@
           "@deepagents/toolbox",
           "@deepagents/text2sql",
           "@deepagents/retrieval",
-          "@deepagents/orchestrator"
+          "@deepagents/orchestrator",
+          "@deepagents/context"
         ]
       },
       "cache": true,
@@ -98,25 +99,14 @@
       "inputs": ["production", "^production"]
     },
     "build": {
-      "dependsOn": [
-        {
-          "target": "client",
-          "projects": "@deepagents/source"
-        },
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     },
     "dev": {
-      "dependsOn": [
-        {
-          "target": "client",
-          "projects": "@deepagents/source"
-        },
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     }
   },
   "release": {
+    "projects": ["*", "!packages/test"],
     "conventionalCommits": {
       "types": {
         "chore": {
