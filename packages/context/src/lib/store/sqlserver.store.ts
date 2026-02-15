@@ -1,7 +1,7 @@
 import type { ConnectionPool, Transaction, config } from 'mssql';
 import { createRequire } from 'node:module';
 
-import STORE_DDL from './ddl.sqlserver.sql';
+import { storeDDL } from './ddl.sqlserver.ts';
 import type {
   BranchData,
   BranchInfo,
@@ -24,10 +24,15 @@ import { ContextStore } from './store.ts';
 
 export interface SqlServerStoreOptions {
   /**
-   * SQL Server connection pool configuration.
-   * Can be a connection string or config object.
+   * SQL Server connection pool or configuration.
+   * Can be a connection string, config object, or existing ConnectionPool.
    */
-  pool: config | string;
+  pool: config | string | ConnectionPool;
+  /**
+   * SQL Server schema to scope all tables under.
+   * Defaults to 'dbo'.
+   */
+  schema?: string;
 }
 
 /**
@@ -43,16 +48,25 @@ export interface SqlServerStoreOptions {
  */
 export class SqlServerContextStore extends ContextStore {
   #pool: ConnectionPool;
+  #schema: string;
+  #ownsPool: boolean;
   #initialized: Promise<void>;
 
   constructor(options: SqlServerStoreOptions) {
     super();
-    // Dynamic import to support optional peer dependency
+    const schema = options.schema ?? 'dbo';
+    if (!/^[a-zA-Z_]\w*$/.test(schema)) {
+      throw new Error(`Invalid schema name: "${schema}"`);
+    }
+    this.#schema = schema;
     const mssql = SqlServerContextStore.#requireMssql();
-    this.#pool =
-      typeof options.pool === 'string'
-        ? new mssql.ConnectionPool(options.pool)
-        : new mssql.ConnectionPool(options.pool);
+    if (options.pool instanceof mssql.ConnectionPool) {
+      this.#pool = options.pool;
+      this.#ownsPool = false;
+    } else {
+      this.#pool = new mssql.ConnectionPool(options.pool);
+      this.#ownsPool = true;
+    }
 
     this.#initialized = this.#initialize();
   }
@@ -68,10 +82,27 @@ export class SqlServerContextStore extends ContextStore {
     }
   }
 
+  #t(name: string): string {
+    return `[${this.#schema}].[${name}]`;
+  }
+
   async #initialize(): Promise<void> {
-    await this.#pool.connect();
-    // Run DDL - split by GO statements and execute each batch
-    const batches = STORE_DDL.split(/\bGO\b/i).filter((b) => b.trim());
+    if (this.#ownsPool) {
+      await this.#pool.connect();
+    }
+
+    const schemaReq = this.#pool.request();
+    schemaReq.input('schema', this.#schema);
+    await schemaReq.query(`
+      IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @schema)
+      BEGIN
+        DECLARE @sql NVARCHAR(MAX) = N'CREATE SCHEMA ' + QUOTENAME(@schema);
+        EXEC sp_executesql @sql;
+      END
+    `);
+
+    const ddl = storeDDL(this.#schema);
+    const batches = ddl.split(/\bGO\b/i).filter((b) => b.trim());
     for (const batch of batches) {
       if (batch.trim()) {
         await this.#pool.request().batch(batch);
@@ -132,7 +163,14 @@ export class SqlServerContextStore extends ContextStore {
    * Call this when done with the store.
    */
   async close(): Promise<void> {
-    await this.#pool.close();
+    try {
+      await this.#initialized;
+    } catch {
+      // Ignore initialization errors when closing
+    }
+    if (this.#ownsPool) {
+      await this.#pool.close();
+    }
   }
 
   // ==========================================================================
@@ -155,7 +193,7 @@ export class SqlServerContextStore extends ContextStore {
       );
 
       const result = await request.query(`
-        INSERT INTO chats (id, userId, title, metadata)
+        INSERT INTO ${this.#t('chats')} (id, userId, title, metadata)
         OUTPUT INSERTED.*
         VALUES (@p0, @p1, @p2, @p3)
       `);
@@ -176,7 +214,7 @@ export class SqlServerContextStore extends ContextStore {
       branchRequest.input('p2', mssql.BigInt, Date.now());
 
       await branchRequest.query(`
-        INSERT INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+        INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
         VALUES (@p0, @p1, 'main', NULL, 1, @p2)
       `);
 
@@ -210,7 +248,7 @@ export class SqlServerContextStore extends ContextStore {
       // MERGE with both MATCHED (no-op update) and NOT MATCHED cases
       // The no-op update triggers OUTPUT for existing rows (same pattern as PostgreSQL's ON CONFLICT)
       const result = await request.query(`
-        MERGE chats AS target
+        MERGE ${this.#t('chats')} AS target
         USING (SELECT @p0 AS id, @p1 AS userId, @p2 AS title, @p3 AS metadata) AS source
         ON target.id = source.id
         WHEN MATCHED THEN
@@ -238,9 +276,9 @@ export class SqlServerContextStore extends ContextStore {
 
       // Check if branch exists, insert if not
       await branchRequest.query(`
-        IF NOT EXISTS (SELECT 1 FROM branches WHERE chatId = @p1 AND name = 'main')
+        IF NOT EXISTS (SELECT 1 FROM ${this.#t('branches')} WHERE chatId = @p1 AND name = 'main')
         BEGIN
-          INSERT INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+          INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
           VALUES (@p0, @p1, 'main', NULL, 1, @p2)
         END
       `);
@@ -264,7 +302,7 @@ export class SqlServerContextStore extends ContextStore {
       metadata: string | null;
       createdAt: number | string;
       updatedAt: number | string;
-    }>('SELECT * FROM chats WHERE id = @p0', [chatId]);
+    }>(`SELECT * FROM ${this.#t('chats')} WHERE id = @p0`, [chatId]);
 
     if (rows.length === 0) {
       return undefined;
@@ -309,7 +347,7 @@ export class SqlServerContextStore extends ContextStore {
       createdAt: number | string;
       updatedAt: number | string;
     }>(
-      `UPDATE chats SET ${setClauses.join(', ')} OUTPUT INSERTED.* WHERE id = @p${paramIndex}`,
+      `UPDATE ${this.#t('chats')} SET ${setClauses.join(', ')} OUTPUT INSERTED.* WHERE id = @p${paramIndex}`,
       params,
     );
 
@@ -376,9 +414,9 @@ export class SqlServerContextStore extends ContextStore {
         c.updatedAt,
         COUNT(DISTINCT m.id) as messageCount,
         COUNT(DISTINCT b.id) as branchCount
-      FROM chats c
-      LEFT JOIN messages m ON m.chatId = c.id
-      LEFT JOIN branches b ON b.chatId = c.id
+      FROM ${this.#t('chats')} c
+      LEFT JOIN ${this.#t('messages')} m ON m.chatId = c.id
+      LEFT JOIN ${this.#t('branches')} b ON b.chatId = c.id
       ${whereClause}
       GROUP BY c.id, c.userId, c.title, c.metadata, c.createdAt, c.updatedAt
       ORDER BY c.updatedAt DESC${paginationClause}`,
@@ -408,7 +446,7 @@ export class SqlServerContextStore extends ContextStore {
       const request = transaction.request();
       request.input('p0', mssql.NVarChar, chatId);
 
-      let sql = 'DELETE FROM chats WHERE id = @p0';
+      let sql = `DELETE FROM ${this.#t('chats')} WHERE id = @p0`;
       if (options?.userId !== undefined) {
         request.input('p1', mssql.NVarChar, options.userId);
         sql += ' AND userId = @p1';
@@ -444,7 +482,7 @@ export class SqlServerContextStore extends ContextStore {
       request.input('p6', mssql.BigInt, message.createdAt);
 
       await request.query(`
-        MERGE messages AS target
+        MERGE ${this.#t('messages')} AS target
         USING (SELECT @p0 AS id) AS source
         ON target.id = source.id
         WHEN MATCHED THEN
@@ -468,7 +506,7 @@ export class SqlServerContextStore extends ContextStore {
       ftsRequest.input('p3', mssql.NVarChar, content);
 
       await ftsRequest.query(`
-        MERGE messages_fts AS target
+        MERGE ${this.#t('messages_fts')} AS target
         USING (SELECT @p0 AS messageId) AS source
         ON target.messageId = source.messageId
         WHEN MATCHED THEN
@@ -489,7 +527,7 @@ export class SqlServerContextStore extends ContextStore {
       type: string | null;
       data: string;
       createdAt: number | string;
-    }>('SELECT * FROM messages WHERE id = @p0', [messageId]);
+    }>(`SELECT * FROM ${this.#t('messages')} WHERE id = @p0`, [messageId]);
 
     if (rows.length === 0) {
       return undefined;
@@ -523,9 +561,9 @@ export class SqlServerContextStore extends ContextStore {
       depth: number;
     }>(
       `WITH chain AS (
-        SELECT *, 0 as depth FROM messages WHERE id = @p0
+        SELECT *, 0 as depth FROM ${this.#t('messages')} WHERE id = @p0
         UNION ALL
-        SELECT m.*, c.depth + 1 FROM messages m
+        SELECT m.*, c.depth + 1 FROM ${this.#t('messages')} m
         INNER JOIN chain c ON m.id = c.parentId
         WHERE c.depth < 10000
       )
@@ -547,7 +585,7 @@ export class SqlServerContextStore extends ContextStore {
 
   async hasChildren(messageId: string): Promise<boolean> {
     const rows = await this.#query<{ hasChildren: number }>(
-      `SELECT CASE WHEN EXISTS(SELECT 1 FROM messages WHERE parentId = @p0) THEN 1 ELSE 0 END as hasChildren`,
+      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('messages')} WHERE parentId = @p0) THEN 1 ELSE 0 END as hasChildren`,
       [messageId],
     );
     return rows[0].hasChildren === 1;
@@ -573,7 +611,7 @@ export class SqlServerContextStore extends ContextStore {
 
   async createBranch(branch: BranchData): Promise<void> {
     await this.#query(
-      `INSERT INTO branches (id, chatId, name, headMessageId, isActive, createdAt)
+      `INSERT INTO ${this.#t('branches')} (id, chatId, name, headMessageId, isActive, createdAt)
        VALUES (@p0, @p1, @p2, @p3, @p4, @p5)`,
       [
         branch.id,
@@ -597,10 +635,10 @@ export class SqlServerContextStore extends ContextStore {
       headMessageId: string | null;
       isActive: boolean | number;
       createdAt: number | string;
-    }>('SELECT * FROM branches WHERE chatId = @p0 AND name = @p1', [
-      chatId,
-      name,
-    ]);
+    }>(
+      `SELECT * FROM ${this.#t('branches')} WHERE chatId = @p0 AND name = @p1`,
+      [chatId, name],
+    );
 
     if (rows.length === 0) {
       return undefined;
@@ -625,7 +663,10 @@ export class SqlServerContextStore extends ContextStore {
       headMessageId: string | null;
       isActive: boolean | number;
       createdAt: number | string;
-    }>('SELECT * FROM branches WHERE chatId = @p0 AND isActive = 1', [chatId]);
+    }>(
+      `SELECT * FROM ${this.#t('branches')} WHERE chatId = @p0 AND isActive = 1`,
+      [chatId],
+    );
 
     if (rows.length === 0) {
       return undefined;
@@ -650,14 +691,14 @@ export class SqlServerContextStore extends ContextStore {
       const deactivateRequest = transaction.request();
       deactivateRequest.input('p0', mssql.NVarChar, chatId);
       await deactivateRequest.query(
-        'UPDATE branches SET isActive = 0 WHERE chatId = @p0',
+        `UPDATE ${this.#t('branches')} SET isActive = 0 WHERE chatId = @p0`,
       );
 
       // Activate the specified branch
       const activateRequest = transaction.request();
       activateRequest.input('p0', mssql.NVarChar, branchId);
       await activateRequest.query(
-        'UPDATE branches SET isActive = 1 WHERE id = @p0',
+        `UPDATE ${this.#t('branches')} SET isActive = 1 WHERE id = @p0`,
       );
     });
   }
@@ -667,7 +708,7 @@ export class SqlServerContextStore extends ContextStore {
     messageId: string | null,
   ): Promise<void> {
     await this.#query(
-      'UPDATE branches SET headMessageId = @p0 WHERE id = @p1',
+      `UPDATE ${this.#t('branches')} SET headMessageId = @p0 WHERE id = @p1`,
       [messageId, branchId],
     );
   }
@@ -687,7 +728,7 @@ export class SqlServerContextStore extends ContextStore {
         headMessageId,
         isActive,
         createdAt
-      FROM branches
+      FROM ${this.#t('branches')}
       WHERE chatId = @p0
       ORDER BY createdAt ASC`,
       [chatId],
@@ -700,9 +741,9 @@ export class SqlServerContextStore extends ContextStore {
       if (branch.headMessageId) {
         const countRows = await this.#query<{ count: number | string }>(
           `WITH chain AS (
-            SELECT id, parentId FROM messages WHERE id = @p0
+            SELECT id, parentId FROM ${this.#t('messages')} WHERE id = @p0
             UNION ALL
-            SELECT m.id, m.parentId FROM messages m
+            SELECT m.id, m.parentId FROM ${this.#t('messages')} m
             INNER JOIN chain c ON m.id = c.parentId
           )
           SELECT COUNT(*) as count FROM chain`,
@@ -741,7 +782,7 @@ export class SqlServerContextStore extends ContextStore {
 
       // Upsert using MERGE
       await request.query(`
-        MERGE checkpoints AS target
+        MERGE ${this.#t('checkpoints')} AS target
         USING (SELECT @p1 AS chatId, @p2 AS name) AS source
         ON target.chatId = source.chatId AND target.name = source.name
         WHEN MATCHED THEN
@@ -763,10 +804,10 @@ export class SqlServerContextStore extends ContextStore {
       name: string;
       messageId: string;
       createdAt: number | string;
-    }>('SELECT * FROM checkpoints WHERE chatId = @p0 AND name = @p1', [
-      chatId,
-      name,
-    ]);
+    }>(
+      `SELECT * FROM ${this.#t('checkpoints')} WHERE chatId = @p0 AND name = @p1`,
+      [chatId, name],
+    );
 
     if (rows.length === 0) {
       return undefined;
@@ -790,7 +831,7 @@ export class SqlServerContextStore extends ContextStore {
       createdAt: number | string;
     }>(
       `SELECT id, name, messageId, createdAt
-       FROM checkpoints
+       FROM ${this.#t('checkpoints')}
        WHERE chatId = @p0
        ORDER BY createdAt DESC`,
       [chatId],
@@ -806,7 +847,7 @@ export class SqlServerContextStore extends ContextStore {
 
   async deleteCheckpoint(chatId: string, name: string): Promise<void> {
     await this.#query(
-      'DELETE FROM checkpoints WHERE chatId = @p0 AND name = @p1',
+      `DELETE FROM ${this.#t('checkpoints')} WHERE chatId = @p0 AND name = @p1`,
       [chatId, name],
     );
   }
@@ -843,10 +884,10 @@ export class SqlServerContextStore extends ContextStore {
           m.createdAt,
           ct.RANK as rank,
           SUBSTRING(fts.content, 1, 200) as snippet
-        FROM messages_fts fts
-        INNER JOIN CONTAINSTABLE(messages_fts, content, @p0) ct
+        FROM ${this.#t('messages_fts')} fts
+        INNER JOIN CONTAINSTABLE(${this.#t('messages_fts')}, content, @p0) ct
           ON fts.messageId = ct.[KEY]
-        INNER JOIN messages m ON m.id = fts.messageId
+        INNER JOIN ${this.#t('messages')} m ON m.id = fts.messageId
         WHERE fts.chatId = @p1
       `;
 
@@ -900,8 +941,8 @@ export class SqlServerContextStore extends ContextStore {
           m.createdAt,
           1 as rank,
           SUBSTRING(fts.content, 1, 200) as snippet
-        FROM messages_fts fts
-        INNER JOIN messages m ON m.id = fts.messageId
+        FROM ${this.#t('messages_fts')} fts
+        INNER JOIN ${this.#t('messages')} m ON m.id = fts.messageId
         WHERE fts.chatId = @p0 AND fts.content LIKE '%' + @p1 + '%'
       `;
 
@@ -959,7 +1000,7 @@ export class SqlServerContextStore extends ContextStore {
       createdAt: number | string;
     }>(
       `SELECT id, parentId, name, data, createdAt
-       FROM messages
+       FROM ${this.#t('messages')}
        WHERE chatId = @p0
        ORDER BY createdAt ASC`,
       [chatId],
@@ -984,7 +1025,7 @@ export class SqlServerContextStore extends ContextStore {
       isActive: boolean | number;
     }>(
       `SELECT name, headMessageId, isActive
-       FROM branches
+       FROM ${this.#t('branches')}
        WHERE chatId = @p0
        ORDER BY createdAt ASC`,
       [chatId],
@@ -1002,7 +1043,7 @@ export class SqlServerContextStore extends ContextStore {
       messageId: string;
     }>(
       `SELECT name, messageId
-       FROM checkpoints
+       FROM ${this.#t('checkpoints')}
        WHERE chatId = @p0
        ORDER BY createdAt ASC`,
       [chatId],

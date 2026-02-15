@@ -10,7 +10,7 @@ import type { ConnectionPool, Transaction, config } from 'mssql';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 
-import MSSQL_FS_DDL from './ddl.mssql-fs.sql';
+import { mssqlFsDDL } from './ddl.mssql-fs.ts';
 
 interface ReadFileOptions {
   encoding?: BufferEncoding | null;
@@ -28,12 +28,17 @@ interface DirentEntry {
 }
 
 export interface MssqlFsOptions {
-  /** SQL Server connection pool configuration. Can be a connection string or config object. */
-  pool: config | string;
+  /** SQL Server connection pool or configuration. Can be a connection string, config object, or existing ConnectionPool. */
+  pool: config | string | ConnectionPool;
   /** Root path prefix for all operations */
   root: string;
   /** Chunk size for large files in bytes (default: 1MB) */
   chunkSize?: number;
+  /**
+   * SQL Server schema to scope all tables under.
+   * Defaults to 'dbo'.
+   */
+  schema?: string;
 }
 
 type EntryType = 'file' | 'directory' | 'symlink';
@@ -57,15 +62,28 @@ export class MssqlFs implements IFileSystem {
   #pool: ConnectionPool;
   #chunkSize: number;
   #root: string;
+  #schema: string;
+  #ownsPool: boolean;
   #initialized: Promise<void>;
 
   constructor(options: MssqlFsOptions) {
     this.#chunkSize = options.chunkSize ?? 1024 * 1024;
+    const schema = options.schema ?? 'dbo';
+    if (!/^[a-zA-Z_]\w*$/.test(schema)) {
+      throw new Error(`Invalid schema name: "${schema}"`);
+    }
+    this.#schema = schema;
     const normalizedRoot = this.#normalizeRoot(options.root);
     this.#root = normalizedRoot === '/' ? '' : normalizedRoot;
 
     const mssql = MssqlFs.#requireMssql();
-    this.#pool = new mssql.ConnectionPool(options.pool);
+    if (options.pool instanceof mssql.ConnectionPool) {
+      this.#pool = options.pool;
+      this.#ownsPool = false;
+    } else {
+      this.#pool = new mssql.ConnectionPool(options.pool);
+      this.#ownsPool = true;
+    }
 
     this.#initialized = this.#initialize();
   }
@@ -81,22 +99,39 @@ export class MssqlFs implements IFileSystem {
     }
   }
 
-  async #initialize(): Promise<void> {
-    await this.#pool.connect();
+  #t(name: string): string {
+    return `[${this.#schema}].[${name}]`;
+  }
 
-    const batches = MSSQL_FS_DDL.split(/\bGO\b/i).filter((b) => b.trim());
+  async #initialize(): Promise<void> {
+    if (this.#ownsPool) {
+      await this.#pool.connect();
+    }
+
+    const schemaReq = this.#pool.request();
+    schemaReq.input('schema', this.#schema);
+    await schemaReq.query(`
+      IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @schema)
+      BEGIN
+        DECLARE @sql NVARCHAR(MAX) = N'CREATE SCHEMA ' + QUOTENAME(@schema);
+        EXEC sp_executesql @sql;
+      END
+    `);
+
+    const ddl = mssqlFsDDL(this.#schema);
+    const batches = ddl.split(/\bGO\b/i).filter((b) => b.trim());
     for (const batch of batches) {
       if (batch.trim()) {
         await this.#pool.request().batch(batch);
       }
     }
 
-    const rootSlashExists = await this.#query<{ exists: number }>(
-      "SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = '/') THEN 1 ELSE 0 END as [exists]",
+    const rootSlashExists = await this.#rawQuery<{ exists: number }>(
+      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = '/') THEN 1 ELSE 0 END as [exists]`,
     );
     if (rootSlashExists[0].exists === 0) {
-      await this.#exec(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime) VALUES ('/', 'directory', 493, 0, @p0)`,
+      await this.#rawExec(
+        `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES ('/', 'directory', 493, 0, @p0)`,
         [Date.now()],
       );
     }
@@ -104,13 +139,13 @@ export class MssqlFs implements IFileSystem {
     if (this.#root) {
       await this.#createParentDirs(this.#root);
 
-      const rootExists = await this.#query<{ exists: number }>(
-        `SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+      const rootExists = await this.#rawQuery<{ exists: number }>(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
         [this.#root],
       );
       if (rootExists[0].exists === 0) {
-        await this.#exec(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
+        await this.#rawExec(
+          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
           [this.#root, Date.now()],
         );
       }
@@ -127,25 +162,24 @@ export class MssqlFs implements IFileSystem {
 
     for (let i = 0; i < segments.length - 1; i++) {
       currentPath = path.posix.join(currentPath, segments[i]);
-      const exists = await this.#query<{ exists: number }>(
-        `SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
+      const exists = await this.#rawQuery<{ exists: number }>(
+        `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
         [currentPath],
       );
 
       if (exists[0].exists === 0) {
-        await this.#exec(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
+        await this.#rawExec(
+          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
           [currentPath, Date.now()],
         );
       }
     }
   }
 
-  async #query<T extends Record<string, unknown>>(
+  async #rawQuery<T extends Record<string, unknown>>(
     sql: string,
     params?: unknown[],
   ): Promise<T[]> {
-    await this.#ensureInitialized();
     const request = this.#pool.request();
     params?.forEach((value, index) => {
       request.input(`p${index}`, value);
@@ -154,14 +188,26 @@ export class MssqlFs implements IFileSystem {
     return result.recordset as T[];
   }
 
-  async #exec(sql: string, params?: unknown[]): Promise<number> {
-    await this.#ensureInitialized();
+  async #rawExec(sql: string, params?: unknown[]): Promise<number> {
     const request = this.#pool.request();
     params?.forEach((value, index) => {
       request.input(`p${index}`, value);
     });
     const result = await request.query(sql);
     return result.rowsAffected[0] ?? 0;
+  }
+
+  async #query<T extends Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<T[]> {
+    await this.#ensureInitialized();
+    return this.#rawQuery<T>(sql, params);
+  }
+
+  async #exec(sql: string, params?: unknown[]): Promise<number> {
+    await this.#ensureInitialized();
+    return this.#rawExec(sql, params);
   }
 
   async #useTransaction<T>(
@@ -230,7 +276,7 @@ export class MssqlFs implements IFileSystem {
     const request = transaction.request();
     request.input('p0', parent);
     const result = await request.query<{ type: string }>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
     );
     const entry = result.recordset[0];
 
@@ -240,7 +286,7 @@ export class MssqlFs implements IFileSystem {
       insertReq.input('p0', parent);
       insertReq.input('p1', Date.now());
       await insertReq.query(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
+        `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
       );
     } else if (entry.type !== 'directory') {
       throw new Error(`mkdir: parent is not a directory: ${parent}`);
@@ -254,7 +300,9 @@ export class MssqlFs implements IFileSystem {
   ): Promise<void> {
     const deleteReq = transaction.request();
     deleteReq.input('p0', filePath);
-    await deleteReq.query('DELETE FROM fs_chunks WHERE path = @p0');
+    await deleteReq.query(
+      `DELETE FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+    );
 
     for (let i = 0; i < content.length; i += this.#chunkSize) {
       const chunk = content.slice(
@@ -266,14 +314,14 @@ export class MssqlFs implements IFileSystem {
       insertReq.input('p1', Math.floor(i / this.#chunkSize));
       insertReq.input('p2', Buffer.from(chunk));
       await insertReq.query(
-        'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (@p0, @p1, @p2)',
+        `INSERT INTO ${this.#t('fs_chunks')} (path, chunkIndex, data) VALUES (@p0, @p1, @p2)`,
       );
     }
   }
 
   async #readChunks(filePath: string): Promise<Uint8Array> {
     const rows = await this.#query<ChunkRow>(
-      'SELECT data FROM fs_chunks WHERE path = @p0 ORDER BY chunkIndex',
+      `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`,
       [filePath],
     );
 
@@ -299,7 +347,7 @@ export class MssqlFs implements IFileSystem {
     }
 
     const rows = await this.#query<Pick<FsEntryRow, 'type' | 'symlinkTarget'>>(
-      'SELECT type, symlinkTarget FROM fs_entries WHERE path = @p0',
+      `SELECT type, symlinkTarget FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [p],
     );
     const entry = rows[0];
@@ -333,7 +381,9 @@ export class MssqlFs implements IFileSystem {
     } catch {
       // Ignore initialization errors when closing
     }
-    await this.#pool.close();
+    if (this.#ownsPool) {
+      await this.#pool.close();
+    }
   }
 
   // ============================================================================
@@ -349,7 +399,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [resolved],
     );
     const entry = rows[0];
@@ -373,7 +423,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [resolved],
     );
     const entry = rows[0];
@@ -407,7 +457,7 @@ export class MssqlFs implements IFileSystem {
       request.input('p2', Date.now());
 
       await request.query(`
-        MERGE fs_entries AS target
+        MERGE ${this.#t('fs_entries')} AS target
         USING (SELECT @p0 AS path) AS source
         ON target.path = source.path
         WHEN MATCHED THEN
@@ -437,7 +487,7 @@ export class MssqlFs implements IFileSystem {
       const checkReq = transaction.request();
       checkReq.input('p0', prefixed);
       const result = await checkReq.query<Pick<FsEntryRow, 'type'>>(
-        'SELECT type FROM fs_entries WHERE path = @p0',
+        `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       );
       const entry = result.recordset[0];
 
@@ -458,7 +508,7 @@ export class MssqlFs implements IFileSystem {
       upsertReq.input('p2', Date.now());
 
       await upsertReq.query(`
-        MERGE fs_entries AS target
+        MERGE ${this.#t('fs_entries')} AS target
         USING (SELECT @p0 AS path) AS source
         ON target.path = source.path
         WHEN MATCHED THEN
@@ -476,7 +526,7 @@ export class MssqlFs implements IFileSystem {
     const normalized = this.#normalizePath(filePath);
     const prefixed = this.#prefixPath(normalized);
     const rows = await this.#query<{ exists: number }>(
-      'SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]',
+      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
       [prefixed],
     );
     return rows[0].exists === 1;
@@ -488,7 +538,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const rows = await this.#query<FsEntryRow>(
-      'SELECT * FROM fs_entries WHERE path = @p0',
+      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [resolved],
     );
     const entry = rows[0];
@@ -512,7 +562,7 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
 
     const rows = await this.#query<FsEntryRow>(
-      'SELECT * FROM fs_entries WHERE path = @p0',
+      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [prefixed],
     );
     const entry = rows[0];
@@ -536,7 +586,7 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
 
     const existingRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [prefixed],
     );
     const existing = existingRows[0];
@@ -560,7 +610,7 @@ export class MssqlFs implements IFileSystem {
           const checkReq = transaction.request();
           checkReq.input('p0', currentPath);
           const result = await checkReq.query<Pick<FsEntryRow, 'type'>>(
-            'SELECT type FROM fs_entries WHERE path = @p0',
+            `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
           );
           const exists = result.recordset[0];
 
@@ -569,7 +619,7 @@ export class MssqlFs implements IFileSystem {
             insertReq.input('p0', currentPath);
             insertReq.input('p1', Date.now());
             await insertReq.query(
-              `INSERT INTO fs_entries (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
+              `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
             );
           } else if (exists.type !== 'directory') {
             throw new Error(`mkdir: not a directory: ${currentPath}`);
@@ -580,7 +630,7 @@ export class MssqlFs implements IFileSystem {
         const parentReq = transaction.request();
         parentReq.input('p0', parent);
         const parentResult = await parentReq.query<Pick<FsEntryRow, 'type'>>(
-          'SELECT type FROM fs_entries WHERE path = @p0',
+          `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
         );
         const parentEntry = parentResult.recordset[0];
 
@@ -595,7 +645,7 @@ export class MssqlFs implements IFileSystem {
         insertReq.input('p0', prefixed);
         insertReq.input('p1', Date.now());
         await insertReq.query(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
+          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime) VALUES (@p0, 'directory', 493, 0, @p1)`,
         );
       }
     });
@@ -607,7 +657,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const entryRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [resolved],
     );
     const entry = entryRows[0];
@@ -621,7 +671,7 @@ export class MssqlFs implements IFileSystem {
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
     const rows = await this.#query<{ path: string }>(
-      `SELECT path FROM fs_entries
+      `SELECT path FROM ${this.#t('fs_entries')}
        WHERE path LIKE @p0 + '%'
          AND path != @p1
          AND path NOT LIKE @p0 + '%/%'`,
@@ -637,7 +687,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const entryRows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [resolved],
     );
     const entry = entryRows[0];
@@ -651,7 +701,7 @@ export class MssqlFs implements IFileSystem {
 
     const prefix = resolved === '/' ? '/' : resolved + '/';
     const rows = await this.#query<Pick<FsEntryRow, 'path' | 'type'>>(
-      `SELECT path, type FROM fs_entries
+      `SELECT path, type FROM ${this.#t('fs_entries')}
        WHERE path LIKE @p0 + '%'
          AND path != @p1
          AND path NOT LIKE @p0 + '%/%'`,
@@ -671,7 +721,7 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
 
     const rows = await this.#query<Pick<FsEntryRow, 'type'>>(
-      'SELECT type FROM fs_entries WHERE path = @p0',
+      `SELECT type FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [prefixed],
     );
     const entry = rows[0];
@@ -688,7 +738,7 @@ export class MssqlFs implements IFileSystem {
         const childrenReq = transaction.request();
         childrenReq.input('p0', prefixed);
         const childrenResult = await childrenReq.query<{ exists: number }>(
-          `SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path LIKE @p0 + '/%') THEN 1 ELSE 0 END as [exists]`,
+          `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path LIKE @p0 + '/%') THEN 1 ELSE 0 END as [exists]`,
         );
 
         if (childrenResult.recordset[0].exists === 1 && !options?.recursive) {
@@ -698,12 +748,14 @@ export class MssqlFs implements IFileSystem {
         const deleteReq = transaction.request();
         deleteReq.input('p0', prefixed);
         await deleteReq.query(
-          `DELETE FROM fs_entries WHERE path = @p0 OR path LIKE @p0 + '/%'`,
+          `DELETE FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%'`,
         );
       } else {
         const deleteReq = transaction.request();
         deleteReq.input('p0', prefixed);
-        await deleteReq.query('DELETE FROM fs_entries WHERE path = @p0');
+        await deleteReq.query(
+          `DELETE FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        );
       }
     });
   }
@@ -715,7 +767,7 @@ export class MssqlFs implements IFileSystem {
     const destPrefixed = this.#prefixPath(destNormalized);
 
     const srcRows = await this.#query<FsEntryRow>(
-      'SELECT * FROM fs_entries WHERE path = @p0',
+      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [srcPrefixed],
     );
     const srcEntry = srcRows[0];
@@ -735,7 +787,7 @@ export class MssqlFs implements IFileSystem {
         const allEntriesReq = transaction.request();
         allEntriesReq.input('p0', srcPrefixed);
         const allEntriesResult = await allEntriesReq.query<FsEntryRow>(
-          `SELECT * FROM fs_entries WHERE path = @p0 OR path LIKE @p0 + '/%'`,
+          `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%'`,
         );
 
         for (const entry of allEntriesResult.recordset) {
@@ -751,7 +803,7 @@ export class MssqlFs implements IFileSystem {
           insertReq.input('p5', entry.symlinkTarget);
 
           await insertReq.query(`
-            MERGE fs_entries AS target
+            MERGE ${this.#t('fs_entries')} AS target
             USING (SELECT @p0 AS path) AS source
             ON target.path = source.path
             WHEN MATCHED THEN
@@ -765,7 +817,7 @@ export class MssqlFs implements IFileSystem {
             const deleteChunksReq = transaction.request();
             deleteChunksReq.input('p0', newPath);
             await deleteChunksReq.query(
-              'DELETE FROM fs_chunks WHERE path = @p0',
+              `DELETE FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
             );
 
             const chunksReq = transaction.request();
@@ -773,7 +825,9 @@ export class MssqlFs implements IFileSystem {
             const chunksResult = await chunksReq.query<{
               chunkIndex: number;
               data: Buffer;
-            }>('SELECT chunkIndex, data FROM fs_chunks WHERE path = @p0');
+            }>(
+              `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            );
 
             for (const chunk of chunksResult.recordset) {
               const chunkInsertReq = transaction.request();
@@ -781,7 +835,7 @@ export class MssqlFs implements IFileSystem {
               chunkInsertReq.input('p1', chunk.chunkIndex);
               chunkInsertReq.input('p2', chunk.data);
               await chunkInsertReq.query(
-                'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (@p0, @p1, @p2)',
+                `INSERT INTO ${this.#t('fs_chunks')} (path, chunkIndex, data) VALUES (@p0, @p1, @p2)`,
               );
             }
           }
@@ -796,7 +850,7 @@ export class MssqlFs implements IFileSystem {
         insertReq.input('p5', srcEntry.symlinkTarget);
 
         await insertReq.query(`
-          MERGE fs_entries AS target
+          MERGE ${this.#t('fs_entries')} AS target
           USING (SELECT @p0 AS path) AS source
           ON target.path = source.path
           WHEN MATCHED THEN
@@ -812,11 +866,15 @@ export class MssqlFs implements IFileSystem {
           const chunksResult = await chunksReq.query<{
             chunkIndex: number;
             data: Buffer;
-          }>('SELECT chunkIndex, data FROM fs_chunks WHERE path = @p0');
+          }>(
+            `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+          );
 
           const deleteChunksReq = transaction.request();
           deleteChunksReq.input('p0', destPrefixed);
-          await deleteChunksReq.query('DELETE FROM fs_chunks WHERE path = @p0');
+          await deleteChunksReq.query(
+            `DELETE FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+          );
 
           for (const chunk of chunksResult.recordset) {
             const chunkInsertReq = transaction.request();
@@ -824,7 +882,7 @@ export class MssqlFs implements IFileSystem {
             chunkInsertReq.input('p1', chunk.chunkIndex);
             chunkInsertReq.input('p2', chunk.data);
             await chunkInsertReq.query(
-              'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (@p0, @p1, @p2)',
+              `INSERT INTO ${this.#t('fs_chunks')} (path, chunkIndex, data) VALUES (@p0, @p1, @p2)`,
             );
           }
         }
@@ -839,7 +897,7 @@ export class MssqlFs implements IFileSystem {
     const destPrefixed = this.#prefixPath(destNormalized);
 
     const srcRows = await this.#query<FsEntryRow>(
-      'SELECT * FROM fs_entries WHERE path = @p0',
+      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [srcPrefixed],
     );
     const srcEntry = srcRows[0];
@@ -855,7 +913,7 @@ export class MssqlFs implements IFileSystem {
         const allEntriesReq = transaction.request();
         allEntriesReq.input('p0', srcPrefixed);
         const allEntriesResult = await allEntriesReq.query<FsEntryRow>(
-          `SELECT * FROM fs_entries WHERE path = @p0 OR path LIKE @p0 + '/%' ORDER BY path DESC`,
+          `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%' ORDER BY path DESC`,
         );
 
         for (const entry of [...allEntriesResult.recordset].reverse()) {
@@ -871,7 +929,7 @@ export class MssqlFs implements IFileSystem {
           insertReq.input('p5', entry.symlinkTarget);
 
           await insertReq.query(
-            `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+            `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime, symlinkTarget)
              VALUES (@p0, @p1, @p2, @p3, @p4, @p5)`,
           );
 
@@ -881,7 +939,9 @@ export class MssqlFs implements IFileSystem {
             const chunksResult = await chunksReq.query<{
               chunkIndex: number;
               data: Buffer;
-            }>('SELECT chunkIndex, data FROM fs_chunks WHERE path = @p0');
+            }>(
+              `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            );
 
             for (const chunk of chunksResult.recordset) {
               const chunkInsertReq = transaction.request();
@@ -889,7 +949,7 @@ export class MssqlFs implements IFileSystem {
               chunkInsertReq.input('p1', chunk.chunkIndex);
               chunkInsertReq.input('p2', chunk.data);
               await chunkInsertReq.query(
-                'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (@p0, @p1, @p2)',
+                `INSERT INTO ${this.#t('fs_chunks')} (path, chunkIndex, data) VALUES (@p0, @p1, @p2)`,
               );
             }
           }
@@ -898,7 +958,7 @@ export class MssqlFs implements IFileSystem {
         const deleteReq = transaction.request();
         deleteReq.input('p0', srcPrefixed);
         await deleteReq.query(
-          `DELETE FROM fs_entries WHERE path = @p0 OR path LIKE @p0 + '/%'`,
+          `DELETE FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%'`,
         );
       } else {
         const insertReq = transaction.request();
@@ -910,7 +970,7 @@ export class MssqlFs implements IFileSystem {
         insertReq.input('p5', srcEntry.symlinkTarget);
 
         await insertReq.query(
-          `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime, symlinkTarget)
            VALUES (@p0, @p1, @p2, @p3, @p4, @p5)`,
         );
 
@@ -920,7 +980,9 @@ export class MssqlFs implements IFileSystem {
           const chunksResult = await chunksReq.query<{
             chunkIndex: number;
             data: Buffer;
-          }>('SELECT chunkIndex, data FROM fs_chunks WHERE path = @p0');
+          }>(
+            `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+          );
 
           for (const chunk of chunksResult.recordset) {
             const chunkInsertReq = transaction.request();
@@ -928,14 +990,16 @@ export class MssqlFs implements IFileSystem {
             chunkInsertReq.input('p1', chunk.chunkIndex);
             chunkInsertReq.input('p2', chunk.data);
             await chunkInsertReq.query(
-              'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (@p0, @p1, @p2)',
+              `INSERT INTO ${this.#t('fs_chunks')} (path, chunkIndex, data) VALUES (@p0, @p1, @p2)`,
             );
           }
         }
 
         const deleteReq = transaction.request();
         deleteReq.input('p0', srcPrefixed);
-        await deleteReq.query('DELETE FROM fs_entries WHERE path = @p0');
+        await deleteReq.query(
+          `DELETE FROM ${this.#t('fs_entries')} WHERE path = @p0`,
+        );
       }
     });
   }
@@ -952,7 +1016,7 @@ export class MssqlFs implements IFileSystem {
 
   async getAllPathsAsync(): Promise<string[]> {
     const rows = await this.#query<{ path: string; [key: string]: unknown }>(
-      'SELECT path FROM fs_entries ORDER BY path',
+      `SELECT path FROM ${this.#t('fs_entries')} ORDER BY path`,
     );
     return rows.map((row) => row.path);
   }
@@ -963,7 +1027,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const rows = await this.#query<{ exists: number }>(
-      'SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]',
+      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
       [resolved],
     );
     if (rows[0].exists !== 1) {
@@ -979,7 +1043,7 @@ export class MssqlFs implements IFileSystem {
     const resolved = await this.#resolveSymlink(prefixed);
 
     const result = await this.#exec(
-      'UPDATE fs_entries SET mtime = @p0 WHERE path = @p1',
+      `UPDATE ${this.#t('fs_entries')} SET mtime = @p0 WHERE path = @p1`,
       [mtime.getTime(), resolved],
     );
 
@@ -993,7 +1057,7 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
 
     const result = await this.#exec(
-      'UPDATE fs_entries SET mode = @p0 WHERE path = @p1',
+      `UPDATE ${this.#t('fs_entries')} SET mode = @p0 WHERE path = @p1`,
       [mode, prefixed],
     );
 
@@ -1007,7 +1071,7 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
 
     const existingRows = await this.#query<{ exists: number }>(
-      'SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]',
+      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
       [prefixed],
     );
     if (existingRows[0].exists === 1) {
@@ -1022,7 +1086,7 @@ export class MssqlFs implements IFileSystem {
       insertReq.input('p1', Date.now());
       insertReq.input('p2', target);
       await insertReq.query(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime, symlinkTarget)
+        `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime, symlinkTarget)
          VALUES (@p0, 'symlink', 511, 0, @p1, @p2)`,
       );
     });
@@ -1035,7 +1099,7 @@ export class MssqlFs implements IFileSystem {
     const destPrefixed = this.#prefixPath(destNormalized);
 
     const srcRows = await this.#query<FsEntryRow>(
-      'SELECT * FROM fs_entries WHERE path = @p0',
+      `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [srcPrefixed],
     );
     const srcEntry = srcRows[0];
@@ -1049,7 +1113,7 @@ export class MssqlFs implements IFileSystem {
     }
 
     const existingRows = await this.#query<{ exists: number }>(
-      'SELECT CASE WHEN EXISTS(SELECT 1 FROM fs_entries WHERE path = @p0) THEN 1 ELSE 0 END as [exists]',
+      `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${this.#t('fs_entries')} WHERE path = @p0) THEN 1 ELSE 0 END as [exists]`,
       [destPrefixed],
     );
     if (existingRows[0].exists === 1) {
@@ -1065,7 +1129,7 @@ export class MssqlFs implements IFileSystem {
       insertReq.input('p2', srcEntry.size);
       insertReq.input('p3', Date.now());
       await insertReq.query(
-        `INSERT INTO fs_entries (path, type, mode, size, mtime)
+        `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime)
          VALUES (@p0, 'file', @p1, @p2, @p3)`,
       );
 
@@ -1074,7 +1138,9 @@ export class MssqlFs implements IFileSystem {
       const chunksResult = await chunksReq.query<{
         chunkIndex: number;
         data: Buffer;
-      }>('SELECT chunkIndex, data FROM fs_chunks WHERE path = @p0');
+      }>(
+        `SELECT chunkIndex, data FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+      );
 
       for (const chunk of chunksResult.recordset) {
         const chunkInsertReq = transaction.request();
@@ -1082,7 +1148,7 @@ export class MssqlFs implements IFileSystem {
         chunkInsertReq.input('p1', chunk.chunkIndex);
         chunkInsertReq.input('p2', chunk.data);
         await chunkInsertReq.query(
-          'INSERT INTO fs_chunks (path, chunkIndex, data) VALUES (@p0, @p1, @p2)',
+          `INSERT INTO ${this.#t('fs_chunks')} (path, chunkIndex, data) VALUES (@p0, @p1, @p2)`,
         );
       }
     });
@@ -1093,7 +1159,7 @@ export class MssqlFs implements IFileSystem {
     const prefixed = this.#prefixPath(normalized);
 
     const rows = await this.#query<Pick<FsEntryRow, 'type' | 'symlinkTarget'>>(
-      'SELECT type, symlinkTarget FROM fs_entries WHERE path = @p0',
+      `SELECT type, symlinkTarget FROM ${this.#t('fs_entries')} WHERE path = @p0`,
       [prefixed],
     );
     const entry = rows[0];

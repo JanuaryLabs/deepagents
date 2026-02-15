@@ -16,9 +16,6 @@
   "include": ["src/**/*.ts", "../../global.d.ts"],
   "references": [
     {
-      "path": "../toolbox/tsconfig.lib.json"
-    },
-    {
       "path": "../context/tsconfig.lib.json"
     },
     {
