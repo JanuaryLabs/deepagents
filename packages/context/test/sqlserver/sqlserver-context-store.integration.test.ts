@@ -1,12 +1,9 @@
+import sql from 'mssql';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { SqlServerContextStore } from '@deepagents/context';
-
-import {
-  waitForFtsReady,
-  withSqlServerContainer,
-} from '../helpers/sqlserver-container.ts';
+import { waitForFtsReady, withSqlServerContainer } from '@deepagents/test';
 
 /**
  * Integration tests for SQL Server ContextStore.
@@ -1382,5 +1379,168 @@ describe('SQL Server ContextStore Integration', () => {
           }
         }));
     });
+  });
+
+  // ==========================================================================
+  // Pool Injection
+  // ==========================================================================
+
+  describe('Pool Injection', () => {
+    it('should accept a pre-existing connected ConnectionPool', () =>
+      withSqlServerContainer(async (container) => {
+        const pool = new sql.ConnectionPool(container.connectionString);
+        await pool.connect();
+        try {
+          const store = new SqlServerContextStore({ pool });
+          try {
+            await store.createChat({
+              id: 'chat-pool-inject',
+              userId: 'user-1',
+              title: 'Pool Injection Test',
+            });
+
+            const chat = await store.getChat('chat-pool-inject');
+            assert.ok(chat);
+            assert.strictEqual(chat.id, 'chat-pool-inject');
+          } finally {
+            await store.close();
+          }
+
+          assert.strictEqual(pool.connected, true);
+        } finally {
+          await pool.close();
+        }
+      }));
+
+    it('should not close external pool on store.close()', () =>
+      withSqlServerContainer(async (container) => {
+        const pool = new sql.ConnectionPool(container.connectionString);
+        await pool.connect();
+        try {
+          const store = new SqlServerContextStore({ pool });
+          await store.createChat({
+            id: 'chat-no-close',
+            userId: 'user-1',
+          });
+
+          await store.close();
+
+          assert.strictEqual(pool.connected, true);
+
+          const request = pool.request();
+          const result = await request.query('SELECT 1 AS val');
+          assert.strictEqual(result.recordset[0].val, 1);
+        } finally {
+          await pool.close();
+        }
+      }));
+
+    it('should allow two store instances to share the same pool', () =>
+      withSqlServerContainer(async (container) => {
+        const pool = new sql.ConnectionPool(container.connectionString);
+        await pool.connect();
+        try {
+          const store1 = new SqlServerContextStore({ pool });
+          await store1.createChat({
+            id: 'chat-shared-1',
+            userId: 'user-1',
+          });
+
+          const store2 = new SqlServerContextStore({ pool });
+          const chat = await store2.getChat('chat-shared-1');
+          assert.ok(chat);
+          assert.strictEqual(chat.id, 'chat-shared-1');
+
+          await store1.close();
+          await store2.close();
+
+          assert.strictEqual(pool.connected, true);
+        } finally {
+          await pool.close();
+        }
+      }));
+  });
+
+  // ==========================================================================
+  // Schema Support
+  // ==========================================================================
+
+  describe('Schema Support', () => {
+    it('should create tables in a custom schema', () =>
+      withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+          schema: 'custom_schema',
+        });
+        try {
+          await store.createChat({
+            id: 'chat-custom-schema',
+            userId: 'user-1',
+            title: 'Custom Schema Chat',
+          });
+
+          const chat = await store.getChat('chat-custom-schema');
+          assert.ok(chat);
+          assert.strictEqual(chat.title, 'Custom Schema Chat');
+
+          const pool = new sql.ConnectionPool(container.connectionString);
+          await pool.connect();
+          try {
+            const result = await pool.request().query(`
+              SELECT TABLE_SCHEMA, TABLE_NAME
+              FROM INFORMATION_SCHEMA.TABLES
+              WHERE TABLE_SCHEMA = 'custom_schema'
+            `);
+            assert.ok(result.recordset.length > 0);
+            assert.ok(
+              result.recordset.every(
+                (r: { TABLE_SCHEMA: string }) =>
+                  r.TABLE_SCHEMA === 'custom_schema',
+              ),
+            );
+          } finally {
+            await pool.close();
+          }
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should isolate two stores with different schemas', async () =>
+      await withSqlServerContainer(async (container) => {
+        const storeA = new SqlServerContextStore({
+          pool: container.connectionString,
+          schema: 'schema_a',
+        });
+        const storeB = new SqlServerContextStore({
+          pool: container.connectionString,
+          schema: 'schema_b',
+        });
+
+        try {
+          await storeA.createChat({
+            id: 'chat-iso',
+            userId: 'user-1',
+            title: 'Schema A Chat',
+          });
+
+          await storeB.createChat({
+            id: 'chat-iso',
+            userId: 'user-1',
+            title: 'Schema B Chat',
+          });
+
+          const chatA = await storeA.getChat('chat-iso');
+          const chatB = await storeB.getChat('chat-iso');
+
+          assert.ok(chatA);
+          assert.ok(chatB);
+          assert.strictEqual(chatA.title, 'Schema A Chat');
+          assert.strictEqual(chatB.title, 'Schema B Chat');
+        } finally {
+          await storeA.close();
+          await storeB.close();
+        }
+      }));
   });
 });

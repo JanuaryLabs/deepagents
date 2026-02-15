@@ -1,4 +1,4 @@
-import { APICallError } from '@ai-sdk/provider';
+import { APICallError } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';

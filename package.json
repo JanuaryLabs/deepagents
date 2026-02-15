@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/source",
-  "version": "0.0.0",
+  "version": "0.15.1",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -80,6 +80,7 @@
     }
   },
   "dependencies": {
+    "@ai-sdk/provider": "^3.0.8",
     "@ai-sdk/anthropic": "^3.0.44",
     "@ai-sdk/google": "^3.0.29",
     "@ai-sdk/groq": "^3.0.24",
@@ -92,7 +93,6 @@
     "@tavily/core": "^0.5.12",
     "@types/jsdom": "^27.0.0",
     "@types/mdx": "^2.0.13",
-    "@upstash/qstash": "^2.8.4",
     "ai": "^6.0.86",
     "conf": "^15.0.2",
     "cron-parser": "^5.4.0",
@@ -109,7 +109,7 @@
     "framer-motion": "^12.19.1",
     "ignore": "^7.0.5",
     "isbot": "^4.4.0",
-    "just-bash": "2.9.6",
+    "just-bash": "^2.10.0",
     "langchain": "^0.3.35",
     "lint-staged": "^16.2.7",
     "lodash-es": "^4.17.21",

@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/toolbox",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "^3.0.24",
-    "@deepagents/agent": "0.15.0",
+    "@deepagents/agent": "0.15.1",
     "ai": "^6.0.86",
     "duck-duck-scrape": "^2.2.7",
     "lodash-es": "^4.17.21",

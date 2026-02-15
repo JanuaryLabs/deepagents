@@ -33,5 +33,6 @@
     "@types/react-dom": "19.2.3",
     "eslint-plugin-react": "7.35.0",
     "eslint-plugin-react-hooks": "7.0.1"
-  }
+  },
+  "version": "0.15.1"
 }
