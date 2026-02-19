@@ -1,3 +1,5 @@
+import { format as formatSql } from 'sql-formatter';
+
 import type { ContextFragment } from '@deepagents/context';
 
 import {
@@ -129,6 +131,8 @@ export type ValidateFunction = (
 
 export abstract class Adapter {
   abstract grounding: GroundingFn[];
+
+  abstract readonly formatterLanguage: string;
 
   /**
    * Default schema name for this database.
@@ -360,6 +364,14 @@ export abstract class Adapter {
       cardinality,
     });
   }
+  format(sql: string): string {
+    try {
+      return formatSql(sql, { language: this.formatterLanguage as any });
+    } catch {
+      return sql;
+    }
+  }
+
   abstract execute(sql: string): Promise<any[]> | any[];
   abstract validate(sql: string): Promise<string | void> | string | void;
   abstract runQuery<Row>(sql: string): Promise<Row[]> | Row[];

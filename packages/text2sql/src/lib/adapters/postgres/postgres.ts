@@ -119,6 +119,7 @@ export class Postgres extends Adapter {
   override readonly grounding: GroundingFn[];
   override readonly defaultSchema = 'public';
   override readonly systemSchemas = ['pg_catalog', 'information_schema'];
+  override readonly formatterLanguage = 'postgresql';
 
   constructor(options: PostgresAdapterOptions) {
     super();

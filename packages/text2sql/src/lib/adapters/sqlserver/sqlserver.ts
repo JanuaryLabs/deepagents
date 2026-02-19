@@ -130,6 +130,7 @@ export class SqlServer extends Adapter {
   override readonly grounding: GroundingFn[];
   override readonly defaultSchema = 'dbo';
   override readonly systemSchemas = ['INFORMATION_SCHEMA', 'sys'];
+  override readonly formatterLanguage = 'transactsql';
 
   constructor(options: SqlServerAdapterOptions) {
     super();

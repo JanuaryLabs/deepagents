@@ -106,6 +106,7 @@ export class Sqlite extends Adapter {
   override readonly grounding: GroundingFn[];
   override readonly defaultSchema = undefined;
   override readonly systemSchemas: string[] = [];
+  override readonly formatterLanguage = 'sqlite';
 
   constructor(options: SqliteAdapterOptions) {
     super();

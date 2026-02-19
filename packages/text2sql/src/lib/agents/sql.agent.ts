@@ -165,9 +165,8 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
         throw new UnanswerableSQLError(output.error);
       }
 
-      const sql = extractSql(output.sql);
+      const sql = options.adapter.format(extractSql(output.sql));
 
-      // Validate the generated SQL
       const validationError = await options.adapter.validate(sql);
       if (validationError) {
         throw new SQLValidationError(validationError);

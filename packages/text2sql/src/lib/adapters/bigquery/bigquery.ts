@@ -56,6 +56,7 @@ export class BigQuery extends Adapter {
   override readonly grounding: GroundingFn[];
   override readonly defaultSchema: string | undefined;
   override readonly systemSchemas: string[] = [];
+  override readonly formatterLanguage = 'bigquery';
 
   constructor(options: BigQueryAdapterOptions) {
     super();

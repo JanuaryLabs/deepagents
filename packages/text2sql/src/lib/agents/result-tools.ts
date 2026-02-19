@@ -92,9 +92,9 @@ function createSqlCommand(adapter: Adapter) {
       usage: 'run "SELECT ..."',
       description: 'Execute query and store results',
       handler: async (args, ctx) => {
-        const query = args.join(' ').trim();
+        const rawQuery = args.join(' ').trim();
 
-        if (!query) {
+        if (!rawQuery) {
           return {
             stdout: '',
             stderr: 'sql run: no query provided',
@@ -102,7 +102,7 @@ function createSqlCommand(adapter: Adapter) {
           };
         }
 
-        const validation = validateReadOnly(query);
+        const validation = validateReadOnly(rawQuery);
         if (!validation.valid) {
           return {
             stdout: '',
@@ -110,6 +110,8 @@ function createSqlCommand(adapter: Adapter) {
             exitCode: 1,
           };
         }
+
+        const query = adapter.format(rawQuery);
 
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
@@ -157,9 +159,9 @@ function createSqlCommand(adapter: Adapter) {
       usage: 'validate "SELECT ..."',
       description: 'Validate query syntax',
       handler: async (args) => {
-        const query = args.join(' ').trim();
+        const rawQuery = args.join(' ').trim();
 
-        if (!query) {
+        if (!rawQuery) {
           return {
             stdout: '',
             stderr: 'sql validate: no query provided',
@@ -167,7 +169,7 @@ function createSqlCommand(adapter: Adapter) {
           };
         }
 
-        const validation = validateReadOnly(query);
+        const validation = validateReadOnly(rawQuery);
         if (!validation.valid) {
           return {
             stdout: '',
@@ -176,6 +178,7 @@ function createSqlCommand(adapter: Adapter) {
           };
         }
 
+        const query = adapter.format(rawQuery);
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
           return {

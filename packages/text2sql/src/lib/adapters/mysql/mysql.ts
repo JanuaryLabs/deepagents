@@ -87,6 +87,7 @@ export class Mysql extends Adapter {
   #options: MysqlAdapterOptions;
   override readonly grounding: GroundingFn[];
   override readonly defaultSchema: string | undefined = undefined;
+  override readonly formatterLanguage = 'mysql';
   override readonly systemSchemas = [
     'mysql',
     'information_schema',

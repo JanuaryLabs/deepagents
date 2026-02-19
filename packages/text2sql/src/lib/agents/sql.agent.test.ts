@@ -88,7 +88,7 @@ describe('toSql', () => {
     });
 
     // Assert
-    assert.strictEqual(result.sql, 'SELECT 1');
+    assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 1);
     assert.strictEqual(result.errors, undefined);
   });
@@ -114,7 +114,7 @@ describe('toSql', () => {
     });
 
     // Assert
-    assert.strictEqual(result.sql, 'SELECT 1');
+    assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 2);
     assert.deepStrictEqual(result.errors, [
       'SQL Validation Error: syntax error',
@@ -164,7 +164,7 @@ describe('toSql', () => {
     });
 
     // Assert
-    assert.strictEqual(result.sql, 'SELECT 1');
+    assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 2, '');
     assert.ok(result.errors?.[0]?.includes('Schema validation failed'));
   });
@@ -287,7 +287,7 @@ describe('toSql', () => {
       maxRetries: 6,
     });
 
-    assert.strictEqual(result.sql, 'SELECT 1');
+    assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 6);
     assert.strictEqual(result.errors?.length, 5);
     assert.strictEqual(calls.length, 6);
@@ -464,27 +464,27 @@ describe('toSql', () => {
     const testCases = [
       {
         input: '```sql\nSELECT * FROM users\n```',
-        expected: 'SELECT * FROM users',
+        expected: adapter.format('SELECT * FROM users'),
         name: 'standard sql block',
       },
       {
         input: '```SQL\nSELECT * FROM users\n```',
-        expected: '```SQL\nSELECT * FROM users\n```',
+        expected: adapter.format('```SQL\nSELECT * FROM users\n```'),
         name: 'uppercase SQL (not extracted - case sensitive)',
       },
       {
         input: '```\nSELECT * FROM users\n```',
-        expected: '```\nSELECT * FROM users\n```',
+        expected: adapter.format('```\nSELECT * FROM users\n```'),
         name: 'no language specifier (not extracted)',
       },
       {
         input: '```sql\nSELECT 1\n```\ntext\n```sql\nSELECT 2\n```',
-        expected: 'SELECT 1',
+        expected: adapter.format('SELECT 1'),
         name: 'multiple blocks (first extracted)',
       },
       {
         input: 'SELECT `column` FROM `table`',
-        expected: 'SELECT `column` FROM `table`',
+        expected: adapter.format('SELECT `column` FROM `table`'),
         name: 'backticks in query (no code block)',
       },
     ];
@@ -503,7 +503,7 @@ describe('toSql', () => {
     }
   });
 
-  it('returns plain SQL unchanged', async () => {
+  it('returns formatted SQL', async () => {
     // Arrange
     const { adapter } = await init_db('');
     const model = createMockModel({ sql: 'SELECT 1' });
@@ -519,7 +519,7 @@ describe('toSql', () => {
     });
 
     // Assert
-    assert.strictEqual(result.sql, 'SELECT 1');
+    assert.strictEqual(result.sql, adapter.format('SELECT 1'));
   });
 
   describe('previous error injection', () => {
@@ -562,7 +562,7 @@ describe('toSql', () => {
         maxRetries: 1,
       });
 
-      assert.strictEqual(result.sql, 'SELECT * FROM users');
+      assert.strictEqual(result.sql, adapter.format('SELECT * FROM users'));
       assert.strictEqual(result.attempts, 1);
     });
 
@@ -630,7 +630,7 @@ describe('toSql', () => {
         maxRetries: 1,
       });
 
-      assert.strictEqual(result.sql, 'SELECT 1');
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 1);
     });
   });
@@ -649,7 +649,7 @@ describe('toSql', () => {
         maxRetries: 1,
       });
 
-      assert.strictEqual(result.sql, 'SELECT 1');
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 1);
     });
 
@@ -670,7 +670,7 @@ describe('toSql', () => {
         maxRetries: 1,
       });
 
-      assert.strictEqual(result.sql, 'SELECT email FROM users');
+      assert.strictEqual(result.sql, adapter.format('SELECT email FROM users'));
       const promptContent = JSON.stringify(calls[0].messages);
       assert.ok(promptContent.includes("What's the user's email?"));
     });
@@ -689,7 +689,7 @@ describe('toSql', () => {
         maxRetries: 1,
       });
 
-      assert.strictEqual(result.sql, 'SELECT 1');
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 1);
     });
   });
@@ -729,9 +729,41 @@ describe('toSql', () => {
         }),
       ]);
 
-      assert.strictEqual(result1.sql, 'SELECT 1');
-      assert.strictEqual(result2.sql, 'SELECT 2');
-      assert.strictEqual(result3.sql, 'SELECT 3');
+      assert.strictEqual(result1.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result2.sql, adapter.format('SELECT 2'));
+      assert.strictEqual(result3.sql, adapter.format('SELECT 3'));
+    });
+  });
+
+  describe('format', () => {
+    it('pretty-prints SQL with line breaks and indentation', async () => {
+      const { adapter } = await init_db('');
+      const formatted = adapter.format(
+        'SELECT id, name FROM users WHERE active = 1',
+      );
+      assert.ok(
+        formatted.includes('\n'),
+        'formatted SQL should contain line breaks',
+      );
+      assert.ok(
+        formatted.includes('SELECT'),
+        'formatted SQL should contain SELECT keyword',
+      );
+      assert.ok(
+        formatted.includes('users'),
+        'formatted SQL should preserve table name',
+      );
+    });
+
+    it('returns original on unparseable input', async () => {
+      const { adapter } = await init_db('');
+      const garbage = '{{not sql at all}}';
+      assert.strictEqual(adapter.format(garbage), garbage);
+    });
+
+    it('handles empty string', async () => {
+      const { adapter } = await init_db('');
+      assert.strictEqual(adapter.format(''), '');
     });
   });
 });
