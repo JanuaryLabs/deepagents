@@ -43,6 +43,58 @@ export class SqliteStreamStore extends StreamStore {
     );
   }
 
+  async upsertStream(
+    stream: StreamData,
+  ): Promise<{ stream: StreamData; created: boolean }> {
+    const row = this.#stmt(
+      `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING
+       RETURNING *`,
+    ).get(
+      stream.id,
+      stream.status,
+      stream.createdAt,
+      stream.startedAt,
+      stream.finishedAt,
+      stream.cancelRequestedAt,
+      stream.error,
+    ) as
+      | {
+          id: string;
+          status: StreamStatus;
+          createdAt: number;
+          startedAt: number | null;
+          finishedAt: number | null;
+          cancelRequestedAt: number | null;
+          error: string | null;
+        }
+      | undefined;
+
+    if (row) {
+      return {
+        stream: {
+          id: row.id,
+          status: row.status,
+          createdAt: row.createdAt,
+          startedAt: row.startedAt,
+          finishedAt: row.finishedAt,
+          cancelRequestedAt: row.cancelRequestedAt,
+          error: row.error,
+        },
+        created: true,
+      };
+    }
+
+    const existing = await this.getStream(stream.id);
+    if (!existing) {
+      throw new Error(
+        `Stream "${stream.id}" disappeared between upsert and fetch`,
+      );
+    }
+    return { stream: existing, created: false };
+  }
+
   async getStream(streamId: string): Promise<StreamData | undefined> {
     const row = this.#stmt('SELECT * FROM streams WHERE id = ?').get(
       streamId,

@@ -76,6 +76,237 @@ describe('Stream Chunks', () => {
     });
   });
 
+  describe('upsertStream', () => {
+    it('should create a new stream and return created: true', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        const result = await store.upsertStream(stream);
+
+        assert.strictEqual(result.created, true);
+        assert.strictEqual(result.stream.id, stream.id);
+        assert.strictEqual(result.stream.status, 'queued');
+        assert.strictEqual(result.stream.createdAt, stream.createdAt);
+      });
+    });
+
+    it('should return existing stream unchanged with created: false on conflict', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        const first = await store.upsertStream(stream);
+        assert.strictEqual(first.created, true);
+
+        await store.updateStreamStatus(stream.id, 'running');
+
+        const second = await store.upsertStream({
+          ...stream,
+          createdAt: Date.now() + 1000,
+        });
+
+        assert.strictEqual(second.created, false);
+        assert.strictEqual(second.stream.status, 'running');
+        assert.strictEqual(second.stream.createdAt, stream.createdAt);
+      });
+    });
+
+    it('should not overwrite existing stream data with conflicting input', async () => {
+      await withStreamStore(async (store) => {
+        const original = createStream();
+        await store.upsertStream(original);
+
+        const conflicting = {
+          ...original,
+          status: 'running' as const,
+          createdAt: Date.now() + 9999,
+        };
+        const result = await store.upsertStream(conflicting);
+
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'queued');
+        assert.strictEqual(result.stream.createdAt, original.createdAt);
+      });
+    });
+
+    it('should preserve completed stream with finishedAt on conflict', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        await store.upsertStream(stream);
+        await store.updateStreamStatus(stream.id, 'running');
+        await store.updateStreamStatus(stream.id, 'completed');
+
+        const result = await store.upsertStream({
+          ...stream,
+          createdAt: Date.now() + 1000,
+        });
+
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'completed');
+        assert.ok(result.stream.finishedAt);
+      });
+    });
+
+    it('should preserve failed stream with error field on conflict', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        await store.upsertStream(stream);
+        await store.updateStreamStatus(stream.id, 'running');
+        await store.updateStreamStatus(stream.id, 'failed', {
+          error: 'something broke',
+        });
+
+        const result = await store.upsertStream({
+          ...stream,
+          createdAt: Date.now() + 1000,
+        });
+
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'failed');
+        assert.strictEqual(result.stream.error, 'something broke');
+        assert.ok(result.stream.finishedAt);
+      });
+    });
+
+    it('should preserve cancelled stream with cancelRequestedAt on conflict', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        await store.upsertStream(stream);
+        await store.updateStreamStatus(stream.id, 'cancelled');
+
+        const result = await store.upsertStream({
+          ...stream,
+          createdAt: Date.now() + 1000,
+        });
+
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'cancelled');
+        assert.ok(result.stream.cancelRequestedAt);
+        assert.ok(result.stream.finishedAt);
+      });
+    });
+
+    it('should treat deleted stream as fresh insert on re-upsert', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        await store.upsertStream(stream);
+        await store.deleteStream(stream.id);
+
+        const result = await store.upsertStream({
+          ...stream,
+          createdAt: Date.now() + 5000,
+        });
+
+        assert.strictEqual(result.created, true);
+        assert.strictEqual(result.stream.status, 'queued');
+      });
+    });
+
+    it('should not disturb existing chunks on conflict', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream();
+        await store.upsertStream(stream);
+        await store.updateStreamStatus(stream.id, 'running');
+
+        const chunks = [
+          createChunk(stream.id, 0),
+          createChunk(stream.id, 1),
+          createChunk(stream.id, 2),
+        ];
+        await store.appendChunks(chunks);
+
+        await store.upsertStream({
+          ...stream,
+          createdAt: Date.now() + 1000,
+        });
+
+        const retrieved = await store.getChunks(stream.id);
+        assert.strictEqual(retrieved.length, 3);
+        assert.strictEqual(retrieved[0].seq, 0);
+        assert.strictEqual(retrieved[1].seq, 1);
+        assert.strictEqual(retrieved[2].seq, 2);
+      });
+    });
+  });
+
+  describe('StreamManager.register() idempotency', () => {
+    it('should return created: true on first call', async () => {
+      await withStreamStore(async (store) => {
+        const manager = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        const result = await manager.register(streamId);
+        assert.strictEqual(result.created, true);
+        assert.strictEqual(result.stream.id, streamId);
+        assert.strictEqual(result.stream.status, 'queued');
+      });
+    });
+
+    it('should return created: false on duplicate call', async () => {
+      await withStreamStore(async (store) => {
+        const manager = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await manager.register(streamId);
+        const result = await manager.register(streamId);
+        assert.strictEqual(result.created, false);
+      });
+    });
+
+    it('should not overwrite status of existing stream', async () => {
+      await withStreamStore(async (store) => {
+        const manager = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await manager.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+
+        const result = await manager.register(streamId);
+        assert.strictEqual(result.stream.status, 'running');
+      });
+    });
+
+    it('should not reset completed stream to queued', async () => {
+      await withStreamStore(async (store) => {
+        const manager = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await manager.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+        await store.updateStreamStatus(streamId, 'completed');
+
+        const result = await manager.register(streamId);
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'completed');
+        assert.ok(result.stream.finishedAt);
+      });
+    });
+
+    it('should not reset failed stream to queued', async () => {
+      await withStreamStore(async (store) => {
+        const manager = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await manager.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+        await store.updateStreamStatus(streamId, 'failed', {
+          error: 'timeout',
+        });
+
+        const result = await manager.register(streamId);
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'failed');
+        assert.strictEqual(result.stream.error, 'timeout');
+      });
+    });
+
+    it('should not reset cancelled stream to queued', async () => {
+      await withStreamStore(async (store) => {
+        const manager = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await manager.register(streamId);
+        await store.updateStreamStatus(streamId, 'cancelled');
+
+        const result = await manager.register(streamId);
+        assert.strictEqual(result.created, false);
+        assert.strictEqual(result.stream.status, 'cancelled');
+        assert.ok(result.stream.cancelRequestedAt);
+      });
+    });
+  });
+
   describe('updateStreamStatus', () => {
     it('should transition to running and set startedAt', async () => {
       await withStreamStore(async (store) => {

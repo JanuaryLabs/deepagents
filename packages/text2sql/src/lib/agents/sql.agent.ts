@@ -9,8 +9,6 @@ import {
   defaultSettingsMiddleware,
   wrapLanguageModel,
 } from 'ai';
-import { Console } from 'node:console';
-import { createWriteStream } from 'node:fs';
 import pRetry from 'p-retry';
 import z from 'zod';
 
@@ -49,12 +47,6 @@ export interface ToSqlResult {
   /** Validation errors encountered (if any retries occurred) */
   errors?: string[];
 }
-
-const logger = new Console({
-  stdout: createWriteStream('./sql-agent.log', { flags: 'a' }),
-  stderr: createWriteStream('./sql-agent-error.log', { flags: 'a' }),
-  inspectOptions: { depth: null },
-});
 
 /** Temperature progression for retries: deterministic first, then increasingly exploratory */
 const RETRY_TEMPERATURES = [0, 0.2, 0.3];
@@ -245,7 +237,6 @@ async function withRetry<T>(
         );
       },
       onFailedAttempt(context) {
-        logger.error(`toSQL`, context.error);
         console.log(
           `Attempt ${context.attemptNumber} failed. There are ${context.retriesLeft} retries left.`,
         );

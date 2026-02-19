@@ -25,6 +25,10 @@ export interface StreamChunkData {
 export abstract class StreamStore {
   abstract createStream(stream: StreamData): Promise<void>;
 
+  abstract upsertStream(
+    stream: StreamData,
+  ): Promise<{ stream: StreamData; created: boolean }>;
+
   abstract getStream(streamId: string): Promise<StreamData | undefined>;
 
   abstract updateStreamStatus(

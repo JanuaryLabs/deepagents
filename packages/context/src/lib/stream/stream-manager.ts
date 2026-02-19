@@ -6,7 +6,7 @@ import {
   type PersistedWriterOptions,
   persistedWriter,
 } from '../stream-buffer.ts';
-import type { StreamStatus, StreamStore } from './stream-store.ts';
+import type { StreamData, StreamStatus, StreamStore } from './stream-store.ts';
 
 function isTerminal(status: StreamStatus) {
   return status !== 'queued' && status !== 'running';
@@ -27,8 +27,10 @@ export class StreamManager {
     return this.#store;
   }
 
-  async register(streamId: string): Promise<void> {
-    await this.#store.createStream({
+  async register(
+    streamId: string,
+  ): Promise<{ stream: StreamData; created: boolean }> {
+    return this.#store.upsertStream({
       id: streamId,
       status: 'queued',
       createdAt: Date.now(),
