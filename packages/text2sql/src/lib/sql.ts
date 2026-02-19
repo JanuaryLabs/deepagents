@@ -7,6 +7,7 @@ import {
   ToolCallRepairError,
   type ToolSet,
   type UIMessage,
+  createUIMessageStream,
   generateId,
 } from 'ai';
 import { type IFileSystem } from 'just-bash';
@@ -143,6 +144,8 @@ export class Text2Sql {
       filesystem: trackedFs,
     });
 
+    const assistantMsgId = generateId();
+
     const chatAgent = agent({
       name: 'text2sql',
       model: this.#config.model,
@@ -160,27 +163,55 @@ export class Text2Sql {
       { transform: this.#config.transform },
     );
 
-    return result.toUIMessageStream({
+    const uiStream = result.toUIMessageStream({
       onError: (error) => this.#formatError(error),
       sendStart: true,
       sendFinish: true,
       sendReasoning: true,
       sendSources: true,
       originalMessages: messages,
-      generateMessageId: generateId,
-      messageMetadata: (options) => options.part,
+      generateMessageId: () => assistantMsgId,
+      messageMetadata: ({ part }) => {
+        if (part.type === 'finish-step') {
+          return {
+            finishReason: part.finishReason,
+            usage: part.usage,
+          };
+        }
+        if (part.type === 'finish') {
+          return {
+            finishReason: part.finishReason,
+            totalUsage: part.totalUsage,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    return createUIMessageStream({
+      originalMessages: messages,
+      generateId: () => assistantMsgId,
+      onStepFinish: async ({ responseMessage }) => {
+        context.set(assistant({ ...responseMessage, id: assistantMsgId }));
+        await context.save({ branch: false });
+      },
       onFinish: async ({ responseMessage }) => {
         const createdFiles = trackedFs.getCreatedFiles();
-        const messageWithMetadata = {
-          ...responseMessage,
-          metadata: {
-            ...((responseMessage.metadata as object) ?? {}),
-            createdFiles,
-          },
-        };
-        context.set(assistant(messageWithMetadata));
-        await context.save();
+        context.set(
+          assistant({
+            ...responseMessage,
+            id: assistantMsgId,
+            metadata: {
+              ...((responseMessage.metadata as object) ?? {}),
+              createdFiles,
+            },
+          }),
+        );
+        await context.save({ branch: false });
         await context.trackUsage(await result.totalUsage);
+      },
+      execute: async ({ writer }) => {
+        writer.merge(uiStream);
       },
     });
   }

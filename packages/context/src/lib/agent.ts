@@ -301,7 +301,7 @@ class Agent<CIn, COut = CIn> {
             context.set(lastAssistantMessage(selfCorrectionText));
 
             // Save to persist the self-correction (prevents duplicate messages on next resolve)
-            await context.save();
+            await context.save({ branch: false });
 
             // Create new stream for retry
             currentResult = await this.#createRawStream(
@@ -465,12 +465,16 @@ const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
   error,
 }) => {
   console.log(
-    `Debug: ${chalk.yellow('RepairingToolCall')}: ${toolCall.toolName}`,
+    `Debug: ${chalk.yellow('RepairingToolCall')}: ${chalk.bgYellow(toolCall.toolName)}`,
     error.name,
+    JSON.stringify(toolCall),
   );
   if (NoSuchToolError.isInstance(error)) {
     return null; // do not attempt to fix invalid tool names
   }
+  // if (InvalidToolInputError.isInstance(error)) {
+
+  // }
 
   const tool = tools[toolCall.toolName as keyof typeof tools];
 

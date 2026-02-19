@@ -381,12 +381,14 @@ export class ContextEngine {
    * await context.save(); // Persist to graph
    * ```
    */
-  public async save(): Promise<void> {
+  public async save(options?: { branch?: boolean }): Promise<void> {
     await this.#ensureInitialized();
 
     if (this.#pendingMessages.length === 0) {
       return;
     }
+
+    const shouldBranch = options?.branch ?? true;
 
     // Resolve any lazy fragments before processing
     for (let i = 0; i < this.#pendingMessages.length; i++) {
@@ -396,17 +398,19 @@ export class ContextEngine {
       }
     }
 
-    // Check if any fragment is an update to an existing message.
-    // If so, rewind to the parent to create a new branch, preserving the original.
-    for (const fragment of this.#pendingMessages) {
-      if (fragment.id) {
-        const existing = await this.#store.getMessage(fragment.id);
-        if (existing && existing.parentId) {
-          // Rewind to parent, creates new branch, preserves pending
-          await this.#rewindForUpdate(existing.parentId);
-          // Regenerate ID so the original message stays untouched on old branch
-          fragment.id = crypto.randomUUID();
-          break; // Only need to rewind once
+    if (shouldBranch) {
+      // Check if any fragment is an update to an existing message.
+      // If so, rewind to the parent to create a new branch, preserving the original.
+      for (const fragment of this.#pendingMessages) {
+        if (fragment.id) {
+          const existing = await this.#store.getMessage(fragment.id);
+          if (existing && existing.parentId) {
+            // Rewind to parent, creates new branch, preserves pending
+            await this.#rewindForUpdate(existing.parentId);
+            // Regenerate ID so the original message stays untouched on old branch
+            fragment.id = crypto.randomUUID();
+            break; // Only need to rewind once
+          }
         }
       }
     }
@@ -421,10 +425,24 @@ export class ContextEngine {
           `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before encode.`,
         );
       }
+
+      const msgId = fragment.id ?? crypto.randomUUID();
+
+      // When updating in place, a fragment's ID may equal the current branch head.
+      // Deriving parentId from the head would create a self-reference.
+      // Use the existing message's original parentId instead.
+      let msgParentId = parentId;
+      if (!shouldBranch && msgId === parentId) {
+        const existing = await this.#store.getMessage(msgId);
+        if (existing) {
+          msgParentId = existing.parentId;
+        }
+      }
+
       const messageData: MessageData = {
-        id: fragment.id ?? crypto.randomUUID(),
+        id: msgId,
         chatId: this.#chatId,
-        parentId,
+        parentId: msgParentId,
         name: fragment.name,
         type: fragment.type,
         data: fragment.codec.encode(),

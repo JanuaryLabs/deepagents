@@ -45,9 +45,10 @@ export class SqliteContextStore extends ContextStore {
     return stmt;
   }
 
-  constructor(path: string) {
+  constructor(pathOrDb: string | DatabaseSync) {
     super();
-    this.#db = new DatabaseSync(path);
+    this.#db =
+      typeof pathOrDb === 'string' ? new DatabaseSync(pathOrDb) : pathOrDb;
     this.#db.exec(STORE_DDL);
   }
 

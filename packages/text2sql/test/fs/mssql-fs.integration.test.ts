@@ -599,5 +599,51 @@ describe('MssqlFs', () => {
           await fs.close();
         }
       }));
+
+    it('should create schema in sys.schemas', async () =>
+      await withSqlServerContainer(async (container) => {
+        const fs = new MssqlFs({
+          pool: container.connectionString,
+          root: '/',
+          schema: 'ddl_created_fs_schema',
+        });
+        await fs.initialize();
+        try {
+          const pool = new sql.ConnectionPool(container.connectionString);
+          await pool.connect();
+          try {
+            const result = await pool.request().query(`
+              SELECT name FROM sys.schemas WHERE name = 'ddl_created_fs_schema'
+            `);
+            assert.strictEqual(result.recordset.length, 1);
+            assert.strictEqual(
+              result.recordset[0].name,
+              'ddl_created_fs_schema',
+            );
+          } finally {
+            await pool.close();
+          }
+        } finally {
+          await fs.close();
+        }
+      }));
+
+    it('should handle idempotent initialization', async () =>
+      await withSqlServerContainer(async (container) => {
+        const fs = new MssqlFs({
+          pool: container.connectionString,
+          root: '/',
+          schema: 'idempotent_fs_schema',
+        });
+        await fs.initialize();
+        await fs.initialize();
+        try {
+          await fs.writeFile('/test.txt', 'idempotent');
+          const content = await fs.readFile('/test.txt');
+          assert.strictEqual(content, 'idempotent');
+        } finally {
+          await fs.close();
+        }
+      }));
   });
 });

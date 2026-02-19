@@ -34,7 +34,7 @@ function reasoningFramework(): ContextFragment[] {
     ),
 
     fragment(
-      'Meta-cognitive reasoning framework',
+      'meta-cognitive-reasoning-framework',
       hint(
         'Before taking any action (either tool calls *or* responses to the user), you must proactively, methodically, and independently plan and reason about:',
       ),
@@ -174,7 +174,7 @@ export function guidelines(options: TeachingsOptions = {}): ContextFragment[] {
 
     // Prerequisite policies (must do X before Y)
     fragment(
-      'Prerequisite policies',
+      'prerequisite_policies',
       policy({
         rule: 'YOU MUST inspect schema structure and available tables',
         before: 'generating ANY SQL query',
@@ -200,7 +200,7 @@ export function guidelines(options: TeachingsOptions = {}): ContextFragment[] {
 
     // Few-shot: Applying reasoning principles
     fragment(
-      'Reasoning examples',
+      'reasoning-examples',
       example({
         question: 'Show me sales last month',
         answer: `Applying Principle 1 (Logical dependencies):
@@ -241,7 +241,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
 
     // Schema adherence - consolidated into clear rules
     fragment(
-      'Schema adherence',
+      'schema_adherence',
       hint(
         'Use only tables and columns from the schema. For unspecified columns, use SELECT *. When showing related items, include IDs and requested details.',
       ),

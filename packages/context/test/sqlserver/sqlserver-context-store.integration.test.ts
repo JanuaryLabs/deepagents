@@ -1590,5 +1590,45 @@ describe('SQL Server ContextStore Integration', () => {
           await storeB.close();
         }
       }));
+
+    it('should create schema in sys.schemas', async () =>
+      await withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+          schema: 'ddl_created_schema',
+        });
+        await store.initialize();
+        try {
+          const pool = new sql.ConnectionPool(container.connectionString);
+          await pool.connect();
+          try {
+            const result = await pool.request().query(`
+              SELECT name FROM sys.schemas WHERE name = 'ddl_created_schema'
+            `);
+            assert.strictEqual(result.recordset.length, 1);
+            assert.strictEqual(result.recordset[0].name, 'ddl_created_schema');
+          } finally {
+            await pool.close();
+          }
+        } finally {
+          await store.close();
+        }
+      }));
+
+    it('should handle idempotent initialization', async () =>
+      await withSqlServerContainer(async (container) => {
+        const store = new SqlServerContextStore({
+          pool: container.connectionString,
+          schema: 'idempotent_schema',
+        });
+        await store.initialize();
+        await store.initialize();
+        try {
+          const chat = await store.createChat({ id: 'c1', userId: 'u1' });
+          assert.ok(chat);
+        } finally {
+          await store.close();
+        }
+      }));
   });
 });

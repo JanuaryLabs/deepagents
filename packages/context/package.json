@@ -35,7 +35,7 @@
     "gpt-tokenizer": "^3.4.0",
     "pluralize": "^8.0.0",
     "stringcase": "^4.3.1",
-    "ai": "^6.0.86",
+    "ai": "^6.0.90",
     "chalk": "^5.6.0",
     "yaml": "^2.8.0",
     "zod": "^3.25.76 || ^4.0.0",
@@ -50,7 +50,8 @@
   "devDependencies": {
     "@types/debug": "^4.1.12",
     "@types/mssql": "^9.1.6",
-    "@types/pg": "^8.16.0"
+    "@types/pg": "^8.16.0",
+    "pg-boss": "^10.0.0"
   },
   "peerDependencies": {
     "mssql": "^12.2.0",

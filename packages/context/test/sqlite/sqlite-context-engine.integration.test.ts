@@ -695,4 +695,130 @@ describe('Sqlite ContextEngine Integration', () => {
       );
     });
   });
+
+  it('save({ branch: false }) updates message in place without creating a branch', async () => {
+    await withTempDb('branch-false-update', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-bf-1',
+        userId: 'user-1',
+      });
+
+      engine.set(user(makeUserMessage('u1', 'Hello')));
+      await engine.save();
+
+      engine.set(assistantText('First version', { id: 'a1' }));
+      await engine.save();
+
+      assert.strictEqual(engine.branch, 'main');
+      const branchesBefore = await store.listBranches('chat-bf-1');
+      assert.strictEqual(branchesBefore.length, 1);
+
+      engine.set(assistantText('Updated version', { id: 'a1' }));
+      await engine.save({ branch: false });
+
+      const branchesAfter = await store.listBranches('chat-bf-1');
+      assert.strictEqual(branchesAfter.length, 1, 'Should still have 1 branch');
+      assert.strictEqual(engine.branch, 'main', 'Should still be on main');
+
+      const msg = await store.getMessage('a1');
+      assert.ok(msg, 'Message a1 should exist');
+      const data = msg.data as {
+        parts?: Array<{ type: string; text?: string }>;
+      };
+      assert.ok(
+        data.parts?.[0]?.text?.includes('Updated version'),
+        'Should have updated content',
+      );
+
+      const activeBranch = await store.getActiveBranch('chat-bf-1');
+      assert.strictEqual(
+        activeBranch?.headMessageId,
+        'a1',
+        'Branch head should still be a1',
+      );
+    });
+  });
+
+  it('save({ branch: false }) preserves original parentId (self-reference guard)', async () => {
+    await withTempDb('branch-false-parent', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-bf-2',
+        userId: 'user-1',
+      });
+
+      engine.set(user(makeUserMessage('u1', 'Hello')));
+      await engine.save();
+
+      engine.set(assistantText('Original', { id: 'a1' }));
+      await engine.save();
+
+      const beforeMsg = await store.getMessage('a1');
+      assert.strictEqual(
+        beforeMsg?.parentId,
+        'u1',
+        'parentId should be user msg before update',
+      );
+
+      engine.set(assistantText('Corrected', { id: 'a1' }));
+      await engine.save({ branch: false });
+
+      const afterMsg = await store.getMessage('a1');
+      assert.strictEqual(
+        afterMsg?.parentId,
+        'u1',
+        'parentId should still be user msg after update',
+      );
+    });
+  });
+
+  it('save({ branch: false }) works across multiple incremental saves', async () => {
+    await withTempDb('branch-false-incremental', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-bf-3',
+        userId: 'user-1',
+      });
+
+      engine.set(user(makeUserMessage('u1', 'Hello')));
+      await engine.save();
+
+      engine.set(assistantText('Step 1', { id: 'a1' }));
+      await engine.save({ branch: false });
+
+      engine.set(assistantText('Step 1 + Step 2', { id: 'a1' }));
+      await engine.save({ branch: false });
+
+      engine.set(assistantText('Step 1 + Step 2 + Step 3', { id: 'a1' }));
+      await engine.save({ branch: false });
+
+      const branches = await store.listBranches('chat-bf-3');
+      assert.strictEqual(branches.length, 1, 'Should still have 1 branch');
+
+      const chain = await store.getMessageChain('a1');
+      assert.strictEqual(
+        chain.length,
+        2,
+        'Should have 2 messages: user + assistant',
+      );
+
+      const msg = await store.getMessage('a1');
+      const data = msg!.data as {
+        parts?: Array<{ type: string; text?: string }>;
+      };
+      assert.ok(
+        data.parts?.[0]?.text?.includes('Step 3'),
+        'Should have final content from 3rd save',
+      );
+      assert.strictEqual(
+        msg!.parentId,
+        'u1',
+        'parentId should remain user msg',
+      );
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { embedMany } from 'ai';
+import { embedMany, extractReasoningMiddleware, wrapLanguageModel } from 'ai';
 
 export const lmstudio = createOpenAICompatible({
   name: 'lmstudio',
@@ -34,14 +34,38 @@ export const nebius = createOpenAICompatible({
   includeUsage: true,
   supportsStructuredOutputs: true,
 });
+interface MiniMaxProviderSettings {
+  /**
+   * Base URL for the Groq API calls.
+   */
+  baseURL?: string;
+  /**
+   * API key for authenticating requests.
+   */
+  apiKey?: string;
+  /**
+   * Custom headers to include in the requests.
+   */
+  headers?: Record<string, string>;
+}
 
-export const minimax = createOpenAICompatible({
-  name: 'minimax',
-  baseURL: 'https://api.minimax.io/v1',
-  apiKey: process.env.MINIMAX_API_KEY!,
-  includeUsage: true,
-  supportsStructuredOutputs: true,
-});
+export function createMiniMax(config: MiniMaxProviderSettings = {}) {
+  return (modelId: 'MiniMax-M2.5') => {
+    return wrapLanguageModel({
+      model: createOpenAICompatible({
+        headers: config.headers,
+        name: 'minimax',
+        baseURL: config.baseURL ?? 'https://api.minimax.chat/v1',
+        apiKey: config.apiKey ?? process.env.MINIMAX_API_KEY,
+        includeUsage: true,
+        supportsStructuredOutputs: true,
+      })(modelId),
+      middleware: extractReasoningMiddleware({ tagName: 'think' }),
+    });
+  };
+}
+
+export const minimax = (modelId: 'MiniMax-M2.5') => createMiniMax()(modelId);
 
 export async function embed(documents: string[]): Promise<{
   embeddings: number[][];

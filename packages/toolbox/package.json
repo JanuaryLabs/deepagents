@@ -39,7 +39,7 @@
   "dependencies": {
     "@ai-sdk/groq": "^3.0.24",
     "@deepagents/agent": "0.15.1",
-    "ai": "^6.0.86",
+    "ai": "^6.0.90",
     "duck-duck-scrape": "^2.2.7",
     "lodash-es": "^4.17.21",
     "nano-spawn": "^2.0.0",
