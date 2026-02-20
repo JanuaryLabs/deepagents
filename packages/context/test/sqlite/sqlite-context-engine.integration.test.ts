@@ -191,7 +191,14 @@ describe('Sqlite ContextEngine Integration', () => {
       );
       assert.strictEqual(result.messages.length, 0);
 
-      await withTimeout('save empty chat', 10000, () => engine.save());
+      const emptyResult = await withTimeout('save empty chat', 10000, () =>
+        engine.save(),
+      );
+      assert.strictEqual(
+        emptyResult.headMessageId,
+        undefined,
+        'Empty save should return undefined headMessageId',
+      );
     });
   });
 
@@ -563,7 +570,12 @@ describe('Sqlite ContextEngine Integration', () => {
 
       // 1. User message → save
       engine.set(user(makeUserMessage('user-msg-1', 'What is the weather?')));
-      await engine.save();
+      const userSaveResult = await engine.save();
+      assert.strictEqual(
+        userSaveResult.headMessageId,
+        'user-msg-1',
+        'headMessageId should be the saved message ID',
+      );
 
       // 2. Assistant message with pending tool → save (head = assistant-pending)
       const pendingToolMessage = {
@@ -611,7 +623,12 @@ describe('Sqlite ContextEngine Integration', () => {
           id: 'assistant-pending',
         }),
       );
-      await engine.save();
+      const branchSaveResult = await engine.save();
+      assert.notStrictEqual(
+        branchSaveResult.headMessageId,
+        'assistant-pending',
+        'headMessageId should differ after branching',
+      );
 
       // 4. Verify new branch was created
       const afterBranches = await store.listBranches('chat-tool-result');
@@ -664,7 +681,12 @@ describe('Sqlite ContextEngine Integration', () => {
           'Oops, read_file failed. Let me try again with the correct path.',
         ),
       );
-      await engine.save();
+      const lazySaveResult = await engine.save();
+      assert.notStrictEqual(
+        lazySaveResult.headMessageId,
+        'assistant-msg-1',
+        'headMessageId should differ after branching',
+      );
 
       // 4. Verify new branch was created
       const afterBranches = await store.listBranches('chat-lazy-resolve');
@@ -716,7 +738,12 @@ describe('Sqlite ContextEngine Integration', () => {
       assert.strictEqual(branchesBefore.length, 1);
 
       engine.set(assistantText('Updated version', { id: 'a1' }));
-      await engine.save({ branch: false });
+      const inPlaceResult = await engine.save({ branch: false });
+      assert.strictEqual(
+        inPlaceResult.headMessageId,
+        'a1',
+        'headMessageId should remain same ID after in-place update',
+      );
 
       const branchesAfter = await store.listBranches('chat-bf-1');
       assert.strictEqual(branchesAfter.length, 1, 'Should still have 1 branch');

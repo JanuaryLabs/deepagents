@@ -51,6 +51,13 @@ export interface ResolveOptions {
 }
 
 /**
+ * Result of saving pending messages to the graph.
+ */
+export interface SaveResult {
+  headMessageId: string | undefined;
+}
+
+/**
  * Options for creating a ContextEngine.
  */
 export interface ContextEngineOptions {
@@ -264,6 +271,14 @@ export class ContextEngine {
   }
 
   /**
+   * Get the current branch head message ID.
+   * Returns undefined if no messages have been saved yet.
+   */
+  public get headMessageId(): string | undefined {
+    return this.#branch?.headMessageId ?? undefined;
+  }
+
+  /**
    * Get metadata for the current chat.
    * Returns null if the chat hasn't been initialized yet.
    */
@@ -381,11 +396,11 @@ export class ContextEngine {
    * await context.save(); // Persist to graph
    * ```
    */
-  public async save(options?: { branch?: boolean }): Promise<void> {
+  public async save(options?: { branch?: boolean }): Promise<SaveResult> {
     await this.#ensureInitialized();
 
     if (this.#pendingMessages.length === 0) {
-      return;
+      return { headMessageId: this.#branch?.headMessageId ?? undefined };
     }
 
     const shouldBranch = options?.branch ?? true;
@@ -459,6 +474,8 @@ export class ContextEngine {
 
     // Clear pending messages
     this.#pendingMessages = [];
+
+    return { headMessageId: this.#branch!.headMessageId ?? undefined };
   }
 
   /**

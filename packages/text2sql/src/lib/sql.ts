@@ -23,7 +23,6 @@ import {
 } from '@deepagents/context';
 
 import type { Adapter } from './adapters/adapter.ts';
-import developerExports from './agents/developer.agent.ts';
 import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
@@ -123,6 +122,10 @@ export class Text2Sql {
   }
 
   public async chat(messages: UIMessage[]) {
+    if (messages.length === 0) {
+      throw new Error('messages must not be empty');
+    }
+
     const trackedFs = new TrackedFs(this.#config.filesystem);
 
     const context = this.#config.context(
@@ -130,10 +133,17 @@ export class Text2Sql {
       ...(await this.index()),
     );
 
-    const userMsg = messages.at(-1);
-    if (userMsg) {
-      context.set(message(userMsg));
+    const lastMessage = messages[messages.length - 1];
+    let assistantMsgId: string;
+
+    if (lastMessage.role === 'assistant') {
+      context.set(message(lastMessage));
+      await context.save({ branch: false });
+      assistantMsgId = lastMessage.id;
+    } else {
+      context.set(message(lastMessage));
       await context.save();
+      assistantMsgId = generateId();
     }
 
     const { mounts: skillMounts } = context.getSkillMounts();
@@ -143,8 +153,6 @@ export class Text2Sql {
       skillMounts,
       filesystem: trackedFs,
     });
-
-    const assistantMsgId = generateId();
 
     const chatAgent = agent({
       name: 'text2sql',
@@ -212,45 +220,6 @@ export class Text2Sql {
       },
       execute: async ({ writer }) => {
         writer.merge(uiStream);
-      },
-    });
-  }
-
-  public async developer(messages: UIMessage[]) {
-    const context = this.#config.context(
-      ...guidelines(this.#config.teachingsOptions),
-      ...developerExports.fragments,
-      ...(await this.index()),
-    );
-
-    const userMsg = messages.at(-1);
-    if (userMsg) {
-      context.set(message(userMsg));
-      await context.save();
-    }
-
-    const developerAgent = agent({
-      name: 'developer',
-      model: this.#config.model,
-      context,
-      tools: developerExports.tools,
-    });
-
-    const result = await developerAgent.stream({
-      adapter: this.#config.adapter,
-    });
-
-    return result.toUIMessageStream({
-      onError: (error) => this.#formatError(error),
-      sendStart: true,
-      sendFinish: true,
-      sendReasoning: true,
-      sendSources: true,
-      generateMessageId: generateId,
-      onFinish: async ({ responseMessage }) => {
-        context.set(assistant(responseMessage));
-        await context.save();
-        await context.trackUsage(await result.totalUsage);
       },
     });
   }
