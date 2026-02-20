@@ -1,15 +1,12 @@
-import { groq } from '@ai-sdk/groq';
 import {
   type GenerateTextResult,
   type ModelMessage,
-  NoSuchToolError,
   Output,
   type PrepareStepFunction,
   type PrepareStepResult,
   type StepResult,
   type StreamTextResult,
   type StreamTextTransform,
-  type ToolCallRepairFunction,
   type ToolSet,
   type UIDataTypes,
   type UIMessage,
@@ -96,7 +93,7 @@ export async function generate<O, CIn, COut = CIn>(
     messages: await convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
     ),
-    experimental_repairToolCall: repairToolCall,
+    experimental_repairToolCall: agent.repairToolCall,
     stopWhen: stepCountIs(25),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
@@ -144,7 +141,7 @@ export async function execute<O, CIn, COut = CIn>(
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,
     toolChoice: agent.toolChoice,
-    experimental_repairToolCall: repairToolCall,
+    experimental_repairToolCall: agent.repairToolCall,
     onError: (error) => {
       console.error(
         chalk.red(
@@ -424,35 +421,3 @@ function removeTransferCalls(messages: ModelMessage[]): ModelMessage[] {
   }
   return messages;
 }
-
-const repairToolCall: ToolCallRepairFunction<ToolSet> = async ({
-  toolCall,
-  tools,
-  inputSchema,
-  error,
-}) => {
-  if (NoSuchToolError.isInstance(error)) {
-    return null; // do not attempt to fix invalid tool names
-  }
-
-  console.log(
-    `Debug: ${chalk.yellow('RepairingToolCall')}: ${toolCall.toolName}`,
-  );
-
-  const tool = tools[toolCall.toolName as keyof typeof tools];
-
-  const { output } = await generateText({
-    model: groq('openai/gpt-oss-20b'),
-    output: Output.object({ schema: tool.inputSchema }),
-    prompt: [
-      `The model tried to call the tool "${toolCall.toolName}"` +
-        ` with the following inputs:`,
-      JSON.stringify(toolCall.input),
-      `The tool accepts the following schema:`,
-      JSON.stringify(inputSchema(toolCall)),
-      'Please fix the inputs.',
-    ].join('\n'),
-  });
-
-  return { ...toolCall, input: JSON.stringify(output) };
-};

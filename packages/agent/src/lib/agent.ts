@@ -4,6 +4,7 @@ import {
   type ModelMessage,
   Output,
   type StreamTextResult,
+  type ToolCallRepairFunction,
   type ToolChoice,
   type ToolSet,
   type UIDataTypes,
@@ -23,6 +24,7 @@ import {
   RECOMMENDED_PROMPT_PREFIX,
   SUPERVISOR_PROMPT_PREFIX,
 } from './prompts.ts';
+import { createRepairToolCall } from './repair.ts';
 import { toState } from './stream_utils.ts';
 import { prepareStep } from './swarm.ts';
 
@@ -101,10 +103,12 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   readonly handoffToolName: transfer_tool;
   readonly handoffTool: ToolSet;
   readonly output?: z.Schema<Output>;
+  readonly repairToolCall: ToolCallRepairFunction<ToolSet>;
   readonly providerOptions?: CreateAgent<Output, CIn, COut>['providerOptions'];
   readonly logging?: boolean;
   constructor(config: CreateAgent<Output, CIn, COut>) {
     this.model = config.model;
+    this.repairToolCall = createRepairToolCall(config.model);
     this.toolChoice = config.toolChoice || 'auto';
     this.handoffs = config.handoffs ?? [];
     this.prepareHandoff = config.prepareHandoff;
@@ -222,7 +226,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
       execute: async ({ input, output }, options) => {
         try {
           const result = await generateText({
-            model: this.model!,
+            model: this.model,
             system: this.#prepareInstructions(),
             prompt: `
               <Input>
@@ -234,6 +238,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             tools: this.handoff.tools,
             abortSignal: options.abortSignal,
             stopWhen: stepCountIs(25),
+            experimental_repairToolCall: this.repairToolCall,
             experimental_context: options.experimental_context,
             output: this.output
               ? Output.object({ schema: this.output })
@@ -248,7 +253,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             },
             prepareStep: prepareStep(
               this,
-              this.model!,
+              this.model,
               options.experimental_context,
             ),
           });
