@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { before, describe, it, mock } from 'node:test';
+import { before, describe, it } from 'node:test';
 
 import {
   ContextEngine,
@@ -199,7 +199,7 @@ describe('ContextEngine.inspect()', () => {
 
     await assert.rejects(async () => {
       await engine.inspect({
-        modelId: 'invalid:nonexistent-model' as any,
+        modelId: 'invalid:nonexistent-model',
         renderer: new XmlRenderer(),
       });
     }, /not found/i);

@@ -1,4 +1,4 @@
-import { format as formatSql } from 'sql-formatter';
+import { type SqlLanguage, format as formatSql } from 'sql-formatter';
 
 import type { ContextFragment } from '@deepagents/context';
 
@@ -132,7 +132,7 @@ export type ValidateFunction = (
 export abstract class Adapter {
   abstract grounding: GroundingFn[];
 
-  abstract readonly formatterLanguage: string;
+  abstract readonly formatterLanguage: SqlLanguage;
 
   /**
    * Default schema name for this database.
@@ -366,7 +366,7 @@ export abstract class Adapter {
   }
   format(sql: string): string {
     try {
-      return formatSql(sql, { language: this.formatterLanguage as any });
+      return formatSql(sql, { language: this.formatterLanguage });
     } catch {
       return sql;
     }

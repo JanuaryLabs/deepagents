@@ -77,6 +77,7 @@ async function waitForPostgres(
  * ```typescript
  * await withPostgresContainer(async (container) => {
  *   const store = new PostgresContextStore({ pool: container.connectionString });
+ *   await store.initialize();
  *   // ... run tests
  *   await store.close();
  * });
@@ -91,7 +92,7 @@ export async function withPostgresContainer<T>(
     return undefined;
   }
 
-  const image = config?.image ?? 'postgres:16-alpine';
+  const image = config?.image ?? 'postgres:17-alpine';
   const password = config?.password ?? 'testpassword';
   const database = config?.database ?? 'testdb';
   const user = config?.user ?? 'postgres';

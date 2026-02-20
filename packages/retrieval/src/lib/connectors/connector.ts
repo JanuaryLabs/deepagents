@@ -6,7 +6,7 @@ export type Connector = {
     {
       id: string;
       content: () => Promise<string>;
-      metadata?: Record<string, any> | undefined; // Arbitrary per-document metadata
+      metadata?: Record<string, unknown> | undefined; // Arbitrary per-document metadata
     },
     void,
     unknown

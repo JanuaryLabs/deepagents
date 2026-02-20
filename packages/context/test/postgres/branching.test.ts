@@ -19,6 +19,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -43,6 +44,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -63,6 +65,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -92,6 +95,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -133,6 +137,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -162,6 +167,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -193,6 +199,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -232,6 +239,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -267,6 +275,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -305,6 +314,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -340,6 +350,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -371,6 +382,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -403,6 +415,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -428,6 +441,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -463,6 +477,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -510,6 +525,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -532,6 +548,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -568,6 +585,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -608,6 +626,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -646,6 +665,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -682,6 +702,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -713,6 +734,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -736,6 +758,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -762,6 +785,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',
@@ -789,6 +813,7 @@ describe('Branching', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             userId: 'test-user',

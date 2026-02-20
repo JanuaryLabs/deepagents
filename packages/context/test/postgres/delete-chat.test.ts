@@ -19,6 +19,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -42,6 +43,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const result = await store.deleteChat('non-existent-chat-12345');
 
@@ -56,6 +58,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -79,6 +82,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine1 = new ContextEngine({
             store,
@@ -113,6 +117,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -149,6 +154,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -183,6 +189,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -222,6 +229,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -265,6 +273,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -295,6 +304,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -320,6 +330,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -347,6 +358,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -370,6 +382,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const aliceEngine = new ContextEngine({
             store,
@@ -407,6 +420,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -441,6 +455,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const engine = new ContextEngine({
             store,
@@ -464,6 +479,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const specialIds = [
             'chat-with-dashes-pg',
@@ -495,6 +511,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           const longChatId = 'c'.repeat(200);
 
@@ -517,6 +534,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           for (let i = 0; i < 10; i++) {
             await store.upsertChat({
@@ -542,6 +560,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           await store.upsertChat({ id: 'race-chat', userId: 'alice' });
 
@@ -573,6 +592,7 @@ describe('Delete Chat', () => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
+        await store.initialize();
         try {
           for (let i = 0; i < 5; i++) {
             const engine = new ContextEngine({
