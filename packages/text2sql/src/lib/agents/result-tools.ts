@@ -9,6 +9,7 @@ import {
   OverlayFs,
   defineCommand,
 } from 'just-bash';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as path from 'node:path';
 import { v7 } from 'uuid';
 import z from 'zod';
@@ -83,10 +84,9 @@ function validateReadOnly(query: string): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-/**
- * Creates the `sql` command with run/validate subcommands.
- */
-function createSqlCommand(adapter: Adapter) {
+type MetaStore = AsyncLocalStorage<{ value?: Record<string, unknown> }>;
+
+function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
   return createCommand('sql', {
     run: {
       usage: 'run "SELECT ..."',
@@ -112,6 +112,8 @@ function createSqlCommand(adapter: Adapter) {
         }
 
         const query = adapter.format(rawQuery);
+        const store = metaStore.getStore();
+        if (store) store.value = { formattedSql: query };
 
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
@@ -179,6 +181,9 @@ function createSqlCommand(adapter: Adapter) {
         }
 
         const query = adapter.format(rawQuery);
+        const store = metaStore.getStore();
+        if (store) store.value = { formattedSql: query };
+
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
           return {
@@ -218,7 +223,9 @@ export interface ResultToolsOptions {
  */
 export async function createResultTools(options: ResultToolsOptions) {
   const { adapter, skillMounts, filesystem: baseFs } = options;
-  const sqlCommand = createSqlCommand(adapter);
+
+  const metaStore: MetaStore = new AsyncLocalStorage();
+  const sqlCommand = createSqlCommand(adapter, metaStore);
 
   const fsMounts = skillMounts.map(({ host, sandbox }) => ({
     mountPoint: path.dirname(sandbox),
@@ -266,10 +273,20 @@ export async function createResultTools(options: ResultToolsOptions) {
         .describe('Brief reason for executing this command'),
     }),
     execute: async ({ command }, execOptions) => {
-      if (!tools.bash.execute) {
+      const execute = tools.bash.execute;
+      if (!execute) {
         throw new Error('bash tool execution is not available');
       }
-      return tools.bash.execute({ command }, execOptions);
+      return metaStore.run({}, async () => {
+        const result = await execute({ command }, execOptions);
+        const meta = metaStore.getStore()?.value;
+        return meta ? { ...result, meta } : result;
+      });
+    },
+    toModelOutput: ({ output }) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { meta, ...rest } = output as Record<string, unknown>;
+      return { type: 'json' as const, value: rest };
     },
   });
 

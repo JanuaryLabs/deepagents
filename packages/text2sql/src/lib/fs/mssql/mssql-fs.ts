@@ -323,11 +323,24 @@ export class MssqlFs implements IFileSystem {
     }
   }
 
-  async #readChunks(filePath: string): Promise<Uint8Array> {
-    const rows = await this.#query<ChunkRow>(
-      `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`,
-      [filePath],
-    );
+  async #readChunks(
+    filePath: string,
+    transaction?: Transaction,
+  ): Promise<Uint8Array> {
+    let rows: ChunkRow[];
+    if (transaction) {
+      const req = transaction.request();
+      req.input('p0', filePath);
+      const result = await req.query<ChunkRow>(
+        `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`,
+      );
+      rows = result.recordset as ChunkRow[];
+    } else {
+      rows = await this.#query<ChunkRow>(
+        `SELECT data FROM ${this.#t('fs_chunks')} WHERE path = @p0 ORDER BY chunkIndex`,
+        [filePath],
+      );
+    }
 
     if (rows.length === 0) {
       return new Uint8Array(0);
@@ -495,7 +508,7 @@ export class MssqlFs implements IFileSystem {
       }
 
       const existing = entry
-        ? await this.#readChunks(prefixed)
+        ? await this.#readChunks(prefixed, transaction)
         : new Uint8Array(0);
       const combined = new Uint8Array(existing.length + newData.length);
       combined.set(existing, 0);
@@ -915,6 +928,12 @@ export class MssqlFs implements IFileSystem {
           `SELECT * FROM ${this.#t('fs_entries')} WHERE path = @p0 OR path LIKE @p0 + '/%' ORDER BY path DESC`,
         );
 
+        const destDeleteReq = transaction.request();
+        destDeleteReq.input('dp0', destPrefixed);
+        await destDeleteReq.query(
+          `DELETE FROM ${this.#t('fs_entries')} WHERE path = @dp0 OR path LIKE @dp0 + '/%'`,
+        );
+
         for (const entry of [...allEntriesResult.recordset].reverse()) {
           const relativePath = path.posix.relative(srcPrefixed, entry.path);
           const newPath = path.posix.join(destPrefixed, relativePath);
@@ -927,12 +946,24 @@ export class MssqlFs implements IFileSystem {
           insertReq.input('p4', Date.now());
           insertReq.input('p5', entry.symlinkTarget);
 
-          await insertReq.query(
-            `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime, symlinkTarget)
-             VALUES (@p0, @p1, @p2, @p3, @p4, @p5)`,
-          );
+          await insertReq.query(`
+            MERGE ${this.#t('fs_entries')} AS target
+            USING (SELECT @p0 AS path) AS source
+            ON target.path = source.path
+            WHEN MATCHED THEN
+              UPDATE SET type = @p1, mode = @p2, size = @p3, mtime = @p4, symlinkTarget = @p5
+            WHEN NOT MATCHED THEN
+              INSERT (path, type, mode, size, mtime, symlinkTarget)
+              VALUES (@p0, @p1, @p2, @p3, @p4, @p5);
+          `);
 
           if (entry.type === 'file') {
+            const deleteChunksReq = transaction.request();
+            deleteChunksReq.input('p0', newPath);
+            await deleteChunksReq.query(
+              `DELETE FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+            );
+
             const chunksReq = transaction.request();
             chunksReq.input('p0', entry.path);
             const chunksResult = await chunksReq.query<{
@@ -968,12 +999,24 @@ export class MssqlFs implements IFileSystem {
         insertReq.input('p4', Date.now());
         insertReq.input('p5', srcEntry.symlinkTarget);
 
-        await insertReq.query(
-          `INSERT INTO ${this.#t('fs_entries')} (path, type, mode, size, mtime, symlinkTarget)
-           VALUES (@p0, @p1, @p2, @p3, @p4, @p5)`,
-        );
+        await insertReq.query(`
+          MERGE ${this.#t('fs_entries')} AS target
+          USING (SELECT @p0 AS path) AS source
+          ON target.path = source.path
+          WHEN MATCHED THEN
+            UPDATE SET type = @p1, mode = @p2, size = @p3, mtime = @p4, symlinkTarget = @p5
+          WHEN NOT MATCHED THEN
+            INSERT (path, type, mode, size, mtime, symlinkTarget)
+            VALUES (@p0, @p1, @p2, @p3, @p4, @p5);
+        `);
 
         if (srcEntry.type === 'file') {
+          const deleteChunksReq = transaction.request();
+          deleteChunksReq.input('p0', destPrefixed);
+          await deleteChunksReq.query(
+            `DELETE FROM ${this.#t('fs_chunks')} WHERE path = @p0`,
+          );
+
           const chunksReq = transaction.request();
           chunksReq.input('p0', srcPrefixed);
           const chunksResult = await chunksReq.query<{

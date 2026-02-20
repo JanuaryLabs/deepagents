@@ -1,15 +1,15 @@
-import sql from 'mssql';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
+import pg from 'pg';
 
-import { withSqlServerContainer } from '@deepagents/test';
-import { MssqlFs } from '@deepagents/text2sql';
+import { withPostgresContainer } from '@deepagents/test';
+import { PostgresFs } from '@deepagents/text2sql';
 
-describe('MssqlFs', () => {
+describe('PostgresFs', () => {
   describe('file operations', () => {
     it('should write and read a file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -25,8 +25,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should write and read binary content', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -43,8 +43,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should overwrite existing file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -61,8 +61,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should append to file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -79,8 +79,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should accumulate data across multiple appends', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -99,8 +99,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw on reading non-existent file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -113,8 +113,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should write and read empty file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -133,8 +133,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw EISDIR when reading a directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -149,8 +149,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should append to non-existent file creating it', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -166,8 +166,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw when appending to a directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -185,8 +185,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should auto-create parent directories on write', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -208,9 +208,9 @@ describe('MssqlFs', () => {
 
   describe('large file chunking', () => {
     it('should handle files larger than chunk size', async () =>
-      await withSqlServerContainer(async (container) => {
+      await withPostgresContainer(async (container) => {
         const chunkSize = 1024;
-        const fs = new MssqlFs({
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
           chunkSize,
@@ -236,8 +236,8 @@ describe('MssqlFs', () => {
 
   describe('directory operations', () => {
     it('should create directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -252,8 +252,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should create directory recursively', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -271,8 +271,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should list directory contents', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -294,8 +294,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should list directory with file types', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -319,8 +319,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw EEXIST on non-recursive mkdir of existing path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -335,8 +335,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT on readdir of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -349,8 +349,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOTDIR on readdir of a file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -365,8 +365,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should return empty array for readdir of empty directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -384,8 +384,8 @@ describe('MssqlFs', () => {
 
   describe('remove operations', () => {
     it('should remove file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -402,8 +402,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should remove directory recursively', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -422,8 +422,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should not throw on force remove of non-existent', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -436,8 +436,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOTEMPTY on rm non-empty dir without recursive', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -453,8 +453,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT on rm non-existent without force', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -469,8 +469,8 @@ describe('MssqlFs', () => {
 
   describe('copy and move operations', () => {
     it('should copy file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -487,8 +487,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should copy directory recursively', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -513,8 +513,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should move file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -531,8 +531,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should overwrite existing file on move', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -550,8 +550,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should overwrite existing directory on move', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -574,8 +574,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT when copying non-existent source', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -591,8 +591,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw when copying directory without recursive', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -610,8 +610,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should copy file overwriting existing destination', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -629,8 +629,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT when moving non-existent source', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -646,8 +646,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should move directory to new path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -677,8 +677,8 @@ describe('MssqlFs', () => {
 
   describe('stat operations', () => {
     it('should return file stats', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -696,8 +696,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should return directory stats', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -714,8 +714,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should change file mode', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -734,8 +734,8 @@ describe('MssqlFs', () => {
 
   describe('symlink operations', () => {
     it('should create and read symlink', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -755,8 +755,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should distinguish lstat from stat for symlinks', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -778,8 +778,8 @@ describe('MssqlFs', () => {
 
   describe('root option', () => {
     it('should prefix paths with root', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/prefix',
         });
@@ -805,8 +805,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should create root directory structure on initialization', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/chat/123/results',
         });
@@ -826,13 +826,14 @@ describe('MssqlFs', () => {
       }));
 
     it('should isolate two instances with different roots', async () =>
-      await withSqlServerContainer(async (container) => {
-        const pool = new sql.ConnectionPool(container.connectionString);
-        await pool.connect();
+      await withPostgresContainer(async (container) => {
+        const pool = new pg.Pool({
+          connectionString: container.connectionString,
+        });
         try {
-          const fs1 = new MssqlFs({ pool, root: '/chat-1' });
+          const fs1 = new PostgresFs({ pool, root: '/chat-1' });
           await fs1.initialize();
-          const fs2 = new MssqlFs({ pool, root: '/chat-2' });
+          const fs2 = new PostgresFs({ pool, root: '/chat-2' });
           await fs2.initialize();
 
           await fs1.writeFile('/data.json', '{"chat": 1}');
@@ -844,18 +845,19 @@ describe('MssqlFs', () => {
           await fs1.close();
           await fs2.close();
         } finally {
-          await pool.close();
+          await pool.end();
         }
       }));
   });
 
   describe('pool injection', () => {
-    it('should accept a pre-existing ConnectionPool', async () =>
-      await withSqlServerContainer(async (container) => {
-        const pool = new sql.ConnectionPool(container.connectionString);
-        await pool.connect();
+    it('should accept a pre-existing Pool', async () =>
+      await withPostgresContainer(async (container) => {
+        const pool = new pg.Pool({
+          connectionString: container.connectionString,
+        });
         try {
-          const fs = new MssqlFs({ pool, root: '/' });
+          const fs = new PostgresFs({ pool, root: '/' });
           await fs.initialize();
           try {
             await fs.writeFile('/pool-test.txt', 'injected pool');
@@ -866,36 +868,36 @@ describe('MssqlFs', () => {
             await fs.close();
           }
 
-          assert.strictEqual(pool.connected, true);
+          const result = await pool.query('SELECT 1 AS val');
+          assert.strictEqual(result.rows[0].val, 1);
         } finally {
-          await pool.close();
+          await pool.end();
         }
       }));
 
     it('should not close external pool on close()', async () =>
-      await withSqlServerContainer(async (container) => {
-        const pool = new sql.ConnectionPool(container.connectionString);
-        await pool.connect();
+      await withPostgresContainer(async (container) => {
+        const pool = new pg.Pool({
+          connectionString: container.connectionString,
+        });
         try {
-          const fs = new MssqlFs({ pool, root: '/' });
+          const fs = new PostgresFs({ pool, root: '/' });
           await fs.initialize();
           await fs.writeFile('/no-close.txt', 'data');
           await fs.close();
 
-          assert.strictEqual(pool.connected, true);
-
-          const result = await pool.request().query('SELECT 1 AS val');
-          assert.strictEqual(result.recordset[0].val, 1);
+          const result = await pool.query('SELECT 1 AS val');
+          assert.strictEqual(result.rows[0].val, 1);
         } finally {
-          await pool.close();
+          await pool.end();
         }
       }));
   });
 
   describe('schema support', () => {
     it('should create tables in a custom schema', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
           schema: 'custom_fs_schema',
@@ -907,51 +909,24 @@ describe('MssqlFs', () => {
           const content = await fs.readFile('/schema-test.txt');
           assert.strictEqual(content, 'custom schema data');
 
-          const pool = new sql.ConnectionPool(container.connectionString);
-          await pool.connect();
+          const pool = new pg.Pool({
+            connectionString: container.connectionString,
+          });
           try {
-            const result = await pool.request().query(`
-              SELECT TABLE_SCHEMA, TABLE_NAME
-              FROM INFORMATION_SCHEMA.TABLES
-              WHERE TABLE_SCHEMA = 'custom_fs_schema'
+            const result = await pool.query(`
+              SELECT table_schema, table_name
+              FROM information_schema.tables
+              WHERE table_schema = 'custom_fs_schema'
             `);
-            assert.ok(result.recordset.length > 0);
+            assert.ok(result.rows.length > 0);
             assert.ok(
-              result.recordset.every(
-                (r: { TABLE_SCHEMA: string }) =>
-                  r.TABLE_SCHEMA === 'custom_fs_schema',
+              result.rows.every(
+                (r: { table_schema: string }) =>
+                  r.table_schema === 'custom_fs_schema',
               ),
             );
           } finally {
-            await pool.close();
-          }
-        } finally {
-          await fs.close();
-        }
-      }));
-
-    it('should create schema in sys.schemas', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
-          pool: container.connectionString,
-          root: '/',
-          schema: 'ddl_created_fs_schema',
-        });
-        await fs.initialize();
-        try {
-          const pool = new sql.ConnectionPool(container.connectionString);
-          await pool.connect();
-          try {
-            const result = await pool.request().query(`
-              SELECT name FROM sys.schemas WHERE name = 'ddl_created_fs_schema'
-            `);
-            assert.strictEqual(result.recordset.length, 1);
-            assert.strictEqual(
-              result.recordset[0].name,
-              'ddl_created_fs_schema',
-            );
-          } finally {
-            await pool.close();
+            await pool.end();
           }
         } finally {
           await fs.close();
@@ -959,8 +934,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should handle idempotent initialization', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
           schema: 'idempotent_fs_schema',
@@ -975,12 +950,42 @@ describe('MssqlFs', () => {
           await fs.close();
         }
       }));
+
+    it('should create schema in information_schema.schemata', async () =>
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
+          pool: container.connectionString,
+          root: '/',
+          schema: 'ddl_created_fs_schema',
+        });
+        await fs.initialize();
+        try {
+          const pool = new pg.Pool({
+            connectionString: container.connectionString,
+          });
+          try {
+            const result = await pool.query(`
+              SELECT schema_name FROM information_schema.schemata
+              WHERE schema_name = 'ddl_created_fs_schema'
+            `);
+            assert.strictEqual(result.rows.length, 1);
+            assert.strictEqual(
+              result.rows[0].schema_name,
+              'ddl_created_fs_schema',
+            );
+          } finally {
+            await pool.end();
+          }
+        } finally {
+          await fs.close();
+        }
+      }));
   });
 
   describe('link operations', () => {
     it('should create hard link and read from both paths', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1003,8 +1008,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT when link source does not exist', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1020,8 +1025,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw EEXIST when link destination already exists', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1040,8 +1045,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw when linking a directory', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1061,8 +1066,8 @@ describe('MssqlFs', () => {
 
   describe('realpath and utimes', () => {
     it('should return canonical path for a file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1078,8 +1083,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should resolve symlink to physical path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1096,8 +1101,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT for realpath of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1110,8 +1115,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should set mtime via utimes and verify via stat', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1130,8 +1135,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT on utimes of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1149,8 +1154,8 @@ describe('MssqlFs', () => {
 
   describe('symlink edge cases', () => {
     it('should throw EEXIST when creating symlink at existing path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1169,8 +1174,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw when readlink on a regular file', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });
@@ -1188,8 +1193,8 @@ describe('MssqlFs', () => {
       }));
 
     it('should throw ENOENT on stat of non-existent path', async () =>
-      await withSqlServerContainer(async (container) => {
-        const fs = new MssqlFs({
+      await withPostgresContainer(async (container) => {
+        const fs = new PostgresFs({
           pool: container.connectionString,
           root: '/',
         });

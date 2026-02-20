@@ -640,6 +640,282 @@ describe('sql command integration', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SQL Meta via toModelOutput
+// Tests that formatted SQL is exposed in meta but stripped from model context
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('sql meta via toModelOutput', () => {
+  const testUsage = {
+    inputTokens: {
+      total: 3,
+      noCache: 3,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: {
+      total: 10,
+      text: 10,
+      reasoning: undefined,
+    },
+  } as const;
+
+  const createBashToolCallModel = (input: string) =>
+    new MockLanguageModelV3({
+      doGenerate: {
+        finishReason: { unified: 'tool-calls', raw: undefined },
+        usage: testUsage,
+        warnings: [],
+        content: [
+          {
+            type: 'tool-call',
+            toolCallType: 'function',
+            toolCallId: 'call-1',
+            toolName: 'bash',
+            input,
+          },
+        ],
+      },
+    });
+
+  const runBashToolCall = async (input: string) => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await generateText({
+      model: createBashToolCallModel(input),
+      prompt: 'test-input',
+      stopWhen: stepCountIs(1),
+      tools: { bash: tools.bash },
+    });
+
+    return result.content as Array<{
+      type: string;
+      toolName?: string;
+      output?: Record<string, unknown>;
+    }>;
+  };
+
+  it('sql run includes formattedSql in meta', async () => {
+    const content = await runBashToolCall(
+      `{"command":"sql run \\"SELECT 1 as test\\"","reasoning":"test meta"}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool call to succeed');
+    assert.ok(toolResult.output?.meta, 'Expected meta on output');
+    assert.ok(
+      (toolResult.output.meta as Record<string, unknown>).formattedSql,
+      'Expected formattedSql in meta',
+    );
+  });
+
+  it('sql validate includes formattedSql in meta', async () => {
+    const content = await runBashToolCall(
+      `{"command":"sql validate \\"SELECT 1 as test\\"","reasoning":"test meta"}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool call to succeed');
+    assert.ok(toolResult.output?.meta, 'Expected meta on output');
+    assert.ok(
+      (toolResult.output.meta as Record<string, unknown>).formattedSql,
+      'Expected formattedSql in meta',
+    );
+  });
+
+  it('non-sql commands have no meta', async () => {
+    const content = await runBashToolCall(
+      `{"command":"echo hello","reasoning":"test no meta"}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool call to succeed');
+    assert.strictEqual(
+      toolResult.output?.meta,
+      undefined,
+      'Non-SQL commands should not have meta',
+    );
+  });
+
+  it('sql run error still includes formattedSql in meta', async () => {
+    const content = await runBashToolCall(
+      `{"command":"sql run \\"SELECT * FROM nonexistent_xyz\\"","reasoning":"test error meta"}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool result');
+    assert.ok(toolResult.output?.meta, 'Expected meta even on error');
+    assert.ok(
+      (toolResult.output.meta as Record<string, unknown>).formattedSql,
+      'Expected formattedSql in meta even on execution error',
+    );
+  });
+
+  it('toModelOutput strips meta from model context', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const bash = tools.bash as any;
+    assert.ok(bash.toModelOutput, 'bash tool should have toModelOutput');
+
+    const mockOutput = {
+      stdout: 'results stored in /sql/test.json\ncolumns: test\nrows: 1\n',
+      stderr: '',
+      exitCode: 0,
+      meta: { formattedSql: 'SELECT\n  1 AS test' },
+    };
+
+    const modelOutput = await bash.toModelOutput({
+      toolCallId: 'test',
+      input: { command: 'sql run "SELECT 1 as test"', reasoning: 'test' },
+      output: mockOutput,
+    });
+
+    assert.strictEqual(modelOutput.type, 'json');
+    assert.strictEqual(
+      (modelOutput.value as Record<string, unknown>).meta,
+      undefined,
+      'meta should be stripped from model output',
+    );
+    assert.strictEqual(
+      (modelOutput.value as Record<string, unknown>).stdout,
+      mockOutput.stdout,
+      'stdout should be preserved in model output',
+    );
+  });
+
+  it('parallel bash calls get isolated meta via AsyncLocalStorage', async () => {
+    const { tools } = await createResultTools({
+      adapter: (
+        await init_db('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)')
+      ).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+
+    const [sqlRun, sqlValidate, echo] = await Promise.all([
+      execute(
+        { command: 'sql run "SELECT 1 as a"', reasoning: 'test parallel 1' },
+        {} as any,
+      ),
+      execute(
+        {
+          command: 'sql validate "SELECT name FROM users"',
+          reasoning: 'test parallel 2',
+        },
+        {} as any,
+      ),
+      execute(
+        { command: 'echo hello', reasoning: 'test parallel 3' },
+        {} as any,
+      ),
+    ]);
+
+    const sqlRunResult = sqlRun as Record<string, unknown>;
+    const sqlValidateResult = sqlValidate as Record<string, unknown>;
+    const echoResult = echo as Record<string, unknown>;
+
+    assert.ok(sqlRunResult.meta, 'sql run should have meta');
+    assert.ok(
+      (
+        (sqlRunResult.meta as Record<string, unknown>).formattedSql as string
+      ).includes('SELECT'),
+      'sql run meta should contain SELECT',
+    );
+
+    assert.ok(sqlValidateResult.meta, 'sql validate should have meta');
+    assert.ok(
+      (
+        (sqlValidateResult.meta as Record<string, unknown>)
+          .formattedSql as string
+      ).includes('users'),
+      'sql validate meta should reference users table',
+    );
+
+    assert.strictEqual(echoResult.meta, undefined, 'echo should have no meta');
+  });
+
+  it('sql run with WITH clause includes formattedSql in meta', async () => {
+    const content = await runBashToolCall(
+      `{"command":"sql run \\"WITH cte AS (SELECT 1 as v) SELECT v FROM cte\\"","reasoning":"test WITH"}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool call to succeed');
+    assert.ok(toolResult.output?.meta, 'Expected meta on output');
+    const formattedSql = (toolResult.output.meta as Record<string, unknown>)
+      .formattedSql as string;
+    assert.ok(
+      formattedSql.includes('WITH'),
+      'formattedSql should contain WITH',
+    );
+    assert.ok(
+      formattedSql.includes('cte'),
+      'formattedSql should contain CTE alias',
+    );
+  });
+
+  it('compound sql commands produce meta from last command', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: 'sql run "SELECT 1 as first" && sql run "SELECT 2 as second"',
+        reasoning: 'test compound',
+      },
+      {} as any,
+    )) as Record<string, unknown>;
+
+    assert.ok(result.meta, 'compound sql should have meta');
+    const formattedSql = (result.meta as Record<string, unknown>)
+      .formattedSql as string;
+    assert.ok(
+      formattedSql.includes('second'),
+      'meta should reflect last sql command',
+    );
+  });
+
+  it('sql validate with syntax error still includes formattedSql in meta', async () => {
+    const content = await runBashToolCall(
+      `{"command":"sql validate \\"SELECT * FORM users\\"","reasoning":"test syntax error"}`,
+    );
+
+    const toolResult = content.find(
+      (part) => part.type === 'tool-result' && part.toolName === 'bash',
+    );
+    assert.ok(toolResult, 'Expected bash tool result');
+    assert.ok(toolResult.output?.meta, 'Expected meta even on syntax error');
+    assert.ok(
+      (toolResult.output.meta as Record<string, unknown>).formattedSql,
+      'Expected formattedSql in meta even on syntax error',
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Path Traversal Security
 // Tests for various path traversal attack vectors
 // ─────────────────────────────────────────────────────────────────────────────
