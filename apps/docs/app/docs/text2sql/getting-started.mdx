@@ -11,6 +11,15 @@ This guide walks you through installing Text2SQL and running your first natural 
 npm install @deepagents/text2sql
 ```
 
+Database-specific drivers are peer dependencies. Install the one that matches your database:
+
+```bash
+npm install pg        # PostgreSQL
+npm install mssql     # SQL Server
+```
+
+SQLite uses the built-in `node:sqlite` module and requires no additional driver.
+
 ## Basic Setup
 
 Text2SQL requires four components:

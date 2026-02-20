@@ -130,34 +130,23 @@ stopWhen: stepCountIs(50);
 
 ## Tool Call Repair
 
-Invalid tool calls happen when models generate malformed arguments. DeepAgents automatically repairs them:
+Invalid tool calls happen when models generate malformed arguments. DeepAgents automatically repairs them using the agent's own model. Each agent creates its repair function at construction time from the model you pass in:
 
 ```typescript
-// From swarm.ts
-const repairToolCall = async ({ toolCall, tools, inputSchema, error }) => {
-  if (NoSuchToolError.isInstance(error)) {
-    return null; // Can't fix non-existent tools
-  }
+import { createRepairToolCall } from '@deepagents/agent';
 
-  const tool = tools[toolCall.toolName];
-
-  const { output } = await generateText({
-    model: groq('gpt-oss-20b'),
-    output: Output.object({ schema: tool.inputSchema }),
-    prompt: [
-      `The model tried to call "${toolCall.toolName}" with:`,
-      JSON.stringify(toolCall.input),
-      `The tool accepts:`,
-      JSON.stringify(inputSchema(toolCall)),
-      'Please fix the inputs.',
-    ].join('\n'),
-  });
-
-  return { ...toolCall, input: JSON.stringify(output) };
-};
+const repair = createRepairToolCall(model);
+// repair is called automatically when tool validation fails
 ```
 
-This runs automatically when tool validation fails, using a fast model to fix the input.
+The repair function works as follows:
+
+1. If the tool name does not exist (`NoSuchToolError`), repair is skipped
+2. Otherwise, the agent's model is called with the invalid input and the tool's schema
+3. The model produces corrected input that matches the schema
+4. Execution continues with the repaired tool call
+
+Because each agent uses its own model for repair, agents with stronger models get more reliable tool call recovery. You do not need to configure this -- it is handled automatically based on the model you pass to `agent()`.
 
 ## Output Modes
 

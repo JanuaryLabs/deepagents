@@ -24,7 +24,7 @@ type Connector = {
     {
       id: string;                              // Unique document identifier
       content: () => Promise<string>;          // Lazy content loader
-      metadata?: Record<string, any>;          // Optional metadata
+      metadata?: Record<string, unknown>;      // Optional metadata
     },
     void,
     unknown

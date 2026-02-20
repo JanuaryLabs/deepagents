@@ -45,6 +45,14 @@ Returns the current branch name.
 console.log(context.branch); // 'main' or 'main-v2', etc.
 ```
 
+#### headMessageId
+
+Returns the current branch head message ID, or `undefined` if no messages have been saved yet.
+
+```typescript
+console.log(context.headMessageId); // 'msg-abc123' or undefined
+```
+
 #### chat
 
 Returns chat metadata, or `null` if not yet initialized.
@@ -105,16 +113,19 @@ Behavior:
 
 #### save()
 
-Persist pending messages to the graph.
+Persist pending messages to the graph. Returns a `SaveResult` containing the `headMessageId` of the branch after saving.
 
 ```typescript
 context.set(user('Hello'));
 context.set(assistant('Hi there!'));
-await context.save();
+const result = await context.save();
+// result.headMessageId = 'msg-abc123'
 // Messages now in graph, pending cleared
 ```
 
 Each message becomes a node with `parentId` pointing to the previous message. The branch head updates to the last message.
+
+If there are no pending messages, `save()` returns the current head without modifying the graph.
 
 #### render(renderer)
 

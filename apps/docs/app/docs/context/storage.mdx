@@ -46,6 +46,7 @@ import { ContextEngine, PostgresContextStore } from '@deepagents/context';
 const store = new PostgresContextStore({
   pool: 'postgresql://user:password@localhost:5432/mydb',
 });
+await store.initialize();
 
 // Or PoolConfig object
 const store = new PostgresContextStore({
@@ -57,6 +58,13 @@ const store = new PostgresContextStore({
     database: 'mydb',
   },
 });
+await store.initialize();
+
+// Or pass an existing pg.Pool instance
+import pg from 'pg';
+const pool = new pg.Pool({ connectionString: 'postgresql://...' });
+const store = new PostgresContextStore({ pool });
+await store.initialize();
 
 const context = new ContextEngine({
   store,
@@ -76,7 +84,35 @@ await store.close();
 - Connection pooling via `pg.Pool`
 - Full-text search with `tsvector`
 - JSONB metadata support
+- Schema isolation with `schema` option (defaults to `'public'`)
 - Production-grade performance
+
+### Schema Option
+
+Scope all tables under a specific PostgreSQL schema for multi-tenant isolation:
+
+```typescript
+const store = new PostgresContextStore({
+  pool: 'postgresql://user:password@localhost:5432/mydb',
+  schema: 'tenant_one',
+});
+await store.initialize();
+```
+
+The store creates the schema if it does not exist and qualifies all table and index names with the schema prefix.
+
+### Initialization
+
+Unlike SQLite, the PostgreSQL store requires explicit initialization after construction. Calling any store method before `initialize()` throws an error.
+
+```typescript
+const store = new PostgresContextStore({ pool: '...' });
+await store.initialize(); // required before any operations
+```
+
+### Pool Ownership
+
+When you pass an existing `pg.Pool` instance, the store does not close the pool on `store.close()`. When the store creates its own pool (from a connection string or config object), it closes the pool on `store.close()`.
 
 </Tab>
 <Tab value="SQL Server">
@@ -257,13 +293,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 </Tab>
 <Tab value="PostgreSQL">
 
-```sql
--- Context Store DDL for PostgreSQL
--- This schema implements a DAG-based message history with branching and checkpoints.
+All table and index names are qualified with the configured schema (defaults to `public`). The example below uses `public` as the schema:
 
--- Chats table
--- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
-CREATE TABLE IF NOT EXISTS chats (
+```sql
+CREATE SCHEMA IF NOT EXISTS "public";
+
+CREATE TABLE IF NOT EXISTS "public"."chats" (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
   title TEXT,
@@ -272,12 +307,11 @@ CREATE TABLE IF NOT EXISTS chats (
   updatedAt BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
 );
 
-CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
-CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats(userId);
-CREATE INDEX IF NOT EXISTS idx_chats_metadata ON chats USING GIN (metadata);
+CREATE INDEX IF NOT EXISTS "idx_public_chats_updatedAt" ON "public"."chats"(updatedAt);
+CREATE INDEX IF NOT EXISTS "idx_public_chats_userId" ON "public"."chats"(userId);
+CREATE INDEX IF NOT EXISTS "idx_public_chats_metadata" ON "public"."chats" USING GIN (metadata);
 
--- Messages table (nodes in the DAG)
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE IF NOT EXISTS "public"."messages" (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   parentId TEXT,
@@ -285,81 +319,74 @@ CREATE TABLE IF NOT EXISTS messages (
   type TEXT,
   data JSONB NOT NULL,
   createdAt BIGINT NOT NULL,
-  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-  FOREIGN KEY (parentId) REFERENCES messages(id)
+  FOREIGN KEY (chatId) REFERENCES "public"."chats"(id) ON DELETE CASCADE,
+  FOREIGN KEY (parentId) REFERENCES "public"."messages"(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages(chatId);
-CREATE INDEX IF NOT EXISTS idx_messages_parentId ON messages(parentId);
+CREATE INDEX IF NOT EXISTS "idx_public_messages_chatId" ON "public"."messages"(chatId);
+CREATE INDEX IF NOT EXISTS "idx_public_messages_parentId" ON "public"."messages"(parentId);
 
--- Branches table (pointers to head messages)
-CREATE TABLE IF NOT EXISTS branches (
+CREATE TABLE IF NOT EXISTS "public"."branches" (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
   headMessageId TEXT,
   isActive BOOLEAN NOT NULL DEFAULT FALSE,
   createdAt BIGINT NOT NULL,
-  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-  FOREIGN KEY (headMessageId) REFERENCES messages(id),
+  FOREIGN KEY (chatId) REFERENCES "public"."chats"(id) ON DELETE CASCADE,
+  FOREIGN KEY (headMessageId) REFERENCES "public"."messages"(id),
   UNIQUE(chatId, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_branches_chatId ON branches(chatId);
+CREATE INDEX IF NOT EXISTS "idx_public_branches_chatId" ON "public"."branches"(chatId);
 
--- Checkpoints table (pointers to message nodes)
-CREATE TABLE IF NOT EXISTS checkpoints (
+CREATE TABLE IF NOT EXISTS "public"."checkpoints" (
   id TEXT PRIMARY KEY,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
   messageId TEXT NOT NULL,
   createdAt BIGINT NOT NULL,
-  FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-  FOREIGN KEY (messageId) REFERENCES messages(id),
+  FOREIGN KEY (chatId) REFERENCES "public"."chats"(id) ON DELETE CASCADE,
+  FOREIGN KEY (messageId) REFERENCES "public"."messages"(id),
   UNIQUE(chatId, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_checkpoints_chatId ON checkpoints(chatId);
+CREATE INDEX IF NOT EXISTS "idx_public_checkpoints_chatId" ON "public"."checkpoints"(chatId);
 
--- Full-text search using tsvector + GIN index
-CREATE TABLE IF NOT EXISTS messages_fts (
-  messageId TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS "public"."messages_fts" (
+  messageId TEXT PRIMARY KEY REFERENCES "public"."messages"(id) ON DELETE CASCADE,
   chatId TEXT NOT NULL,
   name TEXT NOT NULL,
   content TEXT NOT NULL,
   content_vector TSVECTOR
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_fts_vector ON messages_fts USING GIN(content_vector);
-CREATE INDEX IF NOT EXISTS idx_messages_fts_chatId ON messages_fts(chatId);
+CREATE INDEX IF NOT EXISTS "idx_public_messages_fts_vector" ON "public"."messages_fts" USING GIN(content_vector);
+CREATE INDEX IF NOT EXISTS "idx_public_messages_fts_chatId" ON "public"."messages_fts"(chatId);
 
--- Trigger to automatically update tsvector on insert/update
-CREATE OR REPLACE FUNCTION messages_fts_update_vector() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION "public"."messages_fts_update_vector"() RETURNS TRIGGER AS $$
 BEGIN
   NEW.content_vector := to_tsvector('english', NEW.content);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS messages_fts_vector_update ON messages_fts;
-CREATE TRIGGER messages_fts_vector_update
-  BEFORE INSERT OR UPDATE ON messages_fts
+DROP TRIGGER IF EXISTS "public_messages_fts_vector_update" ON "public"."messages_fts";
+CREATE TRIGGER "public_messages_fts_vector_update"
+  BEFORE INSERT OR UPDATE ON "public"."messages_fts"
   FOR EACH ROW
-  EXECUTE FUNCTION messages_fts_update_vector();
+  EXECUTE FUNCTION "public"."messages_fts_update_vector"();
 ```
 
 </Tab>
 <Tab value="SQL Server">
 
-```sql
--- Context Store DDL for SQL Server
--- This schema implements a DAG-based message history with branching and checkpoints.
+All table and index names are qualified with the configured schema (defaults to `dbo`). The example below uses `dbo` as the schema:
 
--- Chats table
--- createdAt/updatedAt: DEFAULT for insert, inline SET for updates
-IF OBJECT_ID('chats', 'U') IS NULL
+```sql
+IF OBJECT_ID('[dbo].[chats]', 'U') IS NULL
 BEGIN
-  CREATE TABLE chats (
+  CREATE TABLE [dbo].[chats] (
     id NVARCHAR(255) PRIMARY KEY,
     userId NVARCHAR(255) NOT NULL,
     title NVARCHAR(MAX),
@@ -369,16 +396,15 @@ BEGIN
   );
 END;
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_chats_updatedAt' AND object_id = OBJECT_ID('chats'))
-  CREATE INDEX idx_chats_updatedAt ON chats(updatedAt);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_chats_updatedAt' AND object_id = OBJECT_ID('[dbo].[chats]'))
+  CREATE INDEX [idx_dbo_chats_updatedAt] ON [dbo].[chats](updatedAt);
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_chats_userId' AND object_id = OBJECT_ID('chats'))
-  CREATE INDEX idx_chats_userId ON chats(userId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_chats_userId' AND object_id = OBJECT_ID('[dbo].[chats]'))
+  CREATE INDEX [idx_dbo_chats_userId] ON [dbo].[chats](userId);
 
--- Messages table (nodes in the DAG)
-IF OBJECT_ID('messages', 'U') IS NULL
+IF OBJECT_ID('[dbo].[messages]', 'U') IS NULL
 BEGIN
-  CREATE TABLE messages (
+  CREATE TABLE [dbo].[messages] (
     id NVARCHAR(255) PRIMARY KEY,
     chatId NVARCHAR(255) NOT NULL,
     parentId NVARCHAR(255),
@@ -386,91 +412,85 @@ BEGIN
     type NVARCHAR(255),
     data NVARCHAR(MAX) NOT NULL,
     createdAt BIGINT NOT NULL,
-    FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-    FOREIGN KEY (parentId) REFERENCES messages(id)
+    FOREIGN KEY (chatId) REFERENCES [dbo].[chats](id) ON DELETE CASCADE,
+    FOREIGN KEY (parentId) REFERENCES [dbo].[messages](id)
   );
 END;
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_chatId' AND object_id = OBJECT_ID('messages'))
-  CREATE INDEX idx_messages_chatId ON messages(chatId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_messages_chatId' AND object_id = OBJECT_ID('[dbo].[messages]'))
+  CREATE INDEX [idx_dbo_messages_chatId] ON [dbo].[messages](chatId);
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_parentId' AND object_id = OBJECT_ID('messages'))
-  CREATE INDEX idx_messages_parentId ON messages(parentId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_messages_parentId' AND object_id = OBJECT_ID('[dbo].[messages]'))
+  CREATE INDEX [idx_dbo_messages_parentId] ON [dbo].[messages](parentId);
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_chatId_parentId' AND object_id = OBJECT_ID('messages'))
-  CREATE INDEX idx_messages_chatId_parentId ON messages(chatId, parentId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_messages_chatId_parentId' AND object_id = OBJECT_ID('[dbo].[messages]'))
+  CREATE INDEX [idx_dbo_messages_chatId_parentId] ON [dbo].[messages](chatId, parentId);
 
--- Branches table (pointers to head messages)
-IF OBJECT_ID('branches', 'U') IS NULL
+IF OBJECT_ID('[dbo].[branches]', 'U') IS NULL
 BEGIN
-  CREATE TABLE branches (
+  CREATE TABLE [dbo].[branches] (
     id NVARCHAR(255) PRIMARY KEY,
     chatId NVARCHAR(255) NOT NULL,
     name NVARCHAR(255) NOT NULL,
     headMessageId NVARCHAR(255),
     isActive BIT NOT NULL DEFAULT 0,
     createdAt BIGINT NOT NULL,
-    FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-    FOREIGN KEY (headMessageId) REFERENCES messages(id),
-    CONSTRAINT UQ_branches_chatId_name UNIQUE(chatId, name)
+    FOREIGN KEY (chatId) REFERENCES [dbo].[chats](id) ON DELETE CASCADE,
+    FOREIGN KEY (headMessageId) REFERENCES [dbo].[messages](id),
+    CONSTRAINT [UQ_dbo_branches_chatId_name] UNIQUE(chatId, name)
   );
 END;
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_branches_chatId' AND object_id = OBJECT_ID('branches'))
-  CREATE INDEX idx_branches_chatId ON branches(chatId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_branches_chatId' AND object_id = OBJECT_ID('[dbo].[branches]'))
+  CREATE INDEX [idx_dbo_branches_chatId] ON [dbo].[branches](chatId);
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_branches_chatId_isActive' AND object_id = OBJECT_ID('branches'))
-  CREATE INDEX idx_branches_chatId_isActive ON branches(chatId, isActive);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_branches_chatId_isActive' AND object_id = OBJECT_ID('[dbo].[branches]'))
+  CREATE INDEX [idx_dbo_branches_chatId_isActive] ON [dbo].[branches](chatId, isActive);
 
--- Checkpoints table (pointers to message nodes)
-IF OBJECT_ID('checkpoints', 'U') IS NULL
+IF OBJECT_ID('[dbo].[checkpoints]', 'U') IS NULL
 BEGIN
-  CREATE TABLE checkpoints (
+  CREATE TABLE [dbo].[checkpoints] (
     id NVARCHAR(255) PRIMARY KEY,
     chatId NVARCHAR(255) NOT NULL,
     name NVARCHAR(255) NOT NULL,
     messageId NVARCHAR(255) NOT NULL,
     createdAt BIGINT NOT NULL,
-    FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
-    FOREIGN KEY (messageId) REFERENCES messages(id),
-    CONSTRAINT UQ_checkpoints_chatId_name UNIQUE(chatId, name)
+    FOREIGN KEY (chatId) REFERENCES [dbo].[chats](id) ON DELETE CASCADE,
+    FOREIGN KEY (messageId) REFERENCES [dbo].[messages](id),
+    CONSTRAINT [UQ_dbo_checkpoints_chatId_name] UNIQUE(chatId, name)
   );
 END;
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_checkpoints_chatId' AND object_id = OBJECT_ID('checkpoints'))
-  CREATE INDEX idx_checkpoints_chatId ON checkpoints(chatId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_checkpoints_chatId' AND object_id = OBJECT_ID('[dbo].[checkpoints]'))
+  CREATE INDEX [idx_dbo_checkpoints_chatId] ON [dbo].[checkpoints](chatId);
 
--- Full-text search table
-IF OBJECT_ID('messages_fts', 'U') IS NULL
+IF OBJECT_ID('[dbo].[messages_fts]', 'U') IS NULL
 BEGIN
-  CREATE TABLE messages_fts (
+  CREATE TABLE [dbo].[messages_fts] (
     messageId NVARCHAR(255) NOT NULL,
     chatId NVARCHAR(255) NOT NULL,
     name NVARCHAR(255) NOT NULL,
     content NVARCHAR(MAX) NOT NULL,
-    CONSTRAINT PK_messages_fts PRIMARY KEY (messageId),
-    FOREIGN KEY (messageId) REFERENCES messages(id) ON DELETE CASCADE
+    CONSTRAINT [PK_dbo_messages_fts] PRIMARY KEY (messageId),
+    FOREIGN KEY (messageId) REFERENCES [dbo].[messages](id) ON DELETE CASCADE
   );
 END;
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_messages_fts_chatId' AND object_id = OBJECT_ID('messages_fts'))
-  CREATE INDEX idx_messages_fts_chatId ON messages_fts(chatId);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_dbo_messages_fts_chatId' AND object_id = OBJECT_ID('[dbo].[messages_fts]'))
+  CREATE INDEX [idx_dbo_messages_fts_chatId] ON [dbo].[messages_fts](chatId);
 
--- Full-text catalog and index (only if FTS is installed)
--- FTS is optional - search will gracefully degrade without it
+GO
+
 IF SERVERPROPERTY('IsFullTextInstalled') = 1
 BEGIN
-  -- Create catalog if not exists
-  IF NOT EXISTS (SELECT * FROM sys.fulltext_catalogs WHERE name = 'context_store_catalog')
-    CREATE FULLTEXT CATALOG context_store_catalog AS DEFAULT;
+  IF NOT EXISTS (SELECT * FROM sys.fulltext_catalogs WHERE name = 'dbo_context_store_catalog')
+    CREATE FULLTEXT CATALOG [dbo_context_store_catalog];
 
-  -- Create full-text index on messages_fts.content
-  -- Note: This requires the table to have a unique index, which PK provides
-  IF NOT EXISTS (SELECT * FROM sys.fulltext_indexes WHERE object_id = OBJECT_ID('messages_fts'))
+  IF NOT EXISTS (SELECT * FROM sys.fulltext_indexes WHERE object_id = OBJECT_ID('[dbo].[messages_fts]'))
   BEGIN
-    CREATE FULLTEXT INDEX ON messages_fts(content)
-      KEY INDEX PK_messages_fts
-      ON context_store_catalog
+    CREATE FULLTEXT INDEX ON [dbo].[messages_fts](content)
+      KEY INDEX [PK_dbo_messages_fts]
+      ON [dbo_context_store_catalog]
       WITH STOPLIST = SYSTEM;
   END;
 END;
@@ -578,8 +598,8 @@ context.set(user('Hello!'));
 context.set(assistant('Hi there!'));
 
 // 3. Persist to store
-await context.save();
-// Messages now in database, branch head updated
+const { headMessageId } = await context.save();
+// headMessageId points to the last saved message
 
 // 4. New session loads from store
 const context2 = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
@@ -670,14 +690,15 @@ const graph = await store.getGraph('chat-001');
 
 ### Multi-Tenant Setup
 
-One database, multiple users:
+One database, multiple users. You can isolate tenants with the `schema` option:
 
 ```typescript
 const store = new PostgresContextStore({
   pool: process.env.DATABASE_URL,
+  schema: `tenant_${tenantId}`,
 });
+await store.initialize();
 
-// Each user has their own chats
 const context = new ContextEngine({
   store,
   chatId: `user-${userId}-chat-${chatId}`,
@@ -686,6 +707,21 @@ const context = new ContextEngine({
 
 // List only this user's chats
 const chats = await store.listChats({ userId });
+```
+
+Or use a single schema with user-scoped chat IDs:
+
+```typescript
+const store = new PostgresContextStore({
+  pool: process.env.DATABASE_URL,
+});
+await store.initialize();
+
+const context = new ContextEngine({
+  store,
+  chatId: `user-${userId}-chat-${chatId}`,
+  userId,
+});
 ```
 
 ### Per-User SQLite Files

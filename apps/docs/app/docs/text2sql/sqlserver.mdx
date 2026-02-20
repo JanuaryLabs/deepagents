@@ -6,6 +6,14 @@ description: Configure Text2SQL with Microsoft SQL Server databases
 
 The SQL Server adapter supports Microsoft SQL Server databases with automatic schema introspection using INFORMATION_SCHEMA and sys catalog views.
 
+## Installation
+
+The `mssql` driver is a peer dependency. Install it alongside `@deepagents/text2sql`:
+
+```bash
+npm install @deepagents/text2sql mssql
+```
+
 ## Basic Setup
 
 <Tabs groupId="sqlserver-driver" items={['mssql', 'tedious']}>
