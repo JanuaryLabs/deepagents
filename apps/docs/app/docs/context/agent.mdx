@@ -1,0 +1,256 @@
+---
+title: Agent Wrapper
+description: Convenience wrapper that combines ContextEngine with the AI SDK into a streamable agent
+---
+
+The `agent()` function wraps a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, and `clone()` methods. It handles context resolution, tool repair, and optional guardrail-based self-correction so you don't wire that plumbing yourself.
+
+## Creating an Agent
+
+```typescript
+import { agent, ContextEngine, SqliteContextStore, role } from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(role('You are a helpful coding assistant.'));
+
+const assistant = agent({
+  name: 'coding_assistant',
+  context,
+  model: groq('gpt-oss-20b'),
+});
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | required | Identifier for logging and error messages |
+| `context` | `ContextEngine` | `undefined` | Engine that resolves system prompt and messages |
+| `model` | `LanguageModelV3` | `undefined` | AI SDK model to use for generation |
+| `tools` | `ToolSet` | `{}` | AI SDK tools available to the agent |
+| `toolChoice` | `ToolChoice` | `undefined` | Controls how the model selects tools |
+| `providerOptions` | `object` | `undefined` | Provider-specific options forwarded to the AI SDK |
+| `guardrails` | `Guardrail[]` | `[]` | Guardrails applied during streaming |
+| `maxGuardrailRetries` | `number` | `3` | Max retry attempts when a guardrail fails |
+| `logging` | `boolean` | `undefined` | Enable debug logging |
+
+## generate()
+
+Resolves the context, calls the model, and returns the full result. Useful when you need the complete response before continuing.
+
+```typescript
+import { user } from '@deepagents/context';
+
+context.set(user('Explain closures in JavaScript'));
+await context.save();
+
+const result = await assistant.generate({});
+console.log(result.text);
+```
+
+`generate()` accepts two arguments:
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `contextVariables` | `CIn` | Passed as `experimental_context` to the AI SDK |
+| `config.abortSignal` | `AbortSignal` | Cancel the request |
+
+## stream()
+
+Resolves the context and returns a streaming result. When guardrails are configured, `toUIMessageStream()` is wrapped to intercept parts and retry on failure.
+
+```typescript
+context.set(user('Write a Python quicksort'));
+await context.save();
+
+const stream = await assistant.stream({});
+
+for await (const part of stream.toUIMessageStream()) {
+  if (part.type === 'text-delta') {
+    process.stdout.write(part.delta);
+  }
+}
+```
+
+`stream()` accepts two arguments:
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `contextVariables` | `CIn` | Passed as `experimental_context` to the AI SDK |
+| `config.abortSignal` | `AbortSignal` | Cancel the request |
+| `config.transform` | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |
+| `config.maxRetries` | `number` | Override `maxGuardrailRetries` for this call |
+
+## clone()
+
+Creates a new agent with the same options, selectively overridden. Handy for switching models or tools without rebuilding everything.
+
+```typescript
+const creativeAssistant = assistant.clone({
+  name: 'creative_assistant',
+  providerOptions: { temperature: 0.9 },
+});
+
+const result = await creativeAssistant.generate({});
+```
+
+## Guardrails
+
+Guardrails inspect each streaming part and decide whether to `pass`, `fail` (retry with feedback), or `stop` (abort without retry). When a guardrail fails, the agent appends the accumulated text plus the feedback as a self-correction message and starts a new stream.
+
+```typescript
+import {
+  agent,
+  pass,
+  fail,
+  stop,
+  errorRecoveryGuardrail,
+} from '@deepagents/context';
+import type { Guardrail } from '@deepagents/context';
+
+const lengthGuardrail: Guardrail = {
+  id: 'max-length',
+  name: 'Max Length',
+  handle: (part, ctx) => {
+    if (part.type === 'text-delta' && part.delta.length > 5000) {
+      return fail('My response is getting too long. Let me be more concise.');
+    }
+    return pass(part);
+  },
+};
+
+const guarded = agent({
+  name: 'guarded_assistant',
+  context,
+  model: groq('gpt-oss-20b'),
+  guardrails: [errorRecoveryGuardrail, lengthGuardrail],
+  maxGuardrailRetries: 3,
+});
+```
+
+### Built-in Guardrails
+
+`errorRecoveryGuardrail` handles common API errors during streaming:
+
+- Model calls a tool that does not exist
+- Tool arguments are malformed JSON
+- Tool parameters fail schema validation
+- Parsing failures
+
+It returns `fail()` with feedback that guides the model toward a valid retry, or `stop()` for unknown errors.
+
+### Self-Correction Flow
+
+```
+1. Stream starts
+2. Guardrail detects a problem → returns fail(feedback)
+3. Accumulated text + feedback saved as assistant self-correction
+4. Context is saved (persists the correction)
+5. New stream created from updated context
+6. Repeat until success or maxGuardrailRetries reached
+```
+
+### Writing a Custom Guardrail
+
+Each guardrail must return one of three results:
+
+| Result | Effect |
+| --- | --- |
+| `pass(part)` | Allow the part through (can modify it) |
+| `fail(feedback)` | Abort stream, append feedback, retry |
+| `stop(part)` | Abort stream immediately, no retry |
+
+The `handle` function receives the stream part and a `GuardrailContext`:
+
+```typescript
+interface GuardrailContext {
+  availableTools: string[];
+  availableSkills: SkillPathMapping[];
+}
+```
+
+Guardrails run sequentially. The first `fail` or `stop` short-circuits the chain.
+
+## structuredOutput()
+
+Returns type-safe structured data parsed against a Zod schema. Separate from `agent()` because it uses `Output.object()` under the hood.
+
+```typescript
+import { structuredOutput, ContextEngine, SqliteContextStore, role, user } from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+import z from 'zod';
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'extract-001',
+  userId: 'user-001',
+}).set(role('Extract structured data from the user message.'));
+
+const PersonSchema = z.object({
+  name: z.string(),
+  age: z.number(),
+  occupation: z.string(),
+});
+
+const extractor = structuredOutput({
+  context,
+  model: groq('gpt-oss-20b'),
+  schema: PersonSchema,
+});
+
+context.set(user('John is a 30-year-old software engineer.'));
+await context.save();
+
+const person = await extractor.generate({});
+// { name: "John", age: 30, occupation: "software engineer" }
+```
+
+### structuredOutput Configuration
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `context` | `ContextEngine` | required | Engine that resolves system prompt and messages |
+| `model` | `LanguageModelV3` | required | AI SDK model |
+| `schema` | `z.ZodType` | required | Zod schema for the output type |
+| `providerOptions` | `object` | `undefined` | Provider-specific options |
+| `tools` | `ToolSet` | `undefined` | Tools available during generation |
+
+### structuredOutput Methods
+
+`generate()` resolves context, calls the model with `Output.object()`, and returns the parsed value directly.
+
+`stream()` returns the full `StreamTextResult` with the structured output schema applied. Use this when you need to process stream parts before the final value.
+
+```typescript
+const stream = await extractor.stream({});
+
+for await (const part of stream.toUIMessageStream()) {
+  if (part.type === 'text-delta') {
+    process.stdout.write(part.delta);
+  }
+}
+```
+
+## How Context Resolution Works
+
+Both `agent()` and `structuredOutput()` call `context.resolve()` with an `XmlRenderer` internally. The resolved system prompt and messages are forwarded to the AI SDK's `generateText` or `streamText`. You don't need to call `resolve()` yourself when using these wrappers.
+
+```
+agent.generate() / agent.stream()
+  └─ context.resolve({ renderer: XmlRenderer })
+       └─ { systemPrompt, messages }
+            └─ generateText() / streamText()
+```
+
+## Next Steps
+
+- [Context Engine](/docs/context/context-engine) - Full ContextEngine API reference
+- [Fragments](/docs/context/fragments) - Building context with fragments
+- [Renderers](/docs/context/renderers-overview) - How context is rendered for the model
+- [Checkpoints](/docs/context/checkpoints) - Named restore points for branching

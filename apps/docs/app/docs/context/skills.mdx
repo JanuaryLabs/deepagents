@@ -1,0 +1,268 @@
+---
+title: Skills
+description: Progressive disclosure of agent capabilities through discoverable SKILL.md files
+---
+
+Skills are modular instruction packages that extend an agent's capabilities. They follow Anthropic's progressive disclosure pattern: at startup only metadata (name and description) is loaded into context, and the LLM reads the full instructions from disk only when a skill is relevant.
+
+## How Progressive Disclosure Works
+
+```
+Startup:
+  skills/
+    deploy/SKILL.md     →  { name: "deploy", description: "Deploy to production" }
+    refactor/SKILL.md   →  { name: "refactor", description: "Refactor code" }
+
+  Only name + description injected into system prompt.
+
+Runtime:
+  User says "deploy the app"
+  → LLM matches "deploy" skill
+  → LLM reads /skills/deploy/SKILL.md for full instructions
+  → LLM follows the workflow
+```
+
+This keeps the system prompt small while making dozens of skills discoverable.
+
+## The SKILL.md Format
+
+Each skill lives in its own directory and is defined by a `SKILL.md` file with YAML frontmatter:
+
+```markdown title="skills/deploy/SKILL.md"
+---
+name: deploy
+description: Deploy services to production with zero-downtime rollouts
+---
+
+## Workflow
+
+1. Run pre-deploy checks
+2. Build the container image
+3. Push to registry
+4. Roll out with health checks
+
+## Output
+
+Return a summary of what was deployed and the health check results.
+```
+
+import { File, Files, Folder } from 'fumadocs-ui/components/files';
+
+<Files>
+  <Folder name="skills" defaultOpen>
+    <Folder name="deploy" defaultOpen>
+      <File name="SKILL.md" />
+      <Folder name="scripts">
+        <File name="health-check.sh" />
+      </Folder>
+    </Folder>
+    <Folder name="refactor" defaultOpen>
+      <File name="SKILL.md" />
+      <Folder name="references">
+        <File name="patterns.md" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
+
+The frontmatter requires exactly two fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Unique skill identifier |
+| `description` | `string` | Short description shown to the LLM for matching |
+
+The body after the frontmatter contains the full instructions the LLM reads at runtime.
+
+## Discovering Skills
+
+`discoverSkillsInDirectory()` scans a directory for subdirectories containing `SKILL.md` files and returns their metadata:
+
+```typescript
+import { discoverSkillsInDirectory } from '@deepagents/context';
+
+const skills = discoverSkillsInDirectory('./skills');
+// [
+//   { name: 'deploy', description: 'Deploy to production', path: './skills/deploy', skillMdPath: './skills/deploy/SKILL.md' },
+//   { name: 'refactor', description: 'Refactor code', path: './skills/refactor', skillMdPath: './skills/refactor/SKILL.md' },
+// ]
+```
+
+Tilde paths (`~/`) are expanded to the user's home directory. Directories without a `SKILL.md` are silently skipped. Invalid `SKILL.md` files log a warning and are excluded.
+
+## Loading Individual Skills
+
+`loadSkillMetadata()` loads metadata from a single `SKILL.md` path. It parses only the frontmatter -- the body is never loaded into memory:
+
+```typescript
+import { loadSkillMetadata } from '@deepagents/context';
+
+const skill = loadSkillMetadata('./skills/deploy/SKILL.md');
+// { name: 'deploy', description: 'Deploy to production', path: './skills/deploy', skillMdPath: './skills/deploy/SKILL.md' }
+```
+
+## Parsing Frontmatter
+
+`parseFrontmatter()` parses a `SKILL.md` string into its frontmatter and body:
+
+```typescript
+import { parseFrontmatter } from '@deepagents/context';
+
+const content = `---
+name: deploy
+description: Deploy to production
+---
+
+## Workflow
+1. Build
+2. Push
+3. Roll out`;
+
+const { frontmatter, body } = parseFrontmatter(content);
+// frontmatter: { name: 'deploy', description: 'Deploy to production' }
+// body: '## Workflow\n1. Build\n2. Push\n3. Roll out'
+```
+
+Throws if the frontmatter is missing or lacks the required `name` and `description` fields.
+
+## The skills() Fragment
+
+The `skills()` function is the primary integration point. It scans directories, filters skills, and produces a context fragment with embedded LLM instructions:
+
+```typescript
+import { ContextEngine, SqliteContextStore, role, skills } from '@deepagents/context';
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(
+  role('You are a helpful assistant.'),
+  skills({
+    paths: [
+      { host: './skills', sandbox: '/workspace/skills' },
+    ],
+  }),
+);
+```
+
+### SkillsFragmentOptions
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `paths` | `{ host: string; sandbox: string }[]` | *required* | Directories to scan with host-to-sandbox path mapping |
+| `exclude` | `string[]` | `undefined` | Skill names to exclude |
+| `include` | `string[]` | `undefined` | If set, only these skill names are included |
+
+### Path Mapping
+
+The `paths` option maps host filesystem paths to sandbox paths. When your agent runs inside a container, the host path where skills live differs from the path the LLM should reference. The fragment rewrites all `SKILL.md` paths so the LLM sees sandbox paths it can actually read:
+
+```typescript
+skills({
+  paths: [
+    { host: './local-skills', sandbox: '/workspace/skills' },
+    { host: '~/.deepagents/skills', sandbox: '/workspace/global-skills' },
+  ],
+})
+```
+
+A skill discovered at `./local-skills/deploy/SKILL.md` on the host will appear as `/workspace/skills/deploy/SKILL.md` in the LLM's context.
+
+### Filtering
+
+Use `include` for an allowlist or `exclude` for a blocklist:
+
+```typescript
+skills({
+  paths: [{ host: './skills', sandbox: '/skills' }],
+  include: ['deploy', 'refactor'],
+})
+
+skills({
+  paths: [{ host: './skills', sandbox: '/skills' }],
+  exclude: ['dangerous-skill'],
+})
+```
+
+When both are set, `include` is applied first, then `exclude` filters the result.
+
+### Generated Fragment
+
+The `skills()` function returns an `available_skills` fragment containing:
+
+1. An `instructions` fragment with guidance on how the LLM should discover and use skills
+2. One `skill` fragment per discovered skill with `name`, `path` (sandbox), and `description`
+
+The instructions tell the LLM to:
+- Match user requests to skill names or descriptions
+- Read the `SKILL.md` file on demand (progressive disclosure)
+- Load only the specific reference files needed, not everything
+- Prefer running existing scripts over rewriting code
+- Announce which skills are being used and why
+
+## Extracting Skill Mounts
+
+`ContextEngine.getSkillMounts()` extracts the mount mapping from a configured context. This is used by the agent framework to set up guardrail context and container volume mounts:
+
+```typescript
+const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
+  .set(skills({ paths: [{ host: './skills', sandbox: '/workspace/skills' }] }));
+
+const { mounts } = context.getSkillMounts();
+// [
+//   {
+//     name: 'deploy',
+//     description: 'Deploy to production',
+//     host: './skills/deploy/SKILL.md',
+//     sandbox: '/workspace/skills/deploy/SKILL.md',
+//   },
+// ]
+```
+
+Each mount entry is a `SkillPathMapping`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Skill name |
+| `description` | `string` | Skill description |
+| `host` | `string` | Host filesystem path to `SKILL.md` |
+| `sandbox` | `string` | Sandbox path to `SKILL.md` |
+
+The `@deepagents/agent` package uses these mounts to populate `GuardrailContext.availableSkills`, enabling guardrails to detect when the LLM confuses skills with tools.
+
+## Types
+
+```typescript
+interface SkillMetadata {
+  name: string;
+  description: string;
+  path: string;
+  skillMdPath: string;
+}
+
+interface SkillPathMapping {
+  name: string;
+  description: string;
+  host: string;
+  sandbox: string;
+}
+
+interface SkillsFragmentOptions {
+  paths: { host: string; sandbox: string }[];
+  exclude?: string[];
+  include?: string[];
+}
+
+interface ParsedSkillMd {
+  frontmatter: { name: string; description: string; [key: string]: unknown };
+  body: string;
+}
+```
+
+## Next Steps
+
+- [Fragments](/docs/context/fragments) - How fragments work
+- [Context Engine](/docs/context/context-engine) - Managing fragments with ContextEngine
+- [Container Tool](/docs/context/container-tool) - Running agents in sandboxed containers

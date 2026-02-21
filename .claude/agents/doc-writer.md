@@ -33,8 +33,6 @@ Write clear, comprehensive documentation for the topic you've been assigned. The
    description: One-line description for SEO and previews
    ---
 
-   # Feature Name
-
    Brief introduction explaining what this feature does and when to use it.
 
    ## Basic Usage
@@ -42,7 +40,6 @@ Write clear, comprehensive documentation for the topic you've been assigned. The
    ```typescript
    // Simple example showing the most common use case
    ```
-   ````
 
    ## Configuration / Options
 
@@ -55,12 +52,10 @@ Write clear, comprehensive documentation for the topic you've been assigned. The
    More complex examples and edge cases.
 
    ## Best Practices
+
    - Tip 1
    - Tip 2
-
-   ```
-
-   ```
+   ````
 
 4. **Save the file** to the specified output path using the Write tool
 

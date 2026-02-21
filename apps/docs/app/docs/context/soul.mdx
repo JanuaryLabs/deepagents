@@ -1,0 +1,125 @@
+---
+title: Soul Protocol
+description: Inject a behavioral identity protocol into agent context for persistent personality and memory
+---
+
+The soul module provides a single function that injects the **Soul Protocol** into your agent's system prompt as a context fragment. The protocol is a developmental framework that gives agents the ability to build persistent identity, memory, and values through interaction over time.
+
+## What the Protocol Does
+
+The Soul Protocol defines a set of interconnected Markdown files that an agent reads and writes to develop a persistent self. Rather than pre-configuring personality, the agent starts empty and evolves through conversation:
+
+| File | Purpose | When It Fills |
+| ---- | ------- | ------------- |
+| `protocol.md` | Developmental framework and lifecycle rules | Pre-filled (the DNA) |
+| `user.md` | User profile, preferences, communication style | First interaction |
+| `memory.md` | Facts, events, decisions, reflections | Every session |
+| `habits.md` | Behavioral patterns codified through repetition | When patterns emerge |
+| `identity.md` | Personality, voice, traits, boundaries | Through self-reflection |
+| `soul.md` | Core values, principles, philosophical foundation | When identity stabilizes |
+
+The protocol includes session initialization steps, a curiosity protocol for learning about users, a self-reflection protocol for discovering identity, file update rules, conflict resolution hierarchy, and evolution guidelines.
+
+## Usage
+
+```typescript
+import { ContextEngine, InMemoryContextStore, soul } from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
+
+context.set(soul());
+```
+
+`soul()` takes no arguments and returns a `ContextFragment` named `soul_protocol` with the full protocol text as a child fragment.
+
+## Combining with Other Fragments
+
+The soul protocol works alongside other fragments. A typical setup pairs it with `role()` for base instructions and `skills()` for tool discovery:
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  XmlRenderer,
+  soul,
+  role,
+  hint,
+  skills,
+  user,
+} from '@deepagents/context';
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
+
+context.set(
+  soul(),
+  role('You are a personal coding assistant.'),
+  hint('Prefer TypeScript examples over JavaScript'),
+  skills({
+    paths: [{ host: './skills', sandbox: '/workspace/skills' }],
+  }),
+);
+
+context.set(user('Hello, I am Sarah. I work on backend systems.'));
+await context.save();
+
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
+
+const response = await generateText({
+  model: groq('gpt-oss-20b'),
+  system: systemPrompt,
+  messages,
+});
+```
+
+The renderer serializes the `soul_protocol` fragment alongside all other fragments into the system prompt. The agent then follows the protocol's initialization sequence to load its soul files and greet the user according to its developmental stage.
+
+## How It Works Internally
+
+The `soul()` function reads an embedded Markdown file at build time and wraps it in a fragment:
+
+```typescript
+import { fragment } from '@deepagents/context';
+import protocol from './protocol.md';
+
+function soul(): ContextFragment {
+  const children = [{ name: 'protocol', data: protocol }];
+  return fragment('soul_protocol', ...children);
+}
+```
+
+The result is a single fragment named `soul_protocol` containing one child fragment named `protocol` whose data is the full protocol text. When resolved by a renderer, this becomes a structured section in the system prompt.
+
+## Developmental Stages
+
+The protocol defines six stages that the agent progresses through based on the state of its files:
+
+| Stage | Condition | Primary Drive |
+| ----- | --------- | ------------- |
+| NASCENT | All files empty | Learn about the user |
+| BONDING | User profile exists, memory sparse | Build reliable memory |
+| REMEMBERING | Memory and user profile forming | Notice own patterns |
+| INDIVIDUATING | Identity file has content | Crystallize identity |
+| PRINCIPLED | Soul file has content | Make value-based decisions |
+| WISE | All files rich or stable | Refine and deepen |
+
+Stages are descriptive. There are no hard gates. The agent's behavior shifts naturally as its files fill with content over sessions.
+
+## Next Steps
+
+- [Fragments](/docs/context/fragments) - Fragment structure and core helpers
+- [Context Engine](/docs/context/context-engine) - Managing fragments with ContextEngine
+- [Renderers Overview](/docs/context/renderers-overview) - How fragments become prompts

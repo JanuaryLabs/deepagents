@@ -1,0 +1,238 @@
+---
+title: Guardrails
+description: Real-time stream interceptors that inspect AI output and trigger self-correction
+---
+
+Guardrails intercept streaming parts as the model produces them. Each guardrail inspects a part and decides: let it through, retry with feedback, or stop entirely. When a guardrail fails, accumulated text plus your feedback is injected as a self-correction message, and the model retries from that point.
+
+## How Self-Correction Works
+
+```
+Stream: text-delta → text-delta → text-delta (guardrail fails!)
+                                        ↓
+                              accumulate text + feedback
+                                        ↓
+                              inject as assistant message
+                                        ↓
+                              new stream starts (retry)
+```
+
+The user sees the correction inline. From the model's perspective, it "caught itself" and changed course.
+
+## The Three Outcomes
+
+Every guardrail handler returns one of three results:
+
+| Result | Effect | Use When |
+| ------ | ------ | -------- |
+| `pass(part)` | Part flows through (optionally modified) | Content is acceptable |
+| `fail(feedback)` | Stream aborts, feedback triggers retry | Recoverable issue, model should try again |
+| `stop(part)` | Stream aborts immediately, no retry | Unrecoverable error |
+
+## Writing a Guardrail
+
+A guardrail implements `id`, `name`, and a `handle` function:
+
+```typescript
+import { type Guardrail, pass, fail, stop } from '@deepagents/context';
+
+const safetyFilter: Guardrail = {
+  id: 'safety',
+  name: 'Safety Filter',
+  handle: (part, context) => {
+    if (part.type === 'text-delta' && part.delta.includes('unsafe content')) {
+      return fail('I should not provide this information. Let me help differently.');
+    }
+    return pass(part);
+  },
+};
+```
+
+### Guardrail Interface
+
+| Property | Type | Description |
+| -------- | ---- | ----------- |
+| `id` | `string` | Unique identifier |
+| `name` | `string` | Human-readable name for logging |
+| `handle` | `(part: StreamPart, context: GuardrailContext) => GuardrailResult` | Inspects each stream part |
+
+### GuardrailContext
+
+The `context` argument gives handlers access to the agent's capabilities:
+
+| Property | Type | Description |
+| -------- | ---- | ----------- |
+| `availableTools` | `string[]` | Names of tools registered on the agent |
+| `availableSkills` | `SkillPathMapping[]` | Skills available in context |
+
+This is useful for providing corrective feedback that references what the agent can actually do:
+
+```typescript
+const toolAwareGuardrail: Guardrail = {
+  id: 'tool-aware',
+  name: 'Tool Awareness',
+  handle: (part, context) => {
+    if (part.type === 'error' && context.availableTools.length > 0) {
+      return fail(`Error occurred. Try using: ${context.availableTools.join(', ')}`);
+    }
+    return pass(part);
+  },
+};
+```
+
+## Modifying Parts
+
+`pass()` accepts a modified part. Use this to transform content before it reaches the user:
+
+```typescript
+const redactGuardrail: Guardrail = {
+  id: 'redact-pii',
+  name: 'PII Redaction',
+  handle: (part) => {
+    if (part.type === 'text-delta') {
+      const redacted = part.delta.replace(/\b\d{3}-\d{2}-\d{4}\b/g, '[SSN REDACTED]');
+      return pass({ ...part, delta: redacted });
+    }
+    return pass(part);
+  },
+};
+```
+
+## Guardrail Chain
+
+`runGuardrailChain()` runs guardrails sequentially. Each guardrail receives the (possibly modified) part from the previous one. The first `fail` or `stop` short-circuits the chain.
+
+```typescript
+import { runGuardrailChain, type GuardrailContext } from '@deepagents/context';
+
+const context: GuardrailContext = {
+  availableTools: ['bash', 'sql'],
+  availableSkills: [],
+};
+
+const result = runGuardrailChain(part, [safetyFilter, redactGuardrail], context);
+
+if (result.type === 'fail') {
+  console.log('Retry with:', result.feedback);
+} else if (result.type === 'stop') {
+  console.log('Unrecoverable error');
+} else {
+  console.log('Passed:', result.part);
+}
+```
+
+## Built-in: Error Recovery Guardrail
+
+`errorRecoveryGuardrail` catches common API-level errors and triggers self-correction. This is especially useful for models that hallucinate tool calls.
+
+```typescript
+import { errorRecoveryGuardrail } from '@deepagents/context';
+```
+
+### Errors It Catches
+
+| Pattern | Description | Action |
+| ------- | ----------- | ------ |
+| `Tool choice is none` | Model called a tool when none were available | `fail` with available tools list |
+| `not in request.tools` | Model called a non-existent tool | `fail` with correction (or skill redirect) |
+| `Failed to parse tool call arguments` | Malformed JSON in tool arguments | `fail` asking for valid JSON |
+| `validation failed` + `did not match schema` | Tool arguments don't match schema | `fail` with schema errors |
+| `Parsing failed` | Generic parse failure | `fail` asking for proper format |
+| `Failed to call a function` | Malformed function call from provider | `fail` with available tools |
+| Unknown errors | Anything else | `stop` (no retry) |
+
+The guardrail also detects when the model confuses a skill for a tool and redirects it to read the skill file instead.
+
+## Integration with `agent()`
+
+Pass guardrails to the `agent()` wrapper. They apply automatically when streaming via `toUIMessageStream()`:
+
+```typescript
+import { agent, errorRecoveryGuardrail } from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+
+const myAgent = agent({
+  name: 'assistant',
+  context,
+  model: groq('gpt-oss-20b'),
+  tools: { bash, sql },
+  guardrails: [errorRecoveryGuardrail, safetyFilter],
+  maxGuardrailRetries: 3,
+});
+
+const stream = await myAgent.stream({});
+```
+
+### Configuration
+
+| Option | Type | Default | Description |
+| ------ | ---- | ------- | ----------- |
+| `guardrails` | `Guardrail[]` | `[]` | Guardrails to run on each stream part |
+| `maxGuardrailRetries` | `number` | `3` | Maximum retry attempts before giving up |
+
+### What Happens on Failure
+
+1. Guardrail returns `fail(feedback)`
+2. Accumulated text so far + feedback is saved as the assistant's self-correction message
+3. Feedback is written to the output stream (user sees it)
+4. A new stream starts from the corrected context
+5. Process repeats until success or `maxGuardrailRetries` is exhausted
+
+<Callout type="warn">
+  Guardrails only apply when consuming the stream via `toUIMessageStream()`. Direct access to `fullStream` or `textStream` bypasses guardrail processing.
+</Callout>
+
+## Custom Guardrail: Content Policy
+
+```typescript
+const contentPolicy: Guardrail = {
+  id: 'content-policy',
+  name: 'Content Policy',
+  handle: (part) => {
+    if (part.type !== 'text-delta') return pass(part);
+
+    const blocked = ['confidential', 'internal-only', 'secret'];
+    const found = blocked.find((term) => part.delta.toLowerCase().includes(term));
+
+    if (found) {
+      return fail(
+        `I mentioned "${found}" which violates content policy. Let me rephrase without restricted terms.`,
+      );
+    }
+
+    return pass(part);
+  },
+};
+```
+
+## Custom Guardrail: Error Routing
+
+Use `stop()` for errors that retrying cannot fix:
+
+```typescript
+const errorRouter: Guardrail = {
+  id: 'error-router',
+  name: 'Error Router',
+  handle: (part) => {
+    if (part.type !== 'error') return pass(part);
+
+    const errorText = part.errorText || '';
+
+    if (errorText.includes('rate limit')) {
+      return fail('Rate limited. Let me try again.');
+    }
+
+    if (errorText.includes('context length exceeded')) {
+      return stop(part);
+    }
+
+    return stop(part);
+  },
+};
+```
+
+## Next Steps
+
+- [Checkpoints](/docs/context/checkpoints) - Named restore points for conversation branching
+- [Rewind](/docs/context/rewind) - Direct message branching
+- [Storage](/docs/context/storage) - Store implementations

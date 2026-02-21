@@ -1,0 +1,318 @@
+---
+title: Stream Persistence
+description: Durably store AI streaming responses for replay, reconnection, and multi-client watching
+---
+
+Stream persistence saves AI streaming chunks to a durable store as they arrive. If a client disconnects mid-stream, another client can pick up where it left off or replay from the beginning. Multiple clients can watch the same stream simultaneously.
+
+## How It Works
+
+```
+Client A starts stream:
+  AI Model → chunks → StreamManager.persist() → StreamStore (SQLite)
+                                               ↘ Client A (live)
+
+Client A disconnects. Client B connects:
+  StreamManager.watch(streamId) → polls StreamStore → Client B (replay + live tail)
+
+Stream status lifecycle:
+  queued → running → completed
+                   → failed
+                   → cancelled
+```
+
+Three layers handle this:
+
+- **StreamStore** — abstract storage interface for streams and chunks
+- **StreamManager** — high-level lifecycle: register, persist, watch, cancel, cleanup
+- **persistedWriter** — low-level writer wrapper that intercepts chunks and buffers them to the store
+
+## StreamStore
+
+The abstract base class defining storage operations. `SqliteStreamStore` is the built-in implementation.
+
+```typescript
+import { SqliteStreamStore } from '@deepagents/context';
+
+const store = new SqliteStreamStore('./streams.db');
+```
+
+You can also pass an existing `DatabaseSync` instance:
+
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+const db = new DatabaseSync('./app.db');
+const store = new SqliteStreamStore(db);
+```
+
+### StreamData
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique stream identifier |
+| `status` | `StreamStatus` | Current status: `queued`, `running`, `completed`, `failed`, `cancelled` |
+| `createdAt` | `number` | Timestamp when the stream was created |
+| `startedAt` | `number \| null` | Timestamp when the stream started running |
+| `finishedAt` | `number \| null` | Timestamp when the stream reached a terminal status |
+| `cancelRequestedAt` | `number \| null` | Timestamp when cancellation was requested |
+| `error` | `string \| null` | Error message if the stream failed |
+
+### StreamChunkData
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `streamId` | `string` | Parent stream ID |
+| `seq` | `number` | Monotonically increasing sequence number |
+| `data` | `unknown` | The stream part (serialized as JSON in SQLite) |
+| `createdAt` | `number` | Timestamp when the chunk was persisted |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `createStream(stream)` | Insert a new stream record |
+| `upsertStream(stream)` | Insert or return existing stream. Returns `{ stream, created }` |
+| `getStream(streamId)` | Fetch stream metadata, or `undefined` if not found |
+| `updateStreamStatus(streamId, status, opts?)` | Transition stream status. Automatically sets `startedAt`, `finishedAt`, `cancelRequestedAt`, and `error` based on the target status |
+| `appendChunks(chunks)` | Batch-insert chunks (transactional in SQLite) |
+| `getChunks(streamId, fromSeq?, limit?)` | Fetch chunks ordered by `seq`, optionally starting from `fromSeq` |
+| `deleteStream(streamId)` | Delete stream and all its chunks (cascading) |
+
+## StreamManager
+
+Orchestrates the full stream lifecycle.
+
+```typescript
+import { StreamManager, SqliteStreamStore } from '@deepagents/context';
+
+const manager = new StreamManager({
+  store: new SqliteStreamStore('./streams.db'),
+});
+```
+
+### register(streamId)
+
+Creates or retrieves a stream in `queued` status. Call this before starting the AI generation.
+
+```typescript
+const { stream, created } = await manager.register('stream-abc');
+
+if (!created) {
+  console.log(`Stream already exists with status: ${stream.status}`);
+}
+```
+
+### persist(stream, streamId, options?)
+
+Consumes a `ReadableStream`, persists every chunk to the store, and transitions status from `running` to `completed` (or `failed` on error). Polls for cancellation in the background.
+
+```typescript
+import { createUIMessageStream } from 'ai';
+
+const uiStream = createUIMessageStream({
+  execute: async ({ writer }) => {
+    writer.write({ type: 'text-delta', textDelta: 'Hello' });
+    writer.write({ type: 'text-delta', textDelta: ' world' });
+  },
+});
+
+await manager.persist(uiStream, 'stream-abc', {
+  strategy: 'buffered',
+  flushSize: 20,
+  cancelCheckInterval: 500,
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `strategy` | `'buffered' \| 'immediate'` | `'buffered'` | `buffered` batches chunks for throughput; `immediate` persists each chunk before forwarding |
+| `flushSize` | `number` | `20` | For buffered strategy: flush after this many chunks |
+| `cancelCheckInterval` | `number` | `500` | Milliseconds between cancellation polls |
+
+If the stream is already in a terminal status (`completed`, `failed`, `cancelled`), `persist` returns immediately without re-running.
+
+### watch(streamId, options?)
+
+Returns a `ReadableStream` that replays all persisted chunks, then live-tails new ones until the stream reaches a terminal status.
+
+```typescript
+const replayStream = manager.watch('stream-abc', { interval: 100 });
+
+for await (const part of replayStream) {
+  console.log(part);
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `interval` | `number` | `100` | Milliseconds between polls when waiting for new chunks |
+
+Throws if the stream ID does not exist.
+
+### cancel(streamId)
+
+Marks the stream as `cancelled`. The `persist()` loop detects this on its next poll and stops consuming.
+
+```typescript
+await manager.cancel('stream-abc');
+```
+
+### cleanup(streamId)
+
+Deletes the stream record and all associated chunks.
+
+```typescript
+await manager.cleanup('stream-abc');
+```
+
+## persistedWriter
+
+A lower-level API that wraps a `UIMessageStreamWriter` to intercept and persist chunks as they flow through. Use this when you need direct control over the writer inside `createUIMessageStream`.
+
+```typescript
+import { createUIMessageStream } from 'ai';
+import { persistedWriter, SqliteStreamStore } from '@deepagents/context';
+
+const store = new SqliteStreamStore('./streams.db');
+
+const uiStream = createUIMessageStream({
+  execute: async ({ writer }) => {
+    const pw = await persistedWriter({
+      writer,
+      store,
+      streamId: 'stream-abc',
+      strategy: 'buffered',
+      flushSize: 20,
+    });
+
+    pw.writer.write({ type: 'text-delta', textDelta: 'Hello' });
+    pw.writer.write({ type: 'text-delta', textDelta: ' world' });
+
+    await pw.complete();
+  },
+});
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `writer` | `UIMessageStreamWriter` | required | The original writer to wrap |
+| `store` | `StreamStore` | required | Where to persist chunks |
+| `streamId` | `string` | required | Stream identifier |
+| `strategy` | `'buffered' \| 'immediate'` | `'buffered'` | Persistence strategy |
+| `flushSize` | `number` | `20` | Chunks to buffer before flushing (buffered strategy only) |
+
+### PersistedWriter Methods
+
+| Method | Description |
+|--------|-------------|
+| `flush()` | Force-flush the buffer to the store |
+| `complete()` | Flush remaining chunks and mark stream as `completed` |
+| `fail(error?)` | Flush remaining chunks and mark stream as `failed` with optional error message |
+| `cleanup()` | Delete the stream and all chunks from the store |
+
+The returned `writer` property is a drop-in replacement for `UIMessageStreamWriter`. Both `write()` and `merge()` are intercepted: chunks are persisted before being forwarded to the original writer.
+
+## Reconnectable Stream Pattern
+
+Register the stream, start persisting on the server, and serve `watch()` to any client that connects (or reconnects).
+
+```typescript
+import { StreamManager, SqliteStreamStore } from '@deepagents/context';
+import { streamText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+
+const manager = new StreamManager({
+  store: new SqliteStreamStore('./streams.db'),
+});
+
+async function startGeneration(streamId: string, prompt: string) {
+  await manager.register(streamId);
+
+  const { textStream } = streamText({
+    model: groq('gpt-oss-20b'),
+    prompt,
+  });
+
+  manager.persist(textStream, streamId);
+}
+
+function connectClient(streamId: string): ReadableStream {
+  return manager.watch(streamId);
+}
+```
+
+A client calling `connectClient` at any point receives all chunks produced so far, then continues to receive new ones in real time until the stream finishes.
+
+## Multi-Client Watching
+
+Multiple clients can watch the same stream. Each `watch()` call creates an independent `ReadableStream` that polls the store separately.
+
+```typescript
+const client1 = manager.watch('stream-abc');
+const client2 = manager.watch('stream-abc');
+const client3 = manager.watch('stream-abc');
+```
+
+Each client replays from the beginning and tails until the stream reaches a terminal status.
+
+## Stream Status Lifecycle
+
+```
+         register()
+            │
+            v
+        ┌────────┐
+        │ queued  │
+        └───┬────┘
+            │  persist()
+            v
+        ┌─────────┐
+        │ running  │
+        └──┬──┬──┬─┘
+           │  │  │
+      ok   │  │  │  cancel()
+           v  │  v
+  ┌───────────┐ │ ┌───────────┐
+  │ completed │ │ │ cancelled │
+  └───────────┘ │ └───────────┘
+                v
+          ┌────────┐
+          │ failed │
+          └────────┘
+```
+
+Terminal statuses (`completed`, `failed`, `cancelled`) cause `watch()` to close after draining remaining chunks.
+
+## Custom StreamStore
+
+Implement the abstract `StreamStore` class to back stream persistence with any database.
+
+```typescript
+import { StreamStore } from '@deepagents/context';
+import type { StreamData, StreamChunkData, StreamStatus } from '@deepagents/context';
+
+class PostgresStreamStore extends StreamStore {
+  async createStream(stream: StreamData): Promise<void> { /* ... */ }
+  async upsertStream(stream: StreamData): Promise<{ stream: StreamData; created: boolean }> { /* ... */ }
+  async getStream(streamId: string): Promise<StreamData | undefined> { /* ... */ }
+  async updateStreamStatus(streamId: string, status: StreamStatus, options?: { error?: string }): Promise<void> { /* ... */ }
+  async appendChunks(chunks: StreamChunkData[]): Promise<void> { /* ... */ }
+  async getChunks(streamId: string, fromSeq?: number, limit?: number): Promise<StreamChunkData[]> { /* ... */ }
+  async deleteStream(streamId: string): Promise<void> { /* ... */ }
+}
+```
+
+## Best Practices
+
+- Use `buffered` strategy (the default) for throughput-sensitive workloads. Switch to `immediate` when you cannot tolerate any chunk loss on crash.
+- Always call `cleanup()` after you no longer need a stream. Chunks accumulate and are not automatically garbage-collected.
+- Keep `cancelCheckInterval` reasonable (500ms default). Too low adds polling overhead; too high delays cancellation response.
+- Use a shared `SqliteStreamStore` instance across your application to benefit from prepared statement caching.
+
+## Next Steps
+
+- [Storage](/docs/context/storage) - Store implementations for context persistence
+- [Checkpoints](/docs/context/checkpoints) - Named restore points for conversation branching

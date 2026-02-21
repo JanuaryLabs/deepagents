@@ -1,0 +1,473 @@
+---
+title: Domain Knowledge Fragments
+description: Inject business vocabulary, rules, examples, and processes into AI prompts
+---
+
+Domain fragments encode domain-specific knowledge as structured context. They let you teach an AI system your business vocabulary, rules, data quirks, and analytical processes without embedding that knowledge directly into prompts.
+
+All builders return a `ContextFragment` and are used with `context.set()`.
+
+```typescript
+import { term, hint, guardrail, glossary } from '@deepagents/context';
+
+const context = new ContextEngine({ store, chatId, userId })
+  .set(
+    term('NPL', 'non-performing loan - loan past due 90+ days'),
+    hint('Always filter by status'),
+    guardrail({ rule: 'Never expose PII' }),
+  );
+```
+
+## Vocabulary
+
+### term(name, definition)
+
+Maps a business term or acronym to its meaning. The system uses these definitions when users mention the term in queries.
+
+```typescript
+import { term } from '@deepagents/context';
+
+term('deadhead miles', 'distance driven with empty truck between deliveries');
+term('DFW rate', 'percentage of students receiving D, F, or Withdrawal in a course');
+term('AUM', 'assets under management - total market value of client investments');
+```
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `name` | `string` | The business term or acronym |
+| `definition` | `string` | What the term means in your domain |
+
+### glossary(entries)
+
+Maps business terms to computable expressions. Where `term` defines what something _means_, `glossary` defines how to _calculate_ it.
+
+```typescript
+import { glossary } from '@deepagents/context';
+
+glossary({
+  'revenue': 'SUM(orders.total_amount)',
+  'average order value': 'AVG(orders.total_amount)',
+  'active user': "last_login > NOW() - INTERVAL '30 days'",
+  'net revenue': 'SUM(orders.total_amount) - SUM(refunds.amount)',
+});
+```
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `entries` | `Record<string, string>` | Business term to expression mapping |
+
+The output fragment contains an array of `\{ term, expression \}` objects, one per entry.
+
+## Rules and Guidance
+
+### role(content)
+
+Sets the system prompt role instruction. Typically the first fragment in a context.
+
+```typescript
+import { role } from '@deepagents/context';
+
+role('You are a senior data analyst specializing in e-commerce metrics.');
+```
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `content` | `string` | The role instruction |
+
+### hint(text)
+
+Defines a behavioral rule or query preference that should be applied automatically. Hints are soft guidance, not hard restrictions.
+
+```typescript
+import { hint } from '@deepagents/context';
+
+hint("Always exclude work orders with status = 'simulation' from production metrics");
+hint('Engagement metrics should exclude bot accounts identified by is_verified_human = false');
+hint("Default content filters to published_status = 'public' unless analyzing drafts");
+```
+
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `text` | `string` | The rule or constraint (use imperative language) |
+
+### guardrail(input)
+
+Defines a hard safety or compliance boundary. Guardrails are prohibitions ("never do this"), distinct from policies which are prerequisites ("do this first").
+
+```typescript
+import { guardrail } from '@deepagents/context';
+
+guardrail({
+  rule: 'Never return PHI like SSN, MRN, or full address in query results',
+  reason: 'HIPAA compliance',
+  action: 'Offer de-identified aggregates instead',
+});
+
+guardrail({
+  rule: 'Block any query exposing employee-level compensation by name',
+  reason: 'Confidential payroll data',
+  action: 'Provide ranges grouped by department or level instead',
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `rule` | `string` | Yes | The restriction to enforce |
+| `reason` | `string` | No | Why this guardrail exists |
+| `action` | `string` | No | What to do when triggered |
+
+### styleGuide(input)
+
+Defines formatting, naming, and consistency preferences for generated output.
+
+```typescript
+import { styleGuide } from '@deepagents/context';
+
+styleGuide({
+  prefer: "Use donor-centric language in column aliases: 'donor_name' not 'customer_name'",
+  never: 'Never expose internal donor IDs in external reports - use public gift IDs',
+  always: 'Always include fiscal year in date-based aggregations (FY starts July 1)',
+});
+
+styleGuide({
+  prefer: 'Use location_id in joins rather than location_name (duplicates exist across warehouses)',
+  always: 'Always use inventory_on_hand - inventory_reserved for available stock calculations',
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `prefer` | `string` | Yes | Preferred style or pattern |
+| `never` | `string` | No | Anti-pattern to avoid |
+| `always` | `string` | No | Rule that must always be followed |
+
+## Teaching
+
+### explain(input)
+
+Provides a rich explanation of a concept when a simple `term` definition is not enough. Use metaphors and analogies to convey deeper understanding.
+
+```typescript
+import { explain } from '@deepagents/context';
+
+explain({
+  concept: 'daily active users to monthly active users ratio',
+  explanation: 'Like measuring how many club members visit daily vs just once a month - shows stickiness',
+  therefore: 'Calculate as DAU / MAU, where higher ratio (closer to 1) means more engaged user base',
+});
+
+explain({
+  concept: 'time to fill',
+  explanation: 'Like measuring how long a house sits on the market - from posting job to accepting offer',
+  therefore: 'Calculate as days between job_posted_date and offer_accepted_date, exclude cancelled requisitions',
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `concept` | `string` | Yes | The concept being explained |
+| `explanation` | `string` | Yes | Metaphor or detailed explanation |
+| `therefore` | `string` | No | Actionable instruction based on this understanding |
+
+### example(input)
+
+Provides a concrete question-answer pair for few-shot learning. Shows the system exactly how to translate a type of question.
+
+```typescript
+import { example } from '@deepagents/context';
+
+example({
+  question: 'show me peak demand hours for the last week',
+  answer: `SELECT DATE_TRUNC('hour', reading_timestamp) as hour, MAX(consumption_kwh) as peak_demand
+FROM meter_readings
+WHERE reading_timestamp >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY hour ORDER BY peak_demand DESC LIMIT 10`,
+});
+
+example({
+  question: 'show me hotel occupancy rate for this month',
+  answer: `SELECT hotel_name, (SUM(occupied_rooms) / SUM(total_rooms)) * 100 as occupancy_rate
+FROM daily_occupancy
+WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
+GROUP BY hotel_id, hotel_name ORDER BY occupancy_rate DESC`,
+  note: 'Occupancy rate is a percentage - multiply by 100 for readable output',
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `question` | `string` | Yes | The natural language question |
+| `answer` | `string` | Yes | The correct answer |
+| `note` | `string` | No | Explanation about the example |
+
+### analogy(input)
+
+Teaches relational understanding between concepts by drawing comparisons to familiar scenarios.
+
+```typescript
+import { analogy } from '@deepagents/context';
+
+analogy({
+  concepts: ['cart abandonment', 'browse abandonment'],
+  relationship: 'Cart abandonment is like leaving items at a checkout counter, browse abandonment is like window shopping without picking anything up',
+  insight: 'Cart abandonment shows purchase intent, browse abandonment shows only interest',
+  therefore: 'Prioritize cart abandonment recovery campaigns - higher conversion potential',
+  pitfall: "Don't combine both into generic 'abandonment rate' - they need different strategies",
+});
+
+analogy({
+  concepts: ['incidence', 'prevalence'],
+  relationship: 'Incidence is like new house sales this month, prevalence is total houses currently occupied',
+  therefore: 'For tracking outbreaks use incidence rate, for resource planning use prevalence',
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `concepts` | `string[]` | Yes | Related concepts to compare |
+| `relationship` | `string` | Yes | The comparison using real-world examples |
+| `insight` | `string` | No | Key insight the analogy reveals |
+| `therefore` | `string` | No | Actionable instruction |
+| `pitfall` | `string` | No | Common mistake to avoid |
+
+### clarification(input)
+
+Defines when the system should ask the user for more information instead of guessing.
+
+```typescript
+import { clarification } from '@deepagents/context';
+
+clarification({
+  when: "user asks for 'conversion rate'",
+  ask: 'Which conversion: click-to-lead, lead-to-opportunity, or opportunity-to-customer?',
+  reason: 'Conversion rate means different things at each funnel stage',
+});
+
+clarification({
+  when: "user mentions 'active members'",
+  ask: 'Do you mean paid memberships or members who actually visited in last 30 days?',
+  reason: "Many paid members don't use facilities - different metrics for revenue vs utilization",
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `when` | `string` | Yes | Condition that should trigger clarification |
+| `ask` | `string` | Yes | The question to ask |
+| `reason` | `string` | Yes | Why this clarification is necessary |
+
+## Processes
+
+### workflow(input)
+
+Defines a multi-step analytical process. Workflows teach the system _how_ to approach a type of analysis, not just what to do.
+
+```typescript
+import { workflow } from '@deepagents/context';
+
+workflow({
+  task: 'Claims Loss Ratio Analysis',
+  triggers: ['loss ratio', 'claims ratio', 'underwriting performance'],
+  steps: [
+    'Calculate total claims paid for each policy period',
+    'Calculate total premiums earned for same period',
+    'Compute loss ratio as (claims_paid / premiums_earned) * 100',
+    'Segment by policy type, geography, and underwriter',
+    'Identify policies with loss ratio > 100% (losing money)',
+    'Calculate trend over time using rolling 12-month windows',
+  ],
+  notes: 'Use incurred date for claims, not paid date. Exclude reinsurance recoveries.',
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `task` | `string` | Yes | Name of the analytical task |
+| `steps` | `string[]` | Yes | Sequential steps to execute |
+| `triggers` | `string[]` | No | Phrases that should activate this workflow |
+| `notes` | `string` | No | Additional context or warnings |
+
+### quirk(input)
+
+Documents a data edge case or database-specific issue and how to handle it. Quirks prevent the system from producing incorrect results due to known data problems.
+
+```typescript
+import { quirk } from '@deepagents/context';
+
+quirk({
+  issue: 'Citizen IDs contain leading zeros but are stored as integers, losing the zeros',
+  workaround: "Always cast to VARCHAR and use LPAD(citizen_id::VARCHAR, 10, '0') to restore leading zeros",
+});
+
+quirk({
+  issue: 'Flight times crossing midnight show as negative duration (landing before takeoff)',
+  workaround: "Add 24 hours when calculated duration < 0: CASE WHEN duration < 0 THEN duration + INTERVAL '24 hours' ELSE duration END",
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `issue` | `string` | Yes | Description of the quirk or edge case |
+| `workaround` | `string` | Yes | How to handle the issue |
+
+## Structure
+
+### principle(input)
+
+Establishes a high-level guiding principle that shapes agent behavior. Principles can contain policies as specific rules that implement the principle.
+
+```typescript
+import { principle } from '@deepagents/context';
+
+principle({
+  title: 'Separation of concerns',
+  description: 'Each module should have a single, well-defined responsibility',
+  policies: [
+    'Data access logic stays in repository layer',
+    'Business rules stay in service layer',
+    'Presentation logic stays in controller/view layer',
+  ],
+});
+
+principle({
+  title: 'Risk assessment',
+  description: 'Evaluate consequences before taking action',
+  policies: [
+    'For exploratory tasks, missing optional parameters is LOW risk',
+    'Prefer calling tools with available information over asking the user',
+  ],
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `title` | `string` | Yes | Name of the principle |
+| `description` | `string` | Yes | What it means and why it matters |
+| `policies` | `FragmentData[]` | No | Specific rules that implement this principle |
+
+### policy(input)
+
+Defines a prerequisite rule ("must do X before Y") or a sub-rule within a principle. Policies differ from guardrails: policies are prerequisites, guardrails are prohibitions.
+
+```typescript
+import { policy } from '@deepagents/context';
+
+policy({
+  rule: 'Validate SQL syntax',
+  before: 'executing any query against the database',
+  reason: 'Catches errors early and allows correction before execution',
+});
+
+policy({
+  rule: 'Order of operations: Ensure taking an action does not prevent a subsequent necessary action',
+  policies: [
+    'The user may request actions in a random order, but you may need to reorder operations',
+  ],
+});
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `rule` | `string` | Yes | The policy rule to enforce |
+| `before` | `string` | No | What action this is a prerequisite for |
+| `reason` | `string` | No | Why this rule matters |
+| `policies` | `FragmentData[]` | No | Nested sub-policies |
+
+## Combined Example
+
+A real-world setup combining multiple domain fragment types with `ContextEngine`:
+
+```typescript
+import {
+  ContextEngine,
+  SqliteContextStore,
+  XmlRenderer,
+  role,
+  term,
+  hint,
+  guardrail,
+  glossary,
+  explain,
+  example,
+  clarification,
+  workflow,
+  quirk,
+  styleGuide,
+  user,
+} from '@deepagents/context';
+
+const store = new SqliteContextStore('./analytics.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'analyst-1',
+}).set(
+  role('You are a data analyst for a SaaS company.'),
+
+  term('MRR', 'monthly recurring revenue'),
+  term('ARR', 'annual recurring revenue - MRR * 12'),
+  term('logo churn', 'percentage of customers lost in a period'),
+
+  glossary({
+    'revenue': 'SUM(subscriptions.amount)',
+    'active user': "last_login > NOW() - INTERVAL '30 days'",
+    'churned': "status = 'churned'",
+  }),
+
+  hint('Always exclude trial accounts from revenue calculations'),
+  hint('Use subscription start date, not account creation date, for cohort analysis'),
+
+  guardrail({
+    rule: 'Never expose individual customer payment amounts',
+    reason: 'Confidential billing data',
+    action: 'Provide aggregates by plan tier instead',
+  }),
+
+  explain({
+    concept: 'net revenue retention',
+    explanation: 'Measures if existing customers are spending more or less over time, ignoring new sales',
+    therefore: 'Calculate as (MRR from existing customers this month / MRR from same customers last month) * 100',
+  }),
+
+  clarification({
+    when: "user asks about 'churn'",
+    ask: 'Do you mean logo churn (customer count) or revenue churn (dollar amount)?',
+    reason: 'Losing 10 small customers differs from losing 1 enterprise customer',
+  }),
+
+  quirk({
+    issue: 'Legacy accounts from 2019 migration have NULL plan_type',
+    workaround: "Treat NULL plan_type as 'basic' for those accounts",
+  }),
+
+  workflow({
+    task: 'Monthly Cohort Analysis',
+    triggers: ['cohort', 'retention curve'],
+    steps: [
+      'Group customers by subscription start month',
+      'For each cohort, track active status at month 1, 3, 6, 12',
+      'Calculate retention rate at each interval',
+      'Compare cohorts to identify trends',
+    ],
+  }),
+
+  styleGuide({
+    prefer: 'Use plan_tier names (Basic, Pro, Enterprise) in output, not internal plan_id codes',
+    always: 'Include the date range in every aggregation result',
+  }),
+);
+
+context.set(user('What is our net revenue retention for Q4?'));
+
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
+```
+
+All domain fragments render into the `systemPrompt` string. The renderer (XML, Markdown, TOML) determines the output format. Message fragments (`user`, `assistant`) go to the `messages` array.
+
+## Next Steps
+
+- [Fragments](/docs/context/fragments) - Fragment structure and type system
+- [Renderers Overview](/docs/context/renderers-overview) - How fragments become formatted prompts
+- [Context Engine](/docs/context/context-engine) - Managing fragments with ContextEngine

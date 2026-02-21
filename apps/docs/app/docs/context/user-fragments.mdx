@@ -1,0 +1,184 @@
+---
+title: User Fragments
+description: Fragment builders for user identity, preferences, and personalization
+---
+
+User fragments capture who the user is, how they want responses delivered, and corrections they have made. These fragments tailor AI responses to individual users without modifying domain knowledge.
+
+## Identity
+
+### identity(input)
+
+Defines the user's name and/or role. Helps the AI tailor explanations and terminology to the user's perspective.
+
+```typescript
+import { identity } from '@deepagents/context';
+
+identity({ name: 'John', role: 'VP of Sales' });
+identity({ role: 'Data analyst in the marketing team' });
+identity({ name: 'Sarah' });
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `name` | `string` | No | The user's name |
+| `role` | `string` | No | The user's role or position |
+
+### persona(input)
+
+Configures the AI assistant's identity, expertise, and communication style.
+
+```typescript
+import { persona } from '@deepagents/context';
+
+persona({
+  name: 'DataBot',
+  role: 'SQL Expert',
+  objective: 'Generate accurate SQL queries from natural language',
+  tone: 'professional',
+});
+
+persona({ name: 'QueryMaster', role: 'Database Analyst' });
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `name` | `string` | Yes | The persona's name |
+| `role` | `string` | No | The persona's expertise or identity |
+| `objective` | `string` | No | What the persona should accomplish |
+| `tone` | `string` | No | Communication style (e.g., friendly, professional, concise) |
+
+## Vocabulary
+
+### alias(term, meaning)
+
+Defines user-specific vocabulary overrides. When a user calls something by a non-standard name, `alias` maps their language to the correct meaning.
+
+```typescript
+import { alias } from '@deepagents/context';
+
+alias('the big table', 'the orders table');
+alias('revenue', 'gross revenue before deductions, not net');
+alias('Q4', 'October through December, not fiscal Q4');
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `term` | `string` | Yes | The term the user uses |
+| `meaning` | `string` | Yes | What the user means by this term |
+
+### alias vs term
+
+Both deal with vocabulary, but they serve different purposes:
+
+| | `alias()` | `term()` |
+| --- | --- | --- |
+| **Scope** | Per-user | Domain-wide |
+| **Purpose** | Rename: maps user language to correct meaning | Define: explains domain terminology |
+| **Example** | `alias('the big table', 'the orders table')` | `term('NPL', 'non-performing loan')` |
+
+Use `term()` to teach the system what "NPL" means across all users. Use `alias()` when one user says "the big table" but means `orders`.
+
+## Preferences
+
+### preference(aspect, value)
+
+Declares output formatting or behavioral preferences that apply across all interactions with this user.
+
+```typescript
+import { preference } from '@deepagents/context';
+
+preference('date format', 'YYYY-MM-DD');
+preference('output style', 'tables over charts unless trend data');
+preference('detail level', 'always show the SQL query in responses');
+preference('row limit', 'default to 50 rows unless I ask for more');
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `aspect` | `string` | Yes | What aspect of output this preference applies to |
+| `value` | `string` | Yes | The user's preference |
+
+### userContext(description)
+
+Captures the user's current working focus. This is temporary context that informs defaults and suggestions, and should be updated as the user's focus shifts.
+
+```typescript
+import { userContext } from '@deepagents/context';
+
+userContext('Preparing Q4 board presentation');
+userContext('Investigating drop in signups last week');
+userContext('Debugging discrepancy in revenue numbers');
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `description` | `string` | Yes | What the user is currently working on |
+
+## Learning
+
+### correction(subject, clarification)
+
+Records a user correction to prevent the same mistake from happening again. Use this when the user corrects a misunderstanding about data, columns, or business logic.
+
+```typescript
+import { correction } from '@deepagents/context';
+
+correction('status column', '1 = active, 0 = inactive, not boolean true/false');
+correction('orders table', 'Use orders_v2, not the deprecated legacy_orders table');
+correction('revenue calculation', 'Must exclude refunds and chargebacks');
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `subject` | `string` | Yes | What was misunderstood |
+| `clarification` | `string` | Yes | The correct understanding |
+
+## Combined Example
+
+Here is a full setup using `ContextEngine` with multiple user fragments:
+
+```typescript
+import {
+  ContextEngine,
+  SqliteContextStore,
+  XmlRenderer,
+  identity,
+  persona,
+  alias,
+  preference,
+  userContext,
+  correction,
+  role,
+  user,
+} from '@deepagents/context';
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(
+  role('You are a data assistant.'),
+  identity({ name: 'Sarah', role: 'Finance manager' }),
+  persona({ name: 'Freya', role: 'Data Assistant', tone: 'professional' }),
+  alias('revenue', 'gross revenue before deductions'),
+  alias('the big table', 'the orders table'),
+  preference('date format', 'YYYY-MM-DD'),
+  preference('output style', 'tables over charts'),
+  userContext('Preparing Q4 board presentation'),
+  correction('status column', '1 = active, 0 = inactive'),
+);
+
+context.set(user('Show me revenue by region for Q4'));
+
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
+```
+
+## Next Steps
+
+- [Fragments](/docs/context/fragments) - Fragment structure and core helpers
+- [Context Engine](/docs/context/context-engine) - Managing fragments with ContextEngine
+- [Renderers Overview](/docs/context/renderers-overview) - How fragments become prompts
