@@ -218,4 +218,59 @@ export class SqliteStreamStore extends StreamStore {
   async deleteStream(streamId: string): Promise<void> {
     this.#stmt('DELETE FROM streams WHERE id = ?').run(streamId);
   }
+
+  async reopenStream(streamId: string): Promise<StreamData> {
+    return this.#transaction(() => {
+      const row = this.#stmt('SELECT * FROM streams WHERE id = ?').get(
+        streamId,
+      ) as
+        | {
+            id: string;
+            status: StreamStatus;
+          }
+        | undefined;
+
+      if (!row) {
+        throw new Error(`Stream "${streamId}" not found`);
+      }
+      if (
+        row.status !== 'completed' &&
+        row.status !== 'failed' &&
+        row.status !== 'cancelled'
+      ) {
+        throw new Error(
+          `Cannot reopen stream "${streamId}" with status "${row.status}". Only terminal streams can be reopened.`,
+        );
+      }
+
+      this.#stmt('DELETE FROM streams WHERE id = ?').run(streamId);
+      const now = Date.now();
+      this.#stmt(
+        `INSERT INTO streams (id, status, createdAt, startedAt, finishedAt, cancelRequestedAt, error)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(streamId, 'queued', now, null, null, null, null);
+
+      return {
+        id: streamId,
+        status: 'queued',
+        createdAt: now,
+        startedAt: null,
+        finishedAt: null,
+        cancelRequestedAt: null,
+        error: null,
+      };
+    });
+  }
+
+  #transaction<T>(callback: () => T): T {
+    try {
+      this.#db.exec('BEGIN IMMEDIATE');
+      const result = callback();
+      this.#db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
 }

@@ -938,4 +938,180 @@ describe('Stream Chunks', () => {
       });
     });
   });
+
+  describe('StreamManager.reopen()', () => {
+    it('should reopen a completed stream as queued with no old chunks', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+        await store.appendChunks([
+          createChunk(streamId, 0),
+          createChunk(streamId, 1),
+        ]);
+        await store.updateStreamStatus(streamId, 'completed');
+
+        const result = await streams.reopen(streamId);
+
+        assert.strictEqual(result.created, true);
+        assert.strictEqual(result.stream.status, 'queued');
+        assert.strictEqual(result.stream.startedAt, null);
+        assert.strictEqual(result.stream.finishedAt, null);
+        assert.strictEqual(result.stream.error, null);
+
+        const chunks = await store.getChunks(streamId);
+        assert.strictEqual(chunks.length, 0);
+      });
+    });
+
+    it('should reopen a failed stream', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+        await store.appendChunks([createChunk(streamId, 0)]);
+        await store.updateStreamStatus(streamId, 'failed', {
+          error: 'API timeout',
+        });
+
+        const result = await streams.reopen(streamId);
+
+        assert.strictEqual(result.created, true);
+        assert.strictEqual(result.stream.status, 'queued');
+        assert.strictEqual(result.stream.error, null);
+
+        const chunks = await store.getChunks(streamId);
+        assert.strictEqual(chunks.length, 0);
+      });
+    });
+
+    it('should reopen a cancelled stream', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+        await store.updateStreamStatus(streamId, 'cancelled');
+
+        const result = await streams.reopen(streamId);
+
+        assert.strictEqual(result.created, true);
+        assert.strictEqual(result.stream.status, 'queued');
+        assert.strictEqual(result.stream.cancelRequestedAt, null);
+      });
+    });
+
+    it('should throw when trying to reopen a running stream', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+
+        await assert.rejects(
+          () => streams.reopen(streamId),
+          /Cannot reopen stream .* with status "running"/,
+        );
+
+        const unchanged = await store.getStream(streamId);
+        assert.ok(unchanged);
+        assert.strictEqual(unchanged.status, 'running');
+      });
+    });
+
+    it('should throw when trying to reopen a queued stream', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+
+        await assert.rejects(
+          () => streams.reopen(streamId),
+          /Cannot reopen stream .* with status "queued"/,
+        );
+      });
+    });
+
+    it('should throw for a non-existent stream', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await assert.rejects(
+          () => streams.reopen(streamId),
+          /Stream .* not found/,
+        );
+      });
+    });
+
+    it('should throw on double reopen (second call sees queued status)', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+        await store.updateStreamStatus(streamId, 'completed');
+
+        await streams.reopen(streamId);
+
+        await assert.rejects(
+          () => streams.reopen(streamId),
+          /Cannot reopen stream .* with status "queued"/,
+        );
+      });
+    });
+
+    it('should allow persist() after reopen()', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+
+        await streams.register(streamId);
+        await store.updateStreamStatus(streamId, 'running');
+        await store.appendChunks([createChunk(streamId, 0)]);
+        await store.updateStreamStatus(streamId, 'completed');
+
+        await streams.reopen(streamId);
+
+        const newStream = new ReadableStream({
+          start(controller) {
+            controller.enqueue({
+              type: 'text-start',
+              id: 'new-part',
+            });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'new-part',
+              delta: 'reopened content',
+            });
+            controller.enqueue({
+              type: 'text-end',
+              id: 'new-part',
+            });
+            controller.close();
+          },
+        });
+
+        await streams.persist(newStream, streamId, { strategy: 'immediate' });
+
+        const after = await store.getStream(streamId);
+        assert.ok(after);
+        assert.strictEqual(after.status, 'completed');
+
+        const chunks = await store.getChunks(streamId);
+        assert.ok(chunks.length >= 3);
+        assert.deepStrictEqual(chunks[0].data, {
+          type: 'text-start',
+          id: 'new-part',
+        });
+      });
+    });
+  });
 });

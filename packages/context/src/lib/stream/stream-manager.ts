@@ -162,6 +162,13 @@ export class StreamManager {
     });
   }
 
+  async reopen(
+    streamId: string,
+  ): Promise<{ stream: StreamData; created: boolean }> {
+    const stream = await this.#store.reopenStream(streamId);
+    return { stream, created: true };
+  }
+
   async cleanup(streamId: string): Promise<void> {
     await this.#store.deleteStream(streamId);
   }

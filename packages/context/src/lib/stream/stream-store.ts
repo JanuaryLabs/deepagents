@@ -46,4 +46,6 @@ export abstract class StreamStore {
   ): Promise<StreamChunkData[]>;
 
   abstract deleteStream(streamId: string): Promise<void>;
+
+  abstract reopenStream(streamId: string): Promise<StreamData>;
 }

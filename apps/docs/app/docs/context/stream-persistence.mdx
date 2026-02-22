@@ -78,6 +78,7 @@ const store = new SqliteStreamStore(db);
 | `appendChunks(chunks)` | Batch-insert chunks (transactional in SQLite) |
 | `getChunks(streamId, fromSeq?, limit?)` | Fetch chunks ordered by `seq`, optionally starting from `fromSeq` |
 | `deleteStream(streamId)` | Delete stream and all its chunks (cascading) |
+| `reopenStream(streamId)` | Atomically delete a terminal stream and re-create it as `queued`. Throws if the stream is not found or not in a terminal status |
 
 ## StreamManager
 
@@ -165,6 +166,18 @@ Deletes the stream record and all associated chunks.
 ```typescript
 await manager.cleanup('stream-abc');
 ```
+
+### reopen(streamId)
+
+Atomically clears a terminal stream (deletes old chunks and record) and re-registers it as `queued`. Use this to reuse a `streamId` for a new generation cycle — for example, when continuing a multi-turn conversation on the same stream.
+
+```typescript
+const { stream, created } = await manager.reopen('stream-abc');
+// stream.status === 'queued', created === true
+// Old chunks are deleted — call persist() with a new ReadableStream
+```
+
+Throws if the stream does not exist or is not in a terminal status (`completed`, `failed`, `cancelled`). This prevents accidentally destroying an in-progress stream.
 
 ## persistedWriter
 
@@ -265,26 +278,26 @@ Each client replays from the beginning and tails until the stream reaches a term
             │
             v
         ┌────────┐
-        │ queued  │
-        └───┬────┘
-            │  persist()
-            v
-        ┌─────────┐
-        │ running  │
-        └──┬──┬──┬─┘
-           │  │  │
-      ok   │  │  │  cancel()
-           v  │  v
-  ┌───────────┐ │ ┌───────────┐
-  │ completed │ │ │ cancelled │
-  └───────────┘ │ └───────────┘
-                v
-          ┌────────┐
-          │ failed │
+        │ queued  │ ◄──── reopen()
+        └───┬────┘        (deletes old chunks,
+            │  persist()   re-creates as queued)
+            v                  │
+        ┌─────────┐            │
+        │ running  │           │
+        └──┬──┬──┬─┘          │
+           │  │  │             │
+      ok   │  │  │  cancel()   │
+           v  │  v             │
+  ┌───────────┐ │ ┌───────────┐│
+  │ completed │─┤ │ cancelled │┤
+  └───────────┘ │ └───────────┘│
+                v              │
+          ┌────────┐           │
+          │ failed │───────────┘
           └────────┘
 ```
 
-Terminal statuses (`completed`, `failed`, `cancelled`) cause `watch()` to close after draining remaining chunks.
+Terminal statuses (`completed`, `failed`, `cancelled`) cause `watch()` to close after draining remaining chunks. Call `reopen()` on any terminal stream to reset it for a new generation cycle.
 
 ## Custom StreamStore
 
@@ -302,6 +315,76 @@ class PostgresStreamStore extends StreamStore {
   async appendChunks(chunks: StreamChunkData[]): Promise<void> { /* ... */ }
   async getChunks(streamId: string, fromSeq?: number, limit?: number): Promise<StreamChunkData[]> { /* ... */ }
   async deleteStream(streamId: string): Promise<void> { /* ... */ }
+  async reopenStream(streamId: string): Promise<StreamData> { /* ... */ }
+}
+```
+
+## Multi-Turn Conversation Flow
+
+In a chat application, the agent may finish a turn by requesting user input — for example, asking the user to approve a SQL query before executing it. The stream completes, but the conversation continues. `reopen()` lets you reuse the same `streamId` for each turn without leaking old chunks.
+
+Conversation history is stored separately in the context store (the message DAG). Stream chunks are ephemeral transport — they exist for SSE delivery and client reconnection during an active stream, not for permanent storage.
+
+```
+Turn 1: User asks a question
+  register(streamId) → queued
+  persist(chatStream, streamId) → running → completed
+  Client watches → sees tool-call → shows approval UI
+
+Turn 2: User approves (conversation continues)
+  reopen(streamId) → deletes old chunks, re-queued
+  persist(newChatStream, streamId) → running → completed
+  Client re-watches → sees Turn 2 response
+
+Turn N: Same pattern...
+```
+
+### Server Example
+
+```typescript
+import { StreamManager, SqliteStreamStore } from '@deepagents/context';
+
+const manager = new StreamManager({
+  store: new SqliteStreamStore('./streams.db'),
+});
+
+async function handleChatTurn(
+  streamId: string,
+  chatStream: ReadableStream,
+  isFirstTurn: boolean,
+) {
+  if (isFirstTurn) {
+    await manager.register(streamId);
+  } else {
+    await manager.reopen(streamId);
+  }
+
+  manager.persist(chatStream, streamId, { strategy: 'immediate' });
+
+  return manager.watch(streamId);
+}
+```
+
+### With Idempotent Registration
+
+When you don't know whether it's the first turn, use `register()` first. If the stream already exists and is terminal, call `reopen()`.
+
+```typescript
+async function handleChatRequest(
+  streamId: string,
+  chatStream: ReadableStream,
+) {
+  const { stream, created } = await manager.register(streamId);
+
+  if (!created) {
+    if (stream.status === 'queued' || stream.status === 'running') {
+      return manager.watch(streamId);
+    }
+    await manager.reopen(streamId);
+  }
+
+  manager.persist(chatStream, streamId, { strategy: 'immediate' });
+  return manager.watch(streamId);
 }
 ```
 
