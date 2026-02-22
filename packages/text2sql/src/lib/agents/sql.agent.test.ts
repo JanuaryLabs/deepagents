@@ -1,8 +1,16 @@
-import { APICallError } from 'ai';
+import {
+  APICallError,
+  JSONParseError,
+  NoContentGeneratedError,
+  NoObjectGeneratedError,
+  NoOutputGeneratedError,
+  TypeValidationError,
+} from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { fragment } from '@deepagents/context';
 import {
   SQLValidationError,
   UnanswerableSQLError,
@@ -27,7 +35,7 @@ const testUsage = {
     reasoning: undefined,
   },
 } as const;
-/** Helper to create a MockLanguageModelV2 that returns a structured response */
+/** Helper to create a MockLanguageModelV3 that returns a structured response */
 function createMockModel(response: MockModelResponse) {
   return new MockLanguageModelV3({
     doGenerate: {
@@ -39,7 +47,7 @@ function createMockModel(response: MockModelResponse) {
   });
 }
 
-/** Helper to create a MockLanguageModelV2 that throws an error */
+/** Helper to create a MockLanguageModelV3 that throws an error */
 function createThrowingModel(errorFactory: () => Error) {
   return new MockLanguageModelV3({
     doGenerate: async () => {
@@ -167,6 +175,47 @@ describe('toSql', () => {
     assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 2, '');
     assert.ok(result.errors?.[0]?.includes('Schema validation failed'));
+  });
+
+  it('does not retry when model is not found', async () => {
+    const { adapter } = await init_db('', { validate: () => undefined });
+    let attempts = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        attempts += 1;
+        throw new APICallError({
+          message:
+            'The model `gpt-oss-20b` does not exist or you do not have access to it.',
+          url: 'https://api.groq.com/openai/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 404,
+          responseBody:
+            '{"error":{"message":"The model `gpt-oss-20b` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}',
+          isRetryable: false,
+        });
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        toSql({
+          input: 'query',
+          adapter,
+          schemaFragments: [],
+          instructions: [],
+          model,
+          maxRetries: 3,
+        }),
+      (error) => {
+        assert(APICallError.isInstance(error));
+        assert(
+          error.message.includes('does not exist or you do not have access'),
+        );
+        return true;
+      },
+    );
+
+    assert.strictEqual(attempts, 1);
   });
 
   it('throws SQLValidationError when retries exhausted', async () => {
@@ -732,6 +781,233 @@ describe('toSql', () => {
       assert.strictEqual(result1.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result2.sql, adapter.format('SELECT 2'));
       assert.strictEqual(result3.sql, adapter.format('SELECT 3'));
+    });
+  });
+
+  describe('retryable AI SDK errors', () => {
+    it('retries on JSONParseError and succeeds on next attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        new JSONParseError({
+          text: '{ bad json',
+          cause: new SyntaxError('Unexpected token'),
+        }),
+        { sql: 'SELECT 1' },
+      ]);
+
+      const result = await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [],
+        instructions: [],
+        model,
+      });
+
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result.attempts, 2);
+      assert.strictEqual(result.errors?.length, 1);
+      assert.strictEqual(calls.length, 2);
+    });
+
+    it('retries on TypeValidationError and succeeds on next attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        new TypeValidationError({
+          value: { invalid: true },
+          cause: new Error('Expected string, got number'),
+        }),
+        { sql: 'SELECT 1' },
+      ]);
+
+      const result = await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [],
+        instructions: [],
+        model,
+      });
+
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result.attempts, 2);
+      assert.strictEqual(result.errors?.length, 1);
+      assert.strictEqual(calls.length, 2);
+    });
+
+    it('retries on NoObjectGeneratedError and succeeds on next attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        new NoObjectGeneratedError({
+          response: { id: 'r1', timestamp: new Date(), modelId: 'test' },
+          usage: {
+            inputTokens: 10,
+            inputTokenDetails: {
+              noCacheTokens: 10,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            outputTokens: 0,
+            outputTokenDetails: {
+              textTokens: 0,
+              reasoningTokens: 0,
+            },
+            totalTokens: 10,
+          },
+          finishReason: 'error',
+        }),
+        { sql: 'SELECT 1' },
+      ]);
+
+      const result = await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [],
+        instructions: [],
+        model,
+      });
+
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result.attempts, 2);
+      assert.strictEqual(result.errors?.length, 1);
+      assert.strictEqual(calls.length, 2);
+    });
+
+    it('retries on NoOutputGeneratedError and succeeds on next attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        new NoOutputGeneratedError(),
+        { sql: 'SELECT 1' },
+      ]);
+
+      const result = await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [],
+        instructions: [],
+        model,
+      });
+
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result.attempts, 2);
+      assert.strictEqual(result.errors?.length, 1);
+      assert.strictEqual(calls.length, 2);
+    });
+
+    it('retries on NoContentGeneratedError and succeeds on next attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        new NoContentGeneratedError(),
+        { sql: 'SELECT 1' },
+      ]);
+
+      const result = await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [],
+        instructions: [],
+        model,
+      });
+
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result.attempts, 2);
+      assert.strictEqual(result.errors?.length, 1);
+      assert.strictEqual(calls.length, 2);
+    });
+  });
+
+  describe('non-retryable errors', () => {
+    it('does not retry on unknown error types and makes only one attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        new Error('Unknown internal failure'),
+        { sql: 'SELECT 1' },
+      ]);
+
+      await assert.rejects(
+        () =>
+          toSql({
+            input: 'query',
+            adapter,
+            schemaFragments: [],
+            instructions: [],
+            model,
+            maxRetries: 3,
+          }),
+        (error: unknown) => {
+          assert(error instanceof Error);
+          assert.strictEqual(error.message, 'Unknown internal failure');
+          return true;
+        },
+      );
+
+      assert.strictEqual(calls.length, 1);
+    });
+
+    it('does not retry UnanswerableSQLError and makes only one attempt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([
+        { error: 'No table matches this question' },
+        { sql: 'SELECT 1' },
+      ]);
+
+      await assert.rejects(
+        () =>
+          toSql({
+            input: 'query',
+            adapter,
+            schemaFragments: [],
+            instructions: [],
+            model,
+            maxRetries: 3,
+          }),
+        (error: unknown) => {
+          assert(UnanswerableSQLError.isInstance(error));
+          return true;
+        },
+      );
+
+      assert.strictEqual(calls.length, 1);
+    });
+  });
+
+  describe('prompt assembly', () => {
+    it('includes schemaFragments in model prompt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([{ sql: 'SELECT 1' }]);
+
+      await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [
+          fragment('db_schema', 'CREATE TABLE orders (id INT, total DECIMAL)'),
+        ],
+        instructions: [],
+        model,
+      });
+
+      const promptContent = JSON.stringify(calls[0].messages);
+      assert.ok(
+        promptContent.includes('CREATE TABLE orders'),
+        'Prompt should contain schema fragment content',
+      );
+    });
+
+    it('includes instructions in model prompt', async () => {
+      const { adapter } = await init_db('', { validate: () => undefined });
+      const { model, calls } = createCapturingModel([{ sql: 'SELECT 1' }]);
+
+      await toSql({
+        input: 'query',
+        adapter,
+        schemaFragments: [],
+        instructions: [fragment('rule', 'Always use LIMIT 10')],
+        model,
+      });
+
+      const promptContent = JSON.stringify(calls[0].messages);
+      assert.ok(
+        promptContent.includes('Always use LIMIT 10'),
+        'Prompt should contain instruction fragment content',
+      );
     });
   });
 

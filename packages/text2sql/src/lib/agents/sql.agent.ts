@@ -132,25 +132,28 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
       const sqlOutput = structuredOutput({
         model: model,
         context,
-        schema: z.union([
-          z.object({
-            sql: z.string().describe('The SQL query that answers the question'),
-            reasoning: z
-              .string()
-              .optional()
-              .describe('The reasoning steps taken to generate the SQL'),
-          }),
-          z.object({
-            error: z
-              .string()
-              .describe(
-                'Error message explaining why the question cannot be answered with the given schema',
-              ),
-          }),
-        ]),
+        schema: z.object({
+          result: z.union([
+            z.object({
+              sql: z
+                .string()
+                .describe('The SQL query that answers the question'),
+              reasoning: z
+                .string()
+                .describe('The reasoning steps taken to generate the SQL'),
+            }),
+            z.object({
+              error: z
+                .string()
+                .describe(
+                  'Error message explaining why the question cannot be answered with the given schema',
+                ),
+            }),
+          ]),
+        }),
       });
 
-      const output = await sqlOutput.generate();
+      const { result: output } = await sqlOutput.generate();
 
       // Handle error responses (question is unanswerable with given schema)
       if ('error' in output) {
@@ -187,6 +190,36 @@ function formatErrorMessage(error: Error) {
   return error.message;
 }
 
+function isModelUnavailableError(error: unknown): boolean {
+  if (!APICallError.isInstance(error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const responseBody = (error.responseBody ?? '').toLowerCase();
+  const is404ModelError =
+    error.statusCode === 404 &&
+    (message.includes('model') || responseBody.includes('model_not_found'));
+  const errorCode =
+    typeof error.data === 'object' &&
+    error.data !== null &&
+    'error' in error.data &&
+    typeof error.data.error === 'object' &&
+    error.data.error !== null &&
+    'code' in error.data.error &&
+    typeof error.data.error.code === 'string'
+      ? error.data.error.code.toLowerCase()
+      : undefined;
+
+  return (
+    is404ModelError ||
+    errorCode === 'model_not_found' ||
+    responseBody.includes('"code":"model_not_found"') ||
+    (message.includes('model') &&
+      message.includes('does not exist or you do not have access to it'))
+  );
+}
+
 async function withRetry<T>(
   computation: (
     attemptNumber: number,
@@ -206,6 +239,10 @@ async function withRetry<T>(
       shouldRetry: (context) => {
         // Don't retry if unanswerable - it's intentional
         if (UnanswerableSQLError.isInstance(context.error)) {
+          return false;
+        }
+        // Don't retry if the selected model is unavailable
+        if (isModelUnavailableError(context.error)) {
           return false;
         }
         // Retry on validation errors

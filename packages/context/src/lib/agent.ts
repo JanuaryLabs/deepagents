@@ -1,5 +1,7 @@
 import {
+  type FlexibleSchema,
   type GenerateTextResult,
+  type InferSchema,
   Output,
   type StreamTextResult,
   type StreamTextTransform,
@@ -15,7 +17,6 @@ import {
   streamText,
 } from 'ai';
 import chalk from 'chalk';
-import z from 'zod';
 
 import { type AgentModel, createRepairToolCall } from '@deepagents/agent';
 
@@ -335,7 +336,7 @@ export function agent<CIn, COut = CIn>(
 /**
  * Options for creating a structured output handler.
  */
-export interface StructuredOutputOptions<TSchema extends z.ZodType> {
+export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
   context?: ContextEngine;
   model?: AgentModel;
   schema: TSchema;
@@ -369,11 +370,11 @@ export interface StructuredOutputOptions<TSchema extends z.ZodType> {
  * const stream = await output.stream({});
  * ```
  */
-export interface StructuredOutputResult<TSchema extends z.ZodType> {
+export interface StructuredOutputResult<TSchema extends FlexibleSchema> {
   generate<CIn>(
     contextVariables?: CIn,
     config?: { abortSignal?: AbortSignal },
-  ): Promise<z.infer<TSchema>>;
+  ): Promise<InferSchema<TSchema>>;
   stream<CIn>(
     contextVariables?: CIn,
     config?: {
@@ -383,14 +384,14 @@ export interface StructuredOutputResult<TSchema extends z.ZodType> {
   ): Promise<StreamTextResult<ToolSet, any>>;
 }
 
-export function structuredOutput<TSchema extends z.ZodType>(
+export function structuredOutput<TSchema extends FlexibleSchema>(
   options: StructuredOutputOptions<TSchema>,
 ): StructuredOutputResult<TSchema> {
   return {
     async generate<CIn>(
       contextVariables?: CIn,
       config?: { abortSignal?: AbortSignal },
-    ): Promise<z.infer<TSchema>> {
+    ): Promise<InferSchema<TSchema>> {
       if (!options.context) {
         throw new Error(`structuredOutput is missing a context.`);
       }
@@ -415,7 +416,7 @@ export function structuredOutput<TSchema extends z.ZodType>(
         tools: options.tools,
       });
 
-      return result.output as z.infer<TSchema>;
+      return result.output as InferSchema<TSchema>;
     },
 
     async stream<CIn>(
