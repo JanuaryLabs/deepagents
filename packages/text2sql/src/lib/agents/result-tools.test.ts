@@ -298,6 +298,183 @@ describe('bash tool reasoning contract', () => {
   });
 });
 
+describe('sql proxy enforcement', () => {
+  it('blocks direct DB CLI via tool path and redirects to sql validate/run', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: 'psql -c "SELECT 1"',
+        reasoning: 'Try direct db CLI',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks raw SQL command via tool path', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: 'SELECT 1',
+        reasoning: 'Try raw SQL directly',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks invalid sql subcommand via tool path', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: 'sql explain "SELECT 1"',
+        reasoning: 'Try unsupported sql subcommand',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks direct DB CLI via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand('sqlite3 app.db "SELECT 1"');
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('allows sql validate/run but blocks compound command containing direct DB CLI', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const validResult = await sandbox.executeCommand('sql validate "SELECT 1"');
+    assert.strictEqual(validResult.exitCode, 0);
+
+    const runResult = await sandbox.executeCommand(
+      'sql run "SELECT 1 as value"',
+    );
+    assert.strictEqual(runResult.exitCode, 0);
+
+    const blockedCompound = await sandbox.executeCommand(
+      'echo ok && psql -c "SELECT 1"',
+    );
+    assert.notStrictEqual(blockedCompound.exitCode, 0);
+    assert.match(
+      blockedCompound.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(blockedCompound.stderr, /sql validate/i);
+    assert.match(blockedCompound.stderr, /sql run/i);
+  });
+
+  it('blocks direct DB CLI in command substitution', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: 'echo $(psql -c "SELECT 1")',
+        reasoning: 'Try command substitution bypass',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+
+  it('does not block non-invoked function definitions', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'f(){ psql -c "SELECT 1"; }; echo ok',
+    );
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.match(result.stdout, /ok/);
+  });
+
+  it('blocks invoked functions that run direct DB CLI', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'f(){ psql -c "SELECT 1"; }; f',
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Path Resolution Edge Cases
 // Tests for the mountPoint: '/' fix that prevents files appearing at wrong paths

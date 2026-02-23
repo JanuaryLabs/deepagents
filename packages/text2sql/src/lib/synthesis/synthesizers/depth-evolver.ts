@@ -247,8 +247,7 @@ export class DepthEvolver extends PairProducer {
       const sqlResult = await toSql({
         input: evolvedQuestion,
         adapter: this.adapter,
-        schemaFragments: [], // Placeholder - needs to pass actual fragments
-        instructions: [],
+        fragments: [],
         model: this.options?.model,
       });
 

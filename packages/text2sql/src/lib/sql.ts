@@ -74,8 +74,7 @@ export class Text2Sql {
     const result = await toSql({
       input,
       adapter: this.#config.adapter,
-      schemaFragments,
-      instructions: [],
+      fragments: schemaFragments,
       model: this.#config.model,
     });
     return result.sql;

@@ -118,8 +118,7 @@ export class SchemaSynthesizer extends PairProducer {
             return await toSql({
               input: question,
               adapter: this.adapter,
-              schemaFragments: [], // Placeholder - needs to pass actual fragments
-              instructions: this.options.teachings ?? [],
+              fragments: this.options.teachings ?? [],
               model: this.options.model,
             });
           } catch (error) {

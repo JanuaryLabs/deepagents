@@ -29,10 +29,8 @@ export interface ToSqlOptions {
   input: string;
   /** Database adapter for validation */
   adapter: Adapter;
-  /** Schema fragments from adapter introspection */
-  schemaFragments: ContextFragment[];
-  /** Instructions/teachings to include */
-  instructions: ContextFragment[];
+  /** Context fragments (schema + instructions/teachings) */
+  fragments: ContextFragment[];
   /** Optional model override */
   model: AgentModel;
   /** Maximum retry attempts on validation failure (default: 3) */
@@ -104,8 +102,7 @@ export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
           objective:
             'Translate natural language questions into precise, efficient SQL queries',
         }),
-        ...options.instructions,
-        ...options.schemaFragments,
+        ...options.fragments,
       );
 
       // Add user message(s)

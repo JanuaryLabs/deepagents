@@ -19,6 +19,9 @@
       "path": "../test/tsconfig.lib.json"
     },
     {
+      "path": "../evals/tsconfig.lib.json"
+    },
+    {
       "path": "../context/tsconfig.lib.json"
     },
     {

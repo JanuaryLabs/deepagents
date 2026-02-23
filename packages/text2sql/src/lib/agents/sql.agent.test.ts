@@ -20,8 +20,8 @@ import {
 import { init_db } from '../../tests/sqlite.ts';
 
 type MockModelResponse =
-  | { sql: string; reasoning?: string }
-  | { error: string };
+  | { result: { sql: string; reasoning: string } }
+  | { result: { error: string } };
 const testUsage = {
   inputTokens: {
     total: 3,
@@ -84,14 +84,15 @@ describe('toSql', () => {
   it('returns SQL on first attempt success', async () => {
     // Arrange
     const { adapter } = await init_db('', { validate: () => undefined });
-    const model = createMockModel({ sql: 'SELECT 1' });
+    const model = createMockModel({
+      result: { sql: 'SELECT 1', reasoning: 'test' },
+    });
 
     // Act
     const result = await toSql({
       input: 'query',
       adapter,
-      schemaFragments: [],
-      instructions: [],
+      fragments: [],
       model,
     });
 
@@ -108,16 +109,15 @@ describe('toSql', () => {
       validate: () => validateResponses.shift(),
     });
     const { model, calls } = createCapturingModel([
-      { sql: 'SELECT 1' },
-      { sql: 'SELECT 1' },
+      { result: { sql: 'SELECT 1', reasoning: 'test' } },
+      { result: { sql: 'SELECT 1', reasoning: 'test' } },
     ]);
 
     // Act
     const result = await toSql({
       input: 'query',
       adapter,
-      schemaFragments: [],
-      instructions: [],
+      fragments: [],
       model,
     });
 
@@ -155,7 +155,12 @@ describe('toSql', () => {
           finishReason: { unified: 'stop', raw: '' },
           usage: testUsage,
           content: [
-            { type: 'text', text: JSON.stringify({ sql: 'SELECT 1' }) },
+            {
+              type: 'text',
+              text: JSON.stringify({
+                result: { sql: 'SELECT 1', reasoning: 'test' },
+              }),
+            },
           ],
           warnings: [],
         };
@@ -166,8 +171,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      schemaFragments: [],
-      instructions: [],
+      fragments: [],
       model,
     });
 
@@ -201,8 +205,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 3,
         }),
@@ -224,7 +227,9 @@ describe('toSql', () => {
     const { adapter } = await init_db('', {
       validate: () => validateResponses.shift(),
     });
-    const model = createMockModel({ sql: 'SELECT 1' });
+    const model = createMockModel({
+      result: { sql: 'SELECT 1', reasoning: 'test' },
+    });
 
     // Act & Assert
     await assert.rejects(
@@ -232,8 +237,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
         }),
       SQLValidationError.isInstance,
@@ -246,7 +250,9 @@ describe('toSql', () => {
     const { adapter } = await init_db('', {
       validate: () => validateResponses.shift(),
     });
-    const model = createMockModel({ sql: 'SELECT 1' });
+    const model = createMockModel({
+      result: { sql: 'SELECT 1', reasoning: 'test' },
+    });
 
     // Act & Assert
     await assert.rejects(
@@ -254,8 +260,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 5,
         }),
@@ -268,7 +273,9 @@ describe('toSql', () => {
 
   it('throws TypeError when maxRetries is 0 (invalid for p-retry)', async () => {
     const { adapter } = await init_db('', { validate: () => 'error' });
-    const model = createMockModel({ sql: 'SELECT 1' });
+    const model = createMockModel({
+      result: { sql: 'SELECT 1', reasoning: 'test' },
+    });
 
     // Act & Assert
     await assert.rejects(
@@ -276,8 +283,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 0,
         }),
@@ -292,15 +298,16 @@ describe('toSql', () => {
     const { adapter } = await init_db('', {
       validate: () => 'validation error',
     });
-    const model = createMockModel({ sql: 'SELECT 1' });
+    const model = createMockModel({
+      result: { sql: 'SELECT 1', reasoning: 'test' },
+    });
 
     await assert.rejects(
       () =>
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 1,
         }),
@@ -319,19 +326,18 @@ describe('toSql', () => {
     });
 
     const { model, calls } = createCapturingModel([
-      { sql: 'SELECT 1' }, // attempt 1
-      { sql: 'SELECT 1' }, // attempt 2
-      { sql: 'SELECT 1' }, // attempt 3
-      { sql: 'SELECT 1' }, // attempt 4
-      { sql: 'SELECT 1' }, // attempt 5
-      { sql: 'SELECT 1' }, // attempt 6 - succeeds
+      { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 1
+      { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 2
+      { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 3
+      { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 4
+      { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 5
+      { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 6 - succeeds
     ]);
 
     const result = await toSql({
       input: 'query',
       adapter,
-      schemaFragments: [],
-      instructions: [],
+      fragments: [],
       model,
       maxRetries: 6,
     });
@@ -374,7 +380,12 @@ describe('toSql', () => {
           finishReason: { unified: 'stop', raw: '' },
           usage: testUsage,
           content: [
-            { type: 'text', text: JSON.stringify({ sql: 'SELECT 1' }) },
+            {
+              type: 'text',
+              text: JSON.stringify({
+                result: { sql: 'SELECT 1', reasoning: 'test' },
+              }),
+            },
           ],
           warnings: [],
         };
@@ -385,8 +396,7 @@ describe('toSql', () => {
     const result = await toSql({
       input: 'query',
       adapter,
-      schemaFragments: [],
-      instructions: [],
+      fragments: [],
       model,
     });
 
@@ -398,7 +408,7 @@ describe('toSql', () => {
   it('throws UnanswerableSQLError immediately when question is unanswerable', async () => {
     // Arrange
     const { adapter } = await init_db('');
-    const model = createMockModel({ error: 'No matching table' });
+    const model = createMockModel({ result: { error: 'No matching table' } });
 
     // Act & Assert
     await assert.rejects(
@@ -406,8 +416,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 3,
         }),
@@ -442,8 +451,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 1,
         }),
@@ -475,8 +483,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
           maxRetries: 1,
         }),
@@ -499,8 +506,7 @@ describe('toSql', () => {
         toSql({
           input: 'query',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model,
         }),
       /Network timeout/,
@@ -539,12 +545,13 @@ describe('toSql', () => {
     ];
 
     for (const { input, expected, name } of testCases) {
-      const model = createMockModel({ sql: input });
+      const model = createMockModel({
+        result: { sql: input, reasoning: 'test' },
+      });
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -555,14 +562,15 @@ describe('toSql', () => {
   it('returns formatted SQL', async () => {
     // Arrange
     const { adapter } = await init_db('');
-    const model = createMockModel({ sql: 'SELECT 1' });
+    const model = createMockModel({
+      result: { sql: 'SELECT 1', reasoning: 'test' },
+    });
 
     // Act
     const result = await toSql({
       input: 'query',
       adapter,
-      schemaFragments: [],
-      instructions: [],
+      fragments: [],
       model,
       maxRetries: 1,
     });
@@ -574,13 +582,14 @@ describe('toSql', () => {
   describe('previous error injection', () => {
     it('does not include validation_error on first attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([{ sql: 'SELECT 1' }]);
+      const { model, calls } = createCapturingModel([
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
+      ]);
 
       await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -598,15 +607,16 @@ describe('toSql', () => {
     it('handles response with reasoning field', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const model = createMockModel({
-        sql: 'SELECT * FROM users',
-        reasoning: 'The user wants all columns from the users table',
+        result: {
+          sql: 'SELECT * FROM users',
+          reasoning: 'The user wants all columns from the users table',
+        },
       });
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -617,13 +627,12 @@ describe('toSql', () => {
 
     it('handles empty sql string in response', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const model = createMockModel({ sql: '' });
+      const model = createMockModel({ result: { sql: '', reasoning: 'test' } });
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -640,15 +649,16 @@ describe('toSql', () => {
           throw new Error('Database connection lost');
         },
       });
-      const model = createMockModel({ sql: 'SELECT 1' });
+      const model = createMockModel({
+        result: { sql: 'SELECT 1', reasoning: 'test' },
+      });
 
       await assert.rejects(
         () =>
           toSql({
             input: 'query',
             adapter,
-            schemaFragments: [],
-            instructions: [],
+            fragments: [],
             model,
             maxRetries: 1,
           }),
@@ -668,13 +678,14 @@ describe('toSql', () => {
       const { adapter } = await init_db('', {
         validate: () => undefined,
       });
-      const model = createMockModel({ sql: 'SELECT 1' });
+      const model = createMockModel({
+        result: { sql: 'SELECT 1', reasoning: 'test' },
+      });
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -687,13 +698,14 @@ describe('toSql', () => {
   describe('input edge cases', () => {
     it('handles empty input string', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const model = createMockModel({ sql: 'SELECT 1' });
+      const model = createMockModel({
+        result: { sql: 'SELECT 1', reasoning: 'test' },
+      });
 
       const result = await toSql({
         input: '',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -705,7 +717,7 @@ describe('toSql', () => {
     it('handles input with special characters', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const { model, calls } = createCapturingModel([
-        { sql: 'SELECT email FROM users' },
+        { result: { sql: 'SELECT email FROM users', reasoning: 'test' } },
       ]);
       const inputWithSpecialChars =
         "What's the user's email? (test@example.com)";
@@ -713,8 +725,7 @@ describe('toSql', () => {
       const result = await toSql({
         input: inputWithSpecialChars,
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -726,14 +737,15 @@ describe('toSql', () => {
 
     it('handles very long input', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const model = createMockModel({ sql: 'SELECT 1' });
+      const model = createMockModel({
+        result: { sql: 'SELECT 1', reasoning: 'test' },
+      });
       const longInput = 'a'.repeat(10000);
 
       const result = await toSql({
         input: longInput,
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
         maxRetries: 1,
       });
@@ -747,32 +759,35 @@ describe('toSql', () => {
     it('handles concurrent toSql calls independently', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
 
-      const model1 = createMockModel({ sql: 'SELECT 1' });
-      const model2 = createMockModel({ sql: 'SELECT 2' });
-      const model3 = createMockModel({ sql: 'SELECT 3' });
+      const model1 = createMockModel({
+        result: { sql: 'SELECT 1', reasoning: 'test' },
+      });
+      const model2 = createMockModel({
+        result: { sql: 'SELECT 2', reasoning: 'test' },
+      });
+      const model3 = createMockModel({
+        result: { sql: 'SELECT 3', reasoning: 'test' },
+      });
 
       const [result1, result2, result3] = await Promise.all([
         toSql({
           input: 'query 1',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model: model1,
           maxRetries: 1,
         }),
         toSql({
           input: 'query 2',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model: model2,
           maxRetries: 1,
         }),
         toSql({
           input: 'query 3',
           adapter,
-          schemaFragments: [],
-          instructions: [],
+          fragments: [],
           model: model3,
           maxRetries: 1,
         }),
@@ -792,14 +807,13 @@ describe('toSql', () => {
           text: '{ bad json',
           cause: new SyntaxError('Unexpected token'),
         }),
-        { sql: 'SELECT 1' },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
       });
 
@@ -816,14 +830,13 @@ describe('toSql', () => {
           value: { invalid: true },
           cause: new Error('Expected string, got number'),
         }),
-        { sql: 'SELECT 1' },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
       });
 
@@ -854,14 +867,13 @@ describe('toSql', () => {
           },
           finishReason: 'error',
         }),
-        { sql: 'SELECT 1' },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
       });
 
@@ -875,14 +887,13 @@ describe('toSql', () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const { model, calls } = createCapturingModel([
         new NoOutputGeneratedError(),
-        { sql: 'SELECT 1' },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
       });
 
@@ -896,14 +907,13 @@ describe('toSql', () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const { model, calls } = createCapturingModel([
         new NoContentGeneratedError(),
-        { sql: 'SELECT 1' },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       const result = await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [],
+        fragments: [],
         model,
       });
 
@@ -919,7 +929,7 @@ describe('toSql', () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const { model, calls } = createCapturingModel([
         new Error('Unknown internal failure'),
-        { sql: 'SELECT 1' },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       await assert.rejects(
@@ -927,8 +937,7 @@ describe('toSql', () => {
           toSql({
             input: 'query',
             adapter,
-            schemaFragments: [],
-            instructions: [],
+            fragments: [],
             model,
             maxRetries: 3,
           }),
@@ -945,8 +954,8 @@ describe('toSql', () => {
     it('does not retry UnanswerableSQLError and makes only one attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const { model, calls } = createCapturingModel([
-        { error: 'No table matches this question' },
-        { sql: 'SELECT 1' },
+        { result: { error: 'No table matches this question' } },
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
       await assert.rejects(
@@ -954,8 +963,7 @@ describe('toSql', () => {
           toSql({
             input: 'query',
             adapter,
-            schemaFragments: [],
-            instructions: [],
+            fragments: [],
             model,
             maxRetries: 3,
           }),
@@ -970,17 +978,18 @@ describe('toSql', () => {
   });
 
   describe('prompt assembly', () => {
-    it('includes schemaFragments in model prompt', async () => {
+    it('includes schema fragments in model prompt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([{ sql: 'SELECT 1' }]);
+      const { model, calls } = createCapturingModel([
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
+      ]);
 
       await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [
+        fragments: [
           fragment('db_schema', 'CREATE TABLE orders (id INT, total DECIMAL)'),
         ],
-        instructions: [],
         model,
       });
 
@@ -991,15 +1000,16 @@ describe('toSql', () => {
       );
     });
 
-    it('includes instructions in model prompt', async () => {
+    it('includes instruction fragments in model prompt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([{ sql: 'SELECT 1' }]);
+      const { model, calls } = createCapturingModel([
+        { result: { sql: 'SELECT 1', reasoning: 'test' } },
+      ]);
 
       await toSql({
         input: 'query',
         adapter,
-        schemaFragments: [],
-        instructions: [fragment('rule', 'Always use LIMIT 10')],
+        fragments: [fragment('rule', 'Always use LIMIT 10')],
         model,
       });
 

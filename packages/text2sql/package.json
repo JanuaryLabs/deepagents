@@ -86,23 +86,23 @@
     "@deepagents/agent": "0.18.0",
     "@deepagents/context": "0.18.0",
     "ai": "^6.0.90",
-    "autoevals": "^0.0.131",
     "bash-tool": "^1.3.14",
     "chalk": "^5.6.0",
     "dedent": "1.7.0",
-    "evalite": "0.19.0",
     "just-bash": "^2.10.0",
     "nano-spawn": "^1.0.3",
-    "openai": "5.12.2",
     "p-limit": "^6.2.0",
     "p-retry": "^7.1.1",
     "sql-formatter": "^15.7.2",
     "uuid": "^13.0.0",
     "xlsx": "^0.18.5",
-    "zod": "^3.25.76 || ^4.0.0"
+    "zod": "^3.25.76 || ^4.0.0",
+    "autoevals": "0.0.132",
+    "openai": "5.12.2",
+    "@deepagents/evals": "0.18.0"
   },
   "devDependencies": {
-    "evalite": "^0.19.0"
+    "autoevals": "^0.0.132"
   },
   "peerDependencies": {
     "mssql": "^12.2.0",
