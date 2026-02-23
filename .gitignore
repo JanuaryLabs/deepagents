@@ -77,6 +77,7 @@ local_cache/
 
 **/.vitepress/cache/
 deepsearch.sqlite*
+store.db*
 .source
 
 # Python virtual environments
@@ -88,3 +89,4 @@ __pycache__/
 .finetune/
 artifacts/
 agent-sandbox-test
+.evals

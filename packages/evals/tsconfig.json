@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
+  },
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "../agent"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
+}

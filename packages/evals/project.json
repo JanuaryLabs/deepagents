@@ -1,0 +1,51 @@
+{
+  "name": "@deepagents/evals",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/evals/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "additionalEntryPoints": [
+          "packages/evals/src/engine/index.ts",
+          "packages/evals/src/scorers/index.ts",
+          "packages/evals/src/store/index.ts",
+          "packages/evals/src/dataset/index.ts",
+          "packages/evals/src/comparison/index.ts",
+          "packages/evals/src/reporters/index.ts",
+          "packages/evals/src/evaluate/index.ts"
+        ]
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "TSX_TSCONFIG_PATH=./src/runners/web/tsconfig.json node --import tsx --test",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "runner-web-serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx vite --config src/runners/web/vite.config.ts",
+        "cwd": "packages/evals"
+      }
+    },
+    "runner-web-build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "npx vite build --config src/runners/web/vite.config.ts",
+          "npx vite build --ssr --config src/runners/web/vite.config.ts"
+        ],
+        "cwd": "packages/evals",
+        "parallel": false
+      },
+      "outputs": ["{projectRoot}/src/runners/web/dist"]
+    }
+  }
+}
