@@ -9,6 +9,7 @@ import {
   assistantText,
   getModelsRegistry,
   hint,
+  reminder,
   role,
   user,
 } from '@deepagents/context';
@@ -133,6 +134,60 @@ describe('ContextEngine.inspect()', () => {
     assert.strictEqual(result.fragments.persisted.length, 2);
     assert.strictEqual(result.fragments.persisted[0].name, 'user');
     assert.strictEqual(result.fragments.persisted[1].name, 'assistant');
+  });
+
+  it('should keep reminder text visible in inspect persisted data and graph preview', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      userId: 'test-user',
+      store,
+      chatId: 'test-chat-reminders',
+    });
+
+    engine.set(
+      user(
+        {
+          parts: [{ type: 'text', text: 'payload' }],
+          id: 'user-reminder-msg',
+          role: 'assistant',
+        },
+        reminder('tooltip-reminder', { asPart: true }),
+      ),
+    );
+    await engine.save();
+
+    const result = await engine.inspect({
+      modelId: 'openai:gpt-4o',
+      renderer: new XmlRenderer(),
+    });
+
+    const persistedUser = result.fragments.persisted.find(
+      (msg) => msg.id === 'user-reminder-msg',
+    );
+    assert.ok(persistedUser, 'should include persisted user message');
+
+    const persistedData = persistedUser?.data as {
+      parts?: Array<{ type: string; text?: string }>;
+      metadata?: {
+        reminders?: Array<{ text: string; mode: string }>;
+      };
+    };
+    assert.strictEqual(persistedData.parts?.[0]?.text, 'payload');
+    assert.strictEqual(persistedData.parts?.[1]?.text, 'tooltip-reminder');
+    assert.strictEqual(
+      persistedData.metadata?.reminders?.[0]?.text,
+      'tooltip-reminder',
+    );
+    assert.strictEqual(persistedData.metadata?.reminders?.[0]?.mode, 'part');
+
+    const graphUserNode = result.graph.nodes.find(
+      (node) => node.id === 'user-reminder-msg',
+    );
+    assert.ok(graphUserNode, 'should include user node in graph');
+    assert.ok(
+      graphUserNode?.content.includes('tooltip-reminder'),
+      'graph preview should expose reminder text',
+    );
   });
 
   it('should provide accurate token estimates', async () => {

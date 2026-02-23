@@ -11,6 +11,7 @@ import { StreamStore } from './stream-store.ts';
 export class SqliteStreamStore extends StreamStore {
   #db: DatabaseSync;
   #statements = new Map<string, ReturnType<DatabaseSync['prepare']>>();
+  #closed = false;
 
   #stmt(sql: string): ReturnType<DatabaseSync['prepare']> {
     let stmt = this.#statements.get(sql);
@@ -19,6 +20,13 @@ export class SqliteStreamStore extends StreamStore {
       this.#statements.set(sql, stmt);
     }
     return stmt;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#statements.clear();
+    this.#db.close();
   }
 
   constructor(pathOrDb: string | DatabaseSync) {
@@ -121,6 +129,17 @@ export class SqliteStreamStore extends StreamStore {
       cancelRequestedAt: row.cancelRequestedAt,
       error: row.error,
     };
+  }
+
+  async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
+    const row = this.#stmt('SELECT status FROM streams WHERE id = ?').get(
+      streamId,
+    ) as
+      | {
+          status: StreamStatus;
+        }
+      | undefined;
+    return row?.status;
   }
 
   async updateStreamStatus(

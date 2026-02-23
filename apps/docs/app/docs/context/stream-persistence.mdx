@@ -35,6 +35,9 @@ The abstract base class defining storage operations. `SqliteStreamStore` is the 
 import { SqliteStreamStore } from '@deepagents/context';
 
 const store = new SqliteStreamStore('./streams.db');
+
+// Close when your process shuts down
+store.close();
 ```
 
 You can also pass an existing `DatabaseSync` instance:
@@ -45,6 +48,8 @@ import { DatabaseSync } from 'node:sqlite';
 const db = new DatabaseSync('./app.db');
 const store = new SqliteStreamStore(db);
 ```
+
+If you pass your own `DatabaseSync`, call `store.close()` only if this stream store owns the connection lifecycle in your app.
 
 ### StreamData
 
@@ -74,11 +79,26 @@ const store = new SqliteStreamStore(db);
 | `createStream(stream)` | Insert a new stream record |
 | `upsertStream(stream)` | Insert or return existing stream. Returns `{ stream, created }` |
 | `getStream(streamId)` | Fetch stream metadata, or `undefined` if not found |
+| `getStreamStatus(streamId)` | Fetch only the stream status, or `undefined` if not found |
 | `updateStreamStatus(streamId, status, opts?)` | Transition stream status. Automatically sets `startedAt`, `finishedAt`, `cancelRequestedAt`, and `error` based on the target status |
 | `appendChunks(chunks)` | Batch-insert chunks (transactional in SQLite) |
 | `getChunks(streamId, fromSeq?, limit?)` | Fetch chunks ordered by `seq`, optionally starting from `fromSeq` |
 | `deleteStream(streamId)` | Delete stream and all its chunks (cascading) |
 | `reopenStream(streamId)` | Atomically delete a terminal stream and re-create it as `queued`. Throws if the stream is not found or not in a terminal status |
+
+### SqliteStreamStore.close()
+
+`SqliteStreamStore` exposes an explicit `close()` method to release the underlying SQLite connection and clear prepared statements. It is idempotent.
+
+```typescript
+const store = new SqliteStreamStore('./streams.db');
+const manager = new StreamManager({ store });
+
+// ... stream operations ...
+
+// app shutdown
+store.close();
+```
 
 ## StreamManager
 
@@ -89,6 +109,20 @@ import { StreamManager, SqliteStreamStore } from '@deepagents/context';
 
 const manager = new StreamManager({
   store: new SqliteStreamStore('./streams.db'),
+  watchPolling: {
+    minMs: 25,
+    maxMs: 500,
+    multiplier: 2,
+    jitterRatio: 0.15,
+    statusCheckEvery: 3,
+    chunkPageSize: 128,
+  },
+  cancelPolling: {
+    minMs: 50,
+    maxMs: 500,
+    multiplier: 2,
+    jitterRatio: 0.15,
+  },
 });
 ```
 
@@ -121,7 +155,12 @@ const uiStream = createUIMessageStream({
 await manager.persist(uiStream, 'stream-abc', {
   strategy: 'buffered',
   flushSize: 20,
-  cancelCheckInterval: 500,
+  cancelPolling: {
+    minMs: 50,
+    maxMs: 500,
+    multiplier: 2,
+    jitterRatio: 0.15,
+  },
 });
 ```
 
@@ -129,7 +168,7 @@ await manager.persist(uiStream, 'stream-abc', {
 |--------|------|---------|-------------|
 | `strategy` | `'buffered' \| 'immediate'` | `'buffered'` | `buffered` batches chunks for throughput; `immediate` persists each chunk before forwarding |
 | `flushSize` | `number` | `20` | For buffered strategy: flush after this many chunks |
-| `cancelCheckInterval` | `number` | `500` | Milliseconds between cancellation polls |
+| `cancelPolling` | `{ minMs, maxMs, multiplier, jitterRatio }` | `{50, 500, 2, 0.15}` | Adaptive cancellation polling policy |
 
 If the stream is already in a terminal status (`completed`, `failed`, `cancelled`), `persist` returns immediately without re-running.
 
@@ -138,7 +177,14 @@ If the stream is already in a terminal status (`completed`, `failed`, `cancelled
 Returns a `ReadableStream` that replays all persisted chunks, then live-tails new ones until the stream reaches a terminal status.
 
 ```typescript
-const replayStream = manager.watch('stream-abc', { interval: 100 });
+const replayStream = manager.watch('stream-abc', {
+  minMs: 25,
+  maxMs: 500,
+  multiplier: 2,
+  jitterRatio: 0.15,
+  statusCheckEvery: 3,
+  chunkPageSize: 128,
+});
 
 for await (const part of replayStream) {
   console.log(part);
@@ -147,9 +193,40 @@ for await (const part of replayStream) {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `interval` | `number` | `100` | Milliseconds between polls when waiting for new chunks |
+| `minMs` | `number` | `25` | Minimum poll interval |
+| `maxMs` | `number` | `500` | Maximum poll interval |
+| `multiplier` | `number` | `2` | Backoff multiplier when idle |
+| `jitterRatio` | `number` | `0.15` | Random jitter ratio applied per wait |
+| `statusCheckEvery` | `number` | `3` | Check stream status every N chunk polls while data is flowing |
+| `chunkPageSize` | `number` | `128` | Maximum chunks fetched per poll iteration |
 
 Throws if the stream ID does not exist.
+
+If a stream is deleted while being watched, the watcher closes gracefully.
+
+### Polling telemetry
+
+Use `onPollingEvent` to observe polling behavior for tuning and diagnostics:
+
+```typescript
+const manager = new StreamManager({
+  store: new SqliteStreamStore('./streams.db'),
+  onPollingEvent: (event) => {
+    if (event.type === 'watch:empty') {
+      console.debug('idle delay', event.delayMs);
+    }
+  },
+});
+```
+
+Event types:
+
+- `watch:poll`
+- `watch:empty`
+- `watch:chunks`
+- `watch:closed`
+- `persist:cancel-poll`
+- `persist:cancel-detected`
 
 ### cancel(streamId)
 
@@ -311,6 +388,7 @@ class PostgresStreamStore extends StreamStore {
   async createStream(stream: StreamData): Promise<void> { /* ... */ }
   async upsertStream(stream: StreamData): Promise<{ stream: StreamData; created: boolean }> { /* ... */ }
   async getStream(streamId: string): Promise<StreamData | undefined> { /* ... */ }
+  async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> { /* ... */ }
   async updateStreamStatus(streamId: string, status: StreamStatus, options?: { error?: string }): Promise<void> { /* ... */ }
   async appendChunks(chunks: StreamChunkData[]): Promise<void> { /* ... */ }
   async getChunks(streamId: string, fromSeq?: number, limit?: number): Promise<StreamChunkData[]> { /* ... */ }
@@ -392,8 +470,9 @@ async function handleChatRequest(
 
 - Use `buffered` strategy (the default) for throughput-sensitive workloads. Switch to `immediate` when you cannot tolerate any chunk loss on crash.
 - Always call `cleanup()` after you no longer need a stream. Chunks accumulate and are not automatically garbage-collected.
-- Keep `cancelCheckInterval` reasonable (500ms default). Too low adds polling overhead; too high delays cancellation response.
+- Tune `watchPolling`/`cancelPolling` for your latency and DB-load budget. Lower intervals reduce latency but increase polling cost.
 - Use a shared `SqliteStreamStore` instance across your application to benefit from prepared statement caching.
+- Call `SqliteStreamStore.close()` during shutdown to release SQLite resources cleanly.
 
 ## Next Steps
 

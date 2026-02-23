@@ -9,6 +9,12 @@ import {
   type StreamChunkData,
   type StreamData,
   StreamManager,
+  type StreamPollingTelemetryEvent,
+  type StreamStatus,
+  StreamStore,
+  type WatchStreamOptions,
+  createAdaptivePollingState,
+  nextAdaptivePollingDelay,
 } from '@deepagents/context';
 
 async function withStreamStore<T>(
@@ -19,6 +25,22 @@ async function withStreamStore<T>(
   const store = new SqliteStreamStore(dbPath);
   try {
     return await fn(store);
+  } finally {
+    try {
+      (store as { close?: () => void }).close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+async function withStreamStorePath<T>(
+  fn: (dbPath: string) => Promise<T>,
+): Promise<T> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'stream-test-'));
+  const dbPath = path.join(dir, 'test.sqlite');
+  try {
+    return await fn(dbPath);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -50,6 +72,123 @@ function createChunk(
   };
 }
 
+class FlakyFlushStore extends StreamStore {
+  #stream: StreamData | undefined;
+  #chunks: StreamChunkData[] = [];
+  #failNextAppend = true;
+
+  async createStream(stream: StreamData): Promise<void> {
+    this.#stream = { ...stream };
+  }
+
+  async upsertStream(
+    stream: StreamData,
+  ): Promise<{ stream: StreamData; created: boolean }> {
+    if (!this.#stream) {
+      this.#stream = { ...stream };
+      return { stream: { ...this.#stream }, created: true };
+    }
+    return { stream: { ...this.#stream }, created: false };
+  }
+
+  async getStream(streamId: string): Promise<StreamData | undefined> {
+    if (!this.#stream || this.#stream.id !== streamId) return undefined;
+    return { ...this.#stream };
+  }
+
+  async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
+    if (!this.#stream || this.#stream.id !== streamId) return undefined;
+    return this.#stream.status;
+  }
+
+  async updateStreamStatus(
+    streamId: string,
+    status: StreamStatus,
+    options?: { error?: string },
+  ): Promise<void> {
+    if (!this.#stream || this.#stream.id !== streamId) return;
+    const now = Date.now();
+    this.#stream.status = status;
+    if (status === 'running') this.#stream.startedAt = now;
+    if (status === 'completed') this.#stream.finishedAt = now;
+    if (status === 'failed') {
+      this.#stream.finishedAt = now;
+      this.#stream.error = options?.error ?? null;
+    }
+    if (status === 'cancelled') {
+      this.#stream.cancelRequestedAt = now;
+      this.#stream.finishedAt = now;
+    }
+  }
+
+  async appendChunks(chunks: StreamChunkData[]): Promise<void> {
+    if (this.#failNextAppend) {
+      this.#failNextAppend = false;
+      throw new Error('flush failed once');
+    }
+    this.#chunks.push(...chunks);
+  }
+
+  async getChunks(
+    streamId: string,
+    fromSeq = 0,
+    limit?: number,
+  ): Promise<StreamChunkData[]> {
+    const filtered = this.#chunks
+      .filter((chunk) => chunk.streamId === streamId && chunk.seq >= fromSeq)
+      .sort((a, b) => a.seq - b.seq);
+    return limit == null ? filtered : filtered.slice(0, limit);
+  }
+
+  async deleteStream(streamId: string): Promise<void> {
+    if (this.#stream?.id === streamId) this.#stream = undefined;
+    this.#chunks = this.#chunks.filter((chunk) => chunk.streamId !== streamId);
+  }
+
+  async reopenStream(_streamId: string): Promise<StreamData> {
+    throw new Error('not implemented in test store');
+  }
+}
+
+const FAST_WATCH_POLLING: WatchStreamOptions = {
+  minMs: 20,
+  maxMs: 20,
+  multiplier: 2,
+  jitterRatio: 0,
+  statusCheckEvery: 1,
+  chunkPageSize: 128,
+};
+
+function makeWatchPolling(overrides?: WatchStreamOptions): WatchStreamOptions {
+  return {
+    ...FAST_WATCH_POLLING,
+    ...overrides,
+  };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 describe('Stream Chunks', () => {
   describe('createStream / getStream', () => {
     it('should create and retrieve a stream', async () => {
@@ -73,6 +212,79 @@ describe('Stream Chunks', () => {
         const result = await store.getStream('non-existent');
         assert.strictEqual(result, undefined);
       });
+    });
+  });
+
+  describe('Regression guards', () => {
+    it('should reject when aborted flush fails during persist', async () => {
+      const store = new FlakyFlushStore();
+      const streams = new StreamManager({ store });
+      const streamId = crypto.randomUUID();
+      await streams.register(streamId);
+
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'text-start', id: 'part-1' });
+          controller.enqueue({
+            type: 'text-delta',
+            id: 'part-1',
+            delta: 'hello',
+          });
+        },
+      });
+
+      const persistPromise = streams.persist(source, streamId, {
+        cancelPolling: {
+          minMs: 5,
+          maxMs: 5,
+          multiplier: 1,
+          jitterRatio: 0,
+        },
+      });
+
+      globalThis.setTimeout(() => {
+        void streams.cancel(streamId);
+      }, 20);
+
+      await assert.rejects(() => persistPromise, /flush failed once/);
+    });
+
+    it('should keep adaptive jitter delay within configured bounds', () => {
+      const originalRandom = Math.random;
+      Math.random = () => 1;
+      try {
+        const state = createAdaptivePollingState({
+          minMs: 100,
+          maxMs: 200,
+          multiplier: 2,
+          jitterRatio: 0.5,
+        });
+        // first call promotes polling interval to max
+        nextAdaptivePollingDelay(state);
+        const delay = nextAdaptivePollingDelay(state);
+        assert.ok(
+          delay <= 200,
+          `delay should stay within max bound, got ${delay}`,
+        );
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it('should expose explicit close() for sqlite stream store lifecycle', () => {
+      const store = new SqliteStreamStore(':memory:');
+      const close = (store as SqliteStreamStore & { close?: () => void }).close;
+      assert.strictEqual(typeof close, 'function');
+      (
+        store as SqliteStreamStore & {
+          close: () => void;
+        }
+      ).close();
+      (
+        store as SqliteStreamStore & {
+          close: () => void;
+        }
+      ).close();
     });
   });
 
@@ -642,7 +854,7 @@ describe('Stream Chunks', () => {
         await store.appendChunks([createChunk(stream.id, 1)]);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, { interval: 20 });
+        const readable = streams.watch(stream.id, makeWatchPolling());
 
         setTimeout(async () => {
           await store.appendChunks([createChunk(stream.id, 2)]);
@@ -686,7 +898,7 @@ describe('Stream Chunks', () => {
         }, 60);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, { interval: 20 });
+        const readable = streams.watch(stream.id, makeWatchPolling());
         for await (const chunk of readable) {
           received.push(chunk);
         }
@@ -713,7 +925,7 @@ describe('Stream Chunks', () => {
         await store.updateStreamStatus(stream.id, 'cancelled');
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, { interval: 20 });
+        const readable = streams.watch(stream.id, makeWatchPolling());
         for await (const chunk of readable) {
           received.push(chunk);
         }
@@ -735,7 +947,7 @@ describe('Stream Chunks', () => {
         await store.createStream(stream);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, { interval: 20 });
+        const readable = streams.watch(stream.id, makeWatchPolling());
 
         setTimeout(async () => {
           await store.updateStreamStatus(stream.id, 'running');
@@ -759,6 +971,192 @@ describe('Stream Chunks', () => {
         });
       });
     });
+
+    it('should close gracefully when stream is deleted during watch', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+        await store.appendChunks([createChunk(stream.id, 0)]);
+
+        const received: unknown[] = [];
+        const readable = streams.watch(stream.id, makeWatchPolling());
+        const consume = (async () => {
+          for await (const chunk of readable) {
+            received.push(chunk);
+          }
+        })();
+
+        globalThis.setTimeout(async () => {
+          await store.deleteStream(stream.id);
+        }, 60);
+
+        await withTimeout(
+          consume,
+          1_500,
+          'watch should close when stream is deleted',
+        );
+        assert.strictEqual(received.length, 1);
+      });
+    });
+
+    it('should support live tailing across separate sqlite connections', async () => {
+      await withStreamStorePath(async (dbPath) => {
+        const writerStore = new SqliteStreamStore(dbPath);
+        const watcherStore = new SqliteStreamStore(dbPath);
+        try {
+          const streams = new StreamManager({ store: watcherStore });
+          const stream = createStream({
+            status: 'running',
+            startedAt: Date.now(),
+          });
+          await writerStore.createStream(stream);
+          await writerStore.appendChunks([createChunk(stream.id, 0)]);
+
+          const received: unknown[] = [];
+          const readable = streams.watch(stream.id, makeWatchPolling());
+          const consume = (async () => {
+            for await (const chunk of readable) {
+              received.push(chunk);
+            }
+          })();
+
+          globalThis.setTimeout(async () => {
+            await writerStore.appendChunks([createChunk(stream.id, 1)]);
+            await writerStore.appendChunks([createChunk(stream.id, 2)]);
+            await writerStore.updateStreamStatus(stream.id, 'completed');
+          }, 60);
+
+          await withTimeout(
+            consume,
+            1_500,
+            'cross-connection watch should complete',
+          );
+          assert.strictEqual(received.length, 3);
+          assert.deepStrictEqual(received[0], {
+            type: 'text-delta',
+            delta: 'chunk-0',
+          });
+          assert.deepStrictEqual(received[2], {
+            type: 'text-delta',
+            delta: 'chunk-2',
+          });
+        } finally {
+          (writerStore as { close?: () => void }).close?.();
+          (watcherStore as { close?: () => void }).close?.();
+        }
+      });
+    });
+
+    it('should keep adaptive delays within bounds and reset after activity', async () => {
+      await withStreamStore(async (store) => {
+        const events: StreamPollingTelemetryEvent[] = [];
+        const streams = new StreamManager({
+          store,
+          onPollingEvent: (event) => {
+            events.push(event);
+          },
+        });
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+
+        const readable = streams.watch(stream.id, {
+          minMs: 10,
+          maxMs: 40,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+          chunkPageSize: 64,
+        });
+
+        const consume = (async () => {
+          for await (const _ of readable) {
+            /* consume stream */
+          }
+        })();
+
+        globalThis.setTimeout(async () => {
+          await store.appendChunks([createChunk(stream.id, 0)]);
+        }, 85);
+
+        globalThis.setTimeout(async () => {
+          await store.updateStreamStatus(stream.id, 'completed');
+        }, 180);
+
+        await withTimeout(
+          consume,
+          2_000,
+          'adaptive polling watch should complete',
+        );
+
+        const emptyDelays = events
+          .filter((event) => event.type === 'watch:empty')
+          .map((event) => event.delayMs);
+        assert.ok(emptyDelays.length >= 2);
+        assert.ok(emptyDelays.every((delay) => delay >= 10 && delay <= 40));
+        assert.ok(
+          emptyDelays.includes(40),
+          `expected delays to include capped max interval: ${emptyDelays.join(',')}`,
+        );
+
+        const firstChunkIndex = events.findIndex(
+          (event) => event.type === 'watch:chunks',
+        );
+        assert.ok(firstChunkIndex >= 0);
+        const nextEmpty = events
+          .slice(firstChunkIndex + 1)
+          .find((event) => event.type === 'watch:empty');
+        assert.ok(nextEmpty && nextEmpty.type === 'watch:empty');
+        assert.strictEqual(nextEmpty.delayMs, 10);
+      });
+    });
+
+    it('should page chunk reads and preserve ordering for large completed streams', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+
+        const totalChunks = 300;
+        const chunks = Array.from({ length: totalChunks }, (_, idx) =>
+          createChunk(stream.id, idx),
+        );
+        await store.appendChunks(chunks);
+        await store.updateStreamStatus(stream.id, 'completed');
+
+        const received: unknown[] = [];
+        const readable = streams.watch(stream.id, {
+          minMs: 5,
+          maxMs: 5,
+          multiplier: 2,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+          chunkPageSize: 32,
+        });
+        for await (const chunk of readable) {
+          received.push(chunk);
+        }
+
+        assert.strictEqual(received.length, totalChunks);
+        assert.deepStrictEqual(received[0], {
+          type: 'text-delta',
+          delta: 'chunk-0',
+        });
+        assert.deepStrictEqual(received[totalChunks - 1], {
+          type: 'text-delta',
+          delta: `chunk-${totalChunks - 1}`,
+        });
+      });
+    });
   });
 
   describe('StreamManager.watch() detach is passive', () => {
@@ -774,7 +1172,7 @@ describe('Stream Chunks', () => {
 
         await store.appendChunks([createChunk(stream.id, 0)]);
 
-        const readable = streams.watch(stream.id, { interval: 20 });
+        const readable = streams.watch(stream.id, makeWatchPolling());
         const reader = readable.getReader();
 
         const first = await reader.read();
@@ -822,7 +1220,7 @@ describe('Stream Chunks', () => {
         await store.appendChunks([createChunk(stream.id, 0)]);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, { interval: 20 });
+        const readable = streams.watch(stream.id, makeWatchPolling());
 
         globalThis.setTimeout(async () => {
           await store.appendChunks([createChunk(stream.id, 1)]);
@@ -915,6 +1313,36 @@ describe('Stream Chunks', () => {
         assert.ok(after);
         assert.strictEqual(after.status, 'failed');
         assert.strictEqual(after.error, 'previous error');
+      });
+    });
+
+    it('should not wait for full cancel polling interval when stream finishes quickly', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const dummy = new ReadableStream({
+          start(c) {
+            c.close();
+          },
+        });
+
+        const startedAt = Date.now();
+        await streams.persist(dummy, streamId, {
+          cancelPolling: {
+            minMs: 1_000,
+            maxMs: 1_000,
+            multiplier: 2,
+            jitterRatio: 0,
+          },
+        });
+        const elapsedMs = Date.now() - startedAt;
+
+        assert.ok(
+          elapsedMs < 700,
+          `persist should not block on long cancel poll sleep; elapsed=${elapsedMs}ms`,
+        );
       });
     });
   });

@@ -31,6 +31,8 @@ export abstract class StreamStore {
 
   abstract getStream(streamId: string): Promise<StreamData | undefined>;
 
+  abstract getStreamStatus(streamId: string): Promise<StreamStatus | undefined>;
+
   abstract updateStreamStatus(
     streamId: string,
     status: StreamStatus,

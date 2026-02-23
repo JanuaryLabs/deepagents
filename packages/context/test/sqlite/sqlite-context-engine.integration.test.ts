@@ -13,6 +13,7 @@ import {
   XmlRenderer,
   assistantText,
   lastAssistantMessage,
+  reminder,
   user,
 } from '@deepagents/context';
 
@@ -113,6 +114,10 @@ function makeUserMessage(id: string, text: string) {
     role: 'user' as const,
     parts: [{ type: 'text' as const, text }],
   };
+}
+
+function taggedReminder(text: string) {
+  return `<system-reminder>${text}</system-reminder>`;
 }
 
 function makeToolClarificationMessage(id: string) {
@@ -716,6 +721,279 @@ describe('Sqlite ContextEngine Integration', () => {
         'Should have original message',
       );
     });
+  });
+
+  it('adds inline tagged reminder metadata and preserves it across save/resolve', async () => {
+    await withTempDb('inline-reminder-roundtrip', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-inline-reminder',
+        userId: 'user-1',
+      });
+
+      engine.set(user('hello', reminder('keep responses concise')));
+
+      const beforeSave = await engine.resolve({ renderer });
+      assert.strictEqual(beforeSave.messages.length, 1);
+
+      const message = beforeSave.messages[0] as {
+        role: string;
+        parts: Array<{ type: string; text?: string }>;
+        metadata?: {
+          reminders?: Array<{
+            id: string;
+            text: string;
+            partIndex: number;
+            start: number;
+            end: number;
+            mode: string;
+          }>;
+        };
+      };
+
+      const encodedReminder = taggedReminder('keep responses concise');
+      assert.strictEqual(message.role, 'user');
+      assert.strictEqual(message.parts[0]?.text, `hello${encodedReminder}`);
+      assert.strictEqual(message.metadata?.reminders?.length, 1);
+
+      const reminderMeta = message.metadata?.reminders?.[0];
+      assert.ok(reminderMeta?.id, 'Reminder metadata should include an id');
+      assert.strictEqual(reminderMeta?.text, 'keep responses concise');
+      assert.strictEqual(reminderMeta?.partIndex, 0);
+      assert.strictEqual(reminderMeta?.start, 5);
+      assert.strictEqual(reminderMeta?.end, 5 + encodedReminder.length);
+      assert.strictEqual(reminderMeta?.mode, 'inline');
+
+      await engine.save();
+      const afterSave = await engine.resolve({ renderer });
+      const persisted = afterSave.messages[0] as {
+        metadata?: unknown;
+        parts: Array<{ type: string; text?: string }>;
+      };
+
+      assert.deepStrictEqual(
+        persisted.metadata,
+        message.metadata,
+        'Reminder metadata should survive save/resolve roundtrip',
+      );
+      assert.strictEqual(
+        persisted.parts[0]?.text,
+        `hello${encodedReminder}`,
+        'Reminder text should survive save/resolve roundtrip',
+      );
+    });
+  });
+
+  it('applies multiple inline reminders in call order with append-only ranges', async () => {
+    await withTempDb('multi-inline-reminders', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-multi-reminders',
+        userId: 'user-1',
+      });
+
+      engine.set(
+        user('x', reminder('first'), reminder('second'), reminder('third')),
+      );
+
+      const result = await engine.resolve({ renderer });
+      const message = result.messages[0] as {
+        parts: Array<{ type: string; text?: string }>;
+        metadata?: {
+          reminders?: Array<{
+            text: string;
+            partIndex: number;
+            start: number;
+            end: number;
+            mode: string;
+          }>;
+        };
+      };
+
+      const first = taggedReminder('first');
+      const second = taggedReminder('second');
+      const third = taggedReminder('third');
+
+      assert.strictEqual(message.parts[0]?.text, `x${first}${second}${third}`);
+
+      const reminders = message.metadata?.reminders ?? [];
+      assert.strictEqual(reminders.length, 3);
+
+      assert.deepStrictEqual(
+        reminders.map(({ text, partIndex, start, end, mode }) => ({
+          text,
+          partIndex,
+          start,
+          end,
+          mode,
+        })),
+        [
+          {
+            text: 'first',
+            partIndex: 0,
+            start: 1,
+            end: 1 + first.length,
+            mode: 'inline',
+          },
+          {
+            text: 'second',
+            partIndex: 0,
+            start: 1 + first.length,
+            end: 1 + first.length + second.length,
+            mode: 'inline',
+          },
+          {
+            text: 'third',
+            partIndex: 0,
+            start: 1 + first.length + second.length,
+            end: 1 + first.length + second.length + third.length,
+            mode: 'inline',
+          },
+        ],
+      );
+    });
+  });
+
+  it('supports asPart reminders and records part index ranges', async () => {
+    await withTempDb('as-part-reminders', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-as-part-reminders',
+        userId: 'user-1',
+      });
+
+      engine.set(
+        user(
+          'body',
+          reminder('before', { asPart: true }),
+          reminder('after', { asPart: true }),
+        ),
+      );
+
+      const result = await engine.resolve({ renderer });
+      const message = result.messages[0] as {
+        parts: Array<{ type: string; text?: string }>;
+        metadata?: {
+          reminders?: Array<{
+            text: string;
+            partIndex: number;
+            start: number;
+            end: number;
+            mode: string;
+          }>;
+        };
+      };
+
+      assert.deepStrictEqual(
+        message.parts.map((part) =>
+          part.type === 'text' ? part.text : part.type,
+        ),
+        ['body', 'before', 'after'],
+      );
+
+      const reminders = message.metadata?.reminders ?? [];
+      assert.strictEqual(reminders.length, 2);
+      assert.deepStrictEqual(
+        reminders.map(({ text, partIndex, start, end, mode }) => ({
+          text,
+          partIndex,
+          start,
+          end,
+          mode,
+        })),
+        [
+          {
+            text: 'before',
+            partIndex: 1,
+            start: 0,
+            end: 'before'.length,
+            mode: 'part',
+          },
+          {
+            text: 'after',
+            partIndex: 2,
+            start: 0,
+            end: 'after'.length,
+            mode: 'part',
+          },
+        ],
+      );
+    });
+  });
+
+  it('merges reminder metadata with existing metadata and keeps user role', async () => {
+    await withTempDb('metadata-merge-reminders', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-reminder-merge',
+        userId: 'user-1',
+      });
+
+      const existingReminder = {
+        id: 'existing-reminder',
+        text: 'existing',
+        partIndex: 0,
+        start: 0,
+        end: 8,
+        mode: 'part',
+      };
+
+      engine.set(
+        user(
+          {
+            id: 'msg-with-metadata',
+            role: 'assistant',
+            metadata: {
+              source: 'seed',
+              reminders: [existingReminder],
+            },
+            parts: [{ type: 'text', text: 'payload' }],
+          },
+          reminder('new-reminder'),
+        ),
+      );
+
+      const result = await engine.resolve({ renderer });
+      const message = result.messages[0] as {
+        id: string;
+        role: string;
+        metadata?: {
+          source?: string;
+          reminders?: Array<{
+            id: string;
+            text: string;
+            partIndex: number;
+            start: number;
+            end: number;
+            mode: string;
+          }>;
+        };
+      };
+
+      assert.strictEqual(message.id, 'msg-with-metadata');
+      assert.strictEqual(message.role, 'user');
+      assert.strictEqual(message.metadata?.source, 'seed');
+      assert.strictEqual(message.metadata?.reminders?.length, 2);
+      assert.deepStrictEqual(
+        message.metadata?.reminders?.[0],
+        existingReminder,
+      );
+
+      const appendedReminder = message.metadata?.reminders?.[1];
+      assert.ok(appendedReminder?.id, 'Appended reminder should include id');
+      assert.strictEqual(appendedReminder?.text, 'new-reminder');
+      assert.strictEqual(appendedReminder?.partIndex, 0);
+      assert.strictEqual(appendedReminder?.mode, 'inline');
+    });
+  });
+
+  it('rejects empty reminder text', () => {
+    assert.throws(() => reminder(''), /Reminder text must not be empty/);
+    assert.throws(() => reminder('   '), /Reminder text must not be empty/);
   });
 
   it('save({ branch: false }) updates message in place without creating a branch', async () => {

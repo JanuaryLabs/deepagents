@@ -1,7 +1,12 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { ContextEngine, assistantText, user } from '@deepagents/context';
+import {
+  ContextEngine,
+  assistantText,
+  reminder,
+  user,
+} from '@deepagents/context';
 
 import { withSqliteContainer } from '../helpers/sqlite-container.ts';
 
@@ -141,6 +146,32 @@ describe('Full-Text Search', () => {
         assert.strictEqual(results.length, 0);
 
         results = await store.searchMessages('chat-1', 'updated');
+        assert.strictEqual(results.length, 1);
+      });
+    });
+  });
+
+  describe('Reminder Searchability', () => {
+    it('indexes reminder text in FTS', async () => {
+      await withSqliteContainer(async (store) => {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'fts-reminder-chat',
+          userId: 'alice',
+        });
+
+        engine.set(
+          user(
+            'User visible message',
+            reminder('remindersearchabletoken92743'),
+          ),
+        );
+        await engine.save();
+
+        const results = await store.searchMessages(
+          'fts-reminder-chat',
+          'remindersearchabletoken92743',
+        );
         assert.strictEqual(results.length, 1);
       });
     });
