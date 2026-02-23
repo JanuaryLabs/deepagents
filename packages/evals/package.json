@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/evals",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -81,7 +81,7 @@
     "chalk": "^5.6.0",
     "zod": "^3.25.76 || ^4.0.0",
     "hono": "4.10.6",
-    "@deepagents/agent": "0.18.0",
+    "@deepagents/agent": "0.19.0",
     "@hono/node-server": "1.19.6",
     "@ai-sdk/anthropic": "^3.0.44",
     "@ai-sdk/google": "^3.0.29",
