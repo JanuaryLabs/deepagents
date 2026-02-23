@@ -91,7 +91,8 @@
           "@deepagents/text2sql",
           "@deepagents/retrieval",
           "@deepagents/orchestrator",
-          "@deepagents/context"
+          "@deepagents/context",
+          "@deepagents/evals"
         ]
       },
       "cache": true,

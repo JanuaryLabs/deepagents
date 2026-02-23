@@ -35,6 +35,7 @@ export default [
   },
   {
     files: [
+      '**/*.eval.ts',
       '**/*.test.ts',
       '**/*.test.tsx',
       '**/*.test.js',

@@ -145,5 +145,5 @@ nx run text2sql:eval-debug --list
 To run a specific eval test case
 
 ```bash
-EVAL_INDEX=<test-case-index> nx run text2sql:eval path/to/eval.ts
+nx run text2sql:eval path/to/eval.ts
 ```

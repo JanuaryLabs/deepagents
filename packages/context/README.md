@@ -125,6 +125,22 @@ type UserReminderMetadata = {
 };
 ```
 
+Helper utilities for reminder metadata:
+
+```ts
+type ReminderRange = {
+  partIndex: number;
+  start: number;
+  end: number;
+};
+
+const ranges = getReminderRanges(message.metadata);
+const visibleText = stripTextByRanges(messageText, ranges);
+```
+
+- `getReminderRanges(metadata)` returns `metadata.reminders` as offset ranges (or `[]` when missing).
+- `stripTextByRanges(text, ranges)` removes offset spans from text and returns the remaining visible content.
+
 ## Renderers
 
 All renderers support the `groupFragments` option which groups same-named fragments under a pluralized parent tag.
