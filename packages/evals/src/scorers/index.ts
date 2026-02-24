@@ -1,6 +1,7 @@
-import type { LanguageModelV3 } from '@ai-sdk/provider';
-import { generateObject } from 'ai';
-import { z } from 'zod';
+import {
+  Factuality as AutoevalsFactuality,
+  Levenshtein as AutoevalsLevenshtein,
+} from 'autoevals';
 
 export interface ScorerArgs {
   input: unknown;
@@ -11,6 +12,7 @@ export interface ScorerArgs {
 export interface ScorerResult {
   score: number;
   reason?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export type Scorer = (args: ScorerArgs) => Promise<ScorerResult>;
@@ -39,37 +41,36 @@ export function regex(pattern: RegExp): Scorer {
   };
 }
 
-function levenshteinDistance(a: string, b: string): number {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
+function normalizeScore(score: number | null | undefined): number {
+  if (typeof score !== 'number' || !Number.isFinite(score)) return 0;
+  return Math.max(0, Math.min(1, score));
+}
 
-  if (a.length > b.length) [a, b] = [b, a];
-
-  let prev = Array.from({ length: a.length + 1 }, (_, i) => i);
-  let curr = new Array<number>(a.length + 1);
-
-  for (let j = 1; j <= b.length; j++) {
-    curr[0] = j;
-    for (let i = 1; i <= a.length; i++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[i] = Math.min(prev[i]! + 1, curr[i - 1]! + 1, prev[i - 1]! + cost);
+function reasonFromMetadata(
+  metadata?: Record<string, unknown>,
+): string | undefined {
+  if (!metadata) return undefined;
+  const candidates = [
+    metadata.reason,
+    metadata.rationale,
+    metadata.explanation,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate;
     }
-    [prev, curr] = [curr, prev];
   }
-
-  return prev[a.length]!;
+  return undefined;
 }
 
 export const levenshtein: Scorer = async ({ output, expected }) => {
   const exp = expected == null ? '' : String(expected);
-  if (output.length === 0 && exp.length === 0) return { score: 1.0 };
-  const maxLen = Math.max(output.length, exp.length);
-  const distance = levenshteinDistance(output, exp);
-  const score = Math.max(0, 1 - distance / maxLen);
-  if (score === 1.0) return { score };
+  const result = await AutoevalsLevenshtein({ output, expected: exp });
+  const score = normalizeScore(result.score);
   return {
     score,
-    reason: `Levenshtein distance is ${distance} across max length ${maxLen}.`,
+    reason: reasonFromMetadata(result.metadata),
+    metadata: result.metadata,
   };
 };
 
@@ -112,47 +113,19 @@ export const jsonMatch: Scorer = async ({ output, expected }) => {
   }
 };
 
-const llmScorerSchema = z.object({
-  score: z.number().min(0).max(1),
-  reason: z.string(),
-});
-
-export function llmJudge(config: {
-  model: LanguageModelV3;
-  criteria: string;
-}): Scorer {
+export function factuality(config: { model: string }): Scorer {
   return async ({ input, output, expected }) => {
-    const { object } = await generateObject({
+    const result = await AutoevalsFactuality({
       model: config.model,
-      schema: llmScorerSchema,
-      prompt: `You are an expert evaluator. Grade the output based on the following criteria:
-${config.criteria}
-
-Input: ${JSON.stringify(input)}
-Output: ${output}
-${expected != null ? `Expected: ${JSON.stringify(expected)}` : ''}
-
-Return a score from 0.0 to 1.0 and a brief reason.`,
+      input: typeof input === 'string' ? input : JSON.stringify(input),
+      output,
+      expected: expected == null ? undefined : String(expected),
     });
-    return { score: object.score, reason: object.reason };
-  };
-}
-
-export function factuality(config: { model: LanguageModelV3 }): Scorer {
-  return async ({ input, output, expected }) => {
-    const { object } = await generateObject({
-      model: config.model,
-      schema: llmScorerSchema,
-      prompt: `You are a factuality evaluator. Determine whether the output is factually consistent with the expected reference.
-
-Input: ${JSON.stringify(input)}
-Output: ${output}
-Expected reference: ${JSON.stringify(expected)}
-
-Score 1.0 if the output is factually consistent with the reference, 0.0 if it contradicts it. Use intermediate scores for partial consistency.
-Return a score from 0.0 to 1.0 and a brief reason.`,
-    });
-    return { score: object.score, reason: object.reason };
+    return {
+      score: normalizeScore(result.score),
+      reason: reasonFromMetadata(result.metadata),
+      metadata: result.metadata,
+    };
   };
 }
 

@@ -4,17 +4,20 @@ import { agent, generate } from '@deepagents/agent';
 
 import { hf } from '../../../dataset/hf.ts';
 import { dataset } from '../../../dataset/index.ts';
-import { EvalEmitter, runEval } from '../../../engine/index.ts';
+import {
+  filterRecordsByIndex,
+  parseRecordSelection,
+} from '../../../dataset/record-selection.ts';
 import type { TaskFn } from '../../../engine/index.ts';
+import { EvalEmitter, runEval } from '../../../engine/index.ts';
+import type { Scorer } from '../../../scorers/index.ts';
 import {
   exactMatch,
   factuality,
   includes,
   jsonMatch,
   levenshtein,
-  llmJudge,
 } from '../../../scorers/index.ts';
-import type { Scorer } from '../../../scorers/index.ts';
 import {
   datasetPath,
   isHfDataset,
@@ -22,10 +25,6 @@ import {
 } from '../services/dataset-store.ts';
 import { evalManager } from '../services/eval-manager.ts';
 import { resolveModel } from '../services/model-resolver.ts';
-import {
-  filterRecordsByIndex,
-  parseRecordSelection,
-} from '../services/record-selection.ts';
 import type { WebBindings } from '../types.ts';
 
 const SCORER_MAP: Record<string, Scorer> = {
@@ -68,16 +67,18 @@ function buildScorerModelMap(
       scorers[name] = SCORER_MAP[name];
       continue;
     }
-    if (!scorerModelString) {
-      throw new Error(`LLM scorer "${name}" requires a scorer model.`);
+    if (name !== 'factuality') {
+      throw new Error(`Unknown scorer "${name}".`);
     }
-    const model = resolveModel(scorerModelString);
-    if (name === 'llmJudge')
-      scorers[name] = llmJudge({
-        model,
-        criteria: 'Is the output correct and helpful?',
-      });
-    else if (name === 'factuality') scorers[name] = factuality({ model });
+    if (!scorerModelString) {
+      throw new Error('LLM scorer "factuality" requires a scorer model.');
+    }
+    if (scorerModelString.includes('/')) {
+      throw new Error(
+        'Scorer model must be an OpenAI-compatible model id (for example: gpt-4.1-mini).',
+      );
+    }
+    scorers[name] = factuality({ model: scorerModelString });
   }
   return scorers;
 }

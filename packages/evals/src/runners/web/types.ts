@@ -1,4 +1,4 @@
-import type { RunStore } from '@deepagents/evals/store';
+import type { RunStore } from '../../store/index.ts';
 
 export interface WebBindings {
   Variables: {

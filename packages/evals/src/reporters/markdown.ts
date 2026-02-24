@@ -19,16 +19,21 @@ export function markdownReporter(options?: MarkdownReporterOptions): Reporter {
       const { summary } = data;
       const scorerNames = Object.keys(summary.meanScores);
       const lines: string[] = [];
+      const passRate =
+        summary.totalCases > 0
+          ? ((summary.passCount / summary.totalCases) * 100).toFixed(1)
+          : '0.0';
 
       lines.push(`# ${data.name}`);
       lines.push('');
       lines.push(`**Model:** ${data.model}`);
+      lines.push(`**Threshold:** ${data.threshold}`);
       lines.push(
-        `**Cases:** ${summary.totalCases} (${summary.passCount} pass, ${summary.failCount} fail)`,
+        `**Cases:** ${summary.totalCases} (${summary.passCount} pass, ${summary.failCount} fail, ${passRate}%)`,
       );
       lines.push(`**Duration:** ${formatDuration(summary.totalLatencyMs)}`);
       lines.push(
-        `**Tokens:** ${formatTokens(summary.totalTokensIn + summary.totalTokensOut)}`,
+        `**Tokens:** In: ${formatTokens(summary.totalTokensIn)} | Out: ${formatTokens(summary.totalTokensOut)} | Total: ${formatTokens(summary.totalTokensIn + summary.totalTokensOut)}`,
       );
       lines.push('');
 
@@ -50,6 +55,7 @@ export function markdownReporter(options?: MarkdownReporterOptions): Reporter {
         'Input',
         ...scorerNames,
         'Latency',
+        'Tokens',
         'Error',
       ];
       lines.push(`| ${caseHeader.join(' | ')} |`);
@@ -77,7 +83,8 @@ export function markdownReporter(options?: MarkdownReporterOptions): Reporter {
           status,
           input,
           ...scores,
-          `${c.latencyMs}ms`,
+          formatDuration(c.latencyMs),
+          `${c.tokensIn}/${c.tokensOut}`,
           error,
         ];
         lines.push(`| ${row.join(' | ')} |`);

@@ -14,10 +14,7 @@ const DETERMINISTIC_SCORERS = [
   { name: 'jsonMatch', label: 'JSON Match' },
 ];
 
-const LLM_SCORERS = [
-  { name: 'llmJudge', label: 'LLM Judge' },
-  { name: 'factuality', label: 'Factuality' },
-];
+const LLM_SCORERS = [{ name: 'factuality', label: 'Factuality' }];
 
 app.get('/', (c) => {
   const store = c.get('store');
@@ -213,9 +210,9 @@ app.get('/', (c) => {
               class="input input-sm w-full"
             />
             <div id="modelHiddenInputs"></div>
-            <p id="modelError" class="hidden text-error text-xs"></p>
+            <p id="modelError" class="text-error hidden text-xs"></p>
           </div>
-          <p class="mt-1 text-xs text-base-content/60">
+          <p class="text-base-content/60 mt-1 text-xs">
             Add one or more models. Duplicate tags are ignored.
           </p>
         </fieldset>
@@ -223,7 +220,12 @@ app.get('/', (c) => {
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Task Mode</legend>
           <div role="tablist" class="tabs tabs-border">
-            <button type="button" data-tab="prompt" role="tab" class="tab tab-active">
+            <button
+              type="button"
+              data-tab="prompt"
+              role="tab"
+              class="tab tab-active"
+            >
               Prompt
             </button>
             <button type="button" data-tab="http" role="tab" class="tab">
@@ -233,7 +235,7 @@ app.get('/', (c) => {
 
           <div data-panel="prompt" class="mt-4">
             {prompts.length === 0 ? (
-              <div class="rounded-md border border-warning/30 bg-warning/10 p-4 text-sm">
+              <div class="border-warning/30 bg-warning/10 rounded-md border p-4 text-sm">
                 <p>
                   Prompt mode requires a saved prompt version.{' '}
                   <a href="/prompts" class="link link-primary">
@@ -271,8 +273,9 @@ app.get('/', (c) => {
                     readOnly
                     class="textarea w-full font-mono"
                   />
-                  <p class="mt-1 text-xs text-base-content/60">
-                    Prompt content is managed in the Prompt library. New runs can only use saved versions.
+                  <p class="text-base-content/60 mt-1 text-xs">
+                    Prompt content is managed in the Prompt library. New runs
+                    can only use saved versions.
                   </p>
                 </fieldset>
               </>
@@ -288,7 +291,7 @@ app.get('/', (c) => {
                 placeholder="https://api.example.com/predict"
                 class="input input-sm w-full"
               />
-              <p class="mt-1 text-xs text-base-content/60">
+              <p class="text-base-content/60 mt-1 text-xs">
                 POST with JSON body. Expected response: {'{ "output": "..." }'}
               </p>
             </fieldset>
@@ -298,7 +301,7 @@ app.get('/', (c) => {
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Dataset</legend>
           {datasets.length === 0 ? (
-            <p class="text-sm text-base-content/60">
+            <p class="text-base-content/60 text-sm">
               No datasets available.{' '}
               <a href="/datasets" class="link link-primary">
                 Upload one first
@@ -306,11 +309,7 @@ app.get('/', (c) => {
               .
             </p>
           ) : (
-            <select
-              name="dataset"
-              required
-              class="select select-sm w-full"
-            >
+            <select name="dataset" required class="select select-sm w-full">
               {datasets.map((ds) => (
                 <option value={ds.name}>
                   {ds.name} ({ds.extension})
@@ -323,7 +322,7 @@ app.get('/', (c) => {
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Scorers</legend>
           <div class="space-y-2">
-            <p class="text-xs uppercase text-base-content/60">Deterministic</p>
+            <p class="text-base-content/60 text-xs uppercase">Deterministic</p>
             <div class="flex flex-wrap gap-4">
               {DETERMINISTIC_SCORERS.map((s) => (
                 <label class="flex items-center gap-2 text-sm">
@@ -337,7 +336,7 @@ app.get('/', (c) => {
                 </label>
               ))}
             </div>
-            <p class="mt-3 text-xs uppercase text-base-content/60">LLM-Based</p>
+            <p class="text-base-content/60 mt-3 text-xs uppercase">LLM-Based</p>
             <div class="flex flex-wrap gap-4">
               {LLM_SCORERS.map((s) => (
                 <label class="flex items-center gap-2 text-sm">
@@ -357,14 +356,14 @@ app.get('/', (c) => {
               <input
                 type="text"
                 name="scorerModel"
-                placeholder="provider/model-id for LLM scorers"
+                placeholder="OpenAI-compatible model id (e.g. gpt-4.1-mini)"
                 class="input input-sm w-full"
               />
             </fieldset>
           </div>
         </fieldset>
 
-        <div class="collapse collapse-arrow border border-base-content/10 bg-base-100">
+        <div class="collapse-arrow border-base-content/10 bg-base-100 collapse border">
           <input type="checkbox" />
           <div class="collapse-title text-sm font-medium">Advanced Options</div>
           <div class="collapse-content">
@@ -412,7 +411,9 @@ app.get('/', (c) => {
                 />
               </fieldset>
               <fieldset class="fieldset">
-                <legend class="fieldset-legend">Batch Size (execution chunk)</legend>
+                <legend class="fieldset-legend">
+                  Batch Size (execution chunk)
+                </legend>
                 <input
                   type="number"
                   name="batchSize"
@@ -420,19 +421,22 @@ app.get('/', (c) => {
                   min="1"
                   class="input input-sm w-full"
                 />
-                <p class="mt-1 text-xs text-base-content/60">
-                  Controls how many records are processed per batch. It does not limit total records.
+                <p class="text-base-content/60 mt-1 text-xs">
+                  Controls how many records are processed per batch. It does not
+                  limit total records.
                 </p>
               </fieldset>
               <fieldset class="fieldset col-span-2">
-                <legend class="fieldset-legend">Run Specific Records (optional)</legend>
+                <legend class="fieldset-legend">
+                  Run Specific Records (optional)
+                </legend>
                 <input
                   type="text"
                   name="recordSelection"
                   placeholder="Examples: 1,2,8-12"
                   class="input input-sm w-full"
                 />
-                <p class="mt-1 text-xs text-base-content/60">
+                <p class="text-base-content/60 mt-1 text-xs">
                   Uses 1-based row numbers from the dataset preview.
                 </p>
               </fieldset>

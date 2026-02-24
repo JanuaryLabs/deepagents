@@ -1,5 +1,17 @@
-export { Dataset, dataset, hf } from './dataset/index.ts';
-export type { HfOptions, PredicateFn, TransformFn } from './dataset/index.ts';
+export {
+  Dataset,
+  dataset,
+  filterRecordsByIndex,
+  hf,
+  parseRecordSelection,
+  pickFromArray,
+} from './dataset/index.ts';
+export type {
+  HfOptions,
+  ParsedRecordSelection,
+  PredicateFn,
+  TransformFn,
+} from './dataset/index.ts';
 
 export {
   all,
@@ -9,7 +21,6 @@ export {
   includes,
   jsonMatch,
   levenshtein,
-  llmJudge,
   regex,
   weighted,
 } from './scorers/index.ts';
@@ -66,5 +77,5 @@ export type {
   Verbosity,
 } from './reporters/index.ts';
 
-export { evaluate } from './evaluate/index.ts';
-export type { EvaluateOptions, EvaluateEachOptions } from './evaluate/index.ts';
+export * from './evaluate/index.ts';
+export type { EvaluateEachOptions, EvaluateOptions } from './evaluate/index.ts';

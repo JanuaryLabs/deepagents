@@ -1,5 +1,5 @@
 import { escapeCsv } from './format.ts';
-import { createRunEndFileReporter } from './shared.ts';
+import { createRunEndFileReporter, getCaseStatus } from './shared.ts';
 import type { Reporter } from './types.ts';
 
 export interface CsvReporterOptions {
@@ -15,6 +15,7 @@ export function csvReporter(options?: CsvReporterOptions): Reporter {
 
       const headerParts = [
         'index',
+        'status',
         'input',
         'output',
         'expected',
@@ -30,8 +31,10 @@ export function csvReporter(options?: CsvReporterOptions): Reporter {
       const rows = [headerParts.join(',')];
 
       for (const c of data.cases) {
+        const status = getCaseStatus(c, data.threshold);
         const parts = [
           String(c.index),
+          status,
           escapeCsv(c.input),
           escapeCsv(c.output),
           escapeCsv(c.expected),

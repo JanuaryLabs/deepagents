@@ -106,11 +106,12 @@ import {
 ### LLM-Based Scorers
 
 ```typescript
-import { factuality, llmJudge } from '@deepagents/evals/scorers';
+import { factuality } from '@deepagents/evals/scorers';
 
-const judge = llmJudge({ model: myModel, criteria: 'Is the answer helpful?' });
-const fact = factuality({ model: myModel });
+const fact = factuality({ model: 'gpt-4.1-mini' });
 ```
+
+`factuality` is backed by `autoevals` and expects an OpenAI-compatible model id.
 
 ### Combinators
 
@@ -126,7 +127,7 @@ const lenient = any(exactMatch, includes);
 // Weighted average
 const balanced = weighted({
   accuracy: { scorer: exactMatch, weight: 2 },
-  style: { scorer: llmJudge({ model, criteria: '...' }), weight: 1 },
+  grounding: { scorer: factuality({ model: 'gpt-4.1-mini' }), weight: 1 },
 });
 ```
 

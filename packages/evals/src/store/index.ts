@@ -492,6 +492,48 @@ export class RunStore {
     };
   }
 
+  findSuiteByName(name: string): SuiteRow | undefined {
+    const row = this.#stmt(
+      'SELECT * FROM suites WHERE name = ? ORDER BY created_at DESC LIMIT 1',
+    ).get(name) as { id: string; name: string; created_at: number } | undefined;
+    return row ?? undefined;
+  }
+
+  getLatestCompletedRun(suiteId: string, model?: string): RunRow | undefined {
+    const sql = model
+      ? 'SELECT * FROM runs WHERE suite_id = ? AND status = ? AND model = ? ORDER BY started_at DESC LIMIT 1'
+      : 'SELECT * FROM runs WHERE suite_id = ? AND status = ? ORDER BY started_at DESC LIMIT 1';
+    const row = (
+      model
+        ? this.#stmt(sql).get(suiteId, 'completed', model)
+        : this.#stmt(sql).get(suiteId, 'completed')
+    ) as
+      | {
+          id: string;
+          suite_id: string;
+          name: string;
+          model: string;
+          config: string | null;
+          started_at: number;
+          finished_at: number | null;
+          status: string;
+          summary: string | null;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      suite_id: row.suite_id,
+      name: row.name,
+      model: row.model,
+      config: row.config ? JSON.parse(row.config) : null,
+      started_at: row.started_at,
+      finished_at: row.finished_at,
+      status: row.status as RunRow['status'],
+      summary: row.summary ? JSON.parse(row.summary) : null,
+    };
+  }
+
   listSuites(): SuiteRow[] {
     const rows = this.#stmt(
       'SELECT * FROM suites ORDER BY created_at DESC',

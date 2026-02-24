@@ -276,6 +276,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
               scores[sName] = {
                 score: clampScore(sr.score, sName),
                 reason: sr.reason,
+                metadata: sr.metadata,
               };
             }
             trialResults.push({ result, scores });
@@ -314,6 +315,8 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
             score: meanScore,
             reason:
               trialResults[trialResults.length - 1]!.scores[sName]?.reason,
+            metadata:
+              trialResults[trialResults.length - 1]!.scores[sName]?.metadata,
           };
         }
       } else {
@@ -331,6 +334,7 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
             finalScores[sName] = {
               score: clampScore(sr.score, sName),
               reason: sr.reason,
+              metadata: sr.metadata,
             };
           }
         }
