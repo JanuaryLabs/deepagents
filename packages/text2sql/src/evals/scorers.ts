@@ -22,10 +22,22 @@ export const sqlSemanticMatch = createScorer<unknown, string, string>({
       client: openai as never,
       model: 'gpt-4.1-nano',
     });
+    const metadata = (result.metadata ?? {}) as Record<string, unknown>;
+    const rationale = metadata['rationale'];
+    const reason =
+      typeof rationale === 'string'
+        ? rationale
+        : Array.isArray(rationale)
+          ? rationale
+              .map((item) => (typeof item === 'string' ? item.trim() : ''))
+              .filter(Boolean)
+              .join(' | ') || undefined
+          : undefined;
 
     return {
       score: result.score ?? 0,
-      metadata: result.metadata,
+      reason,
+      metadata,
     };
   },
 });

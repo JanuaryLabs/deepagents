@@ -11,17 +11,14 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { fragment } from '@deepagents/context';
-import {
-  SQLValidationError,
-  UnanswerableSQLError,
-  toSql,
-} from '@deepagents/text2sql';
+import { SQLValidationError, toSql } from '@deepagents/text2sql';
 
 import { init_db } from '../../tests/sqlite.ts';
 
 type MockModelResponse =
   | { result: { sql: string; reasoning: string } }
-  | { result: { error: string } };
+  | { result: { error: string } }
+  | { sql: string; reasoning: string };
 const testUsage = {
   inputTokens: {
     total: 3,
@@ -405,26 +402,32 @@ describe('toSql', () => {
     assert.strictEqual(result.errors?.length, 2);
   });
 
-  it('throws UnanswerableSQLError immediately when question is unanswerable', async () => {
+  it('uses best-effort fallback when first response is unanswerable', async () => {
     // Arrange
-    const { adapter } = await init_db('');
-    const model = createMockModel({ result: { error: 'No matching table' } });
+    const { adapter } = await init_db('', { validate: () => undefined });
+    const { model, calls } = createCapturingModel([
+      { result: { error: 'No matching table' } },
+      { sql: 'SELECT 1', reasoning: 'best effort fallback' },
+    ]);
 
-    // Act & Assert
-    await assert.rejects(
-      () =>
-        toSql({
-          input: 'query',
-          adapter,
-          fragments: [],
-          model,
-          maxRetries: 3,
-        }),
-      (error) => {
-        assert(UnanswerableSQLError.isInstance(error));
-        assert((error as UnanswerableSQLError).message === 'No matching table');
-        return true;
-      },
+    // Act
+    const result = await toSql({
+      input: 'query',
+      adapter,
+      fragments: [],
+      model,
+      maxRetries: 3,
+    });
+
+    // Assert
+    assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+    assert.strictEqual(result.attempts, 1);
+    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(
+      calls.some((c) =>
+        JSON.stringify(c.messages).includes('best_effort_fallback'),
+      ),
+      true,
     );
   });
 
@@ -951,29 +954,24 @@ describe('toSql', () => {
       assert.strictEqual(calls.length, 1);
     });
 
-    it('does not retry UnanswerableSQLError and makes only one attempt', async () => {
+    it('uses fallback prompt after unanswerable and succeeds without pRetry rerun', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
       const { model, calls } = createCapturingModel([
         { result: { error: 'No table matches this question' } },
-        { result: { sql: 'SELECT 1', reasoning: 'test' } },
+        { sql: 'SELECT 1', reasoning: 'best effort fallback' },
       ]);
 
-      await assert.rejects(
-        () =>
-          toSql({
-            input: 'query',
-            adapter,
-            fragments: [],
-            model,
-            maxRetries: 3,
-          }),
-        (error: unknown) => {
-          assert(UnanswerableSQLError.isInstance(error));
-          return true;
-        },
-      );
+      const result = await toSql({
+        input: 'query',
+        adapter,
+        fragments: [],
+        model,
+        maxRetries: 3,
+      });
 
-      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(result.sql, adapter.format('SELECT 1'));
+      assert.strictEqual(result.attempts, 1);
+      assert.strictEqual(calls.length, 2);
     });
   });
 

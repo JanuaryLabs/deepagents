@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-import { toState } from '@deepagents/agent';
+import { toState } from './state.ts';
 
 export interface HNSearchItem {
   objectID: string;

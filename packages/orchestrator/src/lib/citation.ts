@@ -12,8 +12,7 @@ import {
   stream,
   user,
 } from '@deepagents/agent';
-
-import { repoTree, search_content_tool } from './deepwiki/tools.ts';
+import { repoTree, search_content_tool } from '@deepagents/toolbox';
 
 type State = {
   tree: string;

@@ -10,9 +10,9 @@ import {
   lmstudio,
   user,
 } from '@deepagents/agent';
+import { read_file_tool, search_content_tool } from '@deepagents/toolbox';
 
 import { type Outline, buildToc } from './outline-agent.ts';
-import { read_file_tool, search_content_tool } from './tools.ts';
 
 type SectionAgentContext = {
   repo_path: string;

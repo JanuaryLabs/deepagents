@@ -2,9 +2,8 @@ import { groq } from '@ai-sdk/groq';
 import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
 import { agent } from '@deepagents/agent';
-import { scratchpad_tool } from '@deepagents/toolbox';
+import { scratchpad_tool, search_content_tool } from '@deepagents/toolbox';
 
-import { search_content_tool } from '../../deepwiki/tools.ts';
 import type { PlanStep, PlannerOutput } from '../planner-agent.ts';
 
 /**

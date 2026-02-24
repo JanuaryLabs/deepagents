@@ -1,6 +1,6 @@
 import limit from 'p-limit';
 
-import { repoTree } from './deepwiki/tools.ts';
+import { repoTree } from '@deepagents/toolbox';
 
 export async function repoContext(repoPath: string) {
   const tree = await repoTree(repoPath);

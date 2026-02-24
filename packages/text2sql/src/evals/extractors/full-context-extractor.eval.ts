@@ -2,11 +2,11 @@
 import { evalite } from 'evalite';
 import { DatabaseSync } from 'node:sqlite';
 
+import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
 import sqlite from '@deepagents/text2sql/sqlite';
 import { FullContextExtractor } from '@deepagents/text2sql/synthesis';
 
 import { simulateConversation } from '../helpers/conversation-simulator';
-import { filterByIndex } from '../utils';
 
 const DB_PATH = '/Users/ezzabuzaid/Downloads/Chinook.db';
 
@@ -30,31 +30,36 @@ interface EvalInput {
   description: string;
 }
 
+const { indexes } = parseRecordSelection('2');
+
 evalite<EvalInput, string>('FullContextExtractor - Question Resolution', {
   data: () =>
-    filterByIndex([
-      {
-        input: {
-          initialQuestion: 'Show me all customers',
-          turns: 3,
-          description: 'Customer exploration with follow-ups',
+    pickFromArray(
+      [
+        {
+          input: {
+            initialQuestion: 'Show me all customers',
+            turns: 3,
+            description: 'Customer exploration with follow-ups',
+          },
         },
-      },
-      {
-        input: {
-          initialQuestion: 'What were total sales last year?',
-          turns: 2,
-          description: 'Sales analysis with refinement',
+        {
+          input: {
+            initialQuestion: 'What were total sales last year?',
+            turns: 2,
+            description: 'Sales analysis with refinement',
+          },
         },
-      },
-      {
-        input: {
-          initialQuestion: 'List the top 5 artists by number of albums',
-          turns: 2,
-          description: 'Artist ranking with drill-down',
+        {
+          input: {
+            initialQuestion: 'List the top 5 artists by number of albums',
+            turns: 2,
+            description: 'Artist ranking with drill-down',
+          },
         },
-      },
-    ]),
+      ],
+      indexes,
+    ),
 
   task: async (input) => {
     // 1. Simulate multi-turn conversation

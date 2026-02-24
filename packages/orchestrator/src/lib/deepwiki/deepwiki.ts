@@ -1,9 +1,9 @@
 import { writeFile } from 'node:fs/promises';
 
+import { repoTree } from '@deepagents/toolbox';
+
 import { completeWiki } from './complete-wiki.ts';
 import { type OutlineAgentContext } from './outline-agent.ts';
-import { repoTree } from './tools.ts';
-import { singlePageWiki } from './writer.ts';
 
 const state: OutlineAgentContext = {
   repo_path: '/Users/ezzabuzaid/Desktop/mo/cold-ambulance',

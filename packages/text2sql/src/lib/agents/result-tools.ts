@@ -215,12 +215,21 @@ const BLOCKED_DB_CLIENT_COMMANDS = new Set([
 ]);
 const BLOCKED_RAW_SQL_COMMANDS = new Set(['select', 'with']);
 const ALLOWED_SQL_PROXY_SUBCOMMANDS = new Set(['run', 'validate']);
+const SHELL_INTERPRETER_COMMANDS = new Set([
+  'bash',
+  'sh',
+  'zsh',
+  'dash',
+  'ksh',
+]);
 const SQL_PROXY_ENFORCEMENT_MESSAGE = [
   'Direct database querying through bash is blocked.',
   'Use SQL proxy commands in this order:',
   '1) sql validate "SELECT ..."',
   '2) sql run "SELECT ..."',
 ].join('\n');
+
+type SqlInspectionMode = 'blocked-only' | 'block-all-sql';
 
 type FunctionDefCommand = Extract<CommandNode, { type: 'FunctionDef' }>;
 
@@ -292,16 +301,18 @@ function isScriptNode(value: unknown): value is ScriptNode {
 function scriptContainsBlockedCommand(
   script: ScriptNode,
   context: InspectionContext,
+  mode: SqlInspectionMode = 'blocked-only',
 ): boolean {
-  return statementsContainBlockedCommand(script.statements, context);
+  return statementsContainBlockedCommand(script.statements, context, mode);
 }
 
 function statementsContainBlockedCommand(
   statements: Array<{ pipelines: Array<{ commands: CommandNode[] }> }>,
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   for (const statement of statements) {
-    if (statementContainsBlockedCommand(statement, context)) {
+    if (statementContainsBlockedCommand(statement, context, mode)) {
       return true;
     }
   }
@@ -311,9 +322,10 @@ function statementsContainBlockedCommand(
 function statementContainsBlockedCommand(
   statement: { pipelines: Array<{ commands: CommandNode[] }> },
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   for (const pipeline of statement.pipelines) {
-    if (pipelineContainsBlockedCommand(pipeline, context)) {
+    if (pipelineContainsBlockedCommand(pipeline, context, mode)) {
       return true;
     }
   }
@@ -323,13 +335,14 @@ function statementContainsBlockedCommand(
 function pipelineContainsBlockedCommand(
   pipeline: { commands: CommandNode[] },
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   for (const command of pipeline.commands) {
     if (command.type === 'FunctionDef') {
       context.functionDefinitions.set(command.name, command);
       continue;
     }
-    if (commandContainsBlockedCommand(command, context)) {
+    if (commandContainsBlockedCommand(command, context, mode)) {
       return true;
     }
   }
@@ -339,6 +352,7 @@ function pipelineContainsBlockedCommand(
 function stringCommandContainsBlockedCommand(
   command: string,
   context: InspectionContext,
+  mode: SqlInspectionMode = 'blocked-only',
 ): boolean {
   let script: ScriptNode;
   try {
@@ -347,12 +361,17 @@ function stringCommandContainsBlockedCommand(
     return false;
   }
 
-  return scriptContainsBlockedCommand(script, cloneInspectionContext(context));
+  return scriptContainsBlockedCommand(
+    script,
+    cloneInspectionContext(context),
+    mode,
+  );
 }
 
 function wordContainsBlockedCommand(
   word: WordNode | null | undefined,
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   if (!word) {
     return false;
@@ -361,15 +380,17 @@ function wordContainsBlockedCommand(
   return wordPartContainsBlockedCommand(
     word.parts as unknown as Array<Record<string, unknown>>,
     context,
+    mode,
   );
 }
 
 function wordPartContainsBlockedCommand(
   parts: Array<Record<string, unknown>>,
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   for (const part of parts) {
-    if (partContainsBlockedCommand(part, context)) {
+    if (partContainsBlockedCommand(part, context, mode)) {
       return true;
     }
   }
@@ -379,6 +400,7 @@ function wordPartContainsBlockedCommand(
 function partContainsBlockedCommand(
   node: Record<string, unknown>,
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   const type = node.type;
 
@@ -387,13 +409,14 @@ function partContainsBlockedCommand(
       return scriptContainsBlockedCommand(
         node.body,
         cloneInspectionContext(context),
+        mode,
       );
     }
     return false;
   }
 
   if (type === 'ArithCommandSubst' && typeof node.command === 'string') {
-    return stringCommandContainsBlockedCommand(node.command, context);
+    return stringCommandContainsBlockedCommand(node.command, context, mode);
   }
 
   for (const value of Object.values(node)) {
@@ -401,7 +424,11 @@ function partContainsBlockedCommand(
       for (const item of value) {
         if (typeof item === 'object' && item !== null) {
           if (
-            partContainsBlockedCommand(item as Record<string, unknown>, context)
+            partContainsBlockedCommand(
+              item as Record<string, unknown>,
+              context,
+              mode,
+            )
           ) {
             return true;
           }
@@ -412,7 +439,11 @@ function partContainsBlockedCommand(
 
     if (typeof value === 'object' && value !== null) {
       if (
-        partContainsBlockedCommand(value as Record<string, unknown>, context)
+        partContainsBlockedCommand(
+          value as Record<string, unknown>,
+          context,
+          mode,
+        )
       ) {
         return true;
       }
@@ -425,6 +456,7 @@ function partContainsBlockedCommand(
 function functionInvocationContainsBlockedCommand(
   functionName: string,
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   const definition = context.functionDefinitions.get(functionName);
   if (!definition) {
@@ -437,16 +469,82 @@ function functionInvocationContainsBlockedCommand(
 
   const invocationContext = cloneInspectionContext(context);
   invocationContext.callStack.add(functionName);
-  return commandContainsBlockedCommand(definition.body, invocationContext);
+  return commandContainsBlockedCommand(
+    definition.body,
+    invocationContext,
+    mode,
+  );
+}
+
+function getShellCommandPayload(args: WordNode[]): {
+  foundCommandFlag: boolean;
+  payload: string | null;
+} {
+  const hasShortCommandFlag = (token: string): boolean => {
+    // Parse compact short-option clusters like -c, -lc, -cl, -xec
+    if (!token.startsWith('-') || token.startsWith('--') || token.length <= 1) {
+      return false;
+    }
+
+    let hasCommandFlag = false;
+    for (let index = 1; index < token.length; index += 1) {
+      const charCode = token.charCodeAt(index);
+      const isLowercase = charCode >= 97 && charCode <= 122;
+      const isUppercase = charCode >= 65 && charCode <= 90;
+      if (!isLowercase && !isUppercase) {
+        return false;
+      }
+      if (token[index] === 'c') {
+        hasCommandFlag = true;
+      }
+    }
+
+    return hasCommandFlag;
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = asStaticWordText(args[index]);
+    if (!token) {
+      continue;
+    }
+
+    if (token === '--') {
+      break;
+    }
+
+    if (token === '--command') {
+      return {
+        foundCommandFlag: true,
+        payload: asStaticWordText(args[index + 1]),
+      };
+    }
+
+    if (token.startsWith('--command=')) {
+      return {
+        foundCommandFlag: true,
+        payload: token.slice('--command='.length),
+      };
+    }
+
+    if (token === '-c' || hasShortCommandFlag(token)) {
+      return {
+        foundCommandFlag: true,
+        payload: asStaticWordText(args[index + 1]),
+      };
+    }
+  }
+
+  return { foundCommandFlag: false, payload: null };
 }
 
 function commandContainsBlockedCommand(
   command: CommandNode,
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
   switch (command.type) {
     case 'SimpleCommand':
-      return isBlockedSimpleCommand(command, context);
+      return isBlockedSimpleCommand(command, context, mode);
     case 'If':
       return (
         command.clauses.some(
@@ -454,16 +552,19 @@ function commandContainsBlockedCommand(
             statementsContainBlockedCommand(
               clause.condition,
               cloneInspectionContext(context),
+              mode,
             ) ||
             statementsContainBlockedCommand(
               clause.body,
               cloneInspectionContext(context),
+              mode,
             ),
         ) ||
         (command.elseBody
           ? statementsContainBlockedCommand(
               command.elseBody,
               cloneInspectionContext(context),
+              mode,
             )
           : false)
       );
@@ -472,6 +573,7 @@ function commandContainsBlockedCommand(
       return statementsContainBlockedCommand(
         command.body,
         cloneInspectionContext(context),
+        mode,
       );
     case 'While':
     case 'Until':
@@ -479,10 +581,12 @@ function commandContainsBlockedCommand(
         statementsContainBlockedCommand(
           command.condition,
           cloneInspectionContext(context),
+          mode,
         ) ||
         statementsContainBlockedCommand(
           command.body,
           cloneInspectionContext(context),
+          mode,
         )
       );
     case 'Case':
@@ -490,6 +594,7 @@ function commandContainsBlockedCommand(
         statementsContainBlockedCommand(
           item.body,
           cloneInspectionContext(context),
+          mode,
         ),
       );
     case 'Subshell':
@@ -497,6 +602,7 @@ function commandContainsBlockedCommand(
       return statementsContainBlockedCommand(
         command.body,
         cloneInspectionContext(context),
+        mode,
       );
     case 'FunctionDef':
       return false;
@@ -523,21 +629,24 @@ function isBlockedSimpleCommand(
     }>;
   },
   context: InspectionContext,
+  mode: SqlInspectionMode,
 ): boolean {
-  if (wordContainsBlockedCommand(command.name, context)) {
+  if (wordContainsBlockedCommand(command.name, context, mode)) {
     return true;
   }
 
-  if (command.args.some((arg) => wordContainsBlockedCommand(arg, context))) {
+  if (
+    command.args.some((arg) => wordContainsBlockedCommand(arg, context, mode))
+  ) {
     return true;
   }
 
   if (
     command.assignments.some(
       (assignment) =>
-        wordContainsBlockedCommand(assignment.value, context) ||
+        wordContainsBlockedCommand(assignment.value, context, mode) ||
         (assignment.array?.some((value) =>
-          wordContainsBlockedCommand(value, context),
+          wordContainsBlockedCommand(value, context, mode),
         ) ??
           false),
     )
@@ -551,10 +660,15 @@ function isBlockedSimpleCommand(
         return wordContainsBlockedCommand(
           redirection.target as unknown as WordNode,
           context,
+          mode,
         );
       }
       if (redirection.target.type === 'HereDoc' && redirection.target.content) {
-        return wordContainsBlockedCommand(redirection.target.content, context);
+        return wordContainsBlockedCommand(
+          redirection.target.content,
+          context,
+          mode,
+        );
       }
       return false;
     })
@@ -577,12 +691,36 @@ function isBlockedSimpleCommand(
     return true;
   }
 
-  if (normalizedName === 'sql') {
-    const subcommand = asStaticWordText(command.args[0])?.toLowerCase();
-    return !subcommand || !ALLOWED_SQL_PROXY_SUBCOMMANDS.has(subcommand);
+  if (SHELL_INTERPRETER_COMMANDS.has(normalizedName)) {
+    const shellCommand = getShellCommandPayload(command.args);
+    if (shellCommand.foundCommandFlag) {
+      if (!shellCommand.payload) {
+        return true;
+      }
+      if (
+        stringCommandContainsBlockedCommand(
+          shellCommand.payload,
+          context,
+          'block-all-sql',
+        )
+      ) {
+        return true;
+      }
+    }
   }
 
-  if (functionInvocationContainsBlockedCommand(commandName, context)) {
+  if (normalizedName === 'sql') {
+    const subcommand = asStaticWordText(command.args[0])?.toLowerCase();
+    if (!subcommand) {
+      return true;
+    }
+    if (mode === 'block-all-sql') {
+      return true;
+    }
+    return !ALLOWED_SQL_PROXY_SUBCOMMANDS.has(subcommand);
+  }
+
+  if (functionInvocationContainsBlockedCommand(commandName, context, mode)) {
     return true;
   }
 

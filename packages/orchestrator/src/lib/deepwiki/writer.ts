@@ -13,11 +13,14 @@ import {
   toState,
   user,
 } from '@deepagents/agent';
-import { scratchpad_tool } from '@deepagents/toolbox';
+import {
+  read_file_tool,
+  scratchpad_tool,
+  search_content_tool,
+} from '@deepagents/toolbox';
 
 import { fold } from '../graph.ts';
 import { type Outline, buildToc } from './outline-agent.ts';
-import { read_file_tool, search_content_tool } from './tools.ts';
 
 type SectionAgentContext = {
   repo_path: string;

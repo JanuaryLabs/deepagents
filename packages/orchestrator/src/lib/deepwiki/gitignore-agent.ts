@@ -2,13 +2,8 @@ import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
 
-import {
-	agent,
-	instructions,
-	toState
-} from '@deepagents/agent';
-
-import { read_dir_tool, read_file_tool } from './tools.ts';
+import { agent, instructions, toState } from '@deepagents/agent';
+import { read_dir_tool, read_file_tool } from '@deepagents/toolbox';
 
 export const ignoreAgent = agent<{ repo_path: string }>({
   name: 'Ignore Agent',

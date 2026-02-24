@@ -1,6 +1,8 @@
 import { openai } from '@ai-sdk/openai';
 import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
+import { lmstudio } from '@deepagents/agent';
+
 /**
  * Model variants for evaluation.
  * Easy to add/remove models - just update this array.
@@ -36,7 +38,7 @@ export const EVAL_MODELS = [
         model: openai('gpt-4.1-nano'),
         middleware: defaultSettingsMiddleware({
           settings: {
-            // temperature: 0,
+            temperature: 0,
           },
         }),
       }),

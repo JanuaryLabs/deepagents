@@ -5,10 +5,11 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import z from 'zod';
 
-import { toState } from '@deepagents/agent';
 import { fastembed, nodeSQLite, similaritySearch } from '@deepagents/retrieval';
 import * as connectors from '@deepagents/retrieval/connectors';
 import { ignorePatterns } from '@deepagents/retrieval/connectors';
+
+import { toState } from './state.ts';
 
 export const read_file_tool = tool({
   description: `Use this tool to read a file from the filesystem. Supports reading entire files or specific line ranges.`,

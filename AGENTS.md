@@ -135,15 +135,3 @@ Otherwise, node will throw an error.
 nx run text2sql:eval                    # Run all evals
 nx run text2sql:eval path/to/eval.ts    # Run specific eval file
 ```
-
-To debug failing evals test cases
-
-```bash
-nx run text2sql:eval-debug --list
-```
-
-To run a specific eval test case
-
-```bash
-nx run text2sql:eval path/to/eval.ts
-```

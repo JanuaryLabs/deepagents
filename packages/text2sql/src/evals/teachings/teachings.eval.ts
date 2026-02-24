@@ -3,11 +3,11 @@ import { evalite } from 'evalite';
 import { DatabaseSync } from 'node:sqlite';
 
 import { XmlRenderer } from '@deepagents/context';
+import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
 import sqlite from '@deepagents/text2sql/sqlite';
 
 import { generateTeachings } from '../../lib/synthesis/synthesizers/teachings-generator.ts';
 import { teachingsCoverage, teachingsQuality } from '../scorers';
-import { filterByIndex } from '../utils';
 import DATASET from './teachings-dataset.json' with { type: 'json' };
 
 interface TeachingsEvalCase {
@@ -22,15 +22,18 @@ interface TeachingsEvalCase {
 
 const typedDataset = DATASET as TeachingsEvalCase[];
 
+const { indexes } = parseRecordSelection('2');
+
 evalite('TeachingsGenerator Quality', {
   data: () =>
-    filterByIndex(
+    pickFromArray(
       typedDataset.map((item) => ({
         input: {
           schema: item.schema,
         },
         expected: item.expected,
       })),
+      indexes,
     ),
   task: async (input) => {
     // Create in-memory SQLite database with the schema

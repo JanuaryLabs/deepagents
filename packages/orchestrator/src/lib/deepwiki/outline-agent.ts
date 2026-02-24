@@ -9,9 +9,7 @@ import {
   instructions,
   user,
 } from '@deepagents/agent';
-import { scratchpad_tool } from '@deepagents/toolbox';
-
-import { read_file_tool } from './tools.ts';
+import { read_file_tool, scratchpad_tool } from '@deepagents/toolbox';
 
 const BaseOutlineItem = z.object({
   title: z.string().trim().min(1, 'Title is required'),
