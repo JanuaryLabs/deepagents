@@ -601,6 +601,46 @@ describe('sql proxy enforcement', () => {
     assert.match(result.stderr, /sql run/i);
   });
 
+  it('blocks sql proxy commands piped into command sh via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `echo 'sql validate "SELECT 1"' | command sh`,
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks sql proxy commands piped into env sh via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `echo 'sql validate "SELECT 1"' | env sh`,
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
   it('blocks sql proxy commands from shell scripts via sandbox path', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
@@ -641,6 +681,142 @@ EOF`,
     );
     assert.match(result.stderr, /sql validate/i);
     assert.match(result.stderr, /sql run/i);
+  });
+
+  it('does not SQL-block bash --noprofile with -c for non-sql commands', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `bash --noprofile -c 'echo ok'`,
+    );
+
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /no such file or directory/i);
+  });
+
+  it('does not SQL-block bash -O <opt> with -c for non-sql commands', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`bash -O extglob -c 'echo ok'`);
+
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /no such file or directory/i);
+  });
+
+  it('allows env wrapper for non-sql commands', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`env FOO=bar echo ok`);
+
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stdout, /ok/);
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+
+  it('allows command wrapper for non-sql commands', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`command echo ok`);
+
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stdout, /ok/);
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+
+  it('allows eval wrapper for non-sql commands', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`eval 'echo ok'`);
+
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stdout, /ok/);
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+
+  it('allows non-shell pipeline with command wrapper', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`echo ok | command cat`);
+
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stdout, /ok/);
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+
+  it('allows command lookup mode without SQL enforcement block', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`command -v sql`);
+
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stdout, /sql/);
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+  });
+
+  it('allows nested non-sql wrappers (env + command)', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(`env FOO=bar command echo ok`);
+
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stdout, /ok/);
+    assert.doesNotMatch(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
   });
 
   it('does not block non-invoked function definitions', async () => {

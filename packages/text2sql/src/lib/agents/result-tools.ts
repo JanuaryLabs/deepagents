@@ -542,39 +542,53 @@ function parseShortOptionCluster(option: string): {
   valid: boolean;
   hasCommandFlag: boolean;
   hasStdinFlag: boolean;
+  consumesNextArg: boolean;
 } {
   if (
     !option.startsWith('-') ||
     option.startsWith('--') ||
     option.length <= 1
   ) {
-    return { valid: false, hasCommandFlag: false, hasStdinFlag: false };
+    return {
+      valid: false,
+      hasCommandFlag: false,
+      hasStdinFlag: false,
+      consumesNextArg: false,
+    };
   }
 
   let hasCommandFlag = false;
   let hasStdinFlag = false;
+  let consumesNextArg = false;
 
   for (let index = 1; index < option.length; index += 1) {
     const char = option[index];
     if (!isAsciiLetter(char)) {
-      return { valid: false, hasCommandFlag: false, hasStdinFlag: false };
+      return {
+        valid: false,
+        hasCommandFlag: false,
+        hasStdinFlag: false,
+        consumesNextArg: false,
+      };
     }
 
     if (char === 'c') {
       hasCommandFlag = true;
     } else if (char === 's') {
       hasStdinFlag = true;
+    } else if (char === 'O' || char === 'o') {
+      consumesNextArg = true;
     }
   }
 
-  return { valid: true, hasCommandFlag, hasStdinFlag };
+  return { valid: true, hasCommandFlag, hasStdinFlag, consumesNextArg };
 }
 
 function getShellInvocationDescriptor(
   args: WordNode[],
 ): ShellInvocationDescriptor {
   let readsFromStdin = false;
-  let positionalArgsStart = 0;
+  const longOptionsWithValue = new Set(['--rcfile', '--init-file']);
 
   for (let index = 0; index < args.length; index += 1) {
     const token = asStaticWordText(args[index]);
@@ -583,8 +597,13 @@ function getShellInvocationDescriptor(
     }
 
     if (token === '--') {
-      positionalArgsStart = index + 1;
-      break;
+      if (index + 1 >= args.length) {
+        break;
+      }
+      return {
+        kind: 'script',
+        payload: asStaticWordText(args[index + 1]),
+      };
     }
 
     if (token === '--command') {
@@ -599,6 +618,20 @@ function getShellInvocationDescriptor(
         kind: 'command',
         payload: token.slice('--command='.length),
       };
+    }
+
+    if (token.startsWith('--')) {
+      if (token.includes('=')) {
+        continue;
+      }
+
+      if (longOptionsWithValue.has(token)) {
+        if (index + 1 >= args.length) {
+          return { kind: 'unknown', payload: null };
+        }
+        index += 1;
+      }
+      continue;
     }
 
     if (token.startsWith('-') && !token.startsWith('--')) {
@@ -617,17 +650,19 @@ function getShellInvocationDescriptor(
       if (parsed.hasStdinFlag) {
         readsFromStdin = true;
       }
+
+      if (parsed.consumesNextArg) {
+        if (index + 1 >= args.length) {
+          return { kind: 'unknown', payload: null };
+        }
+        index += 1;
+      }
       continue;
     }
 
-    positionalArgsStart = index;
-    break;
-  }
-
-  if (positionalArgsStart < args.length) {
     return {
       kind: 'script',
-      payload: asStaticWordText(args[positionalArgsStart]),
+      payload: token,
     };
   }
 
@@ -968,7 +1003,7 @@ function isBlockedSimpleCommand(
       },
       context,
       'block-all-sql',
-      { stdinFromPipe: false },
+      options,
     );
   };
 
