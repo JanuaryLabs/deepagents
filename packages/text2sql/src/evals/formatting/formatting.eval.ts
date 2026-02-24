@@ -5,10 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import { InMemoryContextStore } from '@deepagents/context';
+import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
 import { Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
-import { filterByIndex } from '../utils';
 import TESTS from './formatting.json' with { type: 'json' };
 
 /**
@@ -17,13 +17,16 @@ import TESTS from './formatting.json' with { type: 'json' };
  * - Explanations or commentary
  * - Execution results or summaries
  */
+const { indexes } = parseRecordSelection('2');
+
 evalite('SQL Output Formatting', {
   data: () =>
-    filterByIndex(
+    pickFromArray(
       TESTS.map((it) => ({
         input: { question: it.input, ddl: it.ddl },
         expected: it.expected,
       })),
+      indexes,
     ),
   task: async ({ question, ddl }) => {
     const db = new DatabaseSync(':memory:');

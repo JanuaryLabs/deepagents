@@ -3,6 +3,7 @@ import {
   formatErrorValue,
   formatInputValue,
   formatTokens,
+  stringifyUnknown,
 } from './format.ts';
 import { createRunEndFileReporter, getCaseStatus } from './shared.ts';
 import type { Reporter, RunEndData } from './types.ts';
@@ -30,6 +31,10 @@ function esc(str: string): string {
 function renderHtml(data: RunEndData): string {
   const { summary } = data;
   const scorerNames = Object.keys(summary.meanScores);
+  const passRate =
+    summary.totalCases > 0
+      ? ((summary.passCount / summary.totalCases) * 100).toFixed(1)
+      : '0.0';
 
   const caseRows = data.cases
     .map((c) => {
@@ -46,13 +51,20 @@ function renderHtml(data: RunEndData): string {
         })
         .join('');
 
+      const expectedStr = stringifyUnknown(c.expected, {
+        space: 0,
+        fallback: '',
+      });
+
       return `<tr class="${status}">
         <td>${c.index}</td>
         <td class="${status}">${statusLabel}</td>
         <td class="text">${esc(formatInputValue(c.input).slice(0, 120))}</td>
         <td class="text">${esc(c.output.slice(0, 120))}</td>
+        <td class="text">${esc(expectedStr.slice(0, 120))}</td>
         ${scoresCells}
-        <td>${c.latencyMs}ms</td>
+        <td>${formatDuration(c.latencyMs)}</td>
+        <td>${c.tokensIn}/${c.tokensOut}</td>
         <td class="error-text">${c.error ? esc(formatErrorValue(c.error)) : ''}</td>
       </tr>`;
     })
@@ -96,11 +108,14 @@ function renderHtml(data: RunEndData): string {
   <h1>${esc(data.name)}</h1>
   <div class="meta">
     <span><strong>Model:</strong> ${esc(data.model)}</span>
+    <span><strong>Threshold:</strong> ${data.threshold}</span>
     <span><strong>Cases:</strong> ${summary.totalCases}</span>
     <span><strong>Pass:</strong> ${summary.passCount}</span>
-    <span><strong>Fail:</strong> ${summary.failCount}</span>
+    <span><strong>Fail:</strong> ${summary.failCount} (${passRate}%)</span>
     <span><strong>Duration:</strong> ${formatDuration(summary.totalLatencyMs)}</span>
-    <span><strong>Tokens:</strong> ${formatTokens(summary.totalTokensIn + summary.totalTokensOut)}</span>
+    <span><strong>Tokens In:</strong> ${formatTokens(summary.totalTokensIn)}</span>
+    <span><strong>Tokens Out:</strong> ${formatTokens(summary.totalTokensOut)}</span>
+    <span><strong>Total Tokens:</strong> ${formatTokens(summary.totalTokensIn + summary.totalTokensOut)}</span>
   </div>
 
   <h2>Mean Scores</h2>
@@ -117,8 +132,10 @@ function renderHtml(data: RunEndData): string {
         <th>Status</th>
         <th>Input</th>
         <th>Output</th>
+        <th>Expected</th>
         ${scorerHeaders}
         <th>Latency</th>
+        <th>Tokens</th>
         <th>Error</th>
       </tr>
     </thead>

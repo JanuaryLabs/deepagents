@@ -4,6 +4,10 @@ import { agent, generate } from '@deepagents/agent';
 
 import { hf } from '../../../dataset/hf.ts';
 import { dataset } from '../../../dataset/index.ts';
+import {
+  filterRecordsByIndex,
+  parseRecordSelection,
+} from '../../../dataset/record-selection.ts';
 import { EvalEmitter, runEval } from '../../../engine/index.ts';
 import type { TaskFn } from '../../../engine/index.ts';
 import {
@@ -22,10 +26,6 @@ import {
 } from '../services/dataset-store.ts';
 import { evalManager } from '../services/eval-manager.ts';
 import { resolveModel } from '../services/model-resolver.ts';
-import {
-  filterRecordsByIndex,
-  parseRecordSelection,
-} from '../services/record-selection.ts';
 import type { WebBindings } from '../types.ts';
 
 const SCORER_MAP: Record<string, Scorer> = {

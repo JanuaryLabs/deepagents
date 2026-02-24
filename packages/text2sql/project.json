@@ -37,15 +37,6 @@
         "envFile": ".env"
       }
     },
-    "eval-serve": {
-      "dependsOn": ["build"],
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "evalite serve",
-        "cwd": "{projectRoot}",
-        "envFile": ".env"
-      }
-    },
     "eval-debug": {
       "dependsOn": ["build"],
       "executor": "nx:run-commands",

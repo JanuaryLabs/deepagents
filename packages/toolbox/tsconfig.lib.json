@@ -12,7 +12,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../agent/tsconfig.lib.json"
+      "path": "../retrieval/tsconfig.lib.json"
     }
   ]
 }

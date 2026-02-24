@@ -6,6 +6,13 @@ import { createInterface } from 'node:readline';
 export { hf } from './hf.ts';
 export type { HfOptions } from './hf.ts';
 
+export {
+  filterRecordsByIndex,
+  parseRecordSelection,
+  pickFromArray,
+} from './record-selection.ts';
+export type { ParsedRecordSelection } from './record-selection.ts';
+
 export type TransformFn<T, U> = (item: T) => U;
 export type PredicateFn<T> = (item: T) => boolean;
 
@@ -79,6 +86,23 @@ export class Dataset<T> implements AsyncIterable<T> {
       }
       for (let i = items.length - count; i < items.length; i++) {
         yield items[i]!;
+      }
+    });
+  }
+
+  pick(indexes: Set<number>): Dataset<T> {
+    const source = this.#source;
+    return new Dataset(async function* () {
+      if (indexes.size === 0) {
+        yield* source();
+        return;
+      }
+      let idx = 0;
+      for await (const item of source()) {
+        if (indexes.has(idx)) {
+          yield item;
+        }
+        idx++;
       }
     });
   }

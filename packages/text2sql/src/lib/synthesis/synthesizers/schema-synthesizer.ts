@@ -4,15 +4,12 @@ import type { AgentModel } from '@deepagents/agent';
 import type { ContextFragment } from '@deepagents/context';
 
 import type { Adapter } from '../../adapters/adapter.ts';
+import { UnanswerableSQLError } from '../../agents/exceptions.ts';
 import {
   type QuestionComplexity,
   generateQuestions,
 } from '../../agents/question.agent.ts';
-import {
-  type ToSqlResult,
-  UnanswerableSQLError,
-  toSql,
-} from '../../agents/sql.agent.ts';
+import { type ToSqlResult, toSql } from '../../agents/sql.agent.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
 import type { Persona } from './persona-generator.ts';
 

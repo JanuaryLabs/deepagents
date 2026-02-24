@@ -12,10 +12,9 @@ import {
   lmstudio,
   user,
 } from '@deepagents/agent';
-import { scratchpad_tool } from '@deepagents/toolbox';
+import { scratchpad_tool, search_content_tool } from '@deepagents/toolbox';
 
 import { buildToc } from './outline-agent.ts';
-import { search_content_tool } from './tools.ts';
 
 type OutlineItem = { title: string; sections?: OutlineItem[] };
 

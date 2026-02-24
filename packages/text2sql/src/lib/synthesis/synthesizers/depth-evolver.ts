@@ -17,7 +17,8 @@ import {
 } from '@deepagents/context';
 
 import type { Adapter } from '../../adapters/adapter.ts';
-import { UnanswerableSQLError, toSql } from '../../agents/sql.agent.ts';
+import { UnanswerableSQLError } from '../../agents/exceptions.ts';
+import { toSql } from '../../agents/sql.agent.ts';
 import { type ExtractedPair, PairProducer } from '../types.ts';
 
 /**
