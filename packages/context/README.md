@@ -150,10 +150,12 @@ const ranges = getReminderRanges(message.metadata).filter(
   (range) => range.partIndex === partIndex,
 );
 const visibleText = stripTextByRanges(message.parts[partIndex].text, ranges);
+const messageWithoutReminders = stripReminders(message);
 ```
 
 - `getReminderRanges(metadata)` returns `metadata.reminders` as offset ranges (or `[]` when missing).
 - `stripTextByRanges(text, ranges)` removes offset spans from text and returns the remaining visible content.
+- `stripReminders(message)` strips inline/part reminders from a `UIMessage` and removes `metadata.reminders`.
 - Reminder ranges are local to a message part, so filter by `partIndex` before stripping a specific part's text.
 
 ## Renderers

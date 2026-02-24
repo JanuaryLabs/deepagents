@@ -11,6 +11,14 @@
       "options": {
         "additionalEntryPoints": ["packages/context/src/browser.ts"]
       }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node --test",
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }

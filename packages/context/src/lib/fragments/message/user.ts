@@ -74,6 +74,63 @@ export function stripTextByRanges(
   return output.trimEnd();
 }
 
+/**
+ * Strip reminder content from a message using reminder metadata ranges.
+ *
+ * - Inline reminders are removed from text parts.
+ * - Part reminders are removed as whole parts when their full text is stripped.
+ * - `metadata.reminders` is removed from the returned message.
+ */
+export function stripReminders(message: UIMessage): UIMessage {
+  const reminderRanges = getReminderRanges(
+    isRecord(message.metadata) ? message.metadata : undefined,
+  );
+  const rangesByPartIndex = new Map<
+    number,
+    Array<{ start: number; end: number }>
+  >();
+
+  for (const range of reminderRanges) {
+    const partRanges = rangesByPartIndex.get(range.partIndex) ?? [];
+    partRanges.push({ start: range.start, end: range.end });
+    rangesByPartIndex.set(range.partIndex, partRanges);
+  }
+
+  const strippedParts = message.parts.flatMap((part, partIndex) => {
+    const clonedPart = { ...part };
+    const ranges = rangesByPartIndex.get(partIndex);
+
+    if (clonedPart.type !== 'text' || ranges === undefined) {
+      return [clonedPart];
+    }
+
+    const strippedText = stripTextByRanges(clonedPart.text, ranges);
+    if (strippedText.length === 0) {
+      return [];
+    }
+
+    return [{ ...clonedPart, text: strippedText }];
+  });
+
+  const nextMessage: UIMessage = {
+    ...message,
+    parts: strippedParts,
+  };
+
+  if (isRecord(message.metadata)) {
+    const metadata = { ...message.metadata };
+    delete metadata.reminders;
+
+    if (Object.keys(metadata).length > 0) {
+      nextMessage.metadata = metadata;
+    } else {
+      delete (nextMessage as { metadata?: unknown }).metadata;
+    }
+  }
+
+  return nextMessage;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

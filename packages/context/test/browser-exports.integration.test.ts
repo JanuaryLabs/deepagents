@@ -1,3 +1,4 @@
+import type { UIMessage } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -7,6 +8,7 @@ import {
   identity,
   reminder,
   render,
+  stripReminders,
   stripTextByRanges,
   term,
   user,
@@ -46,6 +48,29 @@ describe('browser export path', () => {
       const stripped = stripTextByRanges(textPart.text ?? '', ranges);
       assert.strictEqual(stripped, 'Deploy now.');
     }
+  });
+
+  it('strips reminders from messages through browser entrypoint', () => {
+    const fragment = user(
+      'Ship now.',
+      reminder('hidden-inline'),
+      reminder('hidden-part', { asPart: true }),
+    );
+
+    const message = fragment.codec?.decode() as UIMessage;
+
+    const stripped = stripReminders(message);
+
+    assert.deepStrictEqual(
+      stripped.parts.map((part) =>
+        part.type === 'text' ? (part.text ?? '') : part.type,
+      ),
+      ['Ship now.'],
+    );
+    const strippedMetadata = stripped.metadata as
+      | { reminders?: unknown }
+      | undefined;
+    assert.strictEqual(strippedMetadata?.reminders, undefined);
   });
 
   it('exposes renderer classes from browser entrypoint', () => {

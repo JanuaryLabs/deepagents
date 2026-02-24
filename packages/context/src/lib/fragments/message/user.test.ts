@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import {
   getReminderRanges,
   reminder,
+  stripReminders,
   stripTextByRanges,
   user,
 } from '@deepagents/context';
@@ -157,6 +158,34 @@ describe('user reminders', () => {
     );
   });
 
+  it('appends inline reminders to the last text part in multi-part messages', () => {
+    const fragment = user(
+      {
+        id: 'multi-text',
+        role: 'user',
+        parts: [
+          { type: 'text', text: 'first' },
+          { type: 'text', text: 'second' },
+        ],
+      },
+      reminder('only-last-part'),
+    );
+    const message = decodeMessage(fragment);
+    const encodedReminder = taggedReminder('only-last-part');
+
+    assert.strictEqual(getTextPart(message, 0), 'first');
+    assert.strictEqual(getTextPart(message, 1), `second${encodedReminder}`);
+
+    const metadata = getReminderMetadata(message);
+    assert.strictEqual(metadata.length, 1);
+    assert.strictEqual(metadata[0].partIndex, 1);
+    assert.strictEqual(metadata[0].start, 'second'.length);
+    assert.strictEqual(
+      metadata[0].end,
+      'second'.length + encodedReminder.length,
+    );
+  });
+
   it('merges reminder metadata with existing metadata and keeps user role', () => {
     const existingReminder = {
       id: 'existing-reminder',
@@ -237,5 +266,125 @@ describe('reminder range helpers', () => {
   it('trims trailing whitespace after stripping ranges', () => {
     const result = stripTextByRanges('abc   ', [{ start: 0, end: 1 }]);
     assert.strictEqual(result, 'bc');
+  });
+
+  it('strips reminders from a message and removes reminder metadata', () => {
+    const fragment = user(
+      {
+        id: 'msg-1',
+        role: 'user',
+        metadata: { source: 'seed' },
+        parts: [{ type: 'text', text: 'Deploy now.' }],
+      },
+      reminder('inline-reminder'),
+      reminder('part-reminder', { asPart: true }),
+    );
+    const message = decodeMessage(fragment);
+    const encodedInlineReminder = taggedReminder('inline-reminder');
+
+    assert.deepStrictEqual(
+      message.parts.map((part) =>
+        part.type === 'text' ? part.text : part.type,
+      ),
+      [`Deploy now.${encodedInlineReminder}`, 'part-reminder'],
+    );
+
+    const stripped = stripReminders(message);
+    assert.notStrictEqual(stripped, message);
+
+    assert.deepStrictEqual(
+      stripped.parts.map((part) =>
+        part.type === 'text' ? part.text : part.type,
+      ),
+      ['Deploy now.'],
+    );
+
+    const strippedMetadata = stripped.metadata as
+      | { source?: string; reminders?: unknown }
+      | undefined;
+    assert.strictEqual(strippedMetadata?.source, 'seed');
+    assert.strictEqual(strippedMetadata?.reminders, undefined);
+
+    assert.deepStrictEqual(
+      message.parts.map((part) =>
+        part.type === 'text' ? part.text : part.type,
+      ),
+      [`Deploy now.${encodedInlineReminder}`, 'part-reminder'],
+    );
+    const originalMetadata = message.metadata as
+      | { source?: string; reminders?: unknown }
+      | undefined;
+    assert.ok(originalMetadata?.reminders);
+  });
+
+  it('strips reminders across multiple text parts and keeps non-reminder text', () => {
+    const fragment = user(
+      {
+        id: 'msg-multi-part-strip',
+        role: 'user',
+        metadata: { source: 'seed' },
+        parts: [
+          { type: 'text', text: 'first' },
+          { type: 'text', text: 'second' },
+        ],
+      },
+      reminder('inline-tail'),
+      reminder('standalone-part', { asPart: true }),
+    );
+    const message = decodeMessage(fragment);
+    const stripped = stripReminders(message);
+
+    assert.deepStrictEqual(
+      stripped.parts.map((part) =>
+        part.type === 'text' ? part.text : part.type,
+      ),
+      ['first', 'second'],
+    );
+
+    const metadata = stripped.metadata as
+      | { source?: string; reminders?: unknown }
+      | undefined;
+    assert.strictEqual(metadata?.source, 'seed');
+    assert.strictEqual(metadata?.reminders, undefined);
+  });
+
+  it('removes metadata object when reminders is the only metadata key', () => {
+    const message: UIMessage = {
+      id: 'only-reminder-metadata',
+      role: 'user',
+      parts: [{ type: 'text', text: 'clean text' }],
+      metadata: {
+        reminders: [{ partIndex: 0, start: 0, end: 0 }],
+      },
+    };
+
+    const stripped = stripReminders(message);
+    assert.strictEqual(stripped.metadata, undefined);
+  });
+
+  it('leaves content unchanged when reminder ranges target missing part indexes', () => {
+    const message: UIMessage = {
+      id: 'missing-index-ranges',
+      role: 'user',
+      parts: [{ type: 'text', text: 'plain text' }],
+      metadata: {
+        source: 'seed',
+        reminders: [{ partIndex: 9, start: 0, end: 50 }],
+      },
+    };
+
+    const stripped = stripReminders(message);
+    assert.deepStrictEqual(
+      stripped.parts.map((part) =>
+        part.type === 'text' ? part.text : part.type,
+      ),
+      ['plain text'],
+    );
+
+    const metadata = stripped.metadata as
+      | { source?: string; reminders?: unknown }
+      | undefined;
+    assert.strictEqual(metadata?.source, 'seed');
+    assert.strictEqual(metadata?.reminders, undefined);
   });
 });
