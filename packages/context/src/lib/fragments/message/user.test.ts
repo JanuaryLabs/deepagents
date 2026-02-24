@@ -7,7 +7,7 @@ import {
   reminder,
   stripTextByRanges,
   user,
-} from './user.ts';
+} from '@deepagents/context';
 
 type UserReminderMetadataRecord = {
   id: string;

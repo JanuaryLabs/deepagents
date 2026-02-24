@@ -13,6 +13,7 @@ import {
   XmlRenderer,
   assistantText,
   lastAssistantMessage,
+  reminder,
   user,
 } from '@deepagents/context';
 
@@ -113,6 +114,10 @@ function makeUserMessage(id: string, text: string) {
     role: 'user' as const,
     parts: [{ type: 'text' as const, text }],
   };
+}
+
+function taggedReminder(text: string) {
+  return `<system-reminder>${text}</system-reminder>`;
 }
 
 function makeToolClarificationMessage(id: string) {
@@ -714,6 +719,67 @@ describe('Sqlite ContextEngine Integration', () => {
       assert.ok(
         mainAssistant.parts?.[0]?.text?.includes('try to read'),
         'Should have original message',
+      );
+    });
+  });
+
+  it('persists reminder metadata and text parts across save/resolve roundtrip', async () => {
+    await withTempDb('reminder-roundtrip', async (dbPath) => {
+      const store = new SqliteContextStore(dbPath);
+      const engine = new ContextEngine({
+        store,
+        chatId: 'chat-reminder-roundtrip',
+        userId: 'user-1',
+      });
+
+      engine.set(
+        user(
+          'body',
+          reminder('inline'),
+          reminder('part-reminder', { asPart: true }),
+        ),
+      );
+
+      const beforeSave = await engine.resolve({ renderer });
+      const messageBefore = beforeSave.messages[0] as {
+        parts: Array<{ type: string; text?: string }>;
+        metadata?: {
+          reminders?: Array<{
+            id: string;
+            text: string;
+            partIndex: number;
+            start: number;
+            end: number;
+            mode: string;
+          }>;
+        };
+      };
+
+      assert.deepStrictEqual(
+        messageBefore.parts.map((part) =>
+          part.type === 'text' ? part.text : part.type,
+        ),
+        [`body${taggedReminder('inline')}`, 'part-reminder'],
+      );
+      assert.strictEqual(messageBefore.metadata?.reminders?.length, 2);
+
+      await engine.save();
+
+      const afterSave = await engine.resolve({ renderer });
+      const messageAfter = afterSave.messages[0] as {
+        parts: Array<{ type: string; text?: string }>;
+        metadata?: unknown;
+      };
+
+      assert.deepStrictEqual(
+        messageAfter.parts,
+        messageBefore.parts,
+        'Reminder text parts should survive save/resolve',
+      );
+      assert.deepStrictEqual(
+        messageAfter.metadata,
+        messageBefore.metadata,
+        'Reminder metadata should survive save/resolve',
       );
     });
   });

@@ -9,6 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
+  "exclude": ["src/**/*.test.ts"],
   "include": ["src/**/*.ts", "../../global.d.ts"],
   "references": [
     {

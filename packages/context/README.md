@@ -12,6 +12,17 @@ This package provides a flexible way to compose and render context data in multi
 npm install @deepagents/context
 ```
 
+## Browser Entry Point
+
+For browser bundles, prefer the browser-specific export path:
+
+```typescript
+import { identity, reminder, term, user } from '@deepagents/context/browser';
+```
+
+`@deepagents/context/browser` intentionally excludes server-only modules
+like store implementations, sandbox tooling, and filesystem-based skill loading.
+
 ## Basic Usage
 
 ```typescript
@@ -134,12 +145,16 @@ type ReminderRange = {
   end: number;
 };
 
-const ranges = getReminderRanges(message.metadata);
-const visibleText = stripTextByRanges(messageText, ranges);
+const partIndex = 0;
+const ranges = getReminderRanges(message.metadata).filter(
+  (range) => range.partIndex === partIndex,
+);
+const visibleText = stripTextByRanges(message.parts[partIndex].text, ranges);
 ```
 
 - `getReminderRanges(metadata)` returns `metadata.reminders` as offset ranges (or `[]` when missing).
 - `stripTextByRanges(text, ranges)` removes offset spans from text and returns the remaining visible content.
+- Reminder ranges are local to a message part, so filter by `partIndex` before stripping a specific part's text.
 
 ## Renderers
 
