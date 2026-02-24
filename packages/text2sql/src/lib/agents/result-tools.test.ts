@@ -511,6 +511,138 @@ describe('sql proxy enforcement', () => {
     assert.match(result.stderr, /sql run/i);
   });
 
+  it('blocks sql proxy commands wrapped with env via tool path', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: `env sql validate "SELECT 1"`,
+        reasoning: 'Try wrapping sql proxy with env',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks sql proxy commands wrapped with command via tool path', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: `command sql run "SELECT 1 as wrapped"`,
+        reasoning: 'Try wrapping sql proxy with command builtin',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks sql proxy commands wrapped with eval via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `eval 'sql validate "SELECT 1"'`,
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks sql proxy commands piped into bash via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `echo 'sql validate "SELECT 1"' | bash`,
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks sql proxy commands from shell scripts via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `echo 'sql validate "SELECT 1"' > /tmp/proxy-bypass.sh && bash /tmp/proxy-bypass.sh`,
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
+  it('blocks sql proxy commands from bash heredoc via sandbox path', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      `bash <<'EOF'
+sql validate "SELECT 1"
+EOF`,
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /direct database querying through bash is blocked/i,
+    );
+    assert.match(result.stderr, /sql validate/i);
+    assert.match(result.stderr, /sql run/i);
+  });
+
   it('does not block non-invoked function definitions', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,

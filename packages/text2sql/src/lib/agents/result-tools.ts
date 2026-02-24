@@ -222,6 +222,7 @@ const SHELL_INTERPRETER_COMMANDS = new Set([
   'dash',
   'ksh',
 ]);
+const WRAPPER_COMMANDS = new Set(['env', 'command', 'eval']);
 const SQL_PROXY_ENFORCEMENT_MESSAGE = [
   'Direct database querying through bash is blocked.',
   'Use SQL proxy commands in this order:',
@@ -236,6 +237,21 @@ type FunctionDefCommand = Extract<CommandNode, { type: 'FunctionDef' }>;
 interface InspectionContext {
   functionDefinitions: Map<string, FunctionDefCommand>;
   callStack: Set<string>;
+}
+
+interface CommandInspectionOptions {
+  stdinFromPipe: boolean;
+}
+
+interface ShellInvocationDescriptor {
+  kind: 'command' | 'script' | 'stdin' | 'none' | 'unknown';
+  payload: string | null;
+}
+
+interface WrapperCommandResolution {
+  kind: 'resolved' | 'none' | 'unknown';
+  name?: WordNode;
+  args?: WordNode[];
 }
 
 function cloneInspectionContext(context: InspectionContext): InspectionContext {
@@ -337,12 +353,16 @@ function pipelineContainsBlockedCommand(
   context: InspectionContext,
   mode: SqlInspectionMode,
 ): boolean {
-  for (const command of pipeline.commands) {
+  for (const [index, command] of pipeline.commands.entries()) {
     if (command.type === 'FunctionDef') {
       context.functionDefinitions.set(command.name, command);
       continue;
     }
-    if (commandContainsBlockedCommand(command, context, mode)) {
+    if (
+      commandContainsBlockedCommand(command, context, mode, {
+        stdinFromPipe: index > 0,
+      })
+    ) {
       return true;
     }
   }
@@ -473,78 +493,303 @@ function functionInvocationContainsBlockedCommand(
     definition.body,
     invocationContext,
     mode,
+    { stdinFromPipe: false },
   );
 }
 
-function getShellCommandPayload(args: WordNode[]): {
-  foundCommandFlag: boolean;
-  payload: string | null;
-} {
-  const hasShortCommandFlag = (token: string): boolean => {
-    // Parse compact short-option clusters like -c, -lc, -cl, -xec
-    if (!token.startsWith('-') || token.startsWith('--') || token.length <= 1) {
+function isAsciiLetter(character: string): boolean {
+  const charCode = character.charCodeAt(0);
+  return (
+    (charCode >= 65 && charCode <= 90) || (charCode >= 97 && charCode <= 122)
+  );
+}
+
+function isAsciiDigit(character: string): boolean {
+  const charCode = character.charCodeAt(0);
+  return charCode >= 48 && charCode <= 57;
+}
+
+function isValidEnvVariableName(name: string): boolean {
+  if (!name) {
+    return false;
+  }
+
+  const firstChar = name[0];
+  if (!(isAsciiLetter(firstChar) || firstChar === '_')) {
+    return false;
+  }
+
+  for (let index = 1; index < name.length; index += 1) {
+    const char = name[index];
+    if (!(isAsciiLetter(char) || isAsciiDigit(char) || char === '_')) {
       return false;
     }
+  }
 
-    let hasCommandFlag = false;
-    for (let index = 1; index < token.length; index += 1) {
-      const charCode = token.charCodeAt(index);
-      const isLowercase = charCode >= 97 && charCode <= 122;
-      const isUppercase = charCode >= 65 && charCode <= 90;
-      if (!isLowercase && !isUppercase) {
-        return false;
-      }
-      if (token[index] === 'c') {
-        hasCommandFlag = true;
-      }
+  return true;
+}
+
+function isEnvAssignmentToken(token: string): boolean {
+  const separatorIndex = token.indexOf('=');
+  if (separatorIndex <= 0) {
+    return false;
+  }
+
+  return isValidEnvVariableName(token.slice(0, separatorIndex));
+}
+
+function parseShortOptionCluster(option: string): {
+  valid: boolean;
+  hasCommandFlag: boolean;
+  hasStdinFlag: boolean;
+} {
+  if (
+    !option.startsWith('-') ||
+    option.startsWith('--') ||
+    option.length <= 1
+  ) {
+    return { valid: false, hasCommandFlag: false, hasStdinFlag: false };
+  }
+
+  let hasCommandFlag = false;
+  let hasStdinFlag = false;
+
+  for (let index = 1; index < option.length; index += 1) {
+    const char = option[index];
+    if (!isAsciiLetter(char)) {
+      return { valid: false, hasCommandFlag: false, hasStdinFlag: false };
     }
 
-    return hasCommandFlag;
-  };
+    if (char === 'c') {
+      hasCommandFlag = true;
+    } else if (char === 's') {
+      hasStdinFlag = true;
+    }
+  }
+
+  return { valid: true, hasCommandFlag, hasStdinFlag };
+}
+
+function getShellInvocationDescriptor(
+  args: WordNode[],
+): ShellInvocationDescriptor {
+  let readsFromStdin = false;
+  let positionalArgsStart = 0;
 
   for (let index = 0; index < args.length; index += 1) {
     const token = asStaticWordText(args[index]);
-    if (!token) {
-      continue;
+    if (token == null) {
+      return { kind: 'unknown', payload: null };
     }
 
     if (token === '--') {
+      positionalArgsStart = index + 1;
       break;
     }
 
     if (token === '--command') {
       return {
-        foundCommandFlag: true,
+        kind: 'command',
         payload: asStaticWordText(args[index + 1]),
       };
     }
 
     if (token.startsWith('--command=')) {
       return {
-        foundCommandFlag: true,
+        kind: 'command',
         payload: token.slice('--command='.length),
       };
     }
 
-    if (token === '-c' || hasShortCommandFlag(token)) {
-      return {
-        foundCommandFlag: true,
-        payload: asStaticWordText(args[index + 1]),
-      };
+    if (token.startsWith('-') && !token.startsWith('--')) {
+      const parsed = parseShortOptionCluster(token);
+      if (!parsed.valid) {
+        return { kind: 'unknown', payload: null };
+      }
+
+      if (parsed.hasCommandFlag) {
+        return {
+          kind: 'command',
+          payload: asStaticWordText(args[index + 1]),
+        };
+      }
+
+      if (parsed.hasStdinFlag) {
+        readsFromStdin = true;
+      }
+      continue;
     }
+
+    positionalArgsStart = index;
+    break;
   }
 
-  return { foundCommandFlag: false, payload: null };
+  if (positionalArgsStart < args.length) {
+    return {
+      kind: 'script',
+      payload: asStaticWordText(args[positionalArgsStart]),
+    };
+  }
+
+  if (readsFromStdin) {
+    return { kind: 'stdin', payload: null };
+  }
+
+  return { kind: 'none', payload: null };
+}
+
+function getHereDocPayload(
+  redirections: Array<{
+    target: { type?: string; content?: WordNode };
+  }>,
+): { hasHereDoc: boolean; payload: string | null } {
+  const payloads: string[] = [];
+
+  for (const redirection of redirections) {
+    if (redirection.target.type !== 'HereDoc') {
+      continue;
+    }
+
+    if (!redirection.target.content) {
+      payloads.push('');
+      continue;
+    }
+
+    const payload = asStaticWordText(redirection.target.content);
+    if (payload == null) {
+      return { hasHereDoc: true, payload: null };
+    }
+
+    payloads.push(payload);
+  }
+
+  if (payloads.length === 0) {
+    return { hasHereDoc: false, payload: null };
+  }
+
+  return { hasHereDoc: true, payload: payloads.join('\n') };
+}
+
+function joinStaticWords(words: WordNode[]): string | null {
+  const tokens: string[] = [];
+
+  for (const word of words) {
+    const token = asStaticWordText(word);
+    if (token == null) {
+      return null;
+    }
+    tokens.push(token);
+  }
+
+  return tokens.join(' ');
+}
+
+function resolveEnvWrapperCommand(args: WordNode[]): WrapperCommandResolution {
+  let index = 0;
+
+  while (index < args.length) {
+    const token = asStaticWordText(args[index]);
+    if (token == null) {
+      return { kind: 'unknown' };
+    }
+
+    if (token === '--') {
+      index += 1;
+      break;
+    }
+
+    if (token === '-u' || token === '--unset' || token === '--chdir') {
+      if (index + 1 >= args.length) {
+        return { kind: 'unknown' };
+      }
+      index += 2;
+      continue;
+    }
+
+    if (token.startsWith('--unset=') || token.startsWith('--chdir=')) {
+      index += 1;
+      continue;
+    }
+
+    if (
+      token.startsWith('-') &&
+      token !== '-' &&
+      !isEnvAssignmentToken(token)
+    ) {
+      index += 1;
+      continue;
+    }
+
+    if (isEnvAssignmentToken(token)) {
+      index += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  if (index >= args.length) {
+    return { kind: 'none' };
+  }
+
+  return {
+    kind: 'resolved',
+    name: args[index],
+    args: args.slice(index + 1),
+  };
+}
+
+function resolveCommandWrapperCommand(
+  args: WordNode[],
+): WrapperCommandResolution {
+  let index = 0;
+  let lookupOnly = false;
+
+  while (index < args.length) {
+    const token = asStaticWordText(args[index]);
+    if (token == null) {
+      return { kind: 'unknown' };
+    }
+
+    if (token === '--') {
+      index += 1;
+      break;
+    }
+
+    if (token === '-v' || token === '-V') {
+      lookupOnly = true;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith('-') && token !== '-') {
+      index += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  if (lookupOnly || index >= args.length) {
+    return { kind: 'none' };
+  }
+
+  return {
+    kind: 'resolved',
+    name: args[index],
+    args: args.slice(index + 1),
+  };
 }
 
 function commandContainsBlockedCommand(
   command: CommandNode,
   context: InspectionContext,
   mode: SqlInspectionMode,
+  options: CommandInspectionOptions = { stdinFromPipe: false },
 ): boolean {
   switch (command.type) {
     case 'SimpleCommand':
-      return isBlockedSimpleCommand(command, context, mode);
+      return isBlockedSimpleCommand(command, context, mode, options);
     case 'If':
       return (
         command.clauses.some(
@@ -630,6 +875,7 @@ function isBlockedSimpleCommand(
   },
   context: InspectionContext,
   mode: SqlInspectionMode,
+  options: CommandInspectionOptions,
 ): boolean {
   if (wordContainsBlockedCommand(command.name, context, mode)) {
     return true;
@@ -691,24 +937,6 @@ function isBlockedSimpleCommand(
     return true;
   }
 
-  if (SHELL_INTERPRETER_COMMANDS.has(normalizedName)) {
-    const shellCommand = getShellCommandPayload(command.args);
-    if (shellCommand.foundCommandFlag) {
-      if (!shellCommand.payload) {
-        return true;
-      }
-      if (
-        stringCommandContainsBlockedCommand(
-          shellCommand.payload,
-          context,
-          'block-all-sql',
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-
   if (normalizedName === 'sql') {
     const subcommand = asStaticWordText(command.args[0])?.toLowerCase();
     if (!subcommand) {
@@ -718,6 +946,103 @@ function isBlockedSimpleCommand(
       return true;
     }
     return !ALLOWED_SQL_PROXY_SUBCOMMANDS.has(subcommand);
+  }
+
+  const inspectWrappedCommand = (
+    resolved: WrapperCommandResolution,
+  ): boolean => {
+    if (resolved.kind === 'none') {
+      return false;
+    }
+
+    if (resolved.kind === 'unknown' || !resolved.name || !resolved.args) {
+      return true;
+    }
+
+    return isBlockedSimpleCommand(
+      {
+        name: resolved.name,
+        args: resolved.args,
+        assignments: [],
+        redirections: [],
+      },
+      context,
+      'block-all-sql',
+      { stdinFromPipe: false },
+    );
+  };
+
+  if (WRAPPER_COMMANDS.has(normalizedName)) {
+    if (normalizedName === 'env') {
+      return inspectWrappedCommand(resolveEnvWrapperCommand(command.args));
+    }
+
+    if (normalizedName === 'command') {
+      return inspectWrappedCommand(resolveCommandWrapperCommand(command.args));
+    }
+
+    const evalScript = joinStaticWords(command.args);
+    if (evalScript == null) {
+      return true;
+    }
+    if (!evalScript.trim()) {
+      return false;
+    }
+    return stringCommandContainsBlockedCommand(
+      evalScript,
+      context,
+      'block-all-sql',
+    );
+  }
+
+  if (SHELL_INTERPRETER_COMMANDS.has(normalizedName)) {
+    const shellInvocation = getShellInvocationDescriptor(command.args);
+    if (shellInvocation.kind === 'unknown') {
+      return true;
+    }
+
+    if (shellInvocation.kind === 'command') {
+      if (!shellInvocation.payload) {
+        return true;
+      }
+      if (
+        stringCommandContainsBlockedCommand(
+          shellInvocation.payload,
+          context,
+          'block-all-sql',
+        )
+      ) {
+        return true;
+      }
+      return false;
+    }
+
+    const hereDoc = getHereDocPayload(command.redirections);
+    if (hereDoc.hasHereDoc) {
+      if (hereDoc.payload == null) {
+        return true;
+      }
+      if (
+        hereDoc.payload.trim().length > 0 &&
+        stringCommandContainsBlockedCommand(
+          hereDoc.payload,
+          context,
+          'block-all-sql',
+        )
+      ) {
+        return true;
+      }
+    }
+
+    if (shellInvocation.kind === 'script') {
+      // Executing shell script files can hide SQL proxy bypasses.
+      return true;
+    }
+
+    if (options.stdinFromPipe || shellInvocation.kind === 'stdin') {
+      // Cannot safely inspect stdin-fed shell scripts unless content is explicit here-doc.
+      return !hereDoc.hasHereDoc;
+    }
   }
 
   if (functionInvocationContainsBlockedCommand(commandName, context, mode)) {
