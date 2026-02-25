@@ -51,9 +51,11 @@ class Agent<CIn, COut = CIn> {
   #options: CreateAgent<CIn, COut>;
   #guardrails: Guardrail[] = [];
   readonly tools: ToolSet;
+  readonly context?: ContextEngine;
   constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
     this.tools = options.tools || {};
+    this.context = options.context;
     this.#guardrails = options.guardrails || [];
   }
 
@@ -62,7 +64,9 @@ class Agent<CIn, COut = CIn> {
     config?: {
       abortSignal?: AbortSignal;
     },
-  ): Promise<GenerateTextResult<ToolSet, Output.Output<string, string, any>>> {
+  ): Promise<
+    GenerateTextResult<ToolSet, Output.Output<string, string, unknown>>
+  > {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
@@ -145,7 +149,17 @@ class Agent<CIn, COut = CIn> {
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     },
   ) {
-    const { messages, systemPrompt } = await this.#options.context!.resolve({
+    const context = this.#options.context;
+    if (!context) {
+      throw new Error(`Agent ${this.#options.name} is missing a context.`);
+    }
+
+    const model = this.#options.model;
+    if (!model) {
+      throw new Error(`Agent ${this.#options.name} is missing a model.`);
+    }
+
+    const { messages, systemPrompt } = await context.resolve({
       renderer: new XmlRenderer(),
     });
 
@@ -153,10 +167,10 @@ class Agent<CIn, COut = CIn> {
     return streamText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
-      model: this.#options.model!,
+      model,
       system: systemPrompt,
       messages: await convertToModelMessages(messages as never),
-      experimental_repairToolCall: createRepairToolCall(this.#options.model!),
+      experimental_repairToolCall: createRepairToolCall(model),
       stopWhen: stepCountIs(50),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.#options.tools,
@@ -192,7 +206,10 @@ class Agent<CIn, COut = CIn> {
   ): StreamTextResult<ToolSet, never> {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
-    const context = this.#options.context!;
+    const context = this.#options.context;
+    if (!context) {
+      throw new Error(`Agent ${this.#options.name} is missing a context.`);
+    }
 
     // Save original method BEFORE override (prevents infinite recursion)
     const originalToUIMessageStream = result.toUIMessageStream.bind(result);
@@ -381,7 +398,9 @@ export interface StructuredOutputResult<TSchema extends FlexibleSchema> {
       abortSignal?: AbortSignal;
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     },
-  ): Promise<StreamTextResult<ToolSet, any>>;
+  ): Promise<
+    StreamTextResult<ToolSet, Output.Output<unknown, unknown, unknown>>
+  >;
 }
 
 export function structuredOutput<TSchema extends FlexibleSchema>(

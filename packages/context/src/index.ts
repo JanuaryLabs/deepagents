@@ -1,4 +1,5 @@
 export * from './lib/agent.ts';
+export * from './lib/chat.ts';
 export * from './lib/codec.ts';
 export * from './lib/engine.ts';
 export * from './lib/estimate.ts';
