@@ -48,4 +48,4 @@
 ## 8. Build Verification
 
 - [ ] 8.1 Run `nx run context:build` and verify new exports are included in dist
-- [ ] 8.2 Run `node --test packages/context/test/tasks/task-store.test.ts` and verify all tests pass
+- [ ] 8.2 Run `node --test --no-warnings  packages/context/test/tasks/task-store.test.ts` and verify all tests pass

@@ -4,7 +4,12 @@ import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  reminder,
+  user,
+} from '@deepagents/context';
 import { Text2Sql } from '@deepagents/text2sql';
 
 import { init_db } from '../src/tests/sqlite.ts';
@@ -346,6 +351,48 @@ describe('Text2Sql.chat()', () => {
     assert.ok(
       Array.isArray(data.metadata.createdFiles),
       'metadata should have createdFiles array',
+    );
+  });
+
+  it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
+    const { store, text2sql } = await setup();
+    const fragment = user(
+      'How many users are there?',
+      reminder('Always explain your SQL before writing it'),
+    );
+
+    const stream = await text2sql.chat([fragment]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('test-chat');
+    assert.ok(branch?.headMessageId, 'branch should have a head message');
+
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const persisted = chain.find((m) => m.name === 'user');
+    assert.ok(persisted, 'user message should be persisted');
+
+    const data = persisted.data as UIMessage;
+    const textPart = data.parts?.find((p: any) => p.type === 'text');
+    assert.ok(textPart, 'should have a text part');
+    assert.ok(
+      textPart.text.includes('<system-reminder>'),
+      'text should contain system-reminder tag',
+    );
+    assert.ok(
+      textPart.text.includes('Always explain your SQL'),
+      'text should contain the reminder content',
+    );
+
+    const metadata = data.metadata as Record<string, unknown>;
+    assert.ok(metadata, 'message should have metadata');
+    assert.ok(
+      Array.isArray(metadata.reminders),
+      'metadata should have reminders array',
+    );
+    assert.strictEqual(
+      (metadata.reminders as unknown[]).length,
+      1,
+      'should have exactly one reminder',
     );
   });
 });

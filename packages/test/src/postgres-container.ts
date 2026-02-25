@@ -49,14 +49,21 @@ async function waitForPostgres(
 ): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      // nano-spawn throws on non-zero exit code
-      // If this doesn't throw, pg_isready succeeded (exit code 0)
       await spawn('docker', ['exec', containerId, 'pg_isready', '-U', user]);
 
-      // Success! PostgreSQL is ready
+      await spawn('docker', [
+        'exec',
+        containerId,
+        'psql',
+        '-U',
+        user,
+        '-c',
+        'SELECT 1',
+      ]);
+
       return;
     } catch {
-      // pg_isready failed (non-zero exit code), PostgreSQL not ready yet
+      // Not ready yet
     }
 
     await new Promise((resolve) => setTimeout(resolve, retryDelayMs));

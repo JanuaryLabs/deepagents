@@ -24,7 +24,7 @@
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
       "options": {
-        "command": "TSX_TSCONFIG_PATH=./src/runners/web/tsconfig.json node --import tsx --test",
+        "command": "TSX_TSCONFIG_PATH=./src/runners/web/tsconfig.json node --test --test-concurrency=1 --no-warnings --import tsx",
         "cwd": "{projectRoot}"
       }
     },

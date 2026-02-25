@@ -21,7 +21,7 @@
 We write tests exclusively using Node.js test runner.
 
 ```sh
-node --test path/to/package/test/file.test.ts
+node --test --no-warnings  path/to/package/test/file.test.ts
 ```
 
 ### Test Import Rules

@@ -85,9 +85,21 @@ export function isFragmentObject(data: unknown): data is FragmentObject {
 }
 
 /**
+ * A context fragment that represents a conversation message (user or assistant).
+ * Stricter than ContextFragment: requires type='message', a codec, and persistence.
+ */
+export interface MessageFragment extends ContextFragment {
+  type: 'message';
+  persist: true;
+  codec: FragmentCodec;
+}
+
+/**
  * Type guard to check if a fragment is a message fragment.
  */
-export function isMessageFragment(fragment: ContextFragment): boolean {
+export function isMessageFragment(
+  fragment: ContextFragment,
+): fragment is MessageFragment {
   return fragment.type === 'message';
 }
 
@@ -114,7 +126,7 @@ export function fragment(
  * context.set(assistant('Hi there!', { id: 'resp-1' })); // Custom ID
  * ```
  */
-export function assistant(message: UIMessage): ContextFragment {
+export function assistant(message: UIMessage): MessageFragment {
   return {
     id: message.id,
     name: 'assistant',
@@ -131,7 +143,7 @@ export function assistant(message: UIMessage): ContextFragment {
     },
   };
 }
-export function message(content: string | UIMessage): ContextFragment {
+export function message(content: string | UIMessage): MessageFragment {
   const message =
     typeof content === 'string'
       ? {
@@ -173,7 +185,7 @@ export function message(content: string | UIMessage): ContextFragment {
 export function assistantText(
   content: string,
   options?: { id?: string },
-): ContextFragment {
+): MessageFragment {
   const id = options?.id ?? crypto.randomUUID();
   return assistant({
     id,

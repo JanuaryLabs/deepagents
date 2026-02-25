@@ -40,7 +40,7 @@ DeepAgents is a collection of TypeScript packages for building AI-powered applic
 ### Testing Strategy
 
 - Focus on integration tests that verify complete flows
-- Use Node.js native test runner: `node --test <file>.test.ts`
+- Use Node.js native test runner: `node --test --no-warnings  <file>.test.ts`
 - Tests should validate overall functionality and user experience
 - Evals for text2sql: `nx run text2sql:eval`
 

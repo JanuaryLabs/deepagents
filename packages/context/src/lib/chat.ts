@@ -12,7 +12,29 @@ import {
 } from 'ai';
 
 import type { ContextEngine } from './engine.ts';
-import { assistant, message } from './fragments.ts';
+import {
+  type MessageFragment,
+  assistant,
+  isFragment,
+  isMessageFragment,
+  message,
+} from './fragments.ts';
+
+export type ChatMessage = UIMessage | MessageFragment;
+
+export function toMessageFragment(item: ChatMessage): MessageFragment {
+  if (isFragment(item) && isMessageFragment(item)) {
+    return item;
+  }
+  return message(item);
+}
+
+export function chatMessageToUIMessage(item: ChatMessage): UIMessage {
+  if (isFragment(item) && isMessageFragment(item)) {
+    return item.codec.decode() as UIMessage;
+  }
+  return item;
+}
 
 export interface ChatAgentLike<CIn> {
   context?: ContextEngine;
@@ -44,7 +66,7 @@ export interface ChatOptions<CIn> {
 
 export async function chat<CIn>(
   agent: ChatAgentLike<CIn>,
-  messages: UIMessage[],
+  messages: ChatMessage[],
   options?: ChatOptions<CIn>,
 ) {
   const context = agent.context;
@@ -58,18 +80,22 @@ export async function chat<CIn>(
     throw new Error('messages must not be empty');
   }
 
-  const lastMessage = messages[messages.length - 1];
+  const lastItem = messages[messages.length - 1];
+  const lastFragment = toMessageFragment(lastItem);
+  const lastUIMessage = chatMessageToUIMessage(lastItem);
   let assistantMsgId: string;
 
-  if (lastMessage.role === 'assistant') {
-    context.set(message(lastMessage));
+  if (lastUIMessage.role === 'assistant') {
+    context.set(lastFragment);
     await context.save({ branch: false });
-    assistantMsgId = lastMessage.id;
+    assistantMsgId = lastUIMessage.id;
   } else {
-    context.set(message(lastMessage));
+    context.set(lastFragment);
     await context.save();
     assistantMsgId = options?.generateMessageId?.() ?? generateId();
   }
+
+  const uiMessages = messages.map(chatMessageToUIMessage);
 
   const streamContextVariables =
     options?.contextVariables === undefined
@@ -86,13 +112,13 @@ export async function chat<CIn>(
     sendFinish: true,
     sendReasoning: true,
     sendSources: true,
-    originalMessages: messages,
+    originalMessages: uiMessages,
     generateMessageId: () => assistantMsgId,
     messageMetadata: options?.messageMetadata,
   });
 
   return createUIMessageStream({
-    originalMessages: messages,
+    originalMessages: uiMessages,
     generateId: () => assistantMsgId,
     onStepFinish: async ({ responseMessage }) => {
       const normalizedMessage = {

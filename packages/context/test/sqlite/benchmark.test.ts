@@ -2,7 +2,7 @@
  * SQLite Performance Benchmark
  *
  * Measures key operations before/after optimization.
- * Run with: node --test packages/context/test/sqlite/benchmark.test.ts
+ * Run with: node --test --no-warnings  packages/context/test/sqlite/benchmark.test.ts
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';

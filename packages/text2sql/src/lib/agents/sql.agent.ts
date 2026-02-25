@@ -55,7 +55,7 @@ export interface ToSqlResult {
 }
 
 /** Temperature progression for retries: deterministic first, then increasingly exploratory */
-const RETRY_TEMPERATURES = [0, 0.4, 0.8];
+const RETRY_TEMPERATURES = [0, 0.2, 0.3];
 const SQL_AGENT_ROLE = 'Expert SQL query generator.';
 const SQL_AGENT_OBJECTIVE = 'Generate precise SQL grounded in provided schema.';
 

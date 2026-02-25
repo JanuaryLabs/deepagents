@@ -1,6 +1,6 @@
 import { type UIMessage, generateId } from 'ai';
 
-import type { ContextFragment } from '../../fragments.ts';
+import type { MessageFragment } from '../../fragments.ts';
 
 export interface UserReminderOptions {
   asPart?: boolean;
@@ -250,7 +250,7 @@ export function reminder(
 export function user(
   content: string | UIMessage,
   ...reminders: UserReminder[]
-): ContextFragment {
+): MessageFragment {
   const message: UIMessage =
     typeof content === 'string'
       ? {

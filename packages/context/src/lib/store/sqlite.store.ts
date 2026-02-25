@@ -787,7 +787,15 @@ export class SqliteContextStore extends ContextStore {
 
     const nodes: GraphNode[] = messageRows.map((row) => {
       const data = JSON.parse(row.data);
-      const content = typeof data === 'string' ? data : JSON.stringify(data);
+      const content =
+        typeof data === 'string'
+          ? data
+          : Array.isArray(data.parts)
+            ? data.parts
+                .filter((p: { type: string }) => p.type === 'text')
+                .map((p: { text: string }) => p.text)
+                .join(' ')
+            : JSON.stringify(data);
       return {
         id: row.id,
         parentId: row.parentId,

@@ -24,7 +24,7 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node --test",
+        "command": "node --test --test-concurrency=1 --no-warnings",
         "cwd": "{projectRoot}"
       }
     },

@@ -36,4 +36,4 @@
 ## 5. Build Verification
 
 - [x] 5.1 Run `nx run text2sql:build` and verify `PostgresFs` is included in the dist output.
-- [x] 5.2 Run integration tests with `node --test packages/text2sql/test/fs/postgres-fs.integration.test.ts` and verify all pass.
+- [x] 5.2 Run integration tests with `node --test --no-warnings  packages/text2sql/test/fs/postgres-fs.integration.test.ts` and verify all pass.

@@ -6,7 +6,6 @@ import {
   type Tool,
   ToolCallRepairError,
   type ToolSet,
-  type UIMessage,
   createUIMessageStream,
   generateId,
 } from 'ai';
@@ -14,12 +13,14 @@ import { type IFileSystem } from 'just-bash';
 
 import { type AgentModel } from '@deepagents/agent';
 import {
+  type ChatMessage,
   ContextEngine,
   type ContextFragment,
   agent,
   assistant,
+  chatMessageToUIMessage,
   errorRecoveryGuardrail,
-  message,
+  toMessageFragment,
 } from '@deepagents/context';
 
 import type { Adapter } from './adapters/adapter.ts';
@@ -120,7 +121,7 @@ export class Text2Sql {
     return producer.toPairs();
   }
 
-  public async chat(messages: UIMessage[]) {
+  public async chat(messages: ChatMessage[]) {
     if (messages.length === 0) {
       throw new Error('messages must not be empty');
     }
@@ -132,18 +133,22 @@ export class Text2Sql {
       ...(await this.index()),
     );
 
-    const lastMessage = messages[messages.length - 1];
+    const lastItem = messages[messages.length - 1];
+    const lastFragment = toMessageFragment(lastItem);
+    const lastUIMessage = chatMessageToUIMessage(lastItem);
     let assistantMsgId: string;
 
-    if (lastMessage.role === 'assistant') {
-      context.set(message(lastMessage));
+    if (lastUIMessage.role === 'assistant') {
+      context.set(lastFragment);
       await context.save({ branch: false });
-      assistantMsgId = lastMessage.id;
+      assistantMsgId = lastUIMessage.id;
     } else {
-      context.set(message(lastMessage));
+      context.set(lastFragment);
       await context.save();
       assistantMsgId = generateId();
     }
+
+    const uiMessages = messages.map(chatMessageToUIMessage);
 
     const { mounts: skillMounts } = context.getSkillMounts();
 
@@ -176,7 +181,7 @@ export class Text2Sql {
       sendFinish: true,
       sendReasoning: true,
       sendSources: true,
-      originalMessages: messages,
+      originalMessages: uiMessages,
       generateMessageId: () => assistantMsgId,
       messageMetadata: ({ part }) => {
         if (part.type === 'finish-step') {
@@ -196,7 +201,7 @@ export class Text2Sql {
     });
 
     return createUIMessageStream({
-      originalMessages: messages,
+      originalMessages: uiMessages,
       generateId: () => assistantMsgId,
       onStepFinish: async ({ responseMessage }) => {
         context.set(assistant({ ...responseMessage, id: assistantMsgId }));
