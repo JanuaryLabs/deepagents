@@ -235,6 +235,21 @@ export class RunStore {
     return { id, name, created_at: now };
   }
 
+  getSuite(id: string): SuiteRow | undefined {
+    const row = this.#stmt('SELECT * FROM suites WHERE id = ?').get(id) as
+      | { id: string; name: string; created_at: number }
+      | undefined;
+    return row ?? undefined;
+  }
+
+  renameSuite(id: string, name: string): void {
+    this.#stmt('UPDATE suites SET name = ? WHERE id = ?').run(name, id);
+  }
+
+  renameRun(id: string, name: string): void {
+    this.#stmt('UPDATE runs SET name = ? WHERE id = ?').run(name, id);
+  }
+
   createRun(run: {
     suite_id: string;
     name: string;

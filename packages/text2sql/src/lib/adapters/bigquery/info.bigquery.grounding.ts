@@ -11,13 +11,17 @@ export class BigQueryInfoGrounding extends InfoGrounding {
   }
 
   protected override async collectInfo(): Promise<AdapterInfo> {
+    const qualifiedTable = this.#adapter.projectId
+      ? 'project.dataset.table'
+      : 'dataset.table';
+
     return {
       dialect: 'bigquery',
       database: this.#adapter.projectId,
       details: {
         identifierQuote: '`',
         identifiers: {
-          qualifiedTable: 'dataset.table',
+          qualifiedTable,
           nestedFieldPath: 'col.path.to.field',
         },
         parameters: {

@@ -32,294 +32,321 @@ function requireOne<T>(items: T[], message: string): T {
   return items[0]!;
 }
 
+function standardResponder(sql: string): unknown {
+  // Tables listing
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
+    sql.includes("WHERE table_type = 'BASE TABLE'")
+  ) {
+    return [
+      { table_name: 'orders' },
+      { table_name: 'users' },
+      { table_name: 'empty_table' },
+    ];
+  }
+
+  // Views listing
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
+    sql.includes("table_type IN ('VIEW', 'MATERIALIZED VIEW')") &&
+    sql.includes('SELECT table_name')
+  ) {
+    return [{ table_name: 'active_users' }, { table_name: 'orders_mv' }];
+  }
+
+  // View definition
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
+    sql.includes('SELECT ddl') &&
+    sql.includes("table_name = 'active_users'")
+  ) {
+    return [
+      {
+        ddl: 'CREATE VIEW `analytics.active_users` AS SELECT id, email FROM `analytics.users`',
+      },
+    ];
+  }
+
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
+    sql.includes('SELECT ddl') &&
+    sql.includes("table_name = 'orders_mv'")
+  ) {
+    return [
+      {
+        ddl: 'CREATE MATERIALIZED VIEW `analytics.orders_mv` AS SELECT order_id, user_id FROM `analytics.orders`',
+      },
+    ];
+  }
+
+  // View columns
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
+    sql.includes('SELECT column_name, data_type') &&
+    sql.includes("table_name = 'active_users'")
+  ) {
+    return [
+      { column_name: 'id', data_type: 'INT64' },
+      { column_name: 'email', data_type: 'STRING' },
+    ];
+  }
+
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
+    sql.includes('SELECT column_name, data_type') &&
+    sql.includes("table_name = 'orders_mv'")
+  ) {
+    return [
+      { column_name: 'order_id', data_type: 'INT64' },
+      { column_name: 'user_id', data_type: 'INT64' },
+    ];
+  }
+
+  // Table columns (flattened nested field paths)
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS') &&
+    sql.includes("WHERE f.table_name = 'orders'")
+  ) {
+    return [
+      { field_path: 'order_id', data_type: 'INT64', ordinal_position: 1 },
+      { field_path: 'user_id', data_type: 'INT64', ordinal_position: 2 },
+      {
+        field_path: 'created_at',
+        data_type: 'TIMESTAMP',
+        ordinal_position: 3,
+      },
+      { field_path: 'user', data_type: 'STRUCT', ordinal_position: 4 },
+      {
+        field_path: 'user.address.city',
+        data_type: 'STRING',
+        ordinal_position: 4,
+      },
+    ];
+  }
+
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS') &&
+    sql.includes("WHERE f.table_name = 'users'")
+  ) {
+    return [
+      { field_path: 'id', data_type: 'INT64', ordinal_position: 1 },
+      { field_path: 'email', data_type: 'STRING', ordinal_position: 2 },
+    ];
+  }
+
+  // empty_table has no columns
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS') &&
+    sql.includes("WHERE f.table_name = 'empty_table'")
+  ) {
+    return [];
+  }
+
+  // FK discovery for empty_table (no FKs)
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+    sql.includes('JOIN') &&
+    sql.includes('KEY_COLUMN_USAGE') &&
+    sql.includes("tc.constraint_type = 'FOREIGN KEY'") &&
+    sql.includes("tc.table_name = 'empty_table'")
+  ) {
+    return [];
+  }
+
+  // FK discovery for TableGrounding (outgoing from orders)
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+    sql.includes('JOIN') &&
+    sql.includes('KEY_COLUMN_USAGE') &&
+    sql.includes("tc.constraint_type = 'FOREIGN KEY'") &&
+    sql.includes("tc.table_name = 'orders'")
+  ) {
+    return [
+      {
+        constraint_name: 'orders.fk_user',
+        column_name: 'user_id',
+        ordinal_position: 1,
+        position_in_unique_constraint: 1,
+      },
+      {
+        constraint_name: 'orders.fk_external',
+        column_name: 'external_user_id',
+        ordinal_position: 1,
+        position_in_unique_constraint: 1,
+      },
+    ];
+  }
+
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+    sql.includes("tc.constraint_type = 'FOREIGN KEY'") &&
+    sql.includes("tc.table_name = 'users'")
+  ) {
+    return [];
+  }
+
+  // FK referenced table lookup
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE') &&
+    sql.includes("constraint_name = 'orders.fk_user'")
+  ) {
+    return [{ table_schema: 'analytics', table_name: 'users' }];
+  }
+
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE') &&
+    sql.includes("constraint_name = 'orders.fk_external'")
+  ) {
+    return [{ table_schema: 'other', table_name: 'users' }];
+  }
+
+  // PK constraint name + columns (referenced side)
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+    sql.includes("constraint_type = 'PRIMARY KEY'") &&
+    sql.includes("table_name = 'users'") &&
+    sql.includes('LIMIT 1')
+  ) {
+    return [{ constraint_name: 'users.pk$' }];
+  }
+
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.KEY_COLUMN_USAGE') &&
+    sql.includes("constraint_name = 'users.pk$'") &&
+    sql.includes("table_name = 'users'")
+  ) {
+    return [{ column_name: 'id', ordinal_position: 1 }];
+  }
+
+  // Batched column metadata for constraints (NOT NULL / DEFAULT)
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
+    sql.includes(
+      'SELECT table_name, column_name, is_nullable, column_default',
+    ) &&
+    sql.includes('table_name IN')
+  ) {
+    return [
+      {
+        table_name: 'orders',
+        column_name: 'order_id',
+        is_nullable: 'NO',
+        column_default: null,
+      },
+      {
+        table_name: 'orders',
+        column_name: 'user_id',
+        is_nullable: 'NO',
+        column_default: null,
+      },
+      {
+        table_name: 'orders',
+        column_name: 'created_at',
+        is_nullable: 'YES',
+        column_default: null,
+      },
+      {
+        table_name: 'orders',
+        column_name: 'user',
+        is_nullable: 'YES',
+        column_default: null,
+      },
+      {
+        table_name: 'users',
+        column_name: 'id',
+        is_nullable: 'NO',
+        column_default: null,
+      },
+      {
+        table_name: 'users',
+        column_name: 'email',
+        is_nullable: 'YES',
+        column_default: null,
+      },
+    ];
+  }
+
+  // Batched PK/FK key columns for constraints grounding
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+    sql.includes("tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')") &&
+    sql.includes('tc.table_name IN')
+  ) {
+    return [
+      {
+        table_name: 'orders',
+        constraint_name: 'orders.pk$',
+        constraint_type: 'PRIMARY KEY',
+        column_name: 'order_id',
+        ordinal_position: 1,
+        position_in_unique_constraint: null,
+      },
+      {
+        table_name: 'orders',
+        constraint_name: 'orders.fk_user',
+        constraint_type: 'FOREIGN KEY',
+        column_name: 'user_id',
+        ordinal_position: 1,
+        position_in_unique_constraint: 1,
+      },
+      {
+        table_name: 'orders',
+        constraint_name: 'orders.fk_external',
+        constraint_type: 'FOREIGN KEY',
+        column_name: 'external_user_id',
+        ordinal_position: 1,
+        position_in_unique_constraint: 1,
+      },
+      {
+        table_name: 'users',
+        constraint_name: 'users.pk$',
+        constraint_type: 'PRIMARY KEY',
+        column_name: 'id',
+        ordinal_position: 1,
+        position_in_unique_constraint: null,
+      },
+    ];
+  }
+
+  // Batched row counts (TABLE_STORAGE) — single query for all tables
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.TABLE_STORAGE') &&
+    sql.includes('table_name IN')
+  ) {
+    return [
+      { table_name: 'orders', total_rows: 1200 },
+      { table_name: 'users', total_rows: 50 },
+    ];
+  }
+
+  // Batched index hints (partition/clustering) — single query for all tables
+  if (
+    sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
+    sql.includes('clustering_ordinal_position') &&
+    sql.includes('table_name IN')
+  ) {
+    return [
+      {
+        table_name: 'orders',
+        column_name: 'created_at',
+        is_partitioning_column: 'YES',
+        clustering_ordinal_position: 2,
+      },
+      {
+        table_name: 'orders',
+        column_name: 'user_id',
+        is_partitioning_column: 'NO',
+        clustering_ordinal_position: 1,
+      },
+    ];
+  }
+
+  throw new Error(`Unexpected SQL in BigQuery introspection stub:\n${sql}`);
+}
+
 describe('BigQuery adapter', () => {
   it('introspects tables, views, constraints, relationships, rowCount, and indexes end-to-end', async () => {
-    const { execute, calls } = createExecuteStub((sql) => {
-      // Tables listing
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
-        sql.includes("WHERE table_type = 'BASE TABLE'")
-      ) {
-        return [{ table_name: 'orders' }, { table_name: 'users' }];
-      }
-
-      // Views listing
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
-        sql.includes("table_type IN ('VIEW', 'MATERIALIZED VIEW')") &&
-        sql.includes('SELECT table_name')
-      ) {
-        return [{ table_name: 'active_users' }, { table_name: 'orders_mv' }];
-      }
-
-      // View definition
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
-        sql.includes('SELECT ddl') &&
-        sql.includes("table_name = 'active_users'")
-      ) {
-        return [
-          {
-            ddl: 'CREATE VIEW `analytics.active_users` AS SELECT id, email FROM `analytics.users`',
-          },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
-        sql.includes('SELECT ddl') &&
-        sql.includes("table_name = 'orders_mv'")
-      ) {
-        return [
-          {
-            ddl: 'CREATE MATERIALIZED VIEW `analytics.orders_mv` AS SELECT order_id, user_id FROM `analytics.orders`',
-          },
-        ];
-      }
-
-      // View columns
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
-        sql.includes('SELECT column_name, data_type') &&
-        sql.includes("table_name = 'active_users'")
-      ) {
-        return [
-          { column_name: 'id', data_type: 'INT64' },
-          { column_name: 'email', data_type: 'STRING' },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
-        sql.includes('SELECT column_name, data_type') &&
-        sql.includes("table_name = 'orders_mv'")
-      ) {
-        return [
-          { column_name: 'order_id', data_type: 'INT64' },
-          { column_name: 'user_id', data_type: 'INT64' },
-        ];
-      }
-
-      // Table columns (flattened nested field paths)
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS') &&
-        sql.includes("WHERE f.table_name = 'orders'")
-      ) {
-        return [
-          { field_path: 'order_id', data_type: 'INT64', ordinal_position: 1 },
-          { field_path: 'user_id', data_type: 'INT64', ordinal_position: 2 },
-          {
-            field_path: 'created_at',
-            data_type: 'TIMESTAMP',
-            ordinal_position: 3,
-          },
-          { field_path: 'user', data_type: 'STRUCT', ordinal_position: 4 },
-          {
-            field_path: 'user.address.city',
-            data_type: 'STRING',
-            ordinal_position: 4,
-          },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS') &&
-        sql.includes("WHERE f.table_name = 'users'")
-      ) {
-        return [
-          { field_path: 'id', data_type: 'INT64', ordinal_position: 1 },
-          { field_path: 'email', data_type: 'STRING', ordinal_position: 2 },
-        ];
-      }
-
-      // FK discovery for TableGrounding
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
-        sql.includes('JOIN') &&
-        sql.includes('KEY_COLUMN_USAGE') &&
-        sql.includes("tc.constraint_type = 'FOREIGN KEY'") &&
-        sql.includes("tc.table_name = 'orders'")
-      ) {
-        return [
-          {
-            constraint_name: 'orders.fk_user',
-            column_name: 'user_id',
-            ordinal_position: 1,
-            position_in_unique_constraint: 1,
-          },
-          {
-            constraint_name: 'orders.fk_external',
-            column_name: 'external_user_id',
-            ordinal_position: 1,
-            position_in_unique_constraint: 1,
-          },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
-        sql.includes("tc.constraint_type = 'FOREIGN KEY'") &&
-        sql.includes("tc.table_name = 'users'")
-      ) {
-        return [];
-      }
-
-      // FK referenced table lookup
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE') &&
-        sql.includes("constraint_name = 'orders.fk_user'")
-      ) {
-        return [{ table_schema: 'analytics', table_name: 'users' }];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE') &&
-        sql.includes("constraint_name = 'orders.fk_external'")
-      ) {
-        return [{ table_schema: 'other', table_name: 'users' }];
-      }
-
-      // PK constraint name + columns (referenced side)
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
-        sql.includes("constraint_type = 'PRIMARY KEY'") &&
-        sql.includes("table_name = 'users'") &&
-        sql.includes('LIMIT 1')
-      ) {
-        return [{ constraint_name: 'users.pk$' }];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.KEY_COLUMN_USAGE') &&
-        sql.includes("constraint_name = 'users.pk$'") &&
-        sql.includes("table_name = 'users'")
-      ) {
-        return [{ column_name: 'id', ordinal_position: 1 }];
-      }
-
-      // Column metadata for constraints (NOT NULL / DEFAULT)
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
-        sql.includes('SELECT column_name, is_nullable, column_default') &&
-        sql.includes("table_name = 'orders'")
-      ) {
-        return [
-          { column_name: 'order_id', is_nullable: 'NO', column_default: null },
-          { column_name: 'user_id', is_nullable: 'NO', column_default: null },
-          {
-            column_name: 'created_at',
-            is_nullable: 'YES',
-            column_default: null,
-          },
-          { column_name: 'user', is_nullable: 'YES', column_default: null },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
-        sql.includes('SELECT column_name, is_nullable, column_default') &&
-        sql.includes("table_name = 'users'")
-      ) {
-        return [
-          { column_name: 'id', is_nullable: 'NO', column_default: null },
-          { column_name: 'email', is_nullable: 'YES', column_default: null },
-        ];
-      }
-
-      // PK/FK key columns for constraints grounding
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
-        sql.includes("tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')") &&
-        sql.includes("tc.table_name = 'orders'")
-      ) {
-        return [
-          {
-            constraint_name: 'orders.pk$',
-            constraint_type: 'PRIMARY KEY',
-            column_name: 'order_id',
-            ordinal_position: 1,
-            position_in_unique_constraint: null,
-          },
-          {
-            constraint_name: 'orders.fk_user',
-            constraint_type: 'FOREIGN KEY',
-            column_name: 'user_id',
-            ordinal_position: 1,
-            position_in_unique_constraint: 1,
-          },
-          {
-            constraint_name: 'orders.fk_external',
-            constraint_type: 'FOREIGN KEY',
-            column_name: 'external_user_id',
-            ordinal_position: 1,
-            position_in_unique_constraint: 1,
-          },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
-        sql.includes("tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')") &&
-        sql.includes("tc.table_name = 'users'")
-      ) {
-        return [
-          {
-            constraint_name: 'users.pk$',
-            constraint_type: 'PRIMARY KEY',
-            column_name: 'id',
-            ordinal_position: 1,
-            position_in_unique_constraint: null,
-          },
-        ];
-      }
-
-      // Row counts (metadata-only)
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_STORAGE') &&
-        sql.includes("table_name = 'orders'")
-      ) {
-        return [{ total_rows: 1200 }];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_STORAGE') &&
-        sql.includes("table_name = 'users'")
-      ) {
-        return [{ total_rows: 50 }];
-      }
-
-      // Index hints (partition/clustering)
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
-        sql.includes('clustering_ordinal_position') &&
-        sql.includes("table_name = 'orders'")
-      ) {
-        return [
-          {
-            column_name: 'created_at',
-            is_partitioning_column: 'YES',
-            clustering_ordinal_position: 2,
-          },
-          {
-            column_name: 'user_id',
-            is_partitioning_column: 'NO',
-            clustering_ordinal_position: 1,
-          },
-        ];
-      }
-
-      if (
-        sql.includes('analytics.INFORMATION_SCHEMA.COLUMNS') &&
-        sql.includes('clustering_ordinal_position') &&
-        sql.includes("table_name = 'users'")
-      ) {
-        return [];
-      }
-
-      throw new Error(
-        `Unexpected SQL in BigQuery introspection stub:\\n${sql}`,
-      );
-    });
+    const { execute, calls } = createExecuteStub(standardResponder);
 
     const adapter = new BigQuery({
       datasets: ['analytics'],
@@ -341,6 +368,20 @@ describe('BigQuery adapter', () => {
     assert.deepStrictEqual(dialect?.data, { dialect: 'bigquery' });
 
     const tableFrags = fragments.filter((f) => f.name === 'table');
+
+    // 0-column table should be filtered out
+    assert.strictEqual(
+      tableFrags.filter((t) => t.data.name === 'analytics.empty_table').length,
+      0,
+      'Empty table (0 columns) should be filtered out',
+    );
+
+    assert.strictEqual(
+      tableFrags.length,
+      2,
+      'Should have exactly 2 tables (orders, users)',
+    );
+
     const orders = requireOne(
       tableFrags.filter((t) => t.data.name === 'analytics.orders'),
       'Expected orders table fragment',
@@ -415,5 +456,131 @@ describe('BigQuery adapter', () => {
 
     // Sanity: rowCount grounding must never issue COUNT(*).
     assert.ok(calls.length > 0);
+  });
+
+  it('resolves each FK constraint exactly once when tables and constraints are both configured', async () => {
+    const { execute, calls } = createExecuteStub(standardResponder);
+
+    const adapter = new BigQuery({
+      datasets: ['analytics'],
+      execute,
+      validate: async () => undefined,
+      grounding: [tables({ forward: true }), constraints()],
+    });
+
+    await adapter.introspect();
+
+    const fkUserResolutions = calls.filter(
+      (sql) =>
+        sql.includes('CONSTRAINT_COLUMN_USAGE') &&
+        sql.includes("constraint_name = 'orders.fk_user'"),
+    );
+
+    assert.strictEqual(
+      fkUserResolutions.length,
+      1,
+      `FK orders.fk_user should be resolved exactly once, but was resolved ${fkUserResolutions.length} times`,
+    );
+
+    const fkExternalResolutions = calls.filter(
+      (sql) =>
+        sql.includes('CONSTRAINT_COLUMN_USAGE') &&
+        sql.includes("constraint_name = 'orders.fk_external'"),
+    );
+
+    assert.strictEqual(
+      fkExternalResolutions.length,
+      1,
+      `FK orders.fk_external should be resolved exactly once, but was resolved ${fkExternalResolutions.length} times`,
+    );
+  });
+
+  it('falls back to __TABLES__ when TABLE_STORAGE is inaccessible', async () => {
+    const { execute } = createExecuteStub((sql) => {
+      if (
+        sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
+        sql.includes("WHERE table_type = 'BASE TABLE'")
+      ) {
+        return [{ table_name: 'users' }];
+      }
+
+      if (sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS')) {
+        return [{ field_path: 'id', data_type: 'INT64', ordinal_position: 1 }];
+      }
+
+      if (
+        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+        sql.includes("tc.constraint_type = 'FOREIGN KEY'")
+      ) {
+        return [];
+      }
+
+      if (sql.includes('TABLE_STORAGE')) {
+        throw new Error('Not found: TABLE_STORAGE');
+      }
+
+      if (sql.includes('__TABLES__')) {
+        return [{ table_name: 'users', row_count: 42 }];
+      }
+
+      return [];
+    });
+
+    const adapter = new BigQuery({
+      datasets: ['analytics'],
+      execute,
+      validate: async () => undefined,
+      grounding: [tables({ forward: true }), rowCount()],
+    });
+
+    const fragments = await adapter.introspect();
+    const userTable = fragments.find(
+      (f) => f.name === 'table' && f.data.name === 'analytics.users',
+    );
+    assert.ok(userTable, 'users table should exist');
+    assert.strictEqual(userTable.data.rowCount, 42);
+    assert.strictEqual(userTable.data.sizeHint, 'tiny');
+  });
+
+  it('survives when both TABLE_STORAGE and __TABLES__ fail', async () => {
+    const { execute } = createExecuteStub((sql) => {
+      if (
+        sql.includes('analytics.INFORMATION_SCHEMA.TABLES') &&
+        sql.includes("WHERE table_type = 'BASE TABLE'")
+      ) {
+        return [{ table_name: 'users' }];
+      }
+
+      if (sql.includes('analytics.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS')) {
+        return [{ field_path: 'id', data_type: 'INT64', ordinal_position: 1 }];
+      }
+
+      if (
+        sql.includes('analytics.INFORMATION_SCHEMA.TABLE_CONSTRAINTS') &&
+        sql.includes("tc.constraint_type = 'FOREIGN KEY'")
+      ) {
+        return [];
+      }
+
+      if (sql.includes('TABLE_STORAGE') || sql.includes('__TABLES__')) {
+        throw new Error('Permission denied');
+      }
+
+      return [];
+    });
+
+    const adapter = new BigQuery({
+      datasets: ['analytics'],
+      execute,
+      validate: async () => undefined,
+      grounding: [tables({ forward: true }), rowCount()],
+    });
+
+    const fragments = await adapter.introspect();
+    const userTable = fragments.find(
+      (f) => f.name === 'table' && f.data.name === 'analytics.users',
+    );
+    assert.ok(userTable, 'users table should exist even without row counts');
+    assert.strictEqual(userTable.data.rowCount, undefined);
   });
 });

@@ -248,7 +248,7 @@ export function reminder(
  * ```
  */
 export function user(
-  content: string | UIMessage,
+  content: string | (UIMessage & { role: 'user' }),
   ...reminders: UserReminder[]
 ): MessageFragment {
   const message: UIMessage =

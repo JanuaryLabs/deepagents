@@ -16,12 +16,60 @@ const DETERMINISTIC_SCORERS = [
 
 const LLM_SCORERS = [{ name: 'factuality', label: 'Factuality' }];
 
+interface Prefill {
+  name: string;
+  models: string[];
+  taskMode: string;
+  promptId: string;
+  endpointUrl: string;
+  dataset: string;
+  scorers: string[];
+  scorerModel: string;
+  maxConcurrency: number;
+  timeout: number;
+  trials: number;
+  threshold: number;
+  batchSize: string;
+  recordSelection: string;
+}
+
+function loadPrefill(c: Parameters<Parameters<typeof app.get>[1]>[0]): Prefill | null {
+  const fromId = c.req.query('from');
+  if (!fromId) return null;
+
+  const store = c.get('store');
+  const run = store.getRun(fromId);
+  if (!run) return null;
+
+  const cfg = (run.config ?? {}) as Record<string, unknown>;
+  return {
+    name: typeof cfg.suiteName === 'string' ? cfg.suiteName : run.name,
+    models: [run.model],
+    taskMode: typeof cfg.taskMode === 'string' ? cfg.taskMode : 'prompt',
+    promptId: typeof cfg.promptId === 'string' ? cfg.promptId : '',
+    endpointUrl: typeof cfg.endpointUrl === 'string' ? cfg.endpointUrl : '',
+    dataset: typeof cfg.dataset === 'string' ? cfg.dataset : '',
+    scorers: Array.isArray(cfg.scorers) ? cfg.scorers.map(String) : [],
+    scorerModel: typeof cfg.scorerModel === 'string' ? cfg.scorerModel : '',
+    maxConcurrency: typeof cfg.maxConcurrency === 'number' ? cfg.maxConcurrency : 10,
+    timeout: typeof cfg.timeout === 'number' ? cfg.timeout : 30000,
+    trials: typeof cfg.trials === 'number' ? cfg.trials : 1,
+    threshold: typeof cfg.threshold === 'number' ? cfg.threshold : 0.5,
+    batchSize: typeof cfg.batchSize === 'number' ? String(cfg.batchSize) : '',
+    recordSelection: typeof cfg.recordSelection === 'string' ? cfg.recordSelection : '',
+  };
+}
+
 app.get('/', (c) => {
   const store = c.get('store');
   const datasets = listDatasets();
   const prompts = [...store.listPrompts()].sort(
     (a, b) => b.created_at - a.created_at,
   );
+  const prefill = loadPrefill(c);
+
+  const prefillModelsJson = JSON.stringify(prefill?.models ?? []);
+  const prefillTaskMode = prefill?.taskMode ?? 'prompt';
 
   const tabScript = raw(`<script>
 (function() {
@@ -46,7 +94,8 @@ app.get('/', (c) => {
       syncMode(target);
     });
   });
-  if (!promptPicker) {
+  var prefillTaskMode = ${JSON.stringify(prefillTaskMode)};
+  if (prefillTaskMode === 'http' || !promptPicker) {
     var httpTab = document.querySelector('[data-tab="http"]');
     if (httpTab) httpTab.click();
   }
@@ -77,7 +126,7 @@ app.get('/', (c) => {
   var modelTagsList = document.getElementById('modelTags');
   var modelHiddenInputs = document.getElementById('modelHiddenInputs');
   var modelError = document.getElementById('modelError');
-  var modelTags = [];
+  var modelTags = ${prefillModelsJson};
 
   function isValidModelTag(value) {
     return /^[^\\s/]+\\/[^\\s/].+$/.test(value);
@@ -156,6 +205,8 @@ app.get('/', (c) => {
     });
   }
 
+  if (modelTags.length > 0) renderModelTags();
+
   document.addEventListener('submit', function(e) {
     if (modelInput && modelInput.value.trim()) {
       addModelTag(modelInput.value);
@@ -186,7 +237,7 @@ app.get('/', (c) => {
   return c.render(
     <Layout title="New Evaluation">
       <form method="post" action="/api/runs" class="max-w-2xl space-y-6">
-        <input type="hidden" name="taskMode" id="taskMode" value="prompt" />
+        <input type="hidden" name="taskMode" id="taskMode" value={prefill?.taskMode ?? 'prompt'} />
 
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Name</legend>
@@ -196,6 +247,7 @@ app.get('/', (c) => {
             required
             placeholder="e.g. prompt-v2-gpt4o"
             class="input input-sm w-full"
+            value={prefill?.name ?? ''}
           />
         </fieldset>
 
@@ -258,7 +310,7 @@ app.get('/', (c) => {
                       <option
                         value={p.id}
                         data-content={p.content}
-                        selected={idx === 0}
+                        selected={prefill?.promptId ? p.id === prefill.promptId : idx === 0}
                       >
                         {p.name} (v{p.version})
                       </option>
@@ -290,6 +342,7 @@ app.get('/', (c) => {
                 name="endpointUrl"
                 placeholder="https://api.example.com/predict"
                 class="input input-sm w-full"
+                value={prefill?.endpointUrl ?? ''}
               />
               <p class="text-base-content/60 mt-1 text-xs">
                 POST with JSON body. Expected response: {'{ "output": "..." }'}
@@ -311,7 +364,7 @@ app.get('/', (c) => {
           ) : (
             <select name="dataset" required class="select select-sm w-full">
               {datasets.map((ds) => (
-                <option value={ds.name}>
+                <option value={ds.name} selected={prefill?.dataset === ds.name}>
                   {ds.name} ({ds.extension})
                 </option>
               ))}
@@ -330,6 +383,7 @@ app.get('/', (c) => {
                     type="checkbox"
                     name="scorers"
                     value={s.name}
+                    checked={prefill?.scorers.includes(s.name)}
                     class="checkbox checkbox-sm"
                   />
                   {s.label}
@@ -345,6 +399,7 @@ app.get('/', (c) => {
                     name="scorers"
                     value={s.name}
                     data-llm-scorer
+                    checked={prefill?.scorers.includes(s.name)}
                     class="checkbox checkbox-sm"
                   />
                   {s.label}
@@ -358,6 +413,7 @@ app.get('/', (c) => {
                 name="scorerModel"
                 placeholder="OpenAI-compatible model id (e.g. gpt-4.1-mini)"
                 class="input input-sm w-full"
+                value={prefill?.scorerModel ?? ''}
               />
             </fieldset>
           </div>
@@ -373,7 +429,7 @@ app.get('/', (c) => {
                 <input
                   type="number"
                   name="maxConcurrency"
-                  value="10"
+                  value={String(prefill?.maxConcurrency ?? 10)}
                   min="1"
                   class="input input-sm w-full"
                 />
@@ -383,7 +439,7 @@ app.get('/', (c) => {
                 <input
                   type="number"
                   name="timeout"
-                  value="30000"
+                  value={String(prefill?.timeout ?? 30000)}
                   min="1000"
                   class="input input-sm w-full"
                 />
@@ -393,7 +449,7 @@ app.get('/', (c) => {
                 <input
                   type="number"
                   name="trials"
-                  value="1"
+                  value={String(prefill?.trials ?? 1)}
                   min="1"
                   class="input input-sm w-full"
                 />
@@ -403,7 +459,7 @@ app.get('/', (c) => {
                 <input
                   type="number"
                   name="threshold"
-                  value="0.5"
+                  value={String(prefill?.threshold ?? 0.5)}
                   min="0"
                   max="1"
                   step="0.05"
@@ -420,6 +476,7 @@ app.get('/', (c) => {
                   placeholder="All at once"
                   min="1"
                   class="input input-sm w-full"
+                  value={prefill?.batchSize ?? ''}
                 />
                 <p class="text-base-content/60 mt-1 text-xs">
                   Controls how many records are processed per batch. It does not
@@ -435,6 +492,7 @@ app.get('/', (c) => {
                   name="recordSelection"
                   placeholder="Examples: 1,2,8-12"
                   class="input input-sm w-full"
+                  value={prefill?.recordSelection ?? ''}
                 />
                 <p class="text-base-content/60 mt-1 text-xs">
                   Uses 1-based row numbers from the dataset preview.

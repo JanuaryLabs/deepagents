@@ -8,6 +8,7 @@ import datasetsApi from './api/datasets.ts';
 import eventsApi from './api/events.ts';
 import promptsApi from './api/prompts.ts';
 import runsApi from './api/runs.ts';
+import suitesApi from './api/suites.ts';
 import { renderer } from './renderer.tsx';
 import compareRoute from './routes/compare.tsx';
 import datasetsRoute from './routes/datasets.tsx';
@@ -46,6 +47,7 @@ export function createWebApp(store: RunStore): Hono<WebBindings> {
 
   app.route('/api/runs', runsApi);
   app.route('/api/runs', eventsApi);
+  app.route('/api/suites', suitesApi);
   app.route('/api/datasets', datasetsApi);
   app.route('/api/prompts', promptsApi);
 

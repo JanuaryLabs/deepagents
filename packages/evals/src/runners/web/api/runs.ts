@@ -127,6 +127,25 @@ function buildHttpTask(endpointUrl: string): TaskFn<Record<string, unknown>> {
 
 const app = new Hono<WebBindings>();
 
+app.post('/:id/rename', async (c) => {
+  const store = c.get('store');
+  const id = c.req.param('id');
+  const body = await c.req.parseBody();
+  const name = String(body.name || '').trim();
+
+  if (!name) {
+    return c.text('Name is required', 400);
+  }
+
+  const run = store.getRun(id);
+  if (!run) {
+    return c.text('Run not found', 404);
+  }
+
+  store.renameRun(id, name);
+  return c.redirect(`/runs/${id}`);
+});
+
 app.post('/', async (c) => {
   const store = c.get('store');
   const body = await c.req.parseBody({ all: true });

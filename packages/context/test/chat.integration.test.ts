@@ -134,6 +134,8 @@ describe('context chat()', () => {
     const secondChain = await store.getMessageChain(secondBranch.headMessageId);
 
     assert.strictEqual(secondChain.length, 2);
+    assert.strictEqual(secondChain[1].name, 'assistant');
+    assert.strictEqual((secondChain[1].data as UIMessage).role, 'assistant');
 
     const branches = await store.listBranches('test-chat');
     assert.strictEqual(branches.length, 1);

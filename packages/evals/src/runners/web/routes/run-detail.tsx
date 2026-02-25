@@ -80,22 +80,52 @@ app.get('/:id', (c) => {
     <Layout>
       <div class="mb-6 flex items-center justify-between">
         <div>
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-3" id="run-name-display">
             <h1 class="text-2xl font-bold">{run.name}</h1>
             <Badge status={run.status} id="status-badge" />
+            <button
+              type="button"
+              id="run-edit-btn"
+              class="btn btn-ghost btn-xs"
+              aria-label="Rename run"
+            >
+              &#9998;
+            </button>
           </div>
+          <form
+            id="run-name-form"
+            method="post"
+            action={`/api/runs/${run.id}/rename`}
+            class="hidden items-center gap-3"
+          >
+            <input
+              type="text"
+              name="name"
+              value={run.name}
+              class="input input-sm text-2xl font-bold"
+              required
+            />
+            <Badge status={run.status} id="status-badge-edit" />
+            <button type="submit" class="btn btn-neutral btn-xs">Save</button>
+            <button type="button" id="run-edit-cancel" class="btn btn-ghost btn-xs">Cancel</button>
+          </form>
           <p class="mt-1 text-sm text-base-content/60">
             {run.model} &middot; {new Date(run.started_at).toLocaleString()}
           </p>
         </div>
-        <div class="breadcrumbs text-sm">
-          <ul>
-            <li><a href="/suites">Suites</a></li>
-            <li>
-              <a href={`/suites/${suite.id}`}>{suite.name}</a>
-            </li>
-            <li>{run.name}</li>
-          </ul>
+        <div class="flex items-center gap-4">
+          <a href={`/evals/new?from=${run.id}`} class="btn btn-outline btn-sm">
+            Re-run
+          </a>
+          <div class="breadcrumbs text-sm">
+            <ul>
+              <li><a href="/suites">Suites</a></li>
+              <li>
+                <a href={`/suites/${suite.id}`}>{suite.name}</a>
+              </li>
+              <li>{run.name}</li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -161,6 +191,31 @@ app.get('/:id', (c) => {
       />
 
       {sseScript}
+      {raw(`<script>
+(function() {
+  var display = document.getElementById('run-name-display');
+  var form = document.getElementById('run-name-form');
+  var editBtn = document.getElementById('run-edit-btn');
+  var cancelBtn = document.getElementById('run-edit-cancel');
+  var input = form ? form.querySelector('input[name="name"]') : null;
+
+  if (editBtn && form && display) {
+    editBtn.addEventListener('click', function() {
+      display.classList.add('hidden');
+      form.classList.remove('hidden');
+      form.classList.add('flex');
+      if (input) input.focus();
+    });
+  }
+  if (cancelBtn && form && display) {
+    cancelBtn.addEventListener('click', function() {
+      form.classList.add('hidden');
+      form.classList.remove('flex');
+      display.classList.remove('hidden');
+    });
+  }
+})();
+</script>`)}
     </Layout>,
   );
 });

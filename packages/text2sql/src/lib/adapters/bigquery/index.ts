@@ -29,15 +29,18 @@ export function info(config: InfoGroundingConfig = {}) {
 }
 
 export function views(config: ViewGroundingConfig = {}) {
-  return (adapter: Adapter) => new BigQueryViewGrounding(adapter, config);
+  return (adapter: Adapter) =>
+    new BigQueryViewGrounding(adapter as BigQuery, config);
 }
 
 export function indexes(config: IndexesGroundingConfig = {}) {
-  return (adapter: Adapter) => new BigQueryIndexesGrounding(adapter, config);
+  return (adapter: Adapter) =>
+    new BigQueryIndexesGrounding(adapter as BigQuery, config);
 }
 
 export function rowCount(config: RowCountGroundingConfig = {}) {
-  return (adapter: Adapter) => new BigQueryRowCountGrounding(adapter, config);
+  return (adapter: Adapter) =>
+    new BigQueryRowCountGrounding(adapter as BigQuery, config);
 }
 
 export function constraints(config: ConstraintGroundingConfig = {}) {

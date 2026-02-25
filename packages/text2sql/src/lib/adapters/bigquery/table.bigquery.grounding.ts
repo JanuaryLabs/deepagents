@@ -1,8 +1,10 @@
 import type { Relationship, Table } from '../adapter.ts';
+import type { GroundingContext } from '../groundings/context.ts';
 import {
   TableGrounding,
   type TableGroundingConfig,
 } from '../groundings/table.grounding.ts';
+import { type FKChildColumn, resolveForeignKey } from './bigquery-fk.ts';
 import type { BigQuery } from './bigquery.ts';
 
 type TableNameRow = {
@@ -22,28 +24,26 @@ type ForeignKeyKeyColumnRow = {
   position_in_unique_constraint: number | null;
 };
 
-type ReferencedTableRow = {
-  table_schema: string | null;
-  table_name: string | null;
-};
-
-type PrimaryKeyConstraintRow = {
-  constraint_name: string | null;
-};
-
-type PrimaryKeyColumnRow = {
-  column_name: string | null;
-  ordinal_position: number | null;
-};
-
 export interface BigQueryTableGroundingConfig extends TableGroundingConfig {}
 
 export class BigQueryTableGrounding extends TableGrounding {
   #adapter: BigQuery;
+  #cache?: Map<string, unknown>;
 
   constructor(adapter: BigQuery, config: BigQueryTableGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
+  }
+
+  override async execute(ctx: GroundingContext): Promise<void> {
+    this.#cache = ctx.cache;
+    await super.execute(ctx);
+    ctx.tables = ctx.tables.filter((t) => t.columns.length > 0);
+
+    const tableNames = new Set(ctx.tables.map((t) => t.name));
+    ctx.relationships = ctx.relationships.filter(
+      (r) => tableNames.has(r.table) && tableNames.has(r.referenced_table),
+    );
   }
 
   protected override async applyFilter(): Promise<string[]> {
@@ -130,14 +130,7 @@ export class BigQueryTableGrounding extends TableGrounding {
       ORDER BY kcu.constraint_name, kcu.ordinal_position
     `);
 
-    const byConstraint = new Map<
-      string,
-      Array<{
-        column: string;
-        ordinal: number;
-        pkOrdinal: number | null;
-      }>
-    >();
+    const byConstraint = new Map<string, FKChildColumn[]>();
 
     for (const row of rows) {
       if (!row.constraint_name || !row.column_name) continue;
@@ -152,14 +145,21 @@ export class BigQueryTableGrounding extends TableGrounding {
 
     const rels: Relationship[] = [];
     for (const [constraintName, columns] of byConstraint.entries()) {
-      const rel = await this.#buildForeignKeyRelationship({
-        constraintDataset: dataset,
-        childDataset: dataset,
-        childTable: table,
+      const resolution = await resolveForeignKey(
+        this.#adapter,
+        dataset,
         constraintName,
-        childColumns: columns,
-      });
-      if (rel) rels.push(rel);
+        columns,
+        this.#cache,
+      );
+      if (resolution) {
+        rels.push({
+          table: `${dataset}.${table}`,
+          from: resolution.childColumns,
+          referenced_table: `${resolution.referencedDataset}.${resolution.referencedTable}`,
+          to: resolution.referencedColumns,
+        });
+      }
     }
 
     return rels;
@@ -185,30 +185,24 @@ export class BigQueryTableGrounding extends TableGrounding {
 
       for (const row of rows) {
         if (!row.constraint_name) continue;
-        const rel = await this.#buildForeignKeyRelationshipFromConstraintName(
+        const rel = await this.#resolveIncomingRelationship(
           constraintDataset,
           row.constraint_name,
+          referencedDataset,
+          referencedTable,
         );
-        if (
-          rel &&
-          rel.referenced_table === `${referencedDataset}.${referencedTable}`
-        ) {
-          rels.push(rel);
-        }
+        if (rel) rels.push(rel);
       }
     }
 
     return rels;
   }
 
-  #isTableInScope(tableName: string): boolean {
-    const { schema } = this.#adapter.parseTableName(tableName);
-    return this.#adapter.isDatasetAllowed(schema);
-  }
-
-  async #buildForeignKeyRelationshipFromConstraintName(
+  async #resolveIncomingRelationship(
     constraintDataset: string,
     constraintName: string,
+    expectedReferencedDataset: string,
+    expectedReferencedTable: string,
   ): Promise<Relationship | undefined> {
     const keyRows = await this.#adapter.runQuery<
       ForeignKeyKeyColumnRow & { child_table_name: string | null }
@@ -232,7 +226,7 @@ export class BigQueryTableGrounding extends TableGrounding {
     const childTable = keyRows[0]?.child_table_name;
     if (!childTable) return undefined;
 
-    const childColumns = keyRows
+    const childColumns: FKChildColumn[] = keyRows
       .filter((r) => r.column_name)
       .map((r) => ({
         column: r.column_name ?? 'unknown',
@@ -240,87 +234,32 @@ export class BigQueryTableGrounding extends TableGrounding {
         pkOrdinal: r.position_in_unique_constraint,
       }));
 
-    return this.#buildForeignKeyRelationship({
+    const resolution = await resolveForeignKey(
+      this.#adapter,
       constraintDataset,
-      childDataset: constraintDataset,
-      childTable,
       constraintName,
       childColumns,
-    });
-  }
-
-  async #buildForeignKeyRelationship(args: {
-    constraintDataset: string;
-    childDataset: string;
-    childTable: string;
-    constraintName: string;
-    childColumns: Array<{
-      column: string;
-      ordinal: number;
-      pkOrdinal: number | null;
-    }>;
-  }): Promise<Relationship | undefined> {
-    const refTableRows = await this.#adapter.runQuery<ReferencedTableRow>(`
-      SELECT DISTINCT table_schema, table_name
-      FROM ${this.#adapter.infoSchemaView(args.constraintDataset, 'CONSTRAINT_COLUMN_USAGE')}
-      WHERE constraint_name = '${this.#adapter.escapeString(args.constraintName)}'
-    `);
-
-    const referenced = refTableRows.find((r) => r.table_schema && r.table_name);
-    if (!referenced?.table_schema || !referenced.table_name) {
-      return undefined;
-    }
-
-    const referencedDataset = referenced.table_schema;
-    const referencedTable = referenced.table_name;
-
-    // Dataset scoping: never traverse relationships outside configured datasets.
-    if (!this.#adapter.isDatasetAllowed(referencedDataset)) {
-      return undefined;
-    }
-
-    const pkConstraintRows = await this.#adapter
-      .runQuery<PrimaryKeyConstraintRow>(`
-      SELECT constraint_name
-      FROM ${this.#adapter.infoSchemaView(referencedDataset, 'TABLE_CONSTRAINTS')}
-      WHERE constraint_type = 'PRIMARY KEY'
-        AND table_name = '${this.#adapter.escapeString(referencedTable)}'
-      LIMIT 1
-    `);
-
-    const pkConstraintName = pkConstraintRows[0]?.constraint_name;
-    if (!pkConstraintName) {
-      return undefined;
-    }
-
-    const pkColumnRows = await this.#adapter.runQuery<PrimaryKeyColumnRow>(`
-      SELECT column_name, ordinal_position
-      FROM ${this.#adapter.infoSchemaView(referencedDataset, 'KEY_COLUMN_USAGE')}
-      WHERE constraint_name = '${this.#adapter.escapeString(pkConstraintName)}'
-        AND table_name = '${this.#adapter.escapeString(referencedTable)}'
-      ORDER BY ordinal_position
-    `);
-
-    const pkByOrdinal = new Map<number, string>();
-    for (const row of pkColumnRows) {
-      if (!row.column_name || row.ordinal_position == null) continue;
-      pkByOrdinal.set(row.ordinal_position, row.column_name);
-    }
-
-    const orderedChild = [...args.childColumns].sort(
-      (a, b) => a.ordinal - b.ordinal,
+      this.#cache,
     );
-    const from = orderedChild.map((c) => c.column);
-    const to = orderedChild.map((c) => {
-      const pkOrdinal = c.pkOrdinal ?? c.ordinal;
-      return pkByOrdinal.get(pkOrdinal) ?? 'unknown';
-    });
+
+    if (
+      !resolution ||
+      resolution.referencedDataset !== expectedReferencedDataset ||
+      resolution.referencedTable !== expectedReferencedTable
+    ) {
+      return undefined;
+    }
 
     return {
-      table: `${args.childDataset}.${args.childTable}`,
-      from,
-      referenced_table: `${referencedDataset}.${referencedTable}`,
-      to,
+      table: `${constraintDataset}.${childTable}`,
+      from: resolution.childColumns,
+      referenced_table: `${resolution.referencedDataset}.${resolution.referencedTable}`,
+      to: resolution.referencedColumns,
     };
+  }
+
+  #isTableInScope(tableName: string): boolean {
+    const { schema } = this.#adapter.parseTableName(tableName);
+    return this.#adapter.isDatasetAllowed(schema);
   }
 }

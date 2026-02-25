@@ -1,4 +1,3 @@
-import type { Adapter } from '../adapter.ts';
 import {
   type View,
   ViewGrounding,
@@ -24,9 +23,9 @@ export interface BigQueryViewGroundingConfig extends ViewGroundingConfig {}
 export class BigQueryViewGrounding extends ViewGrounding {
   #adapter: BigQuery;
 
-  constructor(adapter: Adapter, config: BigQueryViewGroundingConfig = {}) {
+  constructor(adapter: BigQuery, config: BigQueryViewGroundingConfig = {}) {
     super(config);
-    this.#adapter = adapter as BigQuery;
+    this.#adapter = adapter;
   }
 
   protected override async applyFilter(): Promise<string[]> {

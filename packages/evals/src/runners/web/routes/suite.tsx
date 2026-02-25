@@ -178,7 +178,33 @@ app.get('/:id', (c) => {
     <Layout>
       <div class="mb-6 flex items-center justify-between">
         <div>
-          <h1 class="text-2xl font-bold">{suite.name}</h1>
+          <div class="flex items-center gap-2" id="suite-name-display">
+            <h1 class="text-2xl font-bold">{suite.name}</h1>
+            <button
+              type="button"
+              id="suite-edit-btn"
+              class="btn btn-ghost btn-xs"
+              aria-label="Rename suite"
+            >
+              &#9998;
+            </button>
+          </div>
+          <form
+            id="suite-name-form"
+            method="post"
+            action={`/api/suites/${suite.id}/rename`}
+            class="hidden items-center gap-2"
+          >
+            <input
+              type="text"
+              name="name"
+              value={suite.name}
+              class="input input-sm text-2xl font-bold"
+              required
+            />
+            <button type="submit" class="btn btn-neutral btn-xs">Save</button>
+            <button type="button" id="suite-edit-cancel" class="btn btn-ghost btn-xs">Cancel</button>
+          </form>
           <p class="mt-1 text-sm text-base-content/60">
             Suite &middot; {runs.length} run{runs.length !== 1 ? 's' : ''}{' '}
             &middot; Created {new Date(suite.created_at).toLocaleDateString()}
@@ -286,6 +312,31 @@ app.get('/:id', (c) => {
       </div>
 
       {sseScript}
+      {raw(`<script>
+(function() {
+  var display = document.getElementById('suite-name-display');
+  var form = document.getElementById('suite-name-form');
+  var editBtn = document.getElementById('suite-edit-btn');
+  var cancelBtn = document.getElementById('suite-edit-cancel');
+  var input = form ? form.querySelector('input[name="name"]') : null;
+
+  if (editBtn && form && display) {
+    editBtn.addEventListener('click', function() {
+      display.classList.add('hidden');
+      form.classList.remove('hidden');
+      form.classList.add('flex');
+      if (input) input.focus();
+    });
+  }
+  if (cancelBtn && form && display) {
+    cancelBtn.addEventListener('click', function() {
+      form.classList.add('hidden');
+      form.classList.remove('flex');
+      display.classList.remove('hidden');
+    });
+  }
+})();
+</script>`)}
     </Layout>,
   );
 });
