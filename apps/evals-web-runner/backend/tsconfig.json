@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "../../../packages/evals"
+    },
+    {
+      "path": "../../../packages/agent"
+    },
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ]
+}

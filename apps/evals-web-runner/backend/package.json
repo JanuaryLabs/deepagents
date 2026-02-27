@@ -1,0 +1,14 @@
+{
+  "name": "@evals-web-runner/backend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "dependencies": {
+    "@deepagents/agent": "0.23.0",
+    "@deepagents/evals": "0.23.0",
+    "@hono/node-server": "^1.19.5",
+    "hono": "^4.10.3",
+    "zod": "^3.24.2"
+  }
+}

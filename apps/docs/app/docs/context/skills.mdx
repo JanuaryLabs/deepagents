@@ -140,9 +140,7 @@ const context = new ContextEngine({
 }).set(
   role('You are a helpful assistant.'),
   skills({
-    paths: [
-      { host: './skills', sandbox: '/workspace/skills' },
-    ],
+    paths: ['./skills'],
   }),
 );
 ```
@@ -151,24 +149,9 @@ const context = new ContextEngine({
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `paths` | `{ host: string; sandbox: string }[]` | *required* | Directories to scan with host-to-sandbox path mapping |
+| `paths` | `string[]` | *required* | Directories to scan for skills |
 | `exclude` | `string[]` | `undefined` | Skill names to exclude |
 | `include` | `string[]` | `undefined` | If set, only these skill names are included |
-
-### Path Mapping
-
-The `paths` option maps host filesystem paths to sandbox paths. When your agent runs inside a container, the host path where skills live differs from the path the LLM should reference. The fragment rewrites all `SKILL.md` paths so the LLM sees sandbox paths it can actually read:
-
-```typescript
-skills({
-  paths: [
-    { host: './local-skills', sandbox: '/workspace/skills' },
-    { host: '~/.deepagents/skills', sandbox: '/workspace/global-skills' },
-  ],
-})
-```
-
-A skill discovered at `./local-skills/deploy/SKILL.md` on the host will appear as `/workspace/skills/deploy/SKILL.md` in the LLM's context.
 
 ### Filtering
 
@@ -176,12 +159,12 @@ Use `include` for an allowlist or `exclude` for a blocklist:
 
 ```typescript
 skills({
-  paths: [{ host: './skills', sandbox: '/skills' }],
+  paths: ['./skills'],
   include: ['deploy', 'refactor'],
 })
 
 skills({
-  paths: [{ host: './skills', sandbox: '/skills' }],
+  paths: ['./skills'],
   exclude: ['dangerous-skill'],
 })
 ```
@@ -193,7 +176,7 @@ When both are set, `include` is applied first, then `exclude` filters the result
 The `skills()` function returns an `available_skills` fragment containing:
 
 1. An `instructions` fragment with guidance on how the LLM should discover and use skills
-2. One `skill` fragment per discovered skill with `name`, `path` (sandbox), and `description`
+2. One `skill` fragment per discovered skill with `name`, `path`, and `description`
 
 The instructions tell the LLM to:
 - Match user requests to skill names or descriptions
@@ -202,35 +185,33 @@ The instructions tell the LLM to:
 - Prefer running existing scripts over rewriting code
 - Announce which skills are being used and why
 
-## Extracting Skill Mounts
+## Extracting Available Skills
 
-`ContextEngine.getSkillMounts()` extracts the mount mapping from a configured context. This is used by the agent framework to set up guardrail context and container volume mounts:
+`ContextEngine.getAvailableSkills()` returns the metadata of all skills discovered from the configured context. This is used by the agent framework to populate `GuardrailContext.availableSkills`, enabling guardrails to detect when the LLM confuses skills with tools:
 
 ```typescript
 const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
-  .set(skills({ paths: [{ host: './skills', sandbox: '/workspace/skills' }] }));
+  .set(skills({ paths: ['./skills'] }));
 
-const { mounts } = context.getSkillMounts();
+const skills = context.getAvailableSkills();
 // [
 //   {
 //     name: 'deploy',
 //     description: 'Deploy to production',
-//     host: './skills/deploy/SKILL.md',
-//     sandbox: '/workspace/skills/deploy/SKILL.md',
+//     path: './skills/deploy',
+//     skillMdPath: './skills/deploy/SKILL.md',
 //   },
 // ]
 ```
 
-Each mount entry is a `SkillPathMapping`:
+Each entry is a `SkillMetadata`:
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `name` | `string` | Skill name |
 | `description` | `string` | Skill description |
-| `host` | `string` | Host filesystem path to `SKILL.md` |
-| `sandbox` | `string` | Sandbox path to `SKILL.md` |
-
-The `@deepagents/agent` package uses these mounts to populate `GuardrailContext.availableSkills`, enabling guardrails to detect when the LLM confuses skills with tools.
+| `path` | `string` | Directory containing the skill |
+| `skillMdPath` | `string` | Path to the `SKILL.md` file |
 
 ## Types
 
@@ -242,15 +223,8 @@ interface SkillMetadata {
   skillMdPath: string;
 }
 
-interface SkillPathMapping {
-  name: string;
-  description: string;
-  host: string;
-  sandbox: string;
-}
-
 interface SkillsFragmentOptions {
-  paths: { host: string; sandbox: string }[];
+  paths: string[];
   exclude?: string[];
   include?: string[];
 }

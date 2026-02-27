@@ -32,6 +32,15 @@
     },
     {
       "path": "./packages/evals"
+    },
+    {
+      "path": "./apps/evals-web-runner/frontend"
+    },
+    {
+      "path": "./apps/evals-web-runner/backend"
+    },
+    {
+      "path": "./apps/evals-web-runner/client"
     }
   ]
 }

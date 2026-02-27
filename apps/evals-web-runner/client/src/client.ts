@@ -1,0 +1,195 @@
+import z from 'zod';
+
+import type { InferData } from './api/endpoints.ts';
+import schemas from './api/schemas.ts';
+import { fetchType, parse } from './http/dispatcher.ts';
+import {
+  createBaseUrlInterceptor,
+  createHeadersInterceptor,
+} from './http/interceptors.ts';
+import { type ParseError, parseInput } from './http/parser.ts';
+import type { HeadersInit, RequestConfig } from './http/request.ts';
+import { APIResponse } from './http/response.ts';
+
+const optionsSchema = z.object({
+  'X-API-Key': z.string().optional(),
+  token: z
+    .union([
+      z.string(),
+      z.function().returns(z.union([z.string(), z.promise(z.string())])),
+    ])
+    .optional()
+    .transform(async (token) => {
+      if (!token) return undefined;
+      if (typeof token === 'function') {
+        token = await Promise.resolve(token());
+      }
+      return `Bearer ${token}`;
+    })
+    .describe(
+      'Bearer token for authentication. Can be a string or a function that returns a string.',
+    ),
+  fetch: fetchType.describe(
+    'Custom fetch implementation. Defaults to globalThis.fetch.',
+  ),
+  baseUrl: z.string().describe('Base URL of the API server.'),
+  headers: z
+    .record(z.string())
+    .optional()
+    .describe('Default headers to include in all requests.'),
+  skipValidation: z
+    .boolean()
+    .optional()
+    .describe(
+      'Skip request input validation. Client options and TypeScript types still enforce correct usage.',
+    ),
+});
+
+type ClientOptions = z.input<typeof optionsSchema>;
+
+export class Client {
+  public options: ClientOptions;
+  constructor(options: ClientOptions) {
+    this.options = options;
+  }
+
+  /** Sends a request and returns the unwrapped response data. Delegates to the standalone {@link request} function. */
+  async request<const E extends keyof typeof schemas>(
+    endpoint: E,
+    input: z.input<(typeof schemas)[E]['schema']>,
+    options?: { signal?: AbortSignal; headers?: HeadersInit },
+  ) {
+    return request(this, endpoint, input, options).then(function unwrap(it) {
+      if (it instanceof APIResponse) {
+        return it.data as InferData<E>;
+      }
+      return it as InferData<E>;
+    });
+  }
+
+  /** Builds a ready-to-send request without sending it. Delegates to the standalone {@link prepare} function. */
+  async prepare<const E extends keyof typeof schemas>(
+    endpoint: E,
+    input: z.input<(typeof schemas)[E]['schema']>,
+    options?: { headers?: HeadersInit },
+  ) {
+    return prepare(this, endpoint, input, options);
+  }
+
+  async defaultHeaders() {
+    const options = await optionsSchema.parseAsync(this.options);
+    return {
+      ...{ 'X-API-Key': options['X-API-Key'], authorization: options['token'] },
+      ...options.headers,
+    };
+  }
+
+  async defaultInputs() {
+    const options = await optionsSchema.parseAsync(this.options);
+    return {};
+  }
+
+  setOptions(options: Partial<ClientOptions>) {
+    this.options = {
+      ...this.options,
+      ...options,
+    };
+  }
+}
+
+/**
+ * Sends a validated request using the client's configuration and returns the parsed response.
+ * Merges the client's default inputs and headers before sending.
+ * Throws `APIError` on non-ok responses.
+ *
+ * @example
+ * ```ts
+ * const result = await request(client, 'GET /users', { limit: 10 });
+ * ```
+ */
+export async function request<const E extends keyof typeof schemas>(
+  client: Client,
+  endpoint: E,
+  input: z.input<(typeof schemas)[E]['schema']>,
+  requestOptions?: { signal?: AbortSignal; headers?: HeadersInit },
+): Promise<Awaited<ReturnType<(typeof schemas)[E]['dispatch']>>> {
+  const route = schemas[endpoint];
+  const options = await optionsSchema.parseAsync(client.options);
+  const withDefaultInputs = Object.assign({}, {}, input);
+  const parsedInput = options.skipValidation
+    ? withDefaultInputs
+    : parseInput(route.schema, withDefaultInputs);
+  const result = await route.dispatch(parsedInput as never, {
+    fetch: options.fetch,
+    interceptors: [
+      createHeadersInterceptor(
+        {
+          ...{
+            'X-API-Key': options['X-API-Key'],
+            authorization: options['token'],
+          },
+          ...options.headers,
+        },
+        requestOptions?.headers ?? {},
+      ),
+      createBaseUrlInterceptor(options.baseUrl),
+    ],
+    signal: requestOptions?.signal,
+  });
+  return result as Awaited<ReturnType<(typeof schemas)[E]['dispatch']>>;
+}
+
+/**
+ * Builds a validated `RequestConfig` (url + init) with a `parse` function attached, without sending.
+ * Use when you need control over the fetch call — framework integration (Next.js, SvelteKit),
+ * custom retry/logging, request batching, or testing.
+ *
+ * @example
+ * ```ts
+ * const { url, init, parse } = await prepare(client, 'GET /users', { limit: 10 });
+ * const response = await fetch(new Request(url, init));
+ * const result = await parse(response);
+ * ```
+ */
+export async function prepare<const E extends keyof typeof schemas>(
+  client: Client,
+  endpoint: E,
+  input: z.input<(typeof schemas)[E]['schema']>,
+  requestOptions?: { headers?: HeadersInit },
+): Promise<
+  RequestConfig & {
+    parse: (response: Response) => ReturnType<typeof parse>;
+  }
+> {
+  const route = schemas[endpoint];
+  const options = await optionsSchema.parseAsync(client.options);
+  const withDefaultInputs = Object.assign({}, {}, input);
+  const parsedInput = options.skipValidation
+    ? withDefaultInputs
+    : parseInput(route.schema, withDefaultInputs);
+  const interceptors = [
+    createHeadersInterceptor(
+      {
+        ...{
+          'X-API-Key': options['X-API-Key'],
+          authorization: options['token'],
+        },
+        ...options.headers,
+      },
+      requestOptions?.headers ?? {},
+    ),
+    createBaseUrlInterceptor(options.baseUrl),
+  ];
+
+  let config = route.toRequest(parsedInput as never);
+  for (const interceptor of interceptors) {
+    if (interceptor.before) {
+      config = await interceptor.before(config);
+    }
+  }
+  return {
+    ...config,
+    parse: (response: Response) =>
+      parse(route.output as never, response, (d) => d) as never,
+  } as any;
+}

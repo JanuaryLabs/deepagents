@@ -1,0 +1,116 @@
+import type { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
+import { z } from 'zod';
+
+import * as inputs from '../core/inputs.ts';
+import { validate } from '../middlewares/validator.ts';
+import type { AppBindings } from '../store.ts';
+
+export default function (router: Hono<AppBindings>) {
+  /**
+   * @openapi listSuites
+   * @tags suites
+   * @description List all evaluation suites with run counts
+   */
+  router.get(
+    '/suites',
+    validate(() => ({})),
+    (c) => {
+      const store = c.get('store');
+      const suites = store.listSuites();
+      const result = suites.map((suite) => {
+        const runs = store.listRuns(suite.id);
+        return {
+          ...suite,
+          runCount: runs.length,
+          runningCount: runs.filter((r) => r.status === 'running').length,
+          completedCount: runs.filter((r) => r.status === 'completed').length,
+          failedCount: runs.filter((r) => r.status === 'failed').length,
+          lastStartedAt:
+            runs.length > 0 ? runs[runs.length - 1]!.started_at : null,
+        };
+      });
+      return c.json(result);
+    },
+  );
+
+  /**
+   * @openapi getSuite
+   * @tags suites
+   * @description Get a single suite with its runs and aggregate stats
+   */
+  router.get(
+    '/suites/:id',
+    validate((payload) => ({
+      id: { select: payload.params.id, against: z.string() },
+    })),
+    (c) => {
+      const { id } = c.var.input;
+      const store = c.get('store');
+      const suite = store.getSuite(id);
+      if (!suite) {
+        throw new HTTPException(404, { message: 'Suite not found' });
+      }
+
+      const runs = store.listRuns(id).reverse();
+      const completedRuns = runs.filter(
+        (r) => r.status === 'completed' && r.summary,
+      );
+
+      const stats =
+        completedRuns.length > 0
+          ? {
+              totalCases: completedRuns.reduce(
+                (s, r) => s + (r.summary?.totalCases ?? 0),
+                0,
+              ),
+              totalPass: completedRuns.reduce(
+                (s, r) => s + (r.summary?.passCount ?? 0),
+                0,
+              ),
+              totalFail: completedRuns.reduce(
+                (s, r) => s + (r.summary?.failCount ?? 0),
+                0,
+              ),
+              totalLatency: completedRuns.reduce(
+                (s, r) => s + (r.summary?.totalLatencyMs ?? 0),
+                0,
+              ),
+              totalTokens: completedRuns.reduce(
+                (s, r) =>
+                  s +
+                  (r.summary?.totalTokensIn ?? 0) +
+                  (r.summary?.totalTokensOut ?? 0),
+                0,
+              ),
+            }
+          : null;
+
+      return c.json({ suite, runs, stats });
+    },
+  );
+
+  /**
+   * @openapi renameSuite
+   * @tags suites
+   * @description Rename an existing suite
+   */
+  router.patch(
+    '/suites/:id',
+    validate((payload) => ({
+      id: { select: payload.params.id, against: z.string() },
+      name: { select: payload.body.name, against: inputs.nameSchema },
+    })),
+    (c) => {
+      const { id, name } = c.var.input;
+      const store = c.get('store');
+
+      if (!store.getSuite(id)) {
+        throw new HTTPException(404, { message: 'Suite not found' });
+      }
+
+      store.renameSuite(id, name);
+      return c.json({ success: true });
+    },
+  );
+}

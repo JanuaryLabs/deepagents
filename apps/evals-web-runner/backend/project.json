@@ -1,0 +1,72 @@
+{
+  "name": "backend",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/evals-web-runner/backend/src",
+  "projectType": "application",
+  "tags": [],
+  "targets": {
+    "client": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node apps/evals-web-runner/backend/openapi.ts"
+      }
+    },
+    "build": {
+      "dependsOn": ["^build", "client"],
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "defaultConfiguration": "production",
+      "options": {
+        "bundle": true,
+        "platform": "node",
+        "main": "apps/evals-web-runner/backend/src/server.ts",
+        "tsConfig": "apps/evals-web-runner/backend/tsconfig.app.json",
+        "assets": [
+          "./openapi.json",
+          {
+            "input": "apps/evals-web-runner/backend/src/core/agents/skills",
+            "glob": "**",
+            "output": "./skills"
+          }
+        ],
+        "esbuildOptions": {
+          "external": ["pg", "pg-native"],
+          "banner": {
+            "js": "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+          }
+        }
+      },
+      "configurations": {
+        "production": {},
+        "development": {
+          "declaration": false,
+          "skipTypeCheck": true
+        }
+      }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "defaultConfiguration": "development",
+      "dependsOn": ["build", "client"],
+      "options": {
+        "buildTarget": "backend:build"
+      },
+      "configurations": {
+        "development": {
+          "buildTarget": "backend:build:development"
+        },
+        "production": {
+          "buildTarget": "backend:build:production"
+        }
+      }
+    },
+    "serve-ts": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "node --watch src/server.ts",
+        "cwd": "apps/evals-web-runner/backend"
+      }
+    }
+  }
+}
