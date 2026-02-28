@@ -1,6 +1,8 @@
 /// <reference types='vitest' />
+import sdkIt from '@sdk-it/vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { join } from 'node:path';
 import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
@@ -30,6 +32,13 @@ export default defineConfig(({ command }) => {
       'process.env': {},
     },
     plugins: [
+      sdkIt('../../../openapi.json', {
+        mode: 'full',
+        output: join(__dirname, '../../../.evals-sdk-it'),
+        packageName: '@evals/client',
+        readme: false,
+        pagination: false,
+      }),
       react({
         babel: {
           plugins: babelPlugins,

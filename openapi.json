@@ -44,56 +44,7 @@
             "description": "Response for 200",
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "completedCount": {
-                        "type": "number"
-                      },
-                      "created_at": {
-                        "type": "number"
-                      },
-                      "failedCount": {
-                        "type": "number"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "lastStartedAt": {
-                        "anyOf": [
-                          {
-                            "type": "null"
-                          },
-                          {
-                            "type": "number"
-                          }
-                        ]
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "runCount": {
-                        "type": "number"
-                      },
-                      "runningCount": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "completedCount",
-                      "created_at",
-                      "failedCount",
-                      "id",
-                      "lastStartedAt",
-                      "name",
-                      "runCount",
-                      "runningCount"
-                    ],
-                    "additionalProperties": false
-                  }
-                }
+                "schema": {}
               }
             }
           },
@@ -279,12 +230,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "runs": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/RunRow"
-                      }
-                    },
+                    "runs": {},
                     "stats": {
                       "anyOf": [
                         {
@@ -293,21 +239,11 @@
                         {
                           "type": "object",
                           "properties": {
-                            "totalCases": {
-                              "type": "number"
-                            },
-                            "totalFail": {
-                              "type": "number"
-                            },
-                            "totalLatency": {
-                              "type": "number"
-                            },
-                            "totalPass": {
-                              "type": "number"
-                            },
-                            "totalTokens": {
-                              "type": "number"
-                            }
+                            "totalCases": {},
+                            "totalFail": {},
+                            "totalLatency": {},
+                            "totalPass": {},
+                            "totalTokens": {}
                           },
                           "required": [
                             "totalCases",
@@ -320,9 +256,7 @@
                         }
                       ]
                     },
-                    "suite": {
-                      "$ref": "#/components/schemas/SuiteRow"
-                    }
+                    "suite": {}
                   },
                   "required": ["runs", "stats", "suite"],
                   "additionalProperties": false
@@ -937,12 +871,7 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "runs": {
-                            "type": "array",
-                            "items": {
-                              "$ref": "#/components/schemas/RunRow"
-                            }
-                          },
+                          "runs": {},
                           "suiteId": {
                             "type": "string"
                           },
@@ -954,9 +883,7 @@
                         "additionalProperties": false
                       }
                     },
-                    "totalRuns": {
-                      "type": "number"
-                    }
+                    "totalRuns": {}
                   },
                   "required": ["groups", "totalRuns"],
                   "additionalProperties": false
@@ -1226,9 +1153,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "suiteId": {
-                      "type": "string"
-                    }
+                    "suiteId": {}
                   },
                   "required": ["suiteId"],
                   "additionalProperties": false
@@ -1483,29 +1408,19 @@
                   "properties": {
                     "cases": {
                       "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/CaseWithScores"
-                      }
+                      "items": {}
                     },
                     "config": {
                       "type": "object",
                       "additionalProperties": {}
                     },
-                    "run": {
-                      "$ref": "#/components/schemas/RunRow"
-                    },
+                    "run": {},
                     "scorerNames": {
                       "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
+                      "items": {}
                     },
-                    "suite": {
-                      "$ref": "#/components/schemas/SuiteRow"
-                    },
-                    "summary": {
-                      "$ref": "#/components/schemas/RunSummary"
-                    }
+                    "suite": {},
+                    "summary": {}
                   },
                   "required": [
                     "cases",
@@ -2621,18 +2536,8 @@
                     "offset": {
                       "type": "number"
                     },
-                    "rows": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {},
-                        "required": [],
-                        "additionalProperties": false
-                      }
-                    },
-                    "total": {
-                      "type": "number"
-                    }
+                    "rows": {},
+                    "total": {}
                   },
                   "required": ["columns", "limit", "offset", "rows", "total"],
                   "additionalProperties": false
@@ -3045,12 +2950,7 @@
             "description": "Response for 200",
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PromptRow"
-                  }
-                }
+                "schema": {}
               }
             }
           },
@@ -3243,9 +3143,7 @@
             "description": "Response for 201",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PromptRow"
-                }
+                "schema": {}
               }
             }
           },
@@ -3438,9 +3336,7 @@
             "description": "Response for 200",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PromptRow"
-                }
+                "schema": {}
               }
             }
           },
@@ -3816,12 +3712,7 @@
             "description": "Response for 200",
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RunRow"
-                  }
-                }
+                "schema": {}
               }
             }
           },
@@ -4017,15 +3908,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "baseline": {
-                      "$ref": "#/components/schemas/RunRow"
-                    },
-                    "candidate": {
-                      "$ref": "#/components/schemas/RunRow"
-                    },
-                    "result": {
-                      "$ref": "#/components/schemas/ComparisonResult"
-                    }
+                    "baseline": {},
+                    "candidate": {},
+                    "result": {}
                   },
                   "required": ["baseline", "candidate", "result"],
                   "additionalProperties": false
@@ -4392,173 +4277,6 @@
   },
   "components": {
     "schemas": {
-      "SuiteRow": {
-        "type": "object",
-        "properties": {
-          "created_at": {
-            "type": "number"
-          },
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": ["created_at", "id", "name"],
-        "additionalProperties": false
-      },
-      "RunRow": {
-        "type": "object",
-        "properties": {
-          "config": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              }
-            ]
-          },
-          "finished_at": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "started_at": {
-            "type": "number"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "enum": ["running"],
-                "type": "string"
-              },
-              {
-                "enum": ["completed"],
-                "type": "string"
-              },
-              {
-                "enum": ["failed"],
-                "type": "string"
-              }
-            ]
-          },
-          "suite_id": {
-            "type": "string"
-          },
-          "summary": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/RunSummary"
-              }
-            ]
-          }
-        },
-        "required": [
-          "config",
-          "finished_at",
-          "id",
-          "model",
-          "name",
-          "started_at",
-          "status",
-          "suite_id",
-          "summary"
-        ],
-        "additionalProperties": false
-      },
-      "RunSummary": {
-        "type": "object",
-        "properties": {
-          "failCount": {
-            "type": "number"
-          },
-          "meanScores": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "number"
-            }
-          },
-          "passCount": {
-            "type": "number"
-          },
-          "totalCases": {
-            "type": "number"
-          },
-          "totalLatencyMs": {
-            "type": "number"
-          },
-          "totalTokensIn": {
-            "type": "number"
-          },
-          "totalTokensOut": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "failCount",
-          "meanScores",
-          "passCount",
-          "totalCases",
-          "totalLatencyMs",
-          "totalTokensIn",
-          "totalTokensOut"
-        ],
-        "additionalProperties": false
-      },
-      "CaseWithScores": {
-        "type": "object",
-        "properties": {
-          "scores": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "reason": {
-                  "anyOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ]
-                },
-                "score": {
-                  "type": "number"
-                },
-                "scorer_name": {
-                  "type": "string"
-                }
-              },
-              "required": ["reason", "score", "scorer_name"],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": ["scores"],
-        "additionalProperties": false
-      },
       "DatasetEntry": {
         "type": "object",
         "properties": {
@@ -4573,170 +4291,6 @@
           }
         },
         "required": ["extension", "name", "sizeBytes"],
-        "additionalProperties": false
-      },
-      "PromptRow": {
-        "type": "object",
-        "properties": {
-          "content": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "number"
-          },
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "version": {
-            "type": "number"
-          }
-        },
-        "required": ["content", "created_at", "id", "name", "version"],
-        "additionalProperties": false
-      },
-      "ComparisonResult": {
-        "type": "object",
-        "properties": {
-          "caseDiffs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CaseDiff"
-            }
-          },
-          "costDelta": {
-            "$ref": "#/components/schemas/CostDelta"
-          },
-          "regression": {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "object",
-                  "properties": {
-                    "exceeds": {
-                      "type": "boolean"
-                    },
-                    "meanDelta": {
-                      "type": "number"
-                    }
-                  },
-                  "required": ["exceeds", "meanDelta"],
-                  "additionalProperties": false
-                }
-              },
-              "regressed": {
-                "type": "boolean"
-              }
-            },
-            "required": ["details", "regressed"],
-            "additionalProperties": false
-          },
-          "scorerSummaries": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ScorerSummary"
-            }
-          },
-          "totalCasesCompared": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "caseDiffs",
-          "costDelta",
-          "regression",
-          "scorerSummaries",
-          "totalCasesCompared"
-        ],
-        "additionalProperties": false
-      },
-      "CaseDiff": {
-        "type": "object",
-        "properties": {
-          "index": {
-            "type": "number"
-          },
-          "scorerDeltas": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "properties": {
-                "baseline": {
-                  "type": "number"
-                },
-                "candidate": {
-                  "type": "number"
-                },
-                "change": {
-                  "anyOf": [
-                    {
-                      "enum": ["improved"],
-                      "type": "string"
-                    },
-                    {
-                      "enum": ["regressed"],
-                      "type": "string"
-                    },
-                    {
-                      "enum": ["unchanged"],
-                      "type": "string"
-                    }
-                  ]
-                },
-                "delta": {
-                  "type": "number"
-                }
-              },
-              "required": ["baseline", "candidate", "change", "delta"],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": ["index", "scorerDeltas"],
-        "additionalProperties": false
-      },
-      "ScorerSummary": {
-        "type": "object",
-        "properties": {
-          "improvedCount": {
-            "type": "number"
-          },
-          "meanDelta": {
-            "type": "number"
-          },
-          "regressedCount": {
-            "type": "number"
-          },
-          "unchangedCount": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "improvedCount",
-          "meanDelta",
-          "regressedCount",
-          "unchangedCount"
-        ],
-        "additionalProperties": false
-      },
-      "CostDelta": {
-        "type": "object",
-        "properties": {
-          "latencyDeltaMs": {
-            "type": "number"
-          },
-          "tokenInDelta": {
-            "type": "number"
-          },
-          "tokenOutDelta": {
-            "type": "number"
-          }
-        },
-        "required": ["latencyDeltaMs", "tokenInDelta", "tokenOutDelta"],
         "additionalProperties": false
       },
       "ModelEntry": {

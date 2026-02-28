@@ -37,12 +37,13 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^3.0.24",
     "ai": "^6.0.90",
     "duck-duck-scrape": "^2.2.7",
     "lodash-es": "^4.17.21",
     "nano-spawn": "^2.0.0",
-    "zod": "^3.25.76 || ^4.0.0"
+    "zod": "^3.25.76 || ^4.0.0",
+    "fast-glob": "^3.3.3",
+    "@deepagents/retrieval": "0.23.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12"

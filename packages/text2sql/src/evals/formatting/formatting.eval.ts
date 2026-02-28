@@ -1,4 +1,3 @@
-/* eslint-disable @nx/enforce-module-boundaries */
 import { groq } from '@ai-sdk/groq';
 import { evalite } from 'evalite';
 import { randomUUID } from 'node:crypto';

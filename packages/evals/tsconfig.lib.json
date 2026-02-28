@@ -11,9 +11,5 @@
   },
   "include": ["src/**/*.ts", "../../global.d.ts"],
   "exclude": ["src/**/*.test.ts", "src/runners/**"],
-  "references": [
-    {
-      "path": "../agent/tsconfig.lib.json"
-    }
-  ]
+  "references": []
 }

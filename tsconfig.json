@@ -38,9 +38,6 @@
     },
     {
       "path": "./apps/evals-web-runner/backend"
-    },
-    {
-      "path": "./apps/evals-web-runner/client"
     }
   ]
 }

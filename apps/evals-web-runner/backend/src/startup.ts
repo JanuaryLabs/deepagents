@@ -41,9 +41,9 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace NodeJS {
     // Extend the ProcessEnv interface with the parsed environment variables
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+
     // @ts-ignore
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/no-empty-interface
+
     interface ProcessEnv extends z.infer<typeof env> {}
   }
 }

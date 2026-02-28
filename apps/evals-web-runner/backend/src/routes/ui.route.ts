@@ -33,7 +33,7 @@ export default function (router: Hono<AppBindings>) {
       return c.json({ error: 'Not found. Talk to the website admin.' }, 404);
     }
 
-    let html = await readFile(`${dir}/index.html`, 'utf-8');
+    const html = await readFile(`${dir}/index.html`, 'utf-8');
 
     return c.html(html);
   });

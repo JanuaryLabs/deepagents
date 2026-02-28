@@ -1,22 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-
-
-import { apiFetch } from '../../api.ts';
 import { useAction, useData } from '../../hooks/use-client.ts';
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Textarea } from '../../shadcn/index.ts';
-
-
-
-
-
-
-
-
-
-
-
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+} from '../../shadcn/index.ts';
 
 interface PromptRow {
   id: string;
@@ -30,7 +31,6 @@ interface PromptGroup {
   name: string;
   versions: PromptRow[];
 }
-
 
 function groupPrompts(prompts: PromptRow[]): PromptGroup[] {
   const byName = new Map<string, PromptRow[]>();
@@ -62,7 +62,6 @@ function formatDate(timestamp: number): string {
 
 export default function PromptsPage() {
   const { data: prompts, isLoading } = useData('GET /prompts');
-  const queryClient = useQueryClient();
 
   const [promptName, setPromptName] = useState('');
   const [promptContent, setPromptContent] = useState('');
@@ -70,7 +69,6 @@ export default function PromptsPage() {
   const createMutation = useAction('POST /prompts', {
     invalidate: ['GET /prompts'],
     onSuccess: () => {
-
       setPromptName('');
       setPromptContent('');
     },
@@ -140,9 +138,7 @@ export default function PromptsPage() {
 
       {groups.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed p-12 text-center">
-          <p className="text-muted-foreground text-sm">
-            No prompts saved yet.
-          </p>
+          <p className="text-muted-foreground text-sm">No prompts saved yet.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -199,7 +195,9 @@ export default function PromptsPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="text-destructive"
-                                onClick={() => deleteMutation.mutate({ id: p.id })}
+                                onClick={() =>
+                                  deleteMutation.mutate({ id: p.id })
+                                }
                                 disabled={deleteMutation.isPending}
                               >
                                 Delete

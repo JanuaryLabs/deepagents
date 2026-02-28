@@ -1,11 +1,10 @@
 import { defaultTypesMap } from '@sdk-it/core';
 import { analyze } from '@sdk-it/generic';
 import { responseAnalyzer } from '@sdk-it/hono';
-import { generate } from '@sdk-it/typescript';
-import { execFile } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cwd } from 'node:process';
+import type { OpenAPIObject } from 'openapi3-ts/oas31';
 
 const { paths, components, tags } = await analyze(
   'apps/evals-web-runner/backend/tsconfig.app.json',
@@ -28,7 +27,7 @@ const { paths, components, tags } = await analyze(
   },
 );
 
-const spec: Parameters<typeof generate>[0] = {
+const spec: OpenAPIObject = {
   openapi: '3.1.0',
   info: { title: 'Agent API', version: '1.0.0' },
   tags: tags.map((tag) => ({ name: tag })),
@@ -75,17 +74,3 @@ const spec: Parameters<typeof generate>[0] = {
 };
 
 await writeFile('openapi.json', JSON.stringify(spec, null, 2));
-
-console.log('OpenAPI spec generated successfully.');
-
-await generate(spec, {
-  mode: 'minimal',
-  output: join(process.cwd(), 'apps/evals-web-runner/client/src'),
-  readme: false,
-  pagination: false,
-  formatCode: ({ output, env }) => {
-    execFile('prettier', ['openapi.json', output, '--write'], { env: env });
-  },
-});
-
-console.log('OpenAPI client generated successfully.');

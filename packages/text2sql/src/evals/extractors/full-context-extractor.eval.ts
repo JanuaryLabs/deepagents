@@ -1,4 +1,3 @@
-/* eslint-disable @nx/enforce-module-boundaries */
 import { evalite } from 'evalite';
 import { DatabaseSync } from 'node:sqlite';
 
