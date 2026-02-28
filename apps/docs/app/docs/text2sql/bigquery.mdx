@@ -73,7 +73,7 @@ new BigQuery({
 
 ## Dataset Scoping
 
-- Table and view fragments are named as `dataset.table`.
+- Table and view fragments are named as `dataset.table` (or `project.dataset.table` when `projectId` is set).
 - Only configured datasets are introspected.
 - Foreign keys that reference tables outside configured datasets are ignored (no traversal, no relationship fragments).
 
@@ -91,7 +91,7 @@ Import these from `@deepagents/text2sql/bigquery`:
 | `views()` | Discovers views and materialized views (includes definitions) |
 | `info()` | Emits dialect metadata (`bigquery`) and identifier/parameter hints |
 | `constraints()` | Best-effort PK/FK + NOT NULL/DEFAULT from metadata |
-| `rowCount()` | Metadata-only row counts (no `COUNT(*)`) + size hints |
+| `rowCount()` | Metadata-only row counts (no `COUNT(*)`) + size hints. Falls back to `__TABLES__` when `TABLE_STORAGE` is inaccessible (e.g. cross-project public datasets) |
 | `indexes()` | Maps partitioning/clustering metadata into index-like hints (marks indexed columns) |
 | `report()` | Generic LLM-driven business context report grounding (optional; can be expensive) |
 

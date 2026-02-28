@@ -213,6 +213,99 @@ Each entry is a `SkillMetadata`:
 | `path` | `string` | Directory containing the skill |
 | `skillMdPath` | `string` | Path to the `SKILL.md` file |
 
+## Skill Classifier
+
+The skill classifier ranks skills against user messages using BM25 text similarity. Instead of relying on the LLM to pattern-match skill names at inference time, the classifier scores each skill's name and description against the user's input and surfaces the top matches as a soft nudge in the prompt.
+
+### BM25SkillClassifier
+
+The default implementation indexes skill metadata (name + description) into a BM25 corpus and ranks matches by relevance score:
+
+```typescript
+import { BM25SkillClassifier, discoverSkillsInDirectory } from '@deepagents/context';
+
+const skills = discoverSkillsInDirectory('./skills');
+const classifier = new BM25SkillClassifier(skills);
+
+const matches = classifier.match('deploy my docker container', { topN: 3 });
+// [
+//   { skill: { name: 'deploy-helper', ... }, score: 0.82 },
+//   { skill: { name: 'docker-expert', ... }, score: 0.71 },
+// ]
+```
+
+### SkillClassifierOptions
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `topN` | `number` | `5` | Maximum number of matches to return |
+| `threshold` | `number` | `0` | Minimum score to include a match |
+
+### skillsReminder()
+
+`skillsReminder()` bridges the classifier with the user message reminder system. It returns a `UserReminder` with a factory function that runs the classifier against each user message at resolve time. When matches are found, a formatted list of relevant skills (with scores and file paths) is injected as a `<system-reminder>`. When nothing matches, no reminder is injected.
+
+```typescript
+import { ContextEngine, SqliteContextStore, role, skills, user, skillsReminder, discoverSkillsInDirectory } from '@deepagents/context';
+
+const discoveredSkills = discoverSkillsInDirectory('./skills');
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
+  .set(
+    role('You are a helpful assistant.'),
+    skills({ paths: ['./skills'] }),
+    user('deploy my app to production', skillsReminder(discoveredSkills, { topN: 3 })),
+  );
+```
+
+You can also pass a pre-built classifier instance instead of a raw skill array:
+
+```typescript
+import { BM25SkillClassifier, skillsReminder } from '@deepagents/context';
+
+const classifier = new BM25SkillClassifier(skills);
+const reminderFragment = skillsReminder(classifier, { topN: 3, threshold: 0.1 });
+```
+
+### Custom Classifiers
+
+Implement `ISkillClassifier` to replace BM25 with your own ranking logic (embeddings, LLM-based, etc.):
+
+```typescript
+import { type ISkillClassifier, type SkillMatch, type SkillClassifierOptions, skillsReminder } from '@deepagents/context';
+
+const customClassifier: ISkillClassifier = {
+  match(query: string, options?: SkillClassifierOptions): SkillMatch[] {
+    const topN = options?.topN ?? 5;
+    return myEmbeddingSearch(query, topN);
+  },
+};
+
+const reminderFragment = skillsReminder(customClassifier);
+```
+
+## Factory Reminders
+
+`reminder()` now accepts a factory function in addition to a static string. When a factory is provided, `user()` resolves it at build time by passing the message's plain text content. If the factory returns an empty string, the reminder is skipped entirely.
+
+```typescript
+import { user, reminder } from '@deepagents/context';
+
+user(
+  'deploy the app',
+  reminder('Always ask for confirmation'),
+  reminder((content) => {
+    if (content.includes('deploy')) {
+      return 'Remind user about staging checks';
+    }
+    return '';
+  }),
+);
+```
+
+This is the mechanism that `skillsReminder()` uses internally -- it returns a `UserReminder` whose `text` is a factory that runs the classifier.
+
 ## Types
 
 ```typescript
@@ -233,6 +326,22 @@ interface ParsedSkillMd {
   frontmatter: { name: string; description: string; [key: string]: unknown };
   body: string;
 }
+
+interface ISkillClassifier {
+  match(query: string, options?: SkillClassifierOptions): SkillMatch[];
+}
+
+interface SkillMatch {
+  skill: SkillMetadata;
+  score: number;
+}
+
+interface SkillClassifierOptions {
+  topN?: number;
+  threshold?: number;
+}
+
+type ReminderText = string | ((content: string) => string);
 ```
 
 ## Next Steps

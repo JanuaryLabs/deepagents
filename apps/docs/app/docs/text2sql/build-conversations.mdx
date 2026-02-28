@@ -35,15 +35,11 @@ When you call `chat()`:
 
 ## Message Format
 
-Messages follow the Vercel AI SDK `UIMessage` format:
+Messages accept `ChatMessage[]` where `ChatMessage` is `UIMessage | MessageFragment`. Standard `UIMessage` objects work as before:
 
 ```typescript
-interface UIMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
+import type { ChatMessage } from '@deepagents/context';
 
-// Send multiple messages
 await text2sql.chat(
   [
     { role: 'user', content: 'Show me sales by region' },
@@ -154,6 +150,21 @@ const uiStream = stream.toUIMessageStream({
   sendReasoning: true, // AI reasoning steps
   sendSources: true, // Data sources used
 });
+```
+
+## Abort Signal
+
+Pass an `AbortSignal` to cancel an in-progress chat stream:
+
+```typescript
+const controller = new AbortController();
+
+const stream = await text2sql.chat(messages, {
+  abortSignal: controller.signal,
+});
+
+// Cancel the stream after 10 seconds
+setTimeout(() => controller.abort(), 10_000);
 ```
 
 ## Error Handling

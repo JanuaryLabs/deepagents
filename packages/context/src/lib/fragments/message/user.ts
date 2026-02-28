@@ -1,4 +1,4 @@
-import { type UIMessage, generateId } from 'ai';
+import { type UIMessage, generateId, isTextUIPart } from 'ai';
 
 import type { MessageFragment } from '../../fragments.ts';
 
@@ -6,8 +6,10 @@ export interface UserReminderOptions {
   asPart?: boolean;
 }
 
+export type ReminderText = string | ((content: string) => string);
+
 export interface UserReminder {
-  text: string;
+  text: ReminderText;
   asPart: boolean;
 }
 
@@ -131,6 +133,13 @@ export function stripReminders(message: UIMessage): UIMessage {
   return nextMessage;
 }
 
+function extractPlainText(message: UIMessage): string {
+  return message.parts
+    .filter(isTextUIPart)
+    .map((part) => part.text)
+    .join(' ');
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -222,10 +231,12 @@ function applyPartReminder(
  * @param options - Reminder representation options
  */
 export function reminder(
-  text: string,
+  text: ReminderText,
   options?: UserReminderOptions,
 ): UserReminder {
-  assertReminderText(text);
+  if (typeof text === 'string') {
+    assertReminderText(text);
+  }
   return {
     text,
     asPart: options?.asPart ?? false,
@@ -262,23 +273,33 @@ export function user(
 
   if (reminders.length > 0) {
     const addedReminders: UserReminderMetadata[] = [];
+    const plainText = extractPlainText(message);
 
     for (const item of reminders) {
-      assertReminderText(item.text);
+      const resolvedText =
+        typeof item.text === 'function' ? item.text(plainText) : item.text;
+
+      if (resolvedText.trim().length === 0) {
+        continue;
+      }
 
       addedReminders.push(
         item.asPart
-          ? applyPartReminder(message, item.text)
-          : applyInlineReminder(message, item.text),
+          ? applyPartReminder(message, resolvedText)
+          : applyInlineReminder(message, resolvedText),
       );
     }
 
-    const metadata = isRecord(message.metadata) ? { ...message.metadata } : {};
-    const existingReminders = Array.isArray(metadata.reminders)
-      ? metadata.reminders
-      : [];
-    metadata.reminders = [...existingReminders, ...addedReminders];
-    message.metadata = metadata;
+    if (addedReminders.length > 0) {
+      const metadata = isRecord(message.metadata)
+        ? { ...message.metadata }
+        : {};
+      const existingReminders = Array.isArray(metadata.reminders)
+        ? metadata.reminders
+        : [];
+      metadata.reminders = [...existingReminders, ...addedReminders];
+      message.metadata = metadata;
+    }
   }
 
   return {

@@ -31,6 +31,7 @@
  * @module
  */
 
+export * from './classifier.ts';
 export * from './fragments.ts';
 export * from './loader.ts';
 export * from './types.ts';
