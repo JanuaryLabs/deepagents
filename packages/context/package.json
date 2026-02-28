@@ -47,10 +47,11 @@
     "just-bash": "^2.10.0",
     "lodash-es": "^4.17.21",
     "nano-spawn": "^2.0.0",
+    "openai": "^6.25.0",
     "pluralize": "^8.0.0",
     "stringcase": "^4.3.1",
-    "yaml": "^2.8.0",
-    "openai": "^6.25.0"
+    "tiny-tfidf": "^1.0.0",
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",

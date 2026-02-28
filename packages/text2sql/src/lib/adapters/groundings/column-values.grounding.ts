@@ -18,6 +18,8 @@ export type ColumnValuesResult = {
 export interface ColumnValuesGroundingConfig {
   /** Maximum number of distinct values to consider low cardinality (default: 20) */
   lowCardinalityLimit?: number;
+  /** Maximum character length for individual values. Columns with any value exceeding this are skipped entirely (default: 100) */
+  maxValueLength?: number;
 }
 
 /**
@@ -34,10 +36,12 @@ export interface ColumnValuesGroundingConfig {
  */
 export abstract class ColumnValuesGrounding extends AbstractGrounding {
   protected lowCardinalityLimit: number;
+  protected maxValueLength: number;
 
   constructor(config: ColumnValuesGroundingConfig = {}) {
     super('columnValues');
     this.lowCardinalityLimit = config.lowCardinalityLimit ?? 20;
+    this.maxValueLength = config.maxValueLength ?? 100;
   }
 
   /**
@@ -181,6 +185,10 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
     }
   }
 
+  private exceedsMaxValueLength(values: string[]): boolean {
+    return values.some((v) => v.length > this.maxValueLength);
+  }
+
   /**
    * Resolve column values from all sources in priority order.
    */
@@ -191,7 +199,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
   ): Promise<ColumnValuesResult | undefined> {
     // Priority 1: Native ENUM type
     const enumValues = await this.collectEnumValues(tableName, column);
-    if (enumValues?.length) {
+    if (enumValues?.length && !this.exceedsMaxValueLength(enumValues)) {
       return { kind: 'Enum', values: enumValues };
     }
 
@@ -199,7 +207,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
     if (constraints) {
       for (const constraint of constraints) {
         const checkValues = this.parseCheckConstraint(constraint, column.name);
-        if (checkValues?.length) {
+        if (checkValues?.length && !this.exceedsMaxValueLength(checkValues)) {
           return { kind: 'Enum', values: checkValues };
         }
       }
@@ -207,7 +215,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
 
     // Priority 3: Low cardinality data scan
     const lowCardValues = await this.collectLowCardinality(tableName, column);
-    if (lowCardValues?.length) {
+    if (lowCardValues?.length && !this.exceedsMaxValueLength(lowCardValues)) {
       return { kind: 'LowCardinality', values: lowCardValues };
     }
 

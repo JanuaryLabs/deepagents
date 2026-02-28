@@ -32,7 +32,7 @@ export default defineConfig(({ command }) => {
       'process.env': {},
     },
     plugins: [
-      sdkIt('../../../openapi.json', {
+      sdkIt('../../../.evals-sdk-it/openapi.json', {
         mode: 'full',
         output: join(__dirname, '../../../.evals-sdk-it'),
         packageName: '@evals/client',

@@ -73,4 +73,4 @@ const spec: OpenAPIObject = {
   },
 };
 
-await writeFile('openapi.json', JSON.stringify(spec, null, 2));
+await writeFile('.evals-sdk-it/openapi.json', JSON.stringify(spec, null, 2));

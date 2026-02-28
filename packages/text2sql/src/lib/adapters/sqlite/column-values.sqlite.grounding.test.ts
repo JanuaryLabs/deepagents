@@ -365,4 +365,103 @@ describe('SqliteColumnValuesGrounding', () => {
       });
     });
   });
+
+  describe('maxValueLength', () => {
+    it('should skip column when any value exceeds maxValueLength', async () => {
+      const longValue = 'x'.repeat(150);
+      const ddl = `
+        CREATE TABLE docs (
+          id INTEGER PRIMARY KEY,
+          category TEXT
+        );
+        INSERT INTO docs (category) VALUES ('short'), ('${longValue}');
+      `;
+
+      const { adapter } = await init_db(ddl, {
+        grounding: [tables(), columnValues({ maxValueLength: 100 })],
+      });
+
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'docs',
+        columns: [
+          {
+            name: 'column',
+            data: { name: 'id', type: 'INTEGER', values: ['1', '2'] },
+          },
+          { name: 'column', data: { name: 'category', type: 'TEXT' } },
+        ],
+      });
+    });
+
+    it('should keep column when all values are within maxValueLength', async () => {
+      const ddl = `
+        CREATE TABLE tags (
+          id INTEGER PRIMARY KEY,
+          label TEXT
+        );
+        INSERT INTO tags (label) VALUES ('frontend'), ('backend'), ('devops');
+      `;
+
+      const { adapter } = await init_db(ddl, {
+        grounding: [tables(), columnValues({ maxValueLength: 100 })],
+      });
+
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'tags',
+        columns: [
+          {
+            name: 'column',
+            data: {
+              name: 'id',
+              type: 'INTEGER',
+              values: ['1', '2', '3'],
+            },
+          },
+          {
+            name: 'column',
+            data: {
+              name: 'label',
+              type: 'TEXT',
+              values: ['frontend', 'backend', 'devops'],
+            },
+          },
+        ],
+      });
+    });
+
+    it('should use default maxValueLength of 100', async () => {
+      const longValue = 'a'.repeat(101);
+      const ddl = `
+        CREATE TABLE notes (
+          id INTEGER PRIMARY KEY,
+          content TEXT
+        );
+        INSERT INTO notes (content) VALUES ('${longValue}');
+      `;
+
+      const { adapter } = await init_db(ddl, {
+        grounding: [tables(), columnValues()],
+      });
+
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'notes',
+        columns: [
+          {
+            name: 'column',
+            data: { name: 'id', type: 'INTEGER', values: ['1'] },
+          },
+          { name: 'column', data: { name: 'content', type: 'TEXT' } },
+        ],
+      });
+    });
+  });
 });
