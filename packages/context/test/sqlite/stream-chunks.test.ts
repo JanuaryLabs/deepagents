@@ -1240,6 +1240,119 @@ describe('Stream Chunks', () => {
     });
   });
 
+  describe('StreamManager.persist() onCancelDetected', () => {
+    it('should invoke onCancelDetected exactly once when cancelled', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const source = new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'part-1',
+              delta: 'hello',
+            });
+          },
+        });
+
+        const calls: { streamId: string; latencyMs: number | null }[] = [];
+
+        const persistPromise = streams.persist(source, streamId, {
+          cancelPolling: { minMs: 5, maxMs: 5, multiplier: 1, jitterRatio: 0 },
+          onCancelDetected: (info) => {
+            calls.push(info);
+          },
+        });
+
+        globalThis.setTimeout(() => {
+          void streams.cancel(streamId);
+        }, 20);
+
+        await persistPromise;
+
+        assert.strictEqual(
+          calls.length,
+          1,
+          'onCancelDetected should be called exactly once',
+        );
+        assert.strictEqual(calls[0].streamId, streamId);
+        assert.strictEqual(typeof calls[0].latencyMs, 'number');
+      });
+    });
+
+    it('should not fail persist when onCancelDetected throws', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const source = new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'part-1',
+              delta: 'hello',
+            });
+          },
+        });
+
+        const persistPromise = streams.persist(source, streamId, {
+          cancelPolling: { minMs: 5, maxMs: 5, multiplier: 1, jitterRatio: 0 },
+          onCancelDetected: () => {
+            throw new Error('callback exploded');
+          },
+        });
+
+        globalThis.setTimeout(() => {
+          void streams.cancel(streamId);
+        }, 20);
+
+        await persistPromise;
+
+        const stream = await store.getStream(streamId);
+        assert.ok(stream);
+        assert.strictEqual(stream.status, 'cancelled');
+      });
+    });
+
+    it('should work unchanged when no onCancelDetected is provided', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const source = new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'part-1',
+              delta: 'hello',
+            });
+          },
+        });
+
+        const persistPromise = streams.persist(source, streamId, {
+          cancelPolling: { minMs: 5, maxMs: 5, multiplier: 1, jitterRatio: 0 },
+        });
+
+        globalThis.setTimeout(() => {
+          void streams.cancel(streamId);
+        }, 20);
+
+        await persistPromise;
+
+        const stream = await store.getStream(streamId);
+        assert.ok(stream);
+        assert.strictEqual(stream.status, 'cancelled');
+      });
+    });
+  });
+
   describe('StreamManager.persist() terminal state guard', () => {
     it('should return early without changing status when stream is cancelled', async () => {
       await withStreamStore(async (store) => {

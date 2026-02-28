@@ -354,6 +354,67 @@ describe('Text2Sql.chat()', () => {
     );
   });
 
+  it('forwards abortSignal to agent stream', async () => {
+    const store = new InMemoryContextStore();
+    const { adapter } = await init_db(
+      'CREATE TABLE users (id INTEGER, name TEXT)',
+    );
+
+    let receivedSignal: AbortSignal | undefined;
+
+    const model = new MockLanguageModelV3({
+      doStream: async ({ abortSignal }) => {
+        receivedSignal = abortSignal;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 'text-1' },
+              { type: 'text-delta', id: 'text-1', delta: 'response' },
+              { type: 'text-end', id: 'text-1' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    const text2sql = new Text2Sql({
+      version: 'test',
+      adapter,
+      model,
+      filesystem: new InMemoryFs(),
+      transform: () => new TransformStream(),
+      context: (...fragments) => {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'test-chat-signal',
+          userId: 'test-user',
+        });
+        engine.set(...fragments);
+        return engine;
+      },
+    });
+
+    const controller = new AbortController();
+    const msg = userMessage('How many users?');
+    const stream = await text2sql.chat([msg], {
+      abortSignal: controller.signal,
+    });
+    await drain(stream);
+
+    assert.ok(receivedSignal, 'model should receive an AbortSignal');
+    controller.abort();
+    assert.ok(
+      receivedSignal.aborted,
+      'aborting controller should propagate to model signal',
+    );
+  });
+
   it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
     const { store, text2sql } = await setup();
     const fragment = user(

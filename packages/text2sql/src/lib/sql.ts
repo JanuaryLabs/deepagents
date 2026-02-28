@@ -121,7 +121,10 @@ export class Text2Sql {
     return producer.toPairs();
   }
 
-  public async chat(messages: ChatMessage[]) {
+  public async chat(
+    messages: ChatMessage[],
+    options?: { abortSignal?: AbortSignal },
+  ) {
     if (messages.length === 0) {
       throw new Error('messages must not be empty');
     }
@@ -151,7 +154,6 @@ export class Text2Sql {
     const uiMessages = messages.map(chatMessageToUIMessage);
 
     const { mounts: skillMounts } = context.getSkillMounts();
-
     const { tools } = await createResultTools({
       adapter: this.#config.adapter,
       skillMounts,
@@ -172,7 +174,7 @@ export class Text2Sql {
 
     const result = await chatAgent.stream(
       {},
-      { transform: this.#config.transform },
+      { abortSignal: options?.abortSignal, transform: this.#config.transform },
     );
 
     const uiStream = result.toUIMessageStream({

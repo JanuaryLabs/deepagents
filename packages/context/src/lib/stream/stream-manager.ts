@@ -36,6 +36,10 @@ export interface PersistStreamOptions extends Pick<
   'strategy' | 'flushSize'
 > {
   cancelPolling?: PersistCancelPollingOptions;
+  onCancelDetected?: (info: {
+    streamId: string;
+    latencyMs: number | null;
+  }) => void | Promise<void>;
 }
 
 export type StreamPollingTelemetryEvent =
@@ -172,6 +176,15 @@ export class StreamManager {
             streamId,
             latencyMs,
           });
+
+          if (options?.onCancelDetected) {
+            try {
+              await options.onCancelDetected({ streamId, latencyMs });
+            } catch {
+              /* best-effort — never block cancellation */
+            }
+          }
+
           ac.abort();
           break;
         }
