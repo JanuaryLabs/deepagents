@@ -51,6 +51,7 @@ export default function NewEvalPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fromRunId = searchParams.get('from');
+  const suiteId = searchParams.get('suiteId');
 
   const [name, setName] = useState('');
   const [models, setModels] = useState<string[]>([]);
@@ -71,6 +72,8 @@ export default function NewEvalPage() {
   const [threshold, setThreshold] = useState('0.5');
   const [batchSize, setBatchSize] = useState('');
   const [recordSelection, setRecordSelection] = useState('');
+  const [inputField, setInputField] = useState('');
+  const [expectedField, setExpectedField] = useState('');
 
   const { data: datasets } = useData('GET /datasets');
   const { data: prompts } = useData('GET /prompts');
@@ -79,6 +82,13 @@ export default function NewEvalPage() {
     isLoading: modelsLoading,
     isError: modelsError,
   } = useModels();
+
+  const { data: datasetPreview } = useData(
+    'GET /datasets/{name}/rows',
+    { name: selectedDataset, limit: 1 },
+    { enabled: !!selectedDataset },
+  );
+  const datasetColumns = datasetPreview?.columns ?? [];
 
   const { data: prefillData } = useData(
     'GET /runs/{id}',
@@ -114,6 +124,9 @@ export default function NewEvalPage() {
     if (typeof cfg.batchSize === 'number') setBatchSize(String(cfg.batchSize));
     if (typeof cfg.recordSelection === 'string')
       setRecordSelection(cfg.recordSelection);
+    if (typeof cfg.inputField === 'string') setInputField(cfg.inputField);
+    if (typeof cfg.expectedField === 'string')
+      setExpectedField(cfg.expectedField);
   }, [prefillData]);
 
   const sortedPrompts = useMemo(
@@ -177,6 +190,7 @@ export default function NewEvalPage() {
     }
 
     submitMutation.mutate({
+      suiteId: suiteId || undefined,
       name,
       models,
       taskMode,
@@ -191,6 +205,8 @@ export default function NewEvalPage() {
       timeout: Number(timeout) || 30000,
       trials: Number(trials) || 1,
       threshold: Number(threshold) || 0.5,
+      inputField: inputField || undefined,
+      expectedField: expectedField || undefined,
     });
   }
 
@@ -205,7 +221,9 @@ export default function NewEvalPage() {
 
   return (
     <div className="p-8">
-      <h1 className="mb-6 text-2xl font-bold">New Evaluation</h1>
+      <h1 className="mb-6 text-2xl font-bold">
+        {suiteId ? 'Add Run to Suite' : 'New Evaluation'}
+      </h1>
 
       <form onSubmit={handleSubmit} className="max-w-2xl space-y-6">
         <div>
@@ -400,6 +418,40 @@ export default function NewEvalPage() {
                 ))}
               </SelectContent>
             </Select>
+          )}
+          {selectedDataset && datasetColumns.length > 0 && (
+            <div className="mt-3 grid grid-cols-2 gap-4">
+              <div>
+                <Label>Input Column</Label>
+                <Select value={inputField} onValueChange={setInputField}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="input" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {datasetColumns.map((col) => (
+                      <SelectItem key={col} value={col}>
+                        {col}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Expected Column</Label>
+                <Select value={expectedField} onValueChange={setExpectedField}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="expected" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {datasetColumns.map((col) => (
+                      <SelectItem key={col} value={col}>
+                        {col}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           )}
         </div>
 

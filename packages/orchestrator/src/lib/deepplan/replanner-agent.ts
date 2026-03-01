@@ -1,7 +1,15 @@
 import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import z from 'zod';
 
-import { agent, generate, lmstudio, user } from '@deepagents/agent';
+import { lmstudio } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 import { type ExecutionContext } from './executors/generic-executor.ts';
 import type { PlanStep } from './planner-agent.ts';
@@ -39,16 +47,16 @@ export type ReplanDecision = z.infer<typeof ReplanDecisionSchema>;
  *
  * This creates an adaptive planning system that learns as it executes.
  */
-export const replannerAgent = agent({
-  name: 'replanner_agent',
-  model: wrapLanguageModel({
-    // model: groq('moonshotai/kimi-k2-instruct-0905'),
-    model: lmstudio('google/gemma-3-12b'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.1 },
-    }),
+const replannerModel = wrapLanguageModel({
+  // model: groq('moonshotai/kimi-k2-instruct-0905'),
+  model: lmstudio('google/gemma-3-12b'),
+  middleware: defaultSettingsMiddleware({
+    settings: { temperature: 0.1 },
   }),
-  prompt: `
+});
+
+function createReplannerPrompt(): string {
+  return `
     <SystemContext>
       You are an adaptive replanning agent.
       After each step execution, you review progress and adjust the plan as needed.
@@ -199,9 +207,8 @@ export const replannerAgent = agent({
       - remaining_steps: Updated list of steps to execute
       - new_insights: What you learned that affected the plan
     </OutputFormat>
-  `,
-  output: ReplanDecisionSchema,
-});
+  `;
+}
 
 function formatReplannerPrompt(
   context: ExecutionContext,
@@ -253,11 +260,30 @@ Consider:
 
 export async function replan(context: ExecutionContext) {
   const remainingSteps = context.current_plan.slice(1);
-  const { output } = await generate(
-    replannerAgent,
-    [user(formatReplannerPrompt(context, remainingSteps))],
-    {},
+  const plannerContext = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `replanner-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
+
+  plannerContext.set(
+    persona({
+      name: 'replanner_agent',
+      role: 'You are an adaptive replanning agent.',
+      objective:
+        'Review execution progress and adjust remaining steps so the plan reaches the original goal efficiently.',
+    }),
+    fragment('replanner_instructions', createReplannerPrompt()),
+    user(formatReplannerPrompt(context, remainingSteps)),
   );
+
+  const replannerOutput = structuredOutput({
+    model: replannerModel,
+    context: plannerContext,
+    schema: ReplanDecisionSchema,
+  });
+
+  const output = await replannerOutput.generate();
   const decision = output as {
     remaining_steps: typeof context.current_plan;
     should_continue: boolean;

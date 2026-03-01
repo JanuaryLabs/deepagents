@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { createInterface } from 'node:readline';
 
-export { fetchHfRows, hf } from './hf.ts';
+export { downloadHf, fetchHfRows, hf } from './hf.ts';
 export type { HfOptions } from './hf.ts';
 
 export {

@@ -216,3 +216,24 @@ export function invalidateData(endpoint: DataEndpoints): Promise<void> {
     },
   });
 }
+
+export function usePolling<E extends DataEndpoints>(
+  endpoint: E,
+  input: Endpoints[E]['input'],
+  options: {
+    interval: number;
+    enabled?: boolean;
+    shouldStop: (data: Endpoints[E]['output'] | undefined) => boolean;
+  },
+): UseQueryResult<Endpoints[E]['output'], Endpoints[E]['error']> {
+  const enabled = options.enabled ?? true;
+
+  return useData(endpoint, input, {
+    enabled,
+    retry: false,
+    refetchInterval: (query) => {
+      if (options.shouldStop(query.state.data)) return false;
+      return options.interval;
+    },
+  });
+}

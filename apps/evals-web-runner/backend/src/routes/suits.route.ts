@@ -91,6 +91,103 @@ export default function (router: Hono<AppBindings>) {
   );
 
   /**
+   * @openapi compareSuiteRuns
+   * @tags suites
+   * @description Compare multiple runs within a suite
+   */
+  router.get(
+    '/suites/:id/compare',
+    validate((payload) => ({
+      id: { select: payload.params.id, against: z.string() },
+      runIds: {
+        select: payload.query.runIds,
+        against: z.string().min(1),
+      },
+    })),
+    (c) => {
+      const { id, runIds: runIdsParam } = c.var.input;
+      const store = c.get('store');
+
+      const suite = store.getSuite(id);
+      if (!suite) {
+        throw new HTTPException(404, { message: 'Suite not found' });
+      }
+
+      const runIds = runIdsParam.split(',').filter(Boolean);
+      if (runIds.length < 2) {
+        throw new HTTPException(400, {
+          message: 'At least 2 run IDs required',
+        });
+      }
+
+      const runs = runIds.map((runId) => {
+        const run = store.getRun(runId);
+        if (!run) {
+          throw new HTTPException(404, {
+            message: `Run "${runId}" not found`,
+          });
+        }
+        if (run.suite_id !== id) {
+          throw new HTTPException(400, {
+            message: `Run "${runId}" does not belong to this suite`,
+          });
+        }
+        const summary = run.summary ?? store.getRunSummary(runId);
+        return { id: run.id, name: run.name, model: run.model, summary };
+      });
+
+      const allScorerNames = new Set<string>();
+      const runScoreMaps = new Map<
+        string,
+        Map<number, Record<string, number>>
+      >();
+
+      for (const run of runs) {
+        const cases = store.getCases(run.id);
+        const withScores = store.getFailingCases(run.id, Infinity);
+        const scoredMap = new Map(withScores.map((cs) => [cs.id, cs]));
+        const allCases = cases.map(
+          (cs) => scoredMap.get(cs.id) ?? { ...cs, scores: [] },
+        );
+
+        const scoreMap = new Map<number, Record<string, number>>();
+        for (const cs of allCases) {
+          const scores: Record<string, number> = {};
+          for (const s of cs.scores) {
+            scores[s.scorer_name] = s.score;
+            allScorerNames.add(s.scorer_name);
+          }
+          scoreMap.set(cs.idx, scores);
+        }
+        runScoreMaps.set(run.id, scoreMap);
+      }
+
+      const allIndices = new Set<number>();
+      for (const scoreMap of runScoreMaps.values()) {
+        for (const idx of scoreMap.keys()) allIndices.add(idx);
+      }
+      const sortedIndices = [...allIndices].sort((a, b) => a - b);
+
+      const scorerNames = [...allScorerNames];
+
+      const caseDiffs = sortedIndices.map((idx) => {
+        const scores: Record<string, Record<string, number>> = {};
+        for (const scorer of scorerNames) {
+          scores[scorer] = {};
+          for (const run of runs) {
+            const scoreMap = runScoreMaps.get(run.id)!;
+            const caseScores = scoreMap.get(idx);
+            scores[scorer]![run.id] = caseScores?.[scorer] ?? 0;
+          }
+        }
+        return { index: idx, scores };
+      });
+
+      return c.json({ runs, scorerNames, caseDiffs });
+    },
+  );
+
+  /**
    * @openapi renameSuite
    * @tags suites
    * @description Rename an existing suite

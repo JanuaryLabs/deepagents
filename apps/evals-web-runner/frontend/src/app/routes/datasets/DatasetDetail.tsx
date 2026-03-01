@@ -68,14 +68,28 @@ export default function DatasetDetailPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{decodedName}</h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {data.total} rows
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      <div className="mb-6">
+        <Breadcrumb className="mb-3">
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to="/datasets">Datasets</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{decodedName}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">{decodedName}</h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              {data.total} rows
+            </p>
+          </div>
           {allDatasets && allDatasets.length > 1 && (
             <Select
               value={decodedName}
@@ -96,19 +110,6 @@ export default function DatasetDetailPage() {
               </SelectContent>
             </Select>
           )}
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link to="/datasets">Datasets</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{decodedName}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
         </div>
       </div>
 

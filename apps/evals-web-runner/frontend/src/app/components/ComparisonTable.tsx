@@ -1,5 +1,7 @@
+import type { ComparisonResult } from '@evals/client';
 import { Fragment } from 'react';
 
+import { formatDelta } from '../lib/format.ts';
 import {
   Card,
   CardContent,
@@ -12,39 +14,14 @@ import {
   TableHeader,
   TableRow,
 } from '../shadcn/index.ts';
-import { formatDelta } from '../lib/format.ts';
 
-interface ScorerSummary {
-  meanDelta: number;
-  improvedCount: number;
-  regressedCount: number;
-  unchangedCount: number;
-}
-
-interface CostDelta {
-  latencyDeltaMs: number;
-  tokenInDelta: number;
-  tokenOutDelta: number;
-}
-
-interface CaseDiff {
-  index: number;
-  scorerDeltas: Record<
-    string,
-    { baseline: number; candidate: number; delta: number; change: string }
-  >;
-}
-
-interface ComparisonResult {
-  caseDiffs: CaseDiff[];
-  scorerSummaries: Record<string, ScorerSummary>;
-  costDelta: CostDelta;
-  totalCasesCompared: number;
-  regression: {
-    regressed: boolean;
-    details: Record<string, { meanDelta: number; exceeds: boolean }>;
-  };
-}
+type RegressionDetail = { exceeds: boolean; meanDelta: number };
+type ScorerDelta = {
+  baseline: number;
+  candidate: number;
+  change: 'improved' | 'regressed' | 'unchanged';
+  delta: number;
+};
 
 function deltaClass(change: string): string {
   if (change === 'improved') return 'text-green-600';
@@ -54,6 +31,10 @@ function deltaClass(change: string): string {
 
 export function ComparisonTable({ result }: { result: ComparisonResult }) {
   const scorerNames = Object.keys(result.scorerSummaries);
+  const regressionDetails = result.regression.details as unknown as Record<
+    string,
+    RegressionDetail
+  >;
 
   return (
     <div className="space-y-8">
@@ -63,7 +44,7 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
             Regression detected
           </p>
           <ul className="text-destructive mt-1 text-sm">
-            {Object.entries(result.regression.details)
+            {Object.entries(regressionDetails)
               .filter(([, d]) => d.exceeds)
               .map(([name, d]) => (
                 <li key={name}>
@@ -132,7 +113,7 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-lg font-mono font-semibold">
+              <p className="font-mono text-lg font-semibold">
                 {formatDelta(result.costDelta.latencyDeltaMs)}ms
               </p>
             </CardContent>
@@ -144,7 +125,7 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-lg font-mono font-semibold">
+              <p className="font-mono text-lg font-semibold">
                 {formatDelta(result.costDelta.tokenInDelta)}
               </p>
             </CardContent>
@@ -156,7 +137,7 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-lg font-mono font-semibold">
+              <p className="font-mono text-lg font-semibold">
                 {formatDelta(result.costDelta.tokenOutDelta)}
               </p>
             </CardContent>
@@ -197,7 +178,8 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
                     {diff.index}
                   </TableCell>
                   {scorerNames.map((name) => {
-                    const d = diff.scorerDeltas[name];
+                    const deltas = diff.scorerDeltas as unknown as Record<string, ScorerDelta>;
+                    const d = deltas[name];
                     if (!d) {
                       return (
                         <Fragment key={name}>

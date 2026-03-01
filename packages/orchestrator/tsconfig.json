@@ -10,6 +10,9 @@
       "path": "../retrieval"
     },
     {
+      "path": "../context"
+    },
+    {
       "path": "../agent"
     },
     {

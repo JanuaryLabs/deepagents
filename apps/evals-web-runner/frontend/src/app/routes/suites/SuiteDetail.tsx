@@ -1,10 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 
-import { apiFetch } from '../../api.ts';
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
-import { useData } from '../../hooks/use-client.ts';
+import { SuiteComparison } from '../../components/SuiteComparison.tsx';
+import { useAction, useData } from '../../hooks/use-client.ts';
 import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 import { formatDuration, formatTokens } from '../../lib/format.ts';
 import {
@@ -19,6 +19,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   Input,
   Progress,
   Skeleton,
@@ -58,18 +59,6 @@ interface RunRow {
   summary: RunSummary | null;
 }
 
-interface SuiteDetail {
-  suite: SuiteRow;
-  runs: RunRow[];
-  stats: {
-    totalCases: number;
-    totalPass: number;
-    totalFail: number;
-    totalLatency: number;
-    totalTokens: number;
-  } | null;
-}
-
 export default function SuiteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading } = useData(
@@ -88,6 +77,8 @@ export default function SuiteDetailPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
+  const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set());
+  const [showComparison, setShowComparison] = useState(false);
 
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
@@ -110,15 +101,9 @@ export default function SuiteDetailPage() {
     },
   });
 
-  const renameMutation = useMutation({
-    mutationFn: (name: string) =>
-      apiFetch(`/suites/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name }),
-      }),
+  const renameMutation = useAction('PATCH /suites/{id}', {
+    invalidate: ['GET /suites', 'GET /suites/{id}'],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['suite', id] });
-      queryClient.invalidateQueries({ queryKey: ['suites'] });
       setIsEditing(false);
     },
   });
@@ -153,7 +138,7 @@ export default function SuiteDetailPage() {
     e.preventDefault();
     const trimmed = editName.trim();
     if (trimmed && trimmed !== suite.name) {
-      renameMutation.mutate(trimmed);
+      renameMutation.mutate({ name: trimmed, id: suite.id });
     } else {
       setIsEditing(false);
     }
@@ -161,48 +146,8 @@ export default function SuiteDetailPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          {isEditing ? (
-            <form onSubmit={handleRename} className="flex items-center gap-2">
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="text-2xl font-bold"
-                autoFocus
-              />
-              <Button type="submit" size="sm" variant="outline">
-                Save
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsEditing(false)}
-              >
-                Cancel
-              </Button>
-            </form>
-          ) : (
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold">{suite.name}</h1>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={startEditing}
-                aria-label="Rename suite"
-              >
-                &#9998;
-              </Button>
-            </div>
-          )}
-          <p className="text-muted-foreground mt-1 text-sm">
-            Suite &middot; {runs.length} run{runs.length !== 1 ? 's' : ''}{' '}
-            &middot; Created {new Date(suite.created_at).toLocaleDateString()}
-          </p>
-        </div>
-
-        <Breadcrumb>
+      <div className="mb-6">
+        <Breadcrumb className="mb-3">
           <BreadcrumbList>
             <BreadcrumbItem>
               <BreadcrumbLink asChild>
@@ -215,6 +160,55 @@ export default function SuiteDetailPage() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
+
+        <div className="flex items-start justify-between">
+          <div>
+            {isEditing ? (
+              <form onSubmit={handleRename} className="flex items-center gap-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && setIsEditing(false)}
+                  className="text-2xl font-bold"
+                  autoFocus
+                />
+                <Button type="submit" size="sm" variant="outline">
+                  Save
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsEditing(false)}
+                >
+                  Cancel
+                </Button>
+              </form>
+            ) : (
+              <h1
+                className="cursor-pointer text-2xl font-bold decoration-dashed underline-offset-4 hover:underline"
+                onClick={startEditing}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && startEditing()}
+              >
+                {suite.name}
+              </h1>
+            )}
+            <p className="text-muted-foreground mt-1 text-sm">
+              Suite &middot; {runs.length} run{runs.length !== 1 ? 's' : ''}{' '}
+              &middot; Created{' '}
+              {new Date(suite.created_at).toLocaleDateString()}
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link
+              to={`/evals/new?suiteId=${suite.id}${runs[0] ? `&from=${runs[0].id}` : ''}`}
+            >
+              Add Run
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {stats && (
@@ -280,14 +274,35 @@ export default function SuiteDetailPage() {
         </div>
       )}
 
-      {completedRuns.length > 1 && (
-        <div className="mb-6">
-          <Link
-            to={`/compare?baseline=${completedRuns[1]?.id}&candidate=${completedRuns[0]?.id}`}
-            className="text-primary text-sm font-medium hover:underline"
+      {selectedRunIds.size >= 2 && (
+        <div className="mb-4 flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={() => setShowComparison((prev) => !prev)}
           >
-            Compare latest two completed runs
-          </Link>
+            {showComparison ? 'Hide Comparison' : `Compare ${selectedRunIds.size} Runs`}
+          </Button>
+          {showComparison && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setSelectedRunIds(new Set());
+                setShowComparison(false);
+              }}
+            >
+              Clear Selection
+            </Button>
+          )}
+        </div>
+      )}
+
+      {showComparison && selectedRunIds.size >= 2 && (
+        <div className="mb-8">
+          <SuiteComparison
+            suiteId={suite.id}
+            runIds={[...selectedRunIds]}
+          />
         </div>
       )}
 
@@ -295,6 +310,9 @@ export default function SuiteDetailPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              {completedRuns.length > 1 && (
+                <TableHead className="w-10" />
+              )}
               <TableHead>Run</TableHead>
               <TableHead>Model</TableHead>
               <TableHead>Started</TableHead>
@@ -307,49 +325,76 @@ export default function SuiteDetailPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {runs.map((run) => (
-              <TableRow key={run.id}>
-                <TableCell>
-                  <Link
-                    to={`/runs/${run.id}`}
-                    className="text-primary font-medium hover:underline"
-                  >
-                    {run.name}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-xs">{run.model}</TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {new Date(run.started_at).toLocaleString()}
-                </TableCell>
-                <TableCell className="min-w-40">
-                  <div className="space-y-2">
-                    <RunStatusBadge status={run.status} />
-                    {run.status === 'running' && (
-                      <Progress value={progressMap[run.id] ?? 0} />
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>{run.summary?.totalCases ?? '—'}</TableCell>
-                <TableCell className="text-green-600">
-                  {run.summary?.passCount ?? '—'}
-                </TableCell>
-                <TableCell className="text-destructive">
-                  {run.summary?.failCount ?? '—'}
-                </TableCell>
-                <TableCell className="text-xs">
-                  {run.summary
-                    ? formatDuration(run.summary.totalLatencyMs)
-                    : '—'}
-                </TableCell>
-                <TableCell className="text-xs">
-                  {run.summary
-                    ? formatTokens(
-                        run.summary.totalTokensIn + run.summary.totalTokensOut,
-                      )
-                    : '—'}
-                </TableCell>
-              </TableRow>
-            ))}
+            {runs.map((run) => {
+              const isCompleted = run.status === 'completed';
+              const isSelected = selectedRunIds.has(run.id);
+
+              function toggleRun() {
+                setSelectedRunIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(run.id)) {
+                    next.delete(run.id);
+                  } else {
+                    next.add(run.id);
+                  }
+                  return next;
+                });
+              }
+
+              return (
+                <TableRow key={run.id}>
+                  {completedRuns.length > 1 && (
+                    <TableCell>
+                      {isCompleted && (
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={toggleRun}
+                        />
+                      )}
+                    </TableCell>
+                  )}
+                  <TableCell>
+                    <Link
+                      to={`/runs/${run.id}`}
+                      className="text-primary font-medium hover:underline"
+                    >
+                      {run.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-xs">{run.model}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {new Date(run.started_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="min-w-40">
+                    <div className="space-y-2">
+                      <RunStatusBadge status={run.status} />
+                      {run.status === 'running' && (
+                        <Progress value={progressMap[run.id] ?? 0} />
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>{run.summary?.totalCases ?? '\u2014'}</TableCell>
+                  <TableCell className="text-green-600">
+                    {run.summary?.passCount ?? '\u2014'}
+                  </TableCell>
+                  <TableCell className="text-destructive">
+                    {run.summary?.failCount ?? '\u2014'}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {run.summary
+                      ? formatDuration(run.summary.totalLatencyMs)
+                      : '\u2014'}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {run.summary
+                      ? formatTokens(
+                          run.summary.totalTokensIn + run.summary.totalTokensOut,
+                        )
+                      : '\u2014'}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

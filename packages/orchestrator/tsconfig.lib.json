@@ -18,6 +18,9 @@
       "path": "../retrieval/tsconfig.lib.json"
     },
     {
+      "path": "../context/tsconfig.lib.json"
+    },
+    {
       "path": "../agent/tsconfig.lib.json"
     }
   ]

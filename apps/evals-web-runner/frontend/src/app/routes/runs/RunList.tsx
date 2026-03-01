@@ -1,9 +1,9 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
-import { apiFetch } from '../../api.ts';
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
+import { useData } from '../../hooks/use-client.ts';
 import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 import { formatDuration, formatTokens } from '../../lib/format.ts';
 import {
@@ -18,55 +18,23 @@ import {
   TableRow,
 } from '../../shadcn/index.ts';
 
-interface RunSummary {
-  totalCases: number;
-  passCount: number;
-  failCount: number;
-  meanScores: Record<string, number>;
-  totalLatencyMs: number;
-  totalTokensIn: number;
-  totalTokensOut: number;
-}
-
-interface RunRow {
-  id: string;
-  suite_id: string;
-  name: string;
-  model: string;
-  started_at: number;
-  status: string;
-  summary: RunSummary | null;
-}
-
-interface RunGroup {
-  suiteId: string;
-  suiteName: string;
-  runs: RunRow[];
-}
-
-interface RunsResponse {
-  groups: RunGroup[];
-  totalRuns: number;
-}
-
-function useRuns() {
-  return useQuery({
-    queryKey: ['runs'],
-    queryFn: () => apiFetch<RunsResponse>('/runs'),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (
-        data?.groups.some((g) => g.runs.some((r) => r.status === 'running'))
-      ) {
-        return 5000;
-      }
-      return false;
-    },
-  });
-}
-
 export default function RunListPage() {
-  const { data, isLoading } = useRuns();
+  // TODO: use "usePolling"
+  const { data, isLoading } = useData(
+    'GET /runs',
+    {},
+    {
+      refetchInterval: (query) => {
+        const data = query.state.data;
+        if (
+          data?.groups.some((g) => g.runs.some((r) => r.status === 'running'))
+        ) {
+          return 5000;
+        }
+        return false;
+      },
+    },
+  );
   const queryClient = useQueryClient();
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 

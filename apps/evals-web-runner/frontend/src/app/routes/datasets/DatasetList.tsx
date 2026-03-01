@@ -4,7 +4,6 @@ import { Link } from 'react-router';
 import { useAction, useData } from '../../hooks/use-client.ts';
 import { formatSize } from '../../lib/format.ts';
 import {
-  Badge,
   Button,
   Input,
   Skeleton,
@@ -14,6 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TheButton,
 } from '../../shadcn/index.ts';
 
 export default function DatasetListPage() {
@@ -22,6 +22,7 @@ export default function DatasetListPage() {
   const [hfDataset, setHfDataset] = useState('');
   const [hfConfig, setHfConfig] = useState('default');
   const [hfSplit, setHfSplit] = useState('train');
+  const [hfMaxRows, setHfMaxRows] = useState('');
 
   const uploadMutation = useAction('POST /datasets', {
     invalidate: ['GET /datasets'],
@@ -48,16 +49,14 @@ export default function DatasetListPage() {
   function handleHfAdd(e: React.FormEvent) {
     e.preventDefault();
     if (hfDataset.trim()) {
+      const maxRows = hfMaxRows ? Number(hfMaxRows) : undefined;
       hfMutation.mutate({
         dataset: hfDataset,
         config: hfConfig,
         split: hfSplit,
+        ...(maxRows ? { maxRows } : {}),
       });
     }
-  }
-
-  function isHfDataset(name: string): boolean {
-    return name.endsWith('.hf.json');
   }
 
   if (isLoading) {
@@ -92,7 +91,9 @@ export default function DatasetListPage() {
 
         <form onSubmit={handleHfAdd} className="flex items-end gap-4">
           <div>
-            <label className="text-sm font-medium">Add from HuggingFace</label>
+            <label className="text-sm font-medium">
+              Import from HuggingFace
+            </label>
             <Input
               value={hfDataset}
               onChange={(e) => setHfDataset(e.target.value)}
@@ -117,9 +118,20 @@ export default function DatasetListPage() {
               className="mt-1 w-24"
             />
           </div>
-          <Button type="submit" size="sm" disabled={hfMutation.isPending}>
-            {hfMutation.isPending ? 'Adding...' : 'Add'}
-          </Button>
+          <div>
+            <label className="text-sm font-medium">Max Rows</label>
+            <Input
+              type="number"
+              value={hfMaxRows}
+              onChange={(e) => setHfMaxRows(e.target.value)}
+              placeholder="10000"
+              min={1}
+              className="mt-1 w-28"
+            />
+          </div>
+          <TheButton type="submit" size="sm" loading={hfMutation.isPending}>
+            Import
+          </TheButton>
         </form>
       </div>
 
@@ -152,14 +164,10 @@ export default function DatasetListPage() {
                     </Link>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {isHfDataset(ds.name) ? (
-                      <Badge variant="outline">HuggingFace</Badge>
-                    ) : (
-                      ds.extension
-                    )}
+                    {ds.extension}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {isHfDataset(ds.name) ? '\u2014' : formatSize(ds.sizeBytes)}
+                    {formatSize(ds.sizeBytes)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button

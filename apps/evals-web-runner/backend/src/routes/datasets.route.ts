@@ -2,18 +2,15 @@ import type { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 
-import { dataset, fetchHfRows } from '@deepagents/evals/dataset';
+import { dataset, downloadHf } from '@deepagents/evals/dataset';
 
 import * as inputs from '../core/inputs.ts';
 import { validate } from '../middlewares/validator.ts';
 import {
   datasetPath,
   deleteDataset,
-  isHfDataset,
   listDatasets,
-  readHfConfig,
   saveDataset,
-  saveHfDataset,
 } from '../services/dataset-store.ts';
 import type { AppBindings } from '../store.ts';
 
@@ -59,7 +56,7 @@ export default function (router: Hono<AppBindings>) {
   /**
    * @openapi importHfDataset
    * @tags datasets
-   * @description Import a dataset from HuggingFace
+   * @description Import a dataset from HuggingFace and cache it locally as JSONL
    */
   router.post(
     '/datasets/import-hf',
@@ -76,16 +73,39 @@ export default function (router: Hono<AppBindings>) {
         select: payload.body.split,
         against: z.string().trim().default('train'),
       },
+      maxRows: {
+        select: payload.body.maxRows,
+        against: z.coerce.number().int().positive().optional(),
+      },
     })),
-    (c) => {
-      const { dataset: ds, config, split } = c.var.input;
+    async (c) => {
+      const { dataset: ds, config, split, maxRows } = c.var.input;
 
       try {
-        const filename = saveHfDataset({ dataset: ds, config, split });
+        const content = await downloadHf({
+          dataset: ds,
+          config,
+          split,
+          rows: maxRows,
+        });
+
+        if (!content) {
+          throw new HTTPException(400, {
+            message: `No rows found for dataset "${ds}" (config="${config}", split="${split}")`,
+          });
+        }
+
+        const sanitized = `hf_${ds}--${config}--${split}`.replace(
+          /[^a-zA-Z0-9._-]/g,
+          '_',
+        );
+        const filename = `${sanitized}.jsonl`;
+        saveDataset(filename, content);
         return c.json({ success: true, filename }, 201);
       } catch (err) {
         throw new HTTPException(400, {
-          message: err instanceof Error ? err.message : 'Failed to save',
+          message:
+            err instanceof Error ? err.message : 'Failed to import dataset',
         });
       }
     },
@@ -107,23 +127,6 @@ export default function (router: Hono<AppBindings>) {
       const { name, offset, limit } = c.var.input;
 
       try {
-        if (isHfDataset(name)) {
-          const ref = readHfConfig(name);
-          if (!ref) {
-            throw new HTTPException(404, { message: 'Dataset not found' });
-          }
-          const result = await fetchHfRows(ref, offset, limit);
-          const columns =
-            result.rows.length > 0 ? Object.keys(result.rows[0]!) : [];
-          return c.json({
-            rows: result.rows,
-            columns,
-            total: result.total,
-            offset,
-            limit,
-          });
-        }
-
         const ds = dataset<Record<string, unknown>>(datasetPath(name));
         const allRows = await ds.toArray();
         const page = allRows.slice(offset, offset + limit);

@@ -1,11 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 
-import { apiFetch } from '../../api.ts';
+import '../../api.ts';
 import { CaseTable } from '../../components/CaseTable.tsx';
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
 import { StatsGrid } from '../../components/StatsGrid.tsx';
+import { useAction, useData } from '../../hooks/use-client.ts';
 import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
 import {
   Breadcrumb,
@@ -71,30 +72,21 @@ interface SuiteRow {
   name: string;
 }
 
-interface RunDetailResponse {
-  run: RunRow;
-  summary: RunSummary;
-  cases: CaseWithScores[];
-  scorerNames: string[];
-  suite: SuiteRow;
-  config: Record<string, unknown>;
-}
-
-function useRunDetail(id: string) {
-  return useQuery({
-    queryKey: ['run', id],
-    queryFn: () => apiFetch<RunDetailResponse>(`/runs/${id}`),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data?.run.status === 'running') return 5000;
-      return false;
-    },
-  });
-}
-
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, isLoading } = useRunDetail(id!);
+  // TODO: use "usePolling"
+  const { data, isLoading } = useData(
+    'GET /runs/{id}',
+    { id: id! },
+    {
+      enabled: !!id,
+      refetchInterval: (query) => {
+        const data = query.state.data;
+        if (data?.run.status === 'running') return 5000;
+        return false;
+      },
+    },
+  );
   const queryClient = useQueryClient();
 
   const [isEditing, setIsEditing] = useState(false);
@@ -119,15 +111,9 @@ export default function RunDetailPage() {
     },
   });
 
-  const renameMutation = useMutation({
-    mutationFn: (name: string) =>
-      apiFetch(`/runs/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name }),
-      }),
+  const renameMutation = useAction('PATCH /runs/{id}', {
+    invalidate: ['GET /runs', 'GET /runs/{id}'],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['run', id] });
-      queryClient.invalidateQueries({ queryKey: ['runs'] });
       setIsEditing(false);
     },
   });
@@ -150,7 +136,8 @@ export default function RunDetailPage() {
     );
   }
 
-  const { run, summary, cases, scorerNames, suite, config } = data;
+  const { run, summary, scorerNames, suite, config } = data;
+  const cases = data.cases as CaseWithScores[];
   const isRunning = run.status === 'running';
 
   const promptLabel =
@@ -174,7 +161,7 @@ export default function RunDetailPage() {
     e.preventDefault();
     const trimmed = editName.trim();
     if (trimmed && trimmed !== run.name) {
-      renameMutation.mutate(trimmed);
+      renameMutation.mutate({ name: trimmed, id: run.id });
     } else {
       setIsEditing(false);
     }
@@ -182,70 +169,72 @@ export default function RunDetailPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          {isEditing ? (
-            <form onSubmit={handleRename} className="flex items-center gap-2">
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="text-2xl font-bold"
-                autoFocus
-              />
-              <Button type="submit" size="sm" variant="outline">
-                Save
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsEditing(false)}
-              >
-                Cancel
-              </Button>
-            </form>
-          ) : (
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{run.name}</h1>
-              <RunStatusBadge status={run.status} />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={startEditing}
-                aria-label="Rename run"
-              >
-                &#9998;
-              </Button>
-            </div>
-          )}
-          <p className="text-muted-foreground mt-1 text-sm">
-            {run.model} &middot; {new Date(run.started_at).toLocaleString()}
-          </p>
-        </div>
+      <div className="mb-6">
+        <Breadcrumb className="mb-3">
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to="/suites">Suites</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to={`/suites/${suite.id}`}>{suite.name}</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{run.name}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            {isEditing ? (
+              <form onSubmit={handleRename} className="flex items-center gap-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && setIsEditing(false)}
+                  className="text-2xl font-bold"
+                  autoFocus
+                />
+                <Button type="submit" size="sm" variant="outline">
+                  Save
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsEditing(false)}
+                >
+                  Cancel
+                </Button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-3">
+                <h1
+                  className="cursor-pointer text-2xl font-bold decoration-dashed underline-offset-4 hover:underline"
+                  onClick={startEditing}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && startEditing()}
+                >
+                  {run.name}
+                </h1>
+                <RunStatusBadge status={run.status} />
+              </div>
+            )}
+            <p className="text-muted-foreground mt-1 text-sm">
+              {run.model} &middot; {new Date(run.started_at).toLocaleString()}
+            </p>
+          </div>
+
           <Button asChild variant="outline" size="sm">
             <Link to={`/evals/new?from=${run.id}`}>Re-run</Link>
           </Button>
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link to="/suites">Suites</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link to={`/suites/${suite.id}`}>{suite.name}</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{run.name}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
         </div>
       </div>
 
@@ -282,9 +271,7 @@ export default function RunDetailPage() {
             <TableRow>
               <TableCell className="font-medium">Dataset</TableCell>
               <TableCell>
-                {typeof config.dataset === 'string'
-                  ? config.dataset
-                  : '\u2014'}
+                {typeof config.dataset === 'string' ? config.dataset : '\u2014'}
               </TableCell>
             </TableRow>
             <TableRow>

@@ -1,9 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { apiFetch } from '../../api.ts';
 import { ComparisonTable } from '../../components/ComparisonTable.tsx';
+import { useData } from '../../hooks/use-client.ts';
 import {
   Button,
   Select,
@@ -54,24 +53,6 @@ interface ComparisonResponse {
   };
 }
 
-function useCompletedRuns() {
-  return useQuery({
-    queryKey: ['compare', 'runs'],
-    queryFn: () => apiFetch<RunRow[]>('/compare/runs'),
-  });
-}
-
-function useComparison(baseline: string, candidate: string) {
-  return useQuery({
-    queryKey: ['compare', baseline, candidate],
-    queryFn: () =>
-      apiFetch<ComparisonResponse>(
-        `/compare?baseline=${baseline}&candidate=${candidate}`,
-      ),
-    enabled: !!baseline && !!candidate,
-  });
-}
-
 export default function ComparePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const baselineParam = searchParams.get('baseline') ?? '';
@@ -80,12 +61,20 @@ export default function ComparePage() {
   const [selectedBaseline, setSelectedBaseline] = useState(baselineParam);
   const [selectedCandidate, setSelectedCandidate] = useState(candidateParam);
 
-  const { data: completedRuns, isLoading: runsLoading } = useCompletedRuns();
+  const { data: completedRuns, isLoading: runsLoading } =
+    useData('GET /compare/runs');
   const {
     data: comparison,
     isLoading: compareLoading,
     error: compareError,
-  } = useComparison(baselineParam, candidateParam);
+  } = useData(
+    'GET /compare',
+    {
+      baseline: baselineParam,
+      candidate: candidateParam,
+    },
+    { enabled: !!baselineParam && !!candidateParam },
+  );
 
   function handleCompare() {
     if (selectedBaseline && selectedCandidate) {
@@ -114,10 +103,7 @@ export default function ComparePage() {
       <div className="mb-8 max-w-lg space-y-4">
         <div>
           <label className="text-sm font-medium">Baseline Run</label>
-          <Select
-            value={selectedBaseline}
-            onValueChange={setSelectedBaseline}
-          >
+          <Select value={selectedBaseline} onValueChange={setSelectedBaseline}>
             <SelectTrigger className="mt-1">
               <SelectValue placeholder="Select a run..." />
             </SelectTrigger>
@@ -181,8 +167,8 @@ export default function ComparePage() {
             <p className="text-muted-foreground text-sm">
               <span className="font-medium">{comparison.baseline.name}</span> (
               {comparison.baseline.model}){' vs '}
-              <span className="font-medium">{comparison.candidate.name}</span>{' '}
-              ({comparison.candidate.model})
+              <span className="font-medium">{comparison.candidate.name}</span> (
+              {comparison.candidate.model})
             </p>
           </div>
           <ComparisonTable result={comparison.result} />

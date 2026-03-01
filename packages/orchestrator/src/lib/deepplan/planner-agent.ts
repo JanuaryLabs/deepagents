@@ -1,7 +1,15 @@
 import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 import z from 'zod';
 
-import { agent, generate, lmstudio, user } from '@deepagents/agent';
+import { lmstudio } from '@deepagents/agent';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fragment,
+  persona,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 import { createExecutionContext } from './executors/generic-executor.ts';
 
@@ -79,19 +87,18 @@ export interface PlanEnvironment {
  *
  * Enhanced with adaptive replanning for dynamic task execution.
  */
-export const plannerAgent = agent<
-  z.output<typeof PlannerOutputSchema>,
-  { environment?: PlanEnvironment }
->({
-  name: 'planner_agent',
-  model: wrapLanguageModel({
-    model: lmstudio('google/gemma-3-12b'),
-    // model: groq('moonshotai/kimi-k2-instruct-0905'),
-    middleware: defaultSettingsMiddleware({
-      settings: { temperature: 0.3 }, // Slightly creative for better planning
-    }),
+const plannerModel = wrapLanguageModel({
+  model: lmstudio('google/gemma-3-12b'),
+  // model: groq('moonshotai/kimi-k2-instruct-0905'),
+  middleware: defaultSettingsMiddleware({
+    settings: { temperature: 0.3 }, // Slightly creative for better planning
   }),
-  prompt: (context) => `
+});
+
+function createPlannerPrompt(context?: {
+  environment?: PlanEnvironment;
+}): string {
+  return `
     <SystemContext>
       You are an expert planning agent that creates adaptive, well-structured plans.
       Plans are executed step-by-step and adjusted as needed based on findings.
@@ -257,9 +264,8 @@ export const plannerAgent = agent<
       4. Success criteria
       5. Ordered list of steps with expected outcomes.
     </OutputFormat>
-  `,
-  output: PlannerOutputSchema,
-});
+  `;
+}
 
 /**
  * Format environment context for the planner prompt
@@ -290,12 +296,35 @@ export async function plan(
   userRequest: string,
   state: { environment?: PlanEnvironment } = {},
 ) {
-  const { output } = await generate(plannerAgent, [user(userRequest)], state);
+  const context = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `planner-${crypto.randomUUID()}`,
+    userId: 'system',
+  });
+
+  context.set(
+    persona({
+      name: 'planner_agent',
+      role: 'You are an expert planning agent that creates adaptive, well-structured plans.',
+      objective:
+        'Deeply understand user requests and return executable plans with structured variables, constraints, success criteria, and steps.',
+    }),
+    fragment('planner_instructions', createPlannerPrompt(state)),
+    user(userRequest),
+  );
+
+  const plannerOutput = structuredOutput({
+    model: plannerModel,
+    context,
+    schema: PlannerOutputSchema,
+  });
+
+  const output = await plannerOutput.generate(state);
   return createExecutionContext(
     userRequest,
     output as {
       understanding: string;
-      variables: Record<string, any>;
+      variables: Record<string, unknown>;
       constraints: string[];
       success_criteria: string;
       steps: { description: string; expected_outcome: string }[];

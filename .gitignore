@@ -91,3 +91,4 @@ artifacts/
 agent-sandbox-test
 .evals
 .evals-sdk-it
+.playwright-mcp/

@@ -83,6 +83,14 @@ export async function fetchHfRows(
   };
 }
 
+export async function downloadHf(options: HfOptions): Promise<string> {
+  const lines: string[] = [];
+  for await (const row of hf(options)) {
+    lines.push(JSON.stringify(row));
+  }
+  return lines.join('\n');
+}
+
 async function fetchPage(url: string): Promise<HfApiResponse> {
   const response = await fetch(url);
   if (!response.ok) {

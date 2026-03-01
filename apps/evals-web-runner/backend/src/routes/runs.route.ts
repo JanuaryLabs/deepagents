@@ -5,9 +5,7 @@ import { z } from 'zod';
 import { agent, generate } from '@deepagents/agent';
 import {
   dataset,
-  fetchHfRows,
   filterRecordsByIndex,
-  hf,
   parseRecordSelection,
 } from '@deepagents/evals/dataset';
 import type { TaskFn } from '@deepagents/evals/engine';
@@ -24,11 +22,7 @@ import type { CaseWithScores } from '@deepagents/evals/store';
 
 import * as inputs from '../core/inputs.ts';
 import { validate } from '../middlewares/validator.ts';
-import {
-  datasetPath,
-  isHfDataset,
-  readHfConfig,
-} from '../services/dataset-store.ts';
+import { datasetPath } from '../services/dataset-store.ts';
 import evalManager from '../services/eval-manager.ts';
 import { resolveModel } from '../services/model-resolver.ts';
 import type { AppBindings } from '../store.ts';
@@ -232,6 +226,10 @@ export default function (router: Hono<AppBindings>) {
   router.post(
     '/runs',
     validate((payload) => ({
+      suiteId: {
+        select: payload.body.suiteId,
+        against: z.string().optional(),
+      },
       name: { select: payload.body.name, against: inputs.nameSchema },
       models: { select: payload.body.models, against: inputs.modelListSchema },
       taskMode: {
@@ -282,9 +280,18 @@ export default function (router: Hono<AppBindings>) {
         select: payload.body.threshold,
         against: z.coerce.number().min(0).max(1).default(0.5),
       },
+      inputField: {
+        select: payload.body.inputField,
+        against: z.string().trim().optional(),
+      },
+      expectedField: {
+        select: payload.body.expectedField,
+        against: z.string().trim().optional(),
+      },
     })),
     (c) => {
       const {
+        suiteId: existingSuiteId,
         name,
         models,
         taskMode,
@@ -299,7 +306,12 @@ export default function (router: Hono<AppBindings>) {
         timeout,
         trials,
         threshold,
+        inputField: inputFieldRaw,
+        expectedField: expectedFieldRaw,
       } = c.var.input;
+
+      const inputField = inputFieldRaw || 'input';
+      const expectedField = expectedFieldRaw || 'expected';
       const store = c.get('store');
 
       let promptMeta: { id: string; name: string; version: number } | undefined;
@@ -340,20 +352,7 @@ export default function (router: Hono<AppBindings>) {
         });
       }
 
-      let hfRef: ReturnType<typeof readHfConfig> | undefined;
-      if (isHfDataset(datasetName)) {
-        hfRef = readHfConfig(datasetName);
-        if (!hfRef) {
-          throw new HTTPException(400, {
-            message: 'Invalid HuggingFace dataset reference',
-          });
-        }
-      }
-
       const createDataset = (): AsyncIterable<Record<string, unknown>> => {
-        if (hfRef) {
-          return dataset<Record<string, unknown>>(hf(hfRef));
-        }
         return dataset<Record<string, unknown>>(datasetPath(datasetName));
       };
 
@@ -371,16 +370,37 @@ export default function (router: Hono<AppBindings>) {
         }
       }
 
+      const remapFields = async function* (
+        source: AsyncIterable<Record<string, unknown>>,
+      ): AsyncIterable<Record<string, unknown>> {
+        for await (const row of source) {
+          yield {
+            ...row,
+            input: row[inputField],
+            expected: row[expectedField],
+          };
+        }
+      };
+
       const createFilteredDataset = (): AsyncIterable<
         Record<string, unknown>
       > => {
         const ds = createDataset();
-        return recordSelection
+        const filtered = recordSelection
           ? filterRecordsByIndex(ds, recordSelection.indexes)
           : ds;
+        return remapFields(filtered);
       };
 
-      const suite = store.createSuite(name);
+      let suite;
+      if (existingSuiteId) {
+        suite = store.getSuite(existingSuiteId);
+        if (!suite) {
+          throw new HTTPException(404, { message: 'Suite not found' });
+        }
+      } else {
+        suite = store.createSuite(name);
+      }
 
       for (const model of models) {
         let task: TaskFn<Record<string, unknown>>;
@@ -425,6 +445,8 @@ export default function (router: Hono<AppBindings>) {
             recordSelection: recordSelection?.normalized ?? null,
             scorers: scorerNames,
             scorerModel: scorerModelString,
+            inputField,
+            expectedField,
             maxConcurrency,
             batchSize,
             timeout,

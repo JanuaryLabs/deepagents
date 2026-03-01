@@ -1,6 +1,6 @@
 import {
+  existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
   statSync,
   unlinkSync,
@@ -18,16 +18,6 @@ export interface DatasetEntry {
   sizeBytes: number;
 }
 
-export interface HfDatasetRef {
-  dataset: string;
-  config: string;
-  split: string;
-}
-
-export function isHfDataset(name: string): boolean {
-  return name.endsWith('.hf.json');
-}
-
 function ensureDir() {
   mkdirSync(DATASETS_DIR, { recursive: true });
 }
@@ -37,12 +27,13 @@ export function listDatasets(): DatasetEntry[] {
   const files = readdirSync(DATASETS_DIR);
   return files
     .filter(
-      (f) => isHfDataset(f) || ALLOWED_EXTENSIONS.has(extname(f).toLowerCase()),
+      (f) =>
+        ALLOWED_EXTENSIONS.has(extname(f).toLowerCase()) &&
+        !f.endsWith('.hf.json'),
     )
     .map((f) => {
       const stat = statSync(join(DATASETS_DIR, f));
-      const extension = isHfDataset(f) ? '.hf.json' : extname(f);
-      return { name: f, extension, sizeBytes: stat.size };
+      return { name: f, extension: extname(f), sizeBytes: stat.size };
     });
 }
 
@@ -63,27 +54,10 @@ export function saveDataset(name: string, content: ArrayBuffer | string): void {
   writeFileSync(join(DATASETS_DIR, sanitized), buf);
 }
 
-export function saveHfDataset(ref: HfDatasetRef): string {
-  ensureDir();
-  const sanitized = `${ref.dataset}--${ref.config}--${ref.split}`.replace(
-    /[^a-zA-Z0-9._-]/g,
-    '_',
-  );
-  const filename = `${sanitized}.hf.json`;
-  writeFileSync(join(DATASETS_DIR, filename), JSON.stringify(ref));
-  return filename;
-}
-
-export function readHfConfig(name: string): HfDatasetRef | null {
-  if (!isHfDataset(name)) return null;
-  try {
-    const content = readFileSync(join(DATASETS_DIR, basename(name)), 'utf-8');
-    return JSON.parse(content) as HfDatasetRef;
-  } catch {
-    return null;
-  }
-}
-
 export function deleteDataset(name: string): void {
-  unlinkSync(join(DATASETS_DIR, basename(name)));
+  const filepath = join(DATASETS_DIR, basename(name));
+  if (!existsSync(filepath)) {
+    throw new Error(`Dataset "${name}" not found`);
+  }
+  unlinkSync(filepath);
 }

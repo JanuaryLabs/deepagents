@@ -13,6 +13,7 @@ export * from './chart.tsx';
 export * from './checkbox.tsx';
 export * from './collapsible.tsx';
 export * from './command.tsx';
+export * from './TheButton.tsx';
 export * from './context-menu.tsx';
 export * from './dialog.tsx';
 export * from './drawer.tsx';
