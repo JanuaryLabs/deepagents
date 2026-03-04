@@ -210,4 +210,25 @@ export default function (router: Hono<AppBindings>) {
       return c.json({ success: true });
     },
   );
+
+  /**
+   * @openapi deleteSuite
+   * @tags suites
+   * @description Delete a suite and all its runs
+   */
+  router.delete(
+    '/suites/:id',
+    validate((payload) => ({
+      id: { select: payload.params.id, against: z.string() },
+    })),
+    (c) => {
+      const { id } = c.var.input;
+      const store = c.get('store');
+      if (!store.getSuite(id)) {
+        throw new HTTPException(404, { message: 'Suite not found' });
+      }
+      store.deleteSuite(id);
+      return c.body(null, 204);
+    },
+  );
 }

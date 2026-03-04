@@ -29,6 +29,8 @@ export interface View {
 export interface ViewGroundingConfig {
   /** Filter to select views */
   filter?: Filter;
+  /** Whether to fetch the SQL definition of each view (default: true) */
+  includeDefinition?: boolean;
 }
 
 /**
@@ -41,10 +43,12 @@ export interface ViewGroundingConfig {
  */
 export abstract class ViewGrounding extends AbstractGrounding {
   #filter?: Filter;
+  protected includeDefinition: boolean;
 
   constructor(config: ViewGroundingConfig = {}) {
     super('view');
     this.#filter = config.filter;
+    this.includeDefinition = config.includeDefinition ?? true;
   }
 
   /** Get all view names in the database */

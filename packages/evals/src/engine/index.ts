@@ -63,6 +63,7 @@ export interface EvalConfig<T> {
   scorers: Record<string, Scorer>;
   store: RunStore;
   emitter?: EvalEmitter;
+  runId?: string;
   suiteId?: string;
   config?: Record<string, unknown>;
   maxConcurrency?: number;
@@ -217,13 +218,17 @@ export async function runEval<T>(config: EvalConfig<T>): Promise<RunSummary> {
   } = config;
 
   const emitter = config.emitter ?? new EvalEmitter();
-  const resolvedSuiteId = suiteId ?? store.createSuite(name).id;
-  const runId = store.createRun({
-    suite_id: resolvedSuiteId,
-    name,
-    model,
-    config: config.config,
-  });
+  const runId =
+    config.runId ??
+    (() => {
+      const resolvedSuiteId = suiteId ?? store.createSuite(name).id;
+      return store.createRun({
+        suite_id: resolvedSuiteId,
+        name,
+        model,
+        config: config.config,
+      });
+    })();
 
   const items: Array<{ index: number; input: T }> = [];
   let idx = 0;

@@ -36,6 +36,7 @@ for await (const route of [
   import('./routes/prompts.route.ts'),
   import('./routes/compare.route.ts'),
   import('./routes/models.route.ts'),
+  import('./routes/sql-agent.route.ts'),
 ]) {
   route.default(app.basePath('/api'));
 }

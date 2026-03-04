@@ -219,6 +219,170 @@ export default function (router: Hono<AppBindings>) {
   );
 
   /**
+   * @openapi deleteRun
+   * @tags runs
+   * @description Delete a run by ID
+   */
+  router.delete(
+    '/runs/:id',
+    validate((payload) => ({
+      id: { select: payload.params.id, against: z.string() },
+    })),
+    (c) => {
+      const { id } = c.var.input;
+      const store = c.get('store');
+      if (!store.getRun(id)) {
+        throw new HTTPException(404, { message: 'Run not found' });
+      }
+      store.deleteRun(id);
+      return c.body(null, 204);
+    },
+  );
+
+  /**
+   * @openapi retryRun
+   * @tags runs
+   * @description Retry a run in-place by resetting its cases and re-executing
+   */
+  router.post(
+    '/runs/:id/retry',
+    validate((payload) => ({
+      id: { select: payload.params.id, against: z.string() },
+    })),
+    (c) => {
+      const { id } = c.var.input;
+      const store = c.get('store');
+
+      const run = store.getRun(id);
+      if (!run) {
+        throw new HTTPException(404, { message: 'Run not found' });
+      }
+      if (run.status === 'running') {
+        throw new HTTPException(409, { message: 'Run is already running' });
+      }
+
+      const cfg = (run.config ?? {}) as Record<string, unknown>;
+      const taskMode =
+        cfg.taskMode === 'http' ? ('http' as const) : ('prompt' as const);
+      const datasetName = String(cfg.dataset ?? '');
+      const scorerNames = Array.isArray(cfg.scorers)
+        ? cfg.scorers.map(String)
+        : [];
+      const scorerModelString =
+        typeof cfg.scorerModel === 'string' ? cfg.scorerModel : undefined;
+      const endpointUrl =
+        typeof cfg.endpointUrl === 'string' ? cfg.endpointUrl : undefined;
+      const promptId =
+        typeof cfg.promptId === 'string' ? cfg.promptId : undefined;
+      const recordSelectionInput =
+        typeof cfg.recordSelection === 'string'
+          ? cfg.recordSelection
+          : undefined;
+      const inputField =
+        typeof cfg.inputField === 'string' ? cfg.inputField : 'input';
+      const expectedField =
+        typeof cfg.expectedField === 'string' ? cfg.expectedField : 'expected';
+      const maxConcurrency =
+        typeof cfg.maxConcurrency === 'number' ? cfg.maxConcurrency : 10;
+      const batchSize =
+        typeof cfg.batchSize === 'number' ? cfg.batchSize : undefined;
+      const timeout = typeof cfg.timeout === 'number' ? cfg.timeout : 30_000;
+      const trials = typeof cfg.trials === 'number' ? cfg.trials : 1;
+      const threshold = typeof cfg.threshold === 'number' ? cfg.threshold : 0.5;
+
+      let systemPrompt: string | undefined;
+      if (taskMode === 'http') {
+        if (!endpointUrl) {
+          throw new HTTPException(400, {
+            message: 'Stored config missing endpoint URL.',
+          });
+        }
+      } else {
+        if (!promptId) {
+          throw new HTTPException(400, {
+            message: 'Stored config missing prompt ID.',
+          });
+        }
+        const prompt = store.getPrompt(promptId);
+        if (!prompt) {
+          throw new HTTPException(404, {
+            message: 'Prompt referenced by run no longer exists.',
+          });
+        }
+        systemPrompt = prompt.content;
+      }
+
+      let scorers: Record<string, Scorer>;
+      try {
+        scorers = buildScorerModelMap(scorerNames, scorerModelString);
+      } catch (err) {
+        throw new HTTPException(400, {
+          message: err instanceof Error ? err.message : 'Invalid scorer config',
+        });
+      }
+
+      let recordSelection: ReturnType<typeof parseRecordSelection> | undefined;
+      if (recordSelectionInput) {
+        recordSelection = parseRecordSelection(recordSelectionInput);
+      }
+
+      const createFilteredDataset = (): AsyncIterable<
+        Record<string, unknown>
+      > => {
+        const ds = dataset<Record<string, unknown>>(datasetPath(datasetName));
+        const filtered = recordSelection
+          ? filterRecordsByIndex(ds, recordSelection.indexes)
+          : ds;
+        return (async function* (source) {
+          for await (const row of source) {
+            yield {
+              ...row,
+              input: row[inputField],
+              expected: row[expectedField],
+            };
+          }
+        })(filtered);
+      };
+
+      let task: TaskFn<Record<string, unknown>>;
+      if (taskMode === 'http') {
+        task = buildHttpTask(endpointUrl!);
+      } else {
+        task = buildPromptTask(run.model, systemPrompt!);
+      }
+
+      store.resetRun(id);
+
+      const emitter = new EvalEmitter();
+      emitter.on('run:start', (data) => {
+        evalManager.register(data.runId, emitter, data.totalCases);
+      });
+
+      runEval({
+        runId: id,
+        name: run.name,
+        model: run.model,
+        dataset: createFilteredDataset(),
+        task,
+        scorers,
+        store,
+        emitter,
+        suiteId: run.suite_id,
+        maxConcurrency,
+        batchSize,
+        timeout,
+        trials,
+        threshold,
+        config: run.config ?? undefined,
+      }).catch((err) => {
+        console.error(`Retry of run "${run.name}" failed:`, err);
+      });
+
+      return c.json({ runId: id });
+    },
+  );
+
+  /**
    * @openapi createRun
    * @tags runs
    * @description Start a new eval run across one or more models

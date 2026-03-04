@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import '../../api.ts';
 import { CaseTable } from '../../components/CaseTable.tsx';
@@ -74,6 +74,7 @@ interface SuiteRow {
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   // TODO: use "usePolling"
   const { data, isLoading } = useData(
     'GET /runs/{id}',
@@ -116,6 +117,14 @@ export default function RunDetailPage() {
     onSuccess: () => {
       setIsEditing(false);
     },
+  });
+
+  const deleteMutation = useAction('DELETE /runs/{id}', {
+    invalidate: ['GET /runs', 'GET /suites/{id}'],
+  });
+
+  const retryMutation = useAction('POST /runs/{id}/retry', {
+    invalidate: ['GET /runs/{id}'],
   });
 
   if (isLoading) {
@@ -232,9 +241,33 @@ export default function RunDetailPage() {
             </p>
           </div>
 
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/evals/new?from=${run.id}`}>Re-run</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={retryMutation.isPending || isRunning}
+              onClick={() => retryMutation.mutate({ id: run.id })}
+            >
+              {retryMutation.isPending ? 'Retrying\u2026' : 'Retry'}
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link to={`/evals/new?from=${run.id}`}>Add Run</Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() =>
+                deleteMutation.mutate(
+                  { id: run.id },
+                  { onSuccess: () => navigate(`/suites/${suite.id}`) },
+                )
+              }
+            >
+              Delete
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -251,7 +284,11 @@ export default function RunDetailPage() {
       )}
 
       <div className="mb-8">
-        <StatsGrid summary={summary} />
+        <StatsGrid
+          summary={summary}
+          scorerNames={scorerNames}
+          threshold={threshold}
+        />
       </div>
 
       <div className="mb-6 rounded-lg border">

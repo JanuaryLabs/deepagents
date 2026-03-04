@@ -1,7 +1,5 @@
+import { groq } from '@ai-sdk/groq';
 import { openai } from '@ai-sdk/openai';
-import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
-
-import { lmstudio } from '@deepagents/agent';
 
 /**
  * Model variants for evaluation.
@@ -31,17 +29,23 @@ export const EVAL_MODELS = [
   //     }),
   //   },
   // },
+  // {
+  //   name: 'gpt-4.1-nano',
+  //   input: {
+  //     model: wrapLanguageModel({
+  //       model: openai('gpt-4.1-nano'),
+  //       middleware: defaultSettingsMiddleware({
+  //         settings: {
+  //           temperature: 0,
+  //         },
+  //       }),
+  //     }),
+  //   },
+  // },
   {
-    name: 'gpt-4.1-nano',
+    name: 'gpt-5.2',
     input: {
-      model: wrapLanguageModel({
-        model: openai('gpt-4.1-nano'),
-        middleware: defaultSettingsMiddleware({
-          settings: {
-            temperature: 0,
-          },
-        }),
-      }),
+      model: openai('gpt-5.2'),
     },
   },
   // {

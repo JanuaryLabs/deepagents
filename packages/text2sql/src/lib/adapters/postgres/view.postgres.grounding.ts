@@ -42,17 +42,19 @@ export class PostgresViewGrounding extends ViewGrounding {
   protected override async getView(viewName: string): Promise<View> {
     const { schema, table: view } = this.#adapter.parseTableName(viewName);
 
-    // Get view definition from pg_views
-    const defRows = await this.#adapter.runQuery<{
-      definition: string | null;
-    }>(`
-      SELECT definition
-      FROM pg_views
-      WHERE schemaname = '${this.#adapter.escapeString(schema)}'
-        AND viewname = '${this.#adapter.escapeString(view)}'
-    `);
+    let definition: string | undefined;
+    if (this.includeDefinition) {
+      const defRows = await this.#adapter.runQuery<{
+        definition: string | null;
+      }>(`
+        SELECT definition
+        FROM pg_views
+        WHERE schemaname = '${this.#adapter.escapeString(schema)}'
+          AND viewname = '${this.#adapter.escapeString(view)}'
+      `);
+      definition = defRows[0]?.definition ?? undefined;
+    }
 
-    // Get columns from information_schema
     const columns = await this.#adapter.runQuery<ColumnRow>(`
       SELECT column_name, data_type
       FROM information_schema.columns
@@ -65,7 +67,7 @@ export class PostgresViewGrounding extends ViewGrounding {
       name: viewName,
       schema,
       rawName: view,
-      definition: defRows[0]?.definition ?? undefined,
+      definition,
       columns: columns.map((col) => ({
         name: col.column_name ?? 'unknown',
         type: col.data_type ?? 'unknown',

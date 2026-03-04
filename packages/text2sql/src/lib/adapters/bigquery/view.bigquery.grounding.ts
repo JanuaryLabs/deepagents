@@ -56,13 +56,17 @@ export class BigQueryViewGrounding extends ViewGrounding {
   protected override async getView(viewName: string): Promise<View> {
     const { schema: dataset, table } = this.#adapter.parseTableName(viewName);
 
-    const defRows = await this.#adapter.runQuery<ViewDefinitionRow>(`
-      SELECT ddl
-      FROM ${this.#adapter.infoSchemaView(dataset, 'TABLES')}
-      WHERE table_name = '${this.#adapter.escapeString(table)}'
-        AND table_type IN ('VIEW', 'MATERIALIZED VIEW')
-      LIMIT 1
-    `);
+    let definition: string | undefined;
+    if (this.includeDefinition) {
+      const defRows = await this.#adapter.runQuery<ViewDefinitionRow>(`
+        SELECT ddl
+        FROM ${this.#adapter.infoSchemaView(dataset, 'TABLES')}
+        WHERE table_name = '${this.#adapter.escapeString(table)}'
+          AND table_type IN ('VIEW', 'MATERIALIZED VIEW')
+        LIMIT 1
+      `);
+      definition = defRows[0]?.ddl ?? undefined;
+    }
 
     const columns = await this.#adapter.runQuery<ColumnRow>(`
       SELECT column_name, data_type
@@ -75,7 +79,7 @@ export class BigQueryViewGrounding extends ViewGrounding {
       name: `${dataset}.${table}`,
       schema: dataset,
       rawName: table,
-      definition: defRows[0]?.ddl ?? undefined,
+      definition,
       columns: columns.map((c) => ({
         name: c.column_name ?? 'unknown',
         type: c.data_type ?? 'unknown',

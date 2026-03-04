@@ -1,3 +1,4 @@
+// eslint-disable-next-line @nx/enforce-module-boundaries
 import { Client, type Endpoints } from '@evals/client';
 import {
   type MutationFunctionContext,
@@ -12,7 +13,14 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 
-export const queryClient = new QueryClient({});
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 export const client = new Client({
   baseUrl: `${import.meta.env.VITE_API_URL}/api`,

@@ -617,4 +617,21 @@ export class RunStore {
   deletePrompt(id: string): void {
     this.#stmt('DELETE FROM prompts WHERE id = ?').run(id);
   }
+
+  resetRun(id: string): void {
+    this.#transaction(() => {
+      this.#stmt('DELETE FROM cases WHERE run_id = ?').run(id);
+      this.#stmt(
+        'UPDATE runs SET status = ?, started_at = ?, finished_at = NULL, summary = NULL WHERE id = ?',
+      ).run('running', Date.now(), id);
+    });
+  }
+
+  deleteRun(id: string): void {
+    this.#stmt('DELETE FROM runs WHERE id = ?').run(id);
+  }
+
+  deleteSuite(id: string): void {
+    this.#stmt('DELETE FROM suites WHERE id = ?').run(id);
+  }
 }

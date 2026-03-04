@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, redirect, RouterProvider } from 'react-router';
 
+import { queryClient } from './app/hooks/use-client.ts';
 import { Toaster } from './app/shadcn/index.ts';
 
 import ComparePage from './app/routes/compare/ComparePage.tsx';
@@ -15,17 +16,6 @@ import RunDetail from './app/routes/runs/RunDetail.tsx';
 import RunList from './app/routes/runs/RunList.tsx';
 import SuiteDetail from './app/routes/suites/SuiteDetail.tsx';
 import SuiteList from './app/routes/suites/SuiteList.tsx';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
-
-export { queryClient };
 
 const router = createBrowserRouter(
   [

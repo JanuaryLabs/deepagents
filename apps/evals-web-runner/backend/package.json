@@ -7,8 +7,10 @@
   "dependencies": {
     "@deepagents/agent": "0.24.0",
     "@deepagents/evals": "0.24.0",
+    "@deepagents/text2sql": "0.24.0",
     "@hono/node-server": "^1.19.5",
     "hono": "^4.12.3",
+    "mssql": "^12.2.0",
     "zod": "^3.24.2"
   }
 }

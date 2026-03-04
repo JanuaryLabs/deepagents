@@ -32,21 +32,23 @@ export class SqliteViewGrounding extends ViewGrounding {
   }
 
   protected override async getView(viewName: string): Promise<View> {
-    // Get view definition from sqlite_master
-    const defRows = await this.#adapter.runQuery<{
-      sql: string | null | undefined;
-    }>(
-      `SELECT sql FROM sqlite_master WHERE type='view' AND name=${this.#quoteIdentifier(viewName)}`,
-    );
+    let definition: string | undefined;
+    if (this.includeDefinition) {
+      const defRows = await this.#adapter.runQuery<{
+        sql: string | null | undefined;
+      }>(
+        `SELECT sql FROM sqlite_master WHERE type='view' AND name=${this.#quoteIdentifier(viewName)}`,
+      );
+      definition = defRows[0]?.sql ?? undefined;
+    }
 
-    // Get columns via PRAGMA table_info (works for views too)
     const columns = await this.#adapter.runQuery<ColumnRow>(
       `PRAGMA table_info(${this.#quoteIdentifier(viewName)})`,
     );
 
     return {
       name: viewName,
-      definition: defRows[0]?.sql ?? undefined,
+      definition,
       columns: columns.map((col) => ({
         name: col.name ?? 'unknown',
         type: col.type ?? 'unknown',

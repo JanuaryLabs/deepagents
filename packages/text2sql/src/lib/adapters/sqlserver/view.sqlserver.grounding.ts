@@ -42,19 +42,21 @@ export class SqlServerViewGrounding extends ViewGrounding {
   protected override async getView(viewName: string): Promise<View> {
     const { schema, table: view } = this.#adapter.parseTableName(viewName);
 
-    // Get view definition from sys.sql_modules
-    const defRows = await this.#adapter.runQuery<{
-      definition: string | null;
-    }>(`
-      SELECT m.definition
-      FROM sys.views v
-      JOIN sys.schemas s ON v.schema_id = s.schema_id
-      JOIN sys.sql_modules m ON v.object_id = m.object_id
-      WHERE s.name = '${this.#adapter.escapeString(schema)}'
-        AND v.name = '${this.#adapter.escapeString(view)}'
-    `);
+    let definition: string | undefined;
+    if (this.includeDefinition) {
+      const defRows = await this.#adapter.runQuery<{
+        definition: string | null;
+      }>(`
+        SELECT m.definition
+        FROM sys.views v
+        JOIN sys.schemas s ON v.schema_id = s.schema_id
+        JOIN sys.sql_modules m ON v.object_id = m.object_id
+        WHERE s.name = '${this.#adapter.escapeString(schema)}'
+          AND v.name = '${this.#adapter.escapeString(view)}'
+      `);
+      definition = defRows[0]?.definition ?? undefined;
+    }
 
-    // Get columns from INFORMATION_SCHEMA
     const columns = await this.#adapter.runQuery<ColumnRow>(`
       SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type
       FROM INFORMATION_SCHEMA.COLUMNS
@@ -67,7 +69,7 @@ export class SqlServerViewGrounding extends ViewGrounding {
       name: viewName,
       schema,
       rawName: view,
-      definition: defRows[0]?.definition ?? undefined,
+      definition,
       columns: columns.map((col) => ({
         name: col.column_name ?? 'unknown',
         type: col.data_type ?? 'unknown',

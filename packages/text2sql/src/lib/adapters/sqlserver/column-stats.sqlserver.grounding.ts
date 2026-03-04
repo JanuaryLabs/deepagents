@@ -3,24 +3,87 @@ import {
   ColumnStatsGrounding,
   type ColumnStatsGroundingConfig,
 } from '../groundings/column-stats.grounding.ts';
-import type { Column } from '../groundings/context.ts';
+import type { Column, GroundingContext } from '../groundings/context.ts';
 
-/**
- * SQL Server implementation of ColumnStatsGrounding.
- */
+interface NDistinctRow {
+  schema_name: string;
+  table_name: string;
+  column_name: string;
+  approx_n_distinct: number;
+}
+
 export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
   #adapter: Adapter;
+  #nDistinctCache = new Map<string, Map<string, number>>();
 
   constructor(adapter: Adapter, config: ColumnStatsGroundingConfig = {}) {
     super(config);
     this.#adapter = adapter;
   }
 
+  override async execute(ctx: GroundingContext): Promise<void> {
+    await this.#fetchNDistinct(ctx);
+    await super.execute(ctx);
+  }
+
+  async #fetchNDistinct(ctx: GroundingContext): Promise<void> {
+    if (ctx.tables.length === 0) return;
+
+    const objectIds = ctx.tables.map((t) => {
+      const { schema, table } = this.#adapter.parseTableName(t.name);
+      return `OBJECT_ID('[${this.#adapter.escape(schema)}].[${this.#adapter.escape(table)}]')`;
+    });
+
+    try {
+      const rows = await this.#adapter.runQuery<NDistinctRow>(`
+        SELECT
+          OBJECT_SCHEMA_NAME(s.object_id) AS schema_name,
+          OBJECT_NAME(s.object_id) AS table_name,
+          COL_NAME(sc.object_id, sc.column_id) AS column_name,
+          (
+            SELECT ISNULL(SUM(h.distinct_range_rows), 0) + COUNT(*)
+            FROM sys.dm_db_stats_histogram(s.object_id, s.stats_id) h
+          ) AS approx_n_distinct
+        FROM sys.stats s
+        INNER JOIN sys.stats_columns sc
+          ON s.object_id = sc.object_id AND s.stats_id = sc.stats_id
+        CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) sp
+        WHERE sc.stats_column_id = 1
+          AND sp.rows > 0
+          AND s.object_id IN (${objectIds.join(', ')})
+      `);
+
+      for (const row of rows) {
+        const tableName = ctx.tables.find((t) => {
+          const { schema, table } = this.#adapter.parseTableName(t.name);
+          return schema === row.schema_name && table === row.table_name;
+        })?.name;
+        if (!tableName) continue;
+
+        let map = this.#nDistinctCache.get(tableName);
+        if (!map) {
+          map = new Map();
+          this.#nDistinctCache.set(tableName, map);
+        }
+        map.set(row.column_name, row.approx_n_distinct);
+      }
+    } catch {
+      // sys.dm_db_stats_histogram requires SQL Server 2016 SP1+
+    }
+  }
+
   protected override async collectStats(
     tableName: string,
     column: Column,
   ): Promise<ColumnStats | undefined> {
+    const cachedNDistinct = this.#nDistinctCache
+      .get(tableName)
+      ?.get(column.name);
+
     if (!this.#shouldCollectStats(column.type)) {
+      if (cachedNDistinct != null) {
+        return { nDistinct: cachedNDistinct };
+      }
       return undefined;
     }
 
@@ -43,6 +106,9 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
     }>(sql);
 
     if (!rows.length) {
+      if (cachedNDistinct != null) {
+        return { nDistinct: cachedNDistinct };
+      }
       return undefined;
     }
 
@@ -50,7 +116,12 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
     const max = rows[0]?.max_value;
     const nullFraction = this.#adapter.toNumber(rows[0]?.null_fraction);
 
-    if (min == null && max == null && nullFraction == null) {
+    if (
+      min == null &&
+      max == null &&
+      nullFraction == null &&
+      cachedNDistinct == null
+    ) {
       return undefined;
     }
 
@@ -61,6 +132,7 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
         nullFraction != null && Number.isFinite(nullFraction)
           ? Math.max(0, Math.min(1, nullFraction))
           : undefined,
+      ...(cachedNDistinct != null && { nDistinct: cachedNDistinct }),
     };
   }
 
@@ -69,7 +141,6 @@ export class SqlServerColumnStatsGrounding extends ColumnStatsGrounding {
       return false;
     }
     const normalized = type.toLowerCase();
-    // Note: bit excluded because SQL Server doesn't support MIN/MAX on bit types
     return /int|real|numeric|float|decimal|date|time|money/.test(normalized);
   }
 }

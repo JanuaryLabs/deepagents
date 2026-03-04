@@ -50,7 +50,6 @@ export class MysqlViewGrounding extends ViewGrounding {
     const { schema, table } = this.#adapter.parseTableName(viewName);
     const database = schema || (await this.#getCurrentDatabase());
 
-    // Get columns
     const columns = await this.#adapter.runQuery<ColumnRow>(`
       SELECT COLUMN_NAME, DATA_TYPE
       FROM INFORMATION_SCHEMA.COLUMNS
@@ -59,19 +58,22 @@ export class MysqlViewGrounding extends ViewGrounding {
       ORDER BY ORDINAL_POSITION
     `);
 
-    // Get view definition
-    const viewRows = await this.#adapter.runQuery<ViewRow>(`
-      SELECT VIEW_DEFINITION
-      FROM INFORMATION_SCHEMA.VIEWS
-      WHERE TABLE_SCHEMA = '${this.#adapter.escapeString(database)}'
-        AND TABLE_NAME = '${this.#adapter.escapeString(table)}'
-    `);
+    let definition: string | undefined;
+    if (this.includeDefinition) {
+      const viewRows = await this.#adapter.runQuery<ViewRow>(`
+        SELECT VIEW_DEFINITION
+        FROM INFORMATION_SCHEMA.VIEWS
+        WHERE TABLE_SCHEMA = '${this.#adapter.escapeString(database)}'
+          AND TABLE_NAME = '${this.#adapter.escapeString(table)}'
+      `);
+      definition = viewRows[0]?.VIEW_DEFINITION ?? undefined;
+    }
 
     return {
       name: viewName,
       schema: database,
       rawName: table,
-      definition: viewRows[0]?.VIEW_DEFINITION ?? undefined,
+      definition,
       columns: columns.map((col) => ({
         name: col.COLUMN_NAME ?? 'unknown',
         type: col.DATA_TYPE ?? 'unknown',

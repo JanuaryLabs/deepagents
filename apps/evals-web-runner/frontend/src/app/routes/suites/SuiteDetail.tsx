@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 
 import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
 import { SuiteComparison } from '../../components/SuiteComparison.tsx';
@@ -61,6 +61,7 @@ interface RunRow {
 
 export default function SuiteDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { data, isLoading } = useData(
     'GET /suites/{id}',
     { id: id! },
@@ -106,6 +107,14 @@ export default function SuiteDetailPage() {
     onSuccess: () => {
       setIsEditing(false);
     },
+  });
+
+  const deleteSuiteMutation = useAction('DELETE /suites/{id}', {
+    invalidate: ['GET /suites'],
+  });
+
+  const deleteRunMutation = useAction('DELETE /runs/{id}', {
+    invalidate: ['GET /suites/{id}'],
   });
 
   if (isLoading) {
@@ -201,13 +210,29 @@ export default function SuiteDetailPage() {
               {new Date(suite.created_at).toLocaleDateString()}
             </p>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <Link
-              to={`/evals/new?suiteId=${suite.id}${runs[0] ? `&from=${runs[0].id}` : ''}`}
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link
+                to={`/evals/new?suiteId=${suite.id}${runs[0] ? `&from=${runs[0].id}` : ''}`}
+              >
+                Add Run
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
+              disabled={deleteSuiteMutation.isPending}
+              onClick={() =>
+                deleteSuiteMutation.mutate(
+                  { id: suite.id },
+                  { onSuccess: () => navigate('/suites') },
+                )
+              }
             >
-              Add Run
-            </Link>
-          </Button>
+              Delete Suite
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -322,6 +347,7 @@ export default function SuiteDetailPage() {
               <TableHead>Fail</TableHead>
               <TableHead>Latency</TableHead>
               <TableHead>Tokens</TableHead>
+              <TableHead className="w-16" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -391,6 +417,19 @@ export default function SuiteDetailPage() {
                           run.summary.totalTokensIn + run.summary.totalTokensOut,
                         )
                       : '\u2014'}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      disabled={deleteRunMutation.isPending}
+                      onClick={() =>
+                        deleteRunMutation.mutate({ id: run.id })
+                      }
+                    >
+                      Delete
+                    </Button>
                   </TableCell>
                 </TableRow>
               );

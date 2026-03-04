@@ -12,6 +12,12 @@
   "exclude": ["eslint.config.js", "eslint.config.cjs", "eslint.config.mjs"],
   "references": [
     {
+      "path": "../../../packages/context/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../packages/text2sql/tsconfig.lib.json"
+    },
+    {
       "path": "../../../packages/evals/tsconfig.lib.json"
     },
     {

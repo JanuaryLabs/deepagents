@@ -1,3 +1,14 @@
+import { Fragment, useMemo } from 'react';
+import {
+  type ColumnDef,
+  type ExpandedState,
+  flexRender,
+  getCoreRowModel,
+  getExpandedRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
+import { useState } from 'react';
+
 import {
   Table,
   TableBody,
@@ -106,45 +117,127 @@ function fallbackFailureReason(
   return `Score ${score.toFixed(3)} is below threshold ${threshold.toFixed(3)}. Expected: ${expected}. Output: ${output || '<empty>'}.`;
 }
 
-function buildOutcomeReason(
-  caseData: CaseWithScores,
-  threshold: number,
-): string {
-  const errorText = formatCaseError(caseData.error);
-  if (errorText) return `Task error: ${errorText}`;
+function ExpandedCaseRow({
+  caseData,
+  scorerNames,
+  threshold,
+}: {
+  caseData: CaseWithScores;
+  scorerNames: string[];
+  threshold: number;
+}) {
+  const scoreMap = new Map(
+    caseData.scores.map((s) => [s.scorer_name, s]),
+  );
+  const errorSummary = formatCaseError(caseData.error);
+  const errorDetails = formatCaseErrorDetails(caseData.error);
 
-  const failing = caseData.scores.filter((s) => s.score < threshold);
-  if (failing.length > 0) {
-    return failing
-      .map((s) => {
-        const reason =
-          normalizeReason(s.reason) ??
-          fallbackFailureReason(caseData, s.scorer_name, s.score, threshold);
-        return `${s.scorer_name} (${s.score.toFixed(3)}): ${reason}`;
-      })
-      .join(' | ');
-  }
+  return (
+    <div className="space-y-4 p-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">
+            Output
+          </h4>
+          <pre className="bg-muted max-h-40 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">
+            {caseData.output ?? '\u2014'}
+          </pre>
+        </div>
+        <div>
+          <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">
+            Expected
+          </h4>
+          <pre className="bg-muted max-h-40 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">
+            {caseData.expected != null
+              ? formatInputValue(caseData.expected)
+              : '\u2014'}
+          </pre>
+        </div>
+      </div>
 
-  const passingWithReasons = caseData.scores
-    .filter((s) => s.score >= threshold)
-    .map((s) => ({
-      scorer: s.scorer_name,
-      reason: normalizeReason(s.reason),
-      score: s.score,
-    }))
-    .filter((s) => s.reason);
+      {scorerNames.length > 0 && (
+        <div>
+          <h4 className="text-muted-foreground mb-2 text-xs font-medium uppercase">
+            Scorer Results
+          </h4>
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-40">Scorer</TableHead>
+                  <TableHead className="w-20">Score</TableHead>
+                  <TableHead className="w-20">Status</TableHead>
+                  <TableHead>Reason</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {scorerNames.map((name) => {
+                  const s = scoreMap.get(name);
+                  const score = s?.score ?? 0;
+                  const passing = score >= threshold;
+                  const reason =
+                    normalizeReason(s?.reason) ??
+                    (!passing
+                      ? fallbackFailureReason(
+                          caseData,
+                          name,
+                          score,
+                          threshold,
+                        )
+                      : null);
 
-  if (passingWithReasons.length > 0) {
-    return passingWithReasons
-      .map((s) => `${s.scorer} (${s.score.toFixed(3)}): ${s.reason}`)
-      .join(' | ');
-  }
+                  return (
+                    <TableRow key={name}>
+                      <TableCell className="font-medium">{name}</TableCell>
+                      <TableCell
+                        className={`font-mono text-sm ${
+                          passing ? 'text-green-600' : 'text-destructive'
+                        }`}
+                      >
+                        {score.toFixed(3)}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            passing
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                          }`}
+                        >
+                          {passing ? 'PASS' : 'FAIL'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="max-w-lg text-xs whitespace-pre-wrap">
+                        {reason ?? '\u2014'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
 
-  if (caseData.scores.length > 0) {
-    return `Passed all ${caseData.scores.length} scorer(s).`;
-  }
-
-  return 'No scorer output available.';
+      {errorSummary && (
+        <div>
+          <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">
+            Runtime Error
+          </h4>
+          <div className="bg-destructive/10 border-destructive/30 rounded-lg border p-3">
+            <p className="text-destructive text-sm font-medium">
+              {errorSummary}
+            </p>
+            {errorDetails && errorDetails !== errorSummary && (
+              <pre className="text-destructive/80 mt-2 whitespace-pre-wrap font-mono text-[10px]">
+                {errorDetails}
+              </pre>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function CaseTable({
@@ -152,108 +245,186 @@ export function CaseTable({
   scorerNames,
   threshold = 0.5,
 }: CaseTableProps) {
+  const [expanded, setExpanded] = useState<ExpandedState>({});
+
+  const columns = useMemo<ColumnDef<CaseWithScores>[]>(() => {
+    const base: ColumnDef<CaseWithScores>[] = [
+      {
+        id: 'expand',
+        header: '',
+        size: 32,
+        cell: ({ row }) => (
+          <button
+            onClick={row.getToggleExpandedHandler()}
+            className="text-muted-foreground hover:text-foreground cursor-pointer p-1"
+          >
+            {row.getIsExpanded() ? '\u25BC' : '\u25B6'}
+          </button>
+        ),
+      },
+      {
+        accessorKey: 'idx',
+        header: '#',
+        size: 48,
+        cell: ({ getValue }) => (
+          <span className="text-muted-foreground">{getValue<number>()}</span>
+        ),
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        size: 100,
+        cell: ({ row }) => {
+          const c = row.original;
+          const passed = c.scores.every((s) => s.score >= threshold);
+          const status = c.error ? 'error' : passed ? 'pass' : 'fail';
+          const label =
+            status === 'pass'
+              ? 'PASS'
+              : status === 'fail'
+                ? 'FAIL'
+                : 'ERROR';
+          return (
+            <span
+              className={`text-xs font-medium ${
+                status === 'pass'
+                  ? 'text-green-600'
+                  : status === 'fail'
+                    ? 'text-destructive'
+                    : 'text-yellow-600'
+              }`}
+            >
+              {label}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'input',
+        header: 'Input',
+        cell: ({ row }) => (
+          <span className="block max-w-xs truncate">
+            {truncate(formatInputValue(row.original.input))}
+          </span>
+        ),
+      },
+      {
+        id: 'output',
+        header: 'Output',
+        cell: ({ row }) => (
+          <span className="block max-w-xs truncate">
+            {row.original.output ? truncate(row.original.output) : '\u2014'}
+          </span>
+        ),
+      },
+      {
+        id: 'expected',
+        header: 'Expected',
+        cell: ({ row }) => (
+          <span className="block max-w-xs truncate">
+            {row.original.expected != null
+              ? truncate(formatInputValue(row.original.expected))
+              : '\u2014'}
+          </span>
+        ),
+      },
+    ];
+
+    const scorerCols: ColumnDef<CaseWithScores>[] = scorerNames.map(
+      (name) => ({
+        id: `scorer-${name}`,
+        header: name,
+        size: 80,
+        cell: ({ row }) => {
+          const s = row.original.scores.find((sc) => sc.scorer_name === name);
+          const score = s?.score ?? 0;
+          return (
+            <span
+              className={`font-mono text-xs ${
+                score >= threshold ? 'text-green-600' : 'text-destructive'
+              }`}
+            >
+              {score.toFixed(3)}
+            </span>
+          );
+        },
+      }),
+    );
+
+    const tail: ColumnDef<CaseWithScores>[] = [
+      {
+        id: 'latency',
+        header: 'Latency',
+        size: 80,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.latency_ms}ms
+          </span>
+        ),
+      },
+    ];
+
+    return [...base, ...scorerCols, ...tail];
+  }, [scorerNames, threshold]);
+
+  const table = useReactTable({
+    data: cases,
+    columns,
+    state: { expanded },
+    onExpandedChange: setExpanded,
+    getRowCanExpand: () => true,
+    getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowId: (row) => row.id,
+  });
+
+  const totalColumns = table.getHeaderGroups()[0]?.headers.length ?? 1;
+
   return (
     <div className="rounded-lg border">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>#</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Input</TableHead>
-            <TableHead>Output</TableHead>
-            <TableHead>Expected</TableHead>
-            {scorerNames.map((name) => (
-              <TableHead key={name}>{name}</TableHead>
-            ))}
-            <TableHead>Why</TableHead>
-            <TableHead>Latency</TableHead>
-            <TableHead>Runtime Error</TableHead>
-          </TableRow>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <TableRow key={headerGroup.id}>
+              {headerGroup.headers.map((header) => (
+                <TableHead key={header.id}>
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(
+                        header.column.columnDef.header,
+                        header.getContext(),
+                      )}
+                </TableHead>
+              ))}
+            </TableRow>
+          ))}
         </TableHeader>
         <TableBody>
-          {cases.map((c) => {
-            const passed = c.scores.every((s) => s.score >= threshold);
-            const status = c.error ? 'error' : passed ? 'pass' : 'fail';
-            const statusLabel =
-              status === 'pass'
-                ? 'PASS'
-                : status === 'fail'
-                  ? 'FAIL (score)'
-                  : 'ERROR (runtime)';
-            const scoreMap = new Map(
-              c.scores.map((s) => [s.scorer_name, s]),
-            );
-            const errorSummary = formatCaseError(c.error);
-            const errorDetails = formatCaseErrorDetails(c.error);
-
-            return (
-              <TableRow key={c.id}>
-                <TableCell className="text-muted-foreground">
-                  {c.idx}
-                </TableCell>
-                <TableCell>
-                  <span
-                    className={`text-xs font-medium ${
-                      status === 'pass'
-                        ? 'text-green-600'
-                        : status === 'fail'
-                          ? 'text-destructive'
-                          : 'text-yellow-600'
-                    }`}
-                  >
-                    {statusLabel}
-                  </span>
-                </TableCell>
-                <TableCell className="max-w-xs truncate">
-                  {truncate(formatInputValue(c.input))}
-                </TableCell>
-                <TableCell className="max-w-xs truncate">
-                  {c.output ? truncate(c.output) : '\u2014'}
-                </TableCell>
-                <TableCell className="max-w-xs truncate">
-                  {c.expected != null
-                    ? truncate(formatInputValue(c.expected))
-                    : '\u2014'}
-                </TableCell>
-                {scorerNames.map((name) => {
-                  const s = scoreMap.get(name);
-                  const score = s?.score ?? 0;
-                  const reason = normalizeReason(s?.reason);
-                  return (
-                    <TableCell
-                      key={name}
-                      className={`font-mono text-xs ${
-                        score >= threshold
-                          ? 'text-green-600'
-                          : 'text-destructive'
-                      }`}
-                      title={reason ?? undefined}
-                    >
-                      {score.toFixed(3)}
-                    </TableCell>
-                  );
-                })}
-                <TableCell className="max-w-sm whitespace-pre-wrap text-xs">
-                  {buildOutcomeReason(c, threshold)}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {c.latency_ms}ms
-                </TableCell>
-                <TableCell className="text-destructive max-w-xs text-xs">
-                  {errorSummary ? (
-                    <details>
-                      <summary className="cursor-pointer">
-                        {errorSummary}
-                      </summary>
-                      <pre className="text-destructive/80 mt-1 whitespace-pre-wrap font-mono text-[10px]">
-                        {errorDetails}
-                      </pre>
-                    </details>
-                  ) : null}
-                </TableCell>
+          {table.getRowModel().rows.map((row) => (
+            <Fragment key={row.id}>
+              <TableRow
+                className="cursor-pointer"
+                onClick={row.getToggleExpandedHandler()}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
               </TableRow>
-            );
-          })}
+              {row.getIsExpanded() && (
+                <TableRow>
+                  <TableCell colSpan={totalColumns} className="p-0">
+                    <ExpandedCaseRow
+                      caseData={row.original}
+                      scorerNames={scorerNames}
+                      threshold={threshold}
+                    />
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
+          ))}
         </TableBody>
       </Table>
     </div>

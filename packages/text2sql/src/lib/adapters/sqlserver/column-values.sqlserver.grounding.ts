@@ -5,15 +5,6 @@ import {
   type ColumnValuesGroundingConfig,
 } from '../groundings/column-values.grounding.ts';
 
-/**
- * SQL Server implementation of ColumnValuesGrounding.
- *
- * Supports:
- * - CHECK constraints with IN clauses (inherited from base)
- * - Low cardinality data scan
- *
- * Note: SQL Server does not have native ENUM types.
- */
 export class SqlServerColumnValuesGrounding extends ColumnValuesGrounding {
   #adapter: Adapter;
 
@@ -22,10 +13,36 @@ export class SqlServerColumnValuesGrounding extends ColumnValuesGrounding {
     this.#adapter = adapter;
   }
 
+  #isHighCardinality(column: Column): boolean {
+    const nDistinct = column.stats?.nDistinct;
+    if (nDistinct != null) {
+      if (nDistinct > 0) return nDistinct > this.lowCardinalityLimit;
+      return true;
+    }
+
+    const type = column.type.toLowerCase();
+    if (
+      /nvarchar\s*\(\s*max\s*\)|varchar\s*\(\s*max\s*\)|text|ntext|xml|image|varbinary\s*\(\s*max\s*\)|uniqueidentifier/.test(
+        type,
+      )
+    ) {
+      return true;
+    }
+    const varcharMatch = type.match(/n?varchar\s*\(\s*(\d+)\s*\)/);
+    if (varcharMatch && parseInt(varcharMatch[1]) > 255) {
+      return true;
+    }
+    return false;
+  }
+
   protected override async collectLowCardinality(
     tableName: string,
     column: Column,
   ): Promise<string[] | undefined> {
+    if (this.#isHighCardinality(column)) {
+      return undefined;
+    }
+
     const { schema, table } = this.#adapter.parseTableName(tableName);
     const tableIdentifier = `[${this.#adapter.escape(schema)}].[${this.#adapter.escape(table)}]`;
     const columnIdentifier = `[${this.#adapter.escape(column.name)}]`;

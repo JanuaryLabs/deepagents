@@ -4,6 +4,12 @@
   "include": [],
   "references": [
     {
+      "path": "../../../packages/context"
+    },
+    {
+      "path": "../../../packages/text2sql"
+    },
+    {
       "path": "../../../packages/evals"
     },
     {
