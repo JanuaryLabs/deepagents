@@ -2,9 +2,11 @@ import assert from 'node:assert';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import {
+  type ListStreamIdsOptions,
   SqliteStreamStore,
   type StreamChunkData,
   type StreamData,
@@ -99,6 +101,14 @@ class FlakyFlushStore extends StreamStore {
   async getStreamStatus(streamId: string): Promise<StreamStatus | undefined> {
     if (!this.#stream || this.#stream.id !== streamId) return undefined;
     return this.#stream.status;
+  }
+
+  async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
+    if (!this.#stream) return [];
+    if (options?.status && this.#stream.status !== options.status) {
+      return [];
+    }
+    return [this.#stream.id];
   }
 
   async updateStreamStatus(
@@ -211,6 +221,111 @@ describe('Stream Chunks', () => {
       await withStreamStore(async (store) => {
         const result = await store.getStream('non-existent');
         assert.strictEqual(result, undefined);
+      });
+    });
+  });
+
+  describe('listStreamIds', () => {
+    it('returns stream IDs filtered by status', async () => {
+      await withStreamStore(async (store) => {
+        await store.createStream(
+          createStream({
+            id: 'stream-queued',
+            status: 'queued',
+            createdAt: 1,
+          }),
+        );
+        await store.createStream(
+          createStream({
+            id: 'stream-running-1',
+            status: 'running',
+            createdAt: 2,
+          }),
+        );
+        await store.createStream(
+          createStream({
+            id: 'stream-running-2',
+            status: 'running',
+            createdAt: 3,
+          }),
+        );
+
+        const running = await store.listStreamIds({ status: 'running' });
+        assert.deepStrictEqual(running, [
+          'stream-running-1',
+          'stream-running-2',
+        ]);
+      });
+    });
+
+    it('returns all stream IDs when no filter is provided', async () => {
+      await withStreamStore(async (store) => {
+        await store.createStream(
+          createStream({
+            id: 'stream-a',
+            status: 'queued',
+            createdAt: 10,
+          }),
+        );
+        await store.createStream(
+          createStream({
+            id: 'stream-b',
+            status: 'completed',
+            createdAt: 20,
+          }),
+        );
+
+        const streamIds = await store.listStreamIds();
+        assert.deepStrictEqual(streamIds, ['stream-a', 'stream-b']);
+      });
+    });
+
+    it('provides listRunningStreamIds as a store instance method', async () => {
+      await withStreamStore(async (store) => {
+        await store.createStream(
+          createStream({
+            id: 'stream-running',
+            status: 'running',
+            createdAt: 1,
+          }),
+        );
+        await store.createStream(
+          createStream({
+            id: 'stream-completed',
+            status: 'completed',
+            createdAt: 2,
+          }),
+        );
+
+        const running = await store.listRunningStreamIds();
+        assert.deepStrictEqual(running, ['stream-running']);
+      });
+    });
+  });
+
+  describe('Schema indexes', () => {
+    it('creates indexes required for ordered stream listing queries', async () => {
+      await withStreamStorePath(async (dbPath) => {
+        const store = new SqliteStreamStore(dbPath);
+        store.close();
+
+        const db = new DatabaseSync(dbPath, { readOnly: true });
+        try {
+          const rows = db
+            .prepare(
+              `SELECT name
+               FROM sqlite_master
+               WHERE type = 'index'
+                 AND tbl_name = 'streams'`,
+            )
+            .all() as Array<{ name: string }>;
+
+          const indexNames = new Set(rows.map((row) => row.name));
+          assert.ok(indexNames.has('idx_streams_created_at_id'));
+          assert.ok(indexNames.has('idx_streams_status_created_at_id'));
+        } finally {
+          db.close();
+        }
       });
     });
   });
@@ -789,6 +904,48 @@ describe('Stream Chunks', () => {
         assert.ok(stream);
         assert.strictEqual(stream.status, 'queued');
         assert.strictEqual(stream.startedAt, null);
+      });
+    });
+  });
+
+  describe('StreamManager.listStreamIds', () => {
+    it('returns IDs with status filtering and ordering', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+        await store.createStream(
+          createStream({
+            id: 'manager-stream-queued',
+            status: 'queued',
+            createdAt: 1,
+          }),
+        );
+        await store.createStream(
+          createStream({
+            id: 'manager-stream-running-1',
+            status: 'running',
+            createdAt: 2,
+          }),
+        );
+        await store.createStream(
+          createStream({
+            id: 'manager-stream-running-2',
+            status: 'running',
+            createdAt: 3,
+          }),
+        );
+
+        const all = await streams.listStreamIds();
+        const running = await streams.listStreamIds({ status: 'running' });
+
+        assert.deepStrictEqual(all, [
+          'manager-stream-queued',
+          'manager-stream-running-1',
+          'manager-stream-running-2',
+        ]);
+        assert.deepStrictEqual(running, [
+          'manager-stream-running-1',
+          'manager-stream-running-2',
+        ]);
       });
     });
   });

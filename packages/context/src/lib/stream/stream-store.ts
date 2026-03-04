@@ -5,6 +5,10 @@ export type StreamStatus =
   | 'failed'
   | 'cancelled';
 
+export interface ListStreamIdsOptions {
+  status?: StreamStatus;
+}
+
 export interface StreamData {
   id: string;
   status: StreamStatus;
@@ -32,6 +36,12 @@ export abstract class StreamStore {
   abstract getStream(streamId: string): Promise<StreamData | undefined>;
 
   abstract getStreamStatus(streamId: string): Promise<StreamStatus | undefined>;
+
+  abstract listStreamIds(options?: ListStreamIdsOptions): Promise<string[]>;
+
+  async listRunningStreamIds(): Promise<string[]> {
+    return this.listStreamIds({ status: 'running' });
+  }
 
   abstract updateStreamStatus(
     streamId: string,

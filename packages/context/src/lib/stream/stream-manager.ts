@@ -18,6 +18,7 @@ import {
   resetAdaptivePolling,
 } from './polling-policy.ts';
 import type {
+  ListStreamIdsOptions,
   StreamChunkData,
   StreamData,
   StreamStatus,
@@ -125,6 +126,10 @@ export class StreamManager {
 
   async cancel(streamId: string): Promise<void> {
     await this.#store.updateStreamStatus(streamId, 'cancelled');
+  }
+
+  async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
+    return this.#store.listStreamIds(options);
   }
 
   async persist(

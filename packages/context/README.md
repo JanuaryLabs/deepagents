@@ -338,6 +338,10 @@ const manager = new StreamManager({
   },
 });
 
+// Discover active streams without writing raw SQL.
+const runningStreamIds = await store.listStreamIds({ status: 'running' });
+const runningViaConvenienceMethod = await store.listRunningStreamIds();
+
 // Shutdown cleanup (idempotent)
 store.close();
 ```

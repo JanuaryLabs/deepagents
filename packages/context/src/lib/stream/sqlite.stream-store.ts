@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
 import STREAM_DDL from './ddl.stream.sqlite.sql';
 import type {
+  ListStreamIdsOptions,
   StreamChunkData,
   StreamData,
   StreamStatus,
@@ -140,6 +141,21 @@ export class SqliteStreamStore extends StreamStore {
         }
       | undefined;
     return row?.status;
+  }
+
+  async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
+    let sql = 'SELECT id FROM streams';
+    const params: SQLInputValue[] = [];
+
+    if (options?.status) {
+      sql += ' WHERE status = ?';
+      params.push(options.status);
+    }
+
+    sql += ' ORDER BY createdAt ASC, id ASC';
+
+    const rows = this.#stmt(sql).all(...params) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
   }
 
   async updateStreamStatus(
