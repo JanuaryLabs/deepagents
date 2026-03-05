@@ -418,6 +418,32 @@ describe('sql proxy enforcement', () => {
     assert.match(blockedCompound.stderr, /sql run/i);
   });
 
+  it('normalizes literal backslash-n in sql validate', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT\\n  1 as val"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('normalizes literal backslash-n in sql run', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT\\n  1 as val"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
   it('blocks direct DB CLI in command substitution', async () => {
     const { tools } = await createResultTools({
       adapter: (await init_db('')).adapter,

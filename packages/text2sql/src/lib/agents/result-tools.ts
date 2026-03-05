@@ -96,7 +96,11 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
       usage: 'run "SELECT ..."',
       description: 'Execute query and store results',
       handler: async (args, ctx) => {
-        const rawQuery = args.join(' ').trim();
+        const rawQuery = args
+          .join(' ')
+          .trim()
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t');
 
         if (!rawQuery) {
           return {
@@ -165,7 +169,11 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
       usage: 'validate "SELECT ..."',
       description: 'Validate query syntax',
       handler: async (args) => {
-        const rawQuery = args.join(' ').trim();
+        const rawQuery = args
+          .join(' ')
+          .trim()
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t');
 
         if (!rawQuery) {
           return {
