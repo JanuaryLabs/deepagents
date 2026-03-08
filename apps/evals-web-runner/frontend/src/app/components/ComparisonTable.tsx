@@ -1,6 +1,6 @@
-import type { ComparisonResult } from '@evals/client';
 import { Fragment } from 'react';
 
+import type { Endpoints } from '../hooks/use-client.ts';
 import { formatDelta } from '../lib/format.ts';
 import {
   Card,
@@ -16,6 +16,7 @@ import {
 } from '../shadcn/index.ts';
 
 type RegressionDetail = { exceeds: boolean; meanDelta: number };
+type ComparisonResult = Endpoints['GET /compare']['output']['result'];
 type ScorerDelta = {
   baseline: number;
   candidate: number;
@@ -178,7 +179,10 @@ export function ComparisonTable({ result }: { result: ComparisonResult }) {
                     {diff.index}
                   </TableCell>
                   {scorerNames.map((name) => {
-                    const deltas = diff.scorerDeltas as unknown as Record<string, ScorerDelta>;
+                    const deltas = diff.scorerDeltas as unknown as Record<
+                      string,
+                      ScorerDelta
+                    >;
                     const d = deltas[name];
                     if (!d) {
                       return (

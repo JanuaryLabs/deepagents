@@ -47,11 +47,21 @@ const DETERMINISTIC_SCORERS = [
 
 const LLM_SCORERS = [{ name: 'factuality', label: 'Factuality' }];
 
+function toModelSlug(modelId: string): string {
+  const parts = modelId.split('/');
+  return parts[parts.length - 1] ?? modelId;
+}
+
+function getModelProvider(modelId: string): string {
+  return modelId.split('/')[0] ?? modelId;
+}
+
 export default function NewEvalPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fromRunId = searchParams.get('from');
   const suiteId = searchParams.get('suiteId');
+  const prefillRunId = fromRunId ?? '';
 
   const [name, setName] = useState('');
   const [models, setModels] = useState<string[]>([]);
@@ -92,7 +102,7 @@ export default function NewEvalPage() {
 
   const { data: prefillData } = useData(
     'GET /runs/{id}',
-    { id: fromRunId! },
+    { id: prefillRunId },
     {
       enabled: !!fromRunId,
     },
@@ -285,9 +295,7 @@ export default function NewEvalPage() {
                       key={group.provider}
                     >
                       {group.models.map((model) => {
-                        const modelSlug = model.id.includes('/')
-                          ? model.id.split('/').pop()!
-                          : model.id;
+                        const modelSlug = toModelSlug(model.id);
                         const fullId = `${group.provider}/${modelSlug}`;
                         return (
                           <ModelSelectorItem
@@ -501,11 +509,9 @@ export default function NewEvalPage() {
                       {scorerModel ? (
                         <>
                           <ModelSelectorLogo
-                            provider={scorerModel.split('/')[0]!}
+                            provider={getModelProvider(scorerModel)}
                           />
-                          <ModelSelectorName>
-                            {scorerModel}
-                          </ModelSelectorName>
+                          <ModelSelectorName>{scorerModel}</ModelSelectorName>
                         </>
                       ) : modelsLoading ? (
                         'Loading models...'
@@ -526,21 +532,15 @@ export default function NewEvalPage() {
                           key={group.provider}
                         >
                           {group.models.map((model) => {
-                            const modelSlug = model.id.includes('/')
-                              ? model.id.split('/').pop()!
-                              : model.id;
+                            const modelSlug = toModelSlug(model.id);
                             const fullId = `${group.provider}/${modelSlug}`;
                             return (
                               <ModelSelectorItem
                                 key={fullId}
                                 value={fullId}
-                                onSelect={() =>
-                                  handleScorerModelSelect(fullId)
-                                }
+                                onSelect={() => handleScorerModelSelect(fullId)}
                               >
-                                <ModelSelectorLogo
-                                  provider={group.provider}
-                                />
+                                <ModelSelectorLogo provider={group.provider} />
                                 <ModelSelectorName>
                                   {model.name}
                                 </ModelSelectorName>

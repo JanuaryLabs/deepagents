@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 
+import { useData } from '../../hooks/use-client.ts';
 import {
   Badge,
   Button,
@@ -12,18 +12,6 @@ import {
   TableHeader,
   TableRow,
 } from '../../shadcn/index.ts';
-import { useData } from '../../hooks/use-client.ts';
-
-interface SuiteListItem {
-  id: string;
-  name: string;
-  created_at: number;
-  runCount: number;
-  runningCount: number;
-  completedCount: number;
-  failedCount: number;
-  lastStartedAt: number | null;
-}
 
 export default function SuiteList() {
   const { data: suites, isLoading } = useData('GET /suites');
@@ -82,8 +70,7 @@ export default function SuiteList() {
                         {suite.name}
                       </Link>
                       <p className="text-muted-foreground text-xs">
-                        Created{' '}
-                        {new Date(suite.created_at).toLocaleString()}
+                        Created {new Date(suite.created_at).toLocaleString()}
                       </p>
                     </TableCell>
                     <TableCell>{suite.runCount}</TableCell>

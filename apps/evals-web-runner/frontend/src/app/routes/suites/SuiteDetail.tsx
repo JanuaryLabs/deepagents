@@ -31,40 +31,13 @@ import {
   TableRow,
 } from '../../shadcn/index.ts';
 
-interface SuiteRow {
-  id: string;
-  name: string;
-  created_at: number;
-}
-
-interface RunSummary {
-  totalCases: number;
-  passCount: number;
-  failCount: number;
-  meanScores: Record<string, number>;
-  totalLatencyMs: number;
-  totalTokensIn: number;
-  totalTokensOut: number;
-}
-
-interface RunRow {
-  id: string;
-  suite_id: string;
-  name: string;
-  model: string;
-  config: Record<string, unknown> | null;
-  started_at: number;
-  finished_at: number | null;
-  status: 'running' | 'completed' | 'failed';
-  summary: RunSummary | null;
-}
-
 export default function SuiteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const suiteId = id ?? '';
   const { data, isLoading } = useData(
     'GET /suites/{id}',
-    { id: id! },
+    { id: suiteId },
     {
       enabled: !!id,
       refetchInterval: (query) => {
@@ -206,8 +179,7 @@ export default function SuiteDetailPage() {
             )}
             <p className="text-muted-foreground mt-1 text-sm">
               Suite &middot; {runs.length} run{runs.length !== 1 ? 's' : ''}{' '}
-              &middot; Created{' '}
-              {new Date(suite.created_at).toLocaleDateString()}
+              &middot; Created {new Date(suite.created_at).toLocaleDateString()}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -301,11 +273,10 @@ export default function SuiteDetailPage() {
 
       {selectedRunIds.size >= 2 && (
         <div className="mb-4 flex items-center gap-3">
-          <Button
-            size="sm"
-            onClick={() => setShowComparison((prev) => !prev)}
-          >
-            {showComparison ? 'Hide Comparison' : `Compare ${selectedRunIds.size} Runs`}
+          <Button size="sm" onClick={() => setShowComparison((prev) => !prev)}>
+            {showComparison
+              ? 'Hide Comparison'
+              : `Compare ${selectedRunIds.size} Runs`}
           </Button>
           {showComparison && (
             <Button
@@ -324,10 +295,7 @@ export default function SuiteDetailPage() {
 
       {showComparison && selectedRunIds.size >= 2 && (
         <div className="mb-8">
-          <SuiteComparison
-            suiteId={suite.id}
-            runIds={[...selectedRunIds]}
-          />
+          <SuiteComparison suiteId={suite.id} runIds={[...selectedRunIds]} />
         </div>
       )}
 
@@ -335,9 +303,7 @@ export default function SuiteDetailPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              {completedRuns.length > 1 && (
-                <TableHead className="w-10" />
-              )}
+              {completedRuns.length > 1 && <TableHead className="w-10" />}
               <TableHead>Run</TableHead>
               <TableHead>Model</TableHead>
               <TableHead>Started</TableHead>
@@ -414,7 +380,8 @@ export default function SuiteDetailPage() {
                   <TableCell className="text-xs">
                     {run.summary
                       ? formatTokens(
-                          run.summary.totalTokensIn + run.summary.totalTokensOut,
+                          run.summary.totalTokensIn +
+                            run.summary.totalTokensOut,
                         )
                       : '\u2014'}
                   </TableCell>
@@ -424,9 +391,7 @@ export default function SuiteDetailPage() {
                       size="sm"
                       className="text-destructive"
                       disabled={deleteRunMutation.isPending}
-                      onClick={() =>
-                        deleteRunMutation.mutate({ id: run.id })
-                      }
+                      onClick={() => deleteRunMutation.mutate({ id: run.id })}
                     >
                       Delete
                     </Button>

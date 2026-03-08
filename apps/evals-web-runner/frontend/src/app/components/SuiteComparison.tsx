@@ -1,3 +1,4 @@
+import { toPng } from 'html-to-image';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Bar,
@@ -12,7 +13,6 @@ import {
   YAxis,
 } from 'recharts';
 import { toast } from 'sonner';
-import { toPng } from 'html-to-image';
 
 import { useData } from '../hooks/use-client.ts';
 import { formatDuration, formatTokens } from '../lib/format.ts';
@@ -155,7 +155,9 @@ export function SuiteComparison({
       </div>
       <div ref={captureRef} className="space-y-8">
         <SummaryCards runs={comparison.runs} />
-        <div className={`grid gap-6 ${showRadar ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div
+          className={`grid gap-6 ${showRadar ? 'grid-cols-2' : 'grid-cols-1'}`}
+        >
           <ScorerBarChart
             runs={comparison.runs}
             scorerNames={comparison.scorerNames}
@@ -183,7 +185,10 @@ function SummaryCards({ runs }: { runs: CompareRun[] }) {
   const bestLatency = Math.min(...runs.map((r) => r.summary.totalLatencyMs));
 
   return (
-    <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${runs.length}, 1fr)` }}>
+    <div
+      className="grid gap-4"
+      style={{ gridTemplateColumns: `repeat(${runs.length}, 1fr)` }}
+    >
       {runs.map((run, i) => {
         const passRate =
           run.summary.totalCases > 0
@@ -209,13 +214,19 @@ function SummaryCards({ runs }: { runs: CompareRun[] }) {
             <CardContent className="space-y-1 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Pass Rate</span>
-                <span className={isBestPass ? 'font-semibold text-green-600' : ''}>
+                <span
+                  className={isBestPass ? 'font-semibold text-green-600' : ''}
+                >
                   {passRate}%
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Latency</span>
-                <span className={isBestLatency ? 'font-semibold text-green-600' : ''}>
+                <span
+                  className={
+                    isBestLatency ? 'font-semibold text-green-600' : ''
+                  }
+                >
                   {formatDuration(run.summary.totalLatencyMs)}
                 </span>
               </div>
@@ -237,12 +248,12 @@ function SummaryCards({ runs }: { runs: CompareRun[] }) {
 
 function buildChartConfig(runs: CompareRun[]): ChartConfig {
   const config: ChartConfig = {};
-  for (let i = 0; i < runs.length; i++) {
-    config[runs[i]!.id] = {
-      label: `${runs[i]!.name} (${runs[i]!.model})`,
+  runs.forEach((run, i) => {
+    config[run.id] = {
+      label: `${run.name} (${run.model})`,
       color: RUN_COLORS[i % RUN_COLORS.length],
     };
-  }
+  });
   return config;
 }
 
@@ -416,21 +427,29 @@ function CaseScoreTable({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="sticky left-0 bg-background z-10">#</TableHead>
+                <TableHead className="bg-background sticky left-0 z-10">
+                  #
+                </TableHead>
                 {scorerNames.map((scorer) => (
-                  <TableHead key={scorer} colSpan={runs.length} className="text-center">
+                  <TableHead
+                    key={scorer}
+                    colSpan={runs.length}
+                    className="text-center"
+                  >
                     {scorer}
                   </TableHead>
                 ))}
               </TableRow>
               <TableRow>
-                <TableHead className="sticky left-0 bg-background z-10" />
+                <TableHead className="bg-background sticky left-0 z-10" />
                 {scorerNames.map((scorer) =>
                   runs.map((run, i) => (
                     <TableHead key={`${scorer}-${run.id}`} className="text-xs">
                       <span
                         className="mr-1 inline-block h-2 w-2 rounded-full"
-                        style={{ backgroundColor: RUN_COLORS[i % RUN_COLORS.length] }}
+                        style={{
+                          backgroundColor: RUN_COLORS[i % RUN_COLORS.length],
+                        }}
                       />
                       {run.name}
                     </TableHead>
@@ -441,7 +460,7 @@ function CaseScoreTable({
             <TableBody>
               {caseDiffs.map((diff) => (
                 <TableRow key={diff.index}>
-                  <TableCell className="text-muted-foreground sticky left-0 bg-background z-10">
+                  <TableCell className="text-muted-foreground bg-background sticky left-0 z-10">
                     {diff.index}
                   </TableCell>
                   {scorerNames.map((scorer) => {

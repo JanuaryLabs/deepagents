@@ -25,16 +25,6 @@ import {
   TableRow,
 } from '../../shadcn/index.ts';
 
-interface RunSummary {
-  totalCases: number;
-  passCount: number;
-  failCount: number;
-  meanScores: Record<string, number>;
-  totalLatencyMs: number;
-  totalTokensIn: number;
-  totalTokensOut: number;
-}
-
 interface ScoreEntry {
   scorer_name: string;
   score: number;
@@ -55,30 +45,14 @@ interface CaseWithScores {
   scores: ScoreEntry[];
 }
 
-interface RunRow {
-  id: string;
-  suite_id: string;
-  name: string;
-  model: string;
-  config: Record<string, unknown> | null;
-  started_at: number;
-  finished_at: number | null;
-  status: string;
-  summary: RunSummary | null;
-}
-
-interface SuiteRow {
-  id: string;
-  name: string;
-}
-
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const runId = id ?? '';
   // TODO: use "usePolling"
   const { data, isLoading } = useData(
     'GET /runs/{id}',
-    { id: id! },
+    { id: runId },
     {
       enabled: !!id,
       refetchInterval: (query) => {

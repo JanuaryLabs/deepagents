@@ -13,46 +13,6 @@ import {
   Skeleton,
 } from '../../shadcn/index.ts';
 
-interface RunRow {
-  id: string;
-  name: string;
-  model: string;
-  started_at: number;
-}
-
-interface ComparisonResponse {
-  baseline: RunRow;
-  candidate: RunRow;
-  result: {
-    caseDiffs: Array<{
-      index: number;
-      scorerDeltas: Record<
-        string,
-        { baseline: number; candidate: number; delta: number; change: string }
-      >;
-    }>;
-    scorerSummaries: Record<
-      string,
-      {
-        meanDelta: number;
-        improvedCount: number;
-        regressedCount: number;
-        unchangedCount: number;
-      }
-    >;
-    costDelta: {
-      latencyDeltaMs: number;
-      tokenInDelta: number;
-      tokenOutDelta: number;
-    };
-    totalCasesCompared: number;
-    regression: {
-      regressed: boolean;
-      details: Record<string, { meanDelta: number; exceeds: boolean }>;
-    };
-  };
-}
-
 export default function ComparePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const baselineParam = searchParams.get('baseline') ?? '';

@@ -16,12 +16,13 @@ export function useSuiteEvents(
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
 
-  const key = runningRunIds.join(',');
+  const runIdsKey = runningRunIds.join(',');
 
   useEffect(() => {
-    if (runningRunIds.length === 0) return;
+    const runIds = runIdsKey ? runIdsKey.split(',') : [];
+    if (runIds.length === 0) return;
 
-    const sources = runningRunIds.map((runId) => {
+    const sources = runIds.map((runId) => {
       const es = new EventSource(`/api/runs/${runId}/events`);
 
       es.addEventListener('case:scored', (e) => {
@@ -44,5 +45,5 @@ export function useSuiteEvents(
     });
 
     return () => sources.forEach((es) => es.close());
-  }, [key]);
+  }, [runIdsKey]);
 }

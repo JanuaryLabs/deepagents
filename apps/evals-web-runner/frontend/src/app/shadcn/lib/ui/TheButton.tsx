@@ -69,7 +69,7 @@ function IconRenderer({ icon }: { icon: React.ReactNode | LucideIcon }) {
     const Icon = icon;
     return <Icon className="size-4" />;
   }
-  return <>{icon}</>;
+  return icon;
 }
 
 function LoadingSpinner() {
@@ -153,7 +153,7 @@ function WithTooltip({
   children: React.ReactNode;
 }) {
   if (!tooltip) {
-    return <>{children}</>;
+    return children;
   }
 
   return (

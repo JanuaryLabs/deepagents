@@ -85,7 +85,7 @@ export default function PromptsPage() {
     }
   }
 
-  function useAsBase(name: string, content: string) {
+  function handleUseAsBase(name: string, content: string) {
     setPromptName(name);
     setPromptContent(content);
   }
@@ -142,76 +142,83 @@ export default function PromptsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {groups.map((group) => (
-            <Card key={group.name}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-sm">{group.name}</CardTitle>
-                    <p className="text-muted-foreground text-xs">
-                      {group.versions.length} version
-                      {group.versions.length === 1 ? '' : 's'} · Latest:{' '}
-                      {formatDate(group.versions[0]!.created_at)}
-                    </p>
+          {groups.map((group) => {
+            const latestVersion = group.versions[0];
+            if (!latestVersion) return null;
+
+            return (
+              <Card key={group.name}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-sm">{group.name}</CardTitle>
+                      <p className="text-muted-foreground text-xs">
+                        {group.versions.length} version
+                        {group.versions.length === 1 ? '' : 's'} · Latest:{' '}
+                        {formatDate(latestVersion.created_at)}
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      v{latestVersion.version} latest
+                    </Badge>
                   </div>
-                  <Badge variant="outline">
-                    v{group.versions[0]!.version} latest
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-lg border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Version</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead>Preview</TableHead>
-                        <TableHead />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.versions.map((p) => (
-                        <TableRow key={p.id}>
-                          <TableCell className="font-medium">
-                            v{p.version}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-xs">
-                            {new Date(p.created_at).toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground max-w-2xl font-mono text-xs">
-                            {truncate(p.content)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => useAsBase(p.name, p.content)}
-                              >
-                                Use as base
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive"
-                                onClick={() =>
-                                  deleteMutation.mutate({ id: p.id })
-                                }
-                                disabled={deleteMutation.isPending}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </TableCell>
+                </CardHeader>
+                <CardContent>
+                  <div className="rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Version</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Preview</TableHead>
+                          <TableHead />
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                      </TableHeader>
+                      <TableBody>
+                        {group.versions.map((p) => (
+                          <TableRow key={p.id}>
+                            <TableCell className="font-medium">
+                              v{p.version}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {new Date(p.created_at).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground max-w-2xl font-mono text-xs">
+                              {truncate(p.content)}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleUseAsBase(p.name, p.content)
+                                  }
+                                >
+                                  Use as base
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive"
+                                  onClick={() =>
+                                    deleteMutation.mutate({ id: p.id })
+                                  }
+                                  disabled={deleteMutation.isPending}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

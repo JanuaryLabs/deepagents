@@ -34,17 +34,31 @@ function truncateValue(val: unknown, max = 120): string {
 export default function DatasetDetailPage() {
   const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
-  const decodedName = decodeURIComponent(name!);
+  const decodedName = name ? decodeURIComponent(name) : '';
 
   const [offset, setOffset] = useState(0);
 
   const { data: allDatasets } = useData('GET /datasets');
 
-  const { data, isLoading } = useData('GET /datasets/{name}/rows', {
-    name: decodedName,
-    offset,
-    limit: PAGE_SIZE,
-  });
+  const { data, isLoading } = useData(
+    'GET /datasets/{name}/rows',
+    {
+      name: decodedName,
+      offset,
+      limit: PAGE_SIZE,
+    },
+    {
+      enabled: !!decodedName,
+    },
+  );
+
+  if (!decodedName) {
+    return (
+      <div className="p-8">
+        <p className="text-muted-foreground">Dataset not found.</p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
