@@ -90,12 +90,20 @@ function validateReadOnly(query: string): { valid: boolean; error?: string } {
 
 type MetaStore = AsyncLocalStorage<{ value?: Record<string, unknown> }>;
 
+const SQL_VALIDATE_REMINDER =
+  'Always run `sql validate` before `sql run` to catch syntax errors early.';
+
 function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
   return createCommand('sql', {
     run: {
       usage: 'run "SELECT ..."',
       description: 'Execute query and store results',
       handler: async (args, ctx) => {
+        const store = metaStore.getStore();
+        if (store) {
+          store.value = { ...store.value, reminder: SQL_VALIDATE_REMINDER };
+        }
+
         const rawQuery = args
           .join(' ')
           .trim()
@@ -120,8 +128,9 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
         }
 
         const query = adapter.format(rawQuery);
-        const store = metaStore.getStore();
-        if (store) store.value = { formattedSql: query };
+        if (store) {
+          store.value = { ...store.value, formattedSql: query };
+        }
 
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
@@ -194,7 +203,7 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
 
         const query = adapter.format(rawQuery);
         const store = metaStore.getStore();
-        if (store) store.value = { formattedSql: query };
+        if (store) store.value = { ...store.value, formattedSql: query };
 
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
@@ -1216,8 +1225,11 @@ export async function createResultTools(options: ResultToolsOptions) {
 
       return metaStore.run({}, async () => {
         const result = await execute({ command }, execOptions);
-        const meta = metaStore.getStore()?.value;
-        return meta ? { ...result, meta } : result;
+        const storeValue = metaStore.getStore()?.value;
+        if (!storeValue) return result;
+
+        const { reminder, ...meta } = storeValue;
+        return { ...result, meta, reminder };
       });
     },
     toModelOutput: ({ output }) => {

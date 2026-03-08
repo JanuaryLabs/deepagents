@@ -1220,6 +1220,79 @@ describe('sql command integration', () => {
   });
 });
 
+describe('sql run validation reminder', () => {
+  let execute: NonNullable<
+    Awaited<ReturnType<typeof createResultTools>>['tools']['bash']['execute']
+  >;
+
+  beforeEach(async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+    execute = tools.bash.execute!;
+  });
+
+  const run = (command: string) =>
+    execute({ command, reasoning: 'test' }, {} as any) as unknown as Promise<
+      Record<string, unknown>
+    >;
+
+  const assertHasReminder = (result: Record<string, unknown>) => {
+    assert.ok(typeof result.reminder === 'string', 'should have reminder prop');
+    assert.match(result.reminder as string, /sql validate/i);
+  };
+
+  it('sql run success includes reminder prop', async () => {
+    const result = await run('sql run "SELECT 1 as test"');
+    assert.strictEqual(result.exitCode, 0);
+    assertHasReminder(result);
+  });
+
+  it('sql run no query includes reminder prop', async () => {
+    const result = await run('sql run');
+    assert.notStrictEqual(result.exitCode, 0);
+    assertHasReminder(result);
+  });
+
+  it('sql run read-only violation includes reminder prop', async () => {
+    const result = await run('sql run "DROP TABLE foo"');
+    assert.notStrictEqual(result.exitCode, 0);
+    assertHasReminder(result);
+  });
+
+  it('sql run syntax error includes reminder prop', async () => {
+    const result = await run('sql run "SELECT * FORM users"');
+    assert.notStrictEqual(result.exitCode, 0);
+    assertHasReminder(result);
+  });
+
+  it('sql run adapter error includes reminder prop', async () => {
+    const result = await run('sql run "SELECT * FROM nonexistent_xyz"');
+    assert.notStrictEqual(result.exitCode, 0);
+    assertHasReminder(result);
+  });
+
+  it('non-sql commands have no reminder prop', async () => {
+    const result = await run('echo hello');
+    assert.strictEqual(
+      result.reminder,
+      undefined,
+      'non-sql commands should not have reminder',
+    );
+  });
+
+  it('sql validate has no reminder prop', async () => {
+    const result = await run('sql validate "SELECT 1"');
+    assert.strictEqual(
+      result.reminder,
+      undefined,
+      'sql validate should not have reminder',
+    );
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SQL Meta via toModelOutput
 // Tests that formatted SQL is exposed in meta but stripped from model context

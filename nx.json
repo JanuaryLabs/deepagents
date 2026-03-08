@@ -127,7 +127,7 @@
     },
     "releaseTagPattern": "release/{version}",
     "version": {
-      "preVersionCommand": "NX_DAEMON=false npx nx run-many -t build --prod",
+      "preVersionCommand": "NX_DAEMON=false npx nx run-many -t build --prod --verbose",
       "conventionalCommits": true
     }
   },

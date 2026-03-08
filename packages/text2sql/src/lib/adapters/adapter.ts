@@ -166,6 +166,23 @@ export abstract class Adapter {
   }
 
   /**
+   * Resolve the allowed entity names (tables + views) from grounding config.
+   * Runs all configured groundings and returns the resolved set of names.
+   * Results are NOT cached — call once and store the result.
+   */
+  async resolveAllowedEntities(): Promise<string[]> {
+    const ctx = createGroundingContext();
+    for (const fn of this.grounding) {
+      const grounding = fn(this);
+      await grounding.execute(ctx);
+    }
+    return [
+      ...ctx.tables.map((t) => t.name),
+      ...ctx.views.map((v) => v.name),
+    ];
+  }
+
+  /**
    * Convert complete grounding context to schema fragments.
    * Called after all groundings have populated ctx with data.
    */
