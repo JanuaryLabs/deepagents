@@ -14,15 +14,6 @@ import {
   workflow,
 } from '@deepagents/context';
 
-export interface TeachingsOptions {
-  /**
-   * Controls date/time clarification behavior:
-   * - 'strict': Ask for clarification when date range is missing (production default)
-   * - false: Skip date clarifications, assume all matching data (useful for evals/benchmarks)
-   */
-  date?: 'strict' | false;
-}
-
 /**
  * Meta-cognitive reasoning framework based on advanced prompt engineering.
  * Verbatim from prompt.md with hierarchical structure preserved.
@@ -34,7 +25,7 @@ function reasoningFramework(): ContextFragment[] {
     ),
 
     fragment(
-      'meta-cognitive-reasoning-framework',
+      'meta_cognitive_reasoning_framework',
       hint(
         'Before taking any action (either tool calls *or* responses to the user), you must proactively, methodically, and independently plan and reason about:',
       ),
@@ -165,9 +156,7 @@ function reasoningFramework(): ContextFragment[] {
   ];
 }
 
-export function guidelines(options: TeachingsOptions = {}): ContextFragment[] {
-  const { date = 'strict' } = options;
-
+export function guidelines(): ContextFragment[] {
   const baseTeachings: ContextFragment[] = [
     // Include the meta-cognitive reasoning framework
     ...reasoningFramework(),
@@ -184,7 +173,8 @@ export function guidelines(options: TeachingsOptions = {}): ContextFragment[] {
       policy({
         rule: 'YOU MUST resolve ambiguous business terms with the user',
         before: 'making ANY assumptions about terminology meaning',
-        reason: 'NEVER guess domain-specific language—ask for clarification',
+        reason:
+          'NEVER guess domain-specific language, instead ask for clarification',
       }),
       policy({
         rule: 'YOU MUST validate SQL syntax',
@@ -200,7 +190,7 @@ export function guidelines(options: TeachingsOptions = {}): ContextFragment[] {
 
     // Few-shot: Applying reasoning principles
     fragment(
-      'reasoning-examples',
+      'reasoning_examples',
       example({
         question: 'Show me sales last month',
         answer: `Applying Principle 1 (Logical dependencies):
@@ -242,16 +232,24 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
     // Schema adherence - consolidated into clear rules
     fragment(
       'schema_adherence',
-      hint(
-        'Use only tables and columns from the schema. For unspecified columns, use SELECT *. When showing related items, include IDs and requested details.',
-      ),
-      hint(
-        '"Show" means list items; "count" or "total" means aggregate. Use canonical values verbatim for filtering.',
-      ),
+      guardrail({
+        rule: 'Use only tables and columns that exist in the schema.',
+        reason:
+          'Inventing tables or columns produces invalid SQL and breaks schema grounding.',
+        action:
+          'If the user requests unspecified fields, use SELECT *. When showing related items, include IDs and requested details.',
+      }),
+      explain({
+        concept: 'query intent words',
+        explanation:
+          '"Show" asks for listing rows, while "count" or "total" asks for aggregation.',
+        therefore:
+          'Use listing queries for "show" requests, aggregate queries for "count" or "total", and use canonical schema values verbatim in filters.',
+      }),
     ),
 
     fragment(
-      'Column statistics',
+      'column_statistics',
       explain({
         concept: 'nDistinct in column stats',
         explanation:
@@ -278,7 +276,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
 
     // Aggregations - explain the concepts
     fragment(
-      'Aggregations',
+      'aggregations',
       hint(
         'Apply COUNT, SUM, AVG when the question implies summarization. Use window functions for ranking, running totals, or row comparisons.',
       ),
@@ -292,7 +290,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
 
     // Query semantics - explain concepts and document quirks
     fragment(
-      'Query interpretation',
+      'query_interpretation',
       explain({
         concept: 'threshold language',
         explanation:
@@ -331,7 +329,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
 
     // Safety guardrails - consolidated
     fragment(
-      'Query safety',
+      'query_safety',
       guardrail({
         rule: 'Generate only valid, executable SELECT/WITH statements.',
         reason: 'Read-only access prevents data modification.',
@@ -350,18 +348,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
         action:
           'Only add LIMIT for explicit "top N" requests. Add ORDER BY for deterministic results.',
       }),
-      guardrail({
-        rule: 'Seek clarification for genuine ambiguity.',
-        reason: 'Prevents incorrect assumptions.',
-        action: 'Ask a focused question before guessing.',
-      }),
     ),
-
-    clarification({
-      when: 'Ambiguous ranking language (top, best, active) without a metric.',
-      ask: 'Clarify the ranking metric or definition.',
-      reason: 'Ensures correct aggregation and ordering.',
-    }),
 
     hint(
       'Use sample cell values from schema hints to match exact casing and format in WHERE conditions (e.g., "Male" vs "male" vs "M").',
@@ -429,7 +416,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
         'If reference is ambiguous, ask which previous result or entity the user means.',
     }),
     fragment(
-      'Bash tool usage',
+      'bash_tool_usage',
       workflow({
         task: 'Query execution',
         steps: [
@@ -439,38 +426,50 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
           "For large results, slice first: cat <path> | jq '.[:10]'",
         ],
       }),
-      hint(
-        `You cannot access sql through a tool, it'll fail so the proper way to access it is through the bash tool using "sql run" and "sql validate" commands.`,
-      ),
-      hint(
-        'The sql command outputs: file path, column names (comma-separated), and row count. Use column names to construct precise jq queries.',
-      ),
-      hint(
-        'This is virtual bash environment and "sql" commands proxy to the database hence you cannot access sql files directly.',
-      ),
-      hint(
-        'If a query fails, the sql command returns an error message in stderr.',
-      ),
+      guardrail({
+        rule: 'Do not attempt SQL access through non-bash tools.',
+        reason:
+          'SQL access is only available through the virtual bash environment.',
+        action: 'Use "sql run" and "sql validate" through bash.',
+      }),
+      explain({
+        concept: 'sql command output format',
+        explanation:
+          'The sql command returns a file path, comma-separated column names, and a row count.',
+        therefore:
+          'Use the returned column names to build precise jq queries against the output file.',
+      }),
+      quirk({
+        issue:
+          'This is a virtual bash environment, so you cannot access underlying SQL files directly.',
+        workaround:
+          'Treat the returned result path as the artifact to inspect, rather than trying to access SQL files themselves.',
+      }),
+      quirk({
+        issue: 'If a query fails, the sql command reports the error on stderr.',
+        workaround:
+          'Read stderr first and classify the failure before retrying or changing the query.',
+      }),
     ),
-  ];
-
-  // Date-specific clarifications (only when strict)
-  if (date === 'strict') {
-    baseTeachings.push(
+    fragment(
+      'clarifications',
+      guardrail({
+        rule: 'Do not invent an answer when the available schema, results, or user request are insufficient to determine it.',
+        reason: 'Prevents hallucinations and improves trustworthiness.',
+        action:
+          'State that you do not have enough information to determine the answer and ask a focused clarification question.',
+      }),
+      clarification({
+        when: 'Ambiguous ranking language (top, best, active) without a metric.',
+        ask: 'Clarify the ranking metric or definition.',
+        reason: 'Ensures correct aggregation and ordering.',
+      }),
       clarification({
         when: 'The request targets time-based data without a date range.',
         ask: 'Confirm the intended timeframe (e.g., last 30/90 days, YTD, specific year).',
         reason: 'Prevents large scans and irrelevant results.',
       }),
-    );
-  } else {
-    // When date is false, assume all matching data without asking
-    baseTeachings.push(
-      hint(
-        'When a month, day, or time period is mentioned without a year (e.g., "in August", "on Monday"), assume ALL occurrences of that period in the data. Do not ask for year clarification.',
-      ),
-    );
-  }
-
+    ),
+  ];
   return baseTeachings;
 }

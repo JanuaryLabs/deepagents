@@ -365,7 +365,20 @@ describe('BigQuery adapter', () => {
     const fragments = await adapter.introspect();
 
     const dialect = fragments.find((f) => f.name === 'dialectInfo');
-    assert.deepStrictEqual(dialect?.data, { dialect: 'bigquery' });
+    assert.deepStrictEqual(dialect?.data, {
+      dialect: 'bigquery',
+      details: {
+        identifierQuote: '`',
+        identifiers: {
+          qualifiedTable: 'dataset.table',
+          nestedFieldPath: 'col.path.to.field',
+        },
+        parameters: {
+          positional: '?',
+          named: '@name',
+        },
+      },
+    });
 
     const tableFrags = fragments.filter((f) => f.name === 'table');
 

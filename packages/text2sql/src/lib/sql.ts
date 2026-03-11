@@ -28,7 +28,7 @@ import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
 import { TrackedFs } from './fs/tracked-fs.ts';
-import { type TeachingsOptions, guidelines } from './instructions.ts';
+import { guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
 export type RenderingTools = Record<string, Tool<unknown, never>>;
@@ -40,7 +40,6 @@ export class Text2Sql {
     context: (...fragments: ContextFragment[]) => ContextEngine;
     tools?: RenderingTools;
     introspection: JsonCache<ContextFragment[]>;
-    teachingsOptions?: TeachingsOptions;
     transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     filesystem: IFileSystem;
   };
@@ -52,12 +51,9 @@ export class Text2Sql {
     tools?: RenderingTools;
     model: AgentModel;
     transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-    /** @see TeachingsOptions */
-    teachingsOptions?: TeachingsOptions;
     filesystem: IFileSystem;
   }) {
     this.#config = {
-      teachingsOptions: config.teachingsOptions,
       adapter: config.adapter,
       context: config.context,
       tools: config.tools ?? {},
@@ -132,7 +128,7 @@ export class Text2Sql {
     const trackedFs = new TrackedFs(this.#config.filesystem);
 
     const context = this.#config.context(
-      ...guidelines(this.#config.teachingsOptions),
+      ...guidelines(),
       ...(await this.index()),
     );
 

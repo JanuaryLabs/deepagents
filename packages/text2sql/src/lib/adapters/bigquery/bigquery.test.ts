@@ -128,7 +128,7 @@ describe('BigQuery adapter class', () => {
       const parsed = JSON.parse(result as string);
       assert.strictEqual(parsed.error, 'syntax error at position 5');
       assert.strictEqual(parsed.error_type, 'BIGQUERY_ERROR');
-      assert.strictEqual(parsed.sql_attempted, 'SELECT bad');
+      assert.strictEqual(parsed.sql_attempted, adapter.format('SELECT bad'));
     });
 
     it('formats string errors', async () => {

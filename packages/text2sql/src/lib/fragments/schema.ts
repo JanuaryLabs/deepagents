@@ -1,4 +1,4 @@
-import type { ContextFragment } from '@deepagents/context';
+import type { ContextFragment, FragmentObject } from '@deepagents/context';
 
 /**
  * Schema fragment builders.
@@ -37,6 +37,7 @@ export function dialectInfo(input: {
   dialect: string;
   version?: string;
   database?: string;
+  details?: FragmentObject;
 }): ContextFragment {
   return {
     name: 'dialectInfo',
@@ -44,6 +45,7 @@ export function dialectInfo(input: {
       dialect: input.dialect,
       ...(input.version && { version: input.version }),
       ...(input.database && { database: input.database }),
+      ...(input.details && { details: input.details }),
     },
   };
 }

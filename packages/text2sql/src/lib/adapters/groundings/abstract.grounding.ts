@@ -1,3 +1,5 @@
+import type { FragmentObject } from '@deepagents/context';
+
 import type { Adapter } from '../adapter.ts';
 import type { GroundingContext } from './context.ts';
 
@@ -13,7 +15,7 @@ export interface AdapterInfo {
   dialect: string;
   version?: string;
   database?: string;
-  details?: Record<string, unknown>;
+  details?: FragmentObject;
 }
 export type AdapterInfoProvider =
   | AdapterInfo

@@ -12,6 +12,7 @@ import { describe, it } from 'node:test';
 
 import { fragment } from '@deepagents/context';
 import { SQLValidationError, toSql } from '@deepagents/text2sql';
+import { tables } from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../../tests/sqlite.ts';
 
@@ -130,6 +131,44 @@ describe('toSql', () => {
     assert.ok(
       secondCallMessages.includes('syntax error'),
       'Second call should include previous error in prompt',
+    );
+  });
+
+  it('retries when the generated query references an out-of-scope entity', async () => {
+    const { adapter } = await init_db(
+      [
+        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+        'CREATE TABLE secrets (id INTEGER PRIMARY KEY, value TEXT)',
+      ],
+      {
+        grounding: [tables({ filter: ['users'] })],
+        validate: () => undefined,
+      },
+    );
+    const { model, calls } = createCapturingModel([
+      { result: { sql: 'SELECT * FROM secrets', reasoning: 'test' } },
+      { result: { sql: 'SELECT * FROM users', reasoning: 'test' } },
+    ]);
+
+    const result = await toSql({
+      input: 'show all users',
+      adapter,
+      fragments: [],
+      model,
+    });
+
+    assert.strictEqual(result.sql, adapter.format('SELECT * FROM users'));
+    assert.strictEqual(result.attempts, 2);
+    assert.ok(
+      result.errors?.[0]?.includes('OUT_OF_SCOPE'),
+      'scope violations should surface as validation errors',
+    );
+
+    assert.strictEqual(calls.length, 2);
+    const secondCallMessages = JSON.stringify(calls[1].messages);
+    assert.ok(
+      secondCallMessages.includes('OUT_OF_SCOPE'),
+      'retry prompt should include the scope violation payload',
     );
   });
 
@@ -517,23 +556,22 @@ describe('toSql', () => {
   });
 
   it('extracts SQL from markdown code block in response', async () => {
-    const { adapter } = await init_db('', { validate: () => undefined });
+    const { adapter } = await init_db(
+      [
+        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+        'CREATE TABLE "table" ("column" TEXT)',
+      ],
+      {
+        grounding: [tables({ filter: ['users', 'table'] })],
+        validate: () => undefined,
+      },
+    );
 
     const testCases = [
       {
         input: '```sql\nSELECT * FROM users\n```',
         expected: adapter.format('SELECT * FROM users'),
         name: 'standard sql block',
-      },
-      {
-        input: '```SQL\nSELECT * FROM users\n```',
-        expected: adapter.format('```SQL\nSELECT * FROM users\n```'),
-        name: 'uppercase SQL (not extracted - case sensitive)',
-      },
-      {
-        input: '```\nSELECT * FROM users\n```',
-        expected: adapter.format('```\nSELECT * FROM users\n```'),
-        name: 'no language specifier (not extracted)',
       },
       {
         input: '```sql\nSELECT 1\n```\ntext\n```sql\nSELECT 2\n```',
@@ -559,6 +597,39 @@ describe('toSql', () => {
         maxRetries: 1,
       });
       assert.strictEqual(result.sql, expected, `Failed for case: ${name}`);
+    }
+  });
+
+  it('rejects markdown responses that do not extract to valid SQL', async () => {
+    const { adapter } = await init_db('', { validate: () => undefined });
+    const invalidCases = [
+      '```SQL\nSELECT * FROM users\n```',
+      '```\nSELECT * FROM users\n```',
+    ];
+
+    for (const input of invalidCases) {
+      const model = createMockModel({
+        result: { sql: input, reasoning: 'test' },
+      });
+
+      await assert.rejects(
+        () =>
+          toSql({
+            input: 'query',
+            adapter,
+            fragments: [],
+            model,
+            maxRetries: 1,
+          }),
+        (error: unknown) => {
+          assert(SQLValidationError.isInstance(error));
+          assert.match(
+            (error as SQLValidationError).message,
+            /SQL_SCOPE_PARSE_ERROR/,
+          );
+          return true;
+        },
+      );
     }
   });
 
@@ -608,7 +679,13 @@ describe('toSql', () => {
 
   describe('output schema handling', () => {
     it('handles response with reasoning field', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      const { adapter } = await init_db(
+        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+        {
+          grounding: [tables({ filter: ['users'] })],
+          validate: () => undefined,
+        },
+      );
       const model = createMockModel({
         result: {
           sql: 'SELECT * FROM users',
@@ -718,7 +795,13 @@ describe('toSql', () => {
     });
 
     it('handles input with special characters', async () => {
-      const { adapter } = await init_db('', { validate: () => undefined });
+      const { adapter } = await init_db(
+        'CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)',
+        {
+          grounding: [tables({ filter: ['users'] })],
+          validate: () => undefined,
+        },
+      );
       const { model, calls } = createCapturingModel([
         { result: { sql: 'SELECT email FROM users', reasoning: 'test' } },
       ]);

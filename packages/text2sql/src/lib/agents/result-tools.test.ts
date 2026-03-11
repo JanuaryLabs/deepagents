@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import type { SkillPathMapping } from '@deepagents/context';
 import { TrackedFs, createResultTools } from '@deepagents/text2sql';
+import { tables } from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../../tests/sqlite.ts';
 
@@ -1218,6 +1219,56 @@ describe('sql command integration', () => {
     assert.notStrictEqual(result.exitCode, 0);
     assert.ok(result.stderr.length > 0, 'Should have error message');
   });
+
+  it('sql validate inherits adapter-level runtime scope enforcement', async () => {
+    const { adapter } = await init_db(
+      [
+        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+        'CREATE TABLE secrets (id INTEGER PRIMARY KEY, value TEXT)',
+      ],
+      {
+        grounding: [tables({ filter: ['users'] })],
+      },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT * FROM secrets"',
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(result.stderr, /OUT_OF_SCOPE/);
+  });
+
+  it('sql run inherits adapter-level runtime scope enforcement', async () => {
+    const { adapter } = await init_db(
+      [
+        'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+        'CREATE TABLE secrets (id INTEGER PRIMARY KEY, value TEXT)',
+      ],
+      {
+        grounding: [tables({ filter: ['users'] })],
+      },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT * FROM secrets"',
+    );
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(result.stderr, /OUT_OF_SCOPE/);
+  });
 });
 
 describe('sql run validation reminder', () => {
@@ -1455,7 +1506,12 @@ describe('sql meta via toModelOutput', () => {
   it('parallel bash calls get isolated meta via AsyncLocalStorage', async () => {
     const { tools } = await createResultTools({
       adapter: (
-        await init_db('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)')
+        await init_db(
+          'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
+          {
+            grounding: [tables({ filter: ['users'] })],
+          },
+        )
       ).adapter,
       skillMounts: [],
       filesystem: new InMemoryFs(),
