@@ -1,6 +1,6 @@
 import { type UIMessage, generateId } from 'ai';
 
-import type { FragmentCodec } from './codec.ts';
+import type { FragmentCodec } from './codec/codec.ts';
 
 /**
  * Fragment type identifier.
@@ -19,7 +19,7 @@ export interface ContextFragment<T extends FragmentData = FragmentData> {
    */
   id?: string;
   name: string;
-  data: T;
+  data?: T;
   /**
    * Fragment type for categorization.
    * Messages use 'message' type and are handled separately during resolve().
@@ -62,7 +62,7 @@ export function isFragment(data: unknown): data is ContextFragment {
     typeof data === 'object' &&
     data !== null &&
     'name' in data &&
-    'data' in data &&
+    ('data' in data || 'codec' in data) &&
     typeof (data as ContextFragment).name === 'string'
   );
 }
@@ -103,6 +103,18 @@ export function isMessageFragment(
   return fragment.type === 'message';
 }
 
+export function getFragmentData(fragment: ContextFragment): FragmentData {
+  if (fragment.codec) {
+    return fragment.codec.decode() as FragmentData;
+  }
+
+  if ('data' in fragment) {
+    return fragment.data;
+  }
+
+  throw new Error(`Fragment "${fragment.name}" is missing data and codec`);
+}
+
 export function fragment(
   name: string,
   ...children: FragmentData[]
@@ -130,7 +142,6 @@ export function assistant(message: UIMessage): MessageFragment {
   return {
     id: message.id,
     name: 'assistant',
-    data: 'content',
     type: 'message',
     persist: true,
     codec: {
@@ -155,7 +166,6 @@ export function message(content: string | UIMessage): MessageFragment {
   return {
     id: message.id,
     name: message.role,
-    data: 'content',
     type: 'message',
     persist: true,
     codec: {

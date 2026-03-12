@@ -4,7 +4,8 @@
  * This surface excludes server-only modules (stores, sandbox, skills loader)
  * and only exports APIs that are safe to consume in browser bundles.
  */
-export * from './lib/codec.ts';
+export * from './lib/codec/codec.ts';
+export * from './lib/codec/serialized-fragments.ts';
 export * from './lib/estimate.ts';
 export * from './lib/fragments.ts';
 export * from './lib/fragments/domain.ts';

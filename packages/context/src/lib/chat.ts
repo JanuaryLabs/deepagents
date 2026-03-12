@@ -31,7 +31,7 @@ export function toMessageFragment(item: ChatMessage): MessageFragment {
 
 export function chatMessageToUIMessage(item: ChatMessage): UIMessage {
   if (isFragment(item) && isMessageFragment(item)) {
-    return item.codec.decode() as UIMessage;
+    return item.codec.encode() as UIMessage;
   }
   return item;
 }

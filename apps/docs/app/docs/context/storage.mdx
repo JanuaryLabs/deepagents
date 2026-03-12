@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS messages (
   parentId TEXT,
   name TEXT NOT NULL,
   type TEXT,
-  data TEXT NOT NULL,
+  payload TEXT NOT NULL,
   createdAt INTEGER NOT NULL,
   FOREIGN KEY (chatId) REFERENCES chats(id) ON DELETE CASCADE,
   FOREIGN KEY (parentId) REFERENCES messages(id)
@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS "public"."messages" (
   parentId TEXT,
   name TEXT NOT NULL,
   type TEXT,
-  data JSONB NOT NULL,
+  payload JSONB NOT NULL,
   createdAt BIGINT NOT NULL,
   FOREIGN KEY (chatId) REFERENCES "public"."chats"(id) ON DELETE CASCADE,
   FOREIGN KEY (parentId) REFERENCES "public"."messages"(id)
@@ -410,7 +410,7 @@ BEGIN
     parentId NVARCHAR(255),
     name NVARCHAR(255) NOT NULL,
     type NVARCHAR(255),
-    data NVARCHAR(MAX) NOT NULL,
+    payload NVARCHAR(MAX) NOT NULL,
     createdAt BIGINT NOT NULL,
     FOREIGN KEY (chatId) REFERENCES [dbo].[chats](id) ON DELETE CASCADE,
     FOREIGN KEY (parentId) REFERENCES [dbo].[messages](id)
@@ -529,7 +529,7 @@ model Message {
   parentId  String?
   name      String
   type      String?
-  data      Json
+  payload   Json
   createdAt BigInt
 
   chat     Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
@@ -595,7 +595,7 @@ const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001
 
 // 2. Add messages (queued in memory)
 context.set(user('Hello!'));
-context.set(assistant('Hi there!'));
+context.set(assistantText('Hi there!'));
 
 // 3. Persist to store
 const { headMessageId } = await context.save();
@@ -612,9 +612,9 @@ const { messages } = await context2.resolve({ renderer: new XmlRenderer() });
 Only message fragments (with `type: 'message'`) are saved:
 
 ```typescript
-// Auto-persisted (user/assistant set type: 'message')
+// Auto-persisted (message fragments set type: 'message')
 context.set(user('Hello'));        // ✅ Saved
-context.set(assistant('Hi!'));     // ✅ Saved
+context.set(assistantText('Hi!')); // ✅ Saved
 
 // Not persisted (context fragments stay in memory)
 context.set(role('Be helpful'));   // ❌ Memory only
@@ -726,11 +726,11 @@ const context = new ContextEngine({
 
 ### Per-User SQLite Files
 
-Isolate data by user:
+Isolate conversations by user:
 
 ```typescript
 function getStoreForUser(userId: string) {
-  return new SqliteContextStore(`./data/users/${userId}/context.db`);
+  return new SqliteContextStore(`./var/users/${userId}/context.db`);
 }
 
 const store = getStoreForUser('user-123');

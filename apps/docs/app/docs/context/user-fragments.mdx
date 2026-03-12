@@ -19,10 +19,10 @@ identity({ role: 'Data analyst in the marketing team' });
 identity({ name: 'Sarah' });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `name` | `string` | No | The user's name |
-| `role` | `string` | No | The user's role or position |
+| Parameter | Type     | Required | Description                 |
+| --------- | -------- | -------- | --------------------------- |
+| `name`    | `string` | No       | The user's name             |
+| `role`    | `string` | No       | The user's role or position |
 
 ### persona(input)
 
@@ -41,12 +41,12 @@ persona({
 persona({ name: 'QueryMaster', role: 'Database Analyst' });
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `name` | `string` | Yes | The persona's name |
-| `role` | `string` | No | The persona's expertise or identity |
-| `objective` | `string` | No | What the persona should accomplish |
-| `tone` | `string` | No | Communication style (e.g., friendly, professional, concise) |
+| Parameter   | Type     | Required | Description                                                 |
+| ----------- | -------- | -------- | ----------------------------------------------------------- |
+| `name`      | `string` | Yes      | The persona's name                                          |
+| `role`      | `string` | No       | The persona's expertise or identity                         |
+| `objective` | `string` | No       | What the persona should accomplish                          |
+| `tone`      | `string` | No       | Communication style (e.g., friendly, professional, concise) |
 
 ## Vocabulary
 
@@ -62,20 +62,20 @@ alias('revenue', 'gross revenue before deductions, not net');
 alias('Q4', 'October through December, not fiscal Q4');
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `term` | `string` | Yes | The term the user uses |
-| `meaning` | `string` | Yes | What the user means by this term |
+| Parameter | Type     | Required | Description                      |
+| --------- | -------- | -------- | -------------------------------- |
+| `term`    | `string` | Yes      | The term the user uses           |
+| `meaning` | `string` | Yes      | What the user means by this term |
 
 ### alias vs term
 
 Both deal with vocabulary, but they serve different purposes:
 
-| | `alias()` | `term()` |
-| --- | --- | --- |
-| **Scope** | Per-user | Domain-wide |
-| **Purpose** | Rename: maps user language to correct meaning | Define: explains domain terminology |
-| **Example** | `alias('the big table', 'the orders table')` | `term('NPL', 'non-performing loan')` |
+|             | `alias()`                                     | `term()`                             |
+| ----------- | --------------------------------------------- | ------------------------------------ |
+| **Scope**   | Per-user                                      | Domain-wide                          |
+| **Purpose** | Rename: maps user language to correct meaning | Define: explains domain terminology  |
+| **Example** | `alias('the big table', 'the orders table')`  | `term('NPL', 'non-performing loan')` |
 
 Use `term()` to teach the system what "NPL" means across all users. Use `alias()` when one user says "the big table" but means `orders`.
 
@@ -94,26 +94,10 @@ preference('detail level', 'always show the SQL query in responses');
 preference('row limit', 'default to 50 rows unless I ask for more');
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `aspect` | `string` | Yes | What aspect of output this preference applies to |
-| `value` | `string` | Yes | The user's preference |
-
-### userContext(description)
-
-Captures the user's current working focus. This is temporary context that informs defaults and suggestions, and should be updated as the user's focus shifts.
-
-```typescript
-import { userContext } from '@deepagents/context';
-
-userContext('Preparing Q4 board presentation');
-userContext('Investigating drop in signups last week');
-userContext('Debugging discrepancy in revenue numbers');
-```
-
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `description` | `string` | Yes | What the user is currently working on |
+| Parameter | Type     | Required | Description                                      |
+| --------- | -------- | -------- | ------------------------------------------------ |
+| `aspect`  | `string` | Yes      | What aspect of output this preference applies to |
+| `value`   | `string` | Yes      | The user's preference                            |
 
 ## Learning
 
@@ -125,14 +109,17 @@ Records a user correction to prevent the same mistake from happening again. Use 
 import { correction } from '@deepagents/context';
 
 correction('status column', '1 = active, 0 = inactive, not boolean true/false');
-correction('orders table', 'Use orders_v2, not the deprecated legacy_orders table');
+correction(
+  'orders table',
+  'Use orders_v2, not the deprecated legacy_orders table',
+);
 correction('revenue calculation', 'Must exclude refunds and chargebacks');
 ```
 
-| Parameter | Type | Required | Description |
-| --------- | ---- | -------- | ----------- |
-| `subject` | `string` | Yes | What was misunderstood |
-| `clarification` | `string` | Yes | The correct understanding |
+| Parameter       | Type     | Required | Description               |
+| --------------- | -------- | -------- | ------------------------- |
+| `subject`       | `string` | Yes      | What was misunderstood    |
+| `clarification` | `string` | Yes      | The correct understanding |
 
 ## Combined Example
 
@@ -143,12 +130,11 @@ import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  alias,
+  correction,
   identity,
   persona,
-  alias,
   preference,
-  userContext,
-  correction,
   role,
   user,
 } from '@deepagents/context';
@@ -166,7 +152,6 @@ const context = new ContextEngine({
   alias('the big table', 'the orders table'),
   preference('date format', 'YYYY-MM-DD'),
   preference('output style', 'tables over charts'),
-  userContext('Preparing Q4 board presentation'),
   correction('status column', '1 = active, 0 = inactive'),
 );
 

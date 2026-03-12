@@ -1,0 +1,172 @@
+---
+title: Fragment Serialization
+description: Serialize non-message fragments into a JSON format for database storage and round-trip hydration
+---
+
+Non-message fragments have a built-in storage format. You do not need to invent your own JSON schema for supported fragment builders like `term()`, `hint()`, `guardrail()`, `identity()`, `persona()`, `alias()`, `preference()`, and `correction()`.
+
+Use the serialization helpers when you want to store non-message fragments in your own database and load them back later.
+
+## What This Is For
+
+The `ContextEngine` persists message history in its graph store. Non-message fragments are different:
+
+- They are rendered into the `systemPrompt`
+- They stay in memory inside the engine
+- They are not saved into the conversation graph by `context.save()`
+
+If you want them persisted, store their serialized representation yourself.
+
+## Core APIs
+
+### fromFragment(fragment)
+
+Converts a supported non-message `ContextFragment` into a plain JSON-safe object.
+
+```typescript
+import { fromFragment, term } from '@deepagents/context';
+
+const stored = fromFragment(term('MRR', 'monthly recurring revenue'));
+
+// {
+//   type: 'term',
+//   name: 'MRR',
+//   definition: 'monthly recurring revenue'
+// }
+```
+
+### toFragment(flat)
+
+Hydrates a serialized fragment object back into a runtime `ContextFragment`.
+
+```typescript
+import { toFragment } from '@deepagents/context';
+
+const fragment = toFragment({
+  type: 'hint',
+  text: 'Always exclude test accounts',
+});
+
+context.set(fragment);
+```
+
+### encodeSerializedValue(value)
+
+Lower-level helper for encoding nested `FragmentData` values that may contain non-message fragments.
+
+Most users will not need this directly. It is useful when you are building your own fragment codecs or serializing custom fragment payloads that contain nested fragments.
+
+```typescript
+import { encodeSerializedValue, hint } from '@deepagents/context';
+
+const value = encodeSerializedValue({
+  policies: [
+    'Prefer low-risk actions first',
+    hint('Validate assumptions before destructive actions'),
+  ],
+});
+```
+
+## Database Round Trip
+
+Store the serialized fragment JSON in your own table, then hydrate it when rebuilding context.
+
+```typescript
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  fromFragment,
+  identity,
+  preference,
+  toFragment,
+} from '@deepagents/context';
+
+const storedFragments = [
+  fromFragment(identity({ name: 'Sarah', role: 'Finance manager' })),
+  fromFragment(preference('date format', 'YYYY-MM-DD')),
+];
+
+// Save storedFragments as JSON in your DB.
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
+
+context.set(...storedFragments.map((entry) => toFragment(entry)));
+```
+
+## Supported Fragment Types
+
+The serialization helpers support these non-message fragment types:
+
+- `term`
+- `hint`
+- `guardrail`
+- `explain`
+- `example`
+- `clarification`
+- `workflow`
+- `quirk`
+- `styleGuide`
+- `analogy`
+- `glossary`
+- `role`
+- `principle`
+- `policy`
+- `identity`
+- `persona`
+- `alias`
+- `preference`
+- `correction`
+
+## Nested Fragments
+
+Nested non-message fragments round-trip too.
+
+```typescript
+import { fromFragment, policy, principle } from '@deepagents/context';
+
+const fragment = principle({
+  title: 'Execution order',
+  description: 'Preserve prerequisites',
+  policies: [
+    policy({
+      rule: 'Validate schema first',
+      policies: [policy({ rule: 'Check table names' })],
+    }),
+  ],
+});
+
+const stored = fromFragment(fragment);
+```
+
+This produces serialized nested objects that can be stored as JSON and later passed back through `toFragment(...)`.
+
+## Limitations
+
+- Message fragments are not supported by serialized fragment conversion.
+- Unknown fragment names and unknown serialized fragment types throw errors.
+- Custom fragments only work if their codec encodes into a supported serialized fragment object.
+
+```typescript
+import { assistantText, fromFragment } from '@deepagents/context';
+
+fromFragment(assistantText('Done'));
+// throws: Message fragments are not supported by serialized fragment conversion
+```
+
+## When To Use Which Persistence Path
+
+- Use `context.save()` for conversation messages.
+- Use `fromFragment(...)` and `toFragment(...)` for non-message fragment storage.
+- Use `encodeSerializedValue(...)` only when you need lower-level encoding of nested fragment data.
+
+## Next Steps
+
+- [Fragments](/docs/context/fragments) - Fragment structure and lifecycle
+- [User Fragments](/docs/context/user-fragments) - Identity, preferences, and corrections
+- [Domain Knowledge Fragments](/docs/context/domain-fragments) - Rules, examples, and terminology
+- [Storage](/docs/context/storage) - Conversation graph persistence

@@ -4,7 +4,7 @@ A domain-agnostic context management system for formatting context fragments int
 
 ## Overview
 
-This package provides a flexible way to compose and render context data in multiple formats (XML, Markdown, TOML, TOON). Context fragments are simple data structures that can be transformed into different representations suitable for various LLM prompt styles.
+This package provides a flexible way to compose and render context in multiple formats (XML, Markdown, TOML, TOON). Context fragments are structured units that can be transformed into different prompt representations for different LLM styles.
 
 ## Installation
 
@@ -35,7 +35,7 @@ const fragments = [
   guardrail({
     rule: 'Never expose PII',
     reason: 'Privacy compliance',
-    action: 'Aggregate data instead',
+    action: 'Return aggregates instead',
   }),
 ];
 
@@ -60,7 +60,7 @@ console.log(renderer.render(fragments));
   <guardrail>
     <rule>Never expose PII</rule>
     <reason>Privacy compliance</reason>
-    <action>Aggregate data instead</action>
+    <action>Return aggregates instead</action>
   </guardrail>
 </guardrails>
 ```
@@ -95,7 +95,6 @@ Builder functions for user-specific context:
 | `persona({name, role, tone?})`       | AI persona definition        | `persona({ name: 'Freya', role: '...' })`      |
 | `alias(term, meaning)`               | User-specific vocabulary     | `alias('revenue', 'gross revenue')`            |
 | `preference(aspect, value)`          | Output preferences           | `preference('date format', 'YYYY-MM-DD')`      |
-| `userContext(description)`           | Current working focus        | `userContext('Q4 analysis')`                   |
 | `correction(subject, clarification)` | Corrections to understanding | `correction('status', '1=active, 0=inactive')` |
 
 ### Core Utilities
@@ -244,19 +243,14 @@ const fragment = workflow({
 </workflow>
 ```
 
-### Nested Objects
+### Nested Structures
 
 ```typescript
-const fragment = {
-  name: 'database',
-  data: {
-    host: 'localhost',
-    settings: {
-      timeout: 30,
-      retry: true,
-    },
-  },
-};
+const fragment = fragment(
+  'database',
+  fragment('host', 'localhost'),
+  fragment('settings', fragment('timeout', 30), fragment('retry', true)),
+);
 ```
 
 **XML Output:**
@@ -284,7 +278,6 @@ All renderers automatically skip `null` and `undefined` values.
 ```typescript
 interface ContextFragment {
   name: string;
-  data: FragmentData;
   type?: 'fragment' | 'message';
   persist?: boolean;
   codec?: FragmentCodec;

@@ -305,7 +305,6 @@ export function user(
   return {
     id: message.id,
     name: 'user',
-    data: 'content',
     type: 'message',
     persist: true,
     codec: {

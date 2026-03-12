@@ -25,8 +25,10 @@ describe('Guardrail System', () => {
         { availableTools: ['bash', 'sql'], availableSkills: [] },
       );
 
-      assert.strictEqual(result.type, 'pass');
-      assert.deepStrictEqual(result.part, textDeltaPart);
+      assert.deepStrictEqual(result, {
+        type: 'pass',
+        part: textDeltaPart,
+      });
     });
 
     it('should trigger on error parts', () => {
@@ -151,8 +153,10 @@ describe('Guardrail System', () => {
         availableSkills: [],
       });
 
-      assert.strictEqual(result.type, 'stop');
-      assert.deepStrictEqual(result.part, errorPart);
+      assert.deepStrictEqual(result, {
+        type: 'stop',
+        part: errorPart,
+      });
     });
   });
 
@@ -249,7 +253,7 @@ describe('Guardrail System', () => {
       const failingGuardrail: Guardrail = {
         id: 'failing',
         name: 'Fails',
-        handle: (part) => {
+        handle: () => {
           callOrder.push('failing');
           return fail('Stop here');
         },
@@ -303,8 +307,10 @@ describe('Guardrail System', () => {
         { availableTools: [], availableSkills: [] },
       );
 
-      assert.strictEqual(result.type, 'stop');
-      assert.deepStrictEqual(result.part, part);
+      assert.deepStrictEqual(result, {
+        type: 'stop',
+        part,
+      });
       assert.deepStrictEqual(callOrder, ['stopping']);
     });
 
@@ -333,8 +339,10 @@ describe('Guardrail System', () => {
       });
 
       assert.strictEqual(textResult.type, 'pass');
-      assert.strictEqual(errorResult.type, 'stop');
-      assert.deepStrictEqual(errorResult.part, errorPart);
+      assert.deepStrictEqual(errorResult, {
+        type: 'stop',
+        part: errorPart,
+      });
     });
   });
 
@@ -366,8 +374,10 @@ describe('Guardrail System', () => {
       });
 
       // Empty error text is unknown - should stop without retry
-      assert.strictEqual(result.type, 'stop');
-      assert.deepStrictEqual(result.part, errorPart);
+      assert.deepStrictEqual(result, {
+        type: 'stop',
+        part: errorPart,
+      });
     });
   });
 

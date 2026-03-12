@@ -447,10 +447,11 @@ describe('ToonRenderer', () => {
         },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('level1'));
-      assert.ok(result.includes('level2'));
-      assert.ok(result.includes('level3'));
-      assert.ok(result.includes('deep value'));
+      assert.deepStrictEqual(result.split('\n'), [
+        'level1[1]:',
+        '  - level2:',
+        '      - level3: deep value',
+      ]);
     });
 
     it('renders fragment with object data', () => {

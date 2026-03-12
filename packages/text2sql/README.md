@@ -97,7 +97,7 @@ const text2sql = new Text2Sql({
 
 **Domain fragments** (11 types): `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`, `glossary`.
 
-**User fragments** (6 types): `identity`, `persona`, `alias`, `preference`, `userContext`, `correction`.
+**User fragments** (5 types): `identity`, `persona`, `alias`, `preference`, `correction`.
 
 See [@deepagents/context](../context/README.md) for full fragment documentation.
 

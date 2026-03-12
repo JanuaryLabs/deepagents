@@ -1,4 +1,5 @@
-import type { LanguageModelUsage } from 'ai';
+import { validateUIMessages } from 'ai';
+import type { LanguageModelUsage, UIMessage } from 'ai';
 import { mergeWith } from 'lodash-es';
 
 import {
@@ -10,9 +11,9 @@ import type { ContextFragment, LazyFragment } from './fragments.ts';
 import {
   LAZY_ID,
   assistantText,
+  getFragmentData,
   isLazyFragment,
   isMessageFragment,
-  message,
 } from './fragments.ts';
 import type { Models } from './models.generated.ts';
 import {
@@ -39,7 +40,7 @@ export interface ResolveResult {
   /** Rendered non-message fragments for system prompt */
   systemPrompt: string;
   /** Message fragments decoded to AI SDK format */
-  messages: unknown[];
+  messages: UIMessage[];
 }
 
 /**
@@ -69,6 +70,10 @@ export interface ContextEngineOptions {
   userId: string;
   /** Optional initial metadata for the chat (merged with existing if chat exists) */
   metadata?: Record<string, unknown>;
+}
+
+function estimateMessageContent(data: unknown): string {
+  return typeof data === 'string' ? data : JSON.stringify(data);
 }
 
 /**
@@ -356,7 +361,7 @@ export class ContextEngine {
       );
 
       for (const msg of chain) {
-        messages.push(message(msg.data as never).codec?.decode());
+        messages.push(msg.data);
       }
     }
 
@@ -372,14 +377,17 @@ export class ContextEngine {
     for (const fragment of this.#pendingMessages) {
       if (!fragment.codec) {
         throw new Error(
-          `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before decode.`,
+          `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before encode.`,
         );
       }
-      const decoded = fragment.codec.decode();
-      messages.push(decoded);
+      messages.push(fragment.codec.encode());
     }
 
-    return { systemPrompt, messages };
+    return {
+      systemPrompt,
+      messages:
+        messages.length === 0 ? [] : await validateUIMessages({ messages }),
+    };
   }
 
   /**
@@ -572,7 +580,7 @@ export class ContextEngine {
         this.#branch.headMessageId,
       );
       for (const msg of chain) {
-        const content = String(msg.data);
+        const content = estimateMessageContent(msg.data);
         const tokens = tokenizer.count(content);
         const cost = (tokens / 1_000_000) * model.cost.input;
         fragmentEstimates.push({
@@ -586,7 +594,9 @@ export class ContextEngine {
 
     // 3. Estimate pending messages (not yet saved)
     for (const fragment of this.#pendingMessages) {
-      const content = String(fragment.data);
+      const content = estimateMessageContent(
+        fragment.codec ? fragment.codec.encode() : getFragmentData(fragment),
+      );
       const tokens = tokenizer.count(content);
       const cost = (tokens / 1_000_000) * model.cost.input;
       fragmentEstimates.push({

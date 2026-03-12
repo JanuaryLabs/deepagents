@@ -21,10 +21,10 @@ Every context engine needs a store for persistence:
 import {
   ContextEngine,
   InMemoryContextStore,
+  assistantText,
   role,
   hint,
   user,
-  assistant,
 } from '@deepagents/context';
 
 // Create an in-memory store (good for development/testing)
@@ -54,7 +54,8 @@ Each helper creates a typed fragment:
 - `role()` - System instructions
 - `hint()` - Guidelines and preferences
 - `user()` - User messages (auto-persisted)
-- `assistant()` - Assistant responses (auto-persisted)
+- `assistantText()` - Assistant text responses (auto-persisted)
+- `assistant()` - Wrap an existing assistant `UIMessage` (auto-persisted)
 - `fragment()` - Custom nested structures
 
 ## Resolving for AI SDK
@@ -70,7 +71,7 @@ console.log(systemPrompt);
 // <hint>Use modern ES6+ syntax.</hint>
 
 console.log(messages);
-// [{ role: 'user', content: 'How do I read a file in Node.js?' }]
+// [{ id: '...', role: 'user', parts: [{ type: 'text', text: 'How do I read a file in Node.js?' }] }]
 ```
 
 ## Complete Example with AI SDK
@@ -81,12 +82,12 @@ Here's a full working example using the Vercel AI SDK:
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 import {
-  ContextEngine,
   InMemoryContextStore,
-  role,
+  ContextEngine,
+  assistantText,
   hint,
+  role,
   user,
-  assistant,
 } from '@deepagents/context';
 
 async function main() {
@@ -114,7 +115,7 @@ async function main() {
   console.log(response.text);
 
   // Add assistant response to context
-  context.set(assistant(response.text));
+  context.set(assistantText(response.text));
 
   // Save for future sessions
   await context.save();
@@ -125,7 +126,7 @@ main();
 
 ## Persisting Conversations
 
-Messages marked with `persist: true` are saved when you call `save()`. The `user()` and `assistant()` helpers automatically set this flag:
+Messages marked with `persist: true` are saved when you call `save()`. The `user()`, `assistantText()`, and `assistant()` helpers automatically set this flag:
 
 ```typescript
 // Session 1
@@ -134,7 +135,7 @@ const context = new ContextEngine({ store });
 
 context.set(user('Hello!'));
 // ... get AI response
-context.set(assistant('Hi there! How can I help?'));
+context.set(assistantText('Hi there! How can I help?'));
 await context.save(); // Persists both messages
 
 // Session 2 (new process, same database)
@@ -144,8 +145,8 @@ const context2 = new ContextEngine({ store: store2 });
 const { messages } = await context2.resolve();
 console.log(messages);
 // [
-//   { role: 'user', content: 'Hello!' },
-//   { role: 'assistant', content: 'Hi there! How can I help?' }
+//   { id: '...', role: 'user', parts: [{ type: 'text', text: 'Hello!' }] },
+//   { id: '...', role: 'assistant', parts: [{ type: 'text', text: 'Hi there! How can I help?' }] }
 // ]
 ```
 
@@ -161,7 +162,7 @@ console.log(`Cost: $${estimate.cost.toFixed(6)}`);
 console.log(`Exceeds limit: ${estimate.limits.exceedsContext}`);
 ```
 
-The estimate uses real pricing data from [models.dev](https://models.dev) for 1000+ models.
+The estimate uses real pricing information from [models.dev](https://models.dev) for 1000+ models.
 
 ## Choosing a Renderer
 

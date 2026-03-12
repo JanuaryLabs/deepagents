@@ -19,9 +19,9 @@ type UserReminderMetadataRecord = {
   mode: 'inline' | 'part';
 };
 
-function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
-  const message = fragment.codec?.decode();
-  assert.ok(message, 'Expected user fragment to have a decodable message');
+function encodeMessage(fragment: ReturnType<typeof user>): UIMessage {
+  const message = fragment.codec?.encode();
+  assert.ok(message, 'Expected user fragment to have an encodable message');
   return message as UIMessage;
 }
 
@@ -46,7 +46,7 @@ function taggedReminder(text: string) {
 describe('user reminders', () => {
   it('adds inline tagged reminder metadata with expected ranges', () => {
     const fragment = user('hello', reminder('keep responses concise'));
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
 
     const encodedReminder = taggedReminder('keep responses concise');
     assert.strictEqual(message.role, 'user');
@@ -57,11 +57,22 @@ describe('user reminders', () => {
 
     const reminderMeta = metadata[0];
     assert.ok(reminderMeta.id, 'Reminder metadata should include an id');
-    assert.strictEqual(reminderMeta.text, 'keep responses concise');
-    assert.strictEqual(reminderMeta.partIndex, 0);
-    assert.strictEqual(reminderMeta.start, 5);
-    assert.strictEqual(reminderMeta.end, 5 + encodedReminder.length);
-    assert.strictEqual(reminderMeta.mode, 'inline');
+    assert.deepStrictEqual(
+      {
+        text: reminderMeta.text,
+        partIndex: reminderMeta.partIndex,
+        start: reminderMeta.start,
+        end: reminderMeta.end,
+        mode: reminderMeta.mode,
+      },
+      {
+        text: 'keep responses concise',
+        partIndex: 0,
+        start: 5,
+        end: 5 + encodedReminder.length,
+        mode: 'inline',
+      },
+    );
   });
 
   it('applies multiple inline reminders in call order with append-only ranges', () => {
@@ -71,7 +82,7 @@ describe('user reminders', () => {
       reminder('second'),
       reminder('third'),
     );
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
 
     const first = taggedReminder('first');
     const second = taggedReminder('second');
@@ -120,7 +131,7 @@ describe('user reminders', () => {
       reminder('before', { asPart: true }),
       reminder('after', { asPart: true }),
     );
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
 
     assert.deepStrictEqual(
       message.parts.map((part) =>
@@ -170,7 +181,7 @@ describe('user reminders', () => {
       },
       reminder('only-last-part'),
     );
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
     const encodedReminder = taggedReminder('only-last-part');
 
     assert.strictEqual(getTextPart(message, 0), 'first');
@@ -178,11 +189,19 @@ describe('user reminders', () => {
 
     const metadata = getReminderMetadata(message);
     assert.strictEqual(metadata.length, 1);
-    assert.strictEqual(metadata[0].partIndex, 1);
-    assert.strictEqual(metadata[0].start, 'second'.length);
-    assert.strictEqual(
-      metadata[0].end,
-      'second'.length + encodedReminder.length,
+    assert.deepStrictEqual(
+      {
+        partIndex: metadata[0].partIndex,
+        start: metadata[0].start,
+        end: metadata[0].end,
+        mode: metadata[0].mode,
+      },
+      {
+        partIndex: 1,
+        start: 'second'.length,
+        end: 'second'.length + encodedReminder.length,
+        mode: 'inline',
+      },
     );
   });
 
@@ -205,10 +224,10 @@ describe('user reminders', () => {
           reminders: [existingReminder],
         },
         parts: [{ type: 'text', text: 'payload' }],
-      },
+      } as unknown as UIMessage & { role: 'user' },
       reminder('new-reminder'),
     );
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
     const metadata = message.metadata as
       | {
           source?: string;
@@ -218,15 +237,33 @@ describe('user reminders', () => {
 
     assert.strictEqual(message.id, 'msg-with-metadata');
     assert.strictEqual(message.role, 'user');
-    assert.strictEqual(metadata?.source, 'seed');
-    assert.strictEqual(metadata?.reminders?.length, 2);
-    assert.deepStrictEqual(metadata?.reminders?.[0], existingReminder);
+    assert.deepStrictEqual(
+      {
+        source: metadata?.source,
+        existingReminder: metadata?.reminders?.[0],
+        reminderCount: metadata?.reminders?.length,
+      },
+      {
+        source: 'seed',
+        existingReminder,
+        reminderCount: 2,
+      },
+    );
 
     const appendedReminder = metadata?.reminders?.[1];
     assert.ok(appendedReminder?.id, 'Appended reminder should include id');
-    assert.strictEqual(appendedReminder?.text, 'new-reminder');
-    assert.strictEqual(appendedReminder?.partIndex, 0);
-    assert.strictEqual(appendedReminder?.mode, 'inline');
+    assert.deepStrictEqual(
+      {
+        text: appendedReminder?.text,
+        partIndex: appendedReminder?.partIndex,
+        mode: appendedReminder?.mode,
+      },
+      {
+        text: 'new-reminder',
+        partIndex: 0,
+        mode: 'inline',
+      },
+    );
   });
 
   it('rejects empty reminder text', () => {
@@ -279,7 +316,7 @@ describe('reminder range helpers', () => {
       reminder('inline-reminder'),
       reminder('part-reminder', { asPart: true }),
     );
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
     const encodedInlineReminder = taggedReminder('inline-reminder');
 
     assert.deepStrictEqual(
@@ -302,8 +339,7 @@ describe('reminder range helpers', () => {
     const strippedMetadata = stripped.metadata as
       | { source?: string; reminders?: unknown }
       | undefined;
-    assert.strictEqual(strippedMetadata?.source, 'seed');
-    assert.strictEqual(strippedMetadata?.reminders, undefined);
+    assert.deepStrictEqual(strippedMetadata, { source: 'seed' });
 
     assert.deepStrictEqual(
       message.parts.map((part) =>
@@ -331,7 +367,7 @@ describe('reminder range helpers', () => {
       reminder('inline-tail'),
       reminder('standalone-part', { asPart: true }),
     );
-    const message = decodeMessage(fragment);
+    const message = encodeMessage(fragment);
     const stripped = stripReminders(message);
 
     assert.deepStrictEqual(
@@ -344,8 +380,7 @@ describe('reminder range helpers', () => {
     const metadata = stripped.metadata as
       | { source?: string; reminders?: unknown }
       | undefined;
-    assert.strictEqual(metadata?.source, 'seed');
-    assert.strictEqual(metadata?.reminders, undefined);
+    assert.deepStrictEqual(metadata, { source: 'seed' });
   });
 
   it('removes metadata object when reminders is the only metadata key', () => {
@@ -384,7 +419,6 @@ describe('reminder range helpers', () => {
     const metadata = stripped.metadata as
       | { source?: string; reminders?: unknown }
       | undefined;
-    assert.strictEqual(metadata?.source, 'seed');
-    assert.strictEqual(metadata?.reminders, undefined);
+    assert.deepStrictEqual(metadata, { source: 'seed' });
   });
 });

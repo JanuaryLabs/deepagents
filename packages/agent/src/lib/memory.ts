@@ -859,7 +859,7 @@ export class MemoryStore {
    * Convenience method that focuses on user preferences and patterns
    *
    * @example
-   * const userContext = memoryStore.getUserProactiveMemories('user123');
+   * const proactiveUserMemories = memoryStore.getUserProactiveMemories('user123');
    */
   getUserProactiveMemories(
     userId: string,
@@ -990,8 +990,8 @@ export class MemoryStore {
 
     // User-specific context
     if (includeUser && userId) {
-      const userContext = this.getUserProactiveMemories(userId);
-      if (userContext) sections.push(userContext);
+      const proactiveUserMemories = this.getUserProactiveMemories(userId);
+      if (proactiveUserMemories) sections.push(proactiveUserMemories);
     }
 
     // Session-specific context

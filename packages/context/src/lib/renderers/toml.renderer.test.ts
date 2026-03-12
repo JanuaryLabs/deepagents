@@ -113,10 +113,13 @@ definition = "Lifetime Value"`;
         },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('[config]'));
-      assert.ok(result.includes('[config.database]'));
-      assert.ok(result.includes('host = "localhost"'));
-      assert.ok(result.includes('port = 5432'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '[config]',
+        '',
+        '[config.database]',
+        'host = "localhost"',
+        'port = 5432',
+      ]);
     });
 
     it('skips null values in objects', () => {
@@ -151,9 +154,12 @@ definition = "Lifetime Value"`;
         { name: 'config', data: { name: 'test', count: 5, enabled: true } },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('name = "test"'));
-      assert.ok(result.includes('count = 5'));
-      assert.ok(result.includes('enabled = true'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '[config]',
+        'name = "test"',
+        'count = 5',
+        'enabled = true',
+      ]);
     });
   });
 

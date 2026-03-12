@@ -1,3 +1,4 @@
+import { encodeSerializedValue } from '../codec/serialized-codec.ts';
 import type { ContextFragment, FragmentData } from '../fragments.ts';
 
 /**
@@ -49,6 +50,14 @@ export function term(name: string, definition: string): ContextFragment {
   return {
     name: 'term',
     data: { name, definition },
+    codec: {
+      encode() {
+        return { type: 'term', name, definition };
+      },
+      decode() {
+        return { name, definition };
+      },
+    },
   };
 }
 
@@ -82,6 +91,14 @@ export function hint(text: string): ContextFragment {
   return {
     name: 'hint',
     data: text,
+    codec: {
+      encode() {
+        return { type: 'hint', text };
+      },
+      decode() {
+        return text;
+      },
+    },
   };
 }
 
@@ -130,6 +147,23 @@ export function guardrail(input: {
       rule: input.rule,
       ...(input.reason && { reason: input.reason }),
       ...(input.action && { action: input.action }),
+    },
+    codec: {
+      encode() {
+        return {
+          type: 'guardrail',
+          rule: input.rule,
+          ...(input.reason && { reason: input.reason }),
+          ...(input.action && { action: input.action }),
+        };
+      },
+      decode() {
+        return {
+          rule: input.rule,
+          ...(input.reason && { reason: input.reason }),
+          ...(input.action && { action: input.action }),
+        };
+      },
     },
   };
 }
@@ -180,6 +214,23 @@ export function explain(input: {
       explanation: input.explanation,
       ...(input.therefore && { therefore: input.therefore }),
     },
+    codec: {
+      encode() {
+        return {
+          type: 'explain',
+          concept: input.concept,
+          explanation: input.explanation,
+          ...(input.therefore && { therefore: input.therefore }),
+        };
+      },
+      decode() {
+        return {
+          concept: input.concept,
+          explanation: input.explanation,
+          ...(input.therefore && { therefore: input.therefore }),
+        };
+      },
+    },
   };
 }
 
@@ -226,6 +277,23 @@ export function example(input: {
       question: input.question,
       answer: input.answer,
       ...(input.note && { note: input.note }),
+    },
+    codec: {
+      encode() {
+        return {
+          type: 'example',
+          question: input.question,
+          answer: input.answer,
+          ...(input.note && { note: input.note }),
+        };
+      },
+      decode() {
+        return {
+          question: input.question,
+          answer: input.answer,
+          ...(input.note && { note: input.note }),
+        };
+      },
     },
   };
 }
@@ -275,6 +343,23 @@ export function clarification(input: {
       when: input.when,
       ask: input.ask,
       reason: input.reason,
+    },
+    codec: {
+      encode() {
+        return {
+          type: 'clarification',
+          when: input.when,
+          ask: input.ask,
+          reason: input.reason,
+        };
+      },
+      decode() {
+        return {
+          when: input.when,
+          ask: input.ask,
+          reason: input.reason,
+        };
+      },
     },
   };
 }
@@ -352,6 +437,25 @@ export function workflow(input: {
       ...(input.triggers?.length && { triggers: input.triggers }),
       ...(input.notes && { notes: input.notes }),
     },
+    codec: {
+      encode() {
+        return {
+          type: 'workflow',
+          task: input.task,
+          steps: input.steps,
+          ...(input.triggers?.length && { triggers: input.triggers }),
+          ...(input.notes && { notes: input.notes }),
+        };
+      },
+      decode() {
+        return {
+          task: input.task,
+          steps: input.steps,
+          ...(input.triggers?.length && { triggers: input.triggers }),
+          ...(input.notes && { notes: input.notes }),
+        };
+      },
+    },
   };
 }
 
@@ -394,6 +498,21 @@ export function quirk(input: {
     data: {
       issue: input.issue,
       workaround: input.workaround,
+    },
+    codec: {
+      encode() {
+        return {
+          type: 'quirk',
+          issue: input.issue,
+          workaround: input.workaround,
+        };
+      },
+      decode() {
+        return {
+          issue: input.issue,
+          workaround: input.workaround,
+        };
+      },
     },
   };
 }
@@ -443,6 +562,23 @@ export function styleGuide(input: {
       prefer: input.prefer,
       ...(input.never && { never: input.never }),
       ...(input.always && { always: input.always }),
+    },
+    codec: {
+      encode() {
+        return {
+          type: 'styleGuide',
+          prefer: input.prefer,
+          ...(input.never && { never: input.never }),
+          ...(input.always && { always: input.always }),
+        };
+      },
+      decode() {
+        return {
+          prefer: input.prefer,
+          ...(input.never && { never: input.never }),
+          ...(input.always && { always: input.always }),
+        };
+      },
     },
   };
 }
@@ -505,6 +641,27 @@ export function analogy(input: {
       ...(input.therefore && { therefore: input.therefore }),
       ...(input.pitfall && { pitfall: input.pitfall }),
     },
+    codec: {
+      encode() {
+        return {
+          type: 'analogy',
+          concepts: input.concepts,
+          relationship: input.relationship,
+          ...(input.insight && { insight: input.insight }),
+          ...(input.therefore && { therefore: input.therefore }),
+          ...(input.pitfall && { pitfall: input.pitfall }),
+        };
+      },
+      decode() {
+        return {
+          concepts: input.concepts,
+          relationship: input.relationship,
+          ...(input.insight && { insight: input.insight }),
+          ...(input.therefore && { therefore: input.therefore }),
+          ...(input.pitfall && { pitfall: input.pitfall }),
+        };
+      },
+    },
   };
 }
 
@@ -539,6 +696,17 @@ export function glossary(entries: Record<string, string>): ContextFragment {
       term,
       expression,
     })),
+    codec: {
+      encode() {
+        return { type: 'glossary', entries };
+      },
+      decode() {
+        return Object.entries(entries).map(([term, expression]) => ({
+          term,
+          expression,
+        }));
+      },
+    },
   };
 }
 
@@ -549,6 +717,14 @@ export function role(content: string): ContextFragment {
   return {
     name: 'role',
     data: content,
+    codec: {
+      encode() {
+        return { type: 'role', content };
+      },
+      decode() {
+        return content;
+      },
+    },
   };
 }
 
@@ -610,6 +786,25 @@ export function principle(input: {
       description: input.description,
       ...(input.policies?.length && { policies: input.policies }),
     },
+    codec: {
+      encode() {
+        return {
+          type: 'principle',
+          title: input.title,
+          description: input.description,
+          ...(input.policies?.length && {
+            policies: input.policies.map((item) => encodeSerializedValue(item)),
+          }),
+        };
+      },
+      decode() {
+        return {
+          title: input.title,
+          description: input.description,
+          ...(input.policies?.length && { policies: input.policies }),
+        };
+      },
+    },
   };
 }
 
@@ -662,6 +857,27 @@ export function policy(input: {
       ...(input.before && { before: input.before }),
       ...(input.reason && { reason: input.reason }),
       ...(input.policies?.length && { policies: input.policies }),
+    },
+    codec: {
+      encode() {
+        return {
+          type: 'policy',
+          rule: input.rule,
+          ...(input.before && { before: input.before }),
+          ...(input.reason && { reason: input.reason }),
+          ...(input.policies?.length && {
+            policies: input.policies.map((item) => encodeSerializedValue(item)),
+          }),
+        };
+      },
+      decode() {
+        return {
+          rule: input.rule,
+          ...(input.before && { before: input.before }),
+          ...(input.reason && { reason: input.reason }),
+          ...(input.policies?.length && { policies: input.policies }),
+        };
+      },
     },
   };
 }

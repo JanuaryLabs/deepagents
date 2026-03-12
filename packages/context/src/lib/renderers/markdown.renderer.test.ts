@@ -70,9 +70,11 @@ describe('MarkdownRenderer', () => {
         { name: 'term', data: { name: 'LTV', definition: 'Lifetime Value' } },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('## Term'));
-      assert.ok(result.includes('- **name**: LTV'));
-      assert.ok(result.includes('- **definition**: Lifetime Value'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '## Term',
+        '- **name**: LTV',
+        '- **definition**: Lifetime Value',
+      ]);
     });
 
     it('renders nested objects with indentation', () => {
@@ -84,9 +86,12 @@ describe('MarkdownRenderer', () => {
         },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('- **database**:'));
-      assert.ok(result.includes('  - **host**: localhost'));
-      assert.ok(result.includes('  - **port**: 5432'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '## Config',
+        '- **database**:',
+        '  - **host**: localhost',
+        '  - **port**: 5432',
+      ]);
     });
 
     it('skips null values in objects', () => {
@@ -123,10 +128,12 @@ describe('MarkdownRenderer', () => {
         { name: 'items', data: ['one', 'two', 'three'] },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('## Items'));
-      // With nested fragments, primitives in arrays become list items
-      const lines = result.split('\n');
-      assert.ok(lines.length >= 2);
+      assert.deepStrictEqual(result.split('\n'), [
+        '## Items',
+        '- one',
+        '- two',
+        '- three',
+      ]);
     });
 
     it('skips null values in arrays', () => {
@@ -156,8 +163,10 @@ describe('MarkdownRenderer', () => {
         },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('## Container'));
-      assert.ok(result.includes('- **hint**: Use CTEs'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '## Container',
+        '- **hint**: Use CTEs',
+      ]);
     });
 
     it('renders multiple nested fragments', () => {
@@ -172,8 +181,11 @@ describe('MarkdownRenderer', () => {
         },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('- **hint**: First hint'));
-      assert.ok(result.includes('- **hint**: Second hint'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '## Teachings',
+        '- **hint**: First hint',
+        '- **hint**: Second hint',
+      ]);
     });
 
     it('renders deeply nested fragments', () => {
@@ -229,10 +241,13 @@ describe('MarkdownRenderer', () => {
         },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('**Hints**:'));
-      assert.ok(result.includes('**hint**: First'));
-      assert.ok(result.includes('**hint**: Second'));
-      assert.ok(result.includes('**hint**: Third'));
+      assert.deepStrictEqual(result.split('\n'), [
+        '## Teachings',
+        '- **Hints**:',
+        '  - **hint**: First',
+        '  - **hint**: Second',
+        '  - **hint**: Third',
+      ]);
     });
 
     it('groups multiple different fragment types', () => {
@@ -292,7 +307,10 @@ describe('MarkdownRenderer', () => {
         { name: 'second', data: 'two' },
       ];
       const result = renderer.render(fragments);
-      assert.ok(result.includes('## First\none\n\n## Second\ntwo'));
+      assert.deepStrictEqual(result.split('\n\n'), [
+        '## First\none',
+        '## Second\ntwo',
+      ]);
     });
   });
 

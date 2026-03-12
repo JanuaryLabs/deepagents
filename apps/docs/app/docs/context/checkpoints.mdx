@@ -28,7 +28,7 @@ import {
   XmlRenderer,
   role,
   user,
-  assistant,
+  assistantText,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
@@ -40,7 +40,7 @@ const context = new ContextEngine({
 
 // Build conversation
 context.set(user('I want to learn programming.'));
-context.set(assistant('Great! Would you prefer Python or JavaScript?'));
+context.set(assistantText('Great! Would you prefer Python or JavaScript?'));
 await context.save();
 
 // Save checkpoint before user's choice
@@ -63,7 +63,7 @@ console.log(cp);
 ```typescript
 // User chose Python
 context.set(user('I want to learn Python.'));
-context.set(assistant('Python is great for beginners!'));
+context.set(assistantText('Python is great for beginners!'));
 await context.save();
 // main → ... → assistant → user → assistant
 
@@ -73,7 +73,7 @@ await context.restore('before-choice');
 // Now at: main-v2 → ... → assistant (the checkpoint message)
 
 context.set(user('I want to learn JavaScript.'));
-context.set(assistant('JavaScript is excellent for web development!'));
+context.set(assistantText('JavaScript is excellent for web development!'));
 await context.save();
 // main-v2 → ... → assistant → user → assistant
 ```
@@ -149,7 +149,7 @@ async function askWithRetry(
     });
 
     if (isGoodResponse(response.text)) {
-      context.set(assistant(response.text));
+      context.set(assistantText(response.text));
       await context.save();
       return response.text;
     }
@@ -174,19 +174,19 @@ Create checkpoints at each stage of a complex workflow:
 ```typescript
 // Stage 1: Gather requirements
 context.set(user('Help me build a todo app'));
-context.set(assistant('What features do you need?'));
+context.set(assistantText('What features do you need?'));
 await context.save();
 await context.checkpoint('requirements');
 
 // Stage 2: Design
 context.set(user('I need tasks with due dates and priorities'));
-context.set(assistant('Here is the proposed architecture...'));
+context.set(assistantText('Here is the proposed architecture...'));
 await context.save();
 await context.checkpoint('design');
 
 // Stage 3: Implementation
-context.set(user('Start with the data model'));
-context.set(assistant('Here is the schema...'));
+context.set(user('Start with the domain model'));
+context.set(assistantText('Here is the schema...'));
 await context.save();
 await context.checkpoint('implementation');
 
@@ -228,7 +228,7 @@ try {
 
 ## Checkpoints in the Graph
 
-Checkpoints appear in the graph data:
+Checkpoints appear in the graph snapshot:
 
 ```typescript
 const graph = await store.getGraph(context.chatId);

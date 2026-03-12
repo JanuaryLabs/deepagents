@@ -45,7 +45,7 @@ const testSkills: SkillMetadata[] = [
 ];
 
 function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
-  const message = fragment.codec?.decode();
+  const message = fragment.codec?.encode();
   assert.ok(message);
   return message as UIMessage;
 }

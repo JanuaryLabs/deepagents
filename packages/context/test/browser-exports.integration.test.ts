@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 import {
   XmlRenderer,
+  fromFragment,
   getReminderRanges,
   identity,
   reminder,
@@ -11,6 +12,7 @@ import {
   stripReminders,
   stripTextByRanges,
   term,
+  toFragment,
   user,
 } from '@deepagents/context/browser';
 
@@ -33,7 +35,7 @@ describe('browser export path', () => {
       reminder('Ask for confirmation before destructive actions'),
     );
 
-    const message = fragment.codec?.decode() as {
+    const message = fragment.codec?.encode() as {
       parts: Array<{ type: string; text?: string }>;
       metadata?: Record<string, unknown>;
     };
@@ -57,7 +59,7 @@ describe('browser export path', () => {
       reminder('hidden-part', { asPart: true }),
     );
 
-    const message = fragment.codec?.decode() as UIMessage;
+    const message = fragment.codec?.encode() as UIMessage;
 
     const stripped = stripReminders(message);
 
@@ -79,5 +81,19 @@ describe('browser export path', () => {
 
     assert.ok(result.includes('<term>'));
     assert.ok(result.includes('<name>ARR</name>'));
+  });
+
+  it('exposes serialized fragment conversion helpers from browser entrypoint', () => {
+    const fragment = toFragment({
+      type: 'term',
+      name: 'ARR',
+      definition: 'Annual Recurring Revenue',
+    });
+
+    assert.deepStrictEqual(fromFragment(fragment), {
+      type: 'term',
+      name: 'ARR',
+      definition: 'Annual Recurring Revenue',
+    });
   });
 });

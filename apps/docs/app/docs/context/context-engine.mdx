@@ -76,7 +76,7 @@ const meta = context.chat;
 Add fragments to context. Message fragments queue for persistence; others stay in memory for system prompt.
 
 ```typescript
-import { role, hint, user, assistant } from '@deepagents/context';
+import { role, hint, user, assistantText } from '@deepagents/context';
 
 context.set(
   role('You are helpful.'),  // → system prompt
@@ -102,7 +102,7 @@ const { systemPrompt, messages } = await context.resolve({
 });
 
 // systemPrompt: rendered non-message fragments
-// messages: array of { role, content } for AI SDK
+// messages: array of AI SDK UIMessage objects
 ```
 
 Behavior:
@@ -117,7 +117,7 @@ Persist pending messages to the graph. Returns a `SaveResult` containing the `he
 
 ```typescript
 context.set(user('Hello'));
-context.set(assistant('Hi there!'));
+context.set(assistantText('Hi there!'));
 const result = await context.save();
 // result.headMessageId = 'msg-abc123'
 // Messages now in graph, pending cleared
@@ -143,8 +143,10 @@ Create a new branch from a specific message. The original branch is preserved.
 
 ```typescript
 // Conversation: q1 → a1 (wrong answer)
-context.set(user('What is 2+2?', { id: 'q1' }));
-context.set(assistant('The answer is 5.'));
+context.set(
+  user({ id: 'q1', role: 'user', parts: [{ type: 'text', text: 'What is 2+2?' }] }),
+);
+context.set(assistantText('The answer is 5.'));
 await context.save();
 
 // Rewind to q1, creates new branch 'main-v2'
@@ -152,7 +154,7 @@ const newBranch = await context.rewind('q1');
 // newBranch = { name: 'main-v2', headMessageId: 'q1', ... }
 
 // Now on main-v2, add correct answer
-context.set(assistant('The answer is 4.'));
+context.set(assistantText('The answer is 4.'));
 await context.save();
 
 // Original 'main' branch still has the wrong answer
@@ -166,7 +168,7 @@ Create a named pointer to the current branch head.
 
 ```typescript
 context.set(user('Should I learn Python or JavaScript?'));
-context.set(assistant('Both are great! What interests you more?'));
+context.set(assistantText('Both are great! What interests you more?'));
 await context.save();
 
 // Save this decision point

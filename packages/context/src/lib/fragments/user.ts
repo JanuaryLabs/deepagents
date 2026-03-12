@@ -3,7 +3,7 @@ import type { ContextFragment } from '../fragments.ts';
 /**
  * User-specific fragment builders.
  *
- * These fragments capture user context, preferences, and personalization data
+ * These fragments capture identity, preferences, and personalization data
  * that can be injected into AI prompts to tailor responses.
  *
  * @example
@@ -43,6 +43,21 @@ export function identity(input: {
       ...(input.name && { name: input.name }),
       ...(input.role && { role: input.role }),
     },
+    codec: {
+      encode() {
+        return {
+          type: 'identity',
+          ...(input.name && { name: input.name }),
+          ...(input.role && { role: input.role }),
+        };
+      },
+      decode() {
+        return {
+          ...(input.name && { name: input.name }),
+          ...(input.role && { role: input.role }),
+        };
+      },
+    },
   };
 }
 
@@ -74,6 +89,25 @@ export function persona(input: {
       ...(input.objective && { objective: input.objective }),
       ...(input.tone && { tone: input.tone }),
     },
+    codec: {
+      encode() {
+        return {
+          type: 'persona',
+          name: input.name,
+          ...(input.role && { role: input.role }),
+          ...(input.objective && { objective: input.objective }),
+          ...(input.tone && { tone: input.tone }),
+        };
+      },
+      decode() {
+        return {
+          name: input.name,
+          ...(input.role && { role: input.role }),
+          ...(input.objective && { objective: input.objective }),
+          ...(input.tone && { tone: input.tone }),
+        };
+      },
+    },
   };
 }
 
@@ -96,6 +130,14 @@ export function alias(term: string, meaning: string): ContextFragment {
   return {
     name: 'alias',
     data: { term, meaning },
+    codec: {
+      encode() {
+        return { type: 'alias', term, meaning };
+      },
+      decode() {
+        return { term, meaning };
+      },
+    },
   };
 }
 
@@ -119,27 +161,14 @@ export function preference(aspect: string, value: string): ContextFragment {
   return {
     name: 'preference',
     data: { aspect, value },
-  };
-}
-
-/**
- * Define the user's current working focus or project.
- *
- * Use this to capture temporary context that helps inform defaults,
- * assumptions, and suggestions. Should be updated as focus changes.
- *
- * @param description - What the user is currently working on
- *
- * @example
- * userContext("Preparing Q4 board presentation")
- * userContext("Investigating drop in signups last week")
- * userContext("Working on EMEA regional analysis for strategy meeting")
- * userContext("Debugging discrepancy in revenue numbers")
- */
-export function userContext(description: string): ContextFragment {
-  return {
-    name: 'userContext',
-    data: description,
+    codec: {
+      encode() {
+        return { type: 'preference', aspect, value };
+      },
+      decode() {
+        return { aspect, value };
+      },
+    },
   };
 }
 
@@ -165,5 +194,13 @@ export function correction(
   return {
     name: 'correction',
     data: { subject, clarification },
+    codec: {
+      encode() {
+        return { type: 'correction', subject, clarification };
+      },
+      decode() {
+        return { subject, clarification };
+      },
+    },
   };
 }

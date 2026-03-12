@@ -5,6 +5,7 @@ import {
   type ContextFragment,
   type FragmentData,
   type FragmentObject,
+  getFragmentData,
   isFragment,
   isFragmentObject,
 } from '../fragments.ts';
@@ -87,7 +88,7 @@ export abstract class ContextRenderer {
     fragment: ContextFragment,
     seen: WeakSet<object>,
   ): ContextFragment | null {
-    const data = this.sanitizeData(fragment.data, seen);
+    const data = this.sanitizeData(getFragmentData(fragment), seen);
     if (data == null) {
       return null;
     }
@@ -215,12 +216,13 @@ export class XmlRenderer extends ContextRenderer {
   }
 
   #renderTopLevel(fragment: ContextFragment): string {
-    if (this.isPrimitive(fragment.data)) {
-      return this.#leafRoot(fragment.name, String(fragment.data));
+    const data = getFragmentData(fragment);
+    if (this.isPrimitive(data)) {
+      return this.#leafRoot(fragment.name, String(data));
     }
-    if (Array.isArray(fragment.data)) {
-      if (fragment.data.length === 1) {
-        const single = fragment.data[0];
+    if (Array.isArray(data)) {
+      if (data.length === 1) {
+        const single = data[0];
         if (this.isPrimitive(single)) {
           return this.#leafRoot(fragment.name, String(single));
         }
@@ -238,19 +240,15 @@ export class XmlRenderer extends ContextRenderer {
           );
         }
       }
-      return this.#renderArray(fragment.name, fragment.data, 0);
+      return this.#renderArray(fragment.name, data, 0);
     }
-    if (isFragment(fragment.data)) {
-      return this.#renderFragmentContentsUnderParent(
-        fragment.name,
-        fragment.data,
-        0,
-      );
+    if (isFragment(data)) {
+      return this.#renderFragmentContentsUnderParent(fragment.name, data, 0);
     }
-    if (isFragmentObject(fragment.data)) {
+    if (isFragmentObject(data)) {
       return this.#wrap(
         fragment.name,
-        this.renderEntries(fragment.data, { depth: 1, path: [] }),
+        this.renderEntries(data, { depth: 1, path: [] }),
       );
     }
     return '';
@@ -407,23 +405,23 @@ export class XmlRenderer extends ContextRenderer {
     fragment: ContextFragment,
     ctx: RenderContext,
   ): string {
-    const { name, data } = fragment;
+    const data = getFragmentData(fragment);
     if (this.isPrimitive(data)) {
-      return this.#leaf(name, String(data), ctx.depth);
+      return this.#leaf(fragment.name, String(data), ctx.depth);
     }
     if (isFragment(data)) {
       const child = this.renderFragment(data, { ...ctx, depth: ctx.depth + 1 });
-      return this.#wrapIndented(name, [child], ctx.depth);
+      return this.#wrapIndented(fragment.name, [child], ctx.depth);
     }
     if (Array.isArray(data)) {
-      return this.#renderArrayIndented(name, data, ctx.depth);
+      return this.#renderArrayIndented(fragment.name, data, ctx.depth);
     }
     if (isFragmentObject(data)) {
       const children = this.renderEntries(data, {
         ...ctx,
         depth: ctx.depth + 1,
       });
-      return this.#wrapIndented(name, children, ctx.depth);
+      return this.#wrapIndented(fragment.name, children, ctx.depth);
     }
     return '';
   }
@@ -584,17 +582,18 @@ export class MarkdownRenderer extends ContextRenderer {
     return this.sanitizeFragments(fragments)
       .map((f) => {
         const title = `## ${titlecase(f.name)}`;
-        if (this.isPrimitive(f.data)) {
-          return `${title}\n${String(f.data)}`;
+        const data = getFragmentData(f);
+        if (this.isPrimitive(data)) {
+          return `${title}\n${String(data)}`;
         }
-        if (Array.isArray(f.data)) {
-          return `${title}\n${this.#renderArray(f.data, 0)}`;
+        if (Array.isArray(data)) {
+          return `${title}\n${this.#renderArray(data, 0)}`;
         }
-        if (isFragment(f.data)) {
-          return `${title}\n${this.renderFragment(f.data, { depth: 0, path: [] })}`;
+        if (isFragment(data)) {
+          return `${title}\n${this.renderFragment(data, { depth: 0, path: [] })}`;
         }
-        if (isFragmentObject(f.data)) {
-          return `${title}\n${this.renderEntries(f.data, { depth: 0, path: [] }).join('\n')}`;
+        if (isFragmentObject(data)) {
+          return `${title}\n${this.renderEntries(data, { depth: 0, path: [] }).join('\n')}`;
         }
         return `${title}\n`;
       })
@@ -658,10 +657,10 @@ export class MarkdownRenderer extends ContextRenderer {
     fragment: ContextFragment,
     ctx: RenderContext,
   ): string {
-    const { name, data } = fragment;
-    const header = `${this.#pad(ctx.depth)}- **${name}**:`;
+    const data = getFragmentData(fragment);
+    const header = `${this.#pad(ctx.depth)}- **${fragment.name}**:`;
     if (this.isPrimitive(data)) {
-      return `${this.#pad(ctx.depth)}- **${name}**: ${String(data)}`;
+      return `${this.#pad(ctx.depth)}- **${fragment.name}**: ${String(data)}`;
     }
     if (isFragment(data)) {
       const child = this.renderFragment(data, { ...ctx, depth: ctx.depth + 1 });
@@ -723,21 +722,22 @@ export class MarkdownRenderer extends ContextRenderer {
 export class TomlRenderer extends ContextRenderer {
   render(fragments: ContextFragment[]): string {
     const rendered: string[] = [];
-    for (const f of this.sanitizeFragments(fragments)) {
-      if (this.isPrimitive(f.data)) {
-        rendered.push(`${f.name} = ${this.#formatValue(f.data)}`);
-      } else if (Array.isArray(f.data)) {
-        rendered.push(this.#renderTopLevelArray(f.name, f.data));
-      } else if (isFragment(f.data)) {
+    for (const it of this.sanitizeFragments(fragments)) {
+      const data = getFragmentData(it);
+      if (this.isPrimitive(data)) {
+        rendered.push(`${it.name} = ${this.#formatValue(data)}`);
+      } else if (Array.isArray(data)) {
+        rendered.push(this.#renderTopLevelArray(it.name, data));
+      } else if (isFragment(data)) {
         rendered.push(
           [
-            `[${f.name}]`,
-            this.renderFragment(f.data, { depth: 0, path: [f.name] }),
+            `[${it.name}]`,
+            this.renderFragment(data, { depth: 0, path: [it.name] }),
           ].join('\n'),
         );
-      } else if (isFragmentObject(f.data)) {
-        const entries = this.#renderObjectEntries(f.data, [f.name]);
-        rendered.push([`[${f.name}]`, ...entries].join('\n'));
+      } else if (isFragmentObject(data)) {
+        const entries = this.#renderObjectEntries(data, [it.name]);
+        rendered.push([`[${it.name}]`, ...entries].join('\n'));
       }
     }
     return rendered.join('\n\n');
@@ -844,10 +844,10 @@ export class TomlRenderer extends ContextRenderer {
     fragment: ContextFragment,
     ctx: RenderContext,
   ): string {
-    const { name, data } = fragment;
-    const newPath = [...ctx.path, name];
+    const data = getFragmentData(fragment);
+    const newPath = [...ctx.path, fragment.name];
     if (this.isPrimitive(data)) {
-      return `${name} = ${this.#formatValue(data)}`;
+      return `${fragment.name} = ${this.#formatValue(data)}`;
     }
     if (isFragment(data)) {
       return [
@@ -871,7 +871,7 @@ export class TomlRenderer extends ContextRenderer {
       }
 
       const values = nonFragmentItems.map((item) => this.#formatValue(item));
-      return `${name} = [${values.join(', ')}]`;
+      return `${fragment.name} = [${values.join(', ')}]`;
     }
     if (isFragmentObject(data)) {
       const entries = this.#renderObjectEntries(data, newPath);
@@ -913,25 +913,25 @@ export class ToonRenderer extends ContextRenderer {
   }
 
   #renderTopLevel(fragment: ContextFragment): string {
-    const { name, data } = fragment;
+    const data = getFragmentData(fragment);
     if (this.isPrimitive(data)) {
-      return `${name}: ${this.#formatValue(data)}`;
+      return `${fragment.name}: ${this.#formatValue(data)}`;
     }
     if (Array.isArray(data)) {
-      return this.#renderArrayField(name, data, 0);
+      return this.#renderArrayField(fragment.name, data, 0);
     }
     if (isFragment(data)) {
       const child = this.renderFragment(data, { depth: 1, path: [] });
-      return `${name}:\n${child}`;
+      return `${fragment.name}:\n${child}`;
     }
     if (isFragmentObject(data)) {
       const entries = this.#renderObjectEntries(data, 1);
       if (!entries) {
-        return `${name}:`;
+        return `${fragment.name}:`;
       }
-      return `${name}:\n${entries}`;
+      return `${fragment.name}:\n${entries}`;
     }
-    return `${name}:`;
+    return `${fragment.name}:`;
   }
 
   #renderArrayField(key: string, items: FragmentData[], depth: number): string {
@@ -1046,8 +1046,9 @@ export class ToonRenderer extends ContextRenderer {
         path: [],
       });
       // For fragments, render key: value on same line as hyphen if primitive
-      if (this.isPrimitive(item.data)) {
-        return `${this.#pad(depth)}- ${item.name}: ${this.#formatValue(item.data)}`;
+      const itemData = getFragmentData(item);
+      if (this.isPrimitive(itemData)) {
+        return `${this.#pad(depth)}- ${item.name}: ${this.#formatValue(itemData)}`;
       }
       return `${this.#pad(depth)}- ${item.name}:\n${rendered.split('\n').slice(1).join('\n')}`;
     }
@@ -1098,28 +1099,28 @@ export class ToonRenderer extends ContextRenderer {
     fragment: ContextFragment,
     ctx: RenderContext,
   ): string {
-    const { name, data } = fragment;
+    const data = getFragmentData(fragment);
     if (this.isPrimitive(data)) {
-      return `${this.#pad(ctx.depth)}${name}: ${this.#formatValue(data)}`;
+      return `${this.#pad(ctx.depth)}${fragment.name}: ${this.#formatValue(data)}`;
     }
     if (isFragment(data)) {
       const child = this.renderFragment(data, {
         ...ctx,
         depth: ctx.depth + 1,
       });
-      return `${this.#pad(ctx.depth)}${name}:\n${child}`;
+      return `${this.#pad(ctx.depth)}${fragment.name}:\n${child}`;
     }
     if (Array.isArray(data)) {
-      return this.#renderArrayField(name, data, ctx.depth);
+      return this.#renderArrayField(fragment.name, data, ctx.depth);
     }
     if (isFragmentObject(data)) {
       const entries = this.#renderObjectEntries(data, ctx.depth + 1);
       if (!entries) {
-        return `${this.#pad(ctx.depth)}${name}:`;
+        return `${this.#pad(ctx.depth)}${fragment.name}:`;
       }
-      return `${this.#pad(ctx.depth)}${name}:\n${entries}`;
+      return `${this.#pad(ctx.depth)}${fragment.name}:\n${entries}`;
     }
-    return `${this.#pad(ctx.depth)}${name}:`;
+    return `${this.#pad(ctx.depth)}${fragment.name}:`;
   }
 
   protected renderPrimitive(
