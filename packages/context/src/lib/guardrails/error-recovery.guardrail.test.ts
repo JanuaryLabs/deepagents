@@ -347,6 +347,36 @@ describe('Guardrail System', () => {
   });
 
   describe('Error Recovery Guardrail Edge Cases', () => {
+    it('should tell the model to read the skill instead of invoking a tool', () => {
+      const errorPart = {
+        type: 'error' as const,
+        errorText:
+          "attempted to call tool 'test-skill' which was not in request.tools",
+      };
+
+      const result = runGuardrailChain(errorPart, [errorRecoveryGuardrail], {
+        availableTools: ['bash'],
+        availableSkills: [
+          {
+            name: 'test-skill',
+            description: 'Test skill',
+            host: '/skills/test-skill/SKILL.md',
+            sandbox: '/skills/test-skill/SKILL.md',
+          },
+        ],
+      });
+
+      assert.strictEqual(result.type, 'fail');
+      assert.ok(
+        result.feedback.includes('"test-skill" is a skill, not a tool'),
+      );
+      assert.ok(result.feedback.includes('There is no separate invoke action'));
+      assert.ok(
+        result.feedback.includes('/skills/test-skill/SKILL.md'),
+        'feedback should point to the skill file path',
+      );
+    });
+
     it('should handle no tools available gracefully', () => {
       const errorPart = {
         type: 'error' as const,

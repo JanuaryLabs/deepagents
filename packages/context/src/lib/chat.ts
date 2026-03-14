@@ -11,6 +11,8 @@ import {
   generateId,
 } from 'ai';
 
+import type { AgentModel } from '@deepagents/agent';
+
 import type { ContextEngine } from './engine.ts';
 import {
   type MessageFragment,
@@ -19,6 +21,7 @@ import {
   isMessageFragment,
   message,
 } from './fragments.ts';
+import { generateChatTitle, staticChatTitle } from './title.ts';
 
 export type ChatMessage = UIMessage | MessageFragment;
 
@@ -38,6 +41,7 @@ export function chatMessageToUIMessage(item: ChatMessage): UIMessage {
 
 export interface ChatAgentLike<CIn> {
   context?: ContextEngine;
+  model?: AgentModel;
   stream(
     contextVariables: CIn,
     config?: {
@@ -52,6 +56,7 @@ export interface ChatOptions<CIn> {
   contextVariables?: CIn;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   generateMessageId?: () => string;
+  generateTitle?: boolean;
   onError?: (error: unknown) => string;
   messageMetadata?: NonNullable<
     Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
@@ -96,6 +101,21 @@ export async function chat<CIn>(
   }
 
   const uiMessages = messages.map(chatMessageToUIMessage);
+
+  let titlePromise: Promise<string> | null = null;
+  if (!context.chat?.title) {
+    const firstUserMsg = uiMessages.find((m) => m.role === 'user');
+    if (firstUserMsg) {
+      await context.updateChat({ title: staticChatTitle(firstUserMsg) });
+
+      if (options?.generateTitle && agent.model) {
+        titlePromise = generateChatTitle({
+          message: firstUserMsg,
+          model: agent.model,
+        });
+      }
+    }
+  }
 
   const streamContextVariables =
     options?.contextVariables === undefined
@@ -154,6 +174,12 @@ export async function chat<CIn>(
     },
     execute: async ({ writer }) => {
       writer.merge(uiStream);
+
+      if (titlePromise) {
+        const title = await titlePromise;
+        writer.write({ type: 'data-chat-title', data: title });
+        await context.updateChat({ title });
+      }
     },
   });
 }
