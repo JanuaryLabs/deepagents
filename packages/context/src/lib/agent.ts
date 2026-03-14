@@ -52,10 +52,12 @@ class Agent<CIn, COut = CIn> {
   #guardrails: Guardrail[] = [];
   readonly tools: ToolSet;
   readonly context?: ContextEngine;
+  readonly model?: AgentModel;
   constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
     this.tools = options.tools || {};
     this.context = options.context;
+    this.model = options.model;
     this.#guardrails = options.guardrails || [];
   }
 
