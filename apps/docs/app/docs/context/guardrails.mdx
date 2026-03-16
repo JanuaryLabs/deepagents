@@ -134,14 +134,14 @@ import { errorRecoveryGuardrail } from '@deepagents/context';
 | Pattern | Description | Action |
 | ------- | ----------- | ------ |
 | `Tool choice is none` | Model called a tool when none were available | `fail` with available tools list |
-| `not in request.tools` | Model called a non-existent tool | `fail` with correction (or skill redirect) |
+| `not in request.tools` | Model called a non-existent tool | `fail` with correction (or skill redirect clarifying there is no invoke action) |
 | `Failed to parse tool call arguments` | Malformed JSON in tool arguments | `fail` asking for valid JSON |
 | `validation failed` + `did not match schema` | Tool arguments don't match schema | `fail` with schema errors |
 | `Parsing failed` | Generic parse failure | `fail` asking for proper format |
 | `Failed to call a function` | Malformed function call from provider | `fail` with available tools |
 | Unknown errors | Anything else | `stop` (no retry) |
 
-The guardrail also detects when the model confuses a skill for a tool and redirects it to read the skill file instead.
+The guardrail also detects when the model confuses a skill for a tool. It clarifies that skills have no separate invoke action and directs the model to read the skill file and follow the instructions there.
 
 ## Integration with `agent()`
 

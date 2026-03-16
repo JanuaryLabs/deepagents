@@ -51,7 +51,8 @@
     "pluralize": "^8.0.0",
     "stringcase": "^4.3.1",
     "tiny-tfidf": "^1.0.0",
-    "yaml": "^2.8.0"
+    "yaml": "^2.8.0",
+    "zod": "^3.25.76 || ^4.0.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",

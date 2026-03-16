@@ -2,9 +2,12 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  type FragmentSerializerRegistry,
   type SerializedFragment,
+  type SerializedFragmentLike,
   assistantText,
   fromFragment,
+  getFragmentData,
   hint,
   policy,
   principle,
@@ -12,7 +15,49 @@ import {
   toFragment,
 } from '@deepagents/context';
 
+function isNoteSerializedFragment(
+  input: SerializedFragmentLike,
+): input is { type: 'note'; text: string } {
+  return (
+    input.type === 'note' &&
+    typeof (input as { text?: unknown }).text === 'string'
+  );
+}
+
 describe('serialized fragment conversion', () => {
+  const customRegistry = {
+    note: {
+      toFragment: (input) => {
+        if (!isNoteSerializedFragment(input)) {
+          throw new Error(
+            `Unsupported serialized fragment type: ${input.type}`,
+          );
+        }
+
+        return {
+          name: 'note',
+          data: { text: input.text },
+          codec: {
+            encode() {
+              return { type: 'note', text: input.text };
+            },
+            decode() {
+              return { text: input.text };
+            },
+          },
+        };
+      },
+      fromFragment: (fragment) => {
+        if (fragment.name !== 'note') {
+          return undefined;
+        }
+
+        const data = getFragmentData(fragment) as { text: string };
+        return { type: 'note' as const, text: data.text };
+      },
+    },
+  } satisfies FragmentSerializerRegistry;
+
   const roundTripCases: SerializedFragment[] = [
     { type: 'term', name: 'MRR', definition: 'monthly recurring revenue' },
     { type: 'hint', text: 'Always exclude test accounts' },
@@ -121,8 +166,10 @@ describe('serialized fragment conversion', () => {
     it(`round-trips ${testCase.type}`, () => {
       const fragment = toFragment(testCase);
 
-      assert.strictEqual(fragment.name, testCase.type);
-      assert.deepStrictEqual(fromFragment(fragment), testCase);
+      assert.deepStrictEqual(
+        { name: fragment.name, decoded: fromFragment(fragment) },
+        { name: testCase.type, decoded: testCase },
+      );
     });
   }
 
@@ -154,7 +201,7 @@ describe('serialized fragment conversion', () => {
 
   it('decodes non-message codecs to the fragment data shape', () => {
     const simple = hint('Always exclude test accounts');
-    assert.strictEqual(simple.codec?.decode(), simple.data);
+    assert.deepStrictEqual(simple.codec?.decode(), simple.data);
 
     const objectLike = term('MRR', 'monthly recurring revenue');
     assert.deepStrictEqual(objectLike.codec?.decode(), objectLike.data);
@@ -198,6 +245,41 @@ describe('serialized fragment conversion', () => {
           policies: [assistantText('Done') as never],
         }),
       /Message fragments are not supported/,
+    );
+  });
+
+  it('round-trips a custom fragment with a per-call registry', () => {
+    const serialized = { type: 'note' as const, text: 'Remember this' };
+
+    const fragment = toFragment(serialized, { registry: customRegistry });
+
+    assert.deepStrictEqual(
+      fromFragment(fragment, { registry: customRegistry }),
+      {
+        type: 'note',
+        text: 'Remember this',
+      },
+    );
+  });
+
+  it('round-trips nested custom fragments with a per-call registry', () => {
+    const serialized = {
+      type: 'principle' as const,
+      title: 'Execution order',
+      description: 'Preserve prerequisites',
+      policies: [
+        {
+          type: 'note' as const,
+          text: 'Validate schema first',
+        },
+      ],
+    };
+
+    const fragment = toFragment(serialized, { registry: customRegistry });
+
+    assert.deepStrictEqual(
+      fromFragment(fragment, { registry: customRegistry }),
+      serialized,
     );
   });
 });

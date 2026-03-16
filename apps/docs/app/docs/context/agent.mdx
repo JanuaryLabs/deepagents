@@ -39,6 +39,16 @@ const assistant = agent({
 | `maxGuardrailRetries` | `number` | `3` | Max retry attempts when a guardrail fails |
 | `logging` | `boolean` | `undefined` | Enable debug logging |
 
+## Instance Properties
+
+The agent exposes these readonly properties after creation:
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `tools` | `ToolSet` | Tools registered on this agent |
+| `context` | `ContextEngine \| undefined` | The context engine bound to this agent |
+| `model` | `LanguageModelV3 \| undefined` | The model configured for this agent |
+
 ## generate()
 
 Resolves the context, calls the model, and returns the full result. Useful when you need the complete response before continuing.

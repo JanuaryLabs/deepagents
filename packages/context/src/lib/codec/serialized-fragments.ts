@@ -36,6 +36,10 @@ export type SerializedValue =
   | SerializedValue[]
   | SerializedObject;
 
+export type SerializedFragmentLike = {
+  type: string;
+} & Record<string, unknown>;
+
 export type SerializedFragment =
   | { type: 'term'; name: string; definition: string }
   | { type: 'hint'; text: string }
@@ -99,11 +103,47 @@ export type SerializedFragment =
 
 export type SerializedFragmentType = SerializedFragment['type'];
 
-type SerializedRegistryEntry<T extends SerializedFragment> = {
-  toFragment: (input: T) => ContextFragment;
+export type FragmentSerializerEntry<
+  TSerialized extends SerializedFragmentLike = SerializedFragmentLike,
+> = {
+  toFragment: (
+    input: TSerialized,
+    options?: FragmentSerializationOptions,
+  ) => ContextFragment;
+  fromFragment?: (
+    fragment: ContextFragment,
+    options?: FragmentSerializationOptions,
+  ) => TSerialized | undefined;
 };
 
-function isSerializedFragment(value: unknown): value is SerializedFragment {
+export type FragmentSerializerRegistry = Record<
+  string,
+  FragmentSerializerEntry
+>;
+
+export interface FragmentSerializationOptions<
+  TRegistry extends FragmentSerializerRegistry | undefined =
+    | FragmentSerializerRegistry
+    | undefined,
+> {
+  registry?: TRegistry;
+}
+
+type RegistrySerializedFragment<
+  TRegistry extends FragmentSerializerRegistry | undefined,
+> = TRegistry extends FragmentSerializerRegistry
+  ? {
+      [K in keyof TRegistry]: TRegistry[K] extends FragmentSerializerEntry<
+        infer TSerialized
+      >
+        ? TSerialized
+        : never;
+    }[keyof TRegistry]
+  : never;
+
+function isSerializedFragmentLike(
+  value: unknown,
+): value is SerializedFragmentLike {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -112,26 +152,32 @@ function isSerializedFragment(value: unknown): value is SerializedFragment {
   );
 }
 
-function toFragmentData(value: SerializedValue): FragmentData {
-  if (isSerializedFragment(value)) {
-    return toFragment(value);
+function toFragmentData(
+  value: SerializedValue,
+  options?: FragmentSerializationOptions,
+): FragmentData {
+  if (isSerializedFragmentLike(value)) {
+    return toFragment(value, options);
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => toFragmentData(item));
+    return value.map((item) => toFragmentData(item, options));
   }
 
   if (isFragmentObject(value)) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, toFragmentData(entry)]),
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        toFragmentData(entry, options),
+      ]),
     );
   }
 
   return value;
 }
 
-const serializedRegistry: {
-  [K in SerializedFragmentType]: SerializedRegistryEntry<
+const builtInSerializedRegistry: {
+  [K in SerializedFragmentType]: FragmentSerializerEntry<
     Extract<SerializedFragment, { type: K }>
   >;
 } = {
@@ -214,20 +260,20 @@ const serializedRegistry: {
     toFragment: (input) => role(input.content),
   },
   principle: {
-    toFragment: (input) =>
+    toFragment: (input, options) =>
       principle({
         title: input.title,
         description: input.description,
-        policies: input.policies?.map((item) => toFragmentData(item)),
+        policies: input.policies?.map((item) => toFragmentData(item, options)),
       }),
   },
   policy: {
-    toFragment: (input) =>
+    toFragment: (input, options) =>
       policy({
         rule: input.rule,
         before: input.before,
         reason: input.reason,
-        policies: input.policies?.map((item) => toFragmentData(item)),
+        policies: input.policies?.map((item) => toFragmentData(item, options)),
       }),
   },
   identity: {
@@ -259,8 +305,27 @@ const serializedRegistry: {
 
 const messageLikeTypes = new Set(['user', 'assistant', 'message']);
 
-export function toFragment<T extends SerializedFragment>(
+function findCustomSerializedFragment(
+  fragment: ContextFragment,
+  options?: FragmentSerializationOptions,
+): SerializedFragmentLike | undefined {
+  if (!options?.registry) {
+    return undefined;
+  }
+
+  for (const entry of Object.values(options.registry)) {
+    const serialized = entry.fromFragment?.(fragment, options);
+    if (serialized !== undefined) {
+      return serialized;
+    }
+  }
+
+  return undefined;
+}
+
+export function toFragment<T extends SerializedFragmentLike>(
   input: T,
+  options?: FragmentSerializationOptions,
 ): ContextFragment {
   if (messageLikeTypes.has(input.type)) {
     throw new Error(
@@ -268,32 +333,44 @@ export function toFragment<T extends SerializedFragment>(
     );
   }
 
-  const entry = serializedRegistry[input.type];
+  const entry =
+    options?.registry?.[input.type] ??
+    builtInSerializedRegistry[input.type as SerializedFragmentType];
   if (!entry) {
     throw new Error(`Unsupported serialized fragment type: ${input.type}`);
   }
 
-  return entry.toFragment(input as never);
+  return (entry as FragmentSerializerEntry<T>).toFragment(input, options);
 }
 
-export function fromFragment(fragment: ContextFragment): SerializedFragment {
+export function fromFragment<
+  TRegistry extends FragmentSerializerRegistry | undefined = undefined,
+>(
+  fragment: ContextFragment,
+  options?: FragmentSerializationOptions<TRegistry>,
+): SerializedFragment | RegistrySerializedFragment<TRegistry> {
   if (isMessageFragment(fragment)) {
     throw new Error(
       'Message fragments are not supported by serialized fragment conversion',
     );
   }
 
+  const customSerialized = findCustomSerializedFragment(fragment, options);
+  if (customSerialized !== undefined) {
+    return customSerialized as RegistrySerializedFragment<TRegistry>;
+  }
+
   if (fragment.codec) {
     const encoded = fragment.codec.encode();
-    if (!isSerializedFragment(encoded)) {
+    if (!isSerializedFragmentLike(encoded)) {
       throw new Error(
         `Fragment "${fragment.name}" codec must encode to a serialized fragment object`,
       );
     }
-    return encoded;
+    return encoded as SerializedFragment;
   }
 
-  if (!serializedRegistry[fragment.name as SerializedFragmentType]) {
+  if (!builtInSerializedRegistry[fragment.name as SerializedFragmentType]) {
     throw new Error(`Unsupported fragment name: ${fragment.name}`);
   }
 

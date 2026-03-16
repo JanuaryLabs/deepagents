@@ -105,6 +105,66 @@ console.log(context.chat?.metadata);
 // { category: 'support', resolved: true }
 ```
 
+## Automatic Title Generation
+
+The `chat()` streaming function can automatically generate a title for new chats. When a chat has no title, the first user message is used to derive one through a two-phase approach.
+
+### Static Title
+
+`staticChatTitle()` extracts the text content from a `UIMessage` and truncates it to 100 characters. This is applied immediately so the chat has a readable title without waiting for an LLM call.
+
+```typescript
+import { staticChatTitle } from '@deepagents/context';
+
+const title = staticChatTitle(userMessage);
+// "help me write an essay about space exploration and..."
+
+await context.updateChat({ title });
+```
+
+### AI-Generated Title
+
+`generateChatTitle()` uses an LLM to produce a short 2-5 word title. It falls back to `staticChatTitle()` if the LLM call fails.
+
+```typescript
+import { generateChatTitle } from '@deepagents/context';
+
+const title = await generateChatTitle({
+  message: userMessage,
+  model: myModel,
+  abortSignal: controller.signal, // optional
+});
+// "Space Essay Help"
+```
+
+### GenerateChatTitleOptions
+
+| Option | Type | Required | Description |
+| --- | --- | --- | --- |
+| `message` | `UIMessage` | Yes | The user message to summarize |
+| `model` | `AgentModel` | Yes | The model used to generate the title |
+| `abortSignal` | `AbortSignal` | No | Signal to cancel the generation |
+
+### How `chat()` Uses Titles
+
+When you call `chat()`, titles are handled automatically:
+
+1. If the chat has no title, the first user message is immediately set as a static title via `staticChatTitle()`.
+2. If `generateTitle: true` is passed in options **and** the agent has a `model`, an async LLM call generates a refined title in the background.
+3. Once the LLM title resolves, it is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream and persisted via `context.updateChat()`.
+
+```typescript
+import { chat } from '@deepagents/context';
+
+const stream = await chat(agent, messages, {
+  generateTitle: true, // [!code highlight]
+});
+```
+
+The `ChatAgentLike` interface exposes an optional `model` property. If `model` is not present on the agent, only the static title is applied.
+
+The `generateTitle` option is part of `ChatOptions`, which also accepts `contextVariables`, `transform`, `generateMessageId`, `onError`, `messageMetadata`, and `finalAssistantMetadata`.
+
 ## Listing Chats
 
 Use the store's `listChats()` method directly. Results are sorted by `updatedAt` descending (most recent first).
@@ -274,7 +334,7 @@ async function sendMessage(chatId: string, userId: string, text: string) {
   await context.save();
 
   if (!context.chat?.title) {
-    await context.updateChat({ title: text.slice(0, 50) });
+    await context.updateChat({ title: text.slice(0, 100) });
   }
 
   await context.trackUsage(await result.usage);
@@ -290,6 +350,8 @@ async function deleteChat(chatId: string, userId: string) {
   return store.deleteChat(chatId, { userId });
 }
 ```
+
+When using the `chat()` streaming function instead of `generateText()`, title generation is handled automatically -- pass `generateTitle: true` to enable AI-powered titles.
 
 ## Next Steps
 

@@ -184,6 +184,9 @@ The instructions tell the LLM to:
 - Load only the specific reference files needed, not everything
 - Prefer running existing scripts over rewriting code
 - Announce which skills are being used and why
+- Understand that there is no separate skill tool, invoke action, command, or API -- using a skill means reading its `SKILL.md` and following the workflow defined there
+
+The instructions also embed correct/incorrect usage examples so the LLM avoids a common misunderstanding: if a user says "use the onboarding skill", the correct behavior is to read the onboarding `SKILL.md` and follow it, not to claim a separate skill tool needs to be called, invoked, or activated first.
 
 ## Extracting Available Skills
 

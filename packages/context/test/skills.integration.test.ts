@@ -355,6 +355,22 @@ description: ${name.charAt(0).toUpperCase() + name.slice(1)} skill
         (data[0].data as string).includes('SKILL.md'),
         'instructions should mention SKILL.md',
       );
+      assert.ok(
+        (data[0].data as string).includes('There is no separate skill tool'),
+        'instructions should explain there is no separate skill invocation mechanism',
+      );
+      assert.ok(
+        (data[0].data as string).includes(
+          'Correct: if the user says "use the onboarding skill"',
+        ),
+        'instructions should include an explicit positive example',
+      );
+      assert.ok(
+        (data[0].data as string).includes(
+          'Incorrect: do not claim you need to call, invoke, enable, or activate a separate skill tool',
+        ),
+        'instructions should include an explicit negative example',
+      );
     });
 
     it('remaps host paths to sandbox paths', () => {
