@@ -1,4 +1,4 @@
-import { validateUIMessages } from 'ai';
+import { isTextUIPart, validateUIMessages } from 'ai';
 import type { LanguageModelUsage, UIMessage } from 'ai';
 import { mergeWith } from 'lodash-es';
 
@@ -15,6 +15,14 @@ import {
   isLazyFragment,
   isMessageFragment,
 } from './fragments.ts';
+import {
+  type UserReminder,
+  type UserReminderMetadata,
+  applyInlineReminder,
+  applyPartReminder,
+  resolveReminderText,
+  shouldIncludeReminder,
+} from './fragments/message/user.ts';
 import type { Models } from './models.generated.ts';
 import {
   type ContextRenderer,
@@ -302,6 +310,37 @@ export class ContextEngine {
   }
 
   /**
+   * Count user+assistant message pairs (turns) in the conversation.
+   * Includes persisted messages and pending messages.
+   * A turn is one user message paired with one assistant message.
+   * An unpaired trailing user message counts as the next turn.
+   */
+  public async getTurnCount(): Promise<number> {
+    await this.#ensureInitialized();
+
+    let userCount = 0;
+
+    if (this.#branch?.headMessageId) {
+      const chain = await this.#store.getMessageChain(
+        this.#branch.headMessageId,
+      );
+      for (const msg of chain) {
+        if (msg.name === 'user') {
+          userCount++;
+        }
+      }
+    }
+
+    for (const fragment of this.#pendingMessages) {
+      if (fragment.name === 'user') {
+        userCount++;
+      }
+    }
+
+    return userCount;
+  }
+
+  /**
    * Add fragments to the context.
    *
    * - Message fragments (user/assistant) are queued for persistence
@@ -374,13 +413,68 @@ export class ContextEngine {
       }
     }
 
+    // Add pending messages, applying scheduled reminders on cloned copies
+    const turn = await this.getTurnCount();
     for (const fragment of this.#pendingMessages) {
       if (!fragment.codec) {
         throw new Error(
           `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before encode.`,
         );
       }
-      messages.push(fragment.codec.encode());
+
+      const scheduled = fragment.metadata?.scheduledReminders as
+        | UserReminder[]
+        | undefined;
+      if (fragment.name === 'user' && scheduled && scheduled.length > 0) {
+        const original = fragment.codec.encode() as UIMessage;
+        const message: UIMessage = {
+          ...original,
+          parts: [...original.parts],
+        };
+        const plainText = message.parts
+          .filter(isTextUIPart)
+          .map((p) => p.text)
+          .join(' ');
+        const addedReminders: UserReminderMetadata[] = [];
+
+        for (const item of scheduled) {
+          if (!shouldIncludeReminder(item, turn)) {
+            continue;
+          }
+
+          const resolvedText = resolveReminderText(item, {
+            content: plainText,
+            turn,
+          });
+          if (resolvedText.trim().length === 0) {
+            continue;
+          }
+
+          addedReminders.push(
+            item.asPart
+              ? applyPartReminder(message, resolvedText)
+              : applyInlineReminder(message, resolvedText),
+          );
+        }
+
+        if (addedReminders.length > 0) {
+          const metadata =
+            typeof message.metadata === 'object' &&
+            message.metadata !== null &&
+            !Array.isArray(message.metadata)
+              ? { ...(message.metadata as Record<string, unknown>) }
+              : {};
+          const existingReminders = Array.isArray(metadata.reminders)
+            ? metadata.reminders
+            : [];
+          metadata.reminders = [...existingReminders, ...addedReminders];
+          message.metadata = metadata;
+        }
+
+        messages.push(message);
+      } else {
+        messages.push(fragment.codec.encode());
+      }
     }
 
     return {

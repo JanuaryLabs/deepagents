@@ -1,0 +1,119 @@
+---
+title: Error Recovery with Guardrails
+description: Intercept API errors and trigger self-correction retries using guardrails
+---
+
+This recipe demonstrates how guardrails can catch API-level errors and trigger self-correction. The scenario: a model is told to use a tool that doesn't exist, the API returns an error, and the guardrail intercepts it to retry gracefully.
+
+## Scenario
+
+1. System prompt tells the model to use a `tell_joke` tool
+2. No tools are provided to the agent
+3. Model tries to call the tool — API returns `invalid_request_error`
+4. `errorRecoveryGuardrail` catches it and provides corrective feedback
+5. Agent retries and responds with plain text
+
+## Setup
+
+Create a context engine with a system prompt that references a non-existent tool:
+
+```typescript
+import { randomUUID } from 'node:crypto';
+import {
+  type ContextFragment,
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  errorRecoveryGuardrail,
+  role,
+  user,
+} from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+
+function engine(...fragments: ContextFragment[]) {
+  const context = new ContextEngine({
+    userId: 'demo-user',
+    store: new InMemoryContextStore(),
+    chatId: randomUUID(),
+  });
+  context.set(...fragments);
+  return context;
+}
+
+const context = engine(
+  role('You are a helpful assistant. Use the tell_joke tool to tell a joke.'),
+  user('Hello! Tell me a joke please.'),
+);
+```
+
+## Add a Custom Safety Guardrail
+
+You can stack multiple guardrails. Here's a content safety filter alongside the built-in error recovery:
+
+```typescript
+import { type Guardrail, pass, fail } from '@deepagents/context';
+
+const safetyGuardrail: Guardrail = {
+  id: 'safety',
+  name: 'Safety Filter',
+  handle: (part) => {
+    if (part.type === 'text-delta') {
+      const delta = (part as { delta: string }).delta;
+      if (delta.toLowerCase().includes('hack')) {
+        return fail(
+          'I should not provide hacking instructions. Let me suggest ethical alternatives instead.',
+        );
+      }
+    }
+    return pass(part);
+  },
+};
+```
+
+## Create the Agent
+
+Wire both guardrails into the agent. Note that no tools are provided — this is intentional to trigger the error recovery flow:
+
+```typescript
+const jokeAgent = agent({
+  name: 'joke_agent',
+  context,
+  model: groq('gpt-oss-20b'),
+  guardrails: [errorRecoveryGuardrail, safetyGuardrail],
+  maxGuardrailRetries: 3,
+});
+```
+
+## Stream and Consume
+
+The guardrails apply when consuming via `toUIMessageStream()`:
+
+```typescript
+const stream = await jokeAgent.stream({});
+const response = stream.toUIMessageStream();
+```
+
+## What Happens Under the Hood
+
+```
+1. Model receives system prompt mentioning "tell_joke" tool
+2. Model attempts to call tell_joke → API error (tool not in request.tools)
+3. errorRecoveryGuardrail intercepts the error part
+4. Guardrail returns fail() with feedback: "The tool tell_joke is not available..."
+5. Accumulated text + feedback injected as self-correction message
+6. Model retries — this time responds with plain text (no tool call)
+7. safetyGuardrail checks each text-delta — all pass
+8. Response reaches the user
+```
+
+## Key Takeaways
+
+- **`errorRecoveryGuardrail`** handles common API errors (missing tools, malformed JSON, schema mismatches) automatically
+- **Guardrails compose** — stack multiple guardrails and they run sequentially on each stream part
+- **`maxGuardrailRetries`** controls how many self-correction attempts before giving up
+- **Guardrails only apply via `toUIMessageStream()`** — direct `fullStream`/`textStream` access bypasses them
+
+## Next Steps
+
+- [Guardrails reference](/docs/context/guardrails) — full API docs for writing custom guardrails
+- [Agent Integration](/docs/context/recipes/agent-integration) — dynamic prompts with context

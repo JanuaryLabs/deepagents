@@ -149,9 +149,9 @@ const title = await generateChatTitle({
 
 When you call `chat()`, titles are handled automatically:
 
-1. If the chat has no title, the first user message is immediately set as a static title via `staticChatTitle()`.
-2. If `generateTitle: true` is passed in options **and** the agent has a `model`, an async LLM call generates a refined title in the background.
-3. Once the LLM title resolves, it is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream and persisted via `context.updateChat()`.
+1. If `generateTitle: true` and the agent has a `model`, an LLM call generates a 2-5 word title. If the LLM call fails, it falls back to `staticChatTitle()`.
+2. If `generateTitle` is `false` (the default) or the agent has no model, `staticChatTitle()` is applied immediately.
+3. Once the title resolves, it is emitted as a `{ type: 'data-chat-title', data: title }` event on the UI stream and persisted via `context.updateChat()`.
 
 ```typescript
 import { chat } from '@deepagents/context';
@@ -163,7 +163,7 @@ const stream = await chat(agent, messages, {
 
 The `ChatAgentLike` interface exposes an optional `model` property. If `model` is not present on the agent, only the static title is applied.
 
-The `generateTitle` option is part of `ChatOptions`, which also accepts `contextVariables`, `transform`, `generateMessageId`, `onError`, `messageMetadata`, and `finalAssistantMetadata`.
+The `generateTitle` option is part of `ChatOptions`, which also accepts `contextVariables`, `transform`, `abortSignal`, `onError`, `messageMetadata`, and `finalAssistantMetadata`.
 
 ## Listing Chats
 
@@ -355,6 +355,7 @@ When using the `chat()` streaming function instead of `generateText()`, title ge
 
 ## Next Steps
 
+- [chat()](/docs/context/chat-function) - Streaming orchestration with automatic persistence, titles, and usage tracking
 - [Context Engine](/docs/context/context-engine) - Full API reference
 - [Checkpoints](/docs/context/checkpoints) - Named restore points
 - [Branching](/docs/context/branching) - Explore multiple conversation paths

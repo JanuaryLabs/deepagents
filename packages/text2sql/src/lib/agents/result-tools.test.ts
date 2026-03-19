@@ -222,7 +222,6 @@ describe('bash tool reasoning contract', () => {
         content: [
           {
             type: 'tool-call',
-            toolCallType: 'function',
             toolCallId: 'call-1',
             toolName: 'bash',
             input,
@@ -1373,7 +1372,6 @@ describe('sql meta via toModelOutput', () => {
         content: [
           {
             type: 'tool-call',
-            toolCallType: 'function',
             toolCallId: 'call-1',
             toolName: 'bash',
             input,
@@ -1537,9 +1535,9 @@ describe('sql meta via toModelOutput', () => {
       ),
     ]);
 
-    const sqlRunResult = sqlRun as Record<string, unknown>;
-    const sqlValidateResult = sqlValidate as Record<string, unknown>;
-    const echoResult = echo as Record<string, unknown>;
+    const sqlRunResult = sqlRun as unknown as Record<string, unknown>;
+    const sqlValidateResult = sqlValidate as unknown as Record<string, unknown>;
+    const echoResult = echo as unknown as Record<string, unknown>;
 
     assert.ok(sqlRunResult.meta, 'sql run should have meta');
     assert.ok(
@@ -1597,7 +1595,7 @@ describe('sql meta via toModelOutput', () => {
         reasoning: 'test compound',
       },
       {} as any,
-    )) as Record<string, unknown>;
+    )) as unknown as Record<string, unknown>;
 
     assert.ok(result.meta, 'compound sql should have meta');
     const formattedSql = (result.meta as Record<string, unknown>)

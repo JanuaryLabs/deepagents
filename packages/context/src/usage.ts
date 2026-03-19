@@ -10,6 +10,7 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistantText,
+  chat,
   // Docker sandbox
   createContainerTool,
   createDockerSandbox,
@@ -615,10 +616,10 @@ async function createSkillAwareAgent() {
     tools: { bash },
   });
 
-  agentContext.set(user(`Forecast sales base on the last 4 years.`));
-
-  const stream = await skillAwareAgent.stream({}, {});
-  await printer.stdout(stream);
+  const stream = await chat(skillAwareAgent, [
+    user(`Forecast sales base on the last 4 years.`),
+  ]);
+  await printer.readableStream(stream);
 }
 
 /**
@@ -797,10 +798,10 @@ async function createDockerSkillAgent() {
     });
 
     // Example: Agent can now execute real commands
-    context.set(user('Show me all installed apps.'));
-
-    const stream = await dockerAgent.stream({}, {});
-    await printer.stdout(stream);
+    const stream = await chat(dockerAgent, [
+      user('Show me all installed apps.'),
+    ]);
+    await printer.readableStream(stream);
   } finally {
     await sandbox.dispose();
   }

@@ -111,80 +111,21 @@ const result = await creativeAssistant.generate({});
 
 ## Guardrails
 
-Guardrails inspect each streaming part and decide whether to `pass`, `fail` (retry with feedback), or `stop` (abort without retry). When a guardrail fails, the agent appends the accumulated text plus the feedback as a self-correction message and starts a new stream.
+Pass `guardrails` and `maxGuardrailRetries` to add real-time stream interception. When a guardrail fails, the agent automatically retries with self-correction feedback.
 
 ```typescript
-import {
-  agent,
-  pass,
-  fail,
-  stop,
-  errorRecoveryGuardrail,
-} from '@deepagents/context';
-import type { Guardrail } from '@deepagents/context';
-
-const lengthGuardrail: Guardrail = {
-  id: 'max-length',
-  name: 'Max Length',
-  handle: (part, ctx) => {
-    if (part.type === 'text-delta' && part.delta.length > 5000) {
-      return fail('My response is getting too long. Let me be more concise.');
-    }
-    return pass(part);
-  },
-};
+import { agent, errorRecoveryGuardrail } from '@deepagents/context';
 
 const guarded = agent({
   name: 'guarded_assistant',
   context,
   model: groq('gpt-oss-20b'),
-  guardrails: [errorRecoveryGuardrail, lengthGuardrail],
+  guardrails: [errorRecoveryGuardrail],
   maxGuardrailRetries: 3,
 });
 ```
 
-### Built-in Guardrails
-
-`errorRecoveryGuardrail` handles common API errors during streaming:
-
-- Model calls a tool that does not exist
-- Tool arguments are malformed JSON
-- Tool parameters fail schema validation
-- Parsing failures
-
-It returns `fail()` with feedback that guides the model toward a valid retry, or `stop()` for unknown errors.
-
-### Self-Correction Flow
-
-```
-1. Stream starts
-2. Guardrail detects a problem → returns fail(feedback)
-3. Accumulated text + feedback saved as assistant self-correction
-4. Context is saved (persists the correction)
-5. New stream created from updated context
-6. Repeat until success or maxGuardrailRetries reached
-```
-
-### Writing a Custom Guardrail
-
-Each guardrail must return one of three results:
-
-| Result | Effect |
-| --- | --- |
-| `pass(part)` | Allow the part through (can modify it) |
-| `fail(feedback)` | Abort stream, append feedback, retry |
-| `stop(part)` | Abort stream immediately, no retry |
-
-The `handle` function receives the stream part and a `GuardrailContext`:
-
-```typescript
-interface GuardrailContext {
-  availableTools: string[];
-  availableSkills: SkillMetadata[];
-}
-```
-
-Guardrails run sequentially. The first `fail` or `stop` short-circuits the chain.
+See the [Guardrails reference](/docs/context/guardrails) for the full API — writing custom guardrails, the pass/fail/stop model, `GuardrailContext`, chaining, and built-in error patterns. For a practical walkthrough, see the [Error Recovery recipe](/docs/context/recipes/error-recovery).
 
 ## structuredOutput()
 

@@ -48,7 +48,9 @@ function DocsContent({ path }: { path: string }) {
 }
 
 export default function Page({ loaderData }: Route.ComponentProps) {
-  const { tree, path } = loaderData;
+  const { tree, path } = loaderData as unknown as Awaited<
+    ReturnType<typeof loader>
+  >;
 
   return (
     <DocsLayout {...baseOptions()} tree={tree as PageTree.Root} tabMode="top">

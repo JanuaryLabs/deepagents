@@ -1,5 +1,5 @@
 // eslint-disable-next-line @nx/enforce-module-boundaries
-import { type Endpoints as ApiEndpoints, Client } from '@evals/client';
+import { Client, type Endpoints } from '@evals/client';
 import {
   type MutationFunctionContext,
   QueryClient,
@@ -12,19 +12,41 @@ import {
   useQuery,
 } from '@tanstack/react-query';
 
-export type Endpoints = ApiEndpoints;
+export type { Endpoints };
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      refetchOnWindowFocus: false,
     },
   },
 });
 
+// Get the API base URL from <base href> tag or VITE_API_URL
+// This enables deployment at any subpath (e.g., /platform)
+function getBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== '/') {
+    return `${import.meta.env.VITE_API_URL}/api`;
+  }
+  // Read from <base href> to support subdirectory deployments
+  const baseHref = document.querySelector('base')?.getAttribute('href') ?? '/';
+  // Remove trailing slash and append /api
+  const basePath = baseHref.replace(/\/$/, '');
+  return `${window.location.origin}${basePath}/api`;
+}
 export const client = new Client({
-  baseUrl: `${import.meta.env.VITE_API_URL}/api`,
+  baseUrl: getBaseUrl(),
+  fetch: (request) => {
+    const teamId = localStorage.getItem('activeTeamId');
+    const req = request as unknown as Request;
+    const headers = new Headers(req.headers);
+    if (teamId) {
+      headers.set('X-Team-Id', teamId);
+    }
+    return fetch(new Request(req, { headers }), {
+      credentials: 'include',
+    }) as any;
+  },
 });
 
 type DataEndpoints = {
@@ -71,6 +93,27 @@ export function useData<E extends DataEndpoints>(
   });
 }
 
+export function usePolling<E extends DataEndpoints>(
+  endpoint: E,
+  input: Endpoints[E]['input'],
+  options: {
+    interval: number;
+    enabled?: boolean;
+    shouldStop: (data: Endpoints[E]['output'] | undefined) => boolean;
+  },
+): UseQueryResult<Endpoints[E]['output'], Endpoints[E]['error']> {
+  const enabled = options.enabled ?? true;
+
+  return useData(endpoint, input, {
+    enabled,
+    retry: false,
+    refetchInterval: (query) => {
+      if (options.shouldStop(query.state.data)) return false;
+      return options.interval;
+    },
+  });
+}
+
 type WithMutationFn<E extends keyof Endpoints> = Omit<
   UseMutationOptions<Endpoints[E]['output'], Endpoints[E]['error'], unknown>,
   'mutationFn' | 'mutationKey'
@@ -92,15 +135,11 @@ type WithoutMutationFn<E extends keyof Endpoints> = Omit<
   invalidate?: DataEndpoints[];
 };
 
-type ActionOptions<E extends MutationEndpoints> =
-  | WithMutationFn<E>
-  | WithoutMutationFn<E>
-  | undefined;
-
-type ActionVariables<
-  E extends MutationEndpoints,
-  TOptions extends ActionOptions<E>,
-> = TOptions extends WithMutationFn<E> ? void : Endpoints[E]['input'];
+export type UseAction<E extends MutationEndpoints> = UseMutationResult<
+  Endpoints[E]['output'],
+  Endpoints[E]['error'],
+  Endpoints[E]['input']
+>;
 
 /**
  * A hook to perform an action on the API with a custom mutation function.
@@ -132,21 +171,44 @@ type ActionVariables<
  * // later in the code
  * mutate();
  */
-/**
- * A hook to perform an action on the API.
- * The `mutate` function expects endpoint input unless a custom `mutationFn`
- * is supplied, in which case it takes no arguments.
- */
-export function useAction<
-  E extends MutationEndpoints,
-  TOptions extends ActionOptions<E> = undefined,
->(
+export function useAction<E extends MutationEndpoints>(
   endpoint: E,
-  options?: TOptions,
+  options: WithMutationFn<E>,
+): UseMutationResult<Endpoints[E]['output'], Endpoints[E]['error'], void>;
+
+/**
+ * @overload
+ * A hook to perform an action on the API.
+ * The `mutate` function from the result expects the input for the endpoint.
+ *
+ * @param endpoint - The API endpoint to perform the action on (e.g. 'POST /payments').
+ * @param options - Options for the mutation.
+ * @returns The mutation result.
+ *
+ * @example
+ * // Create a new payment
+ * const { mutate, isPending } = useAction('POST /payments', {
+ *   onSuccess: () => console.log('Payment created!'),
+ * });
+ *
+ * // later in the code
+ * mutate({ amount: 1000, date: '2023-01-01' });
+ */
+export function useAction<E extends MutationEndpoints>(
+  endpoint: E,
+  options?: WithoutMutationFn<E>,
 ): UseMutationResult<
   Endpoints[E]['output'],
   Endpoints[E]['error'],
-  ActionVariables<E, TOptions>
+  Endpoints[E]['input']
+>;
+export function useAction<E extends MutationEndpoints>(
+  endpoint: E,
+  options?: WithMutationFn<E> | WithoutMutationFn<E>,
+): UseMutationResult<
+  Endpoints[E]['output'],
+  Endpoints[E]['error'],
+  Endpoints[E]['input']
 > {
   return useMutation<
     Endpoints[E]['output'],
@@ -155,7 +217,6 @@ export function useAction<
     unknown
   >({
     ...options,
-    meta: { endpoint },
     mutationKey: [endpoint],
     mutationFn: async (input, context) => {
       if (options && 'mutationFn' in options && options.mutationFn) {
@@ -170,13 +231,9 @@ export function useAction<
       for (const endpoint of options?.invalidate ?? []) {
         await invalidateData(endpoint);
       }
-      return options?.onSuccess?.(data, variables, onMutateResult, context);
+      return options?.onSuccess?.(data, variables, data, context);
     },
-  }) as UseMutationResult<
-    Endpoints[E]['output'],
-    Endpoints[E]['error'],
-    ActionVariables<E, TOptions>
-  >;
+  });
 }
 
 export function useActionState<E extends MutationEndpoints>(endpoint: E) {
@@ -213,27 +270,6 @@ export function invalidateData(endpoint: DataEndpoints): Promise<void> {
   return queryClient.invalidateQueries({
     predicate(query) {
       return query.meta?.endpoint === endpoint;
-    },
-  });
-}
-
-export function usePolling<E extends DataEndpoints>(
-  endpoint: E,
-  input: Endpoints[E]['input'],
-  options: {
-    interval: number;
-    enabled?: boolean;
-    shouldStop: (data: Endpoints[E]['output'] | undefined) => boolean;
-  },
-): UseQueryResult<Endpoints[E]['output'], Endpoints[E]['error']> {
-  const enabled = options.enabled ?? true;
-
-  return useData(endpoint, input, {
-    enabled,
-    retry: false,
-    refetchInterval: (query) => {
-      if (options.shouldStop(query.state.data)) return false;
-      return options.interval;
     },
   });
 }

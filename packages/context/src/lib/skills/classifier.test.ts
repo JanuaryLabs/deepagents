@@ -226,7 +226,7 @@ describe('skillsReminder', () => {
 
 describe('factory reminders in user()', () => {
   it('resolves factory reminders with message content', () => {
-    const factory = (content: string) => `Echo: ${content}`;
+    const factory = (ctx: { content: string }) => `Echo: ${ctx.content}`;
     const fragment = user('hello world', reminder(factory));
     const message = decodeMessage(fragment);
     const text = message.parts
@@ -260,7 +260,7 @@ describe('factory reminders in user()', () => {
     const fragment = user(
       'test',
       reminder('static hint'),
-      reminder((content) => `dynamic: ${content}`),
+      reminder((ctx) => `dynamic: ${ctx.content}`),
       reminder(() => ''),
     );
     const message = decodeMessage(fragment);
@@ -293,7 +293,7 @@ describe('factory reminders in user()', () => {
           { type: 'text', text: 'second part' },
         ],
       },
-      reminder((content) => `Got: ${content}`),
+      reminder((ctx) => `Got: ${ctx.content}`),
     );
     const message = decodeMessage(fragment);
     const allText = message.parts

@@ -33,12 +33,11 @@
     "dist",
     "!**/*.tsbuildinfo"
   ],
-  "dependencies": {
-    "nano-spawn": "^2.0.0",
-    "mssql": "^12.2.0"
-  },
+  "dependencies": {},
   "peerDependencies": {},
   "devDependencies": {
+    "nano-spawn": "^2.0.0",
+    "mssql": "^12.2.0",
     "@types/debug": "^4.1.12"
   }
 }

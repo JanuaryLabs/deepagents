@@ -2,13 +2,52 @@ import { type UIMessage, generateId, isTextUIPart } from 'ai';
 
 import type { MessageFragment } from '../../fragments.ts';
 
-export interface UserReminderOptions {
+export interface ReminderContext {
+  content: string;
+  turn?: number;
+}
+
+export type ReminderText = string | ((ctx: ReminderContext) => string);
+
+export type WhenPredicate = (turn: number) => boolean;
+
+export function everyNTurns(n: number): WhenPredicate {
+  return (turn) => turn % n === 0;
+}
+
+export function once(): WhenPredicate {
+  return (turn) => turn === 1;
+}
+
+export function firstN(n: number): WhenPredicate {
+  return (turn) => turn <= n;
+}
+
+export function afterTurn(n: number): WhenPredicate {
+  return (turn) => turn > n;
+}
+
+export function and(...predicates: WhenPredicate[]): WhenPredicate {
+  return (turn) => predicates.every((p) => p(turn));
+}
+
+export function or(...predicates: WhenPredicate[]): WhenPredicate {
+  return (turn) => predicates.some((p) => p(turn));
+}
+
+export function not(predicate: WhenPredicate): WhenPredicate {
+  return (turn) => !predicate(turn);
+}
+
+export interface ReminderSchedule {
+  when?: WhenPredicate;
+}
+
+export interface UserReminderOptions extends ReminderSchedule {
   asPart?: boolean;
 }
 
-export type ReminderText = string | ((content: string) => string);
-
-export interface UserReminder {
+export interface UserReminder extends ReminderSchedule {
   text: ReminderText;
   asPart: boolean;
 }
@@ -178,7 +217,7 @@ function ensureTextPart(message: UIMessage): number {
   return message.parts.length - 1;
 }
 
-function applyInlineReminder(
+export function applyInlineReminder(
   message: UIMessage,
   value: string,
 ): UserReminderMetadata {
@@ -203,7 +242,7 @@ function applyInlineReminder(
   };
 }
 
-function applyPartReminder(
+export function applyPartReminder(
   message: UIMessage,
   value: string,
 ): UserReminderMetadata {
@@ -221,6 +260,18 @@ function applyPartReminder(
   };
 }
 
+export function hasSchedule(reminder: UserReminder): boolean {
+  return reminder.when !== undefined;
+}
+
+export function shouldIncludeReminder(
+  reminder: UserReminder,
+  turn: number,
+): boolean {
+  if (reminder.when && !reminder.when(turn)) return false;
+  return true;
+}
+
 /**
  * Create a user reminder payload for user message builders.
  *
@@ -228,7 +279,7 @@ function applyPartReminder(
  * `<system-reminder>...</system-reminder>`.
  *
  * @param text - Reminder text (must not be empty)
- * @param options - Reminder representation options
+ * @param options - Reminder representation and scheduling options
  */
 export function reminder(
   text: ReminderText,
@@ -240,12 +291,24 @@ export function reminder(
   return {
     text,
     asPart: options?.asPart ?? false,
+    ...(options?.when !== undefined && { when: options.when }),
   };
+}
+
+export function resolveReminderText(
+  item: UserReminder,
+  ctx: ReminderContext,
+): string {
+  return typeof item.text === 'function' ? item.text(ctx) : item.text;
 }
 
 /**
  * Create a user message fragment.
  * Message fragments are separated from regular fragments during resolve().
+ *
+ * Immediate reminders (no schedule) are baked into the message at creation time.
+ * Scheduled reminders are stored as fragment metadata and applied by the
+ * ContextEngine during resolve() based on the current turn count.
  *
  * @param content - The message content
  * @param reminders - Optional hidden/system reminders
@@ -255,6 +318,9 @@ export function reminder(
  * context.set(user('Hello')); // Plain user message
  * context.set(
  *   user('Deploy this', reminder('Ask for confirmation before destructive actions')),
+ * );
+ * context.set(
+ *   user('Hello', reminder('Keep concise', { when: everyNTurns(3) })),
  * );
  * ```
  */
@@ -271,13 +337,15 @@ export function user(
         }
       : { ...content, role: 'user', parts: [...content.parts] };
 
-  if (reminders.length > 0) {
+  const immediateReminders = reminders.filter((r) => !hasSchedule(r));
+  const scheduledReminders = reminders.filter((r) => hasSchedule(r));
+
+  if (immediateReminders.length > 0) {
     const addedReminders: UserReminderMetadata[] = [];
     const plainText = extractPlainText(message);
 
-    for (const item of reminders) {
-      const resolvedText =
-        typeof item.text === 'function' ? item.text(plainText) : item.text;
+    for (const item of immediateReminders) {
+      const resolvedText = resolveReminderText(item, { content: plainText });
 
       if (resolvedText.trim().length === 0) {
         continue;
@@ -302,6 +370,9 @@ export function user(
     }
   }
 
+  const fragmentMetadata: Record<string, unknown> | undefined =
+    scheduledReminders.length > 0 ? { scheduledReminders } : undefined;
+
   return {
     id: message.id,
     name: 'user',
@@ -315,5 +386,6 @@ export function user(
         return message;
       },
     },
+    metadata: fragmentMetadata,
   };
 }

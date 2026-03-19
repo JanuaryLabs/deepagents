@@ -20,6 +20,8 @@ import {
   assistant,
   chatMessageToUIMessage,
   errorRecoveryGuardrail,
+  generateChatTitle,
+  staticChatTitle,
   toMessageFragment,
 } from '@deepagents/context';
 
@@ -119,7 +121,7 @@ export class Text2Sql {
 
   public async chat(
     messages: ChatMessage[],
-    options?: { abortSignal?: AbortSignal },
+    options?: { abortSignal?: AbortSignal; generateTitle?: boolean },
   ) {
     if (messages.length === 0) {
       throw new Error('messages must not be empty');
@@ -148,6 +150,23 @@ export class Text2Sql {
     }
 
     const uiMessages = messages.map(chatMessageToUIMessage);
+
+    let title: string | null = null;
+    if (!context.chat?.title) {
+      const firstUserMsg = uiMessages.find((m) => m.role === 'user');
+      if (firstUserMsg) {
+        if (options?.generateTitle) {
+          title = await generateChatTitle({
+            message: firstUserMsg,
+            model: this.#config.model,
+            abortSignal: options?.abortSignal,
+          });
+        } else {
+          title = staticChatTitle(firstUserMsg);
+        }
+        await context.updateChat({ title });
+      }
+    }
 
     const { mounts: skillMounts } = context.getSkillMounts();
     const { tools } = await createResultTools({
@@ -222,6 +241,10 @@ export class Text2Sql {
       },
       execute: async ({ writer }) => {
         writer.merge(uiStream);
+
+        if (title) {
+          writer.write({ type: 'data-chat-title', data: title });
+        }
       },
     });
   }

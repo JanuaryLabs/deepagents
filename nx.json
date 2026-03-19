@@ -104,6 +104,11 @@
     },
     "dev": {
       "dependsOn": ["^build"]
+    },
+    "lint": {
+      "options": {
+        "command": "eslint . --fix"
+      }
     }
   },
   "release": {

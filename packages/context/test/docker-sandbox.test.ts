@@ -471,9 +471,10 @@ describe('Docker Sandbox', async () => {
       assert.strictEqual(result, 'hello from useSandbox');
 
       // Verify sandbox is disposed (command should fail)
-      if (sandboxRef) {
+      const captured1 = sandboxRef as DockerSandbox | null;
+      if (captured1) {
         try {
-          await sandboxRef.executeCommand('echo test');
+          await captured1.executeCommand('echo test');
           // If no error, container might still be stopping - that's ok
         } catch {
           // Expected - container is gone
@@ -497,9 +498,10 @@ describe('Docker Sandbox', async () => {
       );
 
       // Verify sandbox is disposed (command should fail)
-      if (sandboxRef) {
+      const captured2 = sandboxRef as DockerSandbox | null;
+      if (captured2) {
         try {
-          await sandboxRef.executeCommand('echo test');
+          await captured2.executeCommand('echo test');
         } catch {
           // Expected - container is gone
         }

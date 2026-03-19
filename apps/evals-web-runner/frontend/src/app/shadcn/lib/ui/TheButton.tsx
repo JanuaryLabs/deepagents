@@ -31,11 +31,11 @@ interface TheButtonProps extends React.ComponentProps<typeof Button> {
 // --- Internal Components ---
 
 function useDelayedLoading(loading: boolean | undefined, delay: number) {
-  loading = !!loading;
+  const isLoading = !!loading;
   const [delayPassed, setDelayPassed] = useState(false);
 
   useEffect(() => {
-    if (!loading) {
+    if (!isLoading) {
       return;
     }
 
@@ -47,9 +47,9 @@ function useDelayedLoading(loading: boolean | undefined, delay: number) {
       clearTimeout(timerId);
       queueMicrotask(() => setDelayPassed(false));
     };
-  }, [loading, delay]);
+  }, [isLoading, delay]);
 
-  return loading && delayPassed;
+  return isLoading && delayPassed;
 }
 
 function isComponent(
@@ -69,7 +69,7 @@ function IconRenderer({ icon }: { icon: React.ReactNode | LucideIcon }) {
     const Icon = icon;
     return <Icon className="size-4" />;
   }
-  return icon;
+  return <>{icon}</>;
 }
 
 function LoadingSpinner() {
@@ -135,7 +135,8 @@ function TextButtonContent({
       <div
         className={cn(
           'overflow-hidden transition-all duration-300 ease-in-out',
-          showSpinner ? '-ms-2 w-4 opacity-100' : '-ms-2 w-0 opacity-0',
+          showSpinner ? 'w-4 opacity-100' : '-ms-2 w-0 opacity-0',
+          icon ? '-ms-2' : '',
         )}
       >
         <LoadingSpinner />
@@ -153,7 +154,7 @@ function WithTooltip({
   children: React.ReactNode;
 }) {
   if (!tooltip) {
-    return children;
+    return <>{children}</>;
   }
 
   return (

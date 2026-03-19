@@ -575,7 +575,7 @@ describe('spreadsheet runtime scope', () => {
 
     const rows = await adapter.execute('SELECT * FROM users');
     assert.deepStrictEqual(
-      rows.map((row) => ({ ...row })),
+      rows.map((row: Record<string, unknown>) => ({ ...row })),
       [{ id: 1, name: 'Ada' }],
     );
   });

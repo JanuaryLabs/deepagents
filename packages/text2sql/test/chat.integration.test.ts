@@ -1,5 +1,5 @@
-import { type UIMessage, generateId } from 'ai';
-import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
+import { type UIMessage, generateId, simulateReadableStream } from 'ai';
+import { MockLanguageModelV3 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -23,21 +23,21 @@ function createMockModel(
   text = 'Here is your SQL: SELECT count(*) FROM users',
 ) {
   return new MockLanguageModelV3({
-    doStream: async () => ({
-      stream: simulateReadableStream({
-        chunks: [
-          { type: 'text-start', id: 'text-1' },
-          { type: 'text-delta', id: 'text-1', delta: text },
-          { type: 'text-end', id: 'text-1' },
-          {
-            type: 'finish',
-            finishReason: { unified: 'stop', raw: '' },
-            usage: testUsage,
-          },
-        ],
-      }),
-      rawCall: { rawPrompt: undefined, rawSettings: {} },
-    }),
+    doStream: async () =>
+      ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start', id: 'text-1' },
+            { type: 'text-delta', id: 'text-1', delta: text },
+            { type: 'text-end', id: 'text-1' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage: testUsage,
+            },
+          ],
+        }),
+      }) as any,
   });
 }
 
@@ -101,7 +101,7 @@ describe('Text2Sql.chat()', () => {
 
     const data = persisted.data as UIMessage;
     const textPart = data.parts?.find((p: any) => p.type === 'text');
-    assert.strictEqual(textPart?.text, 'How many users are there?');
+    assert.strictEqual((textPart as any)?.text, 'How many users are there?');
   });
 
   it('saves assistant response to context store after stream is consumed', async () => {
@@ -363,7 +363,7 @@ describe('Text2Sql.chat()', () => {
     let receivedSignal: AbortSignal | undefined;
 
     const model = new MockLanguageModelV3({
-      doStream: async ({ abortSignal }) => {
+      doStream: async ({ abortSignal }: any) => {
         receivedSignal = abortSignal;
         return {
           stream: simulateReadableStream({
@@ -378,8 +378,7 @@ describe('Text2Sql.chat()', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
-        };
+        } as any;
       },
     });
 
@@ -436,11 +435,11 @@ describe('Text2Sql.chat()', () => {
     const textPart = data.parts?.find((p: any) => p.type === 'text');
     assert.ok(textPart, 'should have a text part');
     assert.ok(
-      textPart.text.includes('<system-reminder>'),
+      (textPart as any).text.includes('<system-reminder>'),
       'text should contain system-reminder tag',
     );
     assert.ok(
-      textPart.text.includes('Always explain your SQL'),
+      (textPart as any).text.includes('Always explain your SQL'),
       'text should contain the reminder content',
     );
 

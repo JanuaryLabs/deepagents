@@ -3,8 +3,17 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  afterTurn,
+  and,
+  everyNTurns,
+  firstN,
   getReminderRanges,
+  hasSchedule,
+  not,
+  once,
+  or,
   reminder,
+  shouldIncludeReminder,
   stripReminders,
   stripTextByRanges,
   user,
@@ -420,5 +429,146 @@ describe('reminder range helpers', () => {
       | { source?: string; reminders?: unknown }
       | undefined;
     assert.deepStrictEqual(metadata, { source: 'seed' });
+  });
+});
+
+describe('reminder scheduling', () => {
+  describe('hasSchedule', () => {
+    it('returns false for reminders without schedule options', () => {
+      assert.strictEqual(hasSchedule(reminder('plain')), false);
+      assert.strictEqual(
+        hasSchedule(reminder('part', { asPart: true })),
+        false,
+      );
+    });
+
+    it('returns true for reminders with a when predicate', () => {
+      assert.strictEqual(
+        hasSchedule(reminder('a', { when: everyNTurns(3) })),
+        true,
+      );
+      assert.strictEqual(hasSchedule(reminder('b', { when: once() })), true);
+      assert.strictEqual(hasSchedule(reminder('c', { when: firstN(5) })), true);
+      assert.strictEqual(
+        hasSchedule(reminder('d', { when: afterTurn(2) })),
+        true,
+      );
+      assert.strictEqual(
+        hasSchedule(reminder('e', { when: () => true })),
+        true,
+      );
+    });
+  });
+
+  describe('shouldIncludeReminder', () => {
+    it('everyNTurns includes on turns divisible by N', () => {
+      const r = reminder('hint', { when: everyNTurns(3) });
+      assert.strictEqual(shouldIncludeReminder(r, 1), false);
+      assert.strictEqual(shouldIncludeReminder(r, 2), false);
+      assert.strictEqual(shouldIncludeReminder(r, 3), true);
+      assert.strictEqual(shouldIncludeReminder(r, 6), true);
+      assert.strictEqual(shouldIncludeReminder(r, 7), false);
+    });
+
+    it('once includes only on turn 1', () => {
+      const r = reminder('hint', { when: once() });
+      assert.strictEqual(shouldIncludeReminder(r, 1), true);
+      assert.strictEqual(shouldIncludeReminder(r, 2), false);
+      assert.strictEqual(shouldIncludeReminder(r, 10), false);
+    });
+
+    it('firstN includes on first N turns', () => {
+      const r = reminder('hint', { when: firstN(3) });
+      assert.strictEqual(shouldIncludeReminder(r, 1), true);
+      assert.strictEqual(shouldIncludeReminder(r, 3), true);
+      assert.strictEqual(shouldIncludeReminder(r, 4), false);
+    });
+
+    it('afterTurn includes only after turn N', () => {
+      const r = reminder('hint', { when: afterTurn(5) });
+      assert.strictEqual(shouldIncludeReminder(r, 5), false);
+      assert.strictEqual(shouldIncludeReminder(r, 6), true);
+      assert.strictEqual(shouldIncludeReminder(r, 10), true);
+    });
+
+    it('when uses custom predicate', () => {
+      const r = reminder('hint', { when: (turn) => turn === 4 });
+      assert.strictEqual(shouldIncludeReminder(r, 3), false);
+      assert.strictEqual(shouldIncludeReminder(r, 4), true);
+      assert.strictEqual(shouldIncludeReminder(r, 5), false);
+    });
+
+    it('and() combines predicates with AND logic', () => {
+      const r = reminder('hint', { when: and(everyNTurns(3), afterTurn(5)) });
+      assert.strictEqual(shouldIncludeReminder(r, 3), false);
+      assert.strictEqual(shouldIncludeReminder(r, 6), true);
+      assert.strictEqual(shouldIncludeReminder(r, 7), false);
+      assert.strictEqual(shouldIncludeReminder(r, 9), true);
+    });
+
+    it('or() combines predicates with OR logic', () => {
+      const r = reminder('hint', { when: or(once(), everyNTurns(5)) });
+      assert.strictEqual(shouldIncludeReminder(r, 1), true);
+      assert.strictEqual(shouldIncludeReminder(r, 2), false);
+      assert.strictEqual(shouldIncludeReminder(r, 5), true);
+      assert.strictEqual(shouldIncludeReminder(r, 10), true);
+    });
+
+    it('not() inverts a predicate', () => {
+      const r = reminder('hint', { when: not(firstN(2)) });
+      assert.strictEqual(shouldIncludeReminder(r, 1), false);
+      assert.strictEqual(shouldIncludeReminder(r, 2), false);
+      assert.strictEqual(shouldIncludeReminder(r, 3), true);
+    });
+
+    it('includes on every turn when no schedule is set', () => {
+      const r = reminder('always');
+      assert.strictEqual(shouldIncludeReminder(r, 1), true);
+      assert.strictEqual(shouldIncludeReminder(r, 100), true);
+    });
+  });
+
+  describe('user() with scheduled reminders', () => {
+    it('stores scheduled reminders as fragment metadata instead of applying', () => {
+      const fragment = user(
+        'hello',
+        reminder('every-third', { when: everyNTurns(3) }),
+      );
+      const message = encodeMessage(fragment);
+
+      assert.strictEqual(getTextPart(message), 'hello');
+      assert.strictEqual(getReminderMetadata(message).length, 0);
+
+      assert.ok(fragment.metadata?.scheduledReminders);
+      const scheduled = fragment.metadata!.scheduledReminders as Array<{
+        when?: (turn: number) => boolean;
+      }>;
+      assert.strictEqual(scheduled.length, 1);
+      assert.strictEqual(typeof scheduled[0].when, 'function');
+    });
+
+    it('separates immediate and scheduled reminders', () => {
+      const fragment = user(
+        'hello',
+        reminder('immediate'),
+        reminder('scheduled', { when: once() }),
+      );
+      const message = encodeMessage(fragment);
+
+      const encodedImmediate = taggedReminder('immediate');
+      assert.strictEqual(getTextPart(message), `hello${encodedImmediate}`);
+      assert.strictEqual(getReminderMetadata(message).length, 1);
+
+      const scheduled = fragment.metadata?.scheduledReminders as Array<{
+        when?: (turn: number) => boolean;
+      }>;
+      assert.strictEqual(scheduled.length, 1);
+      assert.strictEqual(typeof scheduled[0].when, 'function');
+    });
+
+    it('omits fragment metadata when no scheduled reminders', () => {
+      const fragment = user('hello', reminder('immediate'));
+      assert.strictEqual(fragment.metadata, undefined);
+    });
   });
 });

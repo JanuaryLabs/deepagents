@@ -16,10 +16,10 @@ describe('BigQueryInfoGrounding', () => {
     const dialect = fragments.find((f) => f.name === 'dialectInfo');
 
     assert.ok(dialect);
-    assert.strictEqual(dialect.data.dialect, 'bigquery');
-    assert.strictEqual(dialect.data.database, undefined);
+    assert.strictEqual((dialect.data as any).dialect, 'bigquery');
+    assert.strictEqual((dialect.data as any).database, undefined);
     assert.strictEqual(
-      dialect.data.details.identifiers.qualifiedTable,
+      (dialect.data as any).details.identifiers.qualifiedTable,
       'dataset.table',
     );
   });
@@ -37,9 +37,9 @@ describe('BigQueryInfoGrounding', () => {
     const dialect = fragments.find((f) => f.name === 'dialectInfo');
 
     assert.ok(dialect);
-    assert.strictEqual(dialect.data.database, 'my-project');
+    assert.strictEqual((dialect.data as any).database, 'my-project');
     assert.strictEqual(
-      dialect.data.details.identifiers.qualifiedTable,
+      (dialect.data as any).details.identifiers.qualifiedTable,
       'project.dataset.table',
     );
   });

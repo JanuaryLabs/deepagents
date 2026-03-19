@@ -1,6 +1,10 @@
 import { Corpus } from 'tiny-tfidf';
 
-import { type UserReminder, reminder } from '../fragments/message/user.ts';
+import {
+  type ReminderContext,
+  type UserReminder,
+  reminder,
+} from '../fragments/message/user.ts';
 import type { SkillMetadata } from './types.ts';
 
 export interface SkillMatch {
@@ -69,8 +73,8 @@ export function skillsReminder(
     ? skillsOrClassifier
     : new BM25SkillClassifier(skillsOrClassifier);
 
-  return reminder((content: string) => {
-    const matches = classifier.match(content, options);
+  return reminder((ctx: ReminderContext) => {
+    const matches = classifier.match(ctx.content, options);
     if (matches.length === 0) return '';
     return formatSkillReminder(matches);
   });

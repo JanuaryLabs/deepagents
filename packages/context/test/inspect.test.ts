@@ -149,7 +149,7 @@ describe('ContextEngine.inspect()', () => {
         {
           parts: [{ type: 'text', text: 'payload' }],
           id: 'user-reminder-msg',
-          role: 'assistant',
+          role: 'user',
         },
         reminder('tooltip-reminder', { asPart: true }),
       ),

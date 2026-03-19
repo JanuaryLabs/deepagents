@@ -55,7 +55,7 @@ export interface ChatAgentLike<CIn> {
 export interface ChatOptions<CIn> {
   contextVariables?: CIn;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-  generateMessageId?: () => string;
+  abortSignal?: AbortSignal;
   generateTitle?: boolean;
   onError?: (error: unknown) => string;
   messageMetadata?: NonNullable<
@@ -97,23 +97,25 @@ export async function chat<CIn>(
   } else {
     context.set(lastFragment);
     await context.save();
-    assistantMsgId = options?.generateMessageId?.() ?? generateId();
+    assistantMsgId = generateId();
   }
 
   const uiMessages = messages.map(chatMessageToUIMessage);
 
-  let titlePromise: Promise<string> | null = null;
+  let title: string | null = null;
   if (!context.chat?.title) {
     const firstUserMsg = uiMessages.find((m) => m.role === 'user');
     if (firstUserMsg) {
-      await context.updateChat({ title: staticChatTitle(firstUserMsg) });
-
       if (options?.generateTitle && agent.model) {
-        titlePromise = generateChatTitle({
+        title = await generateChatTitle({
           message: firstUserMsg,
           model: agent.model,
+          abortSignal: options?.abortSignal,
         });
+      } else {
+        title = staticChatTitle(firstUserMsg);
       }
+      await context.updateChat({ title });
     }
   }
 
@@ -124,6 +126,7 @@ export async function chat<CIn>(
 
   const result = await agent.stream(streamContextVariables, {
     transform: options?.transform,
+    abortSignal: options?.abortSignal,
   });
 
   const uiStream = result.toUIMessageStream({
@@ -175,10 +178,8 @@ export async function chat<CIn>(
     execute: async ({ writer }) => {
       writer.merge(uiStream);
 
-      if (titlePromise) {
-        const title = await titlePromise;
+      if (title) {
         writer.write({ type: 'data-chat-title', data: title });
-        await context.updateChat({ title });
       }
     },
   });

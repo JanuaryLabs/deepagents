@@ -1,0 +1,254 @@
+---
+title: chat()
+description: Streaming orchestration that persists messages, generates titles, tracks usage, and handles errors
+---
+
+The `chat()` function is the high-level streaming entry point for conversations. It wires together message persistence, title generation, usage tracking, and error formatting into a single call that returns a `ReadableStream` of UI message chunks.
+
+```typescript
+import { chat, agent, ContextEngine, SqliteContextStore, role } from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+
+const store = new SqliteContextStore('./chat.db');
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(role('You are a helpful assistant.'));
+
+const myAgent = agent({
+  name: 'assistant',
+  context,
+  model: groq('gpt-oss-20b'),
+});
+
+const stream = await chat(myAgent, messages, {
+  generateTitle: true,
+});
+```
+
+## Function Signature
+
+```typescript
+async function chat<CIn>(
+  agent: ChatAgentLike<CIn>,
+  messages: ChatMessage[],
+  options?: ChatOptions<CIn>,
+): Promise<ReadableStream<UIMessageChunk>>
+```
+
+The return value is a `ReadableStream` produced by the AI SDK's `createUIMessageStream()`. It emits structured chunks (`text-delta`, `tool-call`, `data-chat-title`, etc.) that UI frameworks consume directly.
+
+| Argument | Type | Description |
+| --- | --- | --- |
+| `agent` | `ChatAgentLike<CIn>` | An object with `stream()`, `context`, and optionally `model` |
+| `messages` | `ChatMessage[]` | The full conversation history including the new message. Must not be empty |
+| `options` | `ChatOptions<CIn>` | Optional configuration for title generation, transforms, error handling, and metadata |
+
+The function throws if:
+- The agent has no `context` attached
+- The `messages` array is empty
+
+## ChatAgentLike
+
+Any object that satisfies this interface can be passed to `chat()`. The `agent()` wrapper from `@deepagents/context` implements it automatically.
+
+```typescript
+interface ChatAgentLike<CIn> {
+  context?: ContextEngine;
+  model?: AgentModel;
+  stream(
+    contextVariables: CIn,
+    config?: {
+      abortSignal?: AbortSignal;
+      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+      maxRetries?: number;
+    },
+  ): Promise<StreamTextResult<ToolSet, never>>;
+}
+```
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `context` | `ContextEngine` | Yes | The context engine scoped to the current chat |
+| `model` | `AgentModel` | No | Required for AI-generated titles. If absent, only static titles are used |
+| `stream()` | Function | Yes | Resolves context and returns a streaming AI SDK result |
+
+## ChatOptions
+
+```typescript
+interface ChatOptions<CIn> {
+  contextVariables?: CIn;
+  transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+  abortSignal?: AbortSignal;
+  generateTitle?: boolean;
+  onError?: (error: unknown) => string;
+  messageMetadata?: NonNullable<
+    Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
+  >['messageMetadata'];
+  finalAssistantMetadata?: (message: UIMessage) =>
+    | Record<string, unknown>
+    | undefined
+    | Promise<Record<string, unknown> | undefined>;
+}
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `contextVariables` | `CIn` | `{}` | Passed through to `agent.stream()` as context variables |
+| `transform` | `StreamTextTransform` | `undefined` | Custom stream transforms forwarded to `agent.stream()` |
+| `abortSignal` | `AbortSignal` | `undefined` | Signal to cancel the stream, forwarded to `agent.stream()` |
+| `generateTitle` | `boolean` | `false` | Enable AI-powered title generation for untitled chats |
+| `onError` | `(error: unknown) => string` | Built-in formatter | Custom error-to-string formatter for stream errors |
+| `messageMetadata` | Derived from AI SDK | `undefined` | Forwarded to `toUIMessageStream()` — see [AI SDK docs](https://ai-sdk.dev) for the full type |
+| `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined` | Async callback to attach metadata to the final assistant message before persisting |
+
+## ChatMessage
+
+Messages can be passed as either raw AI SDK `UIMessage` objects or as context engine `MessageFragment`s. The function normalizes them internally.
+
+```typescript
+type ChatMessage = UIMessage | MessageFragment;
+```
+
+Use `toMessageFragment()` and `chatMessageToUIMessage()` to convert between formats:
+
+```typescript
+import { toMessageFragment, chatMessageToUIMessage } from '@deepagents/context';
+
+const fragment = toMessageFragment(uiMessage);
+const uiMsg = chatMessageToUIMessage(fragment);
+```
+
+## Message Persistence Flow
+
+The `chat()` function persists messages at three points during a conversation turn:
+
+```
+1. Before streaming  ─── save last message from caller
+2. On each step      ─── save intermediate assistant state
+3. On finish         ─── save final assistant message + track usage
+```
+
+### 1. Initial Save
+
+When `chat()` is called, the last message in the array is persisted:
+
+- **User message** — saved with `save()` (creates a new branch point if needed), then a new assistant message ID is generated
+- **Assistant message** — saved with `save({ branch: false })` (in-place update, no branching). This handles the case where the client is resuming or continuing an assistant turn
+
+### 2. Step-Finish Saves
+
+After each streaming step completes (e.g., a tool call finishes), the intermediate assistant message is saved with `save({ branch: false })`. This ensures partial progress is persisted even if the stream is interrupted.
+
+### 3. Final Save
+
+When the stream finishes:
+
+1. The `finalAssistantMetadata` callback is invoked (if provided) to attach custom metadata
+2. The final assistant message is saved with `save({ branch: false })`
+3. Token usage is tracked via `context.trackUsage()`
+
+The `branch: false` option on assistant saves means the message node is updated in-place rather than creating a new branch. This keeps the conversation graph clean — one assistant node per turn, not one per streaming update.
+
+## Title Generation
+
+`chat()` handles title generation automatically for untitled chats:
+
+```typescript
+const stream = await chat(myAgent, messages, {
+  generateTitle: true,
+});
+```
+
+When `generateTitle: true` and the agent has a `model`, `generateChatTitle()` uses an LLM to produce a 2-5 word title. If the LLM call fails, it falls back to `staticChatTitle()` (first user message truncated to 100 characters). When `generateTitle` is `false` (the default) or the agent has no model, `staticChatTitle()` is used directly.
+
+In both cases, the title is persisted via `context.updateChat()` before streaming begins, and a `{ type: 'data-chat-title', data: title }` event is emitted on the stream so the client can display it.
+
+## Error Handling
+
+The built-in error formatter converts common AI SDK errors into user-friendly strings:
+
+| Error Type | Message |
+| --- | --- |
+| `NoSuchToolError` | "The model tried to call an unknown tool." |
+| `InvalidToolInputError` | "The model called a tool with invalid arguments." |
+| `ToolCallRepairError` | "The model tried to call a tool with invalid arguments, but it was repaired." |
+| `APICallError` | "Upstream API call failed with status {code}: {message}" |
+| Other | JSON-serialized error |
+
+Override with a custom formatter:
+
+```typescript
+const stream = await chat(myAgent, messages, {
+  onError: (error) => {
+    if (error instanceof MyCustomError) {
+      return 'Something went wrong. Please try again.';
+    }
+    return 'An unexpected error occurred.';
+  },
+});
+```
+
+## Complete Example
+
+```typescript
+import {
+  chat,
+  agent,
+  ContextEngine,
+  SqliteContextStore,
+  role,
+} from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+import type { UIMessage } from 'ai';
+
+const store = new SqliteContextStore('./chat.db');
+
+async function handleUserMessage(
+  chatId: string,
+  userId: string,
+  messages: UIMessage[],
+) {
+  const context = new ContextEngine({
+    store,
+    chatId,
+    userId,
+  }).set(role('You are a helpful assistant.'));
+
+  const myAgent = agent({
+    name: 'assistant',
+    context,
+    model: groq('gpt-oss-20b'),
+  });
+
+  const stream = await chat(myAgent, messages, {
+    generateTitle: true,
+    finalAssistantMetadata: async (message) => ({
+      completedAt: Date.now(),
+    }),
+  });
+
+  return stream;
+}
+```
+
+## chat() vs agent.stream()
+
+| | `chat()` | `agent.stream()` |
+| --- | --- | --- |
+| Message persistence | Automatic (save on enter, per step, on finish) | Manual |
+| Title generation | Built-in with `generateTitle` option | Manual |
+| Usage tracking | Automatic via `trackUsage()` | Manual |
+| Error formatting | Built-in with override option | Raw errors |
+| Return type | `ReadableStream<UIMessageChunk>` | `StreamTextResult` |
+| Branch management | Handles `branch: false` for in-place updates | N/A |
+
+Use `chat()` when building a conversation UI. Use `agent.stream()` directly when you need lower-level control over the streaming pipeline.
+
+## Next Steps
+
+- [Agent Wrapper](/docs/context/agent) - The `agent()` function that creates `ChatAgentLike` objects
+- [Chat Management](/docs/context/chat) - CRUD operations for chat metadata, listing, and deletion
+- [Stream Persistence](/docs/context/stream-persistence) - Durable storage for reconnectable streams
+- [Context Engine](/docs/context/context-engine) - Full API reference for `ContextEngine`

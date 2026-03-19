@@ -4,6 +4,7 @@
     "index",
     "agent-integration",
     "text2sql-integration",
-    "multi-session-context"
+    "multi-session-context",
+    "error-recovery"
   ]
 }
