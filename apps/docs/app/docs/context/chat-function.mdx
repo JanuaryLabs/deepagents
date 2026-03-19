@@ -6,8 +6,15 @@ description: Streaming orchestration that persists messages, generates titles, t
 The `chat()` function is the high-level streaming entry point for conversations. It wires together message persistence, title generation, usage tracking, and error formatting into a single call that returns a `ReadableStream` of UI message chunks.
 
 ```typescript
-import { chat, agent, ContextEngine, SqliteContextStore, role } from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
+
+import {
+  ContextEngine,
+  SqliteContextStore,
+  agent,
+  chat,
+  role,
+} from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
@@ -34,18 +41,19 @@ async function chat<CIn>(
   agent: ChatAgentLike<CIn>,
   messages: ChatMessage[],
   options?: ChatOptions<CIn>,
-): Promise<ReadableStream<UIMessageChunk>>
+): Promise<ReadableStream<UIMessageChunk>>;
 ```
 
 The return value is a `ReadableStream` produced by the AI SDK's `createUIMessageStream()`. It emits structured chunks (`text-delta`, `tool-call`, `data-chat-title`, etc.) that UI frameworks consume directly.
 
-| Argument | Type | Description |
-| --- | --- | --- |
-| `agent` | `ChatAgentLike<CIn>` | An object with `stream()`, `context`, and optionally `model` |
-| `messages` | `ChatMessage[]` | The full conversation history including the new message. Must not be empty |
-| `options` | `ChatOptions<CIn>` | Optional configuration for title generation, transforms, error handling, and metadata |
+| Argument   | Type                 | Description                                                                           |
+| ---------- | -------------------- | ------------------------------------------------------------------------------------- |
+| `agent`    | `ChatAgentLike<CIn>` | An object with `stream()`, `context`, and optionally `model`                          |
+| `messages` | `ChatMessage[]`      | The full conversation history including the new message. Must not be empty            |
+| `options`  | `ChatOptions<CIn>`   | Optional configuration for title generation, transforms, error handling, and metadata |
 
 The function throws if:
+
 - The agent has no `context` attached
 - The `messages` array is empty
 
@@ -68,11 +76,11 @@ interface ChatAgentLike<CIn> {
 }
 ```
 
-| Property | Type | Required | Description |
-| --- | --- | --- | --- |
-| `context` | `ContextEngine` | Yes | The context engine scoped to the current chat |
-| `model` | `AgentModel` | No | Required for AI-generated titles. If absent, only static titles are used |
-| `stream()` | Function | Yes | Resolves context and returns a streaming AI SDK result |
+| Property   | Type            | Required | Description                                                              |
+| ---------- | --------------- | -------- | ------------------------------------------------------------------------ |
+| `context`  | `ContextEngine` | Yes      | The context engine scoped to the current chat                            |
+| `model`    | `AgentModel`    | No       | Required for AI-generated titles. If absent, only static titles are used |
+| `stream()` | Function        | Yes      | Resolves context and returns a streaming AI SDK result                   |
 
 ## ChatOptions
 
@@ -86,22 +94,24 @@ interface ChatOptions<CIn> {
   messageMetadata?: NonNullable<
     Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
   >['messageMetadata'];
-  finalAssistantMetadata?: (message: UIMessage) =>
+  finalAssistantMetadata?: (
+    message: UIMessage,
+  ) =>
     | Record<string, unknown>
     | undefined
     | Promise<Record<string, unknown> | undefined>;
 }
 ```
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `contextVariables` | `CIn` | `{}` | Passed through to `agent.stream()` as context variables |
-| `transform` | `StreamTextTransform` | `undefined` | Custom stream transforms forwarded to `agent.stream()` |
-| `abortSignal` | `AbortSignal` | `undefined` | Signal to cancel the stream, forwarded to `agent.stream()` |
-| `generateTitle` | `boolean` | `false` | Enable AI-powered title generation for untitled chats |
-| `onError` | `(error: unknown) => string` | Built-in formatter | Custom error-to-string formatter for stream errors |
-| `messageMetadata` | Derived from AI SDK | `undefined` | Forwarded to `toUIMessageStream()` — see [AI SDK docs](https://ai-sdk.dev) for the full type |
-| `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined` | Async callback to attach metadata to the final assistant message before persisting |
+| Option                   | Type                                                       | Default            | Description                                                                                  |
+| ------------------------ | ---------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------- |
+| `contextVariables`       | `CIn`                                                      | `{}`               | Passed through to `agent.stream()` as context variables                                      |
+| `transform`              | `StreamTextTransform`                                      | `undefined`        | Custom stream transforms forwarded to `agent.stream()`                                       |
+| `abortSignal`            | `AbortSignal`                                              | `undefined`        | Signal to cancel the stream, forwarded to `agent.stream()`                                   |
+| `generateTitle`          | `boolean`                                                  | `false`            | Enable AI-powered title generation for untitled chats                                        |
+| `onError`                | `(error: unknown) => string`                               | Built-in formatter | Custom error-to-string formatter for stream errors                                           |
+| `messageMetadata`        | Derived from AI SDK                                        | `undefined`        | Forwarded to `toUIMessageStream()` — see [AI SDK docs](https://ai-sdk.dev) for the full type |
+| `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined`        | Async callback to attach metadata to the final assistant message before persisting           |
 
 ## ChatMessage
 
@@ -114,7 +124,7 @@ type ChatMessage = UIMessage | MessageFragment;
 Use `toMessageFragment()` and `chatMessageToUIMessage()` to convert between formats:
 
 ```typescript
-import { toMessageFragment, chatMessageToUIMessage } from '@deepagents/context';
+import { chatMessageToUIMessage, toMessageFragment } from '@deepagents/context';
 
 const fragment = toMessageFragment(uiMessage);
 const uiMsg = chatMessageToUIMessage(fragment);
@@ -169,13 +179,13 @@ In both cases, the title is persisted via `context.updateChat()` before streamin
 
 The built-in error formatter converts common AI SDK errors into user-friendly strings:
 
-| Error Type | Message |
-| --- | --- |
-| `NoSuchToolError` | "The model tried to call an unknown tool." |
-| `InvalidToolInputError` | "The model called a tool with invalid arguments." |
-| `ToolCallRepairError` | "The model tried to call a tool with invalid arguments, but it was repaired." |
-| `APICallError` | "Upstream API call failed with status {code}: {message}" |
-| Other | JSON-serialized error |
+| Error Type              | Message                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `NoSuchToolError`       | "The model tried to call an unknown tool."                                    |
+| `InvalidToolInputError` | "The model called a tool with invalid arguments."                             |
+| `ToolCallRepairError`   | "The model tried to call a tool with invalid arguments, but it was repaired." |
+| `APICallError`          | "Upstream API call failed with status `{code}`: `{message}`"                  |
+| Other                   | JSON-serialized error                                                         |
 
 Override with a custom formatter:
 
@@ -193,15 +203,16 @@ const stream = await chat(myAgent, messages, {
 ## Complete Example
 
 ```typescript
-import {
-  chat,
-  agent,
-  ContextEngine,
-  SqliteContextStore,
-  role,
-} from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
 import type { UIMessage } from 'ai';
+
+import {
+  ContextEngine,
+  SqliteContextStore,
+  agent,
+  chat,
+  role,
+} from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
 
@@ -235,14 +246,14 @@ async function handleUserMessage(
 
 ## chat() vs agent.stream()
 
-| | `chat()` | `agent.stream()` |
-| --- | --- | --- |
-| Message persistence | Automatic (save on enter, per step, on finish) | Manual |
-| Title generation | Built-in with `generateTitle` option | Manual |
-| Usage tracking | Automatic via `trackUsage()` | Manual |
-| Error formatting | Built-in with override option | Raw errors |
-| Return type | `ReadableStream<UIMessageChunk>` | `StreamTextResult` |
-| Branch management | Handles `branch: false` for in-place updates | N/A |
+|                     | `chat()`                                       | `agent.stream()`   |
+| ------------------- | ---------------------------------------------- | ------------------ |
+| Message persistence | Automatic (save on enter, per step, on finish) | Manual             |
+| Title generation    | Built-in with `generateTitle` option           | Manual             |
+| Usage tracking      | Automatic via `trackUsage()`                   | Manual             |
+| Error formatting    | Built-in with override option                  | Raw errors         |
+| Return type         | `ReadableStream<UIMessageChunk>`               | `StreamTextResult` |
+| Branch management   | Handles `branch: false` for in-place updates   | N/A                |
 
 Use `chat()` when building a conversation UI. Use `agent.stream()` directly when you need lower-level control over the streaming pipeline.
 
