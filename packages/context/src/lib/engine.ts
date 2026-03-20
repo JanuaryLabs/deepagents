@@ -16,12 +16,11 @@ import {
   isMessageFragment,
 } from './fragments.ts';
 import {
-  type UserReminder,
   type UserReminderMetadata,
-  applyInlineReminder,
-  applyPartReminder,
-  resolveReminderText,
-  shouldIncludeReminder,
+  applyReminderToMessage,
+  getConditionalReminder,
+  isConditionalReminder,
+  mergeReminderMetadata,
 } from './fragments/message/user.ts';
 import type { Models } from './models.generated.ts';
 import {
@@ -163,6 +162,10 @@ export class ContextEngine {
   #initialized = false;
   /** Initial metadata to merge on first initialization */
   #initialMetadata: Record<string, unknown> | undefined;
+
+  get #renderableFragments(): ContextFragment[] {
+    return this.#fragments.filter((f) => !isConditionalReminder(f));
+  }
 
   constructor(options: ContextEngineOptions) {
     if (!options.chatId) {
@@ -367,7 +370,7 @@ export class ContextEngine {
    * @internal Use resolve() instead for public API.
    */
   public render(renderer: ContextRenderer) {
-    return renderer.render(this.#fragments);
+    return renderer.render(this.#renderableFragments);
   }
 
   /**
@@ -390,7 +393,7 @@ export class ContextEngine {
   public async resolve(options: ResolveOptions): Promise<ResolveResult> {
     await this.#ensureInitialized();
 
-    const systemPrompt = options.renderer.render(this.#fragments);
+    const systemPrompt = options.renderer.render(this.#renderableFragments);
 
     // Get persisted messages from graph
     const messages: unknown[] = [];
@@ -413,8 +416,6 @@ export class ContextEngine {
       }
     }
 
-    // Add pending messages, applying scheduled reminders on cloned copies
-    const turn = await this.getTurnCount();
     for (const fragment of this.#pendingMessages) {
       if (!fragment.codec) {
         throw new Error(
@@ -422,58 +423,48 @@ export class ContextEngine {
         );
       }
 
-      const scheduled = fragment.metadata?.scheduledReminders as
-        | UserReminder[]
-        | undefined;
-      if (fragment.name === 'user' && scheduled && scheduled.length > 0) {
-        const original = fragment.codec.encode() as UIMessage;
+      messages.push(fragment.codec.encode());
+    }
+
+    // Apply conditional reminder fragments to the last user message
+    const conditionalReminders = this.#fragments.filter(isConditionalReminder);
+    if (conditionalReminders.length > 0) {
+      const turn = await this.getTurnCount();
+
+      let lastUserIndex = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if ((messages[i] as UIMessage).role === 'user') {
+          lastUserIndex = i;
+          break;
+        }
+      }
+
+      if (lastUserIndex >= 0) {
+        const original = messages[lastUserIndex] as UIMessage;
         const message: UIMessage = {
           ...original,
           parts: [...original.parts],
         };
+
         const plainText = message.parts
           .filter(isTextUIPart)
           .map((p) => p.text)
           .join(' ');
         const addedReminders: UserReminderMetadata[] = [];
 
-        for (const item of scheduled) {
-          if (!shouldIncludeReminder(item, turn)) {
-            continue;
-          }
-
-          const resolvedText = resolveReminderText(item, {
+        for (const fragment of conditionalReminders) {
+          const config = getConditionalReminder(fragment);
+          if (!config.when(turn)) continue;
+          const meta = applyReminderToMessage(message, config, {
             content: plainText,
             turn,
           });
-          if (resolvedText.trim().length === 0) {
-            continue;
-          }
-
-          addedReminders.push(
-            item.asPart
-              ? applyPartReminder(message, resolvedText)
-              : applyInlineReminder(message, resolvedText),
-          );
+          if (meta) addedReminders.push(meta);
         }
 
-        if (addedReminders.length > 0) {
-          const metadata =
-            typeof message.metadata === 'object' &&
-            message.metadata !== null &&
-            !Array.isArray(message.metadata)
-              ? { ...(message.metadata as Record<string, unknown>) }
-              : {};
-          const existingReminders = Array.isArray(metadata.reminders)
-            ? metadata.reminders
-            : [];
-          metadata.reminders = [...existingReminders, ...addedReminders];
-          message.metadata = metadata;
-        }
+        mergeReminderMetadata(message, addedReminders);
 
-        messages.push(message);
-      } else {
-        messages.push(fragment.codec.encode());
+        messages[lastUserIndex] = message;
       }
     }
 
@@ -655,8 +646,8 @@ export class ContextEngine {
     const tokenizer = registry.getTokenizer(modelId);
     const fragmentEstimates: FragmentEstimate[] = [];
 
-    // 1. Estimate context fragments (system prompt)
-    for (const fragment of this.#fragments) {
+    // 1. Estimate context fragments (system prompt), skip conditional reminders
+    for (const fragment of this.#renderableFragments) {
       const rendered = renderer.render([fragment]);
       const tokens = tokenizer.count(rendered);
       const cost = (tokens / 1_000_000) * model.cost.input;
@@ -1040,8 +1031,8 @@ export class ContextEngine {
     // Get token/cost estimation
     const estimateResult = await this.estimate(options.modelId, { renderer });
 
-    // Render using provided renderer
-    const rendered = renderer.render(this.#fragments);
+    // Render using provided renderer (exclude conditional reminders)
+    const rendered = renderer.render(this.#renderableFragments);
 
     // Get persisted messages from store
     const persistedMessages: MessageData[] = [];

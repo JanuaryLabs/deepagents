@@ -1,6 +1,6 @@
 import { type UIMessage, generateId, isTextUIPart } from 'ai';
 
-import type { MessageFragment } from '../../fragments.ts';
+import type { ContextFragment, MessageFragment } from '../../fragments.ts';
 
 export interface ReminderContext {
   content: string;
@@ -39,17 +39,38 @@ export function not(predicate: WhenPredicate): WhenPredicate {
   return (turn) => !predicate(turn);
 }
 
-export interface ReminderSchedule {
-  when?: WhenPredicate;
-}
-
-export interface UserReminderOptions extends ReminderSchedule {
+export interface UserReminderOptions {
   asPart?: boolean;
 }
 
-export interface UserReminder extends ReminderSchedule {
+export interface UserReminder {
   text: ReminderText;
   asPart: boolean;
+}
+
+export interface ConditionalReminderOptions {
+  when: WhenPredicate;
+  asPart?: boolean;
+}
+
+export interface ConditionalReminder {
+  text: ReminderText;
+  when: WhenPredicate;
+  asPart: boolean;
+}
+
+export function isConditionalReminder(
+  fragment: ContextFragment,
+): fragment is ContextFragment & {
+  metadata: { reminder: ConditionalReminder };
+} {
+  return fragment.name === 'reminder' && !!fragment.metadata?.reminder;
+}
+
+export function getConditionalReminder(
+  fragment: ContextFragment,
+): ConditionalReminder {
+  return fragment.metadata!.reminder as ConditionalReminder;
 }
 
 export interface UserReminderMetadata {
@@ -260,55 +281,107 @@ export function applyPartReminder(
   };
 }
 
-export function hasSchedule(reminder: UserReminder): boolean {
-  return reminder.when !== undefined;
+export function resolveReminderText(
+  item: { text: ReminderText },
+  ctx: ReminderContext,
+): string {
+  return typeof item.text === 'function' ? item.text(ctx) : item.text;
 }
 
-export function shouldIncludeReminder(
-  reminder: UserReminder,
-  turn: number,
-): boolean {
-  if (reminder.when && !reminder.when(turn)) return false;
-  return true;
+export function applyReminderToMessage(
+  message: UIMessage,
+  item: { text: ReminderText; asPart: boolean },
+  ctx: ReminderContext,
+): UserReminderMetadata | null {
+  const resolvedText = resolveReminderText(item, ctx);
+  if (resolvedText.trim().length === 0) {
+    return null;
+  }
+  return item.asPart
+    ? applyPartReminder(message, resolvedText)
+    : applyInlineReminder(message, resolvedText);
+}
+
+export function mergeReminderMetadata(
+  message: UIMessage,
+  addedReminders: UserReminderMetadata[],
+): void {
+  if (addedReminders.length === 0) return;
+  const metadata = isRecord(message.metadata) ? { ...message.metadata } : {};
+  const existing = Array.isArray(metadata.reminders) ? metadata.reminders : [];
+  metadata.reminders = [...existing, ...addedReminders];
+  message.metadata = metadata;
 }
 
 /**
- * Create a user reminder payload for user message builders.
+ * Create an immediate reminder for use inside `user()`.
  *
- * Default behavior injects reminder text inline as
- * `<system-reminder>...</system-reminder>`.
+ * Injects reminder text inline as `<system-reminder>...</system-reminder>`.
  *
  * @param text - Reminder text (must not be empty)
- * @param options - Reminder representation and scheduling options
+ * @param options - Reminder representation options
  */
 export function reminder(
   text: ReminderText,
   options?: UserReminderOptions,
-): UserReminder {
+): UserReminder;
+/**
+ * Create a conditional reminder fragment for use with `engine.set()`.
+ *
+ * Evaluated at `resolve()` time against the current turn count.
+ * Only included in the last user message when the predicate returns true.
+ *
+ * @param text - Reminder text (must not be empty)
+ * @param options - Must include a `when` predicate
+ *
+ * @example
+ * ```ts
+ * engine.set(
+ *   reminder('Keep responses concise', { when: everyNTurns(3) }),
+ *   user('Hello'),
+ * );
+ * ```
+ */
+export function reminder(
+  text: ReminderText,
+  options: ConditionalReminderOptions,
+): ContextFragment;
+export function reminder(
+  text: ReminderText,
+  options?: UserReminderOptions | ConditionalReminderOptions,
+): UserReminder | ContextFragment {
   if (typeof text === 'string') {
     assertReminderText(text);
   }
+
+  if (options && 'when' in options && options.when) {
+    return {
+      name: 'reminder',
+      metadata: {
+        reminder: {
+          text,
+          when: options.when,
+          asPart: options.asPart ?? false,
+        } satisfies ConditionalReminder,
+      },
+    };
+  }
+
   return {
     text,
     asPart: options?.asPart ?? false,
-    ...(options?.when !== undefined && { when: options.when }),
   };
-}
-
-export function resolveReminderText(
-  item: UserReminder,
-  ctx: ReminderContext,
-): string {
-  return typeof item.text === 'function' ? item.text(ctx) : item.text;
 }
 
 /**
  * Create a user message fragment.
  * Message fragments are separated from regular fragments during resolve().
  *
- * Immediate reminders (no schedule) are baked into the message at creation time.
- * Scheduled reminders are stored as fragment metadata and applied by the
- * ContextEngine during resolve() based on the current turn count.
+ * Reminders are baked into the message at creation time as
+ * `<system-reminder>...</system-reminder>` tags.
+ *
+ * For conditional reminders that fire based on turn count, use
+ * `reminder(text, { when })` directly with `engine.set()` instead.
  *
  * @param content - The message content
  * @param reminders - Optional hidden/system reminders
@@ -318,9 +391,6 @@ export function resolveReminderText(
  * context.set(user('Hello')); // Plain user message
  * context.set(
  *   user('Deploy this', reminder('Ask for confirmation before destructive actions')),
- * );
- * context.set(
- *   user('Hello', reminder('Keep concise', { when: everyNTurns(3) })),
  * );
  * ```
  */
@@ -337,41 +407,17 @@ export function user(
         }
       : { ...content, role: 'user', parts: [...content.parts] };
 
-  const immediateReminders = reminders.filter((r) => !hasSchedule(r));
-  const scheduledReminders = reminders.filter((r) => hasSchedule(r));
-
-  if (immediateReminders.length > 0) {
-    const addedReminders: UserReminderMetadata[] = [];
+  if (reminders.length > 0) {
     const plainText = extractPlainText(message);
-
-    for (const item of immediateReminders) {
-      const resolvedText = resolveReminderText(item, { content: plainText });
-
-      if (resolvedText.trim().length === 0) {
-        continue;
-      }
-
-      addedReminders.push(
-        item.asPart
-          ? applyPartReminder(message, resolvedText)
-          : applyInlineReminder(message, resolvedText),
-      );
+    const addedReminders: UserReminderMetadata[] = [];
+    for (const item of reminders) {
+      const meta = applyReminderToMessage(message, item, {
+        content: plainText,
+      });
+      if (meta) addedReminders.push(meta);
     }
-
-    if (addedReminders.length > 0) {
-      const metadata = isRecord(message.metadata)
-        ? { ...message.metadata }
-        : {};
-      const existingReminders = Array.isArray(metadata.reminders)
-        ? metadata.reminders
-        : [];
-      metadata.reminders = [...existingReminders, ...addedReminders];
-      message.metadata = metadata;
-    }
+    mergeReminderMetadata(message, addedReminders);
   }
-
-  const fragmentMetadata: Record<string, unknown> | undefined =
-    scheduledReminders.length > 0 ? { scheduledReminders } : undefined;
 
   return {
     id: message.id,
@@ -386,6 +432,5 @@ export function user(
         return message;
       },
     },
-    metadata: fragmentMetadata,
   };
 }

@@ -8,12 +8,11 @@ import {
   everyNTurns,
   firstN,
   getReminderRanges,
-  hasSchedule,
+  isConditionalReminder,
   not,
   once,
   or,
   reminder,
-  shouldIncludeReminder,
   stripReminders,
   stripTextByRanges,
   user,
@@ -433,142 +432,116 @@ describe('reminder range helpers', () => {
 });
 
 describe('reminder scheduling', () => {
-  describe('hasSchedule', () => {
-    it('returns false for reminders without schedule options', () => {
-      assert.strictEqual(hasSchedule(reminder('plain')), false);
-      assert.strictEqual(
-        hasSchedule(reminder('part', { asPart: true })),
-        false,
+  describe('reminder() returns ContextFragment when when is provided', () => {
+    it('returns a ContextFragment with conditional reminder metadata', () => {
+      const fragment = reminder('every-third', { when: everyNTurns(3) });
+      assert.ok(isConditionalReminder(fragment));
+      assert.strictEqual(fragment.name, 'reminder');
+      assert.strictEqual(typeof fragment.metadata?.reminder, 'object');
+    });
+
+    it('returns a UserReminder without when', () => {
+      const r = reminder('plain');
+      assert.ok(!('name' in r), 'Should be a UserReminder, not a fragment');
+      assert.strictEqual(r.text, 'plain');
+      assert.strictEqual(r.asPart, false);
+    });
+
+    it('stores asPart in fragment metadata when when is provided', () => {
+      const fragment = reminder('text', {
+        when: everyNTurns(3),
+        asPart: true,
+      });
+      assert.ok(isConditionalReminder(fragment));
+      const config = (fragment.metadata as { reminder: { asPart: boolean } })
+        .reminder;
+      assert.strictEqual(config.asPart, true);
+    });
+
+    it('stores callback text in fragment metadata when when is provided', () => {
+      const cb = (ctx: { turn?: number }) => `turn ${ctx.turn}`;
+      const fragment = reminder(cb, { when: once() });
+      assert.ok(isConditionalReminder(fragment));
+      const config = (fragment.metadata as { reminder: { text: unknown } })
+        .reminder;
+      assert.strictEqual(typeof config.text, 'function');
+    });
+
+    it('rejects empty string text even with when', () => {
+      assert.throws(
+        () => reminder('', { when: once() }),
+        /Reminder text must not be empty/,
       );
     });
 
-    it('returns true for reminders with a when predicate', () => {
+    it('isConditionalReminder returns false for non-reminder fragments', () => {
       assert.strictEqual(
-        hasSchedule(reminder('a', { when: everyNTurns(3) })),
-        true,
+        isConditionalReminder({ name: 'role', data: 'helpful' }),
+        false,
       );
-      assert.strictEqual(hasSchedule(reminder('b', { when: once() })), true);
-      assert.strictEqual(hasSchedule(reminder('c', { when: firstN(5) })), true);
-      assert.strictEqual(
-        hasSchedule(reminder('d', { when: afterTurn(2) })),
-        true,
-      );
-      assert.strictEqual(
-        hasSchedule(reminder('e', { when: () => true })),
-        true,
-      );
+      assert.strictEqual(isConditionalReminder({ name: 'reminder' }), false);
     });
   });
 
-  describe('shouldIncludeReminder', () => {
-    it('everyNTurns includes on turns divisible by N', () => {
-      const r = reminder('hint', { when: everyNTurns(3) });
-      assert.strictEqual(shouldIncludeReminder(r, 1), false);
-      assert.strictEqual(shouldIncludeReminder(r, 2), false);
-      assert.strictEqual(shouldIncludeReminder(r, 3), true);
-      assert.strictEqual(shouldIncludeReminder(r, 6), true);
-      assert.strictEqual(shouldIncludeReminder(r, 7), false);
+  describe('when predicates', () => {
+    it('everyNTurns fires on turns divisible by N', () => {
+      const pred = everyNTurns(3);
+      assert.strictEqual(pred(1), false);
+      assert.strictEqual(pred(2), false);
+      assert.strictEqual(pred(3), true);
+      assert.strictEqual(pred(6), true);
+      assert.strictEqual(pred(7), false);
     });
 
-    it('once includes only on turn 1', () => {
-      const r = reminder('hint', { when: once() });
-      assert.strictEqual(shouldIncludeReminder(r, 1), true);
-      assert.strictEqual(shouldIncludeReminder(r, 2), false);
-      assert.strictEqual(shouldIncludeReminder(r, 10), false);
+    it('once fires only on turn 1', () => {
+      const pred = once();
+      assert.strictEqual(pred(1), true);
+      assert.strictEqual(pred(2), false);
+      assert.strictEqual(pred(10), false);
     });
 
-    it('firstN includes on first N turns', () => {
-      const r = reminder('hint', { when: firstN(3) });
-      assert.strictEqual(shouldIncludeReminder(r, 1), true);
-      assert.strictEqual(shouldIncludeReminder(r, 3), true);
-      assert.strictEqual(shouldIncludeReminder(r, 4), false);
+    it('firstN fires on first N turns', () => {
+      const pred = firstN(3);
+      assert.strictEqual(pred(1), true);
+      assert.strictEqual(pred(3), true);
+      assert.strictEqual(pred(4), false);
     });
 
-    it('afterTurn includes only after turn N', () => {
-      const r = reminder('hint', { when: afterTurn(5) });
-      assert.strictEqual(shouldIncludeReminder(r, 5), false);
-      assert.strictEqual(shouldIncludeReminder(r, 6), true);
-      assert.strictEqual(shouldIncludeReminder(r, 10), true);
+    it('afterTurn fires only after turn N', () => {
+      const pred = afterTurn(5);
+      assert.strictEqual(pred(5), false);
+      assert.strictEqual(pred(6), true);
+      assert.strictEqual(pred(10), true);
     });
 
-    it('when uses custom predicate', () => {
-      const r = reminder('hint', { when: (turn) => turn === 4 });
-      assert.strictEqual(shouldIncludeReminder(r, 3), false);
-      assert.strictEqual(shouldIncludeReminder(r, 4), true);
-      assert.strictEqual(shouldIncludeReminder(r, 5), false);
+    it('custom predicate', () => {
+      const pred = (turn: number) => turn === 4;
+      assert.strictEqual(pred(3), false);
+      assert.strictEqual(pred(4), true);
+      assert.strictEqual(pred(5), false);
     });
 
-    it('and() combines predicates with AND logic', () => {
-      const r = reminder('hint', { when: and(everyNTurns(3), afterTurn(5)) });
-      assert.strictEqual(shouldIncludeReminder(r, 3), false);
-      assert.strictEqual(shouldIncludeReminder(r, 6), true);
-      assert.strictEqual(shouldIncludeReminder(r, 7), false);
-      assert.strictEqual(shouldIncludeReminder(r, 9), true);
+    it('and() combines with AND logic', () => {
+      const pred = and(everyNTurns(3), afterTurn(5));
+      assert.strictEqual(pred(3), false);
+      assert.strictEqual(pred(6), true);
+      assert.strictEqual(pred(7), false);
+      assert.strictEqual(pred(9), true);
     });
 
-    it('or() combines predicates with OR logic', () => {
-      const r = reminder('hint', { when: or(once(), everyNTurns(5)) });
-      assert.strictEqual(shouldIncludeReminder(r, 1), true);
-      assert.strictEqual(shouldIncludeReminder(r, 2), false);
-      assert.strictEqual(shouldIncludeReminder(r, 5), true);
-      assert.strictEqual(shouldIncludeReminder(r, 10), true);
+    it('or() combines with OR logic', () => {
+      const pred = or(once(), everyNTurns(5));
+      assert.strictEqual(pred(1), true);
+      assert.strictEqual(pred(2), false);
+      assert.strictEqual(pred(5), true);
+      assert.strictEqual(pred(10), true);
     });
 
     it('not() inverts a predicate', () => {
-      const r = reminder('hint', { when: not(firstN(2)) });
-      assert.strictEqual(shouldIncludeReminder(r, 1), false);
-      assert.strictEqual(shouldIncludeReminder(r, 2), false);
-      assert.strictEqual(shouldIncludeReminder(r, 3), true);
-    });
-
-    it('includes on every turn when no schedule is set', () => {
-      const r = reminder('always');
-      assert.strictEqual(shouldIncludeReminder(r, 1), true);
-      assert.strictEqual(shouldIncludeReminder(r, 100), true);
-    });
-  });
-
-  describe('user() with scheduled reminders', () => {
-    it('stores scheduled reminders as fragment metadata instead of applying', () => {
-      const fragment = user(
-        'hello',
-        reminder('every-third', { when: everyNTurns(3) }),
-      );
-      const message = encodeMessage(fragment);
-
-      assert.strictEqual(getTextPart(message), 'hello');
-      assert.strictEqual(getReminderMetadata(message).length, 0);
-
-      assert.ok(fragment.metadata?.scheduledReminders);
-      const scheduled = fragment.metadata!.scheduledReminders as Array<{
-        when?: (turn: number) => boolean;
-      }>;
-      assert.strictEqual(scheduled.length, 1);
-      assert.strictEqual(typeof scheduled[0].when, 'function');
-    });
-
-    it('separates immediate and scheduled reminders', () => {
-      const fragment = user(
-        'hello',
-        reminder('immediate'),
-        reminder('scheduled', { when: once() }),
-      );
-      const message = encodeMessage(fragment);
-
-      const encodedImmediate = taggedReminder('immediate');
-      assert.strictEqual(getTextPart(message), `hello${encodedImmediate}`);
-      assert.strictEqual(getReminderMetadata(message).length, 1);
-
-      const scheduled = fragment.metadata?.scheduledReminders as Array<{
-        when?: (turn: number) => boolean;
-      }>;
-      assert.strictEqual(scheduled.length, 1);
-      assert.strictEqual(typeof scheduled[0].when, 'function');
-    });
-
-    it('omits fragment metadata when no scheduled reminders', () => {
-      const fragment = user('hello', reminder('immediate'));
-      assert.strictEqual(fragment.metadata, undefined);
+      const pred = not(firstN(2));
+      assert.strictEqual(pred(1), false);
+      assert.strictEqual(pred(2), false);
+      assert.strictEqual(pred(3), true);
     });
   });
 });
