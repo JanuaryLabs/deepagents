@@ -106,15 +106,15 @@ export class BigQuery extends Adapter {
     return `\`${projectPrefix}${dataset}.INFORMATION_SCHEMA.${viewName}\``;
   }
 
-  override async execute(sql: string) {
+  override async executeImpl(sql: string) {
     return this.#options.execute(sql);
   }
 
-  override async validate(sql: string) {
+  override async validateImpl(sql: string) {
     try {
       return await this.#options.validate(sql);
     } catch (error) {
-      return JSON.stringify(formatBigQueryError(sql, error));
+      return JSON.stringify(formatBigQueryError(this.format(sql), error));
     }
   }
 

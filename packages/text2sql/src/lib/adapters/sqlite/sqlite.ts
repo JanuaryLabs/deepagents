@@ -117,11 +117,11 @@ export class Sqlite extends Adapter {
     this.grounding = options.grounding;
   }
 
-  override async execute(sql: string) {
+  override async executeImpl(sql: string) {
     return this.#options.execute(sql);
   }
 
-  override async validate(sql: string) {
+  override async validateImpl(sql: string) {
     const validator: ValidateFunction =
       this.#options.validate ??
       (async (text: string) => {

@@ -16,8 +16,8 @@ describe('PostgreSQL ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Chat Operations', () => {
-    it('should create a chat with auto timestamps', () =>
-      withPostgresContainer(async (container) => {
+    it('should create a chat with auto timestamps', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -46,8 +46,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should upsert chat idempotently', () =>
-      withPostgresContainer(async (container) => {
+    it('should upsert chat idempotently', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -77,8 +77,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should return undefined for non-existent chat', () =>
-      withPostgresContainer(async (container) => {
+    it('should return undefined for non-existent chat', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -91,8 +91,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should update chat title and metadata', () =>
-      withPostgresContainer(async (container) => {
+    it('should update chat title and metadata', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -123,8 +123,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should list chats with pagination', () =>
-      withPostgresContainer(async (container) => {
+    it('should list chats with pagination', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -163,8 +163,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should list chats filtered by userId', () =>
-      withPostgresContainer(async (container) => {
+    it('should list chats filtered by userId', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -184,8 +184,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should delete chat and return true', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete chat and return true', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -203,8 +203,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should return false when deleting non-existent chat', () =>
-      withPostgresContainer(async (container) => {
+    it('should return false when deleting non-existent chat', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -217,8 +217,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should respect userId constraint on delete', () =>
-      withPostgresContainer(async (container) => {
+    it('should respect userId constraint on delete', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -252,8 +252,8 @@ describe('PostgreSQL ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Message Operations', () => {
-    it('should add and retrieve a message', () =>
-      withPostgresContainer(async (container) => {
+    it('should add and retrieve a message', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -284,8 +284,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should return undefined for non-existent message', () =>
-      withPostgresContainer(async (container) => {
+    it('should return undefined for non-existent message', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -298,8 +298,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should build message chain with parentId linking', () =>
-      withPostgresContainer(async (container) => {
+    it('should build message chain with parentId linking', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -346,8 +346,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should reject self-reference parentId', () =>
-      withPostgresContainer(async (container) => {
+    it('should reject self-reference parentId', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -372,8 +372,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should check if message has children', () =>
-      withPostgresContainer(async (container) => {
+    it('should check if message has children', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -411,8 +411,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should get messages from active branch', () =>
-      withPostgresContainer(async (container) => {
+    it('should get messages from active branch', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -445,8 +445,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should throw error when getting messages for non-existent chat', () =>
-      withPostgresContainer(async (container) => {
+    it('should throw error when getting messages for non-existent chat', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -467,8 +467,8 @@ describe('PostgreSQL ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Branch Operations', () => {
-    it('should create main branch automatically with chat', () =>
-      withPostgresContainer(async (container) => {
+    it('should create main branch automatically with chat', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -487,8 +487,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should create and retrieve a branch', () =>
-      withPostgresContainer(async (container) => {
+    it('should create and retrieve a branch', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -521,8 +521,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should get active branch', () =>
-      withPostgresContainer(async (container) => {
+    it('should get active branch', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -540,8 +540,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should set active branch and deactivate others', () =>
-      withPostgresContainer(async (container) => {
+    it('should set active branch and deactivate others', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -581,8 +581,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should update branch head', () =>
-      withPostgresContainer(async (container) => {
+    it('should update branch head', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -611,8 +611,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should list branches with message counts', () =>
-      withPostgresContainer(async (container) => {
+    it('should list branches with message counts', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -676,8 +676,8 @@ describe('PostgreSQL ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Checkpoint Operations', () => {
-    it('should create and retrieve a checkpoint', () =>
-      withPostgresContainer(async (container) => {
+    it('should create and retrieve a checkpoint', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -715,8 +715,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should return undefined for non-existent checkpoint', () =>
-      withPostgresContainer(async (container) => {
+    it('should return undefined for non-existent checkpoint', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -737,8 +737,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should upsert checkpoint on conflict', () =>
-      withPostgresContainer(async (container) => {
+    it('should upsert checkpoint on conflict', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -796,8 +796,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should list checkpoints ordered by createdAt descending', () =>
-      withPostgresContainer(async (container) => {
+    it('should list checkpoints ordered by createdAt descending', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -856,8 +856,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should delete a checkpoint', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete a checkpoint', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -906,8 +906,8 @@ describe('PostgreSQL ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Graph Visualization', () => {
-    it('should return complete graph data', () =>
-      withPostgresContainer(async (container) => {
+    it('should return complete graph data', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -970,8 +970,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         }
       }));
 
-    it('should truncate long content in graph nodes', () =>
-      withPostgresContainer(async (container) => {
+    it('should truncate long content in graph nodes', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -1007,8 +1007,8 @@ describe('PostgreSQL ContextStore Integration', () => {
 
   describe('PostgreSQL-Specific', () => {
     describe('JSONB Metadata', () => {
-      it('should store and retrieve complex nested metadata', () =>
-        withPostgresContainer(async (container) => {
+      it('should store and retrieve complex nested metadata', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1034,8 +1034,8 @@ describe('PostgreSQL ContextStore Integration', () => {
           }
         }));
 
-      it('should filter by string metadata value', () =>
-        withPostgresContainer(async (container) => {
+      it('should filter by string metadata value', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1065,8 +1065,8 @@ describe('PostgreSQL ContextStore Integration', () => {
           }
         }));
 
-      it('should filter by boolean metadata value', () =>
-        withPostgresContainer(async (container) => {
+      it('should filter by boolean metadata value', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1104,8 +1104,8 @@ describe('PostgreSQL ContextStore Integration', () => {
           }
         }));
 
-      it('should filter by number metadata value', () =>
-        withPostgresContainer(async (container) => {
+      it('should filter by number metadata value', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1137,8 +1137,8 @@ describe('PostgreSQL ContextStore Integration', () => {
     });
 
     describe('Native Boolean Type', () => {
-      it('should return native boolean for isActive', () =>
-        withPostgresContainer(async (container) => {
+      it('should return native boolean for isActive', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1158,8 +1158,8 @@ describe('PostgreSQL ContextStore Integration', () => {
           }
         }));
 
-      it('should return native boolean for hasChildren', () =>
-        withPostgresContainer(async (container) => {
+      it('should return native boolean for hasChildren', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1190,8 +1190,8 @@ describe('PostgreSQL ContextStore Integration', () => {
     });
 
     describe('Connection Pool', () => {
-      it('should handle concurrent operations', () =>
-        withPostgresContainer(async (container) => {
+      it('should handle concurrent operations', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });
@@ -1223,8 +1223,8 @@ describe('PostgreSQL ContextStore Integration', () => {
     });
 
     describe('Transaction Rollback', () => {
-      it('should cascade delete messages when chat is deleted', () =>
-        withPostgresContainer(async (container) => {
+      it('should cascade delete messages when chat is deleted', async () =>
+        await withPostgresContainer(async (container) => {
           const store = new PostgresContextStore({
             pool: container.connectionString,
           });

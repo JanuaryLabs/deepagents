@@ -14,8 +14,8 @@ const renderer = new XmlRenderer();
 
 describe('Delete Chat', () => {
   describe('Basic Deletion', () => {
-    it('should delete an existing chat and return true', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete an existing chat and return true', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -38,8 +38,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should return false when deleting non-existent chat', () =>
-      withPostgresContainer(async (container) => {
+    it('should return false when deleting non-existent chat', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -53,8 +53,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should return false when deleting already-deleted chat', () =>
-      withPostgresContainer(async (container) => {
+    it('should return false when deleting already-deleted chat', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -77,8 +77,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should not affect other chats when deleting one', () =>
-      withPostgresContainer(async (container) => {
+    it('should not affect other chats when deleting one', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -112,8 +112,8 @@ describe('Delete Chat', () => {
   });
 
   describe('Cascading Deletes', () => {
-    it('should delete all messages when chat is deleted', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete all messages when chat is deleted', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -149,8 +149,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should delete all branches when chat is deleted', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete all branches when chat is deleted', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -184,8 +184,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should delete all checkpoints when chat is deleted', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete all checkpoints when chat is deleted', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -224,8 +224,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle chat with multiple branches', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle chat with multiple branches', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -268,8 +268,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle chat with deep message chains (50+ messages)', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle chat with deep message chains (50+ messages)', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -299,8 +299,8 @@ describe('Delete Chat', () => {
   });
 
   describe('User Authorization', () => {
-    it('should delete chat when userId matches', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete chat when userId matches', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -325,8 +325,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should return false when userId does not match', () =>
-      withPostgresContainer(async (container) => {
+    it('should return false when userId does not match', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -353,8 +353,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should delete any chat when userId not provided (admin mode)', () =>
-      withPostgresContainer(async (container) => {
+    it('should delete any chat when userId not provided (admin mode)', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -377,8 +377,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should not delete other users chats', () =>
-      withPostgresContainer(async (container) => {
+    it('should not delete other users chats', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -415,8 +415,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle case-sensitive userId comparison', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle case-sensitive userId comparison', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -450,8 +450,8 @@ describe('Delete Chat', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle deleting chat with no messages', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle deleting chat with no messages', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -474,8 +474,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle chatId with special characters', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle chatId with special characters', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -506,8 +506,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle very long chatId', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle very long chatId', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -529,8 +529,8 @@ describe('Delete Chat', () => {
   });
 
   describe('Concurrent Operations', () => {
-    it('should handle concurrent deletion of different chats', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle concurrent deletion of different chats', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -555,8 +555,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle concurrent deletion of same chat (one succeeds)', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle concurrent deletion of same chat (one succeeds)', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -587,8 +587,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should not affect concurrent reads of other chats', () =>
-      withPostgresContainer(async (container) => {
+    it('should not affect concurrent reads of other chats', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });

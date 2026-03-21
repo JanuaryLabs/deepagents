@@ -17,8 +17,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Chat Operations', () => {
-    it('should create a chat with auto timestamps', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create a chat with auto timestamps', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -47,8 +47,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should upsert chat idempotently', () =>
-      withSqlServerContainer(async (container) => {
+    it('should upsert chat idempotently', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -78,8 +78,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return undefined for non-existent chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return undefined for non-existent chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -92,8 +92,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should update chat title and metadata', () =>
-      withSqlServerContainer(async (container) => {
+    it('should update chat title and metadata', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -124,8 +124,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should list chats with pagination', () =>
-      withSqlServerContainer(async (container) => {
+    it('should list chats with pagination', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -164,8 +164,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should list chats filtered by userId', () =>
-      withSqlServerContainer(async (container) => {
+    it('should list chats filtered by userId', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -185,8 +185,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should delete chat and return true', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete chat and return true', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -204,8 +204,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return false when deleting non-existent chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return false when deleting non-existent chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -218,8 +218,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should respect userId constraint on delete', () =>
-      withSqlServerContainer(async (container) => {
+    it('should respect userId constraint on delete', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -253,8 +253,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Message Operations', () => {
-    it('should add and retrieve a message', () =>
-      withSqlServerContainer(async (container) => {
+    it('should add and retrieve a message', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -285,8 +285,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return undefined for non-existent message', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return undefined for non-existent message', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -299,8 +299,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should build message chain with parentId linking', () =>
-      withSqlServerContainer(async (container) => {
+    it('should build message chain with parentId linking', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -347,8 +347,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should reject self-reference parentId', () =>
-      withSqlServerContainer(async (container) => {
+    it('should reject self-reference parentId', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -373,8 +373,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should check if message has children', () =>
-      withSqlServerContainer(async (container) => {
+    it('should check if message has children', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -412,8 +412,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should get messages from active branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should get messages from active branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -446,8 +446,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should throw error when getting messages for non-existent chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should throw error when getting messages for non-existent chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -468,8 +468,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Branch Operations', () => {
-    it('should create main branch automatically with chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create main branch automatically with chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -488,8 +488,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should create and retrieve a branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create and retrieve a branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -522,8 +522,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should get active branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should get active branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -541,8 +541,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should set active branch and deactivate others', () =>
-      withSqlServerContainer(async (container) => {
+    it('should set active branch and deactivate others', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -582,8 +582,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should update branch head', () =>
-      withSqlServerContainer(async (container) => {
+    it('should update branch head', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -612,8 +612,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should list branches with message counts', () =>
-      withSqlServerContainer(async (container) => {
+    it('should list branches with message counts', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -677,8 +677,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Checkpoint Operations', () => {
-    it('should create and retrieve a checkpoint', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create and retrieve a checkpoint', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -716,8 +716,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return undefined for non-existent checkpoint', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return undefined for non-existent checkpoint', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -738,8 +738,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should upsert checkpoint on conflict', () =>
-      withSqlServerContainer(async (container) => {
+    it('should upsert checkpoint on conflict', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -797,8 +797,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should list checkpoints ordered by createdAt descending', () =>
-      withSqlServerContainer(async (container) => {
+    it('should list checkpoints ordered by createdAt descending', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -857,8 +857,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should delete a checkpoint', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete a checkpoint', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -907,8 +907,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Search Operations', () => {
-    it('should search messages by keyword', () =>
-      withSqlServerContainer(async (container) => {
+    it('should search messages by keyword', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -972,8 +972,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return ranked results', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return ranked results', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1013,8 +1013,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return snippets', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return snippets', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1046,8 +1046,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should filter by roles', () =>
-      withSqlServerContainer(async (container) => {
+    it('should filter by roles', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1097,8 +1097,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should respect limit option', () =>
-      withSqlServerContainer(async (container) => {
+    it('should respect limit option', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1130,8 +1130,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should return empty array for no matches', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return empty array for no matches', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1165,8 +1165,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Graph Visualization', () => {
-    it('should return complete graph data', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return complete graph data', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1235,8 +1235,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should truncate long content in graph nodes', () =>
-      withSqlServerContainer(async (container) => {
+    it('should truncate long content in graph nodes', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -1272,8 +1272,8 @@ describe('SQL Server ContextStore Integration', () => {
 
   describe('SQL Server-Specific', () => {
     describe('NVARCHAR(MAX) JSON Metadata', () => {
-      it('should store and retrieve complex nested metadata', () =>
-        withSqlServerContainer(async (container) => {
+      it('should store and retrieve complex nested metadata', async () =>
+        await withSqlServerContainer(async (container) => {
           const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
@@ -1301,8 +1301,8 @@ describe('SQL Server ContextStore Integration', () => {
     });
 
     describe('BIT to Boolean Conversion', () => {
-      it('should return native boolean for isActive', () =>
-        withSqlServerContainer(async (container) => {
+      it('should return native boolean for isActive', async () =>
+        await withSqlServerContainer(async (container) => {
           const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
@@ -1319,8 +1319,8 @@ describe('SQL Server ContextStore Integration', () => {
           }
         }));
 
-      it('should return native boolean for hasChildren', () =>
-        withSqlServerContainer(async (container) => {
+      it('should return native boolean for hasChildren', async () =>
+        await withSqlServerContainer(async (container) => {
           const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
@@ -1351,8 +1351,8 @@ describe('SQL Server ContextStore Integration', () => {
     });
 
     describe('Connection Pool', () => {
-      it('should handle concurrent operations', () =>
-        withSqlServerContainer(async (container) => {
+      it('should handle concurrent operations', async () =>
+        await withSqlServerContainer(async (container) => {
           const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
@@ -1386,8 +1386,8 @@ describe('SQL Server ContextStore Integration', () => {
     });
 
     describe('Cascade Delete', () => {
-      it('should cascade delete messages when chat is deleted', () =>
-        withSqlServerContainer(async (container) => {
+      it('should cascade delete messages when chat is deleted', async () =>
+        await withSqlServerContainer(async (container) => {
           const store = new SqlServerContextStore({
             pool: container.connectionString,
           });
@@ -1426,8 +1426,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Pool Injection', () => {
-    it('should accept a pre-existing connected ConnectionPool', () =>
-      withSqlServerContainer(async (container) => {
+    it('should accept a pre-existing connected ConnectionPool', async () =>
+      await withSqlServerContainer(async (container) => {
         const pool = new sql.ConnectionPool(container.connectionString);
         await pool.connect();
         try {
@@ -1453,8 +1453,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should not close external pool on store.close()', () =>
-      withSqlServerContainer(async (container) => {
+    it('should not close external pool on store.close()', async () =>
+      await withSqlServerContainer(async (container) => {
         const pool = new sql.ConnectionPool(container.connectionString);
         await pool.connect();
         try {
@@ -1477,8 +1477,8 @@ describe('SQL Server ContextStore Integration', () => {
         }
       }));
 
-    it('should allow two store instances to share the same pool', () =>
-      withSqlServerContainer(async (container) => {
+    it('should allow two store instances to share the same pool', async () =>
+      await withSqlServerContainer(async (container) => {
         const pool = new sql.ConnectionPool(container.connectionString);
         await pool.connect();
         try {
@@ -1511,8 +1511,8 @@ describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================
 
   describe('Schema Support', () => {
-    it('should create tables in a custom schema', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create tables in a custom schema', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
           schema: 'custom_schema',

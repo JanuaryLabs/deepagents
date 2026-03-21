@@ -2133,3 +2133,184 @@ describe('TrackedFs concurrency', () => {
     );
   });
 });
+
+describe('backtick-quoted identifier preservation', () => {
+  it('sql validate preserves backtick-quoted table reference', async () => {
+    const { adapter } = await init_db(
+      'CREATE TABLE test_bq ("by" TEXT, title TEXT)',
+      { grounding: [tables({ filter: ['test_bq'] })] },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT 1 FROM `test_bq`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0 (backticks preserved), got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('sql run preserves backtick-quoted column and table', async () => {
+    const { adapter } = await init_db(
+      [
+        'CREATE TABLE test_bq ("by" TEXT, title TEXT)',
+        "INSERT INTO test_bq VALUES ('author1', 'Hello World')",
+      ],
+      { grounding: [tables({ filter: ['test_bq'] })] },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT `by`, title FROM `test_bq`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+    assert.ok(
+      result.stdout.includes('rows: 1'),
+      `Expected 1 row, got: ${result.stdout}`,
+    );
+  });
+
+  it('single-quoted sql validate preserves backticks', async () => {
+    const { adapter } = await init_db(
+      'CREATE TABLE test_bq ("by" TEXT, title TEXT)',
+      { grounding: [tables({ filter: ['test_bq'] })] },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      "sql validate 'SELECT `by` FROM `test_bq`'",
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('bare args (no quotes) still work', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand('sql validate SELECT 1');
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('piped commands fall through to bash', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand('echo "hello world" | cat');
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.ok(result.stdout.includes('hello world'));
+  });
+
+  it('multi-arg backtick SQL preserves identifiers correctly', async () => {
+    const { adapter } = await init_db(
+      'CREATE TABLE test_bq ("by" TEXT, title TEXT)',
+      { grounding: [tables({ filter: ['test_bq'] })] },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT" "`by`" "FROM" "`test_bq`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('non-backtick queries work unchanged', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT 1 as value"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('metadata propagation works through direct execution path', async () => {
+    const { adapter } = await init_db(
+      'CREATE TABLE test_bq ("by" TEXT, title TEXT)',
+      { grounding: [tables({ filter: ['test_bq'] })] },
+    );
+
+    const { tools } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const execute = tools.bash.execute!;
+    const result = (await execute(
+      {
+        command: 'sql validate "SELECT `by` FROM `test_bq`"',
+        reasoning: 'Validate BigQuery-style query',
+      },
+      {} as any,
+    )) as {
+      exitCode: number;
+      meta?: Record<string, unknown>;
+      reminder?: string;
+    };
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0. stderr: ${(result as any).stderr}`,
+    );
+    assert.ok(result.meta?.formattedSql, 'Expected formattedSql in metadata');
+  });
+});

@@ -459,6 +459,9 @@ describe('Spreadsheet Adapter', () => {
         version: await adapter
           .execute('SELECT sqlite_version() AS version')
           .then((rows) => rows[0].version),
+        details: {
+          parameterPlaceholder: '?',
+        },
       });
 
       adapter.close();

@@ -14,8 +14,8 @@ const renderer = new XmlRenderer();
 
 describe('Delete Chat', () => {
   describe('Basic Deletion', () => {
-    it('should delete an existing chat and return true', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete an existing chat and return true', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -77,8 +77,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should not affect other chats when deleting one', () =>
-      withSqlServerContainer(async (container) => {
+    it('should not affect other chats when deleting one', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -112,8 +112,8 @@ describe('Delete Chat', () => {
   });
 
   describe('Cascading Deletes', () => {
-    it('should delete all messages when chat is deleted', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete all messages when chat is deleted', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -149,8 +149,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should delete all branches when chat is deleted', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete all branches when chat is deleted', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -184,8 +184,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should delete all checkpoints when chat is deleted', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete all checkpoints when chat is deleted', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -224,8 +224,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle chat with multiple branches', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle chat with multiple branches', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -268,8 +268,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle chat with deep message chains (50+ messages)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle chat with deep message chains (50+ messages)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -299,8 +299,8 @@ describe('Delete Chat', () => {
   });
 
   describe('User Authorization', () => {
-    it('should delete chat when userId matches', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete chat when userId matches', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -325,8 +325,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should return false when userId does not match', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return false when userId does not match', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -353,8 +353,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should delete any chat when userId not provided (admin mode)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should delete any chat when userId not provided (admin mode)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -377,8 +377,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should not delete other users chats', () =>
-      withSqlServerContainer(async (container) => {
+    it('should not delete other users chats', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -420,8 +420,8 @@ describe('Delete Chat', () => {
      * so userId comparisons are case-insensitive. This differs from PostgreSQL.
      * The test verifies that any case variation of the userId can match.
      */
-    it('should handle case-insensitive userId comparison (SQL Server default)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle case-insensitive userId comparison (SQL Server default)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -447,8 +447,8 @@ describe('Delete Chat', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle deleting chat with no messages', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle deleting chat with no messages', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -471,8 +471,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle chatId with special characters', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle chatId with special characters', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -503,8 +503,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle very long chatId', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle very long chatId', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -526,8 +526,8 @@ describe('Delete Chat', () => {
   });
 
   describe('Concurrent Operations', () => {
-    it('should handle concurrent deletion of different chats', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle concurrent deletion of different chats', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -552,8 +552,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should handle concurrent deletion of same chat (one succeeds)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle concurrent deletion of same chat (one succeeds)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -584,8 +584,8 @@ describe('Delete Chat', () => {
         }
       }));
 
-    it('should not affect concurrent reads of other chats', () =>
-      withSqlServerContainer(async (container) => {
+    it('should not affect concurrent reads of other chats', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });

@@ -1,13 +1,23 @@
 import type { ContextFragment } from '../fragments.ts';
 import { fragment } from '../fragments.ts';
-import { hint, policy, principle, role } from './domain.ts';
+import {
+  guardrail,
+  hint,
+  policy,
+  principle,
+  role,
+  workflow,
+} from './domain.ts';
 
 /**
  * Meta-cognitive reasoning framework.
  *
  * A domain-agnostic set of reasoning principles that teach an LLM
  * how to plan, assess risk, form hypotheses, adapt, and verify before acting.
- * Based on advanced prompt engineering research for agentic systems.
+ *
+ * Adapted from Google's Gemini API prompting strategies documentation.
+ *
+ * @see https://ai.google.dev/gemini-api/docs/prompting-strategies
  *
  * @example
  * ```ts

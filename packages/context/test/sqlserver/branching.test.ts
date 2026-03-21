@@ -39,8 +39,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should expose branch name via getter (defaults to main)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should expose branch name via getter (defaults to main)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -60,8 +60,8 @@ describe('Branching', () => {
   });
 
   describe('Message Chain (parentId linking)', () => {
-    it('should set parentId to null for first message', () =>
-      withSqlServerContainer(async (container) => {
+    it('should set parentId to null for first message', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -90,8 +90,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should link subsequent messages via parentId', () =>
-      withSqlServerContainer(async (container) => {
+    it('should link subsequent messages via parentId', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -132,8 +132,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should update branch headMessageId after save', () =>
-      withSqlServerContainer(async (container) => {
+    it('should update branch headMessageId after save', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -162,8 +162,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should return messages in correct order (root to head)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return messages in correct order (root to head)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -194,8 +194,8 @@ describe('Branching', () => {
   });
 
   describe('Rewind (Forking)', () => {
-    it('should create new branch pointing to rewind message', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create new branch pointing to rewind message', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -234,8 +234,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should deactivate old branch after rewind', () =>
-      withSqlServerContainer(async (container) => {
+    it('should deactivate old branch after rewind', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -270,8 +270,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should preserve original messages after rewind', () =>
-      withSqlServerContainer(async (container) => {
+    it('should preserve original messages after rewind', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -309,8 +309,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should link new messages to fork point after rewind', () =>
-      withSqlServerContainer(async (container) => {
+    it('should link new messages to fork point after rewind', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -345,8 +345,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should update engine branch name after rewind', () =>
-      withSqlServerContainer(async (container) => {
+    it('should update engine branch name after rewind', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -377,8 +377,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should clear pending messages after rewind', () =>
-      withSqlServerContainer(async (container) => {
+    it('should clear pending messages after rewind', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -410,8 +410,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should throw when rewinding to non-existent message', () =>
-      withSqlServerContainer(async (container) => {
+    it('should throw when rewinding to non-existent message', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -436,8 +436,8 @@ describe('Branching', () => {
   });
 
   describe('Switch Branch', () => {
-    it('should switch active branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should switch active branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -472,8 +472,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should return different message chains per branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return different message chains per branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -520,8 +520,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should throw when switching to non-existent branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should throw when switching to non-existent branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -543,8 +543,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should clear pending messages when switching', () =>
-      withSqlServerContainer(async (container) => {
+    it('should clear pending messages when switching', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -580,8 +580,8 @@ describe('Branching', () => {
   });
 
   describe('Multiple Branches', () => {
-    it('should support multiple branches in one chat', () =>
-      withSqlServerContainer(async (container) => {
+    it('should support multiple branches in one chat', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -621,8 +621,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should maintain independent headMessageId per branch', () =>
-      withSqlServerContainer(async (container) => {
+    it('should maintain independent headMessageId per branch', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -660,8 +660,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should have only one active branch at a time', () =>
-      withSqlServerContainer(async (container) => {
+    it('should have only one active branch at a time', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -697,8 +697,8 @@ describe('Branching', () => {
   });
 
   describe('btw (By The Way branching)', () => {
-    it('should create new branch from current head without switching', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create new branch from current head without switching', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -729,8 +729,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should throw when no messages exist', () =>
-      withSqlServerContainer(async (container) => {
+    it('should throw when no messages exist', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -753,8 +753,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should keep pending messages after btw', () =>
-      withSqlServerContainer(async (container) => {
+    it('should keep pending messages after btw', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -780,8 +780,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should create incrementing branch names', () =>
-      withSqlServerContainer(async (container) => {
+    it('should create incrementing branch names', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -808,8 +808,8 @@ describe('Branching', () => {
         }
       }));
 
-    it('should allow switching to btw branch and adding messages', () =>
-      withSqlServerContainer(async (container) => {
+    it('should allow switching to btw branch and adding messages', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });

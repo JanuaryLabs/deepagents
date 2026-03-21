@@ -580,3 +580,141 @@ describe('spreadsheet runtime scope', () => {
     );
   });
 });
+
+describe('scope enforcement edge cases', () => {
+  function createSqlite(tables: string[], views: string[] = []) {
+    const calls = { execute: 0, validate: 0 };
+    return {
+      calls,
+      adapter: new Sqlite({
+        grounding: [staticScopeGrounding(tables, views)],
+        execute: async () => {
+          calls.execute += 1;
+          return [{ ok: true }];
+        },
+        validate: async () => {
+          calls.validate += 1;
+          return undefined;
+        },
+      }),
+    };
+  }
+
+  it('allows multiple allowed tables via JOIN', async () => {
+    const { adapter } = createSqlite(['users', 'orders']);
+    const result = await adapter.validate(
+      'SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id',
+    );
+    assert.strictEqual(result, undefined);
+  });
+
+  it('blocks when one of multiple JOINed tables is unauthorized', async () => {
+    const { adapter } = createSqlite(['users']);
+    const result = await adapter.validate(
+      'SELECT * FROM users JOIN secrets ON users.id = secrets.user_id',
+    );
+    assert.ok(typeof result === 'string');
+    const payload = parseScopePayload(result);
+    assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
+    assert.ok(payload.referenced_entities?.includes('secrets'));
+  });
+
+  it('matches table names case-insensitively', async () => {
+    const { adapter } = createSqlite(['users']);
+    const result = await adapter.validate('SELECT * FROM USERS');
+    assert.strictEqual(result, undefined);
+  });
+
+  it('blocks subquery referencing unauthorized table', async () => {
+    const { adapter } = createSqlite(['users']);
+    const result = await adapter.validate(
+      'SELECT * FROM users WHERE id IN (SELECT user_id FROM secrets)',
+    );
+    assert.ok(typeof result === 'string');
+    const payload = parseScopePayload(result);
+    assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
+    assert.ok(payload.referenced_entities?.includes('secrets'));
+  });
+
+  it('lists all unauthorized tables in error payload', async () => {
+    const { adapter } = createSqlite(['users']);
+    const result = await adapter.validate(
+      'SELECT * FROM secrets JOIN passwords ON secrets.id = passwords.secret_id',
+    );
+    assert.ok(typeof result === 'string');
+    const payload = parseScopePayload(result);
+    assert.ok(payload.referenced_entities?.includes('secrets'));
+    assert.ok(payload.referenced_entities?.includes('passwords'));
+  });
+
+  it('blocks UNION query when one table is unauthorized', async () => {
+    const { adapter } = createSqlite(['users']);
+    const result = await adapter.validate(
+      'SELECT name FROM users UNION SELECT name FROM secrets',
+    );
+    assert.ok(typeof result === 'string');
+    const payload = parseScopePayload(result);
+    assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
+    assert.ok(payload.referenced_entities?.includes('secrets'));
+  });
+
+  it('normalizes mixed-case entries in grounding', async () => {
+    const { adapter } = createSqlite(['Users', 'ORDERS']);
+    const result = await adapter.validate(
+      'SELECT * FROM users JOIN orders ON users.id = orders.user_id',
+    );
+    assert.strictEqual(result, undefined);
+  });
+
+  it('passes through entity-free query even with empty allowed set', async () => {
+    const { adapter } = createSqlite([]);
+    const result = await adapter.validate('SELECT 1 + 1');
+    assert.strictEqual(result, undefined);
+  });
+});
+
+describe('bigquery scope normalization', () => {
+  function createBigQuery(tables: string[], views: string[] = []) {
+    const calls = { execute: 0, validate: 0 };
+    return {
+      calls,
+      adapter: new BigQuery({
+        grounding: [staticScopeGrounding(tables, views)],
+        datasets: ['hacker_news'],
+        projectId: 'bigquery-public-data',
+        execute: async () => {
+          calls.execute += 1;
+          return [{ ok: true }];
+        },
+        validate: async () => {
+          calls.validate += 1;
+          return undefined;
+        },
+      }),
+    };
+  }
+
+  it('allows backtick-quoted 3-part name when dataset.table is in allowed set', async () => {
+    const { adapter } = createBigQuery(['hacker_news.full']);
+    const result = await adapter.validate(
+      'SELECT title, score FROM `bigquery-public-data.hacker_news.full` LIMIT 50',
+    );
+    assert.strictEqual(result, undefined);
+  });
+
+  it('blocks unauthorized backtick-quoted 3-part name', async () => {
+    const { adapter } = createBigQuery(['hacker_news.full']);
+    const result = await adapter.validate(
+      'SELECT * FROM `bigquery-public-data.hacker_news.stories`',
+    );
+    assert.ok(typeof result === 'string');
+    const payload = parseScopePayload(result);
+    assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
+  });
+
+  it('allows unquoted 2-part dataset.table name', async () => {
+    const { adapter } = createBigQuery(['hacker_news.full']);
+    const result = await adapter.validate('SELECT * FROM hacker_news.full');
+    assert.strictEqual(result, undefined);
+  });
+});

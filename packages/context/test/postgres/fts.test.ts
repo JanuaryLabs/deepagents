@@ -11,8 +11,8 @@ import { withPostgresContainer } from '@deepagents/test';
 
 describe('Full-Text Search', () => {
   describe('Search Operations', () => {
-    it('should search messages by keyword', () =>
-      withPostgresContainer(async (container) => {
+    it('should search messages by keyword', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -73,8 +73,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should return ranked results with higher rank being more relevant', () =>
-      withPostgresContainer(async (container) => {
+    it('should return ranked results with higher rank being more relevant', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -112,8 +112,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should return highlighted snippets', () =>
-      withPostgresContainer(async (container) => {
+    it('should return highlighted snippets', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -146,8 +146,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should filter by roles', () =>
-      withPostgresContainer(async (container) => {
+    it('should filter by roles', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -194,8 +194,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should respect limit option', () =>
-      withPostgresContainer(async (container) => {
+    it('should respect limit option', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -224,8 +224,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should return empty array for no matches', () =>
-      withPostgresContainer(async (container) => {
+    it('should return empty array for no matches', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -297,8 +297,8 @@ describe('Full-Text Search', () => {
   });
 
   describe('FTS Cleanup', () => {
-    it('should remove FTS entries when chat is deleted', () =>
-      withPostgresContainer(async (container) => {
+    it('should remove FTS entries when chat is deleted', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -325,8 +325,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should not affect FTS entries of other chats', () =>
-      withPostgresContainer(async (container) => {
+    it('should not affect FTS entries of other chats', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });
@@ -357,8 +357,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should handle search after deletion (no stale results)', () =>
-      withPostgresContainer(async (container) => {
+    it('should handle search after deletion (no stale results)', async () =>
+      await withPostgresContainer(async (container) => {
         const store = new PostgresContextStore({
           pool: container.connectionString,
         });

@@ -17,8 +17,8 @@ import { waitForFtsReady, withSqlServerContainer } from '@deepagents/test';
  */
 describe('Full-Text Search', () => {
   describe('Search Operations', () => {
-    it('should search messages by keyword', () =>
-      withSqlServerContainer(async (container) => {
+    it('should search messages by keyword', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -82,8 +82,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should return ranked results with higher rank being more relevant', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return ranked results with higher rank being more relevant', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -124,8 +124,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should return highlighted snippets', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return highlighted snippets', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -161,8 +161,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should filter by roles', () =>
-      withSqlServerContainer(async (container) => {
+    it('should filter by roles', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -212,8 +212,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should respect limit option', () =>
-      withSqlServerContainer(async (container) => {
+    it('should respect limit option', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -245,8 +245,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should return empty array for no matches', () =>
-      withSqlServerContainer(async (container) => {
+    it('should return empty array for no matches', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -321,8 +321,8 @@ describe('Full-Text Search', () => {
   });
 
   describe('FTS Cleanup', () => {
-    it('should remove FTS entries when chat is deleted', () =>
-      withSqlServerContainer(async (container) => {
+    it('should remove FTS entries when chat is deleted', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -352,8 +352,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should not affect FTS entries of other chats', () =>
-      withSqlServerContainer(async (container) => {
+    it('should not affect FTS entries of other chats', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });
@@ -387,8 +387,8 @@ describe('Full-Text Search', () => {
         }
       }));
 
-    it('should handle search after deletion (no stale results)', () =>
-      withSqlServerContainer(async (container) => {
+    it('should handle search after deletion (no stale results)', async () =>
+      await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
         });

@@ -1,7 +1,11 @@
 import { type SqlLanguage, format as formatSql } from 'sql-formatter';
 
-import type { ContextFragment } from '@deepagents/context';
+import type { ContextFragment, FragmentObject } from '@deepagents/context';
 
+import {
+  SQLScopeError,
+  type SQLScopeErrorPayload,
+} from '../agents/exceptions.ts';
 import {
   column,
   constraint,
@@ -17,6 +21,12 @@ import {
   createGroundingContext,
 } from './groundings/context.ts';
 import type { View } from './groundings/view.grounding.ts';
+import {
+  type RuntimeScopeDialect,
+  buildOutOfScopePayload,
+  buildScopeParseErrorPayload,
+  extractBaseEntityReferences,
+} from './runtime-scope.ts';
 
 /**
  * Filter type for view/table names.
@@ -93,7 +103,7 @@ export interface AdapterInfo {
   dialect: string;
   version?: string;
   database?: string;
-  details?: Record<string, unknown>;
+  details?: FragmentObject;
 }
 
 export type AdapterInfoProvider =
@@ -176,10 +186,7 @@ export abstract class Adapter {
       const grounding = fn(this);
       await grounding.execute(ctx);
     }
-    return [
-      ...ctx.tables.map((t) => t.name),
-      ...ctx.views.map((v) => v.name),
-    ];
+    return [...ctx.tables.map((t) => t.name), ...ctx.views.map((v) => v.name)];
   }
 
   /**
@@ -196,6 +203,7 @@ export abstract class Adapter {
           dialect: ctx.info.dialect,
           version: ctx.info.version,
           database: ctx.info.database,
+          details: ctx.info.details,
         }),
       );
     }
@@ -389,8 +397,96 @@ export abstract class Adapter {
     }
   }
 
-  abstract execute(sql: string): Promise<any[]> | any[];
-  abstract validate(sql: string): Promise<string | void> | string | void;
+  #cachedAllowedEntities: string[] | null = null;
+
+  async #resolveScope(): Promise<string[]> {
+    if (this.#cachedAllowedEntities) return this.#cachedAllowedEntities;
+    this.#cachedAllowedEntities = await this.resolveAllowedEntities();
+    return this.#cachedAllowedEntities;
+  }
+
+  async #checkScope(
+    sql: string,
+    allowedEntities: string[],
+  ): Promise<SQLScopeErrorPayload | null> {
+    const dialect = this.formatterLanguage as string;
+    const scopeDialects: Record<string, RuntimeScopeDialect> = {
+      sqlite: 'mysql',
+      postgresql: 'postgresql',
+      bigquery: 'bigquery',
+      transactsql: 'transactsql',
+      mysql: 'mysql',
+    };
+    const scopeDialect = scopeDialects[dialect];
+    if (!scopeDialect) {
+      throw new TypeError(
+        `No scope dialect mapping for formatter language "${dialect}". Add it to the scopeDialects map in Adapter.#checkScope.`,
+      );
+    }
+
+    let references: { db?: string | null; table: string }[];
+    try {
+      references = extractBaseEntityReferences(sql, scopeDialect);
+    } catch (error) {
+      return buildScopeParseErrorPayload(
+        sql,
+        dialect as RuntimeScopeDialect,
+        error,
+      );
+    }
+
+    if (references.length === 0) return null;
+
+    const allowedQualified = new Set(
+      allowedEntities.map((e) => e.toLowerCase()),
+    );
+    const allowedUnqualified = new Set<string>();
+    for (const entity of allowedEntities) {
+      const dot = entity.lastIndexOf('.');
+      if (dot !== -1) {
+        allowedUnqualified.add(entity.slice(dot + 1).toLowerCase());
+      } else {
+        allowedUnqualified.add(entity.toLowerCase());
+      }
+    }
+
+    const outOfScope = references
+      .map((ref) => (ref.db ? `${ref.db}.${ref.table}` : ref.table))
+      .filter((name) => {
+        const lower = name.toLowerCase();
+        if (name.includes('.')) {
+          if (allowedQualified.has(lower)) return false;
+          const parts = lower.split('.');
+          if (parts.length >= 3) {
+            const datasetTable = parts.slice(-2).join('.');
+            if (allowedQualified.has(datasetTable)) return false;
+          }
+          return true;
+        }
+        return !allowedQualified.has(lower) && !allowedUnqualified.has(lower);
+      });
+
+    if (outOfScope.length === 0) return null;
+
+    return buildOutOfScopePayload(sql, outOfScope, allowedEntities);
+  }
+
+  async validate(sql: string): Promise<string | void> {
+    const allowed = await this.#resolveScope();
+    const scopeError = await this.#checkScope(sql, allowed);
+    if (scopeError) return JSON.stringify(scopeError);
+    return this.validateImpl(sql);
+  }
+
+  async execute(sql: string): Promise<any[]> {
+    const allowed = await this.#resolveScope();
+    const scopeError = await this.#checkScope(sql, allowed);
+    if (scopeError) throw new SQLScopeError(scopeError);
+    return this.executeImpl(sql);
+  }
+
+  abstract executeImpl(sql: string): Promise<any[]> | any[];
+  abstract validateImpl(sql: string): Promise<string | void> | string | void;
   abstract runQuery<Row>(sql: string): Promise<Row[]> | Row[];
 
   /**
