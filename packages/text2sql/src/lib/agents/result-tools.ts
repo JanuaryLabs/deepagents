@@ -275,8 +275,8 @@ export async function createResultTools(options: ResultToolsOptions) {
     fs: filesystem,
   });
 
-  bashInstance.registerTransformPlugin(new SqlProxyEnforcementPlugin());
   bashInstance.registerTransformPlugin(new SqlBacktickRewritePlugin());
+  bashInstance.registerTransformPlugin(new SqlProxyEnforcementPlugin());
 
   const { sandbox, tools } = await createBashTool({
     sandbox: bashInstance,

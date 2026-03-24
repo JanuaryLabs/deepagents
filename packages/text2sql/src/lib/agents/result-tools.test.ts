@@ -2227,6 +2227,32 @@ describe('backtick-quoted identifier preservation', () => {
     );
   });
 
+  it('backtick-quoted blocked-keyword identifier is not falsely blocked', async () => {
+    const { adapter } = await init_db(
+      [
+        'CREATE TABLE test_reserved ("with" TEXT, title TEXT)',
+        "INSERT INTO test_reserved VALUES ('val', 'Hello')",
+      ],
+      { grounding: [tables({ filter: ['test_reserved'] })] },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT `with` FROM `test_reserved`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0 (blocked-keyword identifier in backticks should not be falsely blocked by enforcement), got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
   it('piped commands fall through to bash', async () => {
     const { sandbox } = await createResultTools({
       adapter: (await init_db('')).adapter,
@@ -2312,5 +2338,112 @@ describe('backtick-quoted identifier preservation', () => {
       `Expected exitCode 0. stderr: ${(result as any).stderr}`,
     );
     assert.ok(result.meta?.formattedSql, 'Expected formattedSql in metadata');
+  });
+
+  it('multiple backtick identifiers in single arg', async () => {
+    const { adapter } = await init_db('CREATE TABLE t ("a" TEXT, "b" TEXT)', {
+      grounding: [tables({ filter: ['t'] })],
+    });
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT `a`, `b` FROM `t`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('mixed single and double quote styles across args', async () => {
+    const { adapter } = await init_db(
+      'CREATE TABLE t ("by" TEXT, title TEXT)',
+      { grounding: [tables({ filter: ['t'] })] },
+    );
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate \'SELECT\' "`by`" \'FROM\' "`t`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('SQL-escaped single quotes inside double-quoted arg', async () => {
+    const { adapter } = await init_db('CREATE TABLE t (name TEXT)', {
+      grounding: [tables({ filter: ['t'] })],
+    });
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      "sql validate \"SELECT * FROM t WHERE name = 'O''Brien'\"",
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('backtick identifier as first token after SELECT', async () => {
+    const { adapter } = await init_db('CREATE TABLE tbl (col TEXT)', {
+      grounding: [tables({ filter: ['tbl'] })],
+    });
+
+    const { sandbox } = await createResultTools({
+      adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT `tbl`.col FROM `tbl`"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
+  });
+
+  it('extra whitespace inside quoted SQL is preserved', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT   1   as   val"',
+    );
+
+    assert.strictEqual(
+      result.exitCode,
+      0,
+      `Expected exitCode 0, got ${result.exitCode}. stderr: ${result.stderr}`,
+    );
   });
 });
