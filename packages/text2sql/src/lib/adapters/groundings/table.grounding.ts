@@ -1,5 +1,10 @@
 import type { Filter, Relationship, Table } from '../adapter.ts';
-import { AbstractGrounding } from './abstract.grounding.ts';
+import {
+  AbstractGrounding,
+  type ColumnsFilter,
+  applyColumnFilter,
+  filterColumns,
+} from './abstract.grounding.ts';
 import type { GroundingContext } from './context.ts';
 
 /**
@@ -8,6 +13,12 @@ import type { GroundingContext } from './context.ts';
 export interface TableGroundingConfig {
   /** Filter to select seed tables */
   filter?: Filter;
+  /**
+   * Per-table column filter.
+   * Maps table name to a Filter that selects which columns to keep.
+   * Tables not listed keep all their columns.
+   */
+  columns?: ColumnsFilter;
   /**
    * Traverse forward (child→parent) following FK direction.
    * - true: unlimited depth
@@ -36,12 +47,14 @@ export interface TableGroundingConfig {
  */
 export abstract class TableGrounding extends AbstractGrounding {
   #filter?: Filter;
+  #columns?: ColumnsFilter;
   #forward?: boolean | number;
   #backward?: boolean | number;
 
   constructor(config: TableGroundingConfig = {}) {
     super('table');
     this.#filter = config.filter;
+    this.#columns = config.columns;
     this.#forward = config.forward;
     this.#backward = config.backward;
   }
@@ -74,7 +87,9 @@ export abstract class TableGrounding extends AbstractGrounding {
     // No traversal at all - just add the seed tables
     if (!forward && !backward) {
       const tables = await Promise.all(
-        seedTables.map((name) => this.getTable(name)),
+        seedTables.map(async (name) =>
+          applyColumnFilter(await this.getTable(name), this.#columns),
+        ),
       );
       ctx.tables.push(...tables);
       return;
@@ -107,12 +122,16 @@ export abstract class TableGrounding extends AbstractGrounding {
       forwardVisited.add(name);
 
       if (!tables[name]) {
-        tables[name] = await this.getTable(name);
+        tables[name] = applyColumnFilter(
+          await this.getTable(name),
+          this.#columns,
+        );
       }
 
       if (depth < forwardLimit) {
         const rels = await this.findOutgoingRelations(name);
         for (const rel of rels) {
+          if (!this.isRelationshipVisible(rel)) continue;
           this.addRelationship(rel, allRelationships, seenRelationships);
           if (!forwardVisited.has(rel.referenced_table)) {
             forwardQueue.push({ name: rel.referenced_table, depth: depth + 1 });
@@ -132,12 +151,16 @@ export abstract class TableGrounding extends AbstractGrounding {
       backwardVisited.add(name);
 
       if (!tables[name]) {
-        tables[name] = await this.getTable(name);
+        tables[name] = applyColumnFilter(
+          await this.getTable(name),
+          this.#columns,
+        );
       }
 
       if (depth < backwardLimit) {
         const rels = await this.findIncomingRelations(name);
         for (const rel of rels) {
+          if (!this.isRelationshipVisible(rel)) continue;
           this.addRelationship(rel, allRelationships, seenRelationships);
           if (!backwardVisited.has(rel.table)) {
             backwardQueue.push({ name: rel.table, depth: depth + 1 });
@@ -184,5 +207,22 @@ export abstract class TableGrounding extends AbstractGrounding {
       seen.add(key);
       all.push(rel);
     }
+  }
+
+  protected isRelationshipVisible(rel: Relationship): boolean {
+    return (
+      this.areColumnsVisible(rel.from, this.#columns?.[rel.table]) &&
+      this.areColumnsVisible(rel.to, this.#columns?.[rel.referenced_table])
+    );
+  }
+
+  protected areColumnsVisible(names: string[], filter?: Filter): boolean {
+    if (!filter) return true;
+    return (
+      filterColumns(
+        names.map((name) => ({ name })),
+        filter,
+      ).length === names.length
+    );
   }
 }

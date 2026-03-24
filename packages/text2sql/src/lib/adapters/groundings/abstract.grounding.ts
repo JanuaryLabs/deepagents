@@ -11,6 +11,43 @@ import type { GroundingContext } from './context.ts';
  */
 export type Filter = string[] | RegExp | ((tableName: string) => boolean);
 
+/**
+ * Per-entity column filter.
+ * Maps entity name (table or view) to a Filter that selects which columns to keep.
+ * Entities not listed in the record keep all their columns.
+ */
+export type ColumnsFilter = Record<string, Filter>;
+
+/**
+ * Filter a columns array using a Filter.
+ * Keeps columns whose name matches the filter.
+ */
+export function filterColumns<T extends { name: string }>(
+  columns: T[],
+  filter: Filter,
+): T[] {
+  if (Array.isArray(filter)) {
+    return columns.filter((col) => filter.includes(col.name));
+  }
+  if (filter instanceof RegExp) {
+    return columns.filter((col) => filter.test(col.name));
+  }
+  return columns.filter((col) => filter(col.name));
+}
+
+/**
+ * Apply per-entity column filtering.
+ * Returns the entity unchanged if no filter matches its name.
+ */
+export function applyColumnFilter<
+  T extends { name: string; columns: { name: string }[] },
+>(entity: T, columnsConfig?: ColumnsFilter): T {
+  if (!columnsConfig) return entity;
+  const filter = columnsConfig[entity.name];
+  if (!filter) return entity;
+  return { ...entity, columns: filterColumns(entity.columns, filter) } as T;
+}
+
 export interface AdapterInfo {
   dialect: string;
   version?: string;

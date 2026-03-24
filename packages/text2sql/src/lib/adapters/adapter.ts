@@ -218,9 +218,27 @@ export abstract class Adapter {
       fragments.push(this.#viewToFragment(v));
     }
 
-    // Relationships
+    // Relationships — filter out FK columns that were removed by column restriction
     const tableMap = new Map(ctx.tables.map((t) => [t.name, t]));
+    const tableColumnSets = new Map(
+      ctx.tables.map((t) => [t.name, new Set(t.columns.map((c) => c.name))]),
+    );
     for (const rel of ctx.relationships) {
+      const sourceColumns = tableColumnSets.get(rel.table);
+      const targetColumns = tableColumnSets.get(rel.referenced_table);
+      if (
+        sourceColumns &&
+        rel.from.some((column) => !sourceColumns.has(column))
+      ) {
+        continue;
+      }
+      if (
+        targetColumns &&
+        rel.to.some((column) => !targetColumns.has(column))
+      ) {
+        continue;
+      }
+
       const sourceTable = tableMap.get(rel.table);
       const targetTable = tableMap.get(rel.referenced_table);
       fragments.push(
@@ -294,15 +312,22 @@ export abstract class Adapter {
       }),
     );
 
+    // Set of present column names for cascade-cleaning indexes/constraints
+    const presentColumns = new Set(t.columns.map((c) => c.name));
+
     // Build index fragments
-    const indexFragments = (t.indexes ?? []).map((idx) =>
-      index({
-        name: idx.name,
-        columns: idx.columns,
-        unique: idx.unique,
-        type: idx.type,
-      }),
-    );
+    const indexFragments = (t.indexes ?? [])
+      .filter((idx) =>
+        idx.columns.every((column) => presentColumns.has(column)),
+      )
+      .map((idx) =>
+        index({
+          name: idx.name,
+          columns: idx.columns,
+          unique: idx.unique,
+          type: idx.type,
+        }),
+      );
 
     // Build constraint fragments for multi-column UNIQUE and CHECK constraints
     const constraintFragments = (t.constraints ?? [])
@@ -310,6 +335,11 @@ export abstract class Adapter {
         (c) =>
           c.type === 'CHECK' ||
           (c.type === 'UNIQUE' && (c.columns?.length ?? 0) > 1),
+      )
+      .filter(
+        (c) =>
+          !c.columns?.length ||
+          c.columns.every((column) => presentColumns.has(column)),
       )
       .map((c) =>
         constraint({

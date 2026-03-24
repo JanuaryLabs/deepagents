@@ -1,5 +1,9 @@
 import type { ColumnStats, Filter } from '../adapter.ts';
-import { AbstractGrounding } from './abstract.grounding.ts';
+import {
+  AbstractGrounding,
+  type ColumnsFilter,
+  applyColumnFilter,
+} from './abstract.grounding.ts';
 import type { GroundingContext } from './context.ts';
 
 /**
@@ -29,6 +33,12 @@ export interface View {
 export interface ViewGroundingConfig {
   /** Filter to select views */
   filter?: Filter;
+  /**
+   * Per-view column filter.
+   * Maps view name to a Filter that selects which columns to keep.
+   * Views not listed keep all their columns.
+   */
+  columns?: ColumnsFilter;
   /** Whether to fetch the SQL definition of each view (default: true) */
   includeDefinition?: boolean;
 }
@@ -43,11 +53,13 @@ export interface ViewGroundingConfig {
  */
 export abstract class ViewGrounding extends AbstractGrounding {
   #filter?: Filter;
+  #columns?: ColumnsFilter;
   protected includeDefinition: boolean;
 
   constructor(config: ViewGroundingConfig = {}) {
     super('view');
     this.#filter = config.filter;
+    this.#columns = config.columns;
     this.includeDefinition = config.includeDefinition ?? true;
   }
 
@@ -64,7 +76,9 @@ export abstract class ViewGrounding extends AbstractGrounding {
   async execute(ctx: GroundingContext): Promise<void> {
     const viewNames = await this.applyFilter();
     const views = await Promise.all(
-      viewNames.map((name) => this.getView(name)),
+      viewNames.map(async (name) =>
+        applyColumnFilter(await this.getView(name), this.#columns),
+      ),
     );
     ctx.views.push(...views);
   }
