@@ -1,13 +1,6 @@
 import type { ContextFragment } from '../fragments.ts';
 import { fragment } from '../fragments.ts';
-import {
-  guardrail,
-  hint,
-  policy,
-  principle,
-  role,
-  workflow,
-} from './domain.ts';
+import { hint, policy, principle, role, workflow } from './domain.ts';
 
 /**
  * Meta-cognitive reasoning framework.
@@ -153,4 +146,50 @@ export function reasoningFramework(): ContextFragment[] {
       }),
     ),
   ];
+}
+
+const DEFAULT_SELF_CRITIQUE_CHECKS = [
+  "Did I answer the user's intent, not just their literal words?",
+  'Is every claim grounded in the provided context, schema, or data?',
+  'Did I follow the requested output format and constraints?',
+];
+
+/**
+ * Pre-return self-critique fragment.
+ *
+ * Instructs the model to review its output against a set of checks
+ * before returning the final response. Reduces hallucination and
+ * improves alignment with user intent.
+ *
+ * Adapted from Google's Gemini API prompting strategies documentation.
+ *
+ * @see https://ai.google.dev/gemini-api/docs/prompting-strategies
+ *
+ * @param checks - Validation questions the model asks itself. Defaults to intent, grounding, and format checks.
+ *
+ * @example
+ * ```ts
+ * import { selfCritique } from '@deepagents/context';
+ *
+ * // Use defaults
+ * context.set(selfCritique());
+ *
+ * // Custom checks
+ * context.set(selfCritique([
+ *   'Does the SQL only use tables that exist in the schema?',
+ *   'Did I avoid adding columns not requested by the user?',
+ * ]));
+ * ```
+ */
+export function selfCritique(
+  checks: string[] = DEFAULT_SELF_CRITIQUE_CHECKS,
+): ContextFragment {
+  return workflow({
+    task: 'Self-critique before returning final response',
+    steps: [
+      "Before returning your final response, review your generated output against the user's original constraints:",
+      ...checks.map((check, i) => `${i + 1}. ${check}`),
+      'If any check fails, revise your response before returning it.',
+    ],
+  });
 }
