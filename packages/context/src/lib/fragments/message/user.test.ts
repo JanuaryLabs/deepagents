@@ -278,6 +278,101 @@ describe('user reminders', () => {
     assert.throws(() => reminder(''), /Reminder text must not be empty/);
     assert.throws(() => reminder('   '), /Reminder text must not be empty/);
   });
+
+  it('merges metadata returned from reminder factories', () => {
+    const fragment = user(
+      'payload',
+      reminder(() => ({
+        text: 'structured-hint',
+        metadata: {
+          environmentReminder: {
+            version: 1,
+            snapshot: { dateKey: '2026-03-27' },
+          },
+        },
+      })),
+    );
+    const message = encodeMessage(fragment);
+    const metadata = message.metadata as
+      | {
+          environmentReminder?: Record<string, unknown>;
+          reminders?: UserReminderMetadataRecord[];
+        }
+      | undefined;
+
+    assert.ok(
+      getTextPart(message).includes(taggedReminder('structured-hint')),
+      'factory reminder text should still be injected',
+    );
+    assert.deepStrictEqual(metadata?.environmentReminder, {
+      version: 1,
+      snapshot: { dateKey: '2026-03-27' },
+    });
+    assert.strictEqual(metadata?.reminders?.length, 1);
+  });
+});
+
+describe('user codec contract', () => {
+  it('decode and encode return the same message with inline reminders', () => {
+    const fragment = user('hello', reminder('secret'));
+    const decoded = fragment.codec?.decode() as UIMessage;
+    const encoded = encodeMessage(fragment);
+
+    assert.strictEqual(
+      decoded,
+      encoded,
+      'decode and encode should return the same reference',
+    );
+    assert.ok(
+      getTextPart(decoded).includes('secret'),
+      'inline reminders should be baked into the message',
+    );
+  });
+
+  it('multiple encode calls return the same reference', () => {
+    const fragment = user(
+      'hi',
+      reminder('r1'),
+      reminder('r2', { asPart: true }),
+    );
+    const first = encodeMessage(fragment);
+    const second = encodeMessage(fragment);
+
+    assert.strictEqual(
+      first,
+      second,
+      'encode should return the same object each call',
+    );
+  });
+
+  it('decode preserves inline reminders and metadata', () => {
+    const fragment = user('payload', reminder('injected'));
+    const decoded = fragment.codec?.decode() as UIMessage;
+
+    const text = getTextPart(decoded);
+    assert.ok(text.includes('payload'), 'original content should be present');
+    assert.ok(
+      text.includes(taggedReminder('injected')),
+      'reminder should be baked in',
+    );
+
+    const metadata = getReminderMetadata(decoded);
+    assert.strictEqual(metadata.length, 1);
+    assert.strictEqual(metadata[0].text, 'injected');
+  });
+
+  it('fragments created with the same content are independent', () => {
+    const a = user('msg', reminder('a'));
+    const b = user('msg', reminder('b'));
+
+    const aMsg = encodeMessage(a);
+    const bMsg = encodeMessage(b);
+
+    assert.ok(getTextPart(aMsg).includes('a'));
+    assert.ok(!getTextPart(aMsg).includes(taggedReminder('b')));
+    assert.ok(getTextPart(bMsg).includes('b'));
+    assert.ok(!getTextPart(bMsg).includes(taggedReminder('a')));
+  });
 });
 
 describe('reminder range helpers', () => {

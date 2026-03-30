@@ -43,7 +43,7 @@ const clientLoader = browserCollections.docs.createClientLoader({
 });
 
 function DocsContent({ path }: { path: string }) {
-  const Content = clientLoader.getComponent(path);
+  const Content: any = clientLoader.getComponent(path);
   return <Content />;
 }
 

@@ -1,5 +1,5 @@
-import { isTextUIPart, validateUIMessages } from 'ai';
 import type { LanguageModelUsage, UIMessage } from 'ai';
+import { validateUIMessages } from 'ai';
 import { mergeWith } from 'lodash-es';
 
 import {
@@ -16,11 +16,11 @@ import {
   isMessageFragment,
 } from './fragments.ts';
 import {
-  type UserReminderMetadata,
-  applyReminderToMessage,
+  extractPlainText,
   getConditionalReminder,
   isConditionalReminder,
-  mergeReminderMetadata,
+  resolveReminder,
+  user,
 } from './fragments/message/user.ts';
 import type { Models } from './models.generated.ts';
 import {
@@ -163,6 +163,15 @@ export class ContextEngine {
   /** Initial metadata to merge on first initialization */
   #initialMetadata: Record<string, unknown> | undefined;
 
+  get #activeBranch(): BranchData {
+    if (!this.#branch) {
+      throw new Error(
+        'Branch not initialized. Call #ensureInitialized() first.',
+      );
+    }
+    return this.#branch;
+  }
+
   get #renderableFragments(): ContextFragment[] {
     return this.#fragments.filter((f) => !isConditionalReminder(f));
   }
@@ -206,8 +215,13 @@ export class ContextEngine {
       this.#initialMetadata = undefined;
     }
 
-    // "main" branch is guaranteed to exist after upsertChat
-    this.#branch = (await this.#store.getActiveBranch(this.#chatId))!;
+    const branch = await this.#store.getActiveBranch(this.#chatId);
+    if (!branch) {
+      throw new Error(
+        `Active branch not found for chat "${this.#chatId}" after upsertChat`,
+      );
+    }
+    this.#branch = branch;
 
     this.#initialized = true;
   }
@@ -313,34 +327,45 @@ export class ContextEngine {
   }
 
   /**
-   * Count user+assistant message pairs (turns) in the conversation.
-   * Includes persisted messages and pending messages.
-   * A turn is one user message paired with one assistant message.
-   * An unpaired trailing user message counts as the next turn.
+   * Count user turns in the conversation and return the previous saved user message context.
+   * Includes persisted messages and pending messages in the turn count.
    */
-  public async getTurnCount(): Promise<number> {
+  async #getChainContext(): Promise<{
+    turn: number;
+    lastMessageAt?: number;
+    lastMessage?: UIMessage;
+  }> {
     await this.#ensureInitialized();
 
-    let userCount = 0;
+    let turn = 0;
+    let lastMessageAt: number | undefined;
+    let lastMessage: UIMessage | undefined;
 
     if (this.#branch?.headMessageId) {
       const chain = await this.#store.getMessageChain(
         this.#branch.headMessageId,
       );
       for (const msg of chain) {
-        if (msg.name === 'user') {
-          userCount++;
+        if (msg.name !== 'user') {
+          continue;
         }
+
+        turn++;
+        lastMessageAt = msg.createdAt;
+        lastMessage = msg.data as UIMessage;
       }
     }
 
     for (const fragment of this.#pendingMessages) {
-      if (fragment.name === 'user') {
-        userCount++;
-      }
+      if (fragment.name === 'user') turn++;
     }
 
-    return userCount;
+    return { turn, lastMessageAt, lastMessage };
+  }
+
+  public async getTurnCount(): Promise<number> {
+    const { turn } = await this.#getChainContext();
+    return turn;
   }
 
   /**
@@ -426,48 +451,6 @@ export class ContextEngine {
       messages.push(fragment.codec.encode());
     }
 
-    // Apply conditional reminder fragments to the last user message
-    const conditionalReminders = this.#fragments.filter(isConditionalReminder);
-    if (conditionalReminders.length > 0) {
-      const turn = await this.getTurnCount();
-
-      let lastUserIndex = -1;
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if ((messages[i] as UIMessage).role === 'user') {
-          lastUserIndex = i;
-          break;
-        }
-      }
-
-      if (lastUserIndex >= 0) {
-        const original = messages[lastUserIndex] as UIMessage;
-        const message: UIMessage = {
-          ...original,
-          parts: [...original.parts],
-        };
-
-        const plainText = message.parts
-          .filter(isTextUIPart)
-          .map((p) => p.text)
-          .join(' ');
-        const addedReminders: UserReminderMetadata[] = [];
-
-        for (const fragment of conditionalReminders) {
-          const config = getConditionalReminder(fragment);
-          if (!config.when(turn)) continue;
-          const meta = applyReminderToMessage(message, config, {
-            content: plainText,
-            turn,
-          });
-          if (meta) addedReminders.push(meta);
-        }
-
-        mergeReminderMetadata(message, addedReminders);
-
-        messages[lastUserIndex] = message;
-      }
-    }
-
     return {
       systemPrompt,
       messages:
@@ -523,7 +506,58 @@ export class ContextEngine {
       }
     }
 
-    let parentId = this.#branch!.headMessageId;
+    const conditionalReminders = this.#fragments.filter(isConditionalReminder);
+    if (conditionalReminders.length > 0) {
+      let lastUserIndex = -1;
+      for (let i = this.#pendingMessages.length - 1; i >= 0; i--) {
+        if (this.#pendingMessages[i].name === 'user') {
+          lastUserIndex = i;
+          break;
+        }
+      }
+
+      if (lastUserIndex >= 0) {
+        const lastUserFragment = this.#pendingMessages[lastUserIndex];
+        if (lastUserFragment.codec) {
+          const { turn, lastMessageAt, lastMessage } =
+            await this.#getChainContext();
+          const firedReminders = conditionalReminders
+            .map(getConditionalReminder)
+            .filter((config) => config.when(turn));
+
+          if (firedReminders.length > 0) {
+            const original = lastUserFragment.codec.encode() as UIMessage & {
+              role: 'user';
+            };
+            const plainText = extractPlainText(original);
+            const reminders = firedReminders.flatMap((rem) => {
+              const resolved = resolveReminder(rem, {
+                content: plainText,
+                turn,
+                lastMessageAt,
+                lastMessage,
+              });
+              if (!resolved) {
+                return [];
+              }
+
+              return [
+                {
+                  text: resolved.text,
+                  asPart: rem.asPart,
+                  metadata: resolved.metadata,
+                },
+              ];
+            });
+            const recreated = user(original, ...reminders);
+            recreated.id = lastUserFragment.id;
+            this.#pendingMessages[lastUserIndex] = recreated;
+          }
+        }
+      }
+    }
+
+    let parentId = this.#activeBranch.headMessageId;
     const now = Date.now();
 
     // Add each pending message to the graph
@@ -562,13 +596,13 @@ export class ContextEngine {
     }
 
     // Update branch head to last message
-    await this.#store.updateBranchHead(this.#branch!.id, parentId);
-    this.#branch!.headMessageId = parentId;
+    await this.#store.updateBranchHead(this.#activeBranch.id, parentId);
+    this.#activeBranch.headMessageId = parentId;
 
     // Clear pending messages
     this.#pendingMessages = [];
 
-    return { headMessageId: this.#branch!.headMessageId ?? undefined };
+    return { headMessageId: this.#activeBranch.headMessageId ?? undefined };
   }
 
   /**

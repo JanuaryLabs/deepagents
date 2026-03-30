@@ -40,6 +40,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('every-third', { when: everyNTurns(3) }),
       user('turn 3'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -66,6 +67,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('every-third', { when: everyNTurns(3) }),
       user('turn 2'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -86,6 +88,7 @@ describe('ContextEngine conditional reminders', () => {
     });
 
     engine.set(reminder('welcome', { when: once() }), user('first message'));
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -109,6 +112,7 @@ describe('ContextEngine conditional reminders', () => {
     await engine.save();
 
     engine.set(reminder('welcome', { when: once() }), user('turn 2'));
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -134,6 +138,7 @@ describe('ContextEngine conditional reminders', () => {
     await engine.save();
 
     engine.set(reminder('late-hint', { when: afterTurn(2) }), user('turn 3'));
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -160,6 +165,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder((ctx) => `turn=${ctx.turn}`, { when: everyNTurns(2) }),
       user('turn 2'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -208,6 +214,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('conditional', { when: everyNTurns(3) }),
       user('turn 3', reminder('always-here')),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const lastMsg = messages[messages.length - 1];
@@ -223,7 +230,7 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
-  it('conditional reminders are not persisted (engine-level only)', async () => {
+  it('conditional reminder text is persisted but reminder fragment is not re-evaluated by new engine', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       store,
@@ -231,7 +238,7 @@ describe('ContextEngine conditional reminders', () => {
       userId: 'u1',
     });
 
-    engine.set(reminder('ephemeral', { when: everyNTurns(1) }), user('turn 1'));
+    engine.set(reminder('baked-in', { when: everyNTurns(1) }), user('turn 1'));
     await engine.save();
 
     const engine2 = new ContextEngine({
@@ -245,12 +252,17 @@ describe('ContextEngine conditional reminders', () => {
     const text = getTextParts(lastMsg).join('');
 
     assert.ok(
-      !text.includes('ephemeral'),
-      `Conditional reminders should not persist. Got: ${text}`,
+      text.includes('baked-in'),
+      `Stored message should contain reminder text from original save. Got: ${text}`,
+    );
+    assert.strictEqual(
+      (text.match(/baked-in/g) || []).length,
+      1,
+      'Reminder text should appear exactly once (not re-applied by engine2)',
     );
   });
 
-  it('does not mutate original message on resolve (double-resolve safe)', async () => {
+  it('double-resolve is safe after save', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       store,
@@ -262,6 +274,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('conditional', { when: everyNTurns(1) }),
       user('hello'),
     );
+    await engine.save();
 
     const renderer = new XmlRenderer();
     const result1 = await engine.resolve({ renderer });
@@ -281,30 +294,7 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
-  it('applies conditional reminders to persisted user messages when no pending', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'persisted-target',
-      userId: 'u1',
-    });
-
-    engine.set(user('saved message'), assistantText('reply'));
-    await engine.save();
-
-    engine.set(reminder('late-addition', { when: everyNTurns(1) }));
-
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
-    const userMsg = messages.find((m) => m.role === 'user')!;
-    const text = getTextParts(userMsg).join('');
-
-    assert.ok(
-      text.includes('late-addition'),
-      `Conditional reminder should apply to persisted user message. Got: ${text}`,
-    );
-  });
-
-  it('applies multiple conditional reminders in a single resolve', async () => {
+  it('applies multiple conditional reminders in a single save', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       store,
@@ -317,6 +307,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('r2', { when: everyNTurns(1) }),
       user('hello'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const text = getTextParts(messages[0]).join('');
@@ -337,6 +328,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('part-hint', { when: everyNTurns(1), asPart: true }),
       user('hello'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const parts = getTextParts(messages[0]);
@@ -358,11 +350,66 @@ describe('ContextEngine conditional reminders', () => {
       reminder(() => '', { when: everyNTurns(1) }),
       user('hello'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const text = getTextParts(messages[0]).join('');
 
     assert.strictEqual(text, 'hello');
+  });
+
+  it('save() persists conditional reminder text and metadata to the stored message', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'save-persist',
+      userId: 'u1',
+    });
+
+    engine.set(
+      reminder('persisted-hint', { when: everyNTurns(1) }),
+      user('hello'),
+    );
+    await engine.save();
+
+    const storedMessages = await store.getMessages('save-persist');
+    const storedUser = storedMessages.find((m) => m.name === 'user')!;
+    const storedData = storedUser.data as UIMessage;
+
+    const text = getTextParts(storedData).join('');
+    assert.ok(
+      text.includes('persisted-hint'),
+      `Stored message should contain reminder text after save(). Got: ${text}`,
+    );
+
+    assert.ok(
+      Array.isArray(
+        (storedData.metadata as Record<string, unknown>)?.reminders,
+      ),
+      'Stored message should have reminder metadata',
+    );
+  });
+
+  it('save then resolve does not double-apply reminders', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'save-then-resolve',
+      userId: 'u1',
+    });
+
+    engine.set(reminder('once-only', { when: everyNTurns(1) }), user('hello'));
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const userMsg = messages.find((m) => m.role === 'user')!;
+    const text = getTextParts(userMsg).join('');
+
+    assert.strictEqual(
+      (text.match(/once-only/g) || []).length,
+      1,
+      `Reminder should appear exactly once after save+resolve. Got: ${text}`,
+    );
   });
 
   it('does not crash when no user messages exist', async () => {
@@ -377,6 +424,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('hint', { when: everyNTurns(1) }),
       assistantText('no user here'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     assert.strictEqual(messages.length, 1);
@@ -395,6 +443,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('secret-hint', { when: everyNTurns(1) }),
       user('hello'),
     );
+    await engine.save();
 
     const { systemPrompt } = await engine.resolve({
       renderer: new XmlRenderer(),
@@ -415,6 +464,7 @@ describe('ContextEngine conditional reminders', () => {
     });
 
     engine.set(user('hello'), reminder('after-user', { when: everyNTurns(1) }));
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const text = getTextParts(messages[0]).join('');
@@ -440,6 +490,7 @@ describe('ContextEngine conditional reminders', () => {
       reminder('targeted', { when: everyNTurns(1) }),
       user('pending-msg'),
     );
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
 
@@ -476,6 +527,7 @@ describe('ContextEngine conditional reminders', () => {
     });
 
     engine.set(reminder('strippable', { when: everyNTurns(1) }), user('hello'));
+    await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
     const userMsg = messages[0];
@@ -489,6 +541,66 @@ describe('ContextEngine conditional reminders', () => {
     assert.ok(
       !textAfter.includes('strippable'),
       `Stripped message should not contain reminder. Got: ${textAfter}`,
+    );
+  });
+
+  it('preserves branching-assigned ID when conditional reminders re-create the fragment', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'branch-cond',
+      userId: 'u1',
+    });
+
+    engine.set(user('warmup'), assistantText('ack'));
+    await engine.save();
+
+    const original = user('hello');
+    const originalId = original.id!;
+    engine.set(original, assistantText('reply'));
+    await engine.save();
+
+    engine.set(
+      reminder('branch-hint', { when: everyNTurns(1) }),
+      user({
+        id: originalId,
+        role: 'user',
+        parts: [{ type: 'text', text: 'updated' }],
+      }),
+    );
+    await engine.save();
+
+    const activeBranchMessages = await store.getMessages('branch-cond');
+    const branchedUser = activeBranchMessages.find(
+      (m) =>
+        m.name === 'user' &&
+        getTextParts(m.data as UIMessage)
+          .join('')
+          .includes('updated'),
+    );
+
+    assert.ok(
+      branchedUser,
+      'Updated user message should exist on the new branch',
+    );
+    assert.notStrictEqual(
+      branchedUser!.id,
+      originalId,
+      'Branched message should have a new ID, not the original',
+    );
+    assert.ok(
+      getTextParts(branchedUser!.data as UIMessage)
+        .join('')
+        .includes('branch-hint'),
+      'Conditional reminder should be applied to the branched message',
+    );
+
+    const originalMsg = await store.getMessage(originalId);
+    assert.ok(originalMsg, 'Original message should still exist on old branch');
+    const originalText = getTextParts(originalMsg!.data as UIMessage).join('');
+    assert.ok(
+      !originalText.includes('branch-hint'),
+      `Original message should be untouched. Got: ${originalText}`,
     );
   });
 });

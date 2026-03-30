@@ -318,7 +318,7 @@ public async save(): Promise<void> {
   }
 
   // 3. Chain messages
-  let parentId = this.#branch!.headMessageId;
+  let parentId = this.#activeBranch.headMessageId;
   const now = Date.now();
 
   for (const fragment of this.#pendingMessages) {
@@ -337,8 +337,8 @@ public async save(): Promise<void> {
   }
 
   // 4. Update branch head
-  await this.#store.updateBranchHead(this.#branch!.id, parentId);
-  this.#branch!.headMessageId = parentId;
+  await this.#store.updateBranchHead(this.#activeBranch.id, parentId);
+  this.#activeBranch.headMessageId = parentId;
 
   // 5. Clear pending
   this.#pendingMessages = [];

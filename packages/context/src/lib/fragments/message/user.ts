@@ -5,9 +5,18 @@ import type { ContextFragment, MessageFragment } from '../../fragments.ts';
 export interface ReminderContext {
   content: string;
   turn?: number;
+  lastMessageAt?: number;
+  lastMessage?: UIMessage;
 }
 
-export type ReminderText = string | ((ctx: ReminderContext) => string);
+export interface ReminderResolution {
+  text: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type ReminderText =
+  | string
+  | ((ctx: ReminderContext) => string | ReminderResolution);
 
 export type WhenPredicate = (turn: number) => boolean;
 
@@ -46,6 +55,7 @@ export interface UserReminderOptions {
 export interface UserReminder {
   text: ReminderText;
   asPart: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ConditionalReminderOptions {
@@ -193,7 +203,7 @@ export function stripReminders(message: UIMessage): UIMessage {
   return nextMessage;
 }
 
-function extractPlainText(message: UIMessage): string {
+export function extractPlainText(message: UIMessage): string {
   return message.parts
     .filter(isTextUIPart)
     .map((part) => part.text)
@@ -285,21 +295,76 @@ export function resolveReminderText(
   item: { text: ReminderText },
   ctx: ReminderContext,
 ): string {
-  return typeof item.text === 'function' ? item.text(ctx) : item.text;
+  return resolveReminder(item, ctx)?.text ?? '';
+}
+
+function normalizeReminderResolution(
+  value: string | ReminderResolution,
+): ReminderResolution | null {
+  if (typeof value === 'string') {
+    return value.trim().length === 0 ? null : { text: value };
+  }
+
+  if (value.text.trim().length === 0) {
+    return null;
+  }
+
+  return value;
+}
+
+export function resolveReminder(
+  item: { text: ReminderText; metadata?: Record<string, unknown> },
+  ctx: ReminderContext,
+): ReminderResolution | null {
+  const resolvedText =
+    typeof item.text === 'function' ? item.text(ctx) : item.text;
+  const resolved = normalizeReminderResolution(resolvedText);
+  if (!resolved) {
+    return null;
+  }
+
+  const metadata =
+    item.metadata || resolved.metadata
+      ? {
+          ...(item.metadata ?? {}),
+          ...(resolved.metadata ?? {}),
+        }
+      : undefined;
+
+  return metadata ? { ...resolved, metadata } : resolved;
+}
+
+export function mergeMessageMetadata(
+  message: UIMessage,
+  addedMetadata: Record<string, unknown>,
+): void {
+  if (Object.keys(addedMetadata).length === 0) {
+    return;
+  }
+
+  const metadata = isRecord(message.metadata) ? { ...message.metadata } : {};
+  message.metadata = { ...metadata, ...addedMetadata };
 }
 
 export function applyReminderToMessage(
   message: UIMessage,
-  item: { text: ReminderText; asPart: boolean },
+  item: {
+    text: ReminderText;
+    asPart: boolean;
+    metadata?: Record<string, unknown>;
+  },
   ctx: ReminderContext,
 ): UserReminderMetadata | null {
-  const resolvedText = resolveReminderText(item, ctx);
-  if (resolvedText.trim().length === 0) {
+  const resolved = resolveReminder(item, ctx);
+  if (!resolved) {
     return null;
   }
+  if (resolved.metadata) {
+    mergeMessageMetadata(message, resolved.metadata);
+  }
   return item.asPart
-    ? applyPartReminder(message, resolvedText)
-    : applyInlineReminder(message, resolvedText);
+    ? applyPartReminder(message, resolved.text)
+    : applyInlineReminder(message, resolved.text);
 }
 
 export function mergeReminderMetadata(
@@ -409,14 +474,14 @@ export function user(
 
   if (reminders.length > 0) {
     const plainText = extractPlainText(message);
-    const addedReminders: UserReminderMetadata[] = [];
+    const added: UserReminderMetadata[] = [];
     for (const item of reminders) {
       const meta = applyReminderToMessage(message, item, {
         content: plainText,
       });
-      if (meta) addedReminders.push(meta);
+      if (meta) added.push(meta);
     }
-    mergeReminderMetadata(message, addedReminders);
+    mergeReminderMetadata(message, added);
   }
 
   return {
