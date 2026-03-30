@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/agent",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -35,7 +35,7 @@
     "@ai-sdk/groq": "^3.0.29",
     "@ai-sdk/openai": "^3.0.41",
     "@ai-sdk/openai-compatible": "^2.0.35",
-    "@deepagents/retrieval": "0.30.0",
+    "@deepagents/retrieval": "0.31.0",
     "ai": "^6.0.116",
     "chalk": "^5.6.2",
     "conf": "^15.0.2",
