@@ -10,6 +10,7 @@ export * from './lib/fragments/domain.ts';
 export * from './lib/fragments/message/environment-reminder.ts';
 export * from './lib/fragments/message/user.ts';
 export * from './lib/fragments/reasoning.ts';
+export * from './lib/fragments/socratic.ts';
 export * from './lib/fragments/user.ts';
 export * from './lib/guardrail.ts';
 export * from './lib/guardrails/error-recovery.guardrail.ts';
