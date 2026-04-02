@@ -1,4 +1,9 @@
 import { groq } from '@ai-sdk/groq';
+import common from '@rivet-dev/agent-os-common';
+import {
+  createHostDirBackend,
+  createOverlayBackend,
+} from '@rivet-dev/agent-os-core';
 import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
 import { Bash, OverlayFs } from 'just-bash';
@@ -11,13 +16,13 @@ import {
   XmlRenderer,
   assistantText,
   chat,
-  // Docker sandbox
+  createAgentOsSandbox,
   createContainerTool,
   createDockerSandbox,
   hint,
   role,
-  // Skills fragment
   skills,
+  useAgentOsSandbox,
   user,
   visualizeGraph,
 } from './index.ts';
@@ -806,6 +811,180 @@ async function createDockerSkillAgent() {
     await sandbox.dispose();
   }
 }
+/**
+ * Example: Agent OS Sandbox - WASM-based In-Process Execution
+ *
+ * Agent OS runs commands in an in-process WASM virtual machine.
+ * No Docker daemon required. Near-zero cold start (~6ms).
+ *
+ * Four approaches are shown:
+ * 1. Low-level: createAgentOsSandbox() for direct sandbox control
+ * 2. High-level: useAgentOsSandbox() for auto-disposal
+ * 3. AI agent integration: plug into createBashTool() like Docker does
+ * 4. Filesystem mounts: host directories and copy-on-write overlays
+ *
+ * Requires: npm install @rivet-dev/agent-os-core @rivet-dev/agent-os-common
+ */
+async function demonstrateAgentOsSandbox() {
+  console.log('\n=== Agent OS (WASM) Sandbox Demo ===');
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Approach 1: Low-level - Direct sandbox control
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('\n--- Low-level: createAgentOsSandbox() ---');
+
+  const sandbox = await createAgentOsSandbox({
+    software: [common], // WASM coreutils: ls, cat, grep, sed, awk, etc.
+  });
+
+  try {
+    const result = await sandbox.executeCommand('echo "Hello from WASM!"');
+    console.log('Output:', result.stdout.trim());
+
+    const lsResult = await sandbox.executeCommand('ls /');
+    console.log('Root directory:', lsResult.stdout.trim());
+
+    // File operations work natively (no base64 shell hacks like Docker)
+    await sandbox.writeFiles([
+      { path: '/tmp/hello.txt', content: 'Written inside WASM kernel' },
+    ]);
+    const content = await sandbox.readFile('/tmp/hello.txt');
+    console.log('File content:', content);
+
+    // Pipe commands with real WASM binaries
+    await sandbox.writeFiles([
+      { path: '/tmp/data.txt', content: 'banana\napple\ncherry\napple\n' },
+    ]);
+    const sorted = await sandbox.executeCommand(
+      'sort /tmp/data.txt | uniq -c | sort -rn',
+    );
+    console.log('Sorted unique:\n', sorted.stdout);
+  } finally {
+    await sandbox.dispose();
+    console.log('WASM sandbox disposed');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Approach 2: Auto-dispose wrapper
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('\n--- Auto-dispose: useAgentOsSandbox() ---');
+
+  const output = await useAgentOsSandbox({ software: [common] }, async (sb) => {
+    const result = await sb.executeCommand('uname -a');
+    return result.stdout.trim();
+  });
+  console.log('System info:', output);
+  // sandbox is already disposed here
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Approach 3: AI agent integration via createBashTool
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('\n--- AI Agent: createBashTool() + Agent OS ---');
+
+  const agentSandbox = await createAgentOsSandbox({
+    software: [common],
+  });
+
+  try {
+    const { tools } = await createBashTool({
+      sandbox: agentSandbox,
+      onBeforeBashCall: ({ command }) => {
+        console.log(chalk.magenta(`[WASM] ${command}`));
+        return { command };
+      },
+    });
+    console.log('Available tools:', Object.keys(tools));
+
+    // In a real agent, pass tools to generateText/streamText:
+    //
+    // const skillAgent = agent({
+    //   name: 'wasm_agent',
+    //   model: groq('moonshotai/kimi-k2-instruct-0905'),
+    //   context: new ContextEngine({
+    //     userId: 'demo-user',
+    //     chatId: 'wasm-agent-chat',
+    //     store: new InMemoryContextStore(),
+    //   }).set(
+    //     role(`You are a system assistant with access to a computer.`),
+    //     hint(`Use the bash tool to execute commands.`),
+    //   ),
+    //   tools,
+    // });
+
+    // const stream = await chat(skillAgent, [user('List all files')]);
+    // await printer.readableStream(stream);
+  } finally {
+    await agentSandbox.dispose();
+    console.log('Agent sandbox disposed');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Approach 4: Mounting host directories into the WASM sandbox
+  // ─────────────────────────────────────────────────────────────────────────
+  console.log('\n--- Filesystem Mounts ---');
+
+  // Mount a host directory as read-write
+  const mountedSandbox = await createAgentOsSandbox({
+    software: [common],
+    mounts: [
+      {
+        path: '/workspace',
+        driver: createHostDirBackend({
+          hostPath: process.cwd(),
+          readOnly: false,
+        }),
+      },
+    ],
+  });
+
+  try {
+    const files = await mountedSandbox.executeCommand('ls /workspace');
+    console.log(
+      'Host files visible in WASM:',
+      files.stdout.trim().split('\n').length,
+    );
+    await mountedSandbox.writeFiles([
+      {
+        path: '/workspace/wasm-created.txt',
+        content: 'This file was created by the WASM sandbox',
+      },
+    ]);
+  } finally {
+    await mountedSandbox.dispose();
+  }
+
+  // Copy-on-write: reads from host, writes stay in memory
+  const cowSandbox = await createAgentOsSandbox({
+    software: [common],
+    mounts: [
+      {
+        path: '/workspace',
+        driver: createOverlayBackend({
+          lower: createHostDirBackend({
+            hostPath: process.cwd(),
+            readOnly: true,
+          }),
+        }),
+      },
+    ],
+  });
+
+  try {
+    // Can read host files
+    const pkg = await cowSandbox.readFile('/workspace/package.json');
+    console.log('Read host file, length:', pkg.length);
+
+    // Writes go to memory, not disk
+    await cowSandbox.writeFiles([
+      { path: '/workspace/temp-output.txt', content: 'This stays in RAM' },
+    ]);
+    const temp = await cowSandbox.readFile('/workspace/temp-output.txt');
+    console.log('COW write:', temp);
+    // /workspace/temp-output.txt does NOT exist on your actual disk
+  } finally {
+    await cowSandbox.dispose();
+  }
+}
 
 // Run the skill-aware agent demo
 // await createSkillAwareAgent();
@@ -813,3 +992,6 @@ async function createDockerSkillAgent() {
 // Uncomment to run Docker sandbox demos (requires Docker)
 // await demonstrateDockerSandbox();
 // await createDockerSkillAgent();
+
+// Uncomment to run Agent OS sandbox demos (requires @rivet-dev/agent-os-core)
+// await demonstrateAgentOsSandbox();

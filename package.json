@@ -20,6 +20,8 @@
     "@nx/vite": "21.6.4",
     "@nx/web": "21.6.4",
     "@react-router/dev": "^7.13.1",
+    "@rivet-dev/agent-os-common": "^0.0.260331072558",
+    "@rivet-dev/agent-os-core": "^0.1.0",
     "@sdk-it/generic": "^0.40.0",
     "@sdk-it/hono": "^0.40.0",
     "@sdk-it/spec": "^0.40.0",
@@ -78,6 +80,7 @@
   "workspaces": [
     "packages/*",
     "apps/**",
+    "applets/*",
     ".evals-sdk-it"
   ],
   "nx": {

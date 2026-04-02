@@ -1,0 +1,201 @@
+---
+title: Agent OS Sandbox
+description: Execute commands in a WASM virtual machine with near-zero cold start and no Docker dependency
+---
+
+<Callout type="warn">
+  Agent OS is a v0.1.0 preview. The API may change in future releases.
+</Callout>
+
+The Agent OS sandbox runs commands in an in-process WASM virtual machine. No Docker daemon required. Cold start is ~6ms. It implements the same `Sandbox` interface as Docker, so it's a drop-in replacement anywhere `createDockerSandbox` is used.
+
+## Installation
+
+Agent OS is an optional peer dependency. Install both packages:
+
+```npm
+npm install @rivet-dev/agent-os-core @rivet-dev/agent-os-common
+```
+
+`@rivet-dev/agent-os-core` provides the WASM kernel. `@rivet-dev/agent-os-common` bundles standard WASM binaries (coreutils, grep, sed, awk, tar, gzip, etc.). You can also install individual command packages instead of `common`.
+
+## Basic Usage
+
+```typescript
+import common from '@rivet-dev/agent-os-common';
+import { createAgentOsSandbox } from '@deepagents/context';
+
+const sandbox = await createAgentOsSandbox({
+  software: [common],
+});
+
+try {
+  const result = await sandbox.executeCommand('echo "Hello from WASM!"');
+  console.log(result.stdout); // "Hello from WASM!"
+
+  const sorted = await sandbox.executeCommand(
+    'echo -e "banana\\napple\\ncherry" | sort'
+  );
+  console.log(sorted.stdout); // apple\nbanana\ncherry
+} finally {
+  await sandbox.dispose();
+}
+```
+
+The `software` array accepts WASM command packages. Pass `common` for the full set of standard utilities.
+
+## File I/O
+
+Read and write files directly through the WASM filesystem — no base64 encoding or shell workarounds:
+
+```typescript
+await sandbox.writeFiles([
+  { path: '/tmp/data.json', content: '{"key": "value"}' },
+  { path: '/tmp/script.sh', content: '#!/bin/sh\necho hello' },
+]);
+
+const content = await sandbox.readFile('/tmp/data.json');
+console.log(content); // {"key": "value"}
+```
+
+`writeFiles` accepts an array and reports per-file failures. `readFile` returns the file content as a UTF-8 string.
+
+## Filesystem Mounts
+
+### Host Directory
+
+Mount a host directory into the WASM sandbox:
+
+```typescript
+import common from '@rivet-dev/agent-os-common';
+import { createHostDirBackend } from '@rivet-dev/agent-os-core';
+import { createAgentOsSandbox } from '@deepagents/context';
+
+const sandbox = await createAgentOsSandbox({
+  software: [common],
+  mounts: [
+    {
+      path: '/workspace',
+      driver: createHostDirBackend({
+        hostPath: process.cwd(),
+        readOnly: false,
+      }),
+    },
+  ],
+});
+```
+
+### Copy-on-Write Overlay
+
+Reads come from the host directory. Writes stay in memory — nothing touches disk:
+
+```typescript
+import common from '@rivet-dev/agent-os-common';
+import { createHostDirBackend, createOverlayBackend } from '@rivet-dev/agent-os-core';
+import { createAgentOsSandbox } from '@deepagents/context';
+
+const sandbox = await createAgentOsSandbox({
+  software: [common],
+  mounts: [
+    {
+      path: '/workspace',
+      driver: createOverlayBackend({
+        lower: createHostDirBackend({
+          hostPath: process.cwd(),
+          readOnly: true,
+        }),
+      }),
+    },
+  ],
+});
+
+// Reads host files
+const pkg = await sandbox.readFile('/workspace/package.json');
+
+// Writes go to memory only — package.json on disk is untouched
+await sandbox.writeFiles([
+  { path: '/workspace/output.txt', content: 'ephemeral' },
+]);
+```
+
+## AI Agent Integration
+
+Agent OS plugs into `createBashTool` the same way Docker does:
+
+```typescript
+import { createBashTool } from 'bash-tool';
+import common from '@rivet-dev/agent-os-common';
+import { createAgentOsSandbox } from '@deepagents/context';
+
+const sandbox = await createAgentOsSandbox({
+  software: [common],
+});
+
+const { tools } = await createBashTool({ sandbox });
+
+// Pass tools to generateText() or streamText()
+```
+
+Since `AgentOsSandbox` implements the `Sandbox` interface from `bash-tool`, any code that accepts a `Sandbox` works with both Docker and WASM backends without changes.
+
+## Lifecycle
+
+### Manual Disposal
+
+Always wrap sandbox usage in `try/finally`:
+
+```typescript
+const sandbox = await createAgentOsSandbox({ software: [common] });
+try {
+  await sandbox.executeCommand('ls /');
+} finally {
+  await sandbox.dispose();
+}
+```
+
+### Auto-Disposal with `useAgentOsSandbox`
+
+```typescript
+import common from '@rivet-dev/agent-os-common';
+import { useAgentOsSandbox } from '@deepagents/context';
+
+const output = await useAgentOsSandbox(
+  { software: [common] },
+  async (sandbox) => {
+    const result = await sandbox.executeCommand('uname -a');
+    return result.stdout.trim();
+  },
+);
+```
+
+The sandbox is disposed when the callback completes, even if it throws.
+
+## Error Handling
+
+All errors extend `AgentOsSandboxError`:
+
+| Error | When |
+|-------|------|
+| `AgentOsNotAvailableError` | `@rivet-dev/agent-os-core` is not installed |
+| `AgentOsCreationError` | WASM VM fails to initialize (includes cause) |
+
+```typescript
+import {
+  createAgentOsSandbox,
+  AgentOsNotAvailableError,
+} from '@deepagents/context';
+
+try {
+  const sandbox = await createAgentOsSandbox();
+} catch (error) {
+  if (error instanceof AgentOsNotAvailableError) {
+    console.error('Install @rivet-dev/agent-os-core first');
+  }
+}
+```
+
+## Next Steps
+
+- [Sandbox Overview](/docs/context/sandbox) — choosing the right approach
+- [Docker Sandbox](/docs/context/docker-sandbox) — full container isolation with Docker
+- [Container Tool](/docs/context/container-tool) — high-level wrapper for AI agents

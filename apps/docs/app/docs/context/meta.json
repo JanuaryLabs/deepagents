@@ -39,6 +39,7 @@
     "sandbox",
     "docker-sandbox",
     "container-tool",
+    "agent-os-sandbox",
     "architecture-sandbox",
     "---Cost Estimation---",
     "cost-estimation",

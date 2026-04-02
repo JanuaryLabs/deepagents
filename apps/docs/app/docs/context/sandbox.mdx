@@ -1,9 +1,9 @@
 ---
 title: Sandbox
-description: Execute code in isolated environments with Docker containers or virtual file systems
+description: Execute code in isolated environments with Docker containers, WASM VMs, or virtual file systems
 ---
 
-The sandbox system lets AI agents execute real commands in isolated environments. Choose between Docker containers for full binary execution, virtual file systems for lightweight simulation, or combine both with binary bridges.
+The sandbox system lets AI agents execute real commands in isolated environments. Choose between Docker containers for full binary execution, WASM virtual machines for lightweight in-process execution, virtual file systems for simulation, or binary bridges to combine approaches.
 
 ## When to Use What
 
@@ -11,7 +11,12 @@ The sandbox system lets AI agents execute real commands in isolated environments
 |----------|----------|-------------------|
 | `createContainerTool` | Agent needs real binaries in isolated container | Yes |
 | `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
+| `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
+
+<Callout type="warn">
+  Agent OS is a v0.1.0 preview. Requires optional peer dependencies `@rivet-dev/agent-os-core` and `@rivet-dev/agent-os-common`.
+</Callout>
 
 ## Quick Start: Container Tool
 
@@ -139,8 +144,51 @@ const { bash } = await createBashTool({
 
 Binary bridges resolve virtual paths to real host paths and use the host's `PATH` for binary resolution, while restricting access via optional `allowedArgs` regex.
 
+## Quick Start: Agent OS
+
+WASM-based execution with no Docker dependency and ~6ms cold start:
+
+```typescript
+import common from '@rivet-dev/agent-os-common';
+import { createAgentOsSandbox } from '@deepagents/context';
+
+const sandbox = await createAgentOsSandbox({
+  software: [common],
+});
+
+try {
+  const result = await sandbox.executeCommand('echo "Hello from WASM!"');
+  console.log(result.stdout);
+
+  await sandbox.writeFiles([
+    { path: '/tmp/hello.txt', content: 'Written inside WASM' },
+  ]);
+
+  const content = await sandbox.readFile('/tmp/hello.txt');
+  console.log(content);
+} finally {
+  await sandbox.dispose();
+}
+```
+
+Or use `useAgentOsSandbox` for automatic cleanup:
+
+```typescript
+import common from '@rivet-dev/agent-os-common';
+import { useAgentOsSandbox } from '@deepagents/context';
+
+const output = await useAgentOsSandbox(
+  { software: [common] },
+  async (sandbox) => {
+    const result = await sandbox.executeCommand('ls /');
+    return result.stdout;
+  },
+);
+```
+
 ## Next Steps
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
+- [Agent OS Sandbox](/docs/context/agent-os-sandbox) - WASM-based execution without Docker
 - [Container Tool](/docs/context/container-tool) - High-level agent integration
 - [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern and internals
