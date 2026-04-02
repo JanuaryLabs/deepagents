@@ -44,6 +44,18 @@ try {
 
 The `software` array accepts WASM command packages. Pass `common` for the full set of standard utilities.
 
+## Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `software` | `unknown[]` | WASM command packages (e.g., `@rivet-dev/agent-os-common`) |
+| `mounts` | `Array<{ path, driver, readOnly? }>` | Filesystem mounts inside the VM (see [Filesystem Mounts](#filesystem-mounts)) |
+| `toolKits` | `unknown[]` | Host tool kits to expose inside the VM |
+| `permissions` | `unknown` | Kernel permissions (defaults to allowAll) |
+| `moduleAccessCwd` | `string` | Host-side CWD for module resolution. Projects this directory's `node_modules` into the VM at `/root/node_modules/` |
+
+`toolKits`, `permissions`, and `moduleAccessCwd` are pass-through options for the underlying Agent OS kernel. Refer to the [Agent OS documentation](https://github.com/nicholasgriffintn/agent-os) for details.
+
 ## File I/O
 
 Read and write files directly through the WASM filesystem — no base64 encoding or shell workarounds:

@@ -361,7 +361,7 @@ description: ${name.charAt(0).toUpperCase() + name.slice(1)} skill
       );
       assert.ok(
         (data[0].data as string).includes(
-          'Correct: if the user says "use the onboarding skill"',
+          'Correct: if the user says "use/open the onboarding skill"',
         ),
         'instructions should include an explicit positive example',
       );

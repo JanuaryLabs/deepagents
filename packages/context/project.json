@@ -9,7 +9,10 @@
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
       "options": {
-        "additionalEntryPoints": ["packages/context/src/browser.ts"]
+        "additionalEntryPoints": [
+          "packages/context/src/browser.ts",
+          "packages/context/src/lib/tracing/index.ts"
+        ]
       }
     },
     "test": {
