@@ -80,6 +80,10 @@ All three Docker sandbox strategies are supported:
 const { bash, sandbox } = await createContainerTool({
   image: 'alpine:latest',     // default
   packages: ['python3', 'nodejs'],
+  env: {
+    NODE_ENV: 'production',
+    API_KEY: process.env.API_KEY || '',
+  },
   binaries: [
     {
       name: 'presenterm',

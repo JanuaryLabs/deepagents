@@ -332,6 +332,89 @@ describe('Docker Sandbox', async () => {
       });
     });
 
+    describe('environment variables', () => {
+      it('sets env vars in the container', async () => {
+        const sandbox = await createDockerSandbox({
+          env: { MY_VAR: 'hello', ANOTHER: 'world' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand(
+            'echo "$MY_VAR $ANOTHER"',
+          );
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'hello world');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('env vars persist across exec calls', async () => {
+        const sandbox = await createDockerSandbox({
+          env: { PERSIST_TEST: 'sticky' },
+        });
+
+        try {
+          const r1 = await sandbox.executeCommand('echo "$PERSIST_TEST"');
+          const r2 = await sandbox.executeCommand('echo "$PERSIST_TEST"');
+          assert.strictEqual(r1.stdout.trim(), 'sticky');
+          assert.strictEqual(r2.stdout.trim(), 'sticky');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('handles env values with spaces', async () => {
+        const sandbox = await createDockerSandbox({
+          env: { SPACED: 'hello world foo' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('echo "$SPACED"');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'hello world foo');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('handles env values containing equals signs', async () => {
+        const sandbox = await createDockerSandbox({
+          env: { DB_URL: 'host=localhost;port=5432' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('echo "$DB_URL"');
+          assert.strictEqual(result.stdout.trim(), 'host=localhost;port=5432');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('works with empty env object', async () => {
+        const sandbox = await createDockerSandbox({
+          env: {},
+        });
+
+        try {
+          const result = await sandbox.executeCommand('echo works');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'works');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('rejects env keys containing equals sign', async () => {
+        await assert.rejects(
+          createDockerSandbox({
+            env: { 'FOO=BAR': 'val' },
+          }),
+          /Invalid environment variable key/,
+        );
+      });
+    });
+
     describe('resource limits', () => {
       it('applies custom memory and CPU limits', async () => {
         const sandbox = await createDockerSandbox({
@@ -425,6 +508,19 @@ describe('Docker Sandbox', async () => {
         const result = await sandbox.executeCommand('curl --version');
         assert.strictEqual(result.exitCode, 0);
         assert.match(result.stdout, /curl/i);
+      } finally {
+        await sandbox.dispose();
+      }
+    });
+
+    it('passes env vars through to container', async () => {
+      const { sandbox } = await createContainerTool({
+        env: { TOOL_VAR: 'via-tool' },
+      });
+
+      try {
+        const result = await sandbox.executeCommand('echo "$TOOL_VAR"');
+        assert.strictEqual(result.stdout.trim(), 'via-tool');
       } finally {
         await sandbox.dispose();
       }

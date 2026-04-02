@@ -1,29 +1,33 @@
 import {
-  createBashTool,
-  type CreateBashToolOptions,
   type BashToolkit,
+  type CreateBashToolOptions,
+  createBashTool,
 } from 'bash-tool';
 
 import {
-  createDockerSandbox,
-  isComposeOptions,
-  isDockerfileOptions,
   type BinaryInstall,
   type DockerMount,
   type DockerResources,
   type DockerSandbox,
   type DockerSandboxOptions,
+  createDockerSandbox,
+  isComposeOptions,
+  isDockerfileOptions,
 } from './docker-sandbox.ts';
 
 /**
  * Base options shared by RuntimeContainerToolOptions and DockerfileContainerToolOptions.
  */
-interface BaseContainerToolOptions
-  extends Omit<CreateBashToolOptions, 'sandbox' | 'uploadDirectory'> {
+interface BaseContainerToolOptions extends Omit<
+  CreateBashToolOptions,
+  'sandbox' | 'uploadDirectory'
+> {
   /** Directories to mount from host into the container */
   mounts?: DockerMount[];
   /** Resource limits for the container */
   resources?: DockerResources;
+  /** Environment variables to set in the container */
+  env?: Record<string, string>;
 }
 
 /**
@@ -54,8 +58,10 @@ export interface DockerfileContainerToolOptions extends BaseContainerToolOptions
  * Options for container tool using ComposeStrategy.
  * Manages multi-container environments via Docker Compose.
  */
-export interface ComposeContainerToolOptions
-  extends Omit<CreateBashToolOptions, 'sandbox' | 'uploadDirectory'> {
+export interface ComposeContainerToolOptions extends Omit<
+  CreateBashToolOptions,
+  'sandbox' | 'uploadDirectory'
+> {
   /** Path to docker-compose.yml file */
   compose: string;
   /** Service name to execute commands in (required) */
@@ -168,12 +174,13 @@ export async function createContainerTool(
     sandboxOptions = { compose, service, resources };
     bashOptions = rest;
   } else if (isDockerfileOptions(options)) {
-    const { dockerfile, context, mounts, resources, ...rest } = options;
-    sandboxOptions = { dockerfile, context, mounts, resources };
+    const { dockerfile, context, mounts, resources, env, ...rest } = options;
+    sandboxOptions = { dockerfile, context, mounts, resources, env };
     bashOptions = rest;
   } else {
-    const { image, packages, binaries, mounts, resources, ...rest } = options;
-    sandboxOptions = { image, packages, binaries, mounts, resources };
+    const { image, packages, binaries, mounts, resources, env, ...rest } =
+      options;
+    sandboxOptions = { image, packages, binaries, mounts, resources, env };
     bashOptions = rest;
   }
 

@@ -221,6 +221,8 @@ export interface RuntimeSandboxOptions {
   mounts?: DockerMount[];
   /** Resource limits */
   resources?: DockerResources;
+  /** Environment variables to set in the container */
+  env?: Record<string, string>;
 }
 
 /**
@@ -235,6 +237,8 @@ export interface DockerfileSandboxOptions {
   mounts?: DockerMount[];
   /** Resource limits */
   resources?: DockerResources;
+  /** Environment variables to set in the container */
+  env?: Record<string, string>;
 }
 
 /**
@@ -277,10 +281,10 @@ export interface DockerSandbox extends Sandbox {
  * Detects if the image is Debian-based (uses apt-get) or Alpine-based (uses apk).
  */
 function isDebianBased(image: string): boolean {
+  const lower = image.toLowerCase();
+  if (lower.includes('alpine')) return false;
   const debianPatterns = ['debian', 'ubuntu', 'node', 'python'];
-  return debianPatterns.some((pattern) =>
-    image.toLowerCase().includes(pattern),
-  );
+  return debianPatterns.some((pattern) => lower.includes(pattern));
 }
 
 /**
@@ -337,10 +341,23 @@ export abstract class DockerSandboxStrategy {
   protected context!: StrategyContext;
   protected mounts: DockerMount[];
   protected resources: DockerResources;
+  protected env: Record<string, string>;
 
-  constructor(mounts: DockerMount[] = [], resources: DockerResources = {}) {
+  constructor(
+    mounts: DockerMount[] = [],
+    resources: DockerResources = {},
+    env: Record<string, string> = {},
+  ) {
+    for (const key of Object.keys(env)) {
+      if (key.length === 0 || key.includes('=')) {
+        throw new DockerSandboxError(
+          `Invalid environment variable key: "${key}"`,
+        );
+      }
+    }
     this.mounts = mounts;
     this.resources = resources;
+    this.env = env;
   }
 
   /**
@@ -403,7 +420,10 @@ export abstract class DockerSandboxStrategy {
       '/workspace', // Set working directory
     ];
 
-    // Add mounts
+    for (const [key, value] of Object.entries(this.env)) {
+      args.push('-e', `${key}=${value}`);
+    }
+
     for (const mount of this.mounts) {
       const mode = mount.readOnly !== false ? 'ro' : 'rw';
       args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mode}`);
@@ -585,8 +605,9 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
     binaries: BinaryInstall[] = [],
     mounts?: DockerMount[],
     resources?: DockerResources,
+    env?: Record<string, string>,
   ) {
-    super(mounts, resources);
+    super(mounts, resources, env);
     this.image = image;
     this.packages = packages;
     this.binaries = binaries;
@@ -823,8 +844,9 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
     dockerContext = '.',
     mounts?: DockerMount[],
     resources?: DockerResources,
+    env?: Record<string, string>,
   ) {
-    super(mounts, resources);
+    super(mounts, resources, env);
     this.dockerfile = dockerfile;
     this.dockerContext = dockerContext;
     this.imageTag = this.computeImageTag();
@@ -1114,6 +1136,7 @@ export async function createDockerSandbox(
       options.context,
       options.mounts,
       options.resources,
+      options.env,
     );
   } else {
     strategy = new RuntimeStrategy(
@@ -1122,6 +1145,7 @@ export async function createDockerSandbox(
       options.binaries,
       options.mounts,
       options.resources,
+      options.env,
     );
   }
 

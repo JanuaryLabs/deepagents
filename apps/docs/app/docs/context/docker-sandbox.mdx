@@ -141,6 +141,27 @@ const sandbox = await createDockerSandbox({
 });
 ```
 
+## Environment Variables
+
+Set environment variables in the container at creation time. Available to all commands executed via `executeCommand`.
+
+```typescript
+const sandbox = await createDockerSandbox({
+  env: {
+    NODE_ENV: 'production',
+    API_KEY: 'secret-123',
+    DB_URL: 'postgresql://user:pass@host/db',
+  },
+});
+
+const result = await sandbox.executeCommand('echo $NODE_ENV');
+// stdout: "production"
+```
+
+Supported on Runtime and Dockerfile strategies. For Compose, define environment variables in your `docker-compose.yml` under the `environment` key.
+
+Keys are validated — empty keys and keys containing `=` throw a `DockerSandboxError`.
+
 ## Installing Binaries from URLs
 
 For tools not available in package managers, install pre-built binaries directly from URLs. Architecture is auto-detected via `uname -m`.
