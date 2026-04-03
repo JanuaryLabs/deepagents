@@ -12,7 +12,6 @@
   - [x] `constraints()` reads informational constraints + NOT NULL/DEFAULT from metadata (best effort)
   - [x] `rowCount()` reads row counts from metadata only (no `COUNT(*)`)
   - [x] `indexes()` maps clustering/partitioning metadata into index hints and marks indexed columns
-  - [x] `report()` re-exports the generic `ReportGrounding`
   - [x] Do NOT implement/export `columnStats()` or `columnValues()` for BigQuery V1
 - [x] Add integration tests (Node test runner) that validate end-to-end `adapter.introspect()` behavior using a stubbed `execute()` returner:
   - [x] tables + nested field paths are present as columns

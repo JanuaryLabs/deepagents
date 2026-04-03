@@ -1,21 +1,17 @@
 import { type Adapter } from '../adapter.ts';
 import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grounding.ts';
+import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
-import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
-import {
-  ReportGrounding,
-  type ReportGroundingConfig,
-} from '../groundings/report.grounding.ts';
 import { type RowCountGroundingConfig } from '../groundings/row-count.grounding.ts';
 import { type TableGroundingConfig } from '../groundings/table.grounding.ts';
 import type { ViewGroundingConfig } from '../groundings/view.grounding.ts';
 import { PostgresColumnStatsGrounding } from './column-stats.postgres.grounding.ts';
+import { PostgresColumnValuesGrounding } from './column-values.postgres.grounding.ts';
 import { PostgresConstraintGrounding } from './constraint.postgres.grounding.ts';
 import { PostgresIndexesGrounding } from './indexes.postgres.grounding.ts';
 import { PostgresInfoGrounding } from './info.postgres.grounding.ts';
-import { PostgresColumnValuesGrounding } from './column-values.postgres.grounding.ts';
 import { Postgres } from './postgres.ts';
 import { PostgresRowCountGrounding } from './row-count.postgres.grounding.ts';
 import { PostgresTableGrounding } from './table.postgres.grounding.ts';
@@ -67,10 +63,6 @@ export function constraints(config: ConstraintGroundingConfig = {}) {
   };
 }
 
-export function report(config: ReportGroundingConfig = {}) {
-  return (adapter: Adapter) => new ReportGrounding(adapter, config);
-}
-
 export default {
   tables,
   info,
@@ -80,6 +72,5 @@ export default {
   indexes,
   rowCount,
   constraints,
-  report,
   Postgres,
 };

@@ -246,11 +246,6 @@ export abstract class Adapter {
       );
     }
 
-    // Business context
-    if (ctx.report) {
-      fragments.push({ name: 'businessContext', data: ctx.report });
-    }
-
     return fragments;
   }
 

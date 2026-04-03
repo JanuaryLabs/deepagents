@@ -2,10 +2,6 @@ import { type Adapter } from '../adapter.ts';
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
-import {
-  ReportGrounding,
-  type ReportGroundingConfig,
-} from '../groundings/report.grounding.ts';
 import { type RowCountGroundingConfig } from '../groundings/row-count.grounding.ts';
 import { type TableGroundingConfig } from '../groundings/table.grounding.ts';
 import type { ViewGroundingConfig } from '../groundings/view.grounding.ts';
@@ -48,10 +44,6 @@ export function constraints(config: ConstraintGroundingConfig = {}) {
     new BigQueryConstraintGrounding(adapter as unknown as BigQuery, config);
 }
 
-export function report(config: ReportGroundingConfig = {}) {
-  return (adapter: Adapter) => new ReportGrounding(adapter, config);
-}
-
 export default {
   tables,
   info,
@@ -59,6 +51,5 @@ export default {
   indexes,
   rowCount,
   constraints,
-  report,
   BigQuery,
 };

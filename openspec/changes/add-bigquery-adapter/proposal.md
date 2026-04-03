@@ -15,7 +15,6 @@
   - `constraints()` (PK/FK/UNIQUE/CHECK + NOT NULL/DEFAULT when available via metadata)
   - `rowCount()` (**metadata-only**, no `COUNT(*)`)
   - `indexes()` (maps BigQuery clustering/partitioning metadata into index-like hints)
-  - `report()` (optional, uses the generic LLM-driven report grounding; may be expensive depending on table sizes)
 - **Explicitly not included in V1**: `columnStats()` and `columnValues()` groundings (data scans can be expensive in BigQuery).
 
 ## Impact

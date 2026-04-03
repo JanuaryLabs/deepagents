@@ -18,7 +18,7 @@ Without grounding, the AI would need to guess table names, column types, and rel
 
 Each database adapter (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB) exports grounding factory functions. Import them and pass to your adapter:
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="PostgreSQL">
 ```typescript
 import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
@@ -119,6 +119,42 @@ const text2sql = new Text2Sql({
       mysqlGrounding.rowCount(),
       mysqlGrounding.columnStats(),
       mysqlGrounding.columnValues(),
+    ],
+  }),
+  history: new InMemoryHistory(),
+});
+```
+</Tab>
+<Tab value="BigQuery">
+```typescript
+import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
+
+import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { BigQuery } from '@deepagents/text2sql/bigquery';
+import * as bigquery from '@deepagents/text2sql/bigquery';
+
+const client = new BigQueryClient({ projectId: process.env.BQ_PROJECT_ID });
+
+const text2sql = new Text2Sql({
+  version: 'v1',
+  adapter: new BigQuery({
+    projectId: process.env.BQ_PROJECT_ID,
+    datasets: ['analytics'],
+    execute: async (sql) => {
+      const [job] = await client.createQueryJob({ query: sql });
+      const [rows] = await job.getQueryResults();
+      return rows;
+    },
+    validate: async (sql) => {
+      await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
+    },
+    grounding: [
+      bigquery.tables(),
+      bigquery.views(),
+      bigquery.info(),
+      bigquery.indexes(),
+      bigquery.constraints(),
+      bigquery.rowCount(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -240,33 +276,6 @@ lowCardinality()
 // Annotates columns with kind: 'LowCardinality' and values: ['active', 'inactive', ...]
 ```
 
-### Advanced Groundings
-
-#### `report(config)`
-
-Uses an LLM agent to analyze your database and generate a business context report. The agent queries each table's row count and sample data to understand what the database represents.
-
-```typescript
-import { groq } from '@ai-sdk/groq';
-
-report({
-  model: groq('llama-3.3-70b-versatile'),
-  // Optional: cache the report
-  cache: {
-    get: async () => localStorage.getItem('db-report'),
-    set: async (value) => localStorage.setItem('db-report', value),
-  },
-  // Optional: regenerate even if cached
-  forceRefresh: false,
-})
-```
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `model` | `AgentModel` | LLM model for generating the report |
-| `cache` | `{ get(): Promise<string \| null>, set(value: string): Promise<void> }` | Optional cache interface |
-| `forceRefresh` | `boolean` | Force regeneration even if cached |
-
 ## Execution Order
 
 Groundings execute in the order you specify. Some groundings depend on others:
@@ -276,7 +285,6 @@ Groundings execute in the order you specify. Some groundings depend on others:
 3. **`info()`** can run independently
 4. **`indexes()`**, **`constraints()`**, **`rowCount()`** - run after `tables()`, annotate discovered tables
 5. **`columnStats()`**, **`lowCardinality()`** - run after `tables()`, annotate columns
-6. **`report()`** - typically runs last, uses the full context
 
 ## Filtering Tables
 
@@ -322,7 +330,7 @@ tables({
 
 For simple use cases, you can use a minimal grounding setup:
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="PostgreSQL">
 ```typescript
 import * as postgres from '@deepagents/text2sql/postgres';
@@ -363,6 +371,16 @@ grounding: [
 ]
 ```
 </Tab>
+<Tab value="BigQuery">
+```typescript
+import * as bigquery from '@deepagents/text2sql/bigquery';
+
+grounding: [
+  bigquery.tables(),
+  bigquery.info(),
+]
+```
+</Tab>
 </Tabs>
 
 ## Empty Grounding
@@ -381,4 +399,5 @@ This is useful when providing custom introspection via the adapter's `introspect
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific configuration
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific configuration
 - [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific configuration
+- [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific configuration
 - [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

@@ -1,21 +1,17 @@
 import { type Adapter } from '../adapter.ts';
 import { type ColumnStatsGroundingConfig } from '../groundings/column-stats.grounding.ts';
+import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
 import { type ConstraintGroundingConfig } from '../groundings/constraint.grounding.ts';
 import { type IndexesGroundingConfig } from '../groundings/indexes.grounding.ts';
 import { type InfoGroundingConfig } from '../groundings/info.grounding.ts';
-import { type ColumnValuesGroundingConfig } from '../groundings/column-values.grounding.ts';
-import {
-  ReportGrounding,
-  type ReportGroundingConfig,
-} from '../groundings/report.grounding.ts';
 import { type RowCountGroundingConfig } from '../groundings/row-count.grounding.ts';
 import { type TableGroundingConfig } from '../groundings/table.grounding.ts';
 import type { ViewGroundingConfig } from '../groundings/view.grounding.ts';
 import { SqliteColumnStatsGrounding } from './column-stats.sqlite.grounding.ts';
+import { SqliteColumnValuesGrounding } from './column-values.sqlite.grounding.ts';
 import { SqliteConstraintGrounding } from './constraint.sqlite.grounding.ts';
 import { SqliteIndexesGrounding } from './indexes.sqlite.grounding.ts';
 import { SqliteInfoGrounding } from './info.sqlite.grounding.ts';
-import { SqliteColumnValuesGrounding } from './column-values.sqlite.grounding.ts';
 import { SqliteRowCountGrounding } from './row-count.sqlite.grounding.ts';
 import { Sqlite } from './sqlite.ts';
 import { SqliteTableGrounding } from './table.sqlite.grounding.ts';
@@ -67,10 +63,6 @@ export function constraints(config: ConstraintGroundingConfig = {}) {
   };
 }
 
-export function report(config: ReportGroundingConfig = {}) {
-  return (adapter: Adapter) => new ReportGrounding(adapter, config);
-}
-
 export default {
   tables,
   info,
@@ -80,6 +72,5 @@ export default {
   indexes,
   rowCount,
   constraints,
-  report,
   Sqlite,
 };

@@ -93,7 +93,6 @@ Import these from `@deepagents/text2sql/bigquery`:
 | `constraints()` | Best-effort PK/FK + NOT NULL/DEFAULT from metadata |
 | `rowCount()` | Metadata-only row counts (no `COUNT(*)`) + size hints. Falls back to `__TABLES__` when `TABLE_STORAGE` is inaccessible (e.g. cross-project public datasets) |
 | `indexes()` | Maps partitioning/clustering metadata into index-like hints (marks indexed columns) |
-| `report()` | Generic LLM-driven business context report grounding (optional; can be expensive) |
 
 ### Not Included In V1
 
