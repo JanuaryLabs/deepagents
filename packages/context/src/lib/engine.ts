@@ -521,17 +521,22 @@ export class ContextEngine {
         if (lastUserFragment.codec) {
           const { turn, lastMessageAt, lastMessage } =
             await this.#getChainContext();
+          const original = lastUserFragment.codec.encode() as UIMessage & {
+            role: 'user';
+          };
+          const plainText = extractPlainText(original);
           const firedReminders = conditionalReminders
             .map(getConditionalReminder)
             .filter((config) =>
-              config.when({ turn, lastMessageAt, lastMessage }),
+              config.when({
+                turn,
+                content: plainText,
+                lastMessageAt,
+                lastMessage,
+              }),
             );
 
           if (firedReminders.length > 0) {
-            const original = lastUserFragment.codec.encode() as UIMessage & {
-              role: 'user';
-            };
-            const plainText = extractPlainText(original);
             const reminders = firedReminders.flatMap((rem) => {
               const resolved = resolveReminder(rem, {
                 content: plainText,

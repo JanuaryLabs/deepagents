@@ -1,10 +1,6 @@
 import { Corpus } from 'tiny-tfidf';
 
-import {
-  type ReminderContext,
-  type UserReminder,
-  reminder,
-} from '../fragments/message/user.ts';
+import { type WhenPredicate } from '../fragments/message/user.ts';
 import type { SkillMetadata } from './types.ts';
 
 export interface SkillMatch {
@@ -48,34 +44,28 @@ export class BM25SkillClassifier implements ISkillClassifier {
   }
 }
 
-function isSkillClassifier(value: unknown): value is ISkillClassifier {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'match' in value &&
-    typeof (value as ISkillClassifier).match === 'function'
-  );
+export interface ContentMatchesOptions {
+  threshold?: number;
 }
 
-function formatSkillReminder(matches: SkillMatch[]): string {
-  const lines = matches.map(
-    (m) =>
-      `- ${m.skill.name} (${m.score.toFixed(2)}): ${m.skill.description} [${m.skill.skillMdPath}]`,
+export function contentMatches(
+  topics: string[],
+  options?: ContentMatchesOptions,
+): WhenPredicate {
+  const corpus = new Corpus(
+    topics.map((_, i) => `t${i}`),
+    topics,
   );
-  return `Relevant skills:\n${lines.join('\n')}`;
+  const threshold = options?.threshold ?? 0;
+  return (ctx) =>
+    corpus
+      .getResultsForQuery(ctx.content)
+      .some(([, score]: [string, number]) => score > threshold);
 }
 
-export function skillsReminder(
-  skillsOrClassifier: SkillMetadata[] | ISkillClassifier,
+export function classifies(
+  classifier: ISkillClassifier,
   options?: SkillClassifierOptions,
-): UserReminder {
-  const classifier = isSkillClassifier(skillsOrClassifier)
-    ? skillsOrClassifier
-    : new BM25SkillClassifier(skillsOrClassifier);
-
-  return reminder((ctx: ReminderContext) => {
-    const matches = classifier.match(ctx.content, options);
-    if (matches.length === 0) return '';
-    return formatSkillReminder(matches);
-  });
+): WhenPredicate {
+  return (ctx) => classifier.match(ctx.content, options).length > 0;
 }

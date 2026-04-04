@@ -20,6 +20,7 @@ export type ReminderText =
 
 export interface WhenContext {
   turn: number;
+  content: string;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
 }
@@ -52,6 +53,21 @@ export function or(...predicates: WhenPredicate[]): WhenPredicate {
 
 export function not(predicate: WhenPredicate): WhenPredicate {
   return (ctx) => !predicate(ctx);
+}
+
+export function contentIncludes(keywords: string[]): WhenPredicate {
+  const lower = keywords.map((k) => k.toLowerCase());
+  return (ctx) => {
+    const text = ctx.content.toLowerCase();
+    return lower.some((kw) => text.includes(kw));
+  };
+}
+
+export function contentPattern(pattern: RegExp): WhenPredicate {
+  return (ctx) => {
+    pattern.lastIndex = 0;
+    return pattern.test(ctx.content);
+  };
 }
 
 function toDateParts(
