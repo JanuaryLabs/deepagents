@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { BM25SkillClassifier } from '@deepagents/context';
+import { BM25Classifier } from '@deepagents/context';
 import type { SkillMetadata } from '@deepagents/context';
 
 function makeSkill(name: string, description: string): SkillMetadata {
@@ -35,14 +35,14 @@ const testSkills: SkillMetadata[] = [
   makeSkill('code-review', 'Review code for bugs and quality issues'),
 ];
 
-describe('BM25SkillClassifier', () => {
-  it('returns relevant skills for a matching query', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+describe('BM25Classifier', () => {
+  it('returns relevant items for a matching query', () => {
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('deploy my docker container');
 
     assert.ok(matches.length > 0, 'Should return at least one match');
 
-    const matchNames = matches.map((m) => m.skill.name);
+    const matchNames = matches.map((m) => m.item.name);
     assert.ok(
       matchNames.includes('docker-expert') ||
         matchNames.includes('deploy-helper'),
@@ -51,7 +51,7 @@ describe('BM25SkillClassifier', () => {
   });
 
   it('returns scores in descending order', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('deploy docker container to production');
 
     for (let i = 1; i < matches.length; i++) {
@@ -63,7 +63,7 @@ describe('BM25SkillClassifier', () => {
   });
 
   it('respects topN limit', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('help me with code', { topN: 3 });
 
     assert.ok(
@@ -73,33 +73,33 @@ describe('BM25SkillClassifier', () => {
   });
 
   it('filters by threshold', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('deploy', { threshold: 0.5 });
 
     for (const match of matches) {
       assert.ok(
         match.score > 0.5,
-        `Expected score > 0.5, got ${match.score} for ${match.skill.name}`,
+        `Expected score > 0.5, got ${match.score} for ${match.item.name}`,
       );
     }
   });
 
   it('returns empty array for unrelated query', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('xyzzyplugh');
 
     assert.strictEqual(matches.length, 0);
   });
 
   it('returns empty array for empty query', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('');
 
     assert.strictEqual(matches.length, 0);
   });
 
   it('defaults topN to 5', () => {
-    const classifier = new BM25SkillClassifier(testSkills);
+    const classifier = new BM25Classifier(testSkills);
     const matches = classifier.match('help');
 
     assert.ok(

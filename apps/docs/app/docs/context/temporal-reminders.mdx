@@ -142,66 +142,6 @@ engine.set(
 | --------- | -------- | ------- | ---------------------------------- |
 | `tz`      | `string` | `UTC`   | Timezone passed to all 5 atoms     |
 
-## Temporal Predicates
+## Predicates and Custom Reminders
 
-Each atom uses a temporal predicate from the `when` scheduling system. These predicates compare `new Date()` against `lastMessageAt` using timezone-aware formatting.
-
-| Predicate          | Fires when...                              |
-| ------------------ | ------------------------------------------ |
-| `dayChanged(tz?)`  | The calendar date has changed              |
-| `hourChanged(tz?)` | The hour has changed                       |
-| `monthChanged(tz?)`| The month has changed                      |
-| `yearChanged(tz?)` | The year has changed                       |
-| `seasonChanged(tz?)` | The meteorological season has changed    |
-| `weekChanged(tz?)` | The ISO week has changed                   |
-
-All return `true` on the first turn (when `lastMessageAt` is `undefined`).
-
-### Combinators
-
-Compose predicates with boolean logic:
-
-```typescript
-import { and, or, not, dayChanged, hourChanged, afterTurn } from '@deepagents/context';
-
-and(dayChanged(), afterTurn(3)); // day changed AND after turn 3
-or(dayChanged(), hourChanged()); // day OR hour changed
-not(dayChanged());               // day has NOT changed
-```
-
-### WhenContext
-
-The context object passed to `when` predicates:
-
-```typescript
-interface WhenContext {
-  turn: number;
-  lastMessageAt?: number;
-  lastMessage?: UIMessage;
-}
-```
-
-| Field            | Description                                         |
-| ---------------- | --------------------------------------------------- |
-| `turn`           | Current user turn count (persisted + pending)        |
-| `lastMessageAt`  | Timestamp of the last persisted user message         |
-| `lastMessage`    | The last persisted user `UIMessage` (with metadata)  |
-
-## Custom Temporal Reminders
-
-Use `reminder()` with a `when` predicate to build your own:
-
-```typescript
-import { reminder, dayChanged } from '@deepagents/context';
-
-const uptimeReminder = reminder(
-  (ctx) => {
-    if (!ctx.lastMessageAt) return 'Session started.';
-    const hours = Math.floor((Date.now() - ctx.lastMessageAt) / 3600000);
-    return `${hours}h since last message.`;
-  },
-  { when: dayChanged(), asPart: true },
-);
-
-engine.set(uptimeReminder, user('hello'));
-```
+Each temporal atom uses a predicate from the `when` scheduling system (e.g., `dayChanged`, `hourChanged`). These predicates — along with turn-based, content-based, and boolean combinators — are documented in [Predicates](/docs/context/predicates).

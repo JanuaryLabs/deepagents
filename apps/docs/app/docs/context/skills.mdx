@@ -246,68 +246,7 @@ const matches = classifier.match('deploy my docker container', { topN: 3 });
 
 ### skillsReminder()
 
-`skillsReminder()` bridges the classifier with the user message reminder system. It returns a `UserReminder` with a factory function that runs the classifier against each user message at resolve time. When matches are found, a formatted list of relevant skills (with scores and file paths) is injected as a `<system-reminder>`. When nothing matches, no reminder is injected.
-
-```typescript
-import { ContextEngine, SqliteContextStore, role, skills, user, skillsReminder, discoverSkillsInDirectory } from '@deepagents/context';
-
-const discoveredSkills = discoverSkillsInDirectory('./skills');
-
-const store = new SqliteContextStore('./chat.db');
-const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
-  .set(
-    role('You are a helpful assistant.'),
-    skills({ paths: ['./skills'] }),
-    user('deploy my app to production', skillsReminder(discoveredSkills, { topN: 3 })),
-  );
-```
-
-You can also pass a pre-built classifier instance instead of a raw skill array:
-
-```typescript
-import { BM25SkillClassifier, skillsReminder } from '@deepagents/context';
-
-const classifier = new BM25SkillClassifier(skills);
-const reminderFragment = skillsReminder(classifier, { topN: 3, threshold: 0.1 });
-```
-
-### Custom Classifiers
-
-Implement `ISkillClassifier` to replace BM25 with your own ranking logic (embeddings, LLM-based, etc.):
-
-```typescript
-import { type ISkillClassifier, type SkillMatch, type SkillClassifierOptions, skillsReminder } from '@deepagents/context';
-
-const customClassifier: ISkillClassifier = {
-  match(query: string, options?: SkillClassifierOptions): SkillMatch[] {
-    const topN = options?.topN ?? 5;
-    return myEmbeddingSearch(query, topN);
-  },
-};
-
-const reminderFragment = skillsReminder(customClassifier);
-```
-
-## Factory Reminders
-
-`reminder()` now accepts a factory function in addition to a static string. When a factory is provided, `user()` resolves it at build time by passing the message's plain text content. If the factory returns an empty string, the reminder is skipped entirely.
-
-```typescript
-import { user, reminder } from '@deepagents/context';
-
-user(
-  'deploy the app',
-  reminder('Always ask for confirmation'),
-  reminder((content) => {
-    if (content.includes('deploy')) {
-      return 'Remind user about staging checks';
-    }
-    return '';
-  }),
-);
-```
-
-This is the mechanism that `skillsReminder()` uses internally -- it returns a `UserReminder` whose `text` is a factory that runs the classifier.
+`skillsReminder()` bridges the classifier with the [reminder system](/docs/context/reminders). It matches user messages against skills and injects relevant matches as a `<system-reminder>`. See [Skill Reminders](/docs/context/skill-reminders) for full usage, custom classifiers, and related predicates.
 
 ## Types
 
@@ -343,8 +282,6 @@ interface SkillClassifierOptions {
   topN?: number;
   threshold?: number;
 }
-
-type ReminderText = string | ((content: string) => string);
 ```
 
 ## Next Steps

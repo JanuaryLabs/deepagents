@@ -1,0 +1,119 @@
+---
+title: Reminders
+description: Inject situational context into user messages so the LLM stays aware of things it cannot see in the conversation history
+---
+
+Reminders inject hidden text into user messages to give the LLM situational awareness — current date, active skills, recurring instructions. The text is invisible to the user but visible to the model.
+
+## How Reminders Work
+
+Every reminder attaches text to a user message. Two decisions control when and how:
+
+1. **When** — immediate (at message creation) or conditional (at `engine.save()`, gated by a predicate)
+2. **How** — inline (appended as a `<system-reminder>` tag inside the last text part) or as a separate text part
+
+## Immediate Reminders
+
+Pass reminders directly to `user()`. They resolve at message creation time and receive the message content.
+
+```ts
+import { user, reminder } from '@deepagents/context';
+
+// Static text
+user('Hello', reminder('Keep responses under 100 words'));
+
+// Factory — receives message content
+user(
+  'Explain polymorphism',
+  reminder((ctx) => `User said: "${ctx.content}". Tailor to their level.`),
+);
+```
+
+A factory that returns an empty string skips injection entirely — useful for conditional logic without the full predicate system.
+
+```ts
+user(
+  'deploy to prod',
+  reminder((ctx) =>
+    ctx.content.includes('prod') ? 'Ask for confirmation before destructive actions' : ''
+  ),
+);
+```
+
+### Inline vs Part Mode
+
+By default, reminders are **inline** — appended as `<system-reminder>` tags to the last text part. Set `asPart: true` to add the reminder as a separate text part instead.
+
+```ts
+// Inline (default) — tag appended to existing text
+reminder('hint');
+
+// Separate part — added as its own text entry
+reminder('hint', { asPart: true });
+```
+
+Use part mode for structured data (dates, skill lists) to keep reminder text separate from the user's message.
+
+## Conditional Reminders
+
+Add a `when` predicate to create reminders that fire based on turn count, content, or time. Pass them to `engine.set()`; the engine evaluates them at `save()` time.
+
+```ts
+import { reminder, everyNTurns, user } from '@deepagents/context';
+
+engine.set(
+  reminder('Remember to cite sources', { when: everyNTurns(3) }),
+  user('Tell me about quantum computing'),
+);
+```
+
+The engine applies conditional reminders to the **last pending user message** during `save()`. It builds a `WhenContext` with the current turn count, message content, and last persisted message, then evaluates each predicate.
+
+```ts
+import { reminder, contentIncludes, afterTurn, and, user } from '@deepagents/context';
+
+// Only fires when user mentions code AND after the first 2 turns
+engine.set(
+  reminder('Include code examples in your response', {
+    when: and(contentIncludes(['code', 'example', 'snippet']), afterTurn(2)),
+  }),
+  user('Show me how to use async/await'),
+);
+```
+
+See [Predicates](/docs/context/predicates) for the full predicate catalog and composition rules.
+
+## Built-in Reminders
+
+The library ships with pre-built reminders for common needs:
+
+<Cards>
+  <Card title="Temporal Reminders" href="/docs/context/temporal-reminders" description="Date, time, season, and locale atoms that fire only when their value changes" />
+  <Card title="Skill Reminders" href="/docs/context/skill-reminders" description="BM25-based skill matching that surfaces relevant skills per user query" />
+</Cards>
+
+## ReminderContext
+
+Both immediate and conditional reminder factories receive a context object:
+
+```ts
+interface ReminderContext {
+  content: string;        // Plain text of the user message
+  turn?: number;          // Current user turn count
+  lastMessageAt?: number; // Timestamp of last persisted user message
+  lastMessage?: UIMessage; // Last persisted user message (with metadata)
+}
+```
+
+Conditional reminders populate all fields at `save()` time. Immediate reminders receive only `content`.
+
+## Stripping Reminders
+
+`stripReminders()` removes all reminder text and metadata from a message. Use it to display clean message history or export conversations.
+
+```ts
+import { stripReminders } from '@deepagents/context';
+
+const clean = stripReminders(message);
+// No <system-reminder> tags, no reminder metadata
+```

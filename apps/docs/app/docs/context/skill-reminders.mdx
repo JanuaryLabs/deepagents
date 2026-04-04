@@ -1,0 +1,145 @@
+---
+title: Skill Reminders
+description: Automatically surface relevant skills per user query using BM25 text matching
+---
+
+Skill reminders match user message content against a catalog of skills and inject the top matches into the message. The LLM sees which skills are relevant and where to find their full documentation, enabling progressive disclosure — metadata upfront, full SKILL.md on demand.
+
+## skillsReminder
+
+Creates an immediate reminder that runs BM25 matching against the user's message content. Returns a `UserReminder` for use inside `user()`.
+
+```ts
+import { user, skillsReminder } from '@deepagents/context';
+
+const skills = [
+  {
+    name: 'deploy-helper',
+    description: 'Assists with deployment workflows and CI/CD pipelines',
+    path: '/skills/deploy-helper',
+    skillMdPath: '/skills/deploy-helper/SKILL.md',
+  },
+  {
+    name: 'docker-expert',
+    description: 'Docker containerization and multi-stage builds',
+    path: '/skills/docker-expert',
+    skillMdPath: '/skills/docker-expert/SKILL.md',
+  },
+];
+
+engine.set(
+  user('deploy my app to production', skillsReminder(skills, { topN: 3 })),
+);
+```
+
+When the user's message matches skills, the reminder injects text like:
+
+```
+Relevant skills:
+- deploy-helper (0.85): Assists with deployment workflows and CI/CD pipelines [/skills/deploy-helper/SKILL.md]
+- docker-expert (0.42): Docker containerization and multi-stage builds [/skills/docker-expert/SKILL.md]
+```
+
+When no skills match (score below threshold or unrelated content), the reminder returns an empty string and skips injection.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `skillsOrClassifier` | `SkillMetadata[] \| ISkillClassifier` | Array of skills or a custom classifier |
+| `options.topN` | `number` | Max results to return (default: `5`) |
+| `options.threshold` | `number` | Minimum score to include (default: `0`) |
+
+## SkillMetadata
+
+Each skill needs four fields:
+
+```ts
+interface SkillMetadata {
+  name: string;        // Skill name from frontmatter
+  description: string; // Skill description from frontmatter
+  path: string;        // Full path to the skill directory
+  skillMdPath: string; // Full path to the SKILL.md file
+}
+```
+
+Use the `skills()` fragment helper or `loadSkillMetadata()` from the [Skills](/docs/context/skills) module to populate these from SKILL.md files automatically.
+
+## Custom Classifiers
+
+Implement `ISkillClassifier` to replace BM25 with your own matching logic:
+
+```ts
+import { user, skillsReminder, type ISkillClassifier, type SkillMatch } from '@deepagents/context';
+
+const classifier: ISkillClassifier = {
+  match(query, options) {
+    // Your matching logic — embeddings, LLM-based, regex, etc.
+    return [
+      { skill: mySkill, score: 0.99 },
+    ];
+  },
+};
+
+user('anything', skillsReminder(classifier, { topN: 5 }));
+```
+
+### ISkillClassifier Interface
+
+```ts
+interface ISkillClassifier {
+  match(query: string, options?: SkillClassifierOptions): SkillMatch[];
+}
+
+interface SkillMatch {
+  skill: SkillMetadata;
+  score: number;
+}
+```
+
+## BM25SkillClassifier
+
+The default classifier uses TF-IDF via `tiny-tfidf`. It builds a corpus from skill names and descriptions, then ranks matches against the user's query.
+
+```ts
+import { BM25SkillClassifier } from '@deepagents/context';
+
+const classifier = new BM25SkillClassifier(skills);
+const matches = classifier.match('optimize SQL queries', { topN: 3 });
+```
+
+You can reuse a single classifier instance across multiple `skillsReminder()` calls to avoid rebuilding the corpus.
+
+## Related Predicates
+
+Two predicates from the classifier module work with `when`-based conditional reminders:
+
+### contentMatches
+
+Fires when the user's message matches any of the given topics via TF-IDF.
+
+```ts
+import { reminder, contentMatches } from '@deepagents/context';
+
+engine.set(
+  reminder('Consider using the deploy skill', {
+    when: contentMatches(['deployment', 'CI/CD', 'production release']),
+  }),
+);
+```
+
+### classifies
+
+Fires when a classifier returns any results for the user's message.
+
+```ts
+import { reminder, classifies, BM25SkillClassifier } from '@deepagents/context';
+
+const classifier = new BM25SkillClassifier(skills);
+
+engine.set(
+  reminder('Check available skills for this task', {
+    when: classifies(classifier, { topN: 3, threshold: 0.1 }),
+  }),
+);
+```

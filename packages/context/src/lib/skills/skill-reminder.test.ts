@@ -3,9 +3,9 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
-  type ISkillClassifier,
-  type SkillClassifierOptions,
-  type SkillMatch,
+  type ClassifierMatch,
+  type ClassifierOptions,
+  type IClassifier,
   reminder,
   skillsReminder,
   user,
@@ -119,12 +119,15 @@ describe('skillsReminder', () => {
     );
   });
 
-  it('accepts a custom classifier implementing ISkillClassifier', () => {
-    const customClassifier: ISkillClassifier = {
-      match(_query: string, _options?: SkillClassifierOptions): SkillMatch[] {
+  it('accepts a custom classifier implementing IClassifier', () => {
+    const customClassifier: IClassifier<SkillMetadata> = {
+      match(
+        _query: string,
+        _options?: ClassifierOptions,
+      ): ClassifierMatch<SkillMetadata>[] {
         return [
           {
-            skill: makeSkill('custom-skill', 'A custom matched skill'),
+            item: makeSkill('custom-skill', 'A custom matched skill'),
             score: 0.99,
           },
         ];

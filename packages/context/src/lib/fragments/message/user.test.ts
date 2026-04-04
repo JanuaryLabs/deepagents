@@ -587,62 +587,62 @@ describe('reminder scheduling', () => {
   describe('when predicates', () => {
     it('everyNTurns fires on turns divisible by N', () => {
       const pred = everyNTurns(3);
-      assert.strictEqual(pred({ turn: 1 }), false);
-      assert.strictEqual(pred({ turn: 2 }), false);
-      assert.strictEqual(pred({ turn: 3 }), true);
-      assert.strictEqual(pred({ turn: 6 }), true);
-      assert.strictEqual(pred({ turn: 7 }), false);
+      assert.strictEqual(pred({ turn: 1, content: '' }), false);
+      assert.strictEqual(pred({ turn: 2, content: '' }), false);
+      assert.strictEqual(pred({ turn: 3, content: '' }), true);
+      assert.strictEqual(pred({ turn: 6, content: '' }), true);
+      assert.strictEqual(pred({ turn: 7, content: '' }), false);
     });
 
     it('once fires only on turn 1', () => {
       const pred = once();
-      assert.strictEqual(pred({ turn: 1 }), true);
-      assert.strictEqual(pred({ turn: 2 }), false);
-      assert.strictEqual(pred({ turn: 10 }), false);
+      assert.strictEqual(pred({ turn: 1, content: '' }), true);
+      assert.strictEqual(pred({ turn: 2, content: '' }), false);
+      assert.strictEqual(pred({ turn: 10, content: '' }), false);
     });
 
     it('firstN fires on first N turns', () => {
       const pred = firstN(3);
-      assert.strictEqual(pred({ turn: 1 }), true);
-      assert.strictEqual(pred({ turn: 3 }), true);
-      assert.strictEqual(pred({ turn: 4 }), false);
+      assert.strictEqual(pred({ turn: 1, content: '' }), true);
+      assert.strictEqual(pred({ turn: 3, content: '' }), true);
+      assert.strictEqual(pred({ turn: 4, content: '' }), false);
     });
 
     it('afterTurn fires only after turn N', () => {
       const pred = afterTurn(5);
-      assert.strictEqual(pred({ turn: 5 }), false);
-      assert.strictEqual(pred({ turn: 6 }), true);
-      assert.strictEqual(pred({ turn: 10 }), true);
+      assert.strictEqual(pred({ turn: 5, content: '' }), false);
+      assert.strictEqual(pred({ turn: 6, content: '' }), true);
+      assert.strictEqual(pred({ turn: 10, content: '' }), true);
     });
 
     it('custom predicate', () => {
-      const pred = ({ turn }: { turn: number }) => turn === 4;
-      assert.strictEqual(pred({ turn: 3 }), false);
-      assert.strictEqual(pred({ turn: 4 }), true);
-      assert.strictEqual(pred({ turn: 5 }), false);
+      const pred = ({ turn }: { turn: number; content: string }) => turn === 4;
+      assert.strictEqual(pred({ turn: 3, content: '' }), false);
+      assert.strictEqual(pred({ turn: 4, content: '' }), true);
+      assert.strictEqual(pred({ turn: 5, content: '' }), false);
     });
 
     it('and() combines with AND logic', () => {
       const pred = and(everyNTurns(3), afterTurn(5));
-      assert.strictEqual(pred({ turn: 3 }), false);
-      assert.strictEqual(pred({ turn: 6 }), true);
-      assert.strictEqual(pred({ turn: 7 }), false);
-      assert.strictEqual(pred({ turn: 9 }), true);
+      assert.strictEqual(pred({ turn: 3, content: '' }), false);
+      assert.strictEqual(pred({ turn: 6, content: '' }), true);
+      assert.strictEqual(pred({ turn: 7, content: '' }), false);
+      assert.strictEqual(pred({ turn: 9, content: '' }), true);
     });
 
     it('or() combines with OR logic', () => {
       const pred = or(once(), everyNTurns(5));
-      assert.strictEqual(pred({ turn: 1 }), true);
-      assert.strictEqual(pred({ turn: 2 }), false);
-      assert.strictEqual(pred({ turn: 5 }), true);
-      assert.strictEqual(pred({ turn: 10 }), true);
+      assert.strictEqual(pred({ turn: 1, content: '' }), true);
+      assert.strictEqual(pred({ turn: 2, content: '' }), false);
+      assert.strictEqual(pred({ turn: 5, content: '' }), true);
+      assert.strictEqual(pred({ turn: 10, content: '' }), true);
     });
 
     it('not() inverts a predicate', () => {
       const pred = not(firstN(2));
-      assert.strictEqual(pred({ turn: 1 }), false);
-      assert.strictEqual(pred({ turn: 2 }), false);
-      assert.strictEqual(pred({ turn: 3 }), true);
+      assert.strictEqual(pred({ turn: 1, content: '' }), false);
+      assert.strictEqual(pred({ turn: 2, content: '' }), false);
+      assert.strictEqual(pred({ turn: 3, content: '' }), true);
     });
   });
 
@@ -660,7 +660,7 @@ describe('reminder scheduling', () => {
     describe('dayChanged', () => {
       it('fires on first turn when lastMessageAt is undefined', () => {
         useFakeTime('2026-03-27T12:00:00Z', () => {
-          assert.strictEqual(dayChanged()({ turn: 1 }), true);
+          assert.strictEqual(dayChanged()({ turn: 1, content: '' }), true);
         });
       });
 
@@ -669,6 +669,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             dayChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
             }),
             false,
@@ -681,6 +682,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             dayChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T23:00:00Z').getTime(),
             }),
             true,
@@ -693,6 +695,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             dayChanged('Asia/Tokyo')({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T14:00:00Z').getTime(),
             }),
             true,
@@ -705,7 +708,7 @@ describe('reminder scheduling', () => {
     describe('hourChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-03-27T12:00:00Z', () => {
-          assert.strictEqual(hourChanged()({ turn: 1 }), true);
+          assert.strictEqual(hourChanged()({ turn: 1, content: '' }), true);
         });
       });
 
@@ -714,6 +717,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             hourChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:10:00Z').getTime(),
             }),
             false,
@@ -726,6 +730,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             hourChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
             }),
             true,
@@ -737,7 +742,7 @@ describe('reminder scheduling', () => {
     describe('monthChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-03-15T12:00:00Z', () => {
-          assert.strictEqual(monthChanged()({ turn: 1 }), true);
+          assert.strictEqual(monthChanged()({ turn: 1, content: '' }), true);
         });
       });
 
@@ -746,6 +751,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             monthChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-01T12:00:00Z').getTime(),
             }),
             false,
@@ -758,6 +764,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             monthChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-31T23:55:00Z').getTime(),
             }),
             true,
@@ -769,7 +776,7 @@ describe('reminder scheduling', () => {
     describe('yearChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-06-15T12:00:00Z', () => {
-          assert.strictEqual(yearChanged()({ turn: 1 }), true);
+          assert.strictEqual(yearChanged()({ turn: 1, content: '' }), true);
         });
       });
 
@@ -778,6 +785,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             yearChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-01-01T12:00:00Z').getTime(),
             }),
             false,
@@ -790,6 +798,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             yearChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-12-31T23:55:00Z').getTime(),
             }),
             true,
@@ -801,7 +810,7 @@ describe('reminder scheduling', () => {
     describe('seasonChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-06-15T12:00:00Z', () => {
-          assert.strictEqual(seasonChanged()({ turn: 1 }), true);
+          assert.strictEqual(seasonChanged()({ turn: 1, content: '' }), true);
         });
       });
 
@@ -810,6 +819,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             seasonChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-06-15T12:00:00Z').getTime(),
             }),
             false,
@@ -823,6 +833,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             seasonChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-05-31T12:00:00Z').getTime(),
             }),
             true,
@@ -835,7 +846,7 @@ describe('reminder scheduling', () => {
     describe('weekChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-03-25T12:00:00Z', () => {
-          assert.strictEqual(weekChanged()({ turn: 1 }), true);
+          assert.strictEqual(weekChanged()({ turn: 1, content: '' }), true);
         });
       });
 
@@ -844,6 +855,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             weekChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-24T12:00:00Z').getTime(),
             }),
             false,
@@ -857,6 +869,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             weekChanged()({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
             }),
             true,
@@ -874,6 +887,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             pred({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
             }),
             false,
@@ -883,6 +897,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             pred({
               turn: 4,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
             }),
             true,
@@ -898,6 +913,7 @@ describe('reminder scheduling', () => {
           assert.strictEqual(
             pred({
               turn: 2,
+              content: '',
               lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
             }),
             false,

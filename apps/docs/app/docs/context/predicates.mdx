@@ -1,0 +1,199 @@
+---
+title: Predicates
+description: Composable functions that control when conditional reminders fire based on turn count, message content, or time
+---
+
+A predicate is a function that receives a `WhenContext` and returns `true` (fire the reminder) or `false` (skip it). Pass predicates to `reminder()` via the `when` option to create conditional reminders.
+
+```ts
+import { reminder, everyNTurns, user } from '@deepagents/context';
+
+engine.set(
+  reminder('Stay concise', { when: everyNTurns(3) }),
+  user('hello'),
+);
+```
+
+## WhenContext
+
+Every predicate receives this context object:
+
+```ts
+interface WhenContext {
+  turn: number;
+  content: string;
+  lastMessageAt?: number;
+  lastMessage?: UIMessage;
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `turn` | Current user turn count (persisted + pending) |
+| `content` | Plain text of the user message |
+| `lastMessageAt` | Timestamp of the last persisted user message |
+| `lastMessage` | The last persisted user `UIMessage` (with metadata) |
+
+## Turn-Based Predicates
+
+### everyNTurns(n)
+
+Fires when the turn count is divisible by `n`.
+
+```ts
+everyNTurns(3); // fires on turns 3, 6, 9, 12, ...
+```
+
+### once()
+
+Fires only on the first turn.
+
+```ts
+once(); // fires on turn 1 only
+```
+
+### firstN(n)
+
+Fires on turns 1 through `n` (inclusive).
+
+```ts
+firstN(5); // fires on turns 1, 2, 3, 4, 5
+```
+
+### afterTurn(n)
+
+Fires after turn `n` (exclusive).
+
+```ts
+afterTurn(2); // fires on turns 3, 4, 5, ...
+```
+
+## Content-Based Predicates
+
+### contentIncludes(keywords)
+
+Fires when the message contains any of the given keywords (case-insensitive).
+
+```ts
+contentIncludes(['deploy', 'release', 'ship']);
+// fires when user says "let's deploy" or "ship it"
+```
+
+### contentPattern(pattern)
+
+Fires when the message matches a regular expression.
+
+```ts
+contentPattern(/\b(SELECT|INSERT|UPDATE|DELETE)\b/i);
+// fires when user includes SQL keywords
+```
+
+## Temporal Predicates
+
+Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. All return `true` on the first turn (when `lastMessageAt` is `undefined`).
+
+| Predicate | Fires when... |
+| --- | --- |
+| `dayChanged(tz?)` | The calendar date has changed |
+| `hourChanged(tz?)` | The hour has changed |
+| `monthChanged(tz?)` | The month has changed |
+| `yearChanged(tz?)` | The year has changed |
+| `seasonChanged(tz?)` | The meteorological season has changed |
+| `weekChanged(tz?)` | The ISO week has changed |
+
+Each accepts an optional timezone string (defaults to `'UTC'`).
+
+```ts
+import { dayChanged, hourChanged } from '@deepagents/context';
+
+dayChanged();                   // UTC
+dayChanged('America/New_York'); // Eastern time
+hourChanged('Asia/Tokyo');      // JST
+```
+
+Seasons follow meteorological boundaries: Winter (Dec-Feb), Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov).
+
+## Combinators
+
+Compose predicates with boolean logic.
+
+### and(...predicates)
+
+All predicates must return `true`.
+
+```ts
+import { and, dayChanged, afterTurn } from '@deepagents/context';
+
+and(dayChanged(), afterTurn(3));
+// day changed AND past turn 3
+```
+
+### or(...predicates)
+
+Any predicate must return `true`.
+
+```ts
+import { or, dayChanged, hourChanged } from '@deepagents/context';
+
+or(dayChanged(), hourChanged());
+// day OR hour changed
+```
+
+### not(predicate)
+
+Negates a predicate.
+
+```ts
+import { not, dayChanged } from '@deepagents/context';
+
+not(dayChanged());
+// day has NOT changed
+```
+
+### Nesting
+
+Combinators nest freely:
+
+```ts
+and(
+  or(dayChanged(), hourChanged()),
+  not(once()),
+  afterTurn(2),
+);
+```
+
+## Custom Predicates
+
+A predicate is any function with the signature `(ctx: WhenContext) => boolean`:
+
+```ts
+import { reminder, type WhenPredicate } from '@deepagents/context';
+
+const businessHours: WhenPredicate = (ctx) => {
+  const hour = new Date().getHours();
+  return hour >= 9 && hour < 17;
+};
+
+engine.set(
+  reminder('User is likely at work — keep responses professional', {
+    when: businessHours,
+  }),
+);
+```
+
+### Factory With Context
+
+Combine a custom predicate with a factory reminder to use both `WhenContext` (for gating) and `ReminderContext` (for dynamic text):
+
+```ts
+engine.set(
+  reminder(
+    (ctx) => {
+      if (!ctx.lastMessageAt) return 'Session started.';
+      const hours = Math.floor((Date.now() - ctx.lastMessageAt) / 3600000);
+      return `${hours}h since last message.`;
+    },
+    { when: dayChanged(), asPart: true },
+  ),
+);
+```

@@ -6,11 +6,12 @@ import {
   dayChanged,
   getSeason,
   hourChanged,
+  isRecord,
   monthChanged,
   reminder,
   seasonChanged,
   yearChanged,
-} from './user.ts';
+} from '../message/user.ts';
 
 export interface TemporalReminderOptions {
   tz?: string;
@@ -204,10 +205,6 @@ const LOCALE_METADATA_KEY = 'locale';
 interface LocaleData {
   language: string;
   timeZone: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function getLocaleFromMessage(

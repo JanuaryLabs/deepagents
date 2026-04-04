@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
-  BM25SkillClassifier,
+  BM25Classifier,
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
@@ -305,7 +305,7 @@ describe('classifies', () => {
         skillMdPath: '/s/SKILL.md',
       },
     ];
-    const classifier = new BM25SkillClassifier(skills);
+    const classifier = new BM25Classifier(skills);
 
     engine.set(
       reminder('deploy-tip', {
@@ -339,7 +339,7 @@ describe('classifies', () => {
         skillMdPath: '/s/SKILL.md',
       },
     ];
-    const classifier = new BM25SkillClassifier(skills);
+    const classifier = new BM25Classifier(skills);
 
     engine.set(
       reminder('nope', {
