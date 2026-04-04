@@ -1,7 +1,13 @@
+import nodeSqlParser from 'node-sql-parser';
+
 import { type ExtractedPair, PairProducer } from '../types.ts';
+
+const { Parser } = nodeSqlParser;
+const parser = new Parser();
 
 export interface DeduplicatedProducerOptions {
   strategy?: 'exact' | 'sql-only' | 'question-only';
+  dialect?: string;
 }
 
 /**
@@ -61,6 +67,13 @@ export class DeduplicatedProducer extends PairProducer {
   }
 
   private normalizeSQL(sql: string): string {
-    return sql.toLowerCase().replace(/\s+/g, ' ').trim();
+    try {
+      const ast = parser.astify(sql, { database: this.options.dialect });
+      return parser
+        .sqlify(ast, { database: this.options.dialect })
+        .toLowerCase();
+    } catch {
+      return sql.toLowerCase().replace(/\s+/g, ' ').trim();
+    }
   }
 }

@@ -534,6 +534,129 @@ describe('sql proxy enforcement', () => {
     assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
   });
 
+  it('repairs missing closing double quote in sql run', async () => {
+    const ddl =
+      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
+    const { tools } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      {
+        command:
+          'sql run "SELECT senderEmail, COUNT(*) as c FROM Emails GROUP BY senderEmail',
+        reasoning: 'test',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('repairs unquoted sql run with parentheses', async () => {
+    const ddl =
+      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
+    const { tools } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      {
+        command:
+          'sql run SELECT senderEmail, COUNT(*) as c FROM Emails GROUP BY senderEmail',
+        reasoning: 'test',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('repairs missing closing double quote in sql validate', async () => {
+    const ddl = 'CREATE TABLE t (id INTEGER PRIMARY KEY, x INTEGER)';
+    const { tools } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      {
+        command: 'sql validate "SELECT * FROM t WHERE x IN (1, 2)',
+        reasoning: 'test',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('repairs sql with internal single quotes and missing closing double quote', async () => {
+    const ddl =
+      "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t VALUES (1, 'O''Brien')";
+    const { tools } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      {
+        command: `sql run "SELECT * FROM t WHERE name = 'O''Brien'`,
+        reasoning: 'test',
+      },
+      {} as any,
+    )) as { exitCode: number; stderr: string; stdout: string };
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.ok(
+      result.stdout.includes('rows: 1'),
+      `expected 1 row but got: ${result.stdout}`,
+    );
+  });
+
+  it('does not modify valid double-quoted sql run', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      { command: 'sql run "SELECT 1 as val"', reasoning: 'test' },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('does not modify valid single-quoted sql run', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      { command: "sql run 'SELECT 1 as val'", reasoning: 'test' },
+      {} as any,
+    )) as { exitCode: number; stderr: string };
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('does not repair non-sql commands with broken quoting', async () => {
+    const { tools } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = (await tools.bash.execute!(
+      { command: 'echo "unclosed', reasoning: 'test' },
+      {} as any,
+    )) as { exitCode: number };
+    assert.notStrictEqual(result.exitCode, 0);
+  });
+
   it('blocks direct DB CLI in command substitution', async () => {
     const { tools } = await createResultTools({
       adapter: (await init_db('')).adapter,

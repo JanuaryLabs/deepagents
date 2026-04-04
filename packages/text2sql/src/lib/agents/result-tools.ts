@@ -8,6 +8,7 @@ import {
   MountableFs,
   OverlayFs,
   defineCommand,
+  parse,
 } from 'just-bash';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as path from 'node:path';
@@ -32,6 +33,7 @@ interface CommandResult {
 interface SubcommandDefinition {
   usage: string;
   description: string;
+  repair?: (rawArgs: string) => string | null;
   handler: (
     args: string[],
     ctx: CommandContext,
@@ -74,6 +76,48 @@ function createCommand(
   });
 }
 
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildRepair(
+  name: string,
+  subcommands: Record<string, SubcommandDefinition>,
+) {
+  const subNames = Object.keys(subcommands).map(escapeRegExp).join('|');
+  const pattern = new RegExp(
+    `^(\\s*${escapeRegExp(name)}\\s+(?:${subNames}))\\s+([\\s\\S]+)$`,
+  );
+
+  return function repair(raw: string): string {
+    const match = raw.match(pattern);
+    if (!match) return raw;
+
+    try {
+      parse(raw);
+      return raw;
+    } catch {
+      // fall through to repair
+    }
+
+    const [, prefix, argsPart] = match;
+    const sub = prefix.trim().split(/\s+/).pop()!;
+    const repairFn = subcommands[sub]?.repair;
+    if (!repairFn) return raw;
+
+    const repairedArgs = repairFn(argsPart);
+    if (repairedArgs == null) return raw;
+
+    const repaired = `${prefix} ${repairedArgs}`;
+    try {
+      parse(repaired);
+      return repaired;
+    } catch {
+      return raw;
+    }
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SQL Command Implementation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,11 +146,31 @@ function normalizeShellArtifacts(raw: string): string {
     .replace(/\\(?=$)/gm, '');
 }
 
+function stripQuoteArtifacts(raw: string): string {
+  let sql = raw.trim();
+  if (sql.startsWith('"')) {
+    sql = sql.slice(1);
+    if (sql.endsWith('"')) sql = sql.slice(0, -1);
+  } else if (sql.startsWith("'")) {
+    sql = sql.slice(1);
+    if (sql.endsWith("'")) sql = sql.slice(0, -1);
+  }
+  return sql.trim();
+}
+
+function repairSqlArgs(rawArgs: string): string | null {
+  const sql = stripQuoteArtifacts(rawArgs);
+  if (!sql) return null;
+  const escaped = sql.replace(/'/g, "'\\''");
+  return `'${escaped}'`;
+}
+
 function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
-  return createCommand('sql', {
+  const subcommands = {
     run: {
       usage: 'run "SELECT ..."',
       description: 'Execute query and store results',
+      repair: repairSqlArgs,
       handler: async (args, ctx) => {
         const store = metaStore.getStore();
         if (store) {
@@ -182,6 +246,7 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
     validate: {
       usage: 'validate "SELECT ..."',
       description: 'Validate query syntax',
+      repair: repairSqlArgs,
       handler: async (args) => {
         const rawQuery = normalizeShellArtifacts(args.join(' ').trim());
 
@@ -222,7 +287,11 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
         };
       },
     },
-  });
+  } satisfies Record<string, SubcommandDefinition>;
+
+  const command = createCommand('sql', subcommands);
+  const repair = buildRepair('sql', subcommands);
+  return { command, repair };
 }
 
 /**
@@ -254,7 +323,10 @@ export async function createResultTools(options: ResultToolsOptions) {
   const { adapter, skillMounts, filesystem: baseFs } = options;
 
   const metaStore: MetaStore = new AsyncLocalStorage();
-  const sqlCommand = createSqlCommand(adapter, metaStore);
+  const { command: sqlCommand, repair: repairCommand } = createSqlCommand(
+    adapter,
+    metaStore,
+  );
 
   const fsMounts = skillMounts.map(({ host, sandbox }) => ({
     mountPoint: path.dirname(sandbox),
@@ -284,8 +356,9 @@ export async function createResultTools(options: ResultToolsOptions) {
     extraInstructions:
       'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.',
     onBeforeBashCall: ({ command }) => {
-      console.log(chalk.cyan(`[onBeforeBashCall]: ${command}`));
-      return { command };
+      const repaired = repairCommand(command);
+      console.log(chalk.cyan(`[onBeforeBashCall]: ${repaired}`));
+      return { command: repaired };
     },
     onAfterBashCall: ({ result }) => {
       if (result.exitCode !== 0) {
