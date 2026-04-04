@@ -523,7 +523,9 @@ export class ContextEngine {
             await this.#getChainContext();
           const firedReminders = conditionalReminders
             .map(getConditionalReminder)
-            .filter((config) => config.when(turn));
+            .filter((config) =>
+              config.when({ turn, lastMessageAt, lastMessage }),
+            );
 
           if (firedReminders.length > 0) {
             const original = lastUserFragment.codec.encode() as UIMessage & {

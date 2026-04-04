@@ -1,0 +1,207 @@
+---
+title: Temporal Reminders
+description: Atomic reminders that inject time-aware context into user messages, each firing only when its value has actually changed
+---
+
+Temporal reminders inject date, time, and locale context into user messages on a need-to-know basis. Each atom has its own temporal schedule and only fires when its value crosses a boundary — so `dateReminder` skips if the day hasn't changed, `seasonReminder` skips if the season hasn't changed, and so on.
+
+## Temporal Atoms
+
+Five atoms cover time-derived facts. Each accepts `{ tz?: string }` (defaults to `'UTC'`), uses `asPart: true` (adds a separate text part), and computes diffs purely from `lastMessageAt` — no metadata storage.
+
+### dateReminder
+
+Fires when `dayChanged(tz)`. Outputs the current date and day of week.
+
+```typescript
+import { dateReminder } from '@deepagents/context';
+
+dateReminder(); // UTC
+dateReminder({ tz: 'America/New_York' });
+```
+
+Output on first turn:
+
+```
+Date: 2026-04-03
+Day of Week: Thursday
+```
+
+Output when day changes:
+
+```
+date: 2026-04-02 -> 2026-04-03
+day of week: Wednesday -> Thursday
+
+Date: 2026-04-03
+Day of Week: Thursday
+```
+
+### timeReminder
+
+Fires when `hourChanged(tz)`. Outputs the current time with an hour-level diff.
+
+```typescript
+import { timeReminder } from '@deepagents/context';
+
+timeReminder();
+timeReminder({ tz: 'Asia/Tokyo' });
+```
+
+Output when hour changes:
+
+```
+hour: 14 -> 15
+
+Time: 15:05:00
+```
+
+### monthReminder
+
+Fires when `monthChanged(tz)`.
+
+```typescript
+import { monthReminder } from '@deepagents/context';
+
+monthReminder();
+```
+
+Diff: `month: March -> April`
+
+### yearReminder
+
+Fires when `yearChanged(tz)`.
+
+```typescript
+import { yearReminder } from '@deepagents/context';
+
+yearReminder();
+```
+
+Diff: `year: 2026 -> 2027`
+
+### seasonReminder
+
+Fires when `seasonChanged(tz)`. Seasons: Winter (Dec-Feb), Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov).
+
+```typescript
+import { seasonReminder } from '@deepagents/context';
+
+seasonReminder();
+```
+
+Diff: `season: Spring -> Summer`
+
+## localeReminder
+
+Unlike temporal atoms, locale (language + timezone) is user configuration that can't be derived from a timestamp. `localeReminder` uses metadata persistence — it stores its values in message metadata and reads them back on the next turn to determine if anything changed.
+
+```typescript
+import { localeReminder } from '@deepagents/context';
+
+localeReminder(); // defaults: English (US), UTC
+localeReminder({ language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' });
+```
+
+| Parameter  | Type     | Default        | Description              |
+| ---------- | -------- | -------------- | ------------------------ |
+| `language` | `string` | `English (US)` | User's language          |
+| `timeZone` | `string` | `UTC`          | User's timezone          |
+
+Fires on the first turn (no previous locale) or when the config changes. Skips if unchanged.
+
+Output when locale changes:
+
+```
+language: English (US) -> Arabic (SA)
+timezone: UTC -> Asia/Riyadh
+
+Language: Arabic (SA)
+Timezone: Asia/Riyadh
+```
+
+## temporalReminder
+
+Convenience wrapper that returns all 5 temporal atoms as a `ContextFragment[]`. Does not include `localeReminder` — add it separately if needed.
+
+```typescript
+import { temporalReminder, localeReminder } from '@deepagents/context';
+
+// Temporal only
+engine.set(...temporalReminder({ tz: 'UTC' }), user('hello'));
+
+// Temporal + locale
+engine.set(
+  ...temporalReminder({ tz: 'Asia/Riyadh' }),
+  localeReminder({ language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' }),
+  user('hello'),
+);
+```
+
+| Parameter | Type     | Default | Description                        |
+| --------- | -------- | ------- | ---------------------------------- |
+| `tz`      | `string` | `UTC`   | Timezone passed to all 5 atoms     |
+
+## Temporal Predicates
+
+Each atom uses a temporal predicate from the `when` scheduling system. These predicates compare `new Date()` against `lastMessageAt` using timezone-aware formatting.
+
+| Predicate          | Fires when...                              |
+| ------------------ | ------------------------------------------ |
+| `dayChanged(tz?)`  | The calendar date has changed              |
+| `hourChanged(tz?)` | The hour has changed                       |
+| `monthChanged(tz?)`| The month has changed                      |
+| `yearChanged(tz?)` | The year has changed                       |
+| `seasonChanged(tz?)` | The meteorological season has changed    |
+| `weekChanged(tz?)` | The ISO week has changed                   |
+
+All return `true` on the first turn (when `lastMessageAt` is `undefined`).
+
+### Combinators
+
+Compose predicates with boolean logic:
+
+```typescript
+import { and, or, not, dayChanged, hourChanged, afterTurn } from '@deepagents/context';
+
+and(dayChanged(), afterTurn(3)); // day changed AND after turn 3
+or(dayChanged(), hourChanged()); // day OR hour changed
+not(dayChanged());               // day has NOT changed
+```
+
+### WhenContext
+
+The context object passed to `when` predicates:
+
+```typescript
+interface WhenContext {
+  turn: number;
+  lastMessageAt?: number;
+  lastMessage?: UIMessage;
+}
+```
+
+| Field            | Description                                         |
+| ---------------- | --------------------------------------------------- |
+| `turn`           | Current user turn count (persisted + pending)        |
+| `lastMessageAt`  | Timestamp of the last persisted user message         |
+| `lastMessage`    | The last persisted user `UIMessage` (with metadata)  |
+
+## Custom Temporal Reminders
+
+Use `reminder()` with a `when` predicate to build your own:
+
+```typescript
+import { reminder, dayChanged } from '@deepagents/context';
+
+const uptimeReminder = reminder(
+  (ctx) => {
+    if (!ctx.lastMessageAt) return 'Session started.';
+    const hours = Math.floor((Date.now() - ctx.lastMessageAt) / 3600000);
+    return `${hours}h since last message.`;
+  },
+  { when: dayChanged(), asPart: true },
+);
+
+engine.set(uptimeReminder, user('hello'));
+```

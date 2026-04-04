@@ -8,6 +8,7 @@
     "fragments",
     "domain-fragments",
     "user-fragments",
+    "temporal-reminders",
     "context-engine",
     "resolve-and-render",
     "architecture-core-concepts",

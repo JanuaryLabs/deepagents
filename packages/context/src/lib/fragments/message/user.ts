@@ -18,34 +18,125 @@ export type ReminderText =
   | string
   | ((ctx: ReminderContext) => string | ReminderResolution);
 
-export type WhenPredicate = (turn: number) => boolean;
+export interface WhenContext {
+  turn: number;
+  lastMessageAt?: number;
+  lastMessage?: UIMessage;
+}
+
+export type WhenPredicate = (ctx: WhenContext) => boolean;
 
 export function everyNTurns(n: number): WhenPredicate {
-  return (turn) => turn % n === 0;
+  return ({ turn }) => turn % n === 0;
 }
 
 export function once(): WhenPredicate {
-  return (turn) => turn === 1;
+  return ({ turn }) => turn === 1;
 }
 
 export function firstN(n: number): WhenPredicate {
-  return (turn) => turn <= n;
+  return ({ turn }) => turn <= n;
 }
 
 export function afterTurn(n: number): WhenPredicate {
-  return (turn) => turn > n;
+  return ({ turn }) => turn > n;
 }
 
 export function and(...predicates: WhenPredicate[]): WhenPredicate {
-  return (turn) => predicates.every((p) => p(turn));
+  return (ctx) => predicates.every((p) => p(ctx));
 }
 
 export function or(...predicates: WhenPredicate[]): WhenPredicate {
-  return (turn) => predicates.some((p) => p(turn));
+  return (ctx) => predicates.some((p) => p(ctx));
 }
 
 export function not(predicate: WhenPredicate): WhenPredicate {
-  return (turn) => !predicate(turn);
+  return (ctx) => !predicate(ctx);
+}
+
+function toDateParts(
+  date: Date,
+  tz: string,
+): { year: string; month: string; day: string; hour: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)!.value;
+
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+  };
+}
+
+function temporalChanged(
+  ctx: WhenContext,
+  tz: string,
+  getKey: (parts: ReturnType<typeof toDateParts>) => string,
+): boolean {
+  if (ctx.lastMessageAt === undefined) return true;
+  const nowParts = toDateParts(new Date(), tz);
+  const prevParts = toDateParts(new Date(ctx.lastMessageAt), tz);
+  return getKey(nowParts) !== getKey(prevParts);
+}
+
+export function getSeason(month: number): string {
+  if (month >= 2 && month <= 4) return 'Spring';
+  if (month >= 5 && month <= 7) return 'Summer';
+  if (month >= 8 && month <= 10) return 'Fall';
+  return 'Winter';
+}
+
+function isoWeekKey(parts: ReturnType<typeof toDateParts>): string {
+  const d = new Date(
+    Date.UTC(
+      parseInt(parts.year),
+      parseInt(parts.month) - 1,
+      parseInt(parts.day),
+    ),
+  );
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(
+    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+  );
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+export function dayChanged(tz = 'UTC'): WhenPredicate {
+  return (ctx) =>
+    temporalChanged(ctx, tz, (p) => `${p.year}-${p.month}-${p.day}`);
+}
+
+export function hourChanged(tz = 'UTC'): WhenPredicate {
+  return (ctx) =>
+    temporalChanged(ctx, tz, (p) => `${p.year}-${p.month}-${p.day}-${p.hour}`);
+}
+
+export function monthChanged(tz = 'UTC'): WhenPredicate {
+  return (ctx) => temporalChanged(ctx, tz, (p) => `${p.year}-${p.month}`);
+}
+
+export function yearChanged(tz = 'UTC'): WhenPredicate {
+  return (ctx) => temporalChanged(ctx, tz, (p) => p.year);
+}
+
+export function seasonChanged(tz = 'UTC'): WhenPredicate {
+  return (ctx) =>
+    temporalChanged(ctx, tz, (p) => getSeason(parseInt(p.month) - 1));
+}
+
+export function weekChanged(tz = 'UTC'): WhenPredicate {
+  return (ctx) => temporalChanged(ctx, tz, isoWeekKey);
 }
 
 export interface UserReminderOptions {

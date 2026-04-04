@@ -7,7 +7,7 @@ export * from './lib/engine.ts';
 export * from './lib/estimate.ts';
 export * from './lib/fragments.ts';
 export * from './lib/fragments/domain.ts';
-export * from './lib/fragments/message/environment-reminder.ts';
+export * from './lib/fragments/message/temporal-reminder.ts';
 export * from './lib/fragments/message/user.ts';
 export * from './lib/fragments/reasoning.ts';
 export * from './lib/fragments/socratic.ts';

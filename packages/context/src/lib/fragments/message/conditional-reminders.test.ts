@@ -1,14 +1,17 @@
 import type { UIMessage } from 'ai';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 import {
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
   afterTurn,
+  and,
   assistantText,
+  dayChanged,
   everyNTurns,
+  hourChanged,
   once,
   reminder,
   stripReminders,
@@ -19,6 +22,19 @@ function getTextParts(message: UIMessage): string[] {
   return message.parts
     .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
     .map((p) => p.text);
+}
+
+async function useFakeTime<T>(
+  iso: string,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  mock.timers.enable({ apis: ['Date'] });
+  mock.timers.setTime(new Date(iso).getTime());
+  try {
+    return await fn();
+  } finally {
+    mock.timers.reset();
+  }
 }
 
 describe('ContextEngine conditional reminders', () => {
@@ -602,5 +618,122 @@ describe('ContextEngine conditional reminders', () => {
       !originalText.includes('branch-hint'),
       `Original message should be untouched. Got: ${originalText}`,
     );
+  });
+
+  it('applies dayChanged temporal predicate when day crosses between turns', async () => {
+    await useFakeTime('2026-03-27T23:00:00Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'temporal-day',
+        userId: 'u1',
+      });
+
+      engine.set(user('turn 1'), assistantText('reply'));
+      await engine.save();
+
+      mock.timers.setTime(new Date('2026-03-28T01:00:00Z').getTime());
+
+      engine.set(reminder('new-day', { when: dayChanged() }), user('turn 2'));
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const lastMsg = messages[messages.length - 1];
+      const text = getTextParts(lastMsg).join('');
+
+      assert.ok(
+        text.includes('new-day'),
+        `Day changed reminder should fire. Got: ${text}`,
+      );
+    });
+  });
+
+  it('skips dayChanged temporal predicate when still the same day', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'temporal-day-skip',
+      userId: 'u1',
+    });
+
+    engine.set(user('turn 1'), assistantText('reply'));
+    await engine.save();
+
+    engine.set(reminder('same-day', { when: dayChanged() }), user('turn 2'));
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const lastMsg = messages[messages.length - 1];
+    const text = getTextParts(lastMsg).join('');
+
+    assert.ok(
+      !text.includes('same-day'),
+      `Same-day reminder should be skipped. Got: ${text}`,
+    );
+  });
+
+  it('composes dayChanged with afterTurn in engine context', async () => {
+    await useFakeTime('2026-03-27T23:00:00Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'temporal-compose',
+        userId: 'u1',
+      });
+
+      engine.set(user('turn 1'), assistantText('reply'));
+      await engine.save();
+
+      mock.timers.setTime(new Date('2026-03-28T01:00:00Z').getTime());
+
+      engine.set(
+        reminder('composed', { when: and(dayChanged(), afterTurn(2)) }),
+        user('turn 2'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const lastMsg = messages[messages.length - 1];
+      const text = getTextParts(lastMsg).join('');
+
+      assert.ok(
+        !text.includes('composed'),
+        `Turn 2 with afterTurn(2) should not fire. Got: ${text}`,
+      );
+    });
+  });
+
+  it('applies hourChanged temporal predicate when hour crosses', async () => {
+    await useFakeTime('2026-03-27T14:55:00Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'temporal-hour',
+        userId: 'u1',
+      });
+
+      engine.set(user('turn 1'), assistantText('reply'));
+      await engine.save();
+
+      mock.timers.setTime(new Date('2026-03-27T15:05:00Z').getTime());
+
+      engine.set(reminder('new-hour', { when: hourChanged() }), user('turn 2'));
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const lastMsg = messages[messages.length - 1];
+      const text = getTextParts(lastMsg).join('');
+
+      assert.ok(
+        text.includes('new-hour'),
+        `Hour changed reminder should fire. Got: ${text}`,
+      );
+    });
   });
 });

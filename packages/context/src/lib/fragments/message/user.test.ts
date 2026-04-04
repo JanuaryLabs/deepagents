@@ -1,21 +1,27 @@
 import type { UIMessage } from 'ai';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 import {
   afterTurn,
   and,
+  dayChanged,
   everyNTurns,
   firstN,
   getReminderRanges,
+  hourChanged,
   isConditionalReminder,
+  monthChanged,
   not,
   once,
   or,
   reminder,
+  seasonChanged,
   stripReminders,
   stripTextByRanges,
   user,
+  weekChanged,
+  yearChanged,
 } from '@deepagents/context';
 
 type UserReminderMetadataRecord = {
@@ -581,62 +587,324 @@ describe('reminder scheduling', () => {
   describe('when predicates', () => {
     it('everyNTurns fires on turns divisible by N', () => {
       const pred = everyNTurns(3);
-      assert.strictEqual(pred(1), false);
-      assert.strictEqual(pred(2), false);
-      assert.strictEqual(pred(3), true);
-      assert.strictEqual(pred(6), true);
-      assert.strictEqual(pred(7), false);
+      assert.strictEqual(pred({ turn: 1 }), false);
+      assert.strictEqual(pred({ turn: 2 }), false);
+      assert.strictEqual(pred({ turn: 3 }), true);
+      assert.strictEqual(pred({ turn: 6 }), true);
+      assert.strictEqual(pred({ turn: 7 }), false);
     });
 
     it('once fires only on turn 1', () => {
       const pred = once();
-      assert.strictEqual(pred(1), true);
-      assert.strictEqual(pred(2), false);
-      assert.strictEqual(pred(10), false);
+      assert.strictEqual(pred({ turn: 1 }), true);
+      assert.strictEqual(pred({ turn: 2 }), false);
+      assert.strictEqual(pred({ turn: 10 }), false);
     });
 
     it('firstN fires on first N turns', () => {
       const pred = firstN(3);
-      assert.strictEqual(pred(1), true);
-      assert.strictEqual(pred(3), true);
-      assert.strictEqual(pred(4), false);
+      assert.strictEqual(pred({ turn: 1 }), true);
+      assert.strictEqual(pred({ turn: 3 }), true);
+      assert.strictEqual(pred({ turn: 4 }), false);
     });
 
     it('afterTurn fires only after turn N', () => {
       const pred = afterTurn(5);
-      assert.strictEqual(pred(5), false);
-      assert.strictEqual(pred(6), true);
-      assert.strictEqual(pred(10), true);
+      assert.strictEqual(pred({ turn: 5 }), false);
+      assert.strictEqual(pred({ turn: 6 }), true);
+      assert.strictEqual(pred({ turn: 10 }), true);
     });
 
     it('custom predicate', () => {
-      const pred = (turn: number) => turn === 4;
-      assert.strictEqual(pred(3), false);
-      assert.strictEqual(pred(4), true);
-      assert.strictEqual(pred(5), false);
+      const pred = ({ turn }: { turn: number }) => turn === 4;
+      assert.strictEqual(pred({ turn: 3 }), false);
+      assert.strictEqual(pred({ turn: 4 }), true);
+      assert.strictEqual(pred({ turn: 5 }), false);
     });
 
     it('and() combines with AND logic', () => {
       const pred = and(everyNTurns(3), afterTurn(5));
-      assert.strictEqual(pred(3), false);
-      assert.strictEqual(pred(6), true);
-      assert.strictEqual(pred(7), false);
-      assert.strictEqual(pred(9), true);
+      assert.strictEqual(pred({ turn: 3 }), false);
+      assert.strictEqual(pred({ turn: 6 }), true);
+      assert.strictEqual(pred({ turn: 7 }), false);
+      assert.strictEqual(pred({ turn: 9 }), true);
     });
 
     it('or() combines with OR logic', () => {
       const pred = or(once(), everyNTurns(5));
-      assert.strictEqual(pred(1), true);
-      assert.strictEqual(pred(2), false);
-      assert.strictEqual(pred(5), true);
-      assert.strictEqual(pred(10), true);
+      assert.strictEqual(pred({ turn: 1 }), true);
+      assert.strictEqual(pred({ turn: 2 }), false);
+      assert.strictEqual(pred({ turn: 5 }), true);
+      assert.strictEqual(pred({ turn: 10 }), true);
     });
 
     it('not() inverts a predicate', () => {
       const pred = not(firstN(2));
-      assert.strictEqual(pred(1), false);
-      assert.strictEqual(pred(2), false);
-      assert.strictEqual(pred(3), true);
+      assert.strictEqual(pred({ turn: 1 }), false);
+      assert.strictEqual(pred({ turn: 2 }), false);
+      assert.strictEqual(pred({ turn: 3 }), true);
+    });
+  });
+
+  describe('temporal predicates', () => {
+    function useFakeTime<T>(iso: string, fn: () => T): T {
+      mock.timers.enable({ apis: ['Date'] });
+      mock.timers.setTime(new Date(iso).getTime());
+      try {
+        return fn();
+      } finally {
+        mock.timers.reset();
+      }
+    }
+
+    describe('dayChanged', () => {
+      it('fires on first turn when lastMessageAt is undefined', () => {
+        useFakeTime('2026-03-27T12:00:00Z', () => {
+          assert.strictEqual(dayChanged()({ turn: 1 }), true);
+        });
+      });
+
+      it('does not fire when still the same day', () => {
+        useFakeTime('2026-03-27T23:00:00Z', () => {
+          assert.strictEqual(
+            dayChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+            }),
+            false,
+          );
+        });
+      });
+
+      it('fires when the day has changed', () => {
+        useFakeTime('2026-03-28T01:00:00Z', () => {
+          assert.strictEqual(
+            dayChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T23:00:00Z').getTime(),
+            }),
+            true,
+          );
+        });
+      });
+
+      it('respects timezone for day boundary', () => {
+        useFakeTime('2026-03-27T16:00:00Z', () => {
+          assert.strictEqual(
+            dayChanged('Asia/Tokyo')({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T14:00:00Z').getTime(),
+            }),
+            true,
+            'In Tokyo: now=2026-03-28 01:00, prev=2026-03-27 23:00 => day changed',
+          );
+        });
+      });
+    });
+
+    describe('hourChanged', () => {
+      it('fires on first turn', () => {
+        useFakeTime('2026-03-27T12:00:00Z', () => {
+          assert.strictEqual(hourChanged()({ turn: 1 }), true);
+        });
+      });
+
+      it('does not fire within the same hour', () => {
+        useFakeTime('2026-03-27T12:45:00Z', () => {
+          assert.strictEqual(
+            hourChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T12:10:00Z').getTime(),
+            }),
+            false,
+          );
+        });
+      });
+
+      it('fires when the hour has changed', () => {
+        useFakeTime('2026-03-27T13:05:00Z', () => {
+          assert.strictEqual(
+            hourChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
+            }),
+            true,
+          );
+        });
+      });
+    });
+
+    describe('monthChanged', () => {
+      it('fires on first turn', () => {
+        useFakeTime('2026-03-15T12:00:00Z', () => {
+          assert.strictEqual(monthChanged()({ turn: 1 }), true);
+        });
+      });
+
+      it('does not fire within the same month', () => {
+        useFakeTime('2026-03-28T12:00:00Z', () => {
+          assert.strictEqual(
+            monthChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-01T12:00:00Z').getTime(),
+            }),
+            false,
+          );
+        });
+      });
+
+      it('fires when the month has changed', () => {
+        useFakeTime('2026-04-01T00:05:00Z', () => {
+          assert.strictEqual(
+            monthChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-31T23:55:00Z').getTime(),
+            }),
+            true,
+          );
+        });
+      });
+    });
+
+    describe('yearChanged', () => {
+      it('fires on first turn', () => {
+        useFakeTime('2026-06-15T12:00:00Z', () => {
+          assert.strictEqual(yearChanged()({ turn: 1 }), true);
+        });
+      });
+
+      it('does not fire within the same year', () => {
+        useFakeTime('2026-12-31T12:00:00Z', () => {
+          assert.strictEqual(
+            yearChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-01-01T12:00:00Z').getTime(),
+            }),
+            false,
+          );
+        });
+      });
+
+      it('fires when the year has changed', () => {
+        useFakeTime('2027-01-01T00:05:00Z', () => {
+          assert.strictEqual(
+            yearChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-12-31T23:55:00Z').getTime(),
+            }),
+            true,
+          );
+        });
+      });
+    });
+
+    describe('seasonChanged', () => {
+      it('fires on first turn', () => {
+        useFakeTime('2026-06-15T12:00:00Z', () => {
+          assert.strictEqual(seasonChanged()({ turn: 1 }), true);
+        });
+      });
+
+      it('does not fire within the same season', () => {
+        useFakeTime('2026-07-15T12:00:00Z', () => {
+          assert.strictEqual(
+            seasonChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-06-15T12:00:00Z').getTime(),
+            }),
+            false,
+            'June and July are both Summer',
+          );
+        });
+      });
+
+      it('fires when the season changes (Spring -> Summer)', () => {
+        useFakeTime('2026-06-01T12:00:00Z', () => {
+          assert.strictEqual(
+            seasonChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-05-31T12:00:00Z').getTime(),
+            }),
+            true,
+            'May is Spring, June is Summer',
+          );
+        });
+      });
+    });
+
+    describe('weekChanged', () => {
+      it('fires on first turn', () => {
+        useFakeTime('2026-03-25T12:00:00Z', () => {
+          assert.strictEqual(weekChanged()({ turn: 1 }), true);
+        });
+      });
+
+      it('does not fire within the same week', () => {
+        useFakeTime('2026-03-26T12:00:00Z', () => {
+          assert.strictEqual(
+            weekChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-24T12:00:00Z').getTime(),
+            }),
+            false,
+            'Tue Mar 24 and Thu Mar 26 are same ISO week',
+          );
+        });
+      });
+
+      it('fires when the week changes', () => {
+        useFakeTime('2026-04-06T12:00:00Z', () => {
+          assert.strictEqual(
+            weekChanged()({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+            }),
+            true,
+            'Mar 27 (Fri) and Apr 6 (Mon) are different ISO weeks',
+          );
+        });
+      });
+    });
+
+    describe('composition', () => {
+      it('composes dayChanged with afterTurn', () => {
+        useFakeTime('2026-03-28T12:00:00Z', () => {
+          const pred = and(dayChanged(), afterTurn(3));
+
+          assert.strictEqual(
+            pred({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+            }),
+            false,
+            'turn 2 + day changed => false (afterTurn(3) fails)',
+          );
+
+          assert.strictEqual(
+            pred({
+              turn: 4,
+              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+            }),
+            true,
+            'turn 4 + day changed => true',
+          );
+        });
+      });
+
+      it('composes hourChanged with not()', () => {
+        useFakeTime('2026-03-27T13:05:00Z', () => {
+          const pred = not(hourChanged());
+
+          assert.strictEqual(
+            pred({
+              turn: 2,
+              lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
+            }),
+            false,
+            'hour changed => not() inverts to false',
+          );
+        });
+      });
     });
   });
 });
