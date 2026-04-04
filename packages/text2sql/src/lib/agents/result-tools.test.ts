@@ -444,6 +444,96 @@ describe('sql proxy enforcement', () => {
     assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
   });
 
+  it('strips shell-escaped parentheses in sql run', async () => {
+    const ddl =
+      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT senderEmail, COUNT\\(*) as c FROM Emails GROUP BY senderEmail"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('strips trailing backslash in sql run', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT 1 as val\\\\"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('strips shell-escaped asterisk in sql run', async () => {
+    const ddl =
+      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT \\* FROM Emails LIMIT 1"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('strips shell-escaped parentheses in sql validate', async () => {
+    const ddl =
+      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT senderEmail, COUNT\\(*) as c FROM Emails GROUP BY senderEmail"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
+  it('preserves backslash before space inside SQL string literal', async () => {
+    const ddl =
+      "CREATE TABLE Files (id INTEGER PRIMARY KEY, path TEXT); INSERT INTO Files VALUES (1, 'C:\\Program Files\\test')";
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run "SELECT path FROM Files WHERE path LIKE \'C:\\\\Program%\' LIMIT 1"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+    assert.ok(
+      result.stdout.includes('rows: 1'),
+      `expected 1 row but got: ${result.stdout}`,
+    );
+  });
+
+  it('strips shell-escaped dot in numeric literal', async () => {
+    const { sandbox } = await createResultTools({
+      adapter: (await init_db('')).adapter,
+      skillMounts: [],
+      filesystem: new InMemoryFs(),
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate "SELECT 1\\.5 as val"',
+    );
+    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+
   it('blocks direct DB CLI in command substitution', async () => {
     const { tools } = await createResultTools({
       adapter: (await init_db('')).adapter,

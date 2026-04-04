@@ -94,6 +94,14 @@ type MetaStore = AsyncLocalStorage<{ value?: Record<string, unknown> }>;
 const SQL_VALIDATE_REMINDER =
   'Always run `sql validate` before `sql run` to catch syntax errors early.';
 
+function normalizeShellArtifacts(raw: string): string {
+  return raw
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\([().*])/g, '$1')
+    .replace(/\\(?=$)/gm, '');
+}
+
 function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
   return createCommand('sql', {
     run: {
@@ -105,11 +113,7 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
           store.value = { ...store.value, reminder: SQL_VALIDATE_REMINDER };
         }
 
-        const rawQuery = args
-          .join(' ')
-          .trim()
-          .replace(/\\n/g, '\n')
-          .replace(/\\t/g, '\t');
+        const rawQuery = normalizeShellArtifacts(args.join(' ').trim());
 
         if (!rawQuery) {
           return {
@@ -179,11 +183,7 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
       usage: 'validate "SELECT ..."',
       description: 'Validate query syntax',
       handler: async (args) => {
-        const rawQuery = args
-          .join(' ')
-          .trim()
-          .replace(/\\n/g, '\n')
-          .replace(/\\t/g, '\t');
+        const rawQuery = normalizeShellArtifacts(args.join(' ').trim());
 
         if (!rawQuery) {
           return {

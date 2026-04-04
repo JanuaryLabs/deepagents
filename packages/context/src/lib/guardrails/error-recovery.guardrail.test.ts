@@ -468,5 +468,116 @@ describe('Guardrail System', () => {
       // This should NOT throw "Fragment 'assistant' is missing codec"
       await context.save();
     });
+
+    it('should not create orphan assistant message when no prior assistant exists', async () => {
+      const {
+        ContextEngine,
+        InMemoryContextStore,
+        XmlRenderer,
+        lastAssistantMessage,
+        assistantText,
+        user,
+      } = await import('@deepagents/context');
+
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        userId: 'test-user',
+        chatId: 'orphan-test',
+        store,
+      });
+
+      // Step 1: User message (only message in context)
+      context.set(user('Hello'));
+      await context.save();
+
+      // Step 2: Guardrail fires on first attempt — no assistant message exists yet
+      // This is the exact scenario from the transcript bug
+      context.set(
+        lastAssistantMessage(
+          'partial response I generated malformed JSON for the tool arguments. Let me format my tool call properly with valid JSON.',
+        ),
+      );
+      await context.save({ branch: false });
+
+      // Step 3: Retry succeeds — chat.ts onFinish saves the real assistant message
+      context.set(
+        assistantText('Here are your recent emails.', { id: 'real-assistant' }),
+      );
+      await context.save({ branch: false });
+
+      // Verify: resolve() should return exactly 2 messages (user + real assistant)
+      // The orphan feedback message should NOT appear as a separate message
+      const { messages } = await context.resolve({
+        renderer: new XmlRenderer(),
+      });
+
+      assert.strictEqual(
+        messages.length,
+        2,
+        `Expected 2 messages (user + assistant) but got ${messages.length}. ` +
+          `An orphan assistant message was created when lastAssistantMessage() ` +
+          `could not find an existing assistant message.`,
+      );
+
+      const assistantMsg = messages.find(
+        (m) => (m as { role: string }).role === 'assistant',
+      ) as
+        | { role: string; parts: { type: string; text?: string }[] }
+        | undefined;
+      assert.ok(assistantMsg, 'Should have an assistant message');
+
+      const textPart = assistantMsg.parts.find((p) => p.type === 'text');
+      assert.strictEqual(
+        textPart?.text,
+        'Here are your recent emails.',
+        'The assistant message should contain the real response, not the guardrail feedback',
+      );
+    });
+
+    it('should produce consistent assistant message after guardrail retry then real save', async () => {
+      const {
+        ContextEngine,
+        InMemoryContextStore,
+        XmlRenderer,
+        lastAssistantMessage,
+        assistantText,
+        user,
+      } = await import('@deepagents/context');
+
+      const store = new InMemoryContextStore();
+      const context = new ContextEngine({
+        userId: 'test-user',
+        chatId: 'consistency-test',
+        store,
+      });
+
+      context.set(user('Show me emails'));
+      await context.save();
+
+      // First guardrail failure — creates orphan
+      context.set(lastAssistantMessage('Failed attempt feedback'));
+      await context.save({ branch: false });
+
+      // Second guardrail failure — should reuse orphan's ID
+      context.set(lastAssistantMessage('Second failed attempt feedback'));
+      await context.save({ branch: false });
+
+      // Real assistant saved by chat.ts onFinish
+      context.set(
+        assistantText('Here is your data.', { id: 'final-assistant' }),
+      );
+      await context.save({ branch: false });
+
+      const { messages } = await context.resolve({
+        renderer: new XmlRenderer(),
+      });
+
+      assert.strictEqual(
+        messages.length,
+        2,
+        `Expected 2 messages after full guardrail cycle but got ${messages.length}. ` +
+          `Multiple guardrail retries should not accumulate orphan messages.`,
+      );
+    });
   });
 });
