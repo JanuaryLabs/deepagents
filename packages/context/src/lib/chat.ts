@@ -9,6 +9,7 @@ import {
   type UIMessage,
   createUIMessageStream,
   generateId,
+  isToolUIPart,
 } from 'ai';
 
 import type { AgentModel } from '@deepagents/agent';
@@ -151,11 +152,16 @@ export async function chat<CIn>(
       context.set(assistant(normalizedMessage));
       await context.save({ branch: false });
     },
-    onFinish: async ({ responseMessage }) => {
+    onFinish: async ({ responseMessage, isAborted }) => {
       const normalizedMessage = {
         ...responseMessage,
         id: assistantMsgId,
       } as UIMessage;
+
+      if (isAborted) {
+        normalizedMessage.parts = sanitizeAbortedParts(normalizedMessage.parts);
+      }
+
       const finalMetadata =
         await options?.finalAssistantMetadata?.(normalizedMessage);
       const finalMessage =
@@ -183,6 +189,38 @@ export async function chat<CIn>(
       }
     },
   });
+}
+
+const TERMINAL_TOOL_STATES = new Set([
+  'output-available',
+  'output-error',
+  'output-denied',
+]);
+
+function sanitizeAbortedParts(parts: UIMessage['parts']): UIMessage['parts'] {
+  const sanitized: UIMessage['parts'] = [];
+  for (const part of parts) {
+    if (!isToolUIPart(part)) {
+      sanitized.push(part);
+      continue;
+    }
+
+    if (TERMINAL_TOOL_STATES.has(part.state)) {
+      sanitized.push(part);
+      continue;
+    }
+
+    if (part.state === 'input-streaming') {
+      continue;
+    }
+
+    sanitized.push({
+      ...part,
+      state: 'output-error',
+      errorText: 'Cancelled by user',
+    } as (typeof sanitized)[number]);
+  }
+  return sanitized;
 }
 
 function formatChatError(error: unknown): string {

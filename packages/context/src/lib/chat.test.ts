@@ -1,9 +1,18 @@
-import { type UIMessage, generateId, simulateReadableStream } from 'ai';
+import {
+  type StreamTextResult,
+  type ToolSet,
+  type UIMessage,
+  type UIMessageChunk,
+  generateId,
+  isToolUIPart,
+  simulateReadableStream,
+} from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  type ChatAgentLike,
   ContextEngine,
   InMemoryContextStore,
   agent,
@@ -396,5 +405,302 @@ describe('chat() title generation', () => {
       { type: titlePart.type, data: titlePart.data },
       { type: 'data-chat-title', data: 'Stream Title' },
     );
+  });
+});
+
+function createChunkedStream(chunks: UIMessageChunk[]): ReadableStream {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+}
+
+function createAbortMockAgent(
+  context: ContextEngine,
+  uiChunks: UIMessageChunk[],
+): ChatAgentLike<Record<string, never>> {
+  const model = createMockModel();
+  return {
+    context,
+    model,
+    stream: async () =>
+      ({
+        toUIMessageStream: () => createChunkedStream(uiChunks),
+        totalUsage: Promise.resolve({
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        }),
+      }) as unknown as StreamTextResult<ToolSet, never>,
+  };
+}
+
+describe('chat() abort handling', () => {
+  it('saves text message and tracks usage on abort', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'abort-text-chat',
+      userId: 'test-user',
+    });
+
+    const mockAgent = createAbortMockAgent(context, [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'start-step' },
+      { type: 'text-start', id: 'text-1' },
+      { type: 'text-delta', id: 'text-1', delta: 'Let me search for' },
+      { type: 'text-end', id: 'text-1' },
+      { type: 'abort' },
+    ]);
+
+    const stream = await chat(mockAgent, [userMessage('search')]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('abort-text-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantEntry = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    );
+    assert.ok(assistantEntry, 'assistant message should be saved on abort');
+
+    const assistantMsg = assistantEntry.data as UIMessage;
+    const textPart = assistantMsg.parts.find(
+      (p: { type: string }) => p.type === 'text',
+    );
+    assert.ok(textPart, 'text part should be preserved');
+
+    const conversation = await store.getChat('abort-text-chat');
+    assert.ok(
+      conversation?.metadata?.usage,
+      'usage should still be tracked on abort',
+    );
+  });
+
+  it('converts input-available tool invocations to output-error on abort', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'abort-tool-chat',
+      userId: 'test-user',
+    });
+
+    const mockAgent = createAbortMockAgent(context, [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'start-step' },
+      { type: 'text-start', id: 'text-1' },
+      { type: 'text-delta', id: 'text-1', delta: 'Searching...' },
+      { type: 'text-end', id: 'text-1' },
+      {
+        type: 'tool-input-start',
+        toolCallId: 'tc-1',
+        toolName: 'search',
+      },
+      {
+        type: 'tool-input-delta',
+        toolCallId: 'tc-1',
+        inputTextDelta: '{"query":"test"}',
+      },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'tc-1',
+        toolName: 'search',
+        input: { query: 'test' },
+      },
+      { type: 'abort' },
+    ]);
+
+    const stream = await chat(mockAgent, [userMessage('search something')]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('abort-tool-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantMsg = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    )?.data as UIMessage;
+    assert.ok(assistantMsg);
+
+    const toolPart = assistantMsg.parts.find(isToolUIPart);
+    assert.ok(toolPart, 'tool part should exist');
+    assert.strictEqual(toolPart.state, 'output-error');
+    assert.strictEqual(toolPart.errorText, 'Cancelled by user');
+  });
+
+  it('removes input-streaming tool parts on abort', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'abort-streaming-chat',
+      userId: 'test-user',
+    });
+
+    const mockAgent = createAbortMockAgent(context, [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'start-step' },
+      {
+        type: 'tool-input-start',
+        toolCallId: 'tc-1',
+        toolName: 'search',
+      },
+      {
+        type: 'tool-input-delta',
+        toolCallId: 'tc-1',
+        inputTextDelta: '{"quer',
+      },
+      { type: 'abort' },
+    ]);
+
+    const stream = await chat(mockAgent, [userMessage('search something')]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('abort-streaming-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantMsg = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    )?.data as UIMessage;
+    assert.ok(assistantMsg);
+
+    const toolParts = assistantMsg.parts.filter(isToolUIPart);
+    assert.strictEqual(
+      toolParts.length,
+      0,
+      'input-streaming tool parts should be removed on abort',
+    );
+  });
+
+  it('converts approval-requested tool invocations to output-error on abort', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'abort-approval-chat',
+      userId: 'test-user',
+    });
+
+    const mockAgent = createAbortMockAgent(context, [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'start-step' },
+      {
+        type: 'tool-input-start',
+        toolCallId: 'tc-1',
+        toolName: 'dangerous-action',
+      },
+      {
+        type: 'tool-input-delta',
+        toolCallId: 'tc-1',
+        inputTextDelta: '{"confirm":true}',
+      },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'tc-1',
+        toolName: 'dangerous-action',
+        input: { confirm: true },
+      },
+      {
+        type: 'tool-approval-request',
+        toolCallId: 'tc-1',
+        approvalId: 'approval-1',
+      },
+      { type: 'abort' },
+    ]);
+
+    const stream = await chat(mockAgent, [userMessage('do the thing')]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('abort-approval-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantMsg = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    )?.data as UIMessage;
+    assert.ok(assistantMsg);
+
+    const toolPart = assistantMsg.parts.find(isToolUIPart);
+    assert.ok(toolPart, 'tool part should exist');
+    assert.strictEqual(toolPart.state, 'output-error');
+    assert.strictEqual(toolPart.errorText, 'Cancelled by user');
+  });
+
+  it('preserves completed tool parts alongside sanitized ones on abort', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'abort-mixed-chat',
+      userId: 'test-user',
+    });
+
+    const mockAgent = createAbortMockAgent(context, [
+      { type: 'start', messageId: 'msg-1' },
+      { type: 'start-step' },
+      {
+        type: 'tool-input-start',
+        toolCallId: 'tc-done',
+        toolName: 'lookup',
+      },
+      {
+        type: 'tool-input-delta',
+        toolCallId: 'tc-done',
+        inputTextDelta: '{"id":1}',
+      },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'tc-done',
+        toolName: 'lookup',
+        input: { id: 1 },
+      },
+      {
+        type: 'tool-output-available',
+        toolCallId: 'tc-done',
+        output: { name: 'Alice' },
+      },
+      { type: 'finish-step' },
+      { type: 'start-step' },
+      {
+        type: 'tool-input-start',
+        toolCallId: 'tc-pending',
+        toolName: 'search',
+      },
+      {
+        type: 'tool-input-delta',
+        toolCallId: 'tc-pending',
+        inputTextDelta: '{"q":"test"}',
+      },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'tc-pending',
+        toolName: 'search',
+        input: { q: 'test' },
+      },
+      { type: 'abort' },
+    ]);
+
+    const stream = await chat(mockAgent, [userMessage('lookup and search')]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('abort-mixed-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantMsg = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    )?.data as UIMessage;
+    assert.ok(assistantMsg);
+
+    const toolParts = assistantMsg.parts.filter(isToolUIPart);
+
+    assert.strictEqual(toolParts.length, 2, 'both tool parts should exist');
+
+    const completedTool = toolParts.find((p) => p.toolCallId === 'tc-done');
+    assert.ok(completedTool);
+    assert.strictEqual(completedTool.state, 'output-available');
+
+    const pendingTool = toolParts.find((p) => p.toolCallId === 'tc-pending');
+    assert.ok(pendingTool);
+    assert.strictEqual(pendingTool.state, 'output-error');
+    assert.strictEqual(pendingTool.errorText, 'Cancelled by user');
   });
 });
