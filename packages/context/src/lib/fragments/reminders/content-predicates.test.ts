@@ -1,4 +1,3 @@
-import type { UIMessage } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -21,11 +20,7 @@ import {
   user,
 } from '@deepagents/context';
 
-function getTextParts(message: UIMessage): string[] {
-  return message.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text);
-}
+import { getTextParts } from '../../text.ts';
 
 describe('contentIncludes', () => {
   it('fires when message contains a keyword', async () => {
@@ -191,6 +186,9 @@ describe('contentPattern', () => {
     const ctx = (content: string) => ({
       turn: 1,
       content,
+      branch: 'main' as const,
+      chat: { id: 'test', userId: 'u1', createdAt: 0, updatedAt: 0 },
+      messageCount: 1,
     });
 
     assert.strictEqual(predicate(ctx('deploy app')), true, 'first call');

@@ -46,7 +46,7 @@ When no skills match (score below threshold or unrelated content), the reminder 
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `skillsOrClassifier` | `SkillMetadata[] \| ISkillClassifier` | Array of skills or a custom classifier |
+| `skillsOrClassifier` | `SkillMetadata[] \| IClassifier<SkillMetadata>` | Array of skills or a custom classifier |
 | `options.topN` | `number` | Max results to return (default: `5`) |
 | `options.threshold` | `number` | Minimum score to include (default: `0`) |
 
@@ -67,16 +67,16 @@ Use the `skills()` fragment helper or `loadSkillMetadata()` from the [Skills](/d
 
 ## Custom Classifiers
 
-Implement `ISkillClassifier` to replace BM25 with your own matching logic:
+The classifier system is generic. `skillsReminder` accepts any `IClassifier<SkillMetadata>`, so you can replace BM25 with embeddings, an LLM call, or any other matching strategy.
 
 ```ts
-import { user, skillsReminder, type ISkillClassifier, type SkillMatch } from '@deepagents/context';
+import { user, skillsReminder, type IClassifier, type ClassifierMatch, type SkillMetadata } from '@deepagents/context';
 
-const classifier: ISkillClassifier = {
+const classifier: IClassifier<SkillMetadata> = {
   match(query, options) {
     // Your matching logic — embeddings, LLM-based, regex, etc.
     return [
-      { skill: mySkill, score: 0.99 },
+      { item: mySkill, score: 0.99 },
     ];
   },
 };
@@ -84,39 +84,48 @@ const classifier: ISkillClassifier = {
 user('anything', skillsReminder(classifier, { topN: 5 }));
 ```
 
-### ISkillClassifier Interface
+### IClassifier Interface
+
+`IClassifier<T>` is a generic interface exported from the package root. The skills module uses `IClassifier<SkillMetadata>` as its concrete type.
 
 ```ts
-interface ISkillClassifier {
-  match(query: string, options?: SkillClassifierOptions): SkillMatch[];
+interface IClassifier<T> {
+  match(query: string, options?: ClassifierOptions): ClassifierMatch<T>[];
 }
 
-interface SkillMatch {
-  skill: SkillMetadata;
+interface ClassifierMatch<T> {
+  item: T;
   score: number;
 }
+
+interface ClassifierOptions {
+  topN?: number;
+  threshold?: number;
+}
 ```
 
-## BM25SkillClassifier
+## BM25Classifier
 
-The default classifier uses TF-IDF via `tiny-tfidf`. It builds a corpus from skill names and descriptions, then ranks matches against the user's query.
+The default classifier uses TF-IDF via `tiny-tfidf`. It builds a corpus from item names and descriptions, then ranks matches against the query. It works with any type that has `name` and `description` fields.
 
 ```ts
-import { BM25SkillClassifier } from '@deepagents/context';
+import { BM25Classifier } from '@deepagents/context';
 
-const classifier = new BM25SkillClassifier(skills);
+const classifier = new BM25Classifier(skills);
 const matches = classifier.match('optimize SQL queries', { topN: 3 });
 ```
+
+When used with `skillsReminder`, this is equivalent to passing the skills array directly (which creates a `BM25Classifier<SkillMetadata>` internally).
 
 You can reuse a single classifier instance across multiple `skillsReminder()` calls to avoid rebuilding the corpus.
 
 ## Related Predicates
 
-Two predicates from the classifier module work with `when`-based conditional reminders:
+Two predicates from the classifier module work with `when`-based conditional reminders. See [Predicates](/docs/context/predicates) for full documentation.
 
 ### contentMatches
 
-Fires when the user's message matches any of the given topics via TF-IDF.
+Fires when the user's message matches any of the given topics via BM25 scoring.
 
 ```ts
 import { reminder, contentMatches } from '@deepagents/context';
@@ -130,12 +139,12 @@ engine.set(
 
 ### classifies
 
-Fires when a classifier returns any results for the user's message.
+Fires when a classifier returns any results for the user's message. Works with any `IClassifier<T>`.
 
 ```ts
-import { reminder, classifies, BM25SkillClassifier } from '@deepagents/context';
+import { reminder, classifies, BM25Classifier } from '@deepagents/context';
 
-const classifier = new BM25SkillClassifier(skills);
+const classifier = new BM25Classifier(skills);
 
 engine.set(
   reminder('Check available skills for this task', {

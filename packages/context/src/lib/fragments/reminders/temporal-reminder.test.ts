@@ -17,11 +17,7 @@ import {
   yearReminder,
 } from '@deepagents/context';
 
-function getTextParts(message: UIMessage): string[] {
-  return message.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text);
-}
+import { getTextParts } from '../../text.ts';
 
 function getLastUserMessage(messages: UIMessage[]): UIMessage {
   const lastUser = [...messages]

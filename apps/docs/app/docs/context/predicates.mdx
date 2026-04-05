@@ -88,6 +88,54 @@ contentPattern(/\b(SELECT|INSERT|UPDATE|DELETE)\b/i);
 // fires when user includes SQL keywords
 ```
 
+## Content Matching Predicates
+
+These predicates use BM25 text matching to determine relevance, offering more sophisticated matching than keyword or regex checks.
+
+### contentMatches(topics, options?)
+
+Fires when the user's message relates to any of the given topics, using BM25 scoring internally. Each topic string becomes a document in the corpus, and the user's message is scored against them.
+
+```ts
+import { reminder, contentMatches } from '@deepagents/context';
+
+engine.set(
+  reminder('Consider indexing strategies', {
+    when: contentMatches(['database optimization', 'query performance']),
+  }),
+);
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `threshold` | `number` | `0` | Minimum BM25 score to count as a match |
+
+### classifies(classifier, options?)
+
+Fires when the given classifier returns at least one result for the user's message. Works with any `IClassifier<T>` implementation, not just the built-in `BM25Classifier`.
+
+```ts
+import { reminder, classifies, BM25Classifier } from '@deepagents/context';
+
+const classifier = new BM25Classifier([
+  { name: 'auth', description: 'authentication and authorization' },
+  { name: 'data', description: 'database and data modeling' },
+]);
+
+engine.set(
+  reminder('Check related skills', {
+    when: classifies(classifier, { threshold: 0.1 }),
+  }),
+);
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `topN` | `number` | `5` | Maximum number of results the classifier returns |
+| `threshold` | `number` | `0` | Minimum score to count as a match |
+
+See [Skill Reminders](/docs/context/skill-reminders) for details on `IClassifier`, `BM25Classifier`, and building custom classifiers.
+
 ## Temporal Predicates
 
 Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. All return `true` on the first turn (when `lastMessageAt` is `undefined`).

@@ -160,7 +160,7 @@ const final = await new DeduplicatedProducer(
       { produce: async function*() { yield variations; } },
       adapter
     ),
-    { mode: 'exact' }
+    { strategy: 'exact' }
   ).toPairs();
 ```
 

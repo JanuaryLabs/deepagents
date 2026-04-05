@@ -119,7 +119,7 @@ const final = await new DeduplicatedProducer(
       { produce: async function* () { yield varied; } },
       adapter
     ),
-    { mode: 'sql' }
+    { strategy: 'sql-only' }
   ).toPairs();
 console.log(`Final dataset: ${final.length} validated pairs`);
 ```
@@ -188,7 +188,7 @@ console.log(`Augmented: ${augmented.length} pairs`);
 // Step 5: Deduplicate
 const final = await new DeduplicatedProducer(
     { produce: async function* () { yield augmented; } },
-    { mode: 'exact' }
+    { strategy: 'exact' }
   ).toPairs();
 console.log(`Final: ${final.length} unique pairs`);
 ```
@@ -240,7 +240,7 @@ console.log(`With variations: ${varied.length} pairs`);
 // Step 4: Deduplicate by question
 const final = await new DeduplicatedProducer(
     { produce: async function* () { yield varied; } },
-    { mode: 'exact' }
+    { strategy: 'exact' }
   ).toPairs();
 console.log(`Final: ${final.length} pairs`);
 ```
@@ -301,7 +301,7 @@ const final = await new DeduplicatedProducer(
       { produce: async function* () { yield varied; } },
       adapter
     ),
-    { mode: 'sql' }
+    { strategy: 'sql-only' }
   ).toPairs();
 
 console.log(`Final dataset: ${final.length} pairs`);
@@ -385,7 +385,7 @@ async function buildProductionDataset(adapter, options: {
   // Gate 3: Deduplication
   const final = await new DeduplicatedProducer(
       { produce: async function* () { yield filtered; } },
-      { mode: 'sql' }
+      { strategy: 'sql-only' }
     ).toPairs();
 
   // Report

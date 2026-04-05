@@ -16,7 +16,6 @@ import {
   isMessageFragment,
 } from './fragments.ts';
 import {
-  extractPlainText,
   getConditionalReminder,
   isConditionalReminder,
   resolveReminder,
@@ -39,6 +38,7 @@ import {
   type MessageData,
   type StoredChatData,
 } from './store/store.ts';
+import { extractPlainText } from './text.ts';
 
 /**
  * Result of resolving context - ready for AI SDK consumption.
@@ -83,22 +83,8 @@ function estimateMessageContent(data: unknown): string {
   return typeof data === 'string' ? data : JSON.stringify(data);
 }
 
-/**
- * Metadata about a chat.
- */
-export interface ChatMeta {
-  /** Unique chat identifier */
-  id: string;
-  /** User who owns this chat */
-  userId: string;
-  /** When the chat was created */
-  createdAt: number;
-  /** When the chat was last updated */
-  updatedAt: number;
-  /** Optional user-provided title */
-  title?: string;
-  /** Optional custom metadata */
-  metadata?: Record<string, unknown>;
+function isLanguageModelUsage(value: unknown): value is LanguageModelUsage {
+  return typeof value === 'object' && value !== null && 'totalTokens' in value;
 }
 
 /**
@@ -312,18 +298,8 @@ export class ContextEngine {
    * Get metadata for the current chat.
    * Returns null if the chat hasn't been initialized yet.
    */
-  public get chat(): ChatMeta | null {
-    if (!this.#chatData) {
-      return null;
-    }
-    return {
-      id: this.#chatData.id,
-      userId: this.#chatData.userId,
-      createdAt: this.#chatData.createdAt,
-      updatedAt: this.#chatData.updatedAt,
-      title: this.#chatData.title,
-      metadata: this.#chatData.metadata,
-    };
+  public get chat(): StoredChatData | null {
+    return this.#chatData;
   }
 
   /**
@@ -332,20 +308,30 @@ export class ContextEngine {
    */
   async #getChainContext(): Promise<{
     turn: number;
+    messageCount: number;
     lastMessageAt?: number;
     lastMessage?: UIMessage;
+    lastAssistantMessage?: UIMessage;
   }> {
     await this.#ensureInitialized();
 
     let turn = 0;
+    let messageCount = 0;
     let lastMessageAt: number | undefined;
     let lastMessage: UIMessage | undefined;
+    let lastAssistantMessage: UIMessage | undefined;
 
     if (this.#branch?.headMessageId) {
       const chain = await this.#store.getMessageChain(
         this.#branch.headMessageId,
       );
       for (const msg of chain) {
+        messageCount++;
+
+        if (msg.name === 'assistant') {
+          lastAssistantMessage = msg.data as UIMessage;
+        }
+
         if (msg.name !== 'user') {
           continue;
         }
@@ -357,10 +343,17 @@ export class ContextEngine {
     }
 
     for (const fragment of this.#pendingMessages) {
+      messageCount++;
       if (fragment.name === 'user') turn++;
     }
 
-    return { turn, lastMessageAt, lastMessage };
+    return {
+      turn,
+      messageCount,
+      lastMessageAt,
+      lastMessage,
+      lastAssistantMessage,
+    };
   }
 
   public async getTurnCount(): Promise<number> {
@@ -519,31 +512,44 @@ export class ContextEngine {
       if (lastUserIndex >= 0) {
         const lastUserFragment = this.#pendingMessages[lastUserIndex];
         if (lastUserFragment.codec) {
-          const { turn, lastMessageAt, lastMessage } =
-            await this.#getChainContext();
+          const {
+            turn,
+            messageCount,
+            lastMessageAt,
+            lastMessage,
+            lastAssistantMessage,
+          } = await this.#getChainContext();
           const original = lastUserFragment.codec.encode() as UIMessage & {
             role: 'user';
           };
           const plainText = extractPlainText(original);
+          const rawUsage = this.#chatData?.metadata?.usage;
+          const usage = isLanguageModelUsage(rawUsage) ? rawUsage : undefined;
+          const elapsed =
+            lastMessageAt !== undefined
+              ? Date.now() - lastMessageAt
+              : undefined;
+
+          const whenCtx = {
+            turn,
+            content: plainText,
+            lastMessageAt,
+            lastMessage,
+            chat: this.#chatData!,
+            usage,
+            branch: this.#branchName,
+            elapsed,
+            messageCount,
+            lastAssistantMessage,
+          };
+
           const firedReminders = conditionalReminders
             .map(getConditionalReminder)
-            .filter((config) =>
-              config.when({
-                turn,
-                content: plainText,
-                lastMessageAt,
-                lastMessage,
-              }),
-            );
+            .filter((config) => config.when(whenCtx));
 
           if (firedReminders.length > 0) {
             const reminders = firedReminders.flatMap((rem) => {
-              const resolved = resolveReminder(rem, {
-                content: plainText,
-                turn,
-                lastMessageAt,
-                lastMessage,
-              });
+              const resolved = resolveReminder(rem, whenCtx);
               if (!resolved) {
                 return [];
               }
@@ -949,7 +955,7 @@ export class ContextEngine {
    * ```
    */
   public async updateChat(
-    updates: Partial<Pick<ChatMeta, 'title' | 'metadata'>>,
+    updates: Partial<Pick<StoredChatData, 'title' | 'metadata'>>,
   ): Promise<void> {
     await this.#ensureInitialized();
 

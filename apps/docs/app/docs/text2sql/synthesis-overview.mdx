@@ -138,9 +138,17 @@ const filtered = new FilteredProducer(
   {
     successOnly: true,
     tables: ['orders', 'customers'], // Only pairs using these tables
+    dialect: 'postgresql',           // SQL dialect for table extraction via node-sql-parser
   }
 );
 ```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `successOnly` | `boolean` | `undefined` | Only include pairs where `success` is `true` |
+| `tables` | `string[]` | `undefined` | Only include pairs whose SQL references these tables |
+| `dialect` | `string` | `undefined` | SQL dialect passed to node-sql-parser for table extraction (e.g. `'postgresql'`, `'mysql'`, `'transactsql'`) |
+| `filter` | `(pair: ExtractedPair) => boolean` | `undefined` | Custom filter predicate |
 
 ### DeduplicatedProducer
 
@@ -151,9 +159,17 @@ import { DeduplicatedProducer, MessageExtractor } from '@deepagents/text2sql/syn
 
 const deduped = new DeduplicatedProducer(
   new MessageExtractor(messages),
-  { mode: 'sql' } // Dedupe by SQL only (ignore question variations)
+  {
+    strategy: 'sql-only', // Dedupe by SQL only (ignore question variations)
+    dialect: 'postgresql', // SQL dialect for node-sql-parser normalization
+  }
 );
 ```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `strategy` | `'exact' \| 'sql-only' \| 'question-only'` | `'exact'` | Deduplication strategy: `'exact'` compares both question and SQL, `'sql-only'` compares SQL only, `'question-only'` compares question only |
+| `dialect` | `string` | `undefined` | SQL dialect passed to node-sql-parser for SQL normalization during deduplication (e.g. `'postgresql'`, `'mysql'`, `'transactsql'`) |
 
 ## Composing Producers
 
@@ -168,7 +184,7 @@ const producer = new DeduplicatedProducer(
     ),
     { successOnly: true }
   ),
-  { mode: 'exact' }
+  { strategy: 'exact' }
 );
 
 const pairs = await producer.toPairs();

@@ -18,11 +18,7 @@ import {
   user,
 } from '@deepagents/context';
 
-function getTextParts(message: UIMessage): string[] {
-  return message.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text);
-}
+import { getTextParts } from '../../text.ts';
 
 async function useFakeTime<T>(
   iso: string,

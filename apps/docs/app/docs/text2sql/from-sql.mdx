@@ -168,7 +168,7 @@ const pairs = await new DeduplicatedProducer(
       new SqlExtractor(sqls, adapter),
       { successOnly: true }
     ),
-    { mode: 'sql' }
+    { strategy: 'sql-only' }
   ).toPairs();
 ```
 

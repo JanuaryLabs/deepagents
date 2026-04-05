@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { describe, it, mock } from 'node:test';
 
 import {
+  type WhenContext,
   afterTurn,
   and,
   dayChanged,
@@ -23,6 +24,17 @@ import {
   weekChanged,
   yearChanged,
 } from '@deepagents/context';
+
+function wctx(
+  partial: Partial<WhenContext> & { turn: number; content: string },
+): WhenContext {
+  return {
+    branch: 'main',
+    chat: { id: 'test-chat', userId: 'test-user', createdAt: 0, updatedAt: 0 },
+    messageCount: 0,
+    ...partial,
+  };
+}
 
 type UserReminderMetadataRecord = {
   id: string;
@@ -587,62 +599,62 @@ describe('reminder scheduling', () => {
   describe('when predicates', () => {
     it('everyNTurns fires on turns divisible by N', () => {
       const pred = everyNTurns(3);
-      assert.strictEqual(pred({ turn: 1, content: '' }), false);
-      assert.strictEqual(pred({ turn: 2, content: '' }), false);
-      assert.strictEqual(pred({ turn: 3, content: '' }), true);
-      assert.strictEqual(pred({ turn: 6, content: '' }), true);
-      assert.strictEqual(pred({ turn: 7, content: '' }), false);
+      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 6, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 7, content: '' })), false);
     });
 
     it('once fires only on turn 1', () => {
       const pred = once();
-      assert.strictEqual(pred({ turn: 1, content: '' }), true);
-      assert.strictEqual(pred({ turn: 2, content: '' }), false);
-      assert.strictEqual(pred({ turn: 10, content: '' }), false);
+      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 10, content: '' })), false);
     });
 
     it('firstN fires on first N turns', () => {
       const pred = firstN(3);
-      assert.strictEqual(pred({ turn: 1, content: '' }), true);
-      assert.strictEqual(pred({ turn: 3, content: '' }), true);
-      assert.strictEqual(pred({ turn: 4, content: '' }), false);
+      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 4, content: '' })), false);
     });
 
     it('afterTurn fires only after turn N', () => {
       const pred = afterTurn(5);
-      assert.strictEqual(pred({ turn: 5, content: '' }), false);
-      assert.strictEqual(pred({ turn: 6, content: '' }), true);
-      assert.strictEqual(pred({ turn: 10, content: '' }), true);
+      assert.strictEqual(pred(wctx({ turn: 5, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 6, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 10, content: '' })), true);
     });
 
     it('custom predicate', () => {
       const pred = ({ turn }: { turn: number; content: string }) => turn === 4;
-      assert.strictEqual(pred({ turn: 3, content: '' }), false);
-      assert.strictEqual(pred({ turn: 4, content: '' }), true);
-      assert.strictEqual(pred({ turn: 5, content: '' }), false);
+      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 4, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 5, content: '' })), false);
     });
 
     it('and() combines with AND logic', () => {
       const pred = and(everyNTurns(3), afterTurn(5));
-      assert.strictEqual(pred({ turn: 3, content: '' }), false);
-      assert.strictEqual(pred({ turn: 6, content: '' }), true);
-      assert.strictEqual(pred({ turn: 7, content: '' }), false);
-      assert.strictEqual(pred({ turn: 9, content: '' }), true);
+      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 6, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 7, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 9, content: '' })), true);
     });
 
     it('or() combines with OR logic', () => {
       const pred = or(once(), everyNTurns(5));
-      assert.strictEqual(pred({ turn: 1, content: '' }), true);
-      assert.strictEqual(pred({ turn: 2, content: '' }), false);
-      assert.strictEqual(pred({ turn: 5, content: '' }), true);
-      assert.strictEqual(pred({ turn: 10, content: '' }), true);
+      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 5, content: '' })), true);
+      assert.strictEqual(pred(wctx({ turn: 10, content: '' })), true);
     });
 
     it('not() inverts a predicate', () => {
       const pred = not(firstN(2));
-      assert.strictEqual(pred({ turn: 1, content: '' }), false);
-      assert.strictEqual(pred({ turn: 2, content: '' }), false);
-      assert.strictEqual(pred({ turn: 3, content: '' }), true);
+      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
+      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), true);
     });
   });
 
@@ -660,18 +672,23 @@ describe('reminder scheduling', () => {
     describe('dayChanged', () => {
       it('fires on first turn when lastMessageAt is undefined', () => {
         useFakeTime('2026-03-27T12:00:00Z', () => {
-          assert.strictEqual(dayChanged()({ turn: 1, content: '' }), true);
+          assert.strictEqual(
+            dayChanged()(wctx({ turn: 1, content: '' })),
+            true,
+          );
         });
       });
 
       it('does not fire when still the same day', () => {
         useFakeTime('2026-03-27T23:00:00Z', () => {
           assert.strictEqual(
-            dayChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-            }),
+            dayChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+              }),
+            ),
             false,
           );
         });
@@ -680,11 +697,13 @@ describe('reminder scheduling', () => {
       it('fires when the day has changed', () => {
         useFakeTime('2026-03-28T01:00:00Z', () => {
           assert.strictEqual(
-            dayChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T23:00:00Z').getTime(),
-            }),
+            dayChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T23:00:00Z').getTime(),
+              }),
+            ),
             true,
           );
         });
@@ -693,11 +712,13 @@ describe('reminder scheduling', () => {
       it('respects timezone for day boundary', () => {
         useFakeTime('2026-03-27T16:00:00Z', () => {
           assert.strictEqual(
-            dayChanged('Asia/Tokyo')({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T14:00:00Z').getTime(),
-            }),
+            dayChanged('Asia/Tokyo')(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T14:00:00Z').getTime(),
+              }),
+            ),
             true,
             'In Tokyo: now=2026-03-28 01:00, prev=2026-03-27 23:00 => day changed',
           );
@@ -708,18 +729,23 @@ describe('reminder scheduling', () => {
     describe('hourChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-03-27T12:00:00Z', () => {
-          assert.strictEqual(hourChanged()({ turn: 1, content: '' }), true);
+          assert.strictEqual(
+            hourChanged()(wctx({ turn: 1, content: '' })),
+            true,
+          );
         });
       });
 
       it('does not fire within the same hour', () => {
         useFakeTime('2026-03-27T12:45:00Z', () => {
           assert.strictEqual(
-            hourChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:10:00Z').getTime(),
-            }),
+            hourChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:10:00Z').getTime(),
+              }),
+            ),
             false,
           );
         });
@@ -728,11 +754,13 @@ describe('reminder scheduling', () => {
       it('fires when the hour has changed', () => {
         useFakeTime('2026-03-27T13:05:00Z', () => {
           assert.strictEqual(
-            hourChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
-            }),
+            hourChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
+              }),
+            ),
             true,
           );
         });
@@ -742,18 +770,23 @@ describe('reminder scheduling', () => {
     describe('monthChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-03-15T12:00:00Z', () => {
-          assert.strictEqual(monthChanged()({ turn: 1, content: '' }), true);
+          assert.strictEqual(
+            monthChanged()(wctx({ turn: 1, content: '' })),
+            true,
+          );
         });
       });
 
       it('does not fire within the same month', () => {
         useFakeTime('2026-03-28T12:00:00Z', () => {
           assert.strictEqual(
-            monthChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-01T12:00:00Z').getTime(),
-            }),
+            monthChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-01T12:00:00Z').getTime(),
+              }),
+            ),
             false,
           );
         });
@@ -762,11 +795,13 @@ describe('reminder scheduling', () => {
       it('fires when the month has changed', () => {
         useFakeTime('2026-04-01T00:05:00Z', () => {
           assert.strictEqual(
-            monthChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-31T23:55:00Z').getTime(),
-            }),
+            monthChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-31T23:55:00Z').getTime(),
+              }),
+            ),
             true,
           );
         });
@@ -776,18 +811,23 @@ describe('reminder scheduling', () => {
     describe('yearChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-06-15T12:00:00Z', () => {
-          assert.strictEqual(yearChanged()({ turn: 1, content: '' }), true);
+          assert.strictEqual(
+            yearChanged()(wctx({ turn: 1, content: '' })),
+            true,
+          );
         });
       });
 
       it('does not fire within the same year', () => {
         useFakeTime('2026-12-31T12:00:00Z', () => {
           assert.strictEqual(
-            yearChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-01-01T12:00:00Z').getTime(),
-            }),
+            yearChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-01-01T12:00:00Z').getTime(),
+              }),
+            ),
             false,
           );
         });
@@ -796,11 +836,13 @@ describe('reminder scheduling', () => {
       it('fires when the year has changed', () => {
         useFakeTime('2027-01-01T00:05:00Z', () => {
           assert.strictEqual(
-            yearChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-12-31T23:55:00Z').getTime(),
-            }),
+            yearChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-12-31T23:55:00Z').getTime(),
+              }),
+            ),
             true,
           );
         });
@@ -810,18 +852,23 @@ describe('reminder scheduling', () => {
     describe('seasonChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-06-15T12:00:00Z', () => {
-          assert.strictEqual(seasonChanged()({ turn: 1, content: '' }), true);
+          assert.strictEqual(
+            seasonChanged()(wctx({ turn: 1, content: '' })),
+            true,
+          );
         });
       });
 
       it('does not fire within the same season', () => {
         useFakeTime('2026-07-15T12:00:00Z', () => {
           assert.strictEqual(
-            seasonChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-06-15T12:00:00Z').getTime(),
-            }),
+            seasonChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-06-15T12:00:00Z').getTime(),
+              }),
+            ),
             false,
             'June and July are both Summer',
           );
@@ -831,11 +878,13 @@ describe('reminder scheduling', () => {
       it('fires when the season changes (Spring -> Summer)', () => {
         useFakeTime('2026-06-01T12:00:00Z', () => {
           assert.strictEqual(
-            seasonChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-05-31T12:00:00Z').getTime(),
-            }),
+            seasonChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-05-31T12:00:00Z').getTime(),
+              }),
+            ),
             true,
             'May is Spring, June is Summer',
           );
@@ -846,18 +895,23 @@ describe('reminder scheduling', () => {
     describe('weekChanged', () => {
       it('fires on first turn', () => {
         useFakeTime('2026-03-25T12:00:00Z', () => {
-          assert.strictEqual(weekChanged()({ turn: 1, content: '' }), true);
+          assert.strictEqual(
+            weekChanged()(wctx({ turn: 1, content: '' })),
+            true,
+          );
         });
       });
 
       it('does not fire within the same week', () => {
         useFakeTime('2026-03-26T12:00:00Z', () => {
           assert.strictEqual(
-            weekChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-24T12:00:00Z').getTime(),
-            }),
+            weekChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-24T12:00:00Z').getTime(),
+              }),
+            ),
             false,
             'Tue Mar 24 and Thu Mar 26 are same ISO week',
           );
@@ -867,11 +921,13 @@ describe('reminder scheduling', () => {
       it('fires when the week changes', () => {
         useFakeTime('2026-04-06T12:00:00Z', () => {
           assert.strictEqual(
-            weekChanged()({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-            }),
+            weekChanged()(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+              }),
+            ),
             true,
             'Mar 27 (Fri) and Apr 6 (Mon) are different ISO weeks',
           );
@@ -885,21 +941,25 @@ describe('reminder scheduling', () => {
           const pred = and(dayChanged(), afterTurn(3));
 
           assert.strictEqual(
-            pred({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-            }),
+            pred(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+              }),
+            ),
             false,
             'turn 2 + day changed => false (afterTurn(3) fails)',
           );
 
           assert.strictEqual(
-            pred({
-              turn: 4,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-            }),
+            pred(
+              wctx({
+                turn: 4,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
+              }),
+            ),
             true,
             'turn 4 + day changed => true',
           );
@@ -911,11 +971,13 @@ describe('reminder scheduling', () => {
           const pred = not(hourChanged());
 
           assert.strictEqual(
-            pred({
-              turn: 2,
-              content: '',
-              lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
-            }),
+            pred(
+              wctx({
+                turn: 2,
+                content: '',
+                lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
+              }),
+            ),
             false,
             'hour changed => not() inverts to false',
           );

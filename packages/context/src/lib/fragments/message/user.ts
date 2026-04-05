@@ -1,12 +1,20 @@
-import { type UIMessage, generateId, isTextUIPart } from 'ai';
+import { type LanguageModelUsage, type UIMessage, generateId } from 'ai';
 
 import type { ContextFragment, MessageFragment } from '../../fragments.ts';
+import type { StoredChatData } from '../../store/store.ts';
+import { extractPlainText } from '../../text.ts';
 
 export interface ReminderContext {
   content: string;
   turn?: number;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
+  chat?: StoredChatData;
+  usage?: LanguageModelUsage;
+  branch?: string;
+  elapsed?: number;
+  messageCount?: number;
+  lastAssistantMessage?: UIMessage;
 }
 
 export interface ReminderResolution {
@@ -23,6 +31,12 @@ export interface WhenContext {
   content: string;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
+  chat: StoredChatData;
+  usage?: LanguageModelUsage;
+  branch: string;
+  elapsed?: number;
+  messageCount: number;
+  lastAssistantMessage?: UIMessage;
 }
 
 export type WhenPredicate = (ctx: WhenContext) => boolean;
@@ -308,13 +322,6 @@ export function stripReminders(message: UIMessage): UIMessage {
   }
 
   return nextMessage;
-}
-
-export function extractPlainText(message: UIMessage): string {
-  return message.parts
-    .filter(isTextUIPart)
-    .map((part) => part.text)
-    .join(' ');
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
