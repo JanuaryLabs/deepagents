@@ -1,0 +1,25 @@
+{
+  "name": "@deepagents/terminal-bench",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "benchmarks/terminal-bench/src",
+  "projectType": "application",
+  "tags": ["scope:benchmark"],
+  "targets": {
+    "bench": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "PYTHONPATH=benchmarks/terminal-bench/shim harbor run -d terminal-bench/terminal-bench-2 --agent-import-path tbench_shim:TBenchAgent -n 1 -l 5",
+        "cwd": "{workspaceRoot}"
+      },
+      "configurations": {
+        "full": {
+          "command": "PYTHONPATH=benchmarks/terminal-bench/shim harbor run -d terminal-bench/terminal-bench-2 --agent-import-path tbench_shim:TBenchAgent -n 1 -k 5"
+        },
+        "single": {
+          "command": "PYTHONPATH=benchmarks/terminal-bench/shim harbor run -d terminal-bench/terminal-bench-2 --agent-import-path tbench_shim:TBenchAgent -n 1 -l 1"
+        }
+      }
+    }
+  }
+}
