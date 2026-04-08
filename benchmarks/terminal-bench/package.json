@@ -1,11 +1,11 @@
 {
   "name": "@deepagents/terminal-bench",
-  "version": "0.0.0",
+  "version": "0.35.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deepagents/context": "0.34.0",
-    "@deepagents/agent": "0.34.0",
+    "@deepagents/context": "0.35.0",
+    "@deepagents/agent": "0.35.0",
     "@ai-sdk/openai-compatible": "^2.0.37",
     "ai": "^6.0.141",
     "zod": "^3.25.76 || ^4.0.0"
