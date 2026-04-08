@@ -51,7 +51,7 @@ const text2sql = new Text2Sql({
       sqlserver.constraints(),
       sqlserver.rowCount(),
       sqlserver.columnStats(),
-      sqlserver.lowCardinality(),
+      sqlserver.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -94,7 +94,7 @@ const text2sql = new Text2Sql({
       sqlserver.constraints(),
       sqlserver.rowCount(),
       sqlserver.columnStats(),
-      sqlserver.lowCardinality(),
+      sqlserver.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -155,7 +155,7 @@ The following grounding functions are available for SQL Server. Import them from
 | `constraints()` | Maps foreign key relationships between tables |
 | `rowCount()` | Counts rows and classifies tables by size |
 | `columnStats()` | Collects min, max, null fraction using CONVERT for type-safe aggregation |
-| `lowCardinality()` | Detects columns with few distinct values using `SELECT DISTINCT TOP` |
+| `columnValues()` | Detects enum-like and low-cardinality columns using `SELECT DISTINCT TOP` |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

@@ -29,6 +29,8 @@ export class SqlServerInfoGrounding extends InfoGrounding {
       database: dbRows[0]?.db,
       details: {
         parameterPlaceholder: '@p1, @p2, @p3, ...',
+        aliasRule:
+          'When a table is aliased (FROM dbo.users AS users), always reference columns via the alias (users.id), never the schema-qualified name (dbo.users.id). SQL Server cannot resolve schema-qualified identifiers on aliased tables (error 4104).',
       },
     };
   }

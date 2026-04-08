@@ -138,7 +138,8 @@ const { model, calls } = createCapturingModel([
 Simulate streaming responses using V3 chunk protocol. Required for testing `streamText()`.
 
 ```ts
-import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
+import { simulateReadableStream } from 'ai';
+import { MockLanguageModelV3 } from 'ai/test';
 
 function createStreamingModel(text = 'response text') {
   return new MockLanguageModelV3({
@@ -320,7 +321,7 @@ new NoContentGeneratedError();
 4. **No `step-finish` at model level** — that's internal to AI SDK
 5. **`doGenerate` does NOT simulate `doStream`** — provide both if your code calls `streamText()`
 6. **`smoothStream()` hangs in tests** — bypass with `transform: () => new TransformStream()`
-7. **`totalUsage` returns `inputTokens`/`outputTokens`/`totalTokens`** — not `promptTokens`/`completionTokens`
+7. **`totalUsage` returns `inputTokens`/`outputTokens`/`totalTokens`** — the old `promptTokens`/`completionTokens` names no longer exist
 8. **All AI SDK error types extend `Error`** — so `instanceof Error` is `true` for all of them
 9. **`isInstance()` static methods use symbol markers** — prefer `ErrorClass.isInstance(err)` over `instanceof`
 10. **Build before running tests** — if tests import from package specifiers which resolve to `dist/`

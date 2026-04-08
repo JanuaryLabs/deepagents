@@ -9,13 +9,18 @@ import {
   afterTurn,
   and,
   assistantText,
+  contentIncludes,
   dayChanged,
   everyNTurns,
+  hint,
   hourChanged,
+  isConditionalReminder,
+  isFragment,
   once,
   reminder,
   stripReminders,
   user,
+  workflow,
 } from '@deepagents/context';
 
 import { getTextParts } from '../../text.ts';
@@ -616,6 +621,117 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
+  it('applies async when predicate that resolves to true', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'async-when-true',
+      userId: 'u1',
+    });
+
+    engine.set(
+      reminder('async-fired', {
+        when: async () => {
+          await new Promise((r) => setTimeout(r, 1));
+          return true;
+        },
+      }),
+      user('hello'),
+    );
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const text = getTextParts(messages[messages.length - 1]).join('');
+    assert.ok(
+      text.includes('async-fired'),
+      `Async predicate returning true should inject reminder. Got: ${text}`,
+    );
+  });
+
+  it('skips async when predicate that resolves to false', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'async-when-false',
+      userId: 'u1',
+    });
+
+    engine.set(
+      reminder('async-skipped', {
+        when: async () => {
+          await new Promise((r) => setTimeout(r, 1));
+          return false;
+        },
+      }),
+      user('hello'),
+    );
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const text = getTextParts(messages[messages.length - 1]).join('');
+    assert.ok(
+      !text.includes('async-skipped'),
+      `Async predicate returning false should skip reminder. Got: ${text}`,
+    );
+  });
+
+  it('resolves async ReminderText callback', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'async-text',
+      userId: 'u1',
+    });
+
+    engine.set(
+      reminder(
+        async () => {
+          await new Promise((r) => setTimeout(r, 1));
+          return 'fetched-from-api';
+        },
+        { when: once() },
+      ),
+      user('hello'),
+    );
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const text = getTextParts(messages[messages.length - 1]).join('');
+    assert.ok(
+      text.includes('fetched-from-api'),
+      `Async text callback should resolve and inject. Got: ${text}`,
+    );
+  });
+
+  it('composes async predicate with sync predicate via and()', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'async-and-sync',
+      userId: 'u1',
+    });
+
+    const asyncAlwaysTrue = async () => {
+      await new Promise((r) => setTimeout(r, 1));
+      return true;
+    };
+
+    engine.set(
+      reminder('mixed-combo', {
+        when: and(once(), asyncAlwaysTrue),
+      }),
+      user('hello'),
+    );
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const text = getTextParts(messages[messages.length - 1]).join('');
+    assert.ok(
+      text.includes('mixed-combo'),
+      `and(sync, async) should fire when both true. Got: ${text}`,
+    );
+  });
+
   it('applies dayChanged temporal predicate when day crosses between turns', async () => {
     await useFakeTime('2026-03-27T23:00:00Z', async () => {
       const store = new InMemoryContextStore();
@@ -729,6 +845,314 @@ describe('ContextEngine conditional reminders', () => {
       assert.ok(
         text.includes('new-hour'),
         `Hour changed reminder should fire. Got: ${text}`,
+      );
+    });
+  });
+
+  describe('fragment-based reminders', () => {
+    it('applies a conditional workflow fragment reminder when predicate fires', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-cond-workflow',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(
+          workflow({
+            task: 'Error recovery',
+            steps: ['Check error logs', 'Fix the query'],
+          }),
+          { when: everyNTurns(1) },
+        ),
+        user('my query failed'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const parts = getTextParts(messages[0]);
+
+      assert.ok(
+        parts.some((p) => p.includes('<workflow>')),
+        `Expected rendered workflow XML in message parts. Got: ${parts.join('|')}`,
+      );
+      assert.ok(
+        parts.some((p) => p.includes('Error recovery')),
+        `Expected workflow task in message. Got: ${parts.join('|')}`,
+      );
+    });
+
+    it('skips conditional fragment reminder when predicate returns false', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-cond-skip',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(
+          workflow({
+            task: 'Error recovery',
+            steps: ['Check logs'],
+          }),
+          { when: () => false },
+        ),
+        user('hello'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const text = getTextParts(messages[0]).join('');
+
+      assert.ok(
+        !text.includes('<workflow>'),
+        `Expected no workflow in message. Got: ${text}`,
+      );
+      assert.strictEqual(text, 'hello');
+    });
+
+    it('defaults to asPart: true for fragment reminders', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-aspart-default',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(hint('Check indexes'), { when: everyNTurns(1) }),
+        user('slow query'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const parts = getTextParts(messages[0]);
+
+      assert.strictEqual(
+        parts.length,
+        2,
+        'Fragment reminder should create a separate part',
+      );
+      assert.strictEqual(parts[0], 'slow query');
+      assert.ok(
+        parts[1].includes('Check indexes'),
+        `Second part should contain hint. Got: ${parts[1]}`,
+      );
+    });
+
+    it('respects explicit asPart: false override on fragment reminders', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-aspart-override',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(hint('inline hint'), { when: everyNTurns(1), asPart: false }),
+        user('hello'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const parts = getTextParts(messages[0]);
+
+      assert.strictEqual(
+        parts.length,
+        1,
+        'With asPart: false, reminder should be inline',
+      );
+      assert.ok(
+        parts[0].includes('inline hint'),
+        `Inline part should contain hint. Got: ${parts[0]}`,
+      );
+    });
+
+    it('applies immediate fragment reminder inside user()', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-immediate',
+        userId: 'u1',
+      });
+
+      engine.set(
+        user(
+          'hello',
+          reminder(
+            workflow({
+              task: 'Greet user',
+              steps: ['Say hi', 'Ask how they are'],
+            }),
+          ),
+        ),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const parts = getTextParts(messages[0]);
+
+      assert.ok(
+        parts.some((p) => p.includes('Greet user')),
+        `Expected workflow in message. Got: ${parts.join('|')}`,
+      );
+    });
+
+    it('composes fragment reminder with contentIncludes predicate', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-content-match',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(
+          workflow({
+            task: 'SQL error recovery',
+            steps: ['Read error message', 'Check schema', 'Fix query'],
+          }),
+          { when: contentIncludes(['error', 'fail']) },
+        ),
+        user('my query has an error'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const text = getTextParts(messages[0]).join('');
+
+      assert.ok(
+        text.includes('SQL error recovery'),
+        `Content-matching reminder should fire. Got: ${text}`,
+      );
+    });
+
+    it('does not fire fragment reminder when content does not match', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-content-miss',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(
+          workflow({
+            task: 'SQL error recovery',
+            steps: ['Read error message'],
+          }),
+          { when: contentIncludes(['error', 'fail']) },
+        ),
+        user('show me all users'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const text = getTextParts(messages[0]).join('');
+
+      assert.ok(
+        !text.includes('SQL error recovery'),
+        `Reminder should not fire for non-matching content. Got: ${text}`,
+      );
+    });
+
+    it('stripReminders works on fragment-based reminders', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-strip',
+        userId: 'u1',
+      });
+
+      engine.set(
+        reminder(workflow({ task: 'Strippable', steps: ['step1'] }), {
+          when: everyNTurns(1),
+        }),
+        user('hello'),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const userMsg = messages[0];
+      const textBefore = getTextParts(userMsg).join('');
+      assert.ok(textBefore.includes('Strippable'));
+
+      const stripped = stripReminders(userMsg);
+      const textAfter = getTextParts(stripped).join('');
+      assert.strictEqual(textAfter, 'hello');
+    });
+
+    it('conditional fragment reminder satisfies isFragment and isConditionalReminder', () => {
+      const frag = reminder(workflow({ task: 'Test', steps: ['s1'] }), {
+        when: everyNTurns(1),
+      });
+
+      assert.ok(
+        isFragment(frag),
+        'Conditional fragment reminder should satisfy isFragment()',
+      );
+      assert.ok(
+        isConditionalReminder(frag),
+        'Conditional fragment reminder should satisfy isConditionalReminder()',
+      );
+    });
+
+    it('stripReminders works on immediate fragment reminders inside user()', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'frag-imm-strip',
+        userId: 'u1',
+      });
+
+      engine.set(
+        user('hello', reminder(workflow({ task: 'Immediate', steps: ['s1'] }))),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const userMsg = messages[0];
+      const textBefore = getTextParts(userMsg).join('');
+      assert.ok(textBefore.includes('Immediate'));
+
+      const stripped = stripReminders(userMsg);
+      const textAfter = getTextParts(stripped).join('');
+      assert.strictEqual(textAfter, 'hello');
+    });
+
+    it('throws on empty fragment for immediate reminder', () => {
+      const emptyFragment = { name: 'empty', data: null } as any;
+      assert.throws(
+        () => reminder(emptyFragment),
+        /Reminder text must not be empty/,
+      );
+    });
+
+    it('throws on empty fragment for conditional reminder', () => {
+      const emptyFragment = { name: 'empty', data: null } as any;
+      assert.throws(
+        () => reminder(emptyFragment, { when: everyNTurns(1) }),
+        /Reminder text must not be empty/,
       );
     });
   });

@@ -49,6 +49,7 @@
     "---Cost Estimation---",
     "cost-estimation",
     "---Recipes---",
-    "recipes"
+    "recipes",
+    "fragment-serialization"
   ]
 }

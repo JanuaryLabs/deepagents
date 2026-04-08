@@ -105,6 +105,13 @@
     "dev": {
       "dependsOn": ["^build"]
     },
+    "test": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
     "lint": {
       "options": {
         "command": "eslint . --fix"

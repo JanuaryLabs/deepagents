@@ -37,7 +37,7 @@ const text2sql = new Text2Sql({
       postgres.constraints(),
       postgres.rowCount(),
       postgres.columnStats(),
-      postgres.lowCardinality(),
+      postgres.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -62,7 +62,7 @@ const text2sql = new Text2Sql({
       sqlite.constraints(),
       sqlite.rowCount(),
       sqlite.columnStats(),
-      sqlite.lowCardinality(),
+      sqlite.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -90,7 +90,7 @@ const text2sql = new Text2Sql({
       sqlserver.constraints(),
       sqlserver.rowCount(),
       sqlserver.columnStats(),
-      sqlserver.lowCardinality(),
+      sqlserver.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -267,12 +267,12 @@ columnStats()
 // Annotates columns with stats: { min, max, nullFraction }
 ```
 
-#### `lowCardinality()`
+#### `columnValues()`
 
-Identifies columns with few distinct values (like status, type, or category columns) and caches their values.
+Detects enum-like and low-cardinality columns (like status, type, or category columns) and caches their values.
 
 ```typescript
-lowCardinality()
+columnValues()
 // Annotates columns with kind: 'LowCardinality' and values: ['active', 'inactive', ...]
 ```
 
@@ -284,7 +284,7 @@ Groundings execute in the order you specify. Some groundings depend on others:
 2. **`views()`** can run independently
 3. **`info()`** can run independently
 4. **`indexes()`**, **`constraints()`**, **`rowCount()`** - run after `tables()`, annotate discovered tables
-5. **`columnStats()`**, **`lowCardinality()`** - run after `tables()`, annotate columns
+5. **`columnStats()`**, **`columnValues()`** - run after `tables()`, annotate columns
 
 ## Filtering Tables
 

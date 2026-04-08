@@ -30,7 +30,7 @@ const text2sql = new Text2Sql({
       sqlite.constraints(),
       sqlite.rowCount(),
       sqlite.columnStats(),
-      sqlite.lowCardinality(),
+      sqlite.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -59,7 +59,7 @@ const text2sql = new Text2Sql({
       sqlite.constraints(),
       sqlite.rowCount(),
       sqlite.columnStats(),
-      sqlite.lowCardinality(),
+      sqlite.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -97,7 +97,7 @@ const text2sql = new Text2Sql({
       sqlite.constraints(),
       sqlite.rowCount(),
       sqlite.columnStats(),
-      sqlite.lowCardinality(),
+      sqlite.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -144,7 +144,7 @@ The following grounding functions are available for SQLite. Import them from `@d
 | `constraints()` | Maps foreign keys using `PRAGMA foreign_key_list` |
 | `rowCount()` | Counts rows and classifies tables by size |
 | `columnStats()` | Collects min, max, null fraction for columns |
-| `lowCardinality()` | Detects columns with 20 or fewer distinct values |
+| `columnValues()` | Detects enum-like and low-cardinality columns |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

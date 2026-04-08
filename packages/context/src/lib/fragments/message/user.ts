@@ -1,6 +1,11 @@
 import { type LanguageModelUsage, type UIMessage, generateId } from 'ai';
 
-import type { ContextFragment, MessageFragment } from '../../fragments.ts';
+import {
+  type ContextFragment,
+  type MessageFragment,
+  isFragment,
+} from '../../fragments.ts';
+import { XmlRenderer } from '../../renderers/abstract.renderer.ts';
 import type { StoredChatData } from '../../store/store.ts';
 import { extractPlainText } from '../../text.ts';
 
@@ -22,9 +27,15 @@ export interface ReminderResolution {
   metadata?: Record<string, unknown>;
 }
 
-export type ReminderText =
+export type SyncReminderText =
   | string
   | ((ctx: ReminderContext) => string | ReminderResolution);
+
+export type ReminderText =
+  | string
+  | ((
+      ctx: ReminderContext,
+    ) => string | ReminderResolution | Promise<string | ReminderResolution>);
 
 export interface WhenContext {
   turn: number;
@@ -39,7 +50,7 @@ export interface WhenContext {
   lastAssistantMessage?: UIMessage;
 }
 
-export type WhenPredicate = (ctx: WhenContext) => boolean;
+export type WhenPredicate = (ctx: WhenContext) => boolean | Promise<boolean>;
 
 export function everyNTurns(n: number): WhenPredicate {
   return ({ turn }) => turn % n === 0;
@@ -57,16 +68,28 @@ export function afterTurn(n: number): WhenPredicate {
   return ({ turn }) => turn > n;
 }
 
-export function and(...predicates: WhenPredicate[]): WhenPredicate {
-  return (ctx) => predicates.every((p) => p(ctx));
+export type AsyncWhenPredicate = (ctx: WhenContext) => Promise<boolean>;
+
+export function and(...predicates: WhenPredicate[]): AsyncWhenPredicate {
+  return async (ctx) => {
+    for (const it of predicates) {
+      if (!(await it(ctx))) return false;
+    }
+    return true;
+  };
 }
 
-export function or(...predicates: WhenPredicate[]): WhenPredicate {
-  return (ctx) => predicates.some((p) => p(ctx));
+export function or(...predicates: WhenPredicate[]): AsyncWhenPredicate {
+  return async (ctx) => {
+    for (const it of predicates) {
+      if (await it(ctx)) return true;
+    }
+    return false;
+  };
 }
 
-export function not(predicate: WhenPredicate): WhenPredicate {
-  return (ctx) => !predicate(ctx);
+export function not(predicate: WhenPredicate): AsyncWhenPredicate {
+  return async (ctx) => !(await predicate(ctx));
 }
 
 export function contentIncludes(keywords: string[]): WhenPredicate {
@@ -174,7 +197,7 @@ export interface UserReminderOptions {
 }
 
 export interface UserReminder {
-  text: ReminderText;
+  text: SyncReminderText;
   asPart: boolean;
   metadata?: Record<string, unknown>;
 }
@@ -406,7 +429,7 @@ export function applyPartReminder(
 }
 
 export function resolveReminderText(
-  item: { text: ReminderText },
+  item: { text: SyncReminderText },
   ctx: ReminderContext,
 ): string {
   return resolveReminder(item, ctx)?.text ?? '';
@@ -427,7 +450,7 @@ function normalizeReminderResolution(
 }
 
 export function resolveReminder(
-  item: { text: ReminderText; metadata?: Record<string, unknown> },
+  item: { text: SyncReminderText; metadata?: Record<string, unknown> },
   ctx: ReminderContext,
 ): ReminderResolution | null {
   const resolvedText =
@@ -448,6 +471,24 @@ export function resolveReminder(
   return metadata ? { ...resolved, metadata } : resolved;
 }
 
+export async function resolveReminderAsync(
+  item: { text: ReminderText; metadata?: Record<string, unknown> },
+  ctx: ReminderContext,
+): Promise<ReminderResolution | null> {
+  const text = await (typeof item.text === 'function'
+    ? item.text(ctx)
+    : item.text);
+  const resolved = normalizeReminderResolution(text);
+  if (!resolved) return null;
+
+  const metadata =
+    item.metadata || resolved.metadata
+      ? { ...(item.metadata ?? {}), ...(resolved.metadata ?? {}) }
+      : undefined;
+
+  return metadata ? { ...resolved, metadata } : resolved;
+}
+
 export function mergeMessageMetadata(
   message: UIMessage,
   addedMetadata: Record<string, unknown>,
@@ -463,7 +504,7 @@ export function mergeMessageMetadata(
 export function applyReminderToMessage(
   message: UIMessage,
   item: {
-    text: ReminderText;
+    text: SyncReminderText;
     asPart: boolean;
     metadata?: Record<string, unknown>;
   },
@@ -501,16 +542,16 @@ export function mergeReminderMetadata(
  * @param options - Reminder representation options
  */
 export function reminder(
-  text: ReminderText,
+  text: SyncReminderText,
   options?: UserReminderOptions,
 ): UserReminder;
 /**
  * Create a conditional reminder fragment for use with `engine.set()`.
  *
- * Evaluated at `resolve()` time against the current turn count.
+ * Evaluated at `save()` time against the current turn context.
  * Only included in the last user message when the predicate returns true.
  *
- * @param text - Reminder text (must not be empty)
+ * @param text - Reminder text (must not be empty). Can be async.
  * @param options - Must include a `when` predicate
  *
  * @example
@@ -525,10 +566,58 @@ export function reminder(
   text: ReminderText,
   options: ConditionalReminderOptions,
 ): ContextFragment;
+/**
+ * Create an immediate reminder from a context fragment.
+ *
+ * The fragment is pre-rendered to XML and injected as reminder text.
+ * Defaults to `asPart: true` since fragments produce structured content.
+ *
+ * @param fragment - A context fragment to render as reminder text
+ * @param options - Reminder representation options
+ *
+ * @example
+ * ```ts
+ * context.set(
+ *   user('hello', reminder(workflow({ task: 'Error recovery', steps: ['Check logs'] }))),
+ * );
+ * ```
+ */
 export function reminder(
-  text: ReminderText,
+  fragment: ContextFragment,
+  options?: UserReminderOptions,
+): UserReminder;
+/**
+ * Create a conditional reminder from a context fragment.
+ *
+ * The fragment is pre-rendered to XML and injected as reminder text
+ * when the predicate fires. Defaults to `asPart: true`.
+ *
+ * @param fragment - A context fragment to render as reminder text
+ * @param options - Must include a `when` predicate
+ *
+ * @example
+ * ```ts
+ * engine.set(
+ *   reminder(
+ *     workflow({ task: 'Error recovery', steps: ['Check logs', 'Fix query'] }),
+ *     { when: contentIncludes(['error', 'fail']) },
+ *   ),
+ *   user('my query failed'),
+ * );
+ * ```
+ */
+export function reminder(
+  fragment: ContextFragment,
+  options: ConditionalReminderOptions,
+): ContextFragment;
+export function reminder(
+  textOrFragment: ReminderText | ContextFragment,
   options?: UserReminderOptions | ConditionalReminderOptions,
 ): UserReminder | ContextFragment {
+  const text = isFragment(textOrFragment)
+    ? new XmlRenderer().render([textOrFragment])
+    : textOrFragment;
+
   if (typeof text === 'string') {
     assertReminderText(text);
   }
@@ -536,6 +625,7 @@ export function reminder(
   if (options && 'when' in options && options.when) {
     return {
       name: 'reminder',
+      data: null,
       metadata: {
         reminder: {
           text,
@@ -547,7 +637,7 @@ export function reminder(
   }
 
   return {
-    text,
+    text: text as SyncReminderText,
     asPart: options?.asPart ?? false,
   };
 }

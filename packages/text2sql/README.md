@@ -5,7 +5,7 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 ## Features
 
 - **Natural Language to SQL** - Convert questions to validated, executable queries
-- **Multi-Database Support** - PostgreSQL, SQLite, and SQL Server adapters
+- **Multi-Database Support** - PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, and BigQuery adapters
 - **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
 - **Domain Knowledge** - Inject business terms, guardrails, and query patterns via fragments
 - **Conversational** - Multi-turn conversations with context persistence
@@ -29,10 +29,10 @@ import { InMemoryContextStore } from '@deepagents/context';
 import { Text2Sql } from '@deepagents/text2sql';
 import {
   Postgres,
+  columnValues,
   constraints,
   indexes,
   info,
-  lowCardinality,
   tables,
   views,
 } from '@deepagents/text2sql/postgres';
@@ -55,7 +55,7 @@ const text2sql = new Text2Sql({
       info(),
       indexes(),
       constraints(),
-      lowCardinality(),
+      columnValues(),
     ],
   }),
   store: new InMemoryContextStore(),
@@ -105,16 +105,16 @@ See [@deepagents/context](../context/README.md) for full fragment documentation.
 
 Control what schema metadata the AI receives:
 
-| Function           | Description                                    |
-| ------------------ | ---------------------------------------------- |
-| `tables()`         | Tables, columns, and primary keys              |
-| `views()`          | Database views                                 |
-| `info()`           | Database version and info                      |
-| `indexes()`        | Index information for performance hints        |
-| `constraints()`    | Foreign keys and other constraints             |
-| `rowCount()`       | Table sizes (tiny, small, medium, large, huge) |
-| `columnStats()`    | Min/max/null distribution for columns          |
-| `lowCardinality()` | Enum-like columns with distinct values         |
+| Function         | Description                                               |
+| ---------------- | --------------------------------------------------------- |
+| `tables()`       | Tables, columns, and primary keys                         |
+| `views()`        | Database views                                            |
+| `info()`         | Database version and info                                 |
+| `indexes()`      | Index information for performance hints                   |
+| `constraints()`  | Foreign keys and other constraints                        |
+| `rowCount()`     | Table sizes (tiny, small, medium, large, huge)            |
+| `columnStats()`  | Min/max/null distribution for columns                     |
+| `columnValues()` | Enum-like and low-cardinality columns with sampled values |
 
 ## Conversations
 
@@ -145,13 +145,15 @@ const followUp = await text2sql.chat(
 Full documentation available at [januarylabs.github.io/deepagents](https://januarylabs.github.io/deepagents/docs/text2sql):
 
 - [Getting Started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
-- [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/generate-sql)
+- [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/to-sql)
 - [Teach the System](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
 - [Build Conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)
 - [PostgreSQL](https://januarylabs.github.io/deepagents/docs/text2sql/postgresql)
 - [SQLite](https://januarylabs.github.io/deepagents/docs/text2sql/sqlite)
 - [SQL Server](https://januarylabs.github.io/deepagents/docs/text2sql/sqlserver)
+- [MySQL / MariaDB](https://januarylabs.github.io/deepagents/docs/text2sql/mysql)
+- [BigQuery](https://januarylabs.github.io/deepagents/docs/text2sql/bigquery)
 
 ## Repository
 

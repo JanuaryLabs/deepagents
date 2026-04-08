@@ -18,7 +18,7 @@ import {
 import {
   getConditionalReminder,
   isConditionalReminder,
-  resolveReminder,
+  resolveReminderAsync,
   user,
 } from './fragments/message/user.ts';
 import type { Models } from './models.generated.ts';
@@ -543,21 +543,22 @@ export class ContextEngine {
             lastAssistantMessage,
           };
 
-          const firedReminders = conditionalReminders
-            .map(getConditionalReminder)
-            .filter((config) => config.when(whenCtx));
+          const configs = conditionalReminders.map(getConditionalReminder);
+          const whenResults = await Promise.all(
+            configs.map((it) => it.when(whenCtx)),
+          );
+          const firedReminders = configs.filter((_, i) => whenResults[i]);
 
           if (firedReminders.length > 0) {
-            const reminders = firedReminders.flatMap((rem) => {
-              const resolved = resolveReminder(rem, whenCtx);
-              if (!resolved) {
-                return [];
-              }
-
+            const resolvedOrNull = await Promise.all(
+              firedReminders.map((it) => resolveReminderAsync(it, whenCtx)),
+            );
+            const reminders = resolvedOrNull.flatMap((resolved, i) => {
+              if (!resolved) return [];
               return [
                 {
                   text: resolved.text,
-                  asPart: rem.asPart,
+                  asPart: firedReminders[i].asPart,
                   metadata: resolved.metadata,
                 },
               ];

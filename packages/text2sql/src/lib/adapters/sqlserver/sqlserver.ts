@@ -65,7 +65,7 @@ const SQL_SERVER_ERROR_MAP: Record<string, { type: string; hint: string }> = {
   },
   '4104': {
     type: 'INVALID_COLUMN',
-    hint: 'Columns must be qualified with table aliases when ambiguous. Double-check join aliases.',
+    hint: 'A column reference could not be bound. If the table is aliased (e.g. FROM dbo.users AS users), use the alias for columns (users.id), not the schema-qualified name (dbo.users.id).',
   },
   '1934': {
     type: 'CONSTRAINT_ERROR',
@@ -313,15 +313,6 @@ export class SqlServer extends Adapter {
         continue;
       }
     }
-  }
-
-  /**
-   * @deprecated Primary keys are now handled via constraints grounding.
-   * This method is kept for backward compatibility but does nothing.
-   */
-  async #annotatePrimaryKeys(_tables: Table[]) {
-    // Primary keys are now derived from constraints, not stored on columns.
-    // See ConstraintGrounding for the new approach.
   }
 
   async #annotateIndexes(tables: Table[]) {

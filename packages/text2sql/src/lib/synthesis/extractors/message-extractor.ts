@@ -1,8 +1,4 @@
-import {
-  type UIMessage,
-  getToolOrDynamicToolName,
-  isToolOrDynamicToolUIPart,
-} from 'ai';
+import { type UIMessage, getToolName, isToolUIPart } from 'ai';
 
 import { type ExtractedPair, PairProducer } from '../types.ts';
 import {
@@ -50,11 +46,11 @@ export class MessageExtractor extends PairProducer {
 
       if (message.role === 'assistant' && lastUserMessage) {
         for (const part of message.parts) {
-          if (!isToolOrDynamicToolUIPart(part)) {
+          if (!isToolUIPart(part)) {
             continue;
           }
 
-          if (getToolOrDynamicToolName(part) !== toolName) {
+          if (getToolName(part) !== toolName) {
             continue;
           }
 

@@ -18,6 +18,7 @@
     "@nx/node": "21.6.4",
     "@nx/react": "^21.6.4",
     "@nx/vite": "21.6.4",
+    "@nx/vitest": "^22.6.4",
     "@nx/web": "21.6.4",
     "@react-router/dev": "^7.13.1",
     "@rivet-dev/agent-os-common": "^0.0.260331072558",
@@ -81,6 +82,7 @@
     "packages/*",
     "apps/**",
     "applets/*",
+    "benchmarks/*",
     ".evals-sdk-it"
   ],
   "nx": {

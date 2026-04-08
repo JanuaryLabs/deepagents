@@ -41,7 +41,7 @@ const text2sql = new Text2Sql({
       postgres.constraints(),
       postgres.rowCount(),
       postgres.columnStats(),
-      postgres.lowCardinality(),
+      postgres.columnValues(),
     ],
   }),
   history: new InMemoryHistory(),
@@ -100,7 +100,7 @@ The following grounding functions are available for PostgreSQL. Import them from
 | `constraints()` | Maps foreign key relationships and other constraints |
 | `rowCount()` | Counts rows and classifies tables by size (tiny, small, medium, large, huge) |
 | `columnStats()` | Collects min, max, null fraction for numeric/date columns |
-| `lowCardinality()` | Detects columns with 20 or fewer distinct values |
+| `columnValues()` | Detects native ENUM types and low-cardinality columns |
 
 See [Grounding](/docs/text2sql/grounding) for detailed configuration options.
 

@@ -1,10 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import {
-  type UIMessage,
-  getToolOrDynamicToolName,
-  isTextUIPart,
-  isToolOrDynamicToolUIPart,
-} from 'ai';
+import { type UIMessage, getToolName, isTextUIPart, isToolUIPart } from 'ai';
 import dedent from 'dedent';
 import z from 'zod';
 
@@ -203,11 +198,11 @@ export abstract class BaseContextualExtractor extends PairProducer {
     includeFailures: boolean,
   ): Promise<void> {
     for (const part of message.parts) {
-      if (!isToolOrDynamicToolUIPart(part)) {
+      if (!isToolUIPart(part)) {
         continue;
       }
 
-      if (getToolOrDynamicToolName(part) !== toolName) {
+      if (getToolName(part) !== toolName) {
         continue;
       }
 

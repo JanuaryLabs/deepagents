@@ -16,11 +16,8 @@
       }
     },
     "test": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["build"],
       "options": {
-        "command": "node --test --test-concurrency=1 --no-warnings",
-        "cwd": "{projectRoot}"
+        "command": "node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/context.xml"
       }
     }
   }

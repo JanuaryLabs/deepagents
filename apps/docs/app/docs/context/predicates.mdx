@@ -24,6 +24,12 @@ interface WhenContext {
   content: string;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
+  chat: StoredChatData;
+  usage?: LanguageModelUsage;
+  branch: string;
+  elapsed?: number;
+  messageCount: number;
+  lastAssistantMessage?: UIMessage;
 }
 ```
 
@@ -33,6 +39,12 @@ interface WhenContext {
 | `content` | Plain text of the user message |
 | `lastMessageAt` | Timestamp of the last persisted user message |
 | `lastMessage` | The last persisted user `UIMessage` (with metadata) |
+| `chat` | Full `StoredChatData` object (id, userId, metadata, timestamps) |
+| `usage` | Accumulated `LanguageModelUsage` from `chat.metadata.usage` |
+| `branch` | Active branch name (e.g. `"main"`) |
+| `elapsed` | Milliseconds since the last persisted user message |
+| `messageCount` | Total message count across all roles |
+| `lastAssistantMessage` | The last persisted assistant `UIMessage` |
 
 ## Turn-Based Predicates
 
@@ -212,7 +224,7 @@ and(
 
 ## Custom Predicates
 
-A predicate is any function with the signature `(ctx: WhenContext) => boolean`:
+A predicate is any function with the signature `(ctx: WhenContext) => boolean | Promise<boolean>`:
 
 ```ts
 import { reminder, type WhenPredicate } from '@deepagents/context';
@@ -226,6 +238,46 @@ engine.set(
   reminder('User is likely at work — keep responses professional', {
     when: businessHours,
   }),
+);
+```
+
+Predicates can be async for cases like external API checks or LLM classifiers:
+
+```ts
+const isHighPriority: WhenPredicate = async (ctx) => {
+  const priority = await classifyPriority(ctx.content);
+  return priority === 'high';
+};
+```
+
+### Fragment Composition
+
+`reminder()` accepts any `ContextFragment` as its first argument. The fragment is pre-rendered to XML and injected as reminder text when the predicate fires.
+
+```ts
+import { reminder, workflow, hint, contentIncludes } from '@deepagents/context';
+
+// Inject a workflow as a reminder when the user mentions errors
+engine.set(
+  reminder(
+    workflow({
+      task: 'Error recovery',
+      steps: ['Read error message', 'Check schema', 'Fix query'],
+    }),
+    { when: contentIncludes(['error', 'fail']) },
+  ),
+  user('my query failed'),
+);
+
+// Works with any fragment type
+engine.set(
+  reminder(hint('Check indexes for slow queries'), { when: contentIncludes(['slow']) }),
+  user('this query is slow'),
+);
+
+// Immediate fragment reminders (no predicate)
+engine.set(
+  user('hello', reminder(workflow({ task: 'Greet', steps: ['Say hi'] }))),
 );
 ```
 

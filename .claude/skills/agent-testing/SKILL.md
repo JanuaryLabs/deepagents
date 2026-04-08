@@ -9,7 +9,8 @@ description: 'Write tests for AI agent code using MockLanguageModelV3 from ai/te
 
 - **Runner**: Node.js built-in (`node:test`). Run: `node --test path/to/test.ts`
 - **Assertions**: `import assert from 'node:assert'`
-- **Mocks**: `import { MockLanguageModelV3, simulateReadableStream } from 'ai/test'`
+- **Mocks**: `import { MockLanguageModelV3 } from 'ai/test'`
+- **Stream simulation**: `import { simulateReadableStream } from 'ai'`
 - **Build before test**: If tests import from package specifiers (e.g., `@scope/pkg`), build the package first
 - **Import rule**: Use package specifiers in test files, not relative source paths — avoids type mismatches with private class members
 

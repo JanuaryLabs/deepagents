@@ -634,27 +634,27 @@ describe('reminder scheduling', () => {
       assert.strictEqual(pred(wctx({ turn: 5, content: '' })), false);
     });
 
-    it('and() combines with AND logic', () => {
+    it('and() combines with AND logic', async () => {
       const pred = and(everyNTurns(3), afterTurn(5));
-      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 6, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 7, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 9, content: '' })), true);
+      assert.strictEqual(await pred(wctx({ turn: 3, content: '' })), false);
+      assert.strictEqual(await pred(wctx({ turn: 6, content: '' })), true);
+      assert.strictEqual(await pred(wctx({ turn: 7, content: '' })), false);
+      assert.strictEqual(await pred(wctx({ turn: 9, content: '' })), true);
     });
 
-    it('or() combines with OR logic', () => {
+    it('or() combines with OR logic', async () => {
       const pred = or(once(), everyNTurns(5));
-      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 5, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 10, content: '' })), true);
+      assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), true);
+      assert.strictEqual(await pred(wctx({ turn: 2, content: '' })), false);
+      assert.strictEqual(await pred(wctx({ turn: 5, content: '' })), true);
+      assert.strictEqual(await pred(wctx({ turn: 10, content: '' })), true);
     });
 
-    it('not() inverts a predicate', () => {
+    it('not() inverts a predicate', async () => {
       const pred = not(firstN(2));
-      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), true);
+      assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), false);
+      assert.strictEqual(await pred(wctx({ turn: 2, content: '' })), false);
+      assert.strictEqual(await pred(wctx({ turn: 3, content: '' })), true);
     });
   });
 
@@ -662,11 +662,18 @@ describe('reminder scheduling', () => {
     function useFakeTime<T>(iso: string, fn: () => T): T {
       mock.timers.enable({ apis: ['Date'] });
       mock.timers.setTime(new Date(iso).getTime());
+      let result: T;
       try {
-        return fn();
-      } finally {
+        result = fn();
+      } catch (e) {
         mock.timers.reset();
+        throw e;
       }
+      if (result instanceof Promise) {
+        return result.finally(() => mock.timers.reset()) as T;
+      }
+      mock.timers.reset();
+      return result;
     }
 
     describe('dayChanged', () => {
@@ -936,12 +943,12 @@ describe('reminder scheduling', () => {
     });
 
     describe('composition', () => {
-      it('composes dayChanged with afterTurn', () => {
-        useFakeTime('2026-03-28T12:00:00Z', () => {
+      it('composes dayChanged with afterTurn', async () => {
+        await useFakeTime('2026-03-28T12:00:00Z', async () => {
           const pred = and(dayChanged(), afterTurn(3));
 
           assert.strictEqual(
-            pred(
+            await pred(
               wctx({
                 turn: 2,
                 content: '',
@@ -953,7 +960,7 @@ describe('reminder scheduling', () => {
           );
 
           assert.strictEqual(
-            pred(
+            await pred(
               wctx({
                 turn: 4,
                 content: '',
@@ -966,12 +973,12 @@ describe('reminder scheduling', () => {
         });
       });
 
-      it('composes hourChanged with not()', () => {
-        useFakeTime('2026-03-27T13:05:00Z', () => {
+      it('composes hourChanged with not()', async () => {
+        await useFakeTime('2026-03-27T13:05:00Z', async () => {
           const pred = not(hourChanged());
 
           assert.strictEqual(
-            pred(
+            await pred(
               wctx({
                 turn: 2,
                 content: '',

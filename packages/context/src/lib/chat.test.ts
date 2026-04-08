@@ -14,9 +14,13 @@ import { describe, it } from 'node:test';
 import {
   type ChatAgentLike,
   ContextEngine,
+  type Guardrail,
   InMemoryContextStore,
   agent,
+  assistant,
   chat,
+  fail,
+  pass,
   staticChatTitle,
 } from '@deepagents/context';
 
@@ -702,5 +706,294 @@ describe('chat() abort handling', () => {
     assert.ok(pendingTool);
     assert.strictEqual(pendingTool.state, 'output-error');
     assert.strictEqual(pendingTool.errorText, 'Cancelled by user');
+  });
+});
+
+describe('chat() abort signal integration', () => {
+  it('aborts mid-stream via AbortController and persists the partial message', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'signal-abort-chat',
+      userId: 'test-user',
+    });
+
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start', id: 'text-1' },
+            { type: 'text-delta', id: 'text-1', delta: 'Hello' },
+            { type: 'text-delta', id: 'text-1', delta: ' world' },
+            { type: 'text-delta', id: 'text-1', delta: ' more' },
+            { type: 'text-delta', id: 'text-1', delta: ' text' },
+            { type: 'text-delta', id: 'text-1', delta: ' here' },
+            { type: 'text-end', id: 'text-1' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage: testUsage,
+            },
+          ],
+        }),
+        rawCall: { rawPrompt: undefined, rawSettings: {} },
+      }),
+    });
+
+    const controller = new AbortController();
+    const chatAgent = agent({ name: 'assistant', context, model });
+
+    let chunksSeen = 0;
+    const stream = await chat(chatAgent, [userMessage('test')], {
+      abortSignal: controller.signal,
+      transform: () =>
+        new TransformStream({
+          transform(chunk, ctrl) {
+            ctrl.enqueue(chunk);
+            if (++chunksSeen >= 3) controller.abort();
+          },
+        }),
+    });
+
+    try {
+      await drain(stream);
+    } catch {
+      // AbortError is expected when signal fires mid-stream
+    }
+
+    assert.ok(chunksSeen >= 3, 'at least 3 chunks should process before abort');
+
+    const branch = await store.getActiveBranch('signal-abort-chat');
+    assert.ok(
+      branch?.headMessageId,
+      'branch should exist after mid-stream abort',
+    );
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantEntry = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    );
+    assert.ok(
+      assistantEntry,
+      'assistant message should be saved on mid-stream abort',
+    );
+  });
+
+  it('stops guardrail retry loop when abort signal fires during retry setup', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-abort-chat',
+      userId: 'test-user',
+    });
+
+    const controller = new AbortController();
+    let doStreamCalls = 0;
+
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        if (doStreamCalls >= 2) {
+          controller.abort();
+        }
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `text-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `text-${doStreamCalls}`,
+                delta: 'bad content',
+              },
+              { type: 'text-end', id: `text-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    const alwaysFailGuardrail: Guardrail = {
+      id: 'always-fail',
+      name: 'always-fail',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          return fail('Content not allowed');
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [alwaysFailGuardrail],
+    });
+
+    const stream = await chat(chatAgent, [userMessage('test')], {
+      abortSignal: controller.signal,
+      transform: () => new TransformStream(),
+    });
+
+    try {
+      await drain(stream);
+    } catch {
+      // AbortError expected when signal fires during guardrail retry
+    }
+
+    assert.strictEqual(
+      doStreamCalls,
+      2,
+      'should call doStream exactly twice: initial + retry that triggers abort',
+    );
+  });
+
+  it('completes without hanging when signal is pre-aborted', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'pre-abort-chat',
+      userId: 'test-user',
+    });
+
+    const model = new MockLanguageModelV3({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start', id: 'text-1' },
+            { type: 'text-delta', id: 'text-1', delta: 'Hello' },
+            { type: 'text-end', id: 'text-1' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage: testUsage,
+            },
+          ],
+        }),
+        rawCall: { rawPrompt: undefined, rawSettings: {} },
+      }),
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const chatAgent = agent({ name: 'assistant', context, model });
+
+    try {
+      const stream = await chat(chatAgent, [userMessage('test')], {
+        abortSignal: controller.signal,
+        transform: () => new TransformStream(),
+      });
+      await drain(stream);
+    } catch {
+      // Expected: AI SDK throws AbortError with pre-aborted signal
+    }
+
+    const branch = await store.getActiveBranch('pre-abort-chat');
+    assert.ok(branch?.headMessageId, 'user message should be persisted');
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const names = chain.map((entry: { name: string }) => entry.name);
+    assert.ok(names.includes('user'), 'user message should exist in chain');
+  });
+});
+
+describe('convertToModelMessages strips incomplete tool calls', () => {
+  it('filters input-available tool parts from messages sent to model', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'strip-tools-chat',
+      userId: 'test-user',
+    });
+
+    const firstMsg = userMessage('call the search tool');
+
+    const corruptAssistant: UIMessage = {
+      id: generateId(),
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'Let me search for that.' },
+        {
+          type: 'tool-invocation',
+          toolCallId: 'orphan-tc',
+          toolName: 'search',
+          state: 'input-available',
+          input: { query: 'test' },
+        } as UIMessage['parts'][number],
+      ],
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model: createMockModel(),
+    });
+
+    const firstStream = await chat(chatAgent, [firstMsg], {
+      transform: () => new TransformStream(),
+    });
+    await drain(firstStream);
+
+    context.set(assistant(corruptAssistant));
+    await context.save({ branch: false });
+
+    let capturedPrompt: unknown[] = [];
+    const capturingModel = new MockLanguageModelV3({
+      doStream: async (options: any) => {
+        capturedPrompt = options.prompt;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 'text-1' },
+              { type: 'text-delta', id: 'text-1', delta: 'response' },
+              { type: 'text-end', id: 'text-1' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    const secondAgent = agent({
+      name: 'assistant',
+      context,
+      model: capturingModel,
+    });
+
+    const secondStream = await chat(
+      secondAgent,
+      [firstMsg, corruptAssistant, userMessage('what did you find?')],
+      { transform: () => new TransformStream() },
+    );
+    await drain(secondStream);
+
+    assert.ok(
+      capturedPrompt.length > 0,
+      'model should have been called with a non-empty prompt',
+    );
+
+    const hasOrphanedToolCall = capturedPrompt.some((msg: any) => {
+      if (msg.role !== 'assistant') return false;
+      return msg.content?.some(
+        (part: any) =>
+          part.type === 'tool-call' && part.toolCallId === 'orphan-tc',
+      );
+    });
+
+    assert.strictEqual(
+      hasOrphanedToolCall,
+      false,
+      'input-available tool call should be stripped from model messages',
+    );
   });
 });

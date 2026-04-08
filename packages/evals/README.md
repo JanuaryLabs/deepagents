@@ -40,7 +40,7 @@ The package is organized into subpath exports for granular imports:
 | `@deepagents/evals/store`      | SQLite run persistence                  |
 | `@deepagents/evals/engine`     | Eval engine with concurrency and events |
 | `@deepagents/evals/comparison` | Run diffing and regression detection    |
-| `@deepagents/evals/reporters`  | Console reporter                        |
+| `@deepagents/evals/reporters`  | Console and file reporters              |
 
 ## Dataset
 
@@ -78,6 +78,43 @@ dataset('./large-dataset.jsonl')
 | `shuffle()`  | Eager — buffers all, randomizes order        |
 | `sample(n)`  | Eager — buffers all, picks n random elements |
 | `toArray()`  | Consumes into a plain array                  |
+
+### Dataset Utilities
+
+The top-level package also exports dataset helpers for Hugging Face ingestion and deterministic record selection:
+
+```typescript
+import {
+  dataset,
+  filterRecordsByIndex,
+  hf,
+  parseRecordSelection,
+  pickFromArray,
+} from '@deepagents/evals';
+
+const rows = dataset(
+  hf({
+    dataset: 'openai/gsm8k',
+    config: 'main',
+    split: 'test',
+    rows: 50,
+  }),
+);
+
+const { indexes } = parseRecordSelection('1,3-5');
+const sampled = pickFromArray(await rows.toArray(), indexes);
+
+for await (const row of filterRecordsByIndex(rows, indexes)) {
+  console.log(row);
+}
+```
+
+| Utility                                 | Description                                                |
+| --------------------------------------- | ---------------------------------------------------------- |
+| `hf(options)`                           | Stream rows directly from the Hugging Face datasets server |
+| `parseRecordSelection(spec)`            | Parse `1,3-5` style selectors into zero-based indexes      |
+| `pickFromArray(items, indexes)`         | Apply a parsed selection to an in-memory array             |
+| `filterRecordsByIndex(source, indexes)` | Apply a parsed selection to an async dataset stream        |
 
 ## Scorers
 
@@ -213,6 +250,33 @@ consoleReporter(emitter, {
   threshold: 0.5,
 });
 ```
+
+## File Reporters
+
+Persist run output in machine-readable or shareable formats:
+
+```typescript
+import {
+  csvReporter,
+  htmlReporter,
+  jsonReporter,
+  markdownReporter,
+} from '@deepagents/evals/reporters';
+
+const reporters = [
+  jsonReporter({ outputDir: '.evals/reports', pretty: true }),
+  csvReporter({ outputDir: '.evals/reports' }),
+  markdownReporter({ outputDir: '.evals/reports' }),
+  htmlReporter({ outputDir: '.evals/reports' }),
+];
+```
+
+| Reporter             | Output                                                |
+| -------------------- | ----------------------------------------------------- |
+| `jsonReporter()`     | Writes per-case `.jsonl` plus a final summary `.json` |
+| `csvReporter()`      | Writes a flat case-by-case CSV file                   |
+| `markdownReporter()` | Writes a Markdown summary with per-case scores        |
+| `htmlReporter()`     | Writes a shareable HTML report with summary tables    |
 
 ## License
 

@@ -1,5 +1,5 @@
-import { stepCountIs } from 'ai';
-import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
+import { simulateReadableStream, stepCountIs } from 'ai';
+import { MockLanguageModelV3 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 

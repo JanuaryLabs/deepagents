@@ -298,15 +298,6 @@ export class Postgres extends Adapter {
     }
   }
 
-  /**
-   * @deprecated Primary keys are now handled via constraints grounding.
-   * This method is kept for backward compatibility but does nothing.
-   */
-  async #annotatePrimaryKeys(_tables: Table[]) {
-    // Primary keys are now derived from constraints, not stored on columns.
-    // See ConstraintGrounding for the new approach.
-  }
-
   async #annotateIndexes(tables: Table[]) {
     if (!tables.length) {
       return;

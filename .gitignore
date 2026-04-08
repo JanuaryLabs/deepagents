@@ -93,3 +93,5 @@ agent-sandbox-test
 .evals-sdk-it
 .playwright-mcp/
 harvard-metrics
+runs
+test-results/

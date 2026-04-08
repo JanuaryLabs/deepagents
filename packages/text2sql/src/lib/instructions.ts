@@ -177,7 +177,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
       prefer:
         'Full table names as aliases (users AS users). Descriptive column aliases (COUNT(*) AS total_count).',
       never:
-        'Abbreviated aliases (u, oi) or positional aliases (t1, t2, a, b).',
+        'Abbreviated aliases (u, oi) or positional aliases (t1, t2, a, b). Schema-qualified column references on aliased tables (e.g. dbo.users.id when table is aliased) — always use the alias (users.id).',
     }),
     styleGuide({
       prefer:
