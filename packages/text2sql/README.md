@@ -23,9 +23,10 @@ Requires Node.js LTS (20+).
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
 import pg from 'pg';
 
-import { InMemoryContextStore } from '@deepagents/context';
+import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
 import { Text2Sql } from '@deepagents/text2sql';
 import {
   Postgres,
@@ -33,6 +34,7 @@ import {
   constraints,
   indexes,
   info,
+  rowCount,
   tables,
   views,
 } from '@deepagents/text2sql/postgres';
@@ -41,24 +43,37 @@ const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+const store = new InMemoryContextStore();
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints(),
+    rowCount(),
+    columnValues(),
+  ],
+});
+
 const text2sql = new Text2Sql({
   version: 'v1',
-  model: groq('gpt-oss-20b'),
-  adapter: new Postgres({
-    execute: async (sql) => {
-      const result = await pool.query(sql);
-      return result.rows;
-    },
-    grounding: [
-      tables(),
-      views(),
-      info(),
-      indexes(),
-      constraints(),
-      columnValues(),
-    ],
-  }),
-  store: new InMemoryContextStore(),
+  model: groq('openai/gpt-oss-20b'),
+  filesystem: new InMemoryFs(),
+  adapter,
+  context: (...fragments) => {
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-123',
+      userId: 'user-456',
+    });
+    engine.set(...fragments);
+    return engine;
+  },
 });
 
 // Generate SQL
@@ -72,14 +87,31 @@ Text2SQL works with any model provider supported by the [Vercel AI SDK](https://
 
 ## Fragments
 
-Inject domain knowledge using fragments from `@deepagents/context` to improve query accuracy. Pass instructions via the constructor:
+Inject domain knowledge using fragments from `@deepagents/context` inside the
+`context` factory you pass to `Text2Sql`. Those fragments affect `chat()`
+sessions. If you need direct SQL generation with extra fragments, use the
+lower-level `toSql({ fragments })` helper exported from `@deepagents/text2sql`.
 
 ```typescript
-import { example, guardrail, hint, term } from '@deepagents/context';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  example,
+  guardrail,
+  hint,
+  term,
+} from '@deepagents/context';
 
-const text2sql = new Text2Sql({
-  // ... other config
-  instructions: [
+const store = new InMemoryContextStore();
+
+const context = (...fragments) => {
+  const engine = new ContextEngine({
+    store,
+    chatId: 'chat-123',
+    userId: 'user-456',
+  });
+
+  engine.set(
     term('MRR', 'monthly recurring revenue'),
     hint('Always exclude test accounts with email ending in @test.com'),
     guardrail({
@@ -91,8 +123,11 @@ const text2sql = new Text2Sql({
       question: 'show me churned customers',
       answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
     }),
-  ],
-});
+    ...fragments,
+  );
+
+  return engine;
+};
 ```
 
 **Domain fragments** (11 types): `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`, `glossary`.
@@ -118,26 +153,40 @@ Control what schema metadata the AI receives:
 
 ## Conversations
 
-Build multi-turn conversations with context:
+`chat()` persists history through the `ContextEngine` returned by your `context` factory. Reuse the same store, `chatId`, and `userId` to continue the same thread:
 
 ```typescript
-const chatId = 'chat-123';
-const userId = 'user-456';
-
-const stream = await text2sql.chat(
-  [{ role: 'user', content: 'Show me orders from last month' }],
-  { chatId, userId },
-);
+const stream = await text2sql.chat([
+  { role: 'user', content: 'Show me orders from last month' },
+]);
 
 for await (const chunk of stream) {
   // handle streaming response
 }
 
-// Continue the conversation with the same chatId
-const followUp = await text2sql.chat(
-  [{ role: 'user', content: 'Now filter to only completed ones' }],
-  { chatId, userId },
-);
+// Continue the same conversation
+const followUp = await text2sql.chat([
+  { role: 'user', content: 'Now filter to only completed ones' },
+]);
+```
+
+## Direct SQL Generation with Extra Fragments
+
+```typescript
+import { term } from '@deepagents/context';
+import { toSql } from '@deepagents/text2sql';
+
+const result = await toSql({
+  input: 'Show ARR by plan',
+  adapter,
+  model: groq('openai/gpt-oss-20b'),
+  fragments: [
+    ...(await adapter.introspect()),
+    term('ARR', 'annual recurring revenue'),
+  ],
+});
+
+console.log(result.sql);
 ```
 
 ## Documentation

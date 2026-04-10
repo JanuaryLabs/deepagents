@@ -24,7 +24,6 @@ import {
   DepthEvolver,
   // Generators
   PersonaGenerator,
-  TeachingsGenerator,
   // Decorators
   ValidatedProducer,
   FilteredProducer,
@@ -72,13 +71,13 @@ const pairs = await new SchemaSynthesizer(adapter, {
 
 ### Full Bootstrap Pipeline
 
-Complete pipeline with personas, teachings, evolution, and validation:
+Complete pipeline with personas, manual teachings, evolution, and validation:
 
 ```typescript
+import { hint, term } from '@deepagents/context';
 import {
   SchemaSynthesizer,
   PersonaGenerator,
-  TeachingsGenerator,
   BreadthEvolver,
   DepthEvolver,
   ValidatedProducer,
@@ -86,10 +85,11 @@ import {
 } from '@deepagents/text2sql/synthesis';
 
 // Step 1: Generate supporting artifacts
-const [personas, teachings] = await Promise.all([
-  new PersonaGenerator(adapter, { count: 5 }).generate(),
-  new TeachingsGenerator(adapter).generate(),
-]);
+const personas = await new PersonaGenerator(adapter, { count: 5 }).generate();
+const teachings = [
+  term('ARR', 'annual recurring revenue'),
+  hint("Exclude sandbox accounts where account_type = 'test'"),
+];
 
 // Step 2: Generate baseline pairs
 const baseline = await new SchemaSynthesizer(adapter, {
@@ -312,10 +312,10 @@ console.log(`Final dataset: ${final.length} pairs`);
 **Use case**: Production-ready pipeline with validation, filtering, and quality checks.
 
 ```typescript
+import { hint, term } from '@deepagents/context';
 import {
   SchemaSynthesizer,
   PersonaGenerator,
-  TeachingsGenerator,
   BreadthEvolver,
   DepthEvolver,
   ValidatedProducer,
@@ -331,10 +331,13 @@ async function buildProductionDataset(adapter, options: {
 
   // Phase 1: Setup
   console.log('Phase 1: Generating personas and teachings...');
-  const [personas, teachings] = await Promise.all([
-    new PersonaGenerator(adapter, { count: 5 }).generate(),
-    new TeachingsGenerator(adapter).generate(),
-  ]);
+  const personas = await new PersonaGenerator(adapter, {
+    count: 5,
+  }).generate();
+  const teachings = [
+    term('ARR', 'annual recurring revenue'),
+    hint("Exclude sandbox accounts where account_type = 'test'"),
+  ];
 
   // Phase 2: Baseline generation
   console.log('Phase 2: Generating baseline pairs...');
@@ -430,7 +433,7 @@ Use this guide to choose components:
 | Generator | Use When | Effect |
 |-----------|----------|--------|
 | `PersonaGenerator` | Want realistic user questions | Personas for SchemaSynthesizer |
-| `TeachingsGenerator` | Want domain-aware questions | Business rules for synthesis |
+| Manual teachings array | Want domain-aware questions | Business rules for synthesis |
 
 ### When to use each decorator
 

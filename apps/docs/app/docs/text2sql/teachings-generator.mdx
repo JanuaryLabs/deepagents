@@ -1,314 +1,66 @@
 ---
 title: Teachings Generator
-description: Generate domain-specific teachings from database schema
+description: Current guidance for building schema-aware teaching bundles
 ---
 
-The `TeachingsGenerator` analyzes your database schema to automatically generate domain-specific teachings - structured knowledge items that improve SQL generation accuracy. These teachings include vocabulary, patterns, guardrails, and examples grounded in your actual schema.
+The current public Text2SQL package does not export a `TeachingsGenerator` class
+or a `text2sql.teach()` convenience method. If you want schema-aware teaching
+bundles today, use one of the supported patterns below.
 
-## Basic Usage
+## Option 1: Build a Manual Teaching Bundle
+
+Create a fragment array with the domain terms, hints, guardrails, and examples
+you want to keep stable:
 
 ```typescript
-import { TeachingsGenerator } from '@deepagents/text2sql/synthesis';
+import { example, guardrail, hint, term } from '@deepagents/context';
 
-const generator = new TeachingsGenerator(adapter, {
-  context: 'E-commerce database tracking orders and inventory'
-});
-
-const teachings = await generator.generate();
-// Returns 3-10 high-value teachables (terms, hints, guardrails, etc.)
+const teachings = [
+  term('NPL', 'non-performing loan - loan past due 90+ days'),
+  hint("Always exclude accounts where account_type = 'test'"),
+  guardrail({
+    rule: 'Never expose full account numbers',
+    reason: 'Sensitive financial data',
+    action: 'Return masked or aggregated results instead',
+  }),
+  example({
+    question: 'show me delinquent loans by region',
+    answer: `SELECT region, COUNT(*) AS delinquent_loans
+FROM loans
+WHERE days_past_due >= 30
+GROUP BY region
+ORDER BY delinquent_loans DESC`,
+  }),
+];
 ```
 
-## How It Works
+Use this array in your `context(...fragments)` factory for `chat()`, or pass it
+to the lower-level `toSql({ fragments })` helper for direct SQL generation.
 
-`TeachingsGenerator` examines your database schema to create relevant, high-impact teachables:
+## Option 2: Feed Teachings into SchemaSynthesizer
 
-1. Introspects schema (tables, columns, relationships, constraints)
-2. Analyzes table/column names to infer domain vocabulary
-3. Identifies potential guardrails (large tables, sensitive data)
-4. Detects common patterns and relationships
-5. Generates 3-10 teachables prioritizing:
-   - Guardrails for safety and performance
-   - Clarifications for ambiguous terms
-   - Hints for best practices
-   - Domain terminology
-
-The generator produces teachings that are automatically added to your Text2SQL instance to guide query generation.
-
-## Configuration Options
+If you are generating synthetic training data, `SchemaSynthesizer` accepts a
+`teachings` array directly:
 
 ```typescript
-interface TeachingsGeneratorOptions {
-  /** Additional domain context to guide generation */
-  context?: string;
-  /** Model to use for generation */
-  model?: AgentModel;
-}
-```
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
-### Domain Context
-
-Provide business context to improve teaching quality:
-
-```typescript
-// Without context - relies purely on schema
-const teachings = await new TeachingsGenerator(adapter).generate();
-
-// With context - generates more relevant teachings
-const teachings = await new TeachingsGenerator(adapter, {
-  context: `Our database tracks e-commerce orders.
-  - Active customers are those who ordered in the last 90 days
-  - We exclude test accounts with email ending in @test.com
-  - Revenue should exclude cancelled and refunded orders`
-}).generate();
-```
-
-### Custom Model
-
-Override the default model:
-
-```typescript
-import { groq } from '@ai-sdk/groq';
-
-const teachings = await new TeachingsGenerator(adapter, {
-  context: 'Healthcare patient records',
-  model: groq('llama-3.3-70b-versatile')
-}).generate();
-```
-
-## Retry Handling
-
-The `generate()` method includes automatic retry logic for transient errors:
-
-```typescript
-// Retries up to 3 times (default)
-const teachings = await generator.generate();
-
-// Custom retry count
-const teachings = await generator.generate(5);
-```
-
-Retryable errors include:
-- Parse errors (malformed output)
-- Schema validation failures
-- "No object generated" errors
-- AI provider errors (rate limits, timeouts)
-
-Non-retryable errors (thrown immediately):
-- Authentication failures
-- Invalid schema format
-- Network connection errors
-
-## Using with SchemaSynthesizer
-
-Generate training pairs with domain knowledge:
-
-```typescript
-import {
-  TeachingsGenerator,
-  SchemaSynthesizer,
-  PersonaGenerator,
-} from '@deepagents/text2sql/synthesis';
-
-// Generate teachings
-const teachingsGen = new TeachingsGenerator(adapter, {
-  context: 'SaaS subscription and usage tracking database'
-});
-const teachings = await teachingsGen.generate();
-
-// Generate personas
-const personaGen = new PersonaGenerator(adapter, { count: 5 });
-const personas = await personaGen.generate();
-
-// Generate pairs with teachings and personas
 const pairs = await new SchemaSynthesizer(adapter, {
   count: 10,
   complexity: 'medium',
-  personas: personas,
-  teachings: teachings  // Guides SQL generation
+  teachings,
 }).toPairs();
 ```
 
-## Example Output
+## Suggested Workflow
 
-For an e-commerce database, generated teachings might include:
+1. Start with a small manual bundle based on real product terminology.
+2. Test it against `chat()` or the low-level `toSql({ fragments })` helper.
+3. Refine vague or noisy teachings before reusing them in synthesis pipelines.
+4. Promote stable bundles into recipe files once they prove useful.
 
-```typescript
-[
-  {
-    type: 'guardrail',
-    rule: 'Avoid unbounded scans on orders table - always include date range filter',
-    reason: 'Performance - orders table contains millions of rows',
-    action: 'Ask user for timeframe if not specified'
-  },
-  {
-    type: 'hint',
-    text: 'Exclude test accounts with email ending in @test.com from all metrics'
-  },
-  {
-    type: 'term',
-    name: 'active customer',
-    definition: 'customer who placed an order in the last 90 days'
-  },
-  {
-    type: 'clarification',
-    when: 'user asks for "revenue"',
-    ask: 'Do you want gross revenue or net revenue (excluding refunds/cancellations)?',
-    reason: 'Revenue can mean different things for different analyses'
-  },
-  {
-    type: 'quirk',
-    issue: 'order_total includes shipping and tax',
-    workaround: 'Use order_subtotal for product revenue only'
-  },
-  {
-    type: 'example',
-    question: 'show top selling products',
-    answer: `SELECT p.product_name, COUNT(oi.order_id) as order_count
-FROM products p
-JOIN order_items oi ON p.product_id = oi.product_id
-JOIN orders o ON oi.order_id = o.order_id
-WHERE o.status NOT IN ('cancelled', 'refunded')
-  AND o.created_at >= CURRENT_DATE - INTERVAL '90 days'
-GROUP BY p.product_id, p.product_name
-ORDER BY order_count DESC
-LIMIT 10`,
-    note: 'Excludes cancelled/refunded orders and focuses on recent history'
-  }
-]
-```
+## What Changed
 
-## Integration with Text2SQL
-
-Use `text2sql.teach()` for automatic teaching (recommended):
-
-```typescript
-// Automatic: generates and applies teachings
-await text2sql.teach(
-  'Our database tracks e-commerce orders. Active customers ordered in last 90 days.'
-);
-
-// Manual: generate teachings separately
-const generator = new TeachingsGenerator(adapter, {
-  context: 'E-commerce database'
-});
-const teachings = await generator.generate();
-
-// Apply manually
-text2sql.instruct(...teachings);
-```
-
-The automatic `teach()` method handles:
-- Schema introspection
-- Teaching generation
-- Application to Text2SQL instance
-- Formatting for system prompt
-
-## Full Pipeline Example
-
-Generate comprehensive training dataset with teachings:
-
-```typescript
-import {
-  TeachingsGenerator,
-  PersonaGenerator,
-  SchemaSynthesizer,
-  DepthEvolver,
-  BreadthEvolver,
-} from '@deepagents/text2sql/synthesis';
-
-// 1. Generate teachings
-const teachingsGen = new TeachingsGenerator(adapter, {
-  context: `Financial services database.
-  - NPL = non-performing loan (90+ days past due)
-  - Always exclude test accounts (account_type = 'test')
-  - Basis points: 1% = 100 bps`
-});
-const teachings = await teachingsGen.generate();
-
-// 2. Generate personas
-const personaGen = new PersonaGenerator(adapter, { count: 8 });
-const personas = await personaGen.generate();
-
-// 3. Generate base pairs
-const basePairs = await new SchemaSynthesizer(adapter, {
-  count: 5,
-  complexity: ['low', 'medium', 'hard'],
-  personas: personas,
-  teachings: teachings
-}).toPairs();
-console.log(`Base pairs: ${basePairs.length}`);
-
-// 4. Evolve in depth (make questions harder)
-const depthEvolved = await new DepthEvolver(basePairs, adapter, {
-    count: 2  // 2 harder versions per question
-  }).toPairs();
-console.log(`Depth evolved: ${depthEvolved.length}`);
-
-// 5. Evolve in breadth (paraphrase)
-const breadthEvolved = await new BreadthEvolver([...basePairs, ...depthEvolved], {
-    count: 3  // 3 paraphrases per question
-  }).toPairs();
-console.log(`Breadth evolved: ${breadthEvolved.length}`);
-
-const allPairs = [...basePairs, ...depthEvolved, ...breadthEvolved];
-console.log(`Total dataset: ${allPairs.length} pairs`);
-```
-
-## Teaching Types Generated
-
-The generator produces these teachable types (in priority order):
-
-1. **Guardrails** - Safety and performance boundaries
-   - Large table scan warnings
-   - Sensitive data protection
-   - Query complexity limits
-
-2. **Hints** - Always-apply rules
-   - Test account exclusions
-   - Default date ranges
-   - Preferred join patterns
-
-3. **Clarifications** - When to ask users for more info
-   - Ambiguous metrics (revenue, active, conversion)
-   - Time period specifications
-   - Aggregation level preferences
-
-4. **Terms** - Domain vocabulary
-   - Business acronyms and jargon
-   - Domain-specific concepts
-   - Canonical values and their meanings
-
-5. **Examples** - Common query patterns
-   - Frequently asked questions
-   - Complex join patterns
-   - Aggregation examples
-
-6. **Quirks** - Data edge cases and workarounds
-   - Column format issues
-   - Calculation gotchas
-   - Schema anomalies
-
-## Best Practices
-
-1. **Provide rich context** - The more domain context you provide, the better the teachings
-2. **Review generated teachings** - Spot-check output to ensure relevance and accuracy
-3. **Combine with manual teachings** - Auto-generated + manually curated = comprehensive
-4. **Iterate** - Regenerate teachings as your schema evolves
-5. **Use retry parameter** - Set higher retry count for production pipelines
-
-## Related Documentation
-
-- [Teach the System](/docs/text2sql/teach-the-system) - Comprehensive guide to all teachable types
-- [Persona Generator](/docs/text2sql/persona-generator) - Generate user personas for diverse questions
-- [From Schema](/docs/text2sql/from-schema) - Using teachings with SchemaSynthesizer
-
-## Comparison: Manual vs Generated
-
-| Aspect | Manual Teaching | Generated Teaching |
-|--------|----------------|-------------------|
-| Precision | High - you define exact rules | Medium - inferred from schema |
-| Coverage | Low - only what you write | Medium - covers common patterns |
-| Effort | High - requires domain expertise | Low - automated |
-| Best For | Business-critical rules, edge cases | Bootstrapping, domain vocabulary |
-
-**Recommendation**: Use both. Generate teachings for baseline knowledge, then supplement with manual teachings for critical business rules and edge cases.
+Older docs referenced a `TeachingsGenerator` class and `text2sql.teach()`
+method. Those surfaces are not part of the current public API, so the supported
+workflow is manual teaching bundles plus synthesis-time `teachings` injection.

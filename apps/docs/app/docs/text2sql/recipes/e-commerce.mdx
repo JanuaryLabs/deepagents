@@ -15,9 +15,9 @@ import {
   hint,
   quirk,
   term,
-} from '@deepagents/text2sql';
+} from '@deepagents/context';
 
-text2sql.instruct(
+const ecommerceRecipe = [
   // Terms
   term(
     'AOV',
@@ -126,8 +126,11 @@ text2sql.instruct(
           ORDER BY lifetime_value DESC
           LIMIT 100`,
   }),
-);
+];
 ```
+
+Spread `...ecommerceRecipe` into your `context(...fragments)` factory for
+`chat()`, or append it to low-level `toSql({ fragments })` calls.
 
 ## Teachables Breakdown
 

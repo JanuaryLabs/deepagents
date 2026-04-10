@@ -3,7 +3,9 @@ title: Generate SQL
 description: Convert natural language to SQL queries without execution
 ---
 
-The `toSql()` method generates SQL queries from natural language without executing them. It's ideal for previewing queries, generating code, or integrating with existing query execution pipelines.
+The high-level `Text2Sql.toSql()` method generates SQL without executing it. It
+uses cached schema fragments from `index()`, runs the SQL generation agent, and
+returns the final SQL string after adapter formatting and validation.
 
 ## Basic Usage
 
@@ -11,144 +13,94 @@ The `toSql()` method generates SQL queries from natural language without executi
 const sql = await text2sql.toSql('Show me top 10 customers by revenue');
 
 console.log(sql);
-// SELECT c.CustomerId, c.FirstName, c.LastName, SUM(i.Total) as Revenue
-// FROM Customer c
-// JOIN Invoice i ON c.CustomerId = i.CustomerId
-// GROUP BY c.CustomerId
-// ORDER BY Revenue DESC
-// LIMIT 10
 ```
 
 ## How It Works
 
 When you call `toSql()`:
 
-1. **Load schema** - Database introspection is loaded (from cache if available)
-2. **Apply instructions** - System teachables and custom instructions are injected
-3. **Generate SQL** - The AI translates natural language to SQL
-4. **Validate** - The query is validated against the database (syntax check only)
-5. **Retry on error** - If validation fails, the query is regenerated with error feedback
-6. **Return SQL** - The final validated SQL string is returned
+1. **Load schema** - `index()` introspects the adapter or returns cached fragments.
+2. **Generate SQL** - The SQL agent maps the question to the available schema.
+3. **Format** - The adapter normalizes the generated SQL for its dialect.
+4. **Validate** - The adapter validates the SQL before it is returned.
+5. **Retry** - Validation errors are fed back into the agent for up to three attempts.
 
-## Output Constraints
+## Validation Example
 
-All generated queries enforce these constraints:
-
-### Read-Only Queries
-
-Only `SELECT` and `WITH` statements are allowed:
-
-```typescript
-// Valid
-const sql1 = await text2sql.toSql('Show all customers');
-// SELECT * FROM Customer
-
-const sql2 = await text2sql.toSql('Monthly sales totals');
-// WITH monthly_sales AS (
-//   SELECT DATE_TRUNC('month', InvoiceDate) as month, SUM(Total) as total
-//   FROM Invoice
-//   GROUP BY month
-// )
-// SELECT * FROM monthly_sales ORDER BY month
-
-// Invalid - would fail validation
-const sql3 = await text2sql.toSql('Delete old records');
-// Error: Only read-only SELECT or WITH queries are allowed
-```
-
-### Row Limits
-
-Generated queries include row limits to prevent overwhelming results. The default maximum is 100 rows:
-
-```typescript
-const sql = await text2sql.toSql('Show me all products');
-// SELECT * FROM Product LIMIT 100
-```
-
-For larger datasets, the AI will automatically apply aggregation:
-
-```typescript
-const sql = await text2sql.toSql('Show me all sales transactions');
-// SELECT COUNT(*) as total_transactions, SUM(Total) as total_revenue
-// FROM Invoice
-```
-
-## Error Handling
-
-The `toSql()` method includes automatic retry logic with validation feedback:
-
-```typescript
-// First attempt generates invalid SQL
-// Error: column "Revenu" does not exist (typo)
-
-// Second attempt includes error in prompt
-// Generates corrected SQL with proper column name "Revenue"
-
-const sql = await text2sql.toSql('Show revenue by customer');
-// Successfully returns valid SQL after auto-correction
-```
-
-### Manual Validation
-
-You can validate before execution:
+If you plan to execute the returned SQL outside `chat()`, validate it again in
+your own execution pipeline:
 
 ```typescript
 const sql = await text2sql.toSql('Show me sales data');
 
-// Validate using the adapter
 const error = await adapter.validate(sql);
 if (error) {
   console.error('Validation error:', error);
 }
 ```
 
+## Adding Extra Fragments
+
+`Text2Sql.toSql()` uses schema fragments from `index()`. If you want direct SQL
+generation with extra business vocabulary or guardrails, call the lower-level
+`toSql()` helper exported from `@deepagents/text2sql` and pass your own
+fragments explicitly:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { term } from '@deepagents/context';
+import { toSql } from '@deepagents/text2sql';
+
+const model = groq('openai/gpt-oss-20b');
+
+const result = await toSql({
+  input: 'Show ARR by plan',
+  // Reuse your configured database adapter from Getting Started.
+  adapter,
+  model,
+  fragments: [
+    ...(await adapter.introspect()),
+    term('ARR', 'annual recurring revenue'),
+  ],
+});
+
+console.log(result.sql);
+```
+
+## Error Handling
+
+`toSql()` includes retry logic that feeds validation failures back into the
+model:
+
+```typescript
+const sql = await text2sql.toSql('Show revenue by customer');
+console.log(sql);
+```
+
 ## When to Use toSql() vs chat()
 
 | Feature | `toSql()` | `chat()` |
-|---------|-----------|----------|
-| Returns | SQL string only | Streaming response with explanation |
-| Execution | No execution | Executes via `db_query` tool |
-| History | No conversation context | Full conversation history |
-| Memory | No user profile | User preferences and context |
-| Tools | None (pure generation) | `validate_query`, `get_sample_rows`, `db_query` |
+| ------- | --------- | -------- |
+| Returns | SQL string | Streamed user-facing answer |
+| Execution | No execution | Executes via `sql validate` and `sql run` |
+| Persistent context | Schema cache only | Full conversation thread from your context store |
+| Extra fragments | Use low-level `toSql({ fragments })` | Use your `context` factory |
 | Streaming | No | Yes |
-| Use case | Code generation, previews | Interactive conversations |
+| Best for | Previews, review flows, offline execution | Interactive data assistants |
 
 ### Use toSql() when you need to:
 
-- Generate queries for display/review before execution
+- Generate queries for display or review before execution
 - Store queries for auditing or later execution
-- Integrate with existing query execution infrastructure
-- Test query generation without database access
-- Generate queries for non-interactive workflows
+- Integrate with an existing query runner
+- Build non-interactive workflows
 
 ### Use chat() when you need to:
 
 - Build interactive query interfaces
 - Maintain conversation context across multiple queries
-- Leverage user preferences and memory
-- Stream results to users in real-time
-- Let the AI explore data with sampling tools
-
-## Inspecting the Prompt
-
-To see the full system prompt and context used for generation:
-
-```typescript
-import { t_a_g } from '@deepagents/text2sql';
-
-const { tools, prompt } = await text2sql.inspect(t_a_g);
-
-console.log('Available tools:', tools);
-console.log('System prompt:', prompt);
-```
-
-The prompt includes:
-
-- **Introspection** - Full database schema (tables, columns, relationships, indexes, constraints)
-- **Instructions** - System teachables and custom instructions
-- **Guardrails** - Read-only enforcement, validation requirements
-- **Style guides** - Query formatting preferences
+- Stream results to users in real time
+- Let the agent validate and run read-only SQL on the user's behalf
 
 ## Examples
 
@@ -156,7 +108,7 @@ The prompt includes:
 
 ```typescript
 const sql = await text2sql.toSql('Count total orders');
-// SELECT COUNT(*) as total_orders FROM "Order"
+// SELECT COUNT(*) AS total_orders FROM orders
 ```
 
 ### Complex Aggregation
@@ -165,13 +117,6 @@ const sql = await text2sql.toSql('Count total orders');
 const sql = await text2sql.toSql(
   'Show monthly revenue trends for the last 12 months',
 );
-// SELECT
-//   DATE_TRUNC('month', InvoiceDate) as month,
-//   SUM(Total) as revenue
-// FROM Invoice
-// WHERE InvoiceDate >= CURRENT_DATE - INTERVAL '12 months'
-// GROUP BY month
-// ORDER BY month
 ```
 
 ### Multi-Table Join
@@ -180,48 +125,15 @@ const sql = await text2sql.toSql(
 const sql = await text2sql.toSql(
   'Which artists have the most albums in our catalog?',
 );
-// SELECT
-//   ar.Name as artist_name,
-//   COUNT(DISTINCT al.AlbumId) as album_count
-// FROM Artist ar
-// JOIN Album al ON ar.ArtistId = al.ArtistId
-// GROUP BY ar.ArtistId, ar.Name
-// ORDER BY album_count DESC
-// LIMIT 10
-```
-
-## Custom Instructions
-
-You can customize query generation with instructions:
-
-```typescript
-import { styleGuide, hint } from '@deepagents/text2sql';
-
-const text2sql = new Text2Sql({
-  version: 'v1',
-  adapter,
-  history,
-  instructions: [
-    styleGuide({
-      prefer: 'Use explicit JOIN syntax instead of implicit joins',
-      avoid: 'SELECT * (always specify columns)',
-      always: 'Include table aliases for multi-table queries',
-    }),
-    hint('Revenue means gross_revenue before discounts'),
-  ],
-});
-
-const sql = await text2sql.toSql('Show revenue by product');
-// Will follow your custom style guides and terminology
 ```
 
 ## Performance
 
 Query generation is fast:
 
-- **Cold start**: ~1-2 seconds (includes schema introspection)
-- **Cached schema**: ~300-500ms (typical response time)
-- **Retry attempts**: Up to 3 attempts on validation errors
+- **Cold start**: first call includes schema introspection
+- **Cached schema**: later calls reuse the on-disk cache for the configured `version`
+- **Retry attempts**: up to three attempts on validation errors
 
 The introspection cache is invalidated when you change the `version` parameter:
 
@@ -229,6 +141,8 @@ The introspection cache is invalidated when you change the `version` parameter:
 const text2sql = new Text2Sql({
   version: 'v2', // Bump this when schema changes
   adapter,
-  history,
+  model,
+  filesystem,
+  context,
 });
 ```

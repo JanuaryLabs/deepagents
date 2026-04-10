@@ -16,9 +16,9 @@ import {
   quirk,
   term,
   workflow,
-} from '@deepagents/text2sql';
+} from '@deepagents/context';
 
-text2sql.instruct(
+const healthcareRecipe = [
   // Terms
   term('LOS', 'Length of Stay - number of days from admission to discharge'),
   term('ALOS', 'Average Length of Stay - mean LOS across a cohort'),
@@ -190,8 +190,11 @@ text2sql.instruct(
           HAVING COUNT(*) >= 10
           ORDER BY week`,
   }),
-);
+];
 ```
+
+Spread `...healthcareRecipe` into your `context(...fragments)` factory for
+`chat()`, or append it to low-level `toSql({ fragments })` calls.
 
 ## Teachables Breakdown
 

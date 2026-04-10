@@ -7,10 +7,13 @@ The MySQL adapter provides full support for both MySQL and MariaDB databases wit
 
 ## Basic Setup
 
+Reuse the shared `model`, `filesystem`, and `context` setup from
+[Getting Started](/docs/text2sql/getting-started).
+
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -23,6 +26,9 @@ const pool = mysql.createPool({
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Mysql({
     execute: async (sql) => {
       const [rows] = await pool.query(sql);
@@ -39,7 +45,6 @@ const text2sql = new Text2Sql({
       mysqlGrounding.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 

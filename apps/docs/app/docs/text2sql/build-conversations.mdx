@@ -1,22 +1,20 @@
 ---
 title: Build Conversations
-description: Create multi-turn chat experiences with persistent context
+description: Create multi-turn chat experiences with a persistent ContextEngine store
 ---
 
-The `chat()` method enables multi-turn conversations where context is maintained across messages and user preferences are remembered.
+The `chat()` method streams answers and persists the conversation through the
+`ContextEngine` returned by your `context` factory. The active thread is defined
+by the `chatId` and `userId` you use when you construct that engine.
 
 ## Basic Usage
 
 ```typescript
 const stream = await text2sql.chat(
   [{ role: 'user', content: 'Show me top 10 customers' }],
-  {
-    chatId: 'chat-123',
-    userId: 'user-456',
-  },
+  { generateTitle: true },
 );
 
-// Stream the response
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {
     process.stdout.write(chunk.textDelta);
@@ -24,137 +22,80 @@ for await (const chunk of stream) {
 }
 ```
 
+## Reusing the Same Thread
+
+Reuse the same store plus the same `chatId` and `userId` whenever you want a
+follow-up request to see prior messages:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
+
+import { ContextEngine, SqliteContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
+
+const store = new SqliteContextStore('./text2sql-chat.sqlite');
+
+function createText2Sql(chatId: string, userId: string) {
+  return new Text2Sql({
+    version: 'v1',
+    model: groq('openai/gpt-oss-20b'),
+    filesystem: new InMemoryFs(),
+    // Reuse your configured database adapter from Getting Started.
+    adapter,
+    context: (...fragments) => {
+      const engine = new ContextEngine({
+        store,
+        chatId,
+        userId,
+      });
+      engine.set(...fragments);
+      return engine;
+    },
+  });
+}
+
+const firstTurn = createText2Sql('chat-123', 'user-456');
+await firstTurn.chat([{ role: 'user', content: 'Show me total revenue' }]);
+
+const followUp = createText2Sql('chat-123', 'user-456');
+await followUp.chat([
+  { role: 'user', content: 'Break that down by quarter' },
+]);
+```
+
 ## How It Works
 
 When you call `chat()`:
 
-1. **Load history** - Previous messages for the chat are loaded
-2. **Load user profile** - User preferences and context are injected
-3. **Generate response** - AI processes full context
-4. **Save messages** - Both user message and response are persisted
+1. **Load stored context** - The `ContextEngine` resolves prior messages for the same thread.
+2. **Inject SQL guidance** - Text2SQL adds its built-in workflow guidance plus cached schema fragments.
+3. **Run tools** - The agent can validate SQL, execute read-only queries, and inspect saved results.
+4. **Persist the turn** - The latest assistant message and chat metadata are written back to the store.
 
 ## Message Format
 
-Messages accept `ChatMessage[]` where `ChatMessage` is `UIMessage | MessageFragment`. Standard `UIMessage` objects work as before:
+`chat()` accepts `ChatMessage[]` from `@deepagents/context`. In most apps, plain
+`{ role, content }` objects are enough:
 
 ```typescript
-import type { ChatMessage } from '@deepagents/context';
-
-await text2sql.chat(
-  [
-    { role: 'user', content: 'Show me sales by region' },
-    { role: 'assistant', content: 'Here are sales by region...' },
-    { role: 'user', content: 'Now show me just California' },
-  ],
-  { chatId: 'chat-123', userId: 'user-456' },
-);
+await text2sql.chat([
+  { role: 'user', content: 'Show me sales by region' },
+  { role: 'assistant', content: 'California leads the list.' },
+  { role: 'user', content: 'Now show me just California by month' },
+]);
 ```
 
-## User Profiles
+## Options
 
-User profiles enable personalization and persistent memory across conversations. Text2SQL uses a `TeachablesStore` to maintain five types of user information:
+`chat()` accepts an optional second argument:
 
-### Memory Types
+| Option | Type | Description |
+| ------ | ---- | ----------- |
+| `abortSignal` | `AbortSignal` | Cancels an in-flight stream |
+| `generateTitle` | `boolean` | Uses the model to generate the first chat title instead of the static fallback |
 
-| Type         | Purpose                     | Schema Fields                         |
-| ------------ | --------------------------- | ------------------------------------- |
-| `identity`   | User's name and/or role     | `description`                         |
-| `alias`      | User-specific term meanings | `term`, `meaning`                     |
-| `preference` | Output and style preferences| `aspect`, `value`                     |
-| `context`    | Current working focus       | `description`                         |
-| `correction` | Corrections to prior errors | `subject`, `clarification`            |
-
-The user profile is stored per userId and automatically injected into the chat context.
-
-### Automatic Memory Updates
-
-During chat, memory tools are automatically available. The AI recognizes when users share facts, preferences, or context and stores them:
-
-```typescript
-// User says: "I'm the sales manager for West region"
-// AI automatically calls:
-remember_memory({
-  memory: {
-    type: 'identity',
-    description: 'Sales manager for West region',
-  },
-});
-
-// User says: "When I say 'revenue', I mean gross revenue"
-// AI calls:
-remember_memory({
-  memory: {
-    type: 'alias',
-    term: 'revenue',
-    meaning: 'gross revenue before deductions',
-  },
-});
-
-// User says: "I prefer weekly aggregations"
-// AI calls:
-remember_memory({
-  memory: {
-    type: 'preference',
-    aspect: 'aggregation',
-    value: 'weekly',
-  },
-});
-```
-
-Available memory tools:
-
-| Tool | Description |
-|------|-------------|
-| `remember_memory` | Store something about the user for future conversations |
-| `recall_memory` | List stored memories for the current user |
-| `update_memory` | Update an existing memory |
-| `forget_memory` | Remove a specific memory |
-
-### Profile Injection
-
-User profiles are injected into the system prompt as teachables:
-
-```xml
-<user_profile>
-  <identity>
-    <description>Sales manager for West region</description>
-  </identity>
-  <user_vocabulary>
-    <alias>
-      <term>revenue</term>
-      <meaning>gross revenue before deductions</meaning>
-    </alias>
-  </user_vocabulary>
-  <user_preferences>
-    <preference>
-      <aspect>aggregation</aspect>
-      <value>weekly</value>
-    </preference>
-  </user_preferences>
-  <user_context>
-    <context>Analyzing Q4 2024 performance</context>
-  </user_context>
-</user_profile>
-```
-
-## Streaming Options
-
-The chat response supports rich streaming:
-
-```typescript
-const stream = await text2sql.chat(messages, params);
-
-const uiStream = stream.toUIMessageStream({
-  sendStart: true, // Stream start event
-  sendFinish: true, // Stream finish event
-  sendReasoning: true, // AI reasoning steps
-  sendSources: true, // Data sources used
-});
-```
-
-## Abort Signal
-
-Pass an `AbortSignal` to cancel an in-progress chat stream:
+### Abort Signal
 
 ```typescript
 const controller = new AbortController();
@@ -163,55 +104,25 @@ const stream = await text2sql.chat(messages, {
   abortSignal: controller.signal,
 });
 
-// Cancel the stream after 10 seconds
 setTimeout(() => controller.abort(), 10_000);
 ```
 
 ## Error Handling
 
-The stream handles common errors gracefully:
-
-```typescript
-const stream = await text2sql.chat(messages, {
-  chatId: 'chat-123',
-  userId: 'user-456',
-});
-
-// Errors are converted to user-friendly messages
-// - "The model tried to call an unknown tool"
-// - "The model called a tool with invalid arguments"
-```
-
-## Context Window
-
-All previous messages in the chat are included in context:
-
-```typescript
-// First message
-await text2sql.chat([{ role: 'user', content: 'Show me total revenue' }], {
-  chatId: 'chat-123',
-  userId: 'user-456',
-});
-
-// Second message - has access to first conversation
-await text2sql.chat([{ role: 'user', content: 'Break that down by quarter' }], {
-  chatId: 'chat-123',
-  userId: 'user-456',
-});
-// AI knows "that" refers to revenue from previous message
-```
+Tool and validation errors are converted into user-facing stream messages. If
+you need more control, abort the current stream and start a fresh turn with a
+new prompt or a new `chatId`.
 
 ## Integration Example
 
 ```typescript
-// Express/Next.js API route
 app.post('/api/chat', async (req, res) => {
   const { messages, chatId } = req.body;
   const userId = req.user.id;
 
-  const stream = await text2sql.chat(messages, { chatId, userId });
+  const text2sql = createText2Sql(chatId, userId);
+  const stream = await text2sql.chat(messages, { generateTitle: true });
 
-  // Stream response to client
   res.setHeader('Content-Type', 'text/event-stream');
 
   for await (const chunk of stream) {
@@ -224,7 +135,7 @@ app.post('/api/chat', async (req, res) => {
 
 ## Best Practices
 
-1. **Use consistent chat IDs** - Same chatId maintains conversation context
-2. **Use consistent user IDs** - Same userId maintains user profile
-3. **Handle streaming properly** - Process chunks as they arrive
-4. **Clean up old chats** - Periodically delete unused conversations
+1. **Keep `chatId` stable per conversation** so follow-up turns can resolve the same history.
+2. **Keep `userId` stable per signed-in user** so related chats remain attributable.
+3. **Share one store across requests** if you want persistence between processes or server restarts.
+4. **Create a fresh `chatId` for a new topic** instead of overloading an existing thread.

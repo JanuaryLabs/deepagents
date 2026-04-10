@@ -103,12 +103,11 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
   readonly handoffToolName: transfer_tool;
   readonly handoffTool: ToolSet;
   readonly output?: z.Schema<Output>;
-  readonly repairToolCall: ToolCallRepairFunction<ToolSet>;
   readonly providerOptions?: CreateAgent<Output, CIn, COut>['providerOptions'];
   readonly logging?: boolean;
+
   constructor(config: CreateAgent<Output, CIn, COut>) {
     this.model = config.model;
-    this.repairToolCall = createRepairToolCall(config.model);
     this.toolChoice = config.toolChoice || 'auto';
     this.handoffs = config.handoffs ?? [];
     this.prepareHandoff = config.prepareHandoff;
@@ -146,6 +145,10 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
         },
       }),
     };
+  }
+
+  repairToolCall(abortSignal?: AbortSignal): ToolCallRepairFunction<ToolSet> {
+    return createRepairToolCall(this.model, abortSignal);
   }
 
   get transfer_tools() {
@@ -238,7 +241,9 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             tools: this.handoff.tools,
             abortSignal: options.abortSignal,
             stopWhen: stepCountIs(25),
-            experimental_repairToolCall: this.repairToolCall,
+            experimental_repairToolCall: this.repairToolCall(
+              options.abortSignal,
+            ),
             experimental_context: options.experimental_context,
             output: this.output
               ? Output.object({ schema: this.output })

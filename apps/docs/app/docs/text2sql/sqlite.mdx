@@ -7,12 +7,15 @@ The SQLite adapter works with SQLite databases, supporting both file-based and i
 
 ## Basic Setup
 
+Reuse the shared `model`, `filesystem`, and `context` setup from
+[Getting Started](/docs/text2sql/getting-started) in each example.
+
 <Tabs groupId="sqlite-driver" items={['node:sqlite', 'better-sqlite3', 'sql.js']}>
 <Tab value="node:sqlite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -20,6 +23,9 @@ const db = new DatabaseSync('./your-database.db', { readOnly: true });
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
     grounding: [
@@ -33,7 +39,6 @@ const text2sql = new Text2Sql({
       sqlite.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -41,7 +46,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import Database from 'better-sqlite3';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -49,6 +54,9 @@ const db = new Database('./database.db', { readonly: true });
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
     grounding: [
@@ -62,7 +70,6 @@ const text2sql = new Text2Sql({
       sqlite.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -70,7 +77,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import initSqlJs from 'sql.js';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -79,6 +86,9 @@ const db = new SQL.Database(data);
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Sqlite({
     execute: (sql) => {
       const stmt = db.prepare(sql);
@@ -100,7 +110,6 @@ const text2sql = new Text2Sql({
       sqlite.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>

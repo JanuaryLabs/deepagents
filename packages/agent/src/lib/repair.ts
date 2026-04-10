@@ -10,6 +10,7 @@ import chalk from 'chalk';
 
 export function createRepairToolCall(
   model: LanguageModelV3,
+  abortSignal?: AbortSignal,
 ): ToolCallRepairFunction<ToolSet> {
   return async ({ toolCall, tools, inputSchema, error }) => {
     if (NoSuchToolError.isInstance(error)) {
@@ -23,6 +24,7 @@ export function createRepairToolCall(
     const tool = tools[toolCall.toolName as keyof typeof tools];
 
     const { output } = await generateText({
+      abortSignal,
       model,
       output: Output.object({ schema: tool.inputSchema }),
       prompt: [

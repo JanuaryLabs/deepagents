@@ -191,9 +191,9 @@ For an e-commerce database with orders, customers, and products tables:
 Generate comprehensive, diverse training data:
 
 ```typescript
+import { hint, term } from '@deepagents/context';
 import {
   PersonaGenerator,
-  TeachingsGenerator,
   SchemaSynthesizer,
   BreadthEvolver,
 } from '@deepagents/text2sql/synthesis';
@@ -202,9 +202,11 @@ import {
 const personaGen = new PersonaGenerator(adapter, { count: 10 });
 const personas = await personaGen.generate();
 
-// 2. Generate teachings
-const teachingsGen = new TeachingsGenerator(adapter);
-const teachings = await teachingsGen.generate();
+// 2. Define manual teachings
+const teachings = [
+  term('ARR', 'annual recurring revenue'),
+  hint("Exclude sandbox accounts where account_type = 'test'"),
+];
 
 // 3. Generate base pairs with personas and teachings
 const basePairs = await new SchemaSynthesizer(adapter, {
@@ -232,7 +234,7 @@ console.log(`Total: ${basePairs.length + evolvedPairs.length} pairs`);
 
 1. **Match count to domain complexity** - Simple schemas need fewer personas (3-5), complex domains benefit from more (8-12)
 2. **Review generated personas** - Verify they match actual users of your database
-3. **Combine with teachings** - Personas + teachings = contextually rich training data
+3. **Combine with teachings** - Personas + manual teachings = contextually rich training data
 4. **Use selectively in evolution** - Don't paraphrase every question from every persona; choose strategically
 5. **Test persona coverage** - Ensure generated questions span the full range of user needs
 

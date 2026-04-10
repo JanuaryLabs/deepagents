@@ -1,12 +1,8 @@
-import {
-  type UIMessage,
-  extractReasoningMiddleware,
-  generateId,
-  wrapLanguageModel,
-} from 'ai';
+import { groq } from '@ai-sdk/groq';
+import { type UIMessage, generateId } from 'ai';
 import { join } from 'node:path';
 
-import { input, last, lmstudio, minimax, printer } from '@deepagents/agent';
+import { input, last, printer } from '@deepagents/agent';
 
 import { agent } from './agent.ts';
 import { ContextEngine } from './engine.ts';
@@ -16,6 +12,7 @@ import { createContainerTool } from './sandbox/container-tool.ts';
 import { skills } from './skills/fragments.ts';
 import { soul } from './soul/fragments.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
+import { createOpenAITracesIntegration } from './tracing/index.ts';
 
 const { bash, sandbox } = await createContainerTool({
   image: 'alpine:latest',
@@ -81,6 +78,8 @@ context.set(
 );
 shutdown(disposeSandbox);
 
+const tracingIntegration = createOpenAITracesIntegration();
+
 while (true) {
   const userMsg = messages.at(-1);
   if (userMsg) {
@@ -90,15 +89,14 @@ while (true) {
 
   const ai = agent({
     name: 'Assistant',
-    // model: wrapLanguageModel({
-    //   model: minimax('MiniMax-M2.5'),
-    //   middleware: extractReasoningMiddleware({ tagName: 'think' }),
-    // }),
-    model: lmstudio('liquid/lfm2.5-1.2b'),
-    // model: groq('moonshotai/kimi-k2-instruct-0905'),
+    model: groq('moonshotai/kimi-k2-instruct-0905'),
     context: context,
     tools: { bash },
     guardrails: [errorRecoveryGuardrail],
+    experimental_telemetry: {
+      isEnabled: true,
+      integrations: [tracingIntegration],
+    },
   });
 
   const result = await ai.stream({});

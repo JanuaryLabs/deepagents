@@ -16,12 +16,15 @@ npm install @deepagents/text2sql mssql
 
 ## Basic Setup
 
+Reuse the shared `model`, `filesystem`, and `context` setup from
+[Getting Started](/docs/text2sql/getting-started) in each example.
+
 <Tabs groupId="sqlserver-driver" items={['mssql', 'tedious']}>
 <Tab value="mssql">
 ```typescript
 import sql from 'mssql';
 
-import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -38,6 +41,9 @@ const pool = await sql.connect({
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new SqlServer({
     execute: async (query) => {
       const result = await pool.request().query(query);
@@ -54,7 +60,6 @@ const text2sql = new Text2Sql({
       sqlserver.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -62,7 +67,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { Connection, Request } from 'tedious';
 
-import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -70,6 +75,9 @@ const connection = new Connection(config);
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new SqlServer({
     execute: (sql) => new Promise((resolve, reject) => {
       const rows = [];
@@ -97,7 +105,6 @@ const text2sql = new Text2Sql({
       sqlserver.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>

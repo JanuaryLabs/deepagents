@@ -7,10 +7,13 @@ The BigQuery adapter is **driver-agnostic**: you provide `execute(sql)` and a re
 
 ## Basic Setup
 
+Reuse the shared `model`, `filesystem`, and `context` setup from
+[Getting Started](/docs/text2sql/getting-started).
+
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -19,6 +22,9 @@ const client = new BigQueryClient({ projectId });
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new BigQuery({
     projectId,
     datasets: ['analytics'], // Only these datasets will be introspected
@@ -44,7 +50,6 @@ const text2sql = new Text2Sql({
       bigquery.rowCount(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 
@@ -97,4 +102,3 @@ Import these from `@deepagents/text2sql/bigquery`:
 ### Not Included In V1
 
 BigQuery V1 does **not** export `columnStats()` or `columnValues()`.
-

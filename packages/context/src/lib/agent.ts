@@ -35,6 +35,9 @@ export interface CreateAgent<CIn, COut = CIn> {
   model?: AgentModel;
   toolChoice?: ToolChoice<Record<string, COut>>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  experimental_telemetry?: Parameters<
+    typeof generateText
+  >[0]['experimental_telemetry'];
   logging?: boolean;
   /**
    * Guardrails to apply during streaming.
@@ -81,6 +84,7 @@ class Agent<CIn, COut = CIn> {
     return generateText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
+      experimental_telemetry: this.#options.experimental_telemetry,
       model: this.#options.model,
       system: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
@@ -89,7 +93,10 @@ class Agent<CIn, COut = CIn> {
       stopWhen: stepCountIs(200),
       tools: this.#options.tools,
       experimental_context: contextVariables,
-      experimental_repairToolCall: createRepairToolCall(this.#options.model),
+      experimental_repairToolCall: createRepairToolCall(
+        this.#options.model,
+        config?.abortSignal,
+      ),
       toolChoice: this.#options.toolChoice,
       onStepFinish: (step) => {
         const toolCall = step.toolCalls.at(-1);
@@ -171,12 +178,16 @@ class Agent<CIn, COut = CIn> {
     return streamText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
+      experimental_telemetry: this.#options.experimental_telemetry,
       model,
       system: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
         ignoreIncompleteToolCalls: true,
       }),
-      experimental_repairToolCall: createRepairToolCall(model),
+      experimental_repairToolCall: createRepairToolCall(
+        model,
+        config?.abortSignal,
+      ),
       stopWhen: stepCountIs(200),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.#options.tools,
@@ -364,6 +375,9 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
   model?: AgentModel;
   schema: TSchema;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  experimental_telemetry?: Parameters<
+    typeof generateText
+  >[0]['experimental_telemetry'];
   tools?: ToolSet;
 }
 
@@ -431,13 +445,17 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       const result = await generateText({
         abortSignal: config?.abortSignal,
         providerOptions: options.providerOptions,
+        experimental_telemetry: options.experimental_telemetry,
         model: options.model,
         system: systemPrompt,
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
         }),
         stopWhen: stepCountIs(200),
-        experimental_repairToolCall: createRepairToolCall(options.model),
+        experimental_repairToolCall: createRepairToolCall(
+          options.model,
+          config?.abortSignal,
+        ),
         experimental_context: contextVariables,
         output: Output.object({ schema: options.schema }),
         tools: options.tools,
@@ -469,9 +487,13 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       return streamText({
         abortSignal: config?.abortSignal,
         providerOptions: options.providerOptions,
+        experimental_telemetry: options.experimental_telemetry,
         model: options.model,
         system: systemPrompt,
-        experimental_repairToolCall: createRepairToolCall(options.model),
+        experimental_repairToolCall: createRepairToolCall(
+          options.model,
+          config?.abortSignal,
+        ),
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
         }),

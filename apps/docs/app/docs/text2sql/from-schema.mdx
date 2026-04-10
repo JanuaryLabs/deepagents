@@ -142,10 +142,13 @@ const pairs = await new SchemaSynthesizer(adapter, {
 Teachings provide domain-specific knowledge to improve question quality:
 
 ```typescript
-import { TeachingsGenerator, SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
+import { hint, term } from '@deepagents/context';
+import { SchemaSynthesizer } from '@deepagents/text2sql/synthesis';
 
-const teachGen = new TeachingsGenerator(adapter);
-const teachings = await teachGen.generate();
+const teachings = [
+  term('MRR', 'monthly recurring revenue'),
+  hint("Exclude sandbox accounts where account_type = 'test'"),
+];
 
 const pairs = await new SchemaSynthesizer(adapter, {
   count: 50,
@@ -247,14 +250,15 @@ Incorporate domain knowledge:
 ```typescript
 import {
   SchemaSynthesizer,
-  TeachingsGenerator,
   PersonaGenerator,
 } from '@deepagents/text2sql/synthesis';
+import { hint, term } from '@deepagents/context';
 
-// Generate domain knowledge and personas
-const teachGen = new TeachingsGenerator(adapter);
-const teachings = await teachGen.generate();
-
+// Define domain knowledge and personas
+const teachings = [
+  term('NPL', 'non-performing loan - 90+ days past due'),
+  hint("Exclude sandbox accounts where account_type = 'test'"),
+];
 const personaGen = new PersonaGenerator(adapter, { count: 5 });
 const personas = await personaGen.generate();
 

@@ -9,7 +9,7 @@ The system SHALL provide a BigQuery adapter module importable from `@deepagents/
 #### Scenario: Import Adapter And Groundings
 
 - **WHEN** a developer imports from `@deepagents/text2sql/bigquery`
-- **THEN** they can access `BigQuery` and the grounding factories `tables`, `views`, `info`, `constraints`, `rowCount`, `indexes`, and `report`.
+- **THEN** they can access `BigQuery` and the grounding factories `tables`, `views`, `info`, `constraints`, `rowCount`, and `indexes`.
 
 ### Requirement: Adapter Is Driver-Agnostic And Requires Validation
 

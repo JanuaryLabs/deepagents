@@ -1,226 +1,115 @@
 ---
 title: History
-description: Persist conversation history for multi-turn chat experiences
+description: Persist Text2SQL conversations through ContextEngine stores
 ---
 
-The History interface manages conversation persistence, enabling multi-turn chats where context is maintained across sessions.
+Text2SQL no longer exposes a separate `History` class. Conversation persistence
+comes from the `ContextStore` you provide to the `ContextEngine` inside the
+`context` factory.
 
-## Available Implementations
+## Choose a Store
 
-<Tabs groupId="history-type" items={['SqliteHistory', 'InMemoryHistory']}>
-<Tab value="SqliteHistory">
-Persistent storage using SQLite:
+<Tabs groupId="history-type" items={['InMemoryContextStore', 'SqliteContextStore']}>
+<Tab value="InMemoryContextStore">
+Use in-memory storage for tests and short-lived processes:
 
 ```typescript
-import { SqliteHistory, Sqlite, Text2Sql } from '@deepagents/text2sql';
+import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
 
-const history = new SqliteHistory('./chat-history.sqlite');
+import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
+
+const store = new InMemoryContextStore();
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
-  adapter: new Sqlite({ execute: (sql) => db.prepare(sql).all() }),
-  history: history,
+  version: 'v1',
+  model: groq('openai/gpt-oss-20b'),
+  filesystem: new InMemoryFs(),
+  // Reuse your configured database adapter from Getting Started.
+  adapter,
+  context: (...fragments) => {
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-123',
+      userId: 'user-456',
+    });
+    engine.set(...fragments);
+    return engine;
+  },
 });
 ```
 </Tab>
-<Tab value="InMemoryHistory">
-Non-persistent storage for testing (data is lost when the process ends):
+<Tab value="SqliteContextStore">
+Use SQLite when you want persistence across server restarts:
 
 ```typescript
-import { InMemoryHistory, Sqlite, Text2Sql } from '@deepagents/text2sql';
+import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
 
-const history = new InMemoryHistory();
+import { ContextEngine, SqliteContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
+
+const store = new SqliteContextStore('./text2sql-history.sqlite');
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
-  adapter: new Sqlite({ execute: (sql) => db.prepare(sql).all() }),
-  history: history,
+  version: 'v1',
+  model: groq('openai/gpt-oss-20b'),
+  filesystem: new InMemoryFs(),
+  // Reuse your configured database adapter from Getting Started.
+  adapter,
+  context: (...fragments) => {
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-123',
+      userId: 'user-456',
+    });
+    engine.set(...fragments);
+    return engine;
+  },
 });
 ```
-
-`InMemoryHistory` extends `SqliteHistory` with `:memory:` path.
 </Tab>
 </Tabs>
 
-## Data Model
+## Continuing a Conversation
 
-### Chat
-
-```typescript
-interface Chat {
-  id: string; // Unique chat identifier
-  userId: string; // Owner of the chat
-  title?: string; // Optional chat title
-  messages: Message[]; // All messages in the chat
-}
-```
-
-### Message
+Reuse the same store, `chatId`, and `userId` for follow-up turns:
 
 ```typescript
-interface Message {
-  id: string; // Unique message identifier
-  chatId: string; // Parent chat ID
-  role: string; // 'user' | 'assistant' | 'system'
-  createdAt: Date; // When message was created
-  content: UIMessage; // Full message content (Vercel AI SDK format)
-}
-```
-
-## History Methods
-
-### Chat Management
-
-```typescript
-// List all chats for a user
-const chats = await history.listChats('user-123');
-
-// Get a specific chat with messages
-const chat = await history.getChat('chat-456');
-
-// Create a new chat
-await history.createChat({
-  id: 'chat-789',
-  userId: 'user-123',
-  title: 'Sales Analysis',
-});
-
-// Create or update a chat
-await history.upsertChat({
-  id: 'chat-789',
-  userId: 'user-123',
-  title: 'Updated Title',
-});
-
-// Update chat metadata
-await history.updateChat('chat-789', { title: 'New Title' });
-
-// Delete a chat (cascades to messages)
-await history.deleteChat('chat-789');
-```
-
-### Message Management
-
-```typescript
-// Add a message to a chat
-await history.addMessage({
-  id: 'msg-001',
-  chatId: 'chat-789',
-  role: 'user',
-  content: { role: 'user', content: 'Show me revenue' },
-});
-
-// Create or update a message
-await history.upsertMessage({
-  id: 'msg-001',
-  chatId: 'chat-789',
-  role: 'user',
-  content: { role: 'user', content: 'Updated content' },
-});
-
-// Delete a message
-await history.deleteMessage('msg-001');
-```
-
-## Custom History Implementation
-
-Implement the `History` abstract class for custom storage:
-
-```typescript
-import { Chat, History, Message } from '@deepagents/text2sql';
-
-class PostgresHistory extends History {
-  constructor(private pool: Pool) {
-    super();
-  }
-
-  async listChats(userId: string): Promise<Chat[]> {
-    const result = await this.pool.query(
-      'SELECT * FROM chats WHERE user_id = $1',
-      [userId],
-    );
-    return result.rows;
-  }
-
-  async getChat(chatId: string): Promise<Chat | null> {
-    // Implement chat retrieval with messages
-  }
-
-  async createChat(chat: CreateChatParams): Promise<Chat> {
-    // Implement chat creation
-  }
-
-  async upsertChat(chat: CreateChatParams): Promise<Chat> {
-    // Implement upsert logic
-  }
-
-  async deleteChat(chatId: string): Promise<void> {
-    // Implement chat deletion
-  }
-
-  async updateChat(chatId: string, updates: UpdateChatParams): Promise<void> {
-    // Implement chat update
-  }
-
-  async addMessage(message: CreateMessageParams): Promise<void> {
-    // Implement message addition
-  }
-
-  async upsertMessage(message: CreateMessageParams): Promise<Message> {
-    // Implement message upsert
-  }
-
-  async deleteMessage(messageId: string): Promise<void> {
-    // Implement message deletion
-  }
-}
-```
-
-## SQLite Schema
-
-The `SqliteHistory` automatically creates these tables:
-
-```sql
-CREATE TABLE IF NOT EXISTS chats (
-  id TEXT PRIMARY KEY,
-  "userId" TEXT NOT NULL,
-  title TEXT
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-  id TEXT PRIMARY KEY,
-  "chatId" TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
-  "createdAt" TEXT NOT NULL,
-  content TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_chats_userId ON chats("userId");
-CREATE INDEX IF NOT EXISTS idx_messages_chatId ON messages("chatId");
-```
-
-## Usage with chat()
-
-History is automatically used when calling `chat()`:
-
-```typescript
-// First interaction
 await text2sql.chat([{ role: 'user', content: 'Show me sales data' }], {
-  chatId: 'chat-123',
-  userId: 'user-456',
+  generateTitle: true,
 });
 
-// Later - history is loaded automatically
-await text2sql.chat([{ role: 'user', content: 'Filter to last quarter' }], {
-  chatId: 'chat-123',
-  userId: 'user-456',
-});
-// Previous messages are included in context
+await text2sql.chat([
+  { role: 'user', content: 'Filter that to last quarter' },
+]);
 ```
+
+Create a new `chatId` when you want to start a separate thread that should not
+reuse prior context.
+
+## What Gets Persisted
+
+Text2SQL writes conversation messages and chat metadata through the underlying
+`ContextEngine`. That gives later `chat()` calls access to prior turns without a
+separate history API on `Text2Sql` itself.
+
+## Direct Store Access
+
+If you need to inspect or manage persisted chats directly, work with the
+`@deepagents/context` storage layer rather than expecting `Text2Sql` helper
+classes.
+
+See:
+
+- [Storage](/docs/context/storage)
+- [Chat](/docs/context/chat)
+- [Context Engine](/docs/context/context-engine)
 
 ## Best Practices
 
-1. **Use UUIDs for IDs** - Ensures uniqueness across distributed systems
-2. **Index frequently queried columns** - userId and chatId are indexed by default
-3. **Clean up old chats** - Implement retention policies for inactive chats
-4. **Consider message limits** - Very long conversations may need truncation strategies
+1. **Share one store across requests** when you want continuity across server restarts.
+2. **Keep `chatId` stable inside a thread** so follow-up questions resolve prior turns.
+3. **Use a fresh `chatId` for a new task** instead of mixing unrelated analyses together.
+4. **Prefer `SqliteContextStore` in production** when process memory alone is not durable enough.

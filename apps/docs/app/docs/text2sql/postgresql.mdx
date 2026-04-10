@@ -15,10 +15,13 @@ npm install @deepagents/text2sql pg
 
 ## Basic Setup
 
+Reuse the shared `model`, `filesystem`, and `context` setup from
+[Getting Started](/docs/text2sql/getting-started).
+
 ```typescript
 import pg from 'pg';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
@@ -28,6 +31,9 @@ const pool = new pg.Pool({
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Postgres({
     execute: async (sql) => {
       const result = await pool.query(sql);
@@ -44,7 +50,6 @@ const text2sql = new Text2Sql({
       postgres.columnValues(),
     ],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 

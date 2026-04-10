@@ -16,9 +16,9 @@ import {
   quirk,
   term,
   workflow,
-} from '@deepagents/text2sql';
+} from '@deepagents/context';
 
-text2sql.instruct(
+const financeRecipe = [
   // Terms
   term(
     'NPL',
@@ -161,8 +161,11 @@ text2sql.instruct(
           GROUP BY DATE_TRUNC('month', transaction_date)
           ORDER BY month`,
   }),
-);
+];
 ```
+
+Spread `...financeRecipe` into your `context(...fragments)` factory for
+`chat()`, or append it to low-level `toSql({ fragments })` calls.
 
 ## Teachables Breakdown
 

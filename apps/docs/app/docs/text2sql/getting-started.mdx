@@ -22,19 +22,46 @@ SQLite uses the built-in `node:sqlite` module and requires no additional driver.
 
 ## Basic Setup
 
-Text2SQL requires four components:
+Text2SQL requires six components:
 
 1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, or BigQuery)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
-3. **Version** - A string used to manage cache invalidation (bump when schema changes)
-4. **History** - Stores conversation history (optional for single queries)
+3. **Model** - Any AI SDK model compatible with `@deepagents/agent`
+4. **Filesystem** - A `just-bash` filesystem used by result tools
+5. **Context Factory** - Creates a `ContextEngine` with your chosen store, `chatId`, and `userId`
+6. **Version** - A string used to manage cache invalidation (bump when schema changes)
+
+Start by creating the shared model, filesystem, and context factory:
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
+
+import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
+
+const store = new InMemoryContextStore();
+const model = groq('openai/gpt-oss-20b');
+const filesystem = new InMemoryFs();
+
+const context = (...fragments) => {
+  const engine = new ContextEngine({
+    store,
+    chatId: 'chat-123',
+    userId: 'user-456',
+  });
+  engine.set(...fragments);
+  return engine;
+};
+```
+
+Reuse `model`, `filesystem`, and `context` in the adapter-specific examples below.
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -44,11 +71,13 @@ const db = new DatabaseSync('./your-database.db', { readOnly: true });
 // Create the Text2SQL instance
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
     grounding: [sqlite.tables(), sqlite.info()],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -56,7 +85,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import pg from 'pg';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
@@ -66,6 +95,9 @@ const pool = new pg.Pool({
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Postgres({
     execute: async (sql) => {
       const result = await pool.query(sql);
@@ -73,7 +105,6 @@ const text2sql = new Text2Sql({
     },
     grounding: [postgres.tables(), postgres.info()],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -81,7 +112,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import sql from 'mssql';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -95,6 +126,9 @@ const pool = await sql.connect({
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new SqlServer({
     execute: async (query) => {
       const result = await pool.request().query(query);
@@ -102,7 +136,6 @@ const text2sql = new Text2Sql({
     },
     grounding: [sqlserver.tables(), sqlserver.info()],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -110,7 +143,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -123,6 +156,9 @@ const pool = mysql.createPool({
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new Mysql({
     execute: async (sql) => {
       const [rows] = await pool.query(sql);
@@ -130,7 +166,6 @@ const text2sql = new Text2Sql({
     },
     grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -138,7 +173,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -147,6 +182,9 @@ const client = new BigQueryClient({ projectId });
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model,
+  filesystem,
+  context,
   adapter: new BigQuery({
     projectId,
     datasets: ['analytics'],
@@ -164,7 +202,6 @@ const text2sql = new Text2Sql({
     },
     grounding: [bigquery.tables(), bigquery.info()],
   }),
-  history: new InMemoryHistory(),
 });
 ```
 </Tab>
@@ -192,13 +229,12 @@ console.log(sql);
 
 ### Chat with Streaming
 
-Use `chat()` for streaming responses with conversation history:
+Use `chat()` for streaming responses. Conversation identity comes from the `context` factory you created above:
 
 ```typescript
-const stream = await text2sql.chat(
-  [{ role: 'user', content: 'What are the most popular genres?' }],
-  { chatId: 'chat-123', userId: 'user-456' },
-);
+const stream = await text2sql.chat([
+  { role: 'user', content: 'What are the most popular genres?' },
+]);
 
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {
@@ -211,13 +247,13 @@ for await (const chunk of stream) {
 
 When Text2SQL processes a query, it:
 
-1. **Runs grounding** - Introspects your database schema (tables, columns, relationships, indexes, constraints)
-2. **Applies teachables** - Injects domain knowledge (terms, hints, guardrails, examples) into the prompt
-3. **Assembles context** - Builds the agent prompt with schema + teachables + step-back reasoning examples
-4. **Generates & validates SQL** - Drafts SQL, validates syntax with `validate_query` tool
-5. **Returns results** - `toSql()` returns the SQL string; `chat()` streams the response with explanation
+1. **Runs grounding** - Introspects your database schema (tables, columns, relationships, indexes, constraints).
+2. **Builds SQL context** - `toSql()` uses cached schema fragments, while `chat()` also resolves the stored conversation thread from your context store.
+3. **Generates SQL** - The model maps the request to the available schema.
+4. **Validates** - The adapter validates the generated SQL before it is returned or executed.
+5. **Returns results** - `toSql()` returns the SQL string; `chat()` streams an end-user answer.
 
-Text2SQL includes default teachables that enforce best practices like read-only queries, row limits, and proper validation workflows.
+`chat()` also injects Text2SQL's built-in SQL workflow guidance and any extra fragments you add in your `context` factory.
 
 ## Environment Variables
 

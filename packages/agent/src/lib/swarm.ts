@@ -94,7 +94,7 @@ export async function generate<O, CIn, COut = CIn>(
       Array.isArray(messages) ? messages : [user(messages)],
       { ignoreIncompleteToolCalls: true },
     ),
-    experimental_repairToolCall: agent.repairToolCall,
+    experimental_repairToolCall: agent.repairToolCall(config?.abortSignal),
     stopWhen: stepCountIs(25),
     tools: agent.toToolset(),
     activeTools: agent.toolsNames,
@@ -143,7 +143,7 @@ export async function execute<O, CIn, COut = CIn>(
     activeTools: agent.toolsNames,
     experimental_context: contextVariables,
     toolChoice: agent.toolChoice,
-    experimental_repairToolCall: agent.repairToolCall,
+    experimental_repairToolCall: agent.repairToolCall(config?.abortSignal),
     onError: (error) => {
       console.error(
         chalk.red(

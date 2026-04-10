@@ -3,95 +3,92 @@ title: Explain Queries
 description: Get plain English explanations of SQL queries
 ---
 
-The `explain()` method translates SQL queries into plain English explanations for non-technical users.
+Text2SQL does not currently expose a public `text2sql.explain()` helper. Use one
+of the supported patterns below when you need plain-English explanations of SQL.
 
-## Basic Usage
+## Option 1: Use chat() for Execution + Explanation
 
 ```typescript
-const explanation = await text2sql.explain(`
-  SELECT c.FirstName, c.LastName, SUM(i.Total) as TotalSpent
-  FROM Customer c
-  JOIN Invoice i ON c.CustomerId = i.CustomerId
-  GROUP BY c.CustomerId
-  ORDER BY TotalSpent DESC
-  LIMIT 10
-`);
+const stream = await text2sql.chat([
+  {
+    role: 'user',
+    content: 'Show revenue by month and explain the result in plain English.',
+  },
+]);
 
-console.log(explanation);
-// "This query finds the top 10 customers who have spent the most money.
-// It looks at each customer's invoices, adds up their total spending,
-// and ranks them from highest to lowest spender."
+for await (const chunk of stream) {
+  if (chunk.type === 'text-delta') {
+    process.stdout.write(chunk.textDelta);
+  }
+}
 ```
 
-## How It Works
+This is the best fit when you want the agent to validate SQL, run the query, and
+describe the result in one flow.
 
-The `explainerAgent` is a specialized agent that:
+## Option 2: Explain Saved SQL with Your Own Agent
 
-1. Receives the raw SQL query
-2. Analyzes the query structure and intent
-3. Generates a plain English explanation
-4. Focuses on **what** the query does, not **how**
-5. Uses a lightweight model (openai/gpt-oss-20b via Groq) for fast responses
-
-The explainer is designed for non-technical users - it translates SQL syntax into business intent without jargon.
-
-## Use Cases
-
-### Debugging Generated Queries
-
-Verify that generated SQL matches your intent:
+If you already have SQL text and only need an explanation, build a tiny explainer
+agent with `@deepagents/context`:
 
 ```typescript
-const sql = await text2sql.toSql('Show revenue by month');
+import { groq } from '@ai-sdk/groq';
 
-// Verify the query does what you expect
-const explanation = await text2sql.explain(sql);
-console.log('Generated SQL:', sql);
-console.log('Explanation:', explanation);
-```
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  role,
+  user,
+} from '@deepagents/context';
 
-### User Education
+const context = new ContextEngine({
+  store: new InMemoryContextStore(),
+  chatId: 'sql-explainer',
+  userId: 'system',
+}).set(
+  role(
+    'Explain SQL queries in plain English. Focus on what the query answers, not SQL syntax.',
+  ),
+);
 
-Help users understand what queries do:
+context.set(
+  user(`
+Explain this SQL:
 
-```typescript
-// In a dashboard or reporting tool
-const savedQuery = getUserSavedQuery(queryId);
-const explanation = await text2sql.explain(savedQuery.sql);
+SELECT c.name, SUM(o.total_amount) AS revenue
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+GROUP BY c.id, c.name
+ORDER BY revenue DESC
+LIMIT 10
+  `),
+);
+await context.save();
 
-// Display to user
-showQueryDetails({
-  sql: savedQuery.sql,
-  explanation,
-  results: await executeQuery(savedQuery.sql),
+const explainer = agent({
+  name: 'sql-explainer',
+  model: groq('openai/gpt-oss-20b'),
+  context,
 });
+
+const result = await explainer.generate({});
+console.log(result.text);
 ```
 
-### Query Auditing
+## When to Use Each Pattern
 
-Document what queries do for compliance:
+| Need | Recommended approach |
+| ---- | -------------------- |
+| Explain a live query result to the end user | `text2sql.chat()` |
+| Explain saved SQL in an audit screen or admin tool | Custom explainer agent |
+| Review generated SQL before execution | `text2sql.toSql()` plus your own explainer step |
 
-```typescript
-const auditLog = queries.map(async (query) => ({
-  sql: query.sql,
-  executedAt: query.timestamp,
-  explanation: await text2sql.explain(query.sql),
-}));
-```
+## Good Explanation Style
 
-## Explanation Style
+Aim for explanations that are:
 
-Explanations are:
-
-- **Non-technical**: No SQL jargon
-- **Intent-focused**: Describes the goal, not the mechanics
-- **Concise**: Clear and to the point
-- **Business-friendly**: Uses domain language where possible
-
-## Example Explanations
-
-| SQL                                                         | Explanation                                                      |
-| ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| `SELECT COUNT(*) FROM orders`                               | "Counts the total number of orders in the system"                |
-| `SELECT * FROM users WHERE status = 'active'`               | "Retrieves all information about users who are currently active" |
-| `SELECT product, SUM(quantity) FROM sales GROUP BY product` | "Shows how many units of each product have been sold in total"   |
+- **Intent-focused**: what the query answers
+- **Business-friendly**: use domain terms the reader already knows
+- **Concrete**: mention filters, grouping, ranking, and time windows when they matter
+- **Short**: one or two paragraphs are usually enough

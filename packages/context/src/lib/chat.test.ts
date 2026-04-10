@@ -997,3 +997,216 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
     );
   });
 });
+
+describe('chat() guardrail retry context integrity', () => {
+  it('first-turn guardrail retry should not create orphan assistant message', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-orphan-test',
+      userId: 'test-user',
+    });
+
+    let doStreamCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `text-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `text-${doStreamCalls}`,
+                delta:
+                  doStreamCalls === 1
+                    ? 'oh I understand, let me help'
+                    : 'Here are your results',
+              },
+              { type: 'text-end', id: `text-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    let guardrailCalls = 0;
+    const failOnceGuardrail: Guardrail = {
+      id: 'fail-once',
+      name: 'fail-once',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          guardrailCalls++;
+          if (guardrailCalls === 1) {
+            return fail('I generated malformed JSON. Let me format properly.');
+          }
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [failOnceGuardrail],
+    });
+
+    const stream = await chat(chatAgent, [userMessage('show me emails')], {
+      transform: () => new TransformStream(),
+    });
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('guardrail-orphan-test');
+    assert.ok(branch?.headMessageId);
+
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const messageNames = chain.map((e: { name: string }) => e.name);
+
+    assert.deepStrictEqual(
+      messageNames,
+      ['user', 'assistant'],
+      `Expected [user, assistant] but got [${messageNames}]. ` +
+        `Guardrail retry created an orphan assistant message.`,
+    );
+  });
+
+  it('multi-turn guardrail retry should not corrupt previous messages', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-multiturn-test',
+      userId: 'test-user',
+    });
+
+    const model1 = createMockModel('First response');
+    const chatAgent1 = agent({
+      name: 'assistant',
+      context,
+      model: model1,
+    });
+
+    const stream1 = await chat(chatAgent1, [userMessage('hello')], {
+      transform: () => new TransformStream(),
+    });
+    await drain(stream1);
+
+    const branch1 = await store.getActiveBranch('guardrail-multiturn-test');
+    assert.ok(branch1?.headMessageId);
+    const chain1 = await store.getMessageChain(branch1.headMessageId);
+    assert.deepStrictEqual(
+      chain1.map((e: { name: string }) => e.name),
+      ['user', 'assistant'],
+    );
+
+    const firstAssistantData = chain1.find(
+      (e: { name: string }) => e.name === 'assistant',
+    )!;
+    const firstAssistantContent = JSON.parse(
+      typeof firstAssistantData.data === 'string'
+        ? firstAssistantData.data
+        : JSON.stringify(firstAssistantData.data),
+    );
+
+    let doStreamCalls = 0;
+    const model2 = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `t2-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `t2-${doStreamCalls}`,
+                delta:
+                  doStreamCalls === 1
+                    ? 'let me check gdrive'
+                    : 'Here is your file',
+              },
+              { type: 'text-end', id: `t2-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    let guardrailCalls = 0;
+    const failOnceGuardrail: Guardrail = {
+      id: 'fail-once-t2',
+      name: 'fail-once-t2',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          guardrailCalls++;
+          if (guardrailCalls === 1) {
+            return fail('Tool call error. Let me retry.');
+          }
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent2 = agent({
+      name: 'assistant',
+      context,
+      model: model2,
+      guardrails: [failOnceGuardrail],
+    });
+
+    const firstAssistantMsg: UIMessage = {
+      id: firstAssistantData.id,
+      role: 'assistant',
+      parts: firstAssistantContent.parts ?? [
+        { type: 'text', text: 'First response' },
+      ],
+    };
+
+    const stream2 = await chat(
+      chatAgent2,
+      [userMessage('hello'), firstAssistantMsg, userMessage('find my file')],
+      { transform: () => new TransformStream() },
+    );
+    await drain(stream2);
+
+    const branch2 = await store.getActiveBranch('guardrail-multiturn-test');
+    assert.ok(branch2?.headMessageId);
+    const chain2 = await store.getMessageChain(branch2.headMessageId);
+    const messageNames2 = chain2.map((e: { name: string }) => e.name);
+
+    assert.deepStrictEqual(
+      messageNames2,
+      ['user', 'assistant', 'user', 'assistant'],
+      `Expected [user, assistant, user, assistant] but got [${messageNames2}]. ` +
+        `Guardrail retry on turn 2 corrupted the message chain.`,
+    );
+
+    const assistants = chain2.filter(
+      (e: { name: string }) => e.name === 'assistant',
+    );
+    const turn1Data = JSON.parse(
+      typeof assistants[0].data === 'string'
+        ? assistants[0].data
+        : JSON.stringify(assistants[0].data),
+    );
+    const turn1Text = turn1Data.parts?.find(
+      (p: { type: string }) => p.type === 'text',
+    );
+    assert.strictEqual(
+      turn1Text?.text,
+      'First response',
+      'Turn 1 assistant content should be preserved after turn 2 guardrail retry',
+    );
+  });
+});

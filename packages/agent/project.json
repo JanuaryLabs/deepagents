@@ -8,6 +8,13 @@
     "build": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/agent.xml",
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }

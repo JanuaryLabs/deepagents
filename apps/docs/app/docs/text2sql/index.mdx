@@ -3,33 +3,51 @@ title: Overview
 description: Convert natural language to SQL queries with AI-powered understanding of your database schema
 ---
 
-Text2SQL is a package that converts natural language questions into SQL queries. It understands your database schema, learns domain-specific terminology, and generates safe, read-only queries.
+Text2SQL converts natural language questions into SQL queries. It understands
+your database schema, carries conversation state through your context store, and
+can stream validated query results back to the user.
 
 ## Key Features
 
 - **Natural Language to SQL**: Ask questions in plain English, get executable SQL
 - **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
 - **Multi-Database Support**: Works with PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, and BigQuery
-- **Teachable**: Add domain knowledge through terms, hints, guardrails, and examples
-- **Conversation Memory**: Multi-turn chat with persistent history and user profiles
+- **Teachable**: Add domain knowledge through context fragments and low-level SQL generation fragments
+- **Conversation Memory**: Multi-turn chat backed by your `ContextEngine` store
 - **Safe by Default**: Generates read-only queries with output limits
 
 ## Quick Example
 
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
+import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
 
-import { InMemoryHistory, Text2Sql } from '@deepagents/text2sql';
+import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
+import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./chinook.db', { readOnly: true });
+const store = new InMemoryContextStore();
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
+  model: groq('openai/gpt-oss-20b'),
+  filesystem: new InMemoryFs(),
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
+    grounding: [sqlite.tables(), sqlite.info()],
   }),
-  history: new InMemoryHistory(),
+  context: (...fragments) => {
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chinook-demo',
+      userId: 'demo-user',
+    });
+    engine.set(...fragments);
+    return engine;
+  },
 });
 
 // Generate SQL from natural language
@@ -44,11 +62,9 @@ const sql = await text2sql.toSql('Show me top 10 customers by total purchases');
 | Method                    | Description                                            |
 | ------------------------- | ------------------------------------------------------ |
 | `toSql(input)`            | Generate SQL without executing                         |
-| `chat(messages, params)`  | Multi-turn conversation with history and user profiles |
-| `explain(sql)`            | Explain SQL in plain English                           |
-| `instruct(...teachables)` | Manually add teachables to the system                  |
-| `inspect(agent)`          | View the full system prompt with all context           |
+| `chat(messages)`          | Run a multi-turn conversation using your context store |
 | `index()`                 | Introspect database schema (cached)                    |
+| `toPairs(factory)`        | Generate training pairs from the configured adapter    |
 
 ## When to Use Text2SQL
 
@@ -69,8 +85,7 @@ User Question
      │
      ▼
 ┌─────────────────┐
-│ Teachables      │ ← Domain knowledge (terms, hints, guardrails, etc.)
-│ System          │
+│ SQL Policies    │ ← Built-in SQL guidance + optional context fragments
 └─────────────────┘
      │
      ▼
@@ -82,8 +97,8 @@ User Question
      │                     │
      ▼                     ▼
 ┌─────────────┐   ┌──────────────┐
-│  Explainer  │   │ User Profile │
-│   Agent     │   │   Memory     │
+│ SQL Output  │   │ ContextStore │
+│  / Stream   │   │ Persistence  │
 └─────────────┘   └──────────────┘
      │
      ▼

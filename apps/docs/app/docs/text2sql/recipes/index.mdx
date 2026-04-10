@@ -29,28 +29,30 @@ Copy the teachables bundle from any recipe into your code:
 
 ```typescript
 import {
+  clarification,
+  example,
+  guardrail,
   term,
   hint,
-  guardrail,
-  example,
-  clarification,
-} from '@deepagents/text2sql';
+} from '@deepagents/context';
 
-// Paste the recipe's teachables here
-text2sql.instruct(
+const recipe = [
   term('AOV', 'Average Order Value - total revenue divided by number of orders'),
   hint('Active customer = ordered in last 90 days unless specified'),
   // ... more teachables from the recipe
-);
+];
 ```
+
+Spread `...recipe` into your `context(...fragments)` factory for `chat()`, or
+append it to the low-level `toSql({ fragments })` helper when you need direct
+SQL generation.
 
 ## Combining Recipes
 
 You can combine multiple recipes for cross-domain applications:
 
 ```typescript
-// E-commerce + Finance for a retail analytics platform
-text2sql.instruct(
+const combinedRecipe = [
   // E-commerce terms
   term('AOV', 'Average Order Value'),
   term('LTV', 'Lifetime Value'),
@@ -58,7 +60,7 @@ text2sql.instruct(
   // Finance terms for payment processing
   term('chargeback', 'disputed transaction returned to customer'),
   term('settlement', 'transfer of funds from processor to merchant'),
-);
+];
 ```
 
 ## Customizing Recipes
@@ -84,17 +86,15 @@ example({
 
 ## Creating Your Own Recipe
 
-Use `teach()` to auto-generate teachables based on your schema:
+There is no public `text2sql.teach()` helper in the current API. Start with a
+recipe array, test it against your schema, and refine it manually:
 
 ```typescript
-const result = await text2sql.teach(`
-  Our ${domain} database tracks:
-  - [describe your main entities]
-  - [explain key relationships]
-  - [define important business rules]
-`);
-
-console.log(result.teachables); // Generated teachables to review
+const customRecipe = [
+  term('active customer', 'customer who purchased in the last 60 days'),
+  hint('Exclude sandbox accounts from all customer metrics'),
+];
 ```
 
-Then refine the generated teachables and save them as your custom recipe.
+If you are generating synthetic training data, pass the final array as the
+`teachings` option to `SchemaSynthesizer`.

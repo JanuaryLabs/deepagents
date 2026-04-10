@@ -35,6 +35,7 @@ const assistant = agent({
 | `tools` | `ToolSet` | `{}` | AI SDK tools available to the agent |
 | `toolChoice` | `ToolChoice` | `undefined` | Controls how the model selects tools |
 | `providerOptions` | `object` | `undefined` | Provider-specific options forwarded to the AI SDK |
+| `experimental_telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
 | `guardrails` | `Guardrail[]` | `[]` | Guardrails applied during streaming |
 | `maxGuardrailRetries` | `number` | `3` | Max retry attempts when a guardrail fails |
 | `logging` | `boolean` | `undefined` | Enable debug logging |
@@ -170,6 +171,7 @@ const person = await extractor.generate({});
 | `model` | `LanguageModelV3` | required | AI SDK model |
 | `schema` | `z.ZodType` | required | Zod schema for the output type |
 | `providerOptions` | `object` | `undefined` | Provider-specific options |
+| `experimental_telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
 | `tools` | `ToolSet` | `undefined` | Tools available during generation |
 
 ### structuredOutput Methods
