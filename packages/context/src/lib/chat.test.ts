@@ -19,9 +19,11 @@ import {
   agent,
   assistant,
   chat,
+  errorRecoveryGuardrail,
   fail,
   pass,
   staticChatTitle,
+  user,
 } from '@deepagents/context';
 
 const testUsage = {
@@ -1207,6 +1209,434 @@ describe('chat() guardrail retry context integrity', () => {
       turn1Text?.text,
       'First response',
       'Turn 1 assistant content should be preserved after turn 2 guardrail retry',
+    );
+  });
+});
+
+describe('chat() guardrail self-correction persistence', () => {
+  it('stores exactly one assistant message and one branch after guardrail retry', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-upsert-test',
+      userId: 'test-user',
+    });
+
+    let doStreamCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `t-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `t-${doStreamCalls}`,
+                delta:
+                  doStreamCalls === 1 ? 'bad output' : 'corrected response',
+              },
+              { type: 'text-end', id: `t-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    let guardrailCalls = 0;
+    const failOnceGuardrail: Guardrail = {
+      id: 'fail-once-upsert',
+      name: 'fail-once-upsert',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          guardrailCalls++;
+          if (guardrailCalls === 1) return fail('Error detected. Retrying.');
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [failOnceGuardrail],
+    });
+
+    const stream = await chat(chatAgent, [userMessage('test')], {
+      transform: () => new TransformStream(),
+    });
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('guardrail-upsert-test');
+    assert.ok(branch?.headMessageId);
+
+    const chain = await store.getMessageChain(branch.headMessageId);
+    assert.deepStrictEqual(
+      chain.map((e: { name: string }) => e.name),
+      ['user', 'assistant'],
+    );
+
+    const assistantEntry = chain.find(
+      (e: { name: string }) => e.name === 'assistant',
+    )!;
+    const assistantData = assistantEntry.data as UIMessage;
+    assert.strictEqual(assistantData.role, 'assistant');
+
+    const branches = await store.listBranches('guardrail-upsert-test');
+    assert.strictEqual(
+      branches.length,
+      1,
+      'Guardrail retry should not create extra branches',
+    );
+  });
+
+  it('stores retry response as proper parts, not concatenated with feedback', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-parts-test',
+      userId: 'test-user',
+    });
+
+    let doStreamCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `t-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `t-${doStreamCalls}`,
+                delta: doStreamCalls === 1 ? 'bad output' : 'clean result',
+              },
+              { type: 'text-end', id: `t-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    let guardrailCalls = 0;
+    const failOnceGuardrail: Guardrail = {
+      id: 'fail-once-parts',
+      name: 'fail-once-parts',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          guardrailCalls++;
+          if (guardrailCalls === 1) return fail('FEEDBACK: fix your output');
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [failOnceGuardrail],
+    });
+
+    const stream = await chat(chatAgent, [userMessage('test')], {
+      transform: () => new TransformStream(),
+    });
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('guardrail-parts-test');
+    assert.ok(branch?.headMessageId);
+
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantEntry = chain.find(
+      (e: { name: string }) => e.name === 'assistant',
+    )!;
+    const assistantData = assistantEntry.data as UIMessage;
+
+    const textParts = assistantData.parts.filter(
+      (p: { type: string }) => p.type === 'text',
+    );
+    assert.ok(textParts.length > 0, 'Should have text parts');
+
+    const allText = textParts.map((p) => (p as { text: string }).text).join('');
+
+    assert.ok(
+      allText.includes('clean result'),
+      `Final assistant text should contain retry response, got: "${allText}"`,
+    );
+    assert.ok(
+      !allText.includes('bad output'),
+      `Final assistant text should not contain the failed first attempt's output, got: "${allText}"`,
+    );
+  });
+
+  it('persists self-correction to store before retry stream starts', async () => {
+    const chatId = 'guardrail-save-before-retry';
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId,
+      userId: 'test-user',
+    });
+
+    let doStreamCalls = 0;
+    let storeChainAtRetry: { name: string }[] | undefined;
+
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        if (doStreamCalls === 2) {
+          const branch = await store.getActiveBranch(chatId);
+          if (branch?.headMessageId) {
+            storeChainAtRetry = await store.getMessageChain(
+              branch.headMessageId,
+            );
+          }
+        }
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `t-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `t-${doStreamCalls}`,
+                delta: doStreamCalls === 1 ? 'first attempt' : 'retry response',
+              },
+              { type: 'text-end', id: `t-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    let guardrailCalls = 0;
+    const failOnceGuardrail: Guardrail = {
+      id: 'fail-once-sync',
+      name: 'fail-once-sync',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          guardrailCalls++;
+          if (guardrailCalls === 1) return fail('Self-correction feedback');
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [failOnceGuardrail],
+    });
+
+    const stream = await chat(chatAgent, [userMessage('go')], {
+      transform: () => new TransformStream(),
+    });
+    await drain(stream);
+
+    assert.ok(
+      storeChainAtRetry,
+      'Store should have been queried when retry doStream fired',
+    );
+    assert.deepStrictEqual(
+      storeChainAtRetry.map((e: { name: string }) => e.name),
+      ['user', 'assistant'],
+      'At retry time, store must already contain [user, assistant] — ' +
+        'proving finish-step → onStepFinish → save() completed before retry',
+    );
+  });
+
+  it('guardrail retry works without generateMessageId', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-no-msgid',
+      userId: 'test-user',
+    });
+
+    context.set(user('test'));
+    await context.save();
+
+    let doStreamCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: `t-${doStreamCalls}` },
+              {
+                type: 'text-delta',
+                id: `t-${doStreamCalls}`,
+                delta: doStreamCalls === 1 ? 'wrong answer' : 'right answer',
+              },
+              { type: 'text-end', id: `t-${doStreamCalls}` },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    let guardrailCalls = 0;
+    const failOnceGuardrail: Guardrail = {
+      id: 'fail-once-nomsgid',
+      name: 'fail-once-nomsgid',
+      handle: (part) => {
+        if (part.type === 'text-delta') {
+          guardrailCalls++;
+          if (guardrailCalls === 1) return fail('Bad response. Try again.');
+        }
+        return pass(part);
+      },
+    };
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [failOnceGuardrail],
+    });
+
+    const result = await chatAgent.stream(
+      {},
+      {
+        transform: () => new TransformStream(),
+      },
+    );
+
+    const uiStream = result.toUIMessageStream({
+      sendStart: true,
+      sendFinish: true,
+    });
+    await drain(uiStream);
+
+    assert.strictEqual(
+      doStreamCalls,
+      2,
+      'Model should have been called twice (original + retry)',
+    );
+    assert.ok(
+      guardrailCalls >= 2,
+      'Guardrail should have inspected parts from both streams',
+    );
+  });
+
+  it('errorRecoveryGuardrail catches error parts and retries successfully', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'guardrail-error-recovery-e2e',
+      userId: 'test-user',
+    });
+
+    let doStreamCalls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        doStreamCalls++;
+        if (doStreamCalls === 1) {
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: 'text-start', id: 'e-1' },
+                { type: 'text-delta', id: 'e-1', delta: 'Let me help...' },
+                { type: 'text-end', id: 'e-1' },
+                {
+                  type: 'error',
+                  error: 'Tool choice is none, but model called a tool',
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage: testUsage,
+                },
+              ],
+            }),
+            rawCall: { rawPrompt: undefined, rawSettings: {} },
+          };
+        }
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'text-start', id: 'e-2' },
+              {
+                type: 'text-delta',
+                id: 'e-2',
+                delta: 'Here is the corrected response',
+              },
+              { type: 'text-end', id: 'e-2' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage: testUsage,
+              },
+            ],
+          }),
+          rawCall: { rawPrompt: undefined, rawSettings: {} },
+        };
+      },
+    });
+
+    const chatAgent = agent({
+      name: 'assistant',
+      context,
+      model,
+      guardrails: [errorRecoveryGuardrail],
+    });
+
+    const stream = await chat(chatAgent, [userMessage('show me data')], {
+      transform: () => new TransformStream(),
+    });
+    await drain(stream);
+
+    assert.strictEqual(
+      doStreamCalls,
+      2,
+      'Model should be called twice (original errored, retry succeeded)',
+    );
+
+    const branch = await store.getActiveBranch('guardrail-error-recovery-e2e');
+    assert.ok(branch?.headMessageId);
+
+    const chain = await store.getMessageChain(branch.headMessageId);
+    assert.deepStrictEqual(
+      chain.map((e: { name: string }) => e.name),
+      ['user', 'assistant'],
+    );
+
+    const assistantData = chain.find(
+      (e: { name: string }) => e.name === 'assistant',
+    )!.data as UIMessage;
+    const textParts = assistantData.parts.filter(
+      (p: { type: string }) => p.type === 'text',
+    );
+    const allText = textParts.map((p) => (p as { text: string }).text).join('');
+    assert.ok(
+      allText.includes('corrected response'),
+      `Final assistant should contain retry text, got: "${allText}"`,
     );
   });
 });

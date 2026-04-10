@@ -7,14 +7,8 @@ import {
   type FragmentEstimate,
   getModelsRegistry,
 } from './estimate.ts';
-import type { ContextFragment, LazyFragment } from './fragments.ts';
-import {
-  LAZY_ID,
-  assistantText,
-  getFragmentData,
-  isLazyFragment,
-  isMessageFragment,
-} from './fragments.ts';
+import type { ContextFragment } from './fragments.ts';
+import { getFragmentData, isMessageFragment } from './fragments.ts';
 import {
   getConditionalReminder,
   isConditionalReminder,
@@ -426,19 +420,9 @@ export class ContextEngine {
     }
 
     // Add pending messages (not yet saved)
-    // Resolve any lazy fragments first (like save() does)
-    for (let i = 0; i < this.#pendingMessages.length; i++) {
-      const fragment = this.#pendingMessages[i];
-      if (isLazyFragment(fragment)) {
-        this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
-      }
-    }
-
     for (const fragment of this.#pendingMessages) {
       if (!fragment.codec) {
-        throw new Error(
-          `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before encode.`,
-        );
+        throw new Error(`Fragment "${fragment.name}" is missing codec.`);
       }
 
       messages.push(fragment.codec.encode());
@@ -473,14 +457,6 @@ export class ContextEngine {
     }
 
     const shouldBranch = options?.branch ?? true;
-
-    // Resolve any lazy fragments before processing
-    for (let i = 0; i < this.#pendingMessages.length; i++) {
-      const fragment = this.#pendingMessages[i];
-      if (isLazyFragment(fragment)) {
-        this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
-      }
-    }
 
     if (shouldBranch) {
       // Check if any fragment is an update to an existing message.
@@ -577,9 +553,7 @@ export class ContextEngine {
     // Add each pending message to the graph
     for (const fragment of this.#pendingMessages) {
       if (!fragment.codec) {
-        throw new Error(
-          `Fragment "${fragment.name}" is missing codec. Lazy fragments must be resolved before encode.`,
-        );
+        throw new Error(`Fragment "${fragment.name}" is missing codec.`);
       }
 
       const msgId = fragment.id ?? crypto.randomUUID();
@@ -617,47 +591,6 @@ export class ContextEngine {
     this.#pendingMessages = [];
 
     return { headMessageId: this.#activeBranch.headMessageId ?? undefined };
-  }
-
-  /**
-   * Resolve a lazy fragment by finding the appropriate ID.
-   */
-  async #resolveLazyFragment(fragment: LazyFragment): Promise<ContextFragment> {
-    const lazy = fragment[LAZY_ID]!;
-
-    if (lazy.type === 'last-assistant') {
-      const lastId = await this.#getLastAssistantId();
-      return assistantText(lazy.content, { id: lastId ?? crypto.randomUUID() });
-    }
-
-    throw new Error(`Unknown lazy fragment type: ${lazy.type}`);
-  }
-
-  /**
-   * Find the most recent assistant message ID (pending or persisted).
-   */
-  async #getLastAssistantId(): Promise<string | undefined> {
-    // Check pending messages first (excluding lazy ones)
-    for (let i = this.#pendingMessages.length - 1; i >= 0; i--) {
-      const msg = this.#pendingMessages[i];
-      if (msg.name === 'assistant' && !isLazyFragment(msg)) {
-        return msg.id;
-      }
-    }
-
-    // Check persisted messages at branch head
-    if (this.#branch?.headMessageId) {
-      const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
-      );
-      for (let i = chain.length - 1; i >= 0; i--) {
-        if (chain[i].name === 'assistant') {
-          return chain[i].id;
-        }
-      }
-    }
-
-    return undefined;
   }
 
   /**

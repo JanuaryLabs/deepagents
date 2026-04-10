@@ -12,7 +12,6 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
-  lastAssistantMessage,
   reminder,
   user,
 } from '@deepagents/context';
@@ -469,101 +468,6 @@ describe('Sqlite ContextEngine Integration', () => {
     },
   );
 
-  it('handles lastAssistantMessage in save() without encode error', async () => {
-    await withTempDb('last-assistant-message', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-last-assistant',
-        userId: 'user-1',
-      });
-
-      // First, add a user message and save
-      engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      await withTimeout('save user message', 10000, () => engine.save());
-
-      // Now simulate guardrail retry: set lastAssistantMessage and save
-      // This should NOT throw "Cannot read properties of undefined (reading 'encode')"
-      engine.set(
-        lastAssistantMessage(
-          'I tried something but it failed. Let me try again.',
-        ),
-      );
-      await withTimeout('save lastAssistantMessage', 10000, () =>
-        engine.save(),
-      );
-
-      // Verify the message was saved
-      const result = await engine.resolve({ renderer });
-      assert.strictEqual(result.messages.length, 2);
-    });
-  });
-
-  it('handles lastAssistantMessage with existing pending user message', async () => {
-    await withTempDb('last-assistant-with-pending', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-pending-mix',
-        userId: 'user-1',
-      });
-
-      // Simulate the real guardrail flow:
-      // 1. User message is set but NOT saved yet
-      // 2. LLM tries to respond, guardrail catches error
-      // 3. lastAssistantMessage is set for self-correction
-      // 4. save() is called with BOTH messages pending
-
-      engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      // Note: NOT saving here - user message is still pending
-
-      // Now add lastAssistantMessage (simulating guardrail retry)
-      engine.set(
-        lastAssistantMessage(
-          'I tried to call read_file but it does not exist. Let me try again.',
-        ),
-      );
-
-      // This save should handle BOTH: user message (has codec) and lazy fragment
-      await withTimeout('save mixed pending', 10000, () => engine.save());
-
-      const result = await engine.resolve({ renderer });
-      assert.strictEqual(result.messages.length, 2);
-    });
-  });
-
-  it('resolve() handles pending lastAssistantMessage without encode error', async () => {
-    await withTempDb('resolve-with-lazy', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-resolve-lazy',
-        userId: 'user-1',
-      });
-
-      // Add user message and save first
-      engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      await withTimeout('save user', 10000, () => engine.save());
-
-      // Set lastAssistantMessage but DON'T save yet
-      engine.set(
-        lastAssistantMessage(
-          'I tried to call read_file but it does not exist. Let me try again.',
-        ),
-      );
-
-      // Now call resolve() with pending lazy fragment
-      // This simulates what happens during retry when createRawStream calls resolve()
-      // BEFORE save() has been called
-      const result = await withTimeout('resolve with pending lazy', 10000, () =>
-        engine.resolve({ renderer }),
-      );
-
-      // Should include both the saved user message and pending assistant message
-      assert.strictEqual(result.messages.length, 2);
-    });
-  });
-
   it('creates new branch when saving message with existing ID (tool result scenario)', async () => {
     await withTempDb('tool-result-branch', async (dbPath) => {
       const store = new SqliteContextStore(dbPath);
@@ -650,76 +554,6 @@ describe('Sqlite ContextEngine Integration', () => {
       assert.strictEqual(mainResult.messages.length, 2);
       const mainAssistant = mainResult.messages[1] as { id?: string };
       assert.strictEqual(mainAssistant.id, 'assistant-pending');
-    });
-  });
-
-  it('creates new branch when lastAssistantMessage resolves to head (guardrail retry scenario)', async () => {
-    await withTempDb('lazy-resolve-branch', async (dbPath) => {
-      const store = new SqliteContextStore(dbPath);
-      const engine = new ContextEngine({
-        store,
-        chatId: 'chat-lazy-resolve',
-        userId: 'user-1',
-      });
-
-      // 1. User message → save
-      engine.set(user(makeUserMessage('user-msg-1', 'Help me with code')));
-      await engine.save();
-
-      // 2. Assistant message → save (head = assistant message)
-      engine.set(
-        assistantText('Let me try to read the file...', {
-          id: 'assistant-msg-1',
-        }),
-      );
-      await engine.save();
-
-      // Verify we're on main branch with 2 messages
-      assert.strictEqual(engine.branch, 'main');
-      const beforeBranches = await store.listBranches('chat-lazy-resolve');
-      assert.strictEqual(beforeBranches.length, 1);
-
-      // 3. lastAssistantMessage (simulating guardrail retry)
-      //    This resolves to assistant-msg-1 which IS the current head
-      engine.set(
-        lastAssistantMessage(
-          'Oops, read_file failed. Let me try again with the correct path.',
-        ),
-      );
-      const lazySaveResult = await engine.save();
-      assert.notStrictEqual(
-        lazySaveResult.headMessageId,
-        'assistant-msg-1',
-        'headMessageId should differ after branching',
-      );
-
-      // 4. Verify new branch was created
-      const afterBranches = await store.listBranches('chat-lazy-resolve');
-      assert.strictEqual(afterBranches.length, 2, 'Should have 2 branches now');
-      assert.strictEqual(engine.branch, 'main-v2', 'Should be on new branch');
-
-      // 5. Verify main-v2 chain: user → new_assistant (2 messages)
-      const result = await engine.resolve({ renderer });
-      assert.strictEqual(result.messages.length, 2);
-      const newAssistant = result.messages[1] as {
-        parts?: Array<{ type: string; text?: string }>;
-      };
-      assert.ok(
-        newAssistant.parts?.[0]?.text?.includes('try again'),
-        'Should have corrected message',
-      );
-
-      // 6. Verify main branch is preserved with original assistant message
-      await engine.switchBranch('main');
-      const mainResult = await engine.resolve({ renderer });
-      assert.strictEqual(mainResult.messages.length, 2);
-      const mainAssistant = mainResult.messages[1] as {
-        parts?: Array<{ type: string; text?: string }>;
-      };
-      assert.ok(
-        mainAssistant.parts?.[0]?.text?.includes('try to read'),
-        'Should have original message',
-      );
     });
   });
 

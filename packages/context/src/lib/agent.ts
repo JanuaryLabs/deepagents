@@ -7,6 +7,7 @@ import {
   type StreamTextTransform,
   type ToolChoice,
   type ToolSet,
+  type UIMessage,
   type UIMessageStreamWriter,
   convertToModelMessages,
   createUIMessageStream,
@@ -21,7 +22,7 @@ import chalk from 'chalk';
 import { type AgentModel, createRepairToolCall } from '@deepagents/agent';
 
 import { type ContextEngine, XmlRenderer } from '../index.ts';
-import { lastAssistantMessage } from './fragments.ts';
+import { assistant } from './fragments.ts';
 import {
   type Guardrail,
   type GuardrailContext,
@@ -208,8 +209,8 @@ class Agent<CIn, COut = CIn> {
    * Wrap a StreamTextResult with guardrail protection on toUIMessageStream().
    *
    * When a guardrail fails:
-   * 1. Accumulated text + feedback is appended as the assistant's self-correction
-   * 2. The feedback is written to the output stream (user sees the correction)
+   * 1. The feedback is written to the output stream (user sees the correction)
+   * 2. A finish-step is emitted, triggering onStepFinish to persist the self-correction
    * 3. A new stream is started and the model continues from the correction
    */
   #wrapWithGuardrails<CIn>(
@@ -233,8 +234,24 @@ class Agent<CIn, COut = CIn> {
 
     // Override toUIMessageStream with guardrail logic
     result.toUIMessageStream = (options) => {
+      const assistantMsgId = options?.generateMessageId?.();
+      let stepSaved: PromiseWithResolvers<void> | null = null;
+
       return createUIMessageStream({
-        generateId,
+        generateId: assistantMsgId ? () => assistantMsgId : generateId,
+        onStepFinish: async ({ responseMessage }) => {
+          if (!stepSaved) return;
+
+          const normalizedMessage = assistantMsgId
+            ? ({ ...responseMessage, id: assistantMsgId } as UIMessage)
+            : responseMessage;
+
+          context.set(assistant(normalizedMessage));
+          await context.save({ branch: false });
+
+          stepSaved.resolve();
+          stepSaved = null;
+        },
         execute: async ({ writer }) => {
           let currentResult: StreamTextResult<ToolSet, never> = result;
           let attempt = 0;
@@ -247,25 +264,21 @@ class Agent<CIn, COut = CIn> {
           };
 
           while (attempt < maxRetries) {
-            // Check if request was cancelled before starting new attempt
             if (config?.abortSignal?.aborted) {
               writer.write({ type: 'finish' });
               return;
             }
 
             attempt++;
-            let accumulatedText = '';
             let guardrailFailed = false;
             let failureFeedback = '';
 
-            // Use original method for first result (avoids recursion), new results have their own original
             const uiStream =
               currentResult === result
                 ? originalToUIMessageStream(options)
                 : currentResult.toUIMessageStream(options);
 
             for await (const part of uiStream) {
-              // Run through guardrail chain - guardrails can handle any part type
               const checkResult = runGuardrailChain(
                 part,
                 this.#guardrails,
@@ -282,11 +295,10 @@ class Agent<CIn, COut = CIn> {
                   ),
                 );
 
-                break; // Exit stream processing
+                break;
               }
 
               if (checkResult.type === 'stop') {
-                // Stop immediately without retry - write part and finish
                 console.log(
                   chalk.red(
                     `[${this.#options.name}] Guardrail stopped - unrecoverable error, no retry`,
@@ -297,22 +309,14 @@ class Agent<CIn, COut = CIn> {
                 return;
               }
 
-              // Guardrail passed - track text for self-correction context
-              if (checkResult.part.type === 'text-delta') {
-                accumulatedText += checkResult.part.delta;
-              }
-
-              // Write the (possibly modified) part to output
               writer.write(part);
             }
 
             if (!guardrailFailed) {
-              // Stream completed successfully
               writer.write({ type: 'finish' });
               return;
             }
 
-            // Check if we've exceeded max retries BEFORE writing feedback
             if (attempt >= maxRetries) {
               console.error(
                 chalk.red(
@@ -323,19 +327,12 @@ class Agent<CIn, COut = CIn> {
               return;
             }
 
-            // Guardrail failed but we have retries left - prepare for retry
-            // Write the self-correction feedback to the output stream
             writeText(writer, failureFeedback);
 
-            // Add the partial assistant message + feedback to context
-            // Uses lastAssistantMessage which finds/reuses the last assistant ID
-            const selfCorrectionText = accumulatedText + ' ' + failureFeedback;
-            context.set(lastAssistantMessage(selfCorrectionText));
+            stepSaved = Promise.withResolvers<void>();
+            writer.write({ type: 'finish-step' as const });
+            await stepSaved.promise;
 
-            // Save to persist the self-correction (prevents duplicate messages on next resolve)
-            await context.save({ branch: false });
-
-            // Create new stream for retry
             currentResult = await this.#createRawStream(
               contextVariables,
               config,

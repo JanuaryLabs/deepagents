@@ -250,7 +250,7 @@ async restore(name: string): Promise<BranchInfo> {
 
 ## Save Flow
 
-The `save()` method persists pending messages to the graph with careful handling of lazy fragments and updates.
+The `save()` method persists pending messages to the graph with careful handling of updates.
 
 ### Flow Diagram
 
@@ -264,25 +264,22 @@ The `save()` method persists pending messages to the graph with careful handling
 │                                                              │
 │  2. Early return if no pending messages                      │
 │                                                              │
-│  3. Resolve lazy fragments                                   │
-│     └── Replace LAZY_ID fragments with concrete ones         │
-│                                                              │
-│  4. Check for updates to existing messages                   │
+│  3. Check for updates to existing messages                   │
 │     ├── If fragment.id matches existing message              │
 │     ├── Rewind to parent (preserves pending)                 │
 │     └── Regenerate ID to avoid modifying original            │
 │                                                              │
-│  5. Chain messages with parentId                             │
+│  4. Chain messages with parentId                             │
 │     ├── Start with current branch.headMessageId              │
 │     └── Each message's id becomes next's parentId            │
 │                                                              │
-│  6. Add messages to store                                    │
+│  5. Add messages to store                                    │
 │     └── store.addMessage() for each                          │
 │                                                              │
-│  7. Update branch head                                       │
+│  6. Update branch head                                       │
 │     └── Point to last added message                          │
 │                                                              │
-│  8. Clear pending messages                                   │
+│  7. Clear pending messages                                   │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -297,15 +294,7 @@ public async save(): Promise<void> {
     return;
   }
 
-  // 1. Resolve lazy fragments
-  for (let i = 0; i < this.#pendingMessages.length; i++) {
-    const fragment = this.#pendingMessages[i];
-    if (isLazyFragment(fragment)) {
-      this.#pendingMessages[i] = await this.#resolveLazyFragment(fragment);
-    }
-  }
-
-  // 2. Check for updates - rewind if needed
+  // 1. Check for updates - rewind if needed
   for (const fragment of this.#pendingMessages) {
     if (fragment.id) {
       const existing = await this.#store.getMessage(fragment.id);

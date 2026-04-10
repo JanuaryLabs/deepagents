@@ -1,9 +1,9 @@
 ---
 title: Core Concepts
-description: Fragment layer, codec system, lazy fragments, and engine orchestration
+description: Fragment layer, codec system, and engine orchestration
 ---
 
-This page explains the foundational concepts behind `@deepagents/context`: fragments, codecs, lazy fragments, and the `ContextEngine`.
+This page explains the foundational concepts behind `@deepagents/context`: fragments, codecs, and the `ContextEngine`.
 
 ## Fragment Layer
 
@@ -46,7 +46,6 @@ The package provides runtime guards for fragment inspection:
 | `isFragment(value)` | Check if a value is a `ContextFragment` |
 | `isFragmentObject(value)` | Check if a value is a plain object (not array/fragment/primitive) |
 | `isMessageFragment(fragment)` | Check if fragment has `type: 'message'` |
-| `isLazyFragment(fragment)` | Check if fragment needs lazy ID resolution |
 
 ## Codec System
 
@@ -98,23 +97,6 @@ const assistantMessage = assistantText('Hi there');
 ```
 
 If you already have an AI SDK `UIMessage`, use `assistant(...)` or `message(...)`.
-
-## Lazy Fragments
-
-Lazy fragments defer ID resolution until `save()` time. This is useful when you want to update the most recent assistant message without knowing its ID ahead of time.
-
-### lastAssistantMessage()
-
-The main lazy helper is `lastAssistantMessage(...)`.
-
-Use it for retry and correction flows where the replacement assistant response should overwrite the latest assistant node on the current branch.
-
-```typescript
-context.set(lastAssistantMessage(correctedContent));
-await context.save();
-```
-
-During `save()`, the engine resolves that lazy fragment into a concrete assistant message using the latest assistant ID if one exists.
 
 ## Engine Orchestration
 
