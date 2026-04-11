@@ -131,9 +131,8 @@ That separation is why `resolve()` can render system context and conversation hi
 1. Initialize chat and active branch.
 2. Render regular fragments into `systemPrompt`.
 3. Load persisted message history from the graph.
-4. Resolve any lazy pending fragments.
-5. Collect message payloads from persisted history and pending message codecs.
-6. Validate the final message list with `validateUIMessages(...)`.
+4. Encode pending message fragments that have not been saved yet.
+5. Validate the final message list with `validateUIMessages(...)`.
 
 ### ResolveResult
 

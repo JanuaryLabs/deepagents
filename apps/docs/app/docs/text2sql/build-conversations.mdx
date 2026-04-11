@@ -3,9 +3,9 @@ title: Build Conversations
 description: Create multi-turn chat experiences with a persistent ContextEngine store
 ---
 
-The `chat()` method streams answers and persists the conversation through the
-`ContextEngine` returned by your `context` factory. The active thread is defined
-by the `chatId` and `userId` you use when you construct that engine.
+The `chat()` method streams answers and persists each turn through the
+`ContextEngine` returned by your `context` factory. Thread identity comes from
+the `chatId` and `userId` on that engine, not from the `Text2Sql` instance.
 
 ## Basic Usage
 
@@ -71,7 +71,7 @@ When you call `chat()`:
 1. **Load stored context** - The `ContextEngine` resolves prior messages for the same thread.
 2. **Inject SQL guidance** - Text2SQL adds its built-in workflow guidance plus cached schema fragments.
 3. **Run tools** - The agent can validate SQL, execute read-only queries, and inspect saved results.
-4. **Persist the turn** - The latest assistant message and chat metadata are written back to the store.
+4. **Persist the turn** - The latest assistant message and chat metadata are written back to the store when the turn finishes.
 
 ## Message Format
 
@@ -92,7 +92,7 @@ await text2sql.chat([
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
-| `abortSignal` | `AbortSignal` | Cancels an in-flight stream |
+| `abortSignal` | `AbortSignal` | Cancels title generation, repair attempts, and the active stream |
 | `generateTitle` | `boolean` | Uses the model to generate the first chat title instead of the static fallback |
 
 ### Abort Signal
@@ -107,11 +107,13 @@ const stream = await text2sql.chat(messages, {
 setTimeout(() => controller.abort(), 10_000);
 ```
 
+The same signal is forwarded to title generation and tool-call repair, so cancellation stops the full turn rather than only the visible stream.
+
 ## Error Handling
 
-Tool and validation errors are converted into user-facing stream messages. If
-you need more control, abort the current stream and start a fresh turn with a
-new prompt or a new `chatId`.
+Tool and validation errors are surfaced as user-facing stream messages. After a
+cancellation or failure, start a new `chat()` call. Reuse the same `chatId` to
+continue the thread, or use a new `chatId` to start a separate conversation.
 
 ## Integration Example
 

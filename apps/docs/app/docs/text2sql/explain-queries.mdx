@@ -4,7 +4,7 @@ description: Get plain English explanations of SQL queries
 ---
 
 Text2SQL does not currently expose a public `text2sql.explain()` helper. Use one
-of the supported patterns below when you need plain-English explanations of SQL.
+of the supported patterns below when you need plain English explanations of SQL.
 
 ## Option 1: Use chat() for Execution + Explanation
 
@@ -23,13 +23,12 @@ for await (const chunk of stream) {
 }
 ```
 
-This is the best fit when you want the agent to validate SQL, run the query, and
-describe the result in one flow.
+Use this when you want one turn to validate SQL, run it, and explain the result.
 
 ## Option 2: Explain Saved SQL with Your Own Agent
 
-If you already have SQL text and only need an explanation, build a tiny explainer
-agent with `@deepagents/context`:
+If you already have SQL text and only need an explanation, build a small
+explainer agent with `@deepagents/context`:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';

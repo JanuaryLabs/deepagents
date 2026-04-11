@@ -9,7 +9,7 @@
 
 Each `Adapter` subclass (Sqlite, Postgres, SqlServer, BigQuery, MySQL, Spreadsheet) accepts an `execute: ExecuteFunction` callback — adapters don't own connections, they delegate to injected functions. The abstract `Adapter` base provides scope checking, formatting, and grounding orchestration.
 
-Real deployments split data across operational, warehouse, and LoB databases. Users need one `Text2Sql` session to reason over multiple databases without maintaining separate instances and manually stitching results.
+Real deployments split data across operational, warehouse, and line-of-business databases. Users need one `Text2Sql` session to reason over multiple databases without maintaining separate instances and manually stitching results.
 
 ## Goals / Non-Goals
 

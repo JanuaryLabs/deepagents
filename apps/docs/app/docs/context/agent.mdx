@@ -3,7 +3,7 @@ title: Agent Wrapper
 description: Convenience wrapper that combines ContextEngine with the AI SDK into a streamable agent
 ---
 
-The `agent()` function wraps a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, and `clone()` methods. It handles context resolution, tool repair, and optional guardrail-based self-correction so you don't wire that plumbing yourself.
+The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, and `clone()` methods. It resolves context, repairs tool calls when needed, and can retry streamed output through guardrails without extra orchestration in your app.
 
 ## Creating an Agent
 
@@ -71,6 +71,8 @@ console.log(result.text);
 | `contextVariables` | `CIn` | Passed as `experimental_context` to the AI SDK |
 | `config.abortSignal` | `AbortSignal` | Cancel the request |
 
+`config.abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
+
 ## stream()
 
 Resolves the context and returns a streaming result. When guardrails are configured, `toUIMessageStream()` is wrapped to intercept parts and retry on failure.
@@ -97,6 +99,8 @@ for await (const part of stream.toUIMessageStream()) {
 | `config.transform` | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |
 | `config.maxRetries` | `number` | Override `maxGuardrailRetries` for this call |
 
+`config.abortSignal` is reused across repair attempts and guardrail retries, so cancelling a stream stops the active turn cleanly.
+
 ## clone()
 
 Creates a new agent with the same options, selectively overridden. Handy for switching models or tools without rebuilding everything.
@@ -112,7 +116,7 @@ const result = await creativeAssistant.generate({});
 
 ## Guardrails
 
-Pass `guardrails` and `maxGuardrailRetries` to add real-time stream interception. When a guardrail fails, the agent automatically retries with self-correction feedback.
+Pass `guardrails` and `maxGuardrailRetries` to add real-time stream interception. When a guardrail fails, the agent emits a finish step, persists the corrected assistant state, and retries with self-correction feedback.
 
 ```typescript
 import { agent, errorRecoveryGuardrail } from '@deepagents/context';
