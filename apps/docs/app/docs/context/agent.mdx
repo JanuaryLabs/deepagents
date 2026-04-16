@@ -3,7 +3,7 @@ title: Agent Wrapper
 description: Convenience wrapper that combines ContextEngine with the AI SDK into a streamable agent
 ---
 
-The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, and `clone()` methods. It resolves context, repairs tool calls when needed, and can retry streamed output through guardrails without extra orchestration in your app.
+The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, `clone()`, `asTool()`, and `asAdvisor()` methods. It resolves context, repairs tool calls when needed, and can retry streamed output through guardrails without extra orchestration in your app.
 
 ## Creating an Agent
 
@@ -113,6 +113,92 @@ const creativeAssistant = assistant.clone({
 
 const result = await creativeAssistant.generate({});
 ```
+
+## asTool()
+
+Convert an agent into a regular AI SDK tool so another agent can call it for a
+bounded sub-task. `asTool()` requires both `context` and `model`.
+
+When the tool runs, the wrapper:
+
+1. Forks the current `ContextEngine`
+2. Appends the tool input as a `user(...)` message in that fork
+3. Runs a one-shot `generate()` call with the child context
+4. Returns either the extracted output or the raw tool results
+
+That keeps the parent agent's persisted thread untouched while reusing the same
+system fragments and configuration.
+
+```typescript
+const researcher = agent({
+  name: 'researcher',
+  context,
+  model: groq('gpt-oss-20b'),
+});
+
+const writer = agent({
+  name: 'writer',
+  context,
+  model: groq('gpt-oss-20b'),
+  tools: {
+    research: researcher.asTool({
+      toolDescription: 'Research the topic and return a concise brief',
+      outputExtractor: async (result) => result.text,
+    }),
+  },
+});
+```
+
+### asTool() Options
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `toolDescription` | `string` | Override the generated tool description |
+| `outputExtractor` | `(result) => string \| Promise<string>` | Transform the sub-agent result before the parent receives it |
+
+## asAdvisor()
+
+Expose the same agent as a no-input advisor tool backed by its configured
+model. The advisor receives the full executor conversation history automatically,
+so callers use it for strategy checks rather than raw execution work.
+
+```typescript
+const reviewer = agent({
+  name: 'reviewer',
+  context,
+  model: groq('gpt-oss-20b'),
+});
+
+const { tool: advisor, usage } = reviewer.asAdvisor({
+  concise: true,
+  maxConversationUses: 2,
+});
+
+const worker = agent({
+  name: 'worker',
+  context,
+  model: groq('gpt-oss-20b'),
+  tools: { advisor },
+});
+
+console.log(usage());
+```
+
+`usage()` reports successful advisor calls plus aggregated model usage for the
+returned advisor instance.
+
+### asAdvisor() Options
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `maxUses` | `number` | Hard cap on total tool invocations for this advisor instance |
+| `maxConversationUses` | `number` | Cap on successful advisor responses before the tool returns `max_uses_exceeded` |
+| `maxOutputTokens` | `number` | Maximum output tokens for the advisor response |
+| `concise` | `boolean \| string` | Use the built-in concise prompt, or provide custom advisor instructions |
+
+The tool returns short machine-readable status codes such as
+`too_many_requests`, `prompt_too_long`, or `execution_time_exceeded` when the
+advisor request cannot complete cleanly.
 
 ## Guardrails
 

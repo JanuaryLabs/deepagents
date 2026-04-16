@@ -135,6 +135,25 @@ Low-level render of context fragments. Use `resolve()` instead.
 const xml = context.render(new XmlRenderer());
 ```
 
+#### fork()
+
+Create an isolated child `ContextEngine` with the same non-message fragments but
+with a fresh in-memory store and no existing conversation history.
+
+```typescript
+import { XmlRenderer, user } from '@deepagents/context';
+
+const child = context.fork();
+child.set(user('Draft three headline options for this article.'));
+
+const { systemPrompt, messages } = await child.resolve({
+  renderer: new XmlRenderer(),
+});
+```
+
+Use `fork()` for one-shot helper flows such as `agent.asTool()` where you want
+to preserve the parent system context without mutating the parent chat thread.
+
 ### Graph Operations
 
 #### rewind(messageId)

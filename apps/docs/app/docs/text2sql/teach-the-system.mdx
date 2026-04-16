@@ -1,15 +1,15 @@
 ---
 title: Teach the System
-description: Add domain knowledge through teachables to improve query accuracy
+description: Add domain knowledge through teaching fragments to improve query accuracy
 ---
 
-Text2SQL can use domain-specific fragments such as terms, hints, guardrails,
-examples, and workflows. The current API does not expose mutable
-`text2sql.instruct()` or `text2sql.teach()` helpers. Instead, you inject
+Text2SQL improves query accuracy with domain-specific fragments such as terms,
+hints, guardrails, examples, and workflows. The current API does not expose
+mutable `text2sql.instruct()` or `text2sql.teach()` helpers. Instead, you inject
 fragments through the `context` factory for `chat()` flows, or pass fragments
 directly to the low-level `toSql()` helper when you need direct SQL generation.
 
-## Teach chat() Sessions
+## Teach `chat()` Sessions
 
 Add fragments inside the `context` factory you pass to `Text2Sql`:
 
@@ -66,7 +66,7 @@ const text2sql = new Text2Sql({
 Those fragments are available to `chat()` because Text2SQL calls your context
 factory whenever it prepares a chat turn.
 
-## Teach Direct SQL Generation
+## Teach Direct SQL Generation with `toSql()`
 
 The high-level `Text2Sql.toSql()` method only uses schema fragments from
 `index()`. If you want direct SQL generation with extra business vocabulary, use
@@ -95,7 +95,7 @@ console.log(result.sql);
 
 ## Fragment Types
 
-All teachable fragments come from `@deepagents/context`.
+All of these domain fragments come from `@deepagents/context`.
 
 ### term() - Domain Vocabulary
 
@@ -212,4 +212,4 @@ Text2SQL already ships with built-in SQL guidance:
 1. **Start with guardrails** so safety and compliance rules are explicit.
 2. **Add terms early** for domain jargon and internal acronyms.
 3. **Use examples sparingly** for patterns that are otherwise easy to misread.
-4. **Keep chat() and toSql() separate in your mental model**: context factory fragments affect `chat()`, while direct SQL generation requires explicit fragments.
+4. **Keep `chat()` and `toSql()` separate in your mental model**: context factory fragments affect persistent chat flows, while direct SQL generation requires explicit fragments on each call.

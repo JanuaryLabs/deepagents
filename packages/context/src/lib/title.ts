@@ -1,8 +1,7 @@
 import type { UIMessage } from 'ai';
 import { z } from 'zod';
 
-import type { AgentModel } from '@deepagents/agent';
-
+import type { AgentModel } from './advisor.ts';
 import { structuredOutput } from './agent.ts';
 import { ContextEngine } from './engine.ts';
 import { role } from './fragments/domain.ts';

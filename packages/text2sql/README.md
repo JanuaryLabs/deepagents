@@ -170,6 +170,9 @@ const followUp = await text2sql.chat([
 ]);
 ```
 
+`toSql()` is stateless. It reads the current schema fragments, but it does not
+write messages, titles, or usage into your context store.
+
 ## Direct SQL Generation with Extra Fragments
 
 ```typescript

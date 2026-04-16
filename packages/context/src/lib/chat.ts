@@ -12,8 +12,7 @@ import {
   isToolUIPart,
 } from 'ai';
 
-import type { AgentModel } from '@deepagents/agent';
-
+import type { AgentModel } from './advisor.ts';
 import type { ContextEngine } from './engine.ts';
 import {
   type MessageFragment,

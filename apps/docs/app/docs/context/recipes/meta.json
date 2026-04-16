@@ -2,6 +2,8 @@
   "title": "Recipes",
   "pages": [
     "index",
+    "as-tool",
+    "as-advisor",
     "agent-integration",
     "text2sql-integration",
     "multi-session-context",

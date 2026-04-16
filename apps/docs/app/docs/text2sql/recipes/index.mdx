@@ -1,9 +1,9 @@
 ---
 title: Recipes
-description: Pre-built teachable bundles for common domains and use cases
+description: Pre-built fragment bundles for common domains and use cases
 ---
 
-Recipes are curated teachable bundles for specific industries and use cases. Each
+Recipes are curated fragment bundles for specific industries and use cases. Each
 recipe provides copy-paste-ready code that teaches Text2SQL the terminology,
 rules, and query patterns for that domain.
 
@@ -27,7 +27,7 @@ Each recipe provides:
 
 ## Quick Start
 
-Copy a recipe's teachables into your code:
+Copy a recipe's fragment bundle into your code:
 
 ```typescript
 import {
@@ -41,7 +41,7 @@ import {
 const recipe = [
   term('AOV', 'Average Order Value - total revenue divided by number of orders'),
   hint('Active customer = ordered in last 90 days unless specified'),
-  // ... more teachables from the recipe
+  // ... more fragments from the recipe
 ];
 ```
 
@@ -82,7 +82,7 @@ guardrail({
 // Add examples for your specific schema
 example({
   question: 'show me VIP customers',
-  sql: 'SELECT * FROM customers WHERE tier = \'VIP\' ORDER BY lifetime_value DESC',
+  answer: 'SELECT * FROM customers WHERE tier = \'VIP\' ORDER BY lifetime_value DESC',
 }),
 ```
 
@@ -98,5 +98,5 @@ const customRecipe = [
 ];
 ```
 
-If you are generating synthetic training data, pass the final array as the
-`teachings` option to `SchemaSynthesizer`.
+If you are generating synthetic training data, pass the final fragment array as
+the `teachings` option to `SchemaSynthesizer`.

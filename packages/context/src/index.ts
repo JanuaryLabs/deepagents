@@ -1,3 +1,4 @@
+export * from './lib/advisor.ts';
 export * from './lib/agent.ts';
 export * from './lib/chat.ts';
 export * from './lib/codec/codec.ts';
@@ -19,6 +20,7 @@ export * from './lib/guardrails/error-recovery.guardrail.ts';
 export * from './lib/models.generated.ts';
 export * from './lib/render.ts';
 export * from './lib/renderers/abstract.renderer.ts';
+export * from './lib/repair.ts';
 export * from './lib/sandbox/index.ts';
 export * from './lib/skills/index.ts';
 export * from './lib/soul/fragments.ts';

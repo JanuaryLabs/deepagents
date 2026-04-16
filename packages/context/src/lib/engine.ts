@@ -21,6 +21,7 @@ import {
   XmlRenderer,
 } from './renderers/abstract.renderer.ts';
 import type { SkillPathMapping } from './skills/types.ts';
+import { InMemoryContextStore } from './store/memory.store.ts';
 import {
   type BranchData,
   type BranchInfo,
@@ -958,6 +959,25 @@ export class ContextEngine {
    */
   public consolidate(): void {
     return void 0;
+  }
+
+  /**
+   * Create an isolated child context with the same system-prompt fragments
+   * but a fresh in-memory store and no message history.
+   *
+   * Useful for one-shot agent invocations (e.g., `asTool()`) that need
+   * the parent's context fragments without sharing conversation state.
+   *
+   * @returns A new ContextEngine with copied fragments and empty message history
+   */
+  public fork(): ContextEngine {
+    const child = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: crypto.randomUUID(),
+      userId: this.#userId,
+    });
+    child.set(...this.#fragments);
+    return child;
   }
 
   /**

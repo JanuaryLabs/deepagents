@@ -202,13 +202,13 @@ import {
 const personaGen = new PersonaGenerator(adapter, { count: 10 });
 const personas = await personaGen.generate();
 
-// 2. Define manual teachings
+// 2. Define a manual fragment bundle
 const teachings = [
   term('ARR', 'annual recurring revenue'),
   hint("Exclude sandbox accounts where account_type = 'test'"),
 ];
 
-// 3. Generate base pairs with personas and teachings
+// 3. Generate base pairs with personas and the fragment bundle
 const basePairs = await new SchemaSynthesizer(adapter, {
   count: 5,
   complexity: ['low', 'medium', 'hard'],
@@ -234,7 +234,7 @@ console.log(`Total: ${basePairs.length + evolvedPairs.length} pairs`);
 
 1. **Match count to domain complexity** - Simple schemas need fewer personas (3-5), complex domains benefit from more (8-12)
 2. **Review generated personas** - Verify they match actual users of your database
-3. **Combine with teachings** - Personas + manual teachings = contextually rich training data
+3. **Combine with a fragment bundle** - Personas plus your stable domain fragments produce richer training data
 4. **Use selectively in evolution** - Don't paraphrase every question from every persona; choose strategically
 5. **Test persona coverage** - Ensure generated questions span the full range of user needs
 

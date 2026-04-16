@@ -1,9 +1,9 @@
 ---
 title: Healthcare Recipe
-description: Pre-built teachables for clinical and healthcare databases with HIPAA compliance
+description: Pre-built fragment bundle for clinical and healthcare databases with HIPAA compliance
 ---
 
-This recipe provides teachables for healthcare databases covering patient data, clinical metrics, and HIPAA-compliant analytics.
+This recipe provides a reusable fragment bundle for healthcare databases covering patient data, clinical metrics, and HIPAA-compliant analytics.
 
 ## Quick Start
 
@@ -194,9 +194,9 @@ const healthcareRecipe = [
 ```
 
 Spread `...healthcareRecipe` into your `context(...fragments)` factory for
-`chat()`, or append it to low-level `toSql({ fragments })` calls.
+`chat()`, or append it to the low-level `toSql({ fragments })` helper.
 
-## Teachables Breakdown
+## Fragment Breakdown
 
 ### Terms
 

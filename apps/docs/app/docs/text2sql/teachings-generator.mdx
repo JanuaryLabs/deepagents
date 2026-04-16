@@ -1,13 +1,13 @@
 ---
 title: Teachings Generator
-description: Current guidance for building schema-aware teaching bundles
+description: Current guidance for building schema-aware fragment bundles
 ---
 
 The current public Text2SQL package does not export a `TeachingsGenerator` class
-or a `text2sql.teach()` convenience method. If you want schema-aware teaching
+or a `text2sql.teach()` convenience method. If you want schema-aware fragment
 bundles today, use one of the supported patterns below.
 
-## Option 1: Build a Manual Teaching Bundle
+## Option 1: Build a Manual Fragment Bundle
 
 Create a fragment array with the domain terms, hints, guardrails, and examples
 you want to keep stable:
@@ -63,4 +63,4 @@ const pairs = await new SchemaSynthesizer(adapter, {
 
 Older docs referenced a `TeachingsGenerator` class and `text2sql.teach()`
 method. Those surfaces are not part of the current public API, so the supported
-workflow is manual teaching bundles plus synthesis-time `teachings` injection.
+workflow is manual fragment bundles plus synthesis-time `teachings` injection.

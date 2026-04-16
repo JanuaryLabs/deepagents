@@ -5,6 +5,7 @@ import {
   Output,
   type StreamTextResult,
   type StreamTextTransform,
+  type Tool,
   type ToolChoice,
   type ToolSet,
   type UIMessage,
@@ -16,18 +17,34 @@ import {
   smoothStream,
   stepCountIs,
   streamText,
+  tool,
 } from 'ai';
 import chalk from 'chalk';
-
-import { type AgentModel, createRepairToolCall } from '@deepagents/agent';
+import z from 'zod';
 
 import { type ContextEngine, XmlRenderer } from '../index.ts';
+import {
+  type AdvisorResult,
+  type AgentModel,
+  type AsAdvisorOptions,
+  addUsage,
+  advisorPreamble,
+  executorContext,
+  mapGenerateErrorToCode,
+  nullUsage,
+} from './advisor.ts';
 import { assistant } from './fragments.ts';
+import { user } from './fragments/message/user.ts';
 import {
   type Guardrail,
   type GuardrailContext,
   runGuardrailChain,
 } from './guardrail.ts';
+import { createRepairToolCall } from './repair.ts';
+
+export type OutputExtractorFn = (
+  output: GenerateTextResult<ToolSet, any>,
+) => string | Promise<string>;
 
 export interface CreateAgent<CIn, COut = CIn> {
   name: string;
@@ -348,6 +365,147 @@ class Agent<CIn, COut = CIn> {
     };
 
     return result;
+  }
+
+  public asTool(props?: {
+    toolDescription?: string;
+    outputExtractor?: OutputExtractorFn;
+  }) {
+    return tool({
+      description:
+        props?.toolDescription ||
+        `Delegate to the ${this.#options.name} agent to handle the request.`,
+      inputSchema: z.object({
+        input: z.string(),
+        output: z
+          .string()
+          .optional()
+          .describe(
+            'Optional instructions on how the final output should be formatted. this would be passed to the underlying llm as part of the prompt.',
+          ),
+      }),
+      execute: async ({ input, output }, options) => {
+        if (!this.context) {
+          throw new Error(
+            `Agent ${this.#options.name} is missing a context for asTool().`,
+          );
+        }
+        if (!this.model) {
+          throw new Error(
+            `Agent ${this.#options.name} is missing a model for asTool().`,
+          );
+        }
+
+        try {
+          const ctx = this.context.fork();
+          const prompt = output
+            ? `${input}\n\n<OutputInstructions>\n${output}\n</OutputInstructions>`
+            : input;
+          ctx.set(user(prompt));
+
+          const sub = agent({
+            name: this.#options.name,
+            model: this.model,
+            context: ctx,
+            tools: this.tools,
+            providerOptions: this.#options.providerOptions,
+            experimental_telemetry: this.#options.experimental_telemetry,
+          });
+
+          const result = await sub.generate(
+            {},
+            {
+              abortSignal: options.abortSignal,
+            },
+          );
+
+          if (props?.outputExtractor) {
+            return await props.outputExtractor(result);
+          }
+          return result.steps.map((it) => it.toolResults).flat();
+        } catch (error) {
+          console.error(error);
+          const details =
+            error instanceof Error ? error.message : JSON.stringify(error);
+          return `An error thrown from a tool call. \n<ErrorDetails>\n${details}\n</ErrorDetails>`;
+        }
+      },
+    });
+  }
+
+  public asAdvisor(options?: AsAdvisorOptions): AdvisorResult {
+    const maxUses = options?.maxUses;
+    const maxConversationUses = options?.maxConversationUses;
+    const maxOutputTokens = options?.maxOutputTokens ?? 1024;
+
+    let callCount = 0;
+    let successfulCalls = 0;
+    let accumulatedUsage = nullUsage();
+
+    const advisorTool = tool({
+      description:
+        'Consult a stronger advisor model for strategic guidance. Takes no parameters — your full conversation context is forwarded automatically. Call before substantive work, when stuck, when changing approach, or before declaring a task complete.',
+      inputSchema: z.object({}),
+      execute: async (_input, executionOptions) => {
+        if (!this.context) {
+          throw new Error(
+            `Agent ${this.#options.name} is missing a context for asAdvisor().`,
+          );
+        }
+        if (!this.model) {
+          throw new Error(
+            `Agent ${this.#options.name} is missing a model for asAdvisor().`,
+          );
+        }
+
+        const slot = callCount++;
+        if (maxUses !== undefined && slot >= maxUses) {
+          return 'max_uses_exceeded';
+        }
+        if (
+          maxConversationUses !== undefined &&
+          successfulCalls >= maxConversationUses
+        ) {
+          return 'max_uses_exceeded';
+        }
+
+        const renderedExecutorPrompt = this.context.render(new XmlRenderer());
+        const advisorCtx = this.context.fork();
+        advisorCtx.set(
+          advisorPreamble(),
+          executorContext(renderedExecutorPrompt),
+        );
+        const advisorSystemPrompt = advisorCtx.render(new XmlRenderer());
+
+        try {
+          const result = await generateText({
+            model: this.model,
+            system: advisorSystemPrompt,
+            messages: executionOptions.messages,
+            maxOutputTokens,
+            abortSignal: executionOptions.abortSignal,
+            providerOptions: this.#options.providerOptions,
+          });
+
+          successfulCalls++;
+          accumulatedUsage = addUsage(accumulatedUsage, result.usage);
+
+          return result.text;
+        } catch (error) {
+          const code = mapGenerateErrorToCode(error);
+          if (code) return code;
+          throw error;
+        }
+      },
+    });
+
+    return {
+      tool: advisorTool as Tool<Record<string, never>, string>,
+      usage: () => ({
+        calls: successfulCalls,
+        totalUsage: { ...accumulatedUsage },
+      }),
+    };
   }
 
   clone(overrides?: Partial<CreateAgent<CIn, COut>>): Agent<CIn, COut> {

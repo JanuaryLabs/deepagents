@@ -65,6 +65,54 @@ console.log(renderer.render(fragments));
 </guardrails>
 ```
 
+## Agent Helpers
+
+If you use the built-in agent wrapper from `@deepagents/context`, the same
+`ContextEngine` can power sub-agents and advisor tools without mutating the
+parent thread.
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  role,
+} from '@deepagents/context';
+
+const context = new ContextEngine({
+  store: new InMemoryContextStore(),
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(role('You are a product analyst.'));
+
+const analyst = agent({
+  name: 'analyst',
+  context,
+  model: openai('gpt-5.4-mini'),
+});
+
+const { tool: advisor } = analyst.asAdvisor({ concise: true });
+
+const coordinator = agent({
+  name: 'coordinator',
+  context,
+  model: openai('gpt-5.4'),
+  tools: {
+    analyze: analyst.asTool({
+      toolDescription: 'Return a short analysis brief',
+    }),
+    advisor,
+  },
+});
+```
+
+`asTool()` forks the context so the child run sees the parent's system fragments
+without persisting new messages into the parent chat. `asAdvisor()` exposes a
+no-input reviewer tool and `usage()` reports successful calls plus token usage
+for that advisor instance.
+
 ## Fragment Builders
 
 ### Domain Fragments

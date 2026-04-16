@@ -1,0 +1,162 @@
+---
+title: Agent as Tool
+description: Delegate bounded sub-tasks to a specialist agent exposed as a regular AI SDK tool
+---
+
+Turn any agent into a callable tool with `asTool()`. The parent agent sees it as
+a normal tool; under the hood it forks the context, runs a one-shot `generate()`,
+and returns the result without touching the parent's persisted thread.
+
+## Scenario: Research-Backed Article Writer
+
+A **writer** agent drafts articles. When it needs facts, it calls a **researcher**
+agent exposed as a tool. The researcher queries a search API, synthesizes
+findings, and hands a brief back to the writer.
+
+```typescript
+import {
+  agent,
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  user,
+} from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
+import z from 'zod';
+
+// -- Researcher agent --------------------------------------------------------
+
+const researchStore = new InMemoryContextStore();
+const researchContext = new ContextEngine({
+  store: researchStore,
+  chatId: 'researcher',
+  userId: 'system',
+}).set(
+  role(
+    'You are a research assistant. Gather facts, cite sources, and return a concise brief.',
+  ),
+);
+
+const webSearch = tool({
+  description: 'Search the web for a query and return results.',
+  inputSchema: z.object({ query: z.string() }),
+  execute: async ({ query }) => {
+    // Replace with your real search API
+    return `[stub] Top results for "${query}"`;
+  },
+});
+
+const researcher = agent({
+  name: 'researcher',
+  context: researchContext,
+  model: groq('gpt-oss-20b'),
+  tools: { webSearch },
+});
+
+// -- Writer agent ------------------------------------------------------------
+
+const writerStore = new InMemoryContextStore();
+const writerContext = new ContextEngine({
+  store: writerStore,
+  chatId: 'writer',
+  userId: 'system',
+}).set(
+  role('You are a staff writer. Draft well-structured articles backed by research.'),
+  user('Write a 500-word article about the impact of LLMs on software testing.'),
+);
+
+const writer = agent({
+  name: 'writer',
+  context: writerContext,
+  model: groq('gpt-oss-20b'),
+  tools: {
+    research: researcher.asTool({
+      toolDescription:
+        'Research a topic and return a fact brief. Pass the topic as input.',
+      outputExtractor: async (result) => result.text,
+    }),
+  },
+});
+
+const stream = await writer.stream({});
+for await (const part of stream.toUIMessageStream()) {
+  if (part.type === 'text-delta') {
+    process.stdout.write(part.delta);
+  }
+}
+```
+
+## What Happens at Runtime
+
+```
+writer.stream()
+  ├─ model decides to call research("LLMs in software testing")
+  │    └─ asTool() forks researchContext
+  │         └─ researcher.generate() with forked context + user input
+  │              ├─ model calls webSearch("LLMs software testing")
+  │              └─ returns synthesized brief
+  ├─ writer receives the brief as a tool result
+  └─ writer drafts the article using the brief
+```
+
+The fork means the researcher's messages never leak into the writer's stored
+conversation, and vice versa.
+
+## Scenario: Multi-Step Data Pipeline
+
+A **coordinator** agent orchestrates two specialist agents — one extracts data,
+the other transforms it — each exposed as a tool.
+
+```typescript
+const extractor = agent({
+  name: 'extractor',
+  context: extractorContext,
+  model: groq('gpt-oss-20b'),
+  tools: { queryDatabase },
+});
+
+const transformer = agent({
+  name: 'transformer',
+  context: transformerContext,
+  model: groq('gpt-oss-20b'),
+});
+
+const coordinator = agent({
+  name: 'coordinator',
+  context: coordinatorContext,
+  model: groq('gpt-oss-20b'),
+  tools: {
+    extract: extractor.asTool({
+      toolDescription: 'Query raw data from the database. Pass the question as input.',
+    }),
+    transform: transformer.asTool({
+      toolDescription:
+        'Clean and reshape raw data. Pass the raw data as input, describe the desired format in output.',
+    }),
+  },
+});
+```
+
+The coordinator calls `extract` first, pipes the result into `transform`, and
+combines both outputs into a final report.
+
+## asTool() Options
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `toolDescription` | `string` | Override the auto-generated tool description |
+| `outputExtractor` | `(result) => string \| Promise<string>` | Transform the sub-agent result before returning it to the parent |
+
+When `outputExtractor` is omitted, the tool returns the raw array of tool results
+from the sub-agent's generation steps.
+
+## When to Use asTool()
+
+Use `asTool()` when the parent agent needs a **bounded, self-contained sub-task**
+completed — research a topic, extract data, generate a summary. The sub-agent
+runs to completion and returns a result; it does not persist state or participate
+in the parent's ongoing conversation.
+
+For open-ended strategic guidance where the advisor sees the full conversation,
+use [asAdvisor()](/docs/context/recipes/as-advisor) instead.

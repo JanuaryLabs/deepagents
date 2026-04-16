@@ -5,7 +5,8 @@ description: Persist Text2SQL conversations through ContextEngine stores
 
 Text2SQL no longer exposes a separate `History` class. Conversation persistence
 comes from the `ContextStore` you provide to the `ContextEngine` inside the
-`context` factory.
+`context` factory. `chat()` writes turns to that store; `toSql()` does not
+persist conversation history.
 
 ## Choose a Store
 
@@ -91,9 +92,14 @@ reuse prior context.
 
 ## What Gets Persisted
 
-Text2SQL writes conversation messages and chat metadata through the underlying
-`ContextEngine`. That gives later `chat()` calls access to prior turns without a
-separate history API on `Text2Sql` itself.
+When you call `chat()`, Text2SQL writes through the underlying `ContextEngine`:
+
+- the incoming user or assistant message for that turn
+- the finalized assistant reply for the turn
+- chat-level data such as the generated title and tracked usage
+
+That gives later `chat()` calls access to prior turns without a separate history
+API on `Text2Sql` itself. Direct `toSql()` calls skip the store entirely.
 
 ## Direct Store Access
 

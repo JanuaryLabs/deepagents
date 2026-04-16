@@ -1,0 +1,185 @@
+---
+title: Agent as Advisor
+description: Attach a stronger reviewer model that sees the executor's full conversation and provides strategic guidance
+---
+
+`asAdvisor()` exposes an agent as a zero-parameter tool. When the executor calls
+it, the entire conversation history — every message, tool call, and result — is
+forwarded automatically. The advisor reviews that history and returns strategic
+guidance without executing anything itself.
+
+## Scenario: Code Migration With Senior Review
+
+A **migration** agent rewrites files from one framework to another. Before it
+commits to an approach (and again before it declares done), it consults a
+**reviewer** advisor backed by a stronger model.
+
+```typescript
+import {
+  agent,
+  ContextEngine,
+  InMemoryContextStore,
+  role,
+  user,
+} from '@deepagents/context';
+import { groq } from '@ai-sdk/groq';
+import { openai } from '@ai-sdk/openai';
+import { tool } from 'ai';
+import z from 'zod';
+
+// -- Reviewer agent (the advisor) --------------------------------------------
+
+const reviewerStore = new InMemoryContextStore();
+const reviewerContext = new ContextEngine({
+  store: reviewerStore,
+  chatId: 'reviewer',
+  userId: 'system',
+}).set(
+  role(
+    'You are a senior engineer who reviews migration plans. Point out risks, missing edge cases, and incorrect API usage.',
+  ),
+);
+
+const reviewer = agent({
+  name: 'senior_reviewer',
+  context: reviewerContext,
+  model: openai('o3'),
+});
+
+const { tool: advisorTool, usage } = reviewer.asAdvisor({
+  maxConversationUses: 3,
+  maxOutputTokens: 512,
+});
+
+// -- Migration agent (the executor) ------------------------------------------
+
+const migrationStore = new InMemoryContextStore();
+const migrationContext = new ContextEngine({
+  store: migrationStore,
+  chatId: 'migration',
+  userId: 'system',
+}).set(
+  role('You migrate React class components to function components with hooks.'),
+  user('Migrate UserProfile.tsx from class component to hooks.'),
+);
+
+const readFile = tool({
+  description: 'Read a source file by path.',
+  inputSchema: z.object({ path: z.string() }),
+  execute: async ({ path }) => {
+    // Replace with real file read
+    return `[stub] contents of ${path}`;
+  },
+});
+
+const writeFile = tool({
+  description: 'Write content to a file.',
+  inputSchema: z.object({ path: z.string(), content: z.string() }),
+  execute: async ({ path, content }) => {
+    // Replace with real file write
+    return `Wrote ${content.length} chars to ${path}`;
+  },
+});
+
+const migration = agent({
+  name: 'migration_agent',
+  context: migrationContext,
+  model: groq('gpt-oss-20b'),
+  tools: {
+    readFile,
+    writeFile,
+    advisor: advisorTool,
+  },
+});
+
+const stream = await migration.stream({});
+for await (const part of stream.toUIMessageStream()) {
+  if (part.type === 'text-delta') {
+    process.stdout.write(part.delta);
+  }
+}
+
+console.log('Advisor usage:', usage());
+// { calls: 2, totalUsage: { inputTokens: 4200, outputTokens: 980, ... } }
+```
+
+## What Happens at Runtime
+
+```
+migration.stream()
+  ├─ model reads UserProfile.tsx via readFile
+  ├─ model calls advisor()           ← first check: "plan looks right?"
+  │    └─ reviewer sees full history (system prompt + readFile result)
+  │         └─ returns: "Watch for componentDidMount side effects..."
+  ├─ model writes migrated file via writeFile
+  ├─ model calls advisor()           ← second check: "migration complete?"
+  │    └─ reviewer sees updated history (now includes the written file)
+  │         └─ returns: "Looks correct. Consider adding a useEffect cleanup."
+  └─ model applies final fix and finishes
+```
+
+The advisor never calls tools or writes files. It only advises.
+
+## Scenario: Research Report With Fact-Checking
+
+A **researcher** agent gathers information and writes a report. A **fact-checker**
+advisor reviews claims before the report is finalized.
+
+```typescript
+const factChecker = agent({
+  name: 'fact_checker',
+  context: factCheckerContext,
+  model: openai('o3'),
+}).asAdvisor({
+  maxConversationUses: 2,
+  maxOutputTokens: 256,
+});
+
+const researcher = agent({
+  name: 'researcher',
+  context: researcherContext,
+  model: groq('gpt-oss-20b'),
+  tools: {
+    webSearch,
+    advisor: factChecker.tool,
+  },
+});
+```
+
+The researcher calls `advisor()` after gathering sources and again after drafting
+the report. The fact-checker flags unsupported claims or contradictions between
+sources.
+
+## asAdvisor() Options
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `maxUses` | `number` | unlimited | Hard cap on total invocations for this advisor instance |
+| `maxConversationUses` | `number` | unlimited | Cap on successful responses before the tool returns `max_uses_exceeded` |
+| `maxOutputTokens` | `number` | `1024` | Maximum output tokens per advisor response |
+
+## Error Codes
+
+When the advisor cannot complete a request, the tool returns a short status code
+instead of throwing:
+
+| Code | Meaning |
+| --- | --- |
+| `max_uses_exceeded` | Call cap reached |
+| `too_many_requests` | Provider rate limit (429) |
+| `overloaded` | Provider overloaded (503/529) |
+| `prompt_too_long` | Context exceeds model limit |
+| `execution_time_exceeded` | Request timed out |
+| `unavailable` | Provider unreachable |
+
+The executor can decide whether to proceed without advice or surface the error.
+
+## When to Use asAdvisor()
+
+Use `asAdvisor()` when you want a **second opinion that sees everything**. The
+advisor model is typically stronger or more expensive than the executor, so you
+call it sparingly — before committing to an approach, when stuck, or before
+declaring a task complete.
+
+For bounded sub-tasks where you need a concrete result (not guidance), use
+[asTool()](/docs/context/recipes/as-tool) instead.
