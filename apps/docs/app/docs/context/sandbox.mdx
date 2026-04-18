@@ -31,19 +31,19 @@ import {
   agent,
   createContainerTool,
   role,
+  skills,
   user,
 } from '@deepagents/context';
 
-const { bash, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   packages: ['curl', 'jq'],
-  mounts: [
-    {
-      hostPath: process.cwd(),
-      containerPath: '/workspace',
-      readOnly: true,
-    },
+  skills: [
+    { host: './skills', sandbox: '/workspace/skills' },
   ],
 });
+
+// `sandbox.skills` is populated from on-disk SKILL.md frontmatter, and the
+// skill files are already uploaded into the container at `/workspace/skills`.
 
 try {
   const context = new ContextEngine({
@@ -54,19 +54,20 @@ try {
 
   context.set(
     role('You are a helpful assistant with bash access.'),
-    user('List all TypeScript files in the workspace.'),
+    skills(sandbox),
+    user('Use the most relevant skill to help me.'),
   );
 
   const assistant = agent({
     name: 'Assistant',
+    sandbox,
     model: groq('gpt-oss-20b'),
     context,
-    tools: { bash },
   });
 
   await printer.stdout(await assistant.stream({}));
 } finally {
-  await sandbox.dispose();
+  await sandbox.sandbox.dispose();
 }
 ```
 

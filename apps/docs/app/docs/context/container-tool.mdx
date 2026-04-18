@@ -18,17 +18,14 @@ import {
   agent,
   createContainerTool,
   role,
+  skills,
   user,
 } from '@deepagents/context';
 
-const { bash, tools, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   packages: ['curl', 'jq'],
-  mounts: [
-    {
-      hostPath: process.cwd(),
-      containerPath: '/workspace',
-      readOnly: false,
-    },
+  skills: [
+    { host: './skills', sandbox: '/workspace/skills' },
   ],
 });
 
@@ -39,35 +36,55 @@ try {
     store: new InMemoryContextStore(),
   }).set(
     role('You are a system admin with bash access.'),
-    user('Show me disk usage for /workspace'),
+    skills(sandbox),
+    user('Use the most relevant skill to answer.'),
   );
 
   const assistant = agent({
     name: 'Admin',
+    sandbox,
     model: groq('gpt-oss-20b'),
     context,
-    tools: { bash },
   });
 
   await printer.stdout(await assistant.stream({}));
 } finally {
-  await sandbox.dispose();
+  await sandbox.sandbox.dispose();
 }
 ```
 
 ## Return Value
 
-`createContainerTool` returns three things:
+`createContainerTool` returns a `ContainerToolResult` (compatible with `AgentSandbox`):
 
 ```typescript
-const { bash, tools, sandbox } = await createContainerTool({ ... });
+const sandbox = await createContainerTool({ ... });
 ```
 
 | Property | Type | Purpose |
 |----------|------|---------|
-| `bash` | `BashExecuteTool` | Single bash tool — pass to agent as `tools: { bash }` |
-| `tools` | `{ bash, readFile, writeFile }` | Full toolkit — pass to `generateText({ tools })` |
-| `sandbox` | `DockerSandbox` | Container handle — call `sandbox.dispose()` for cleanup |
+| `sandbox.bash` | `BashExecuteTool` | Single bash tool for direct use |
+| `sandbox.tools` | `{ bash, readFile, writeFile }` | Full toolkit — auto-registered when passed to `agent()` |
+| `sandbox.sandbox` | `DockerSandbox` | Container handle — call `sandbox.sandbox.dispose()` for cleanup |
+| `sandbox.skills` | `SkillPathMapping[]` | Discovered skills (empty if `skills` option omitted) — pass to `skills(sandbox)` fragment |
+
+Pass the entire result as the `sandbox` field to `agent()`. The agent merges `sandbox.tools` into its toolset automatically.
+
+### The `skills` option
+
+Declare skill directories via `skills: [{ host, sandbox }]`. At container startup the factory:
+
+1. Recursively walks each `host` directory (skipping symlinks and dotfiles).
+2. Writes every file under the matching `sandbox` path inside the container.
+3. Parses each subdirectory's `SKILL.md` frontmatter into `sandbox.skills`.
+
+This replaces the earlier pattern of manually mounting a host directory and separately configuring `skills({ paths })`. The sandbox is now the single source of truth — you cannot end up with a `skills()` entry that points to a path the LLM can't actually read.
+
+<Callout type="warn">
+  The `sandbox` destination of a skill entry must be writable — it's written via
+  `writeFiles` on container start. Do not place it under a `readOnly: true` mount,
+  or put it in a separate, writable location from your read-only host mounts.
+</Callout>
 
 ## Strategy Options
 

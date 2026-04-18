@@ -46,6 +46,7 @@ import {
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
+  createBashTool,
   soul,
   role,
   hint,
@@ -54,6 +55,10 @@ import {
 } from '@deepagents/context';
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
+
+const sandbox = await createBashTool({
+  skills: [{ host: './skills', sandbox: '/workspace/skills' }],
+});
 
 const store = new InMemoryContextStore();
 const context = new ContextEngine({
@@ -66,9 +71,7 @@ context.set(
   soul(),
   role('You are a personal coding assistant.'),
   hint('Prefer TypeScript examples over JavaScript'),
-  skills({
-    paths: [{ host: './skills', sandbox: '/workspace/skills' }],
-  }),
+  skills(sandbox),
 );
 
 context.set(user('Hello, I am Sarah. I work on backend systems.'));

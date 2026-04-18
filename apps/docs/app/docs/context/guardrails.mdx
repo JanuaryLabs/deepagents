@@ -153,9 +153,10 @@ import { groq } from '@ai-sdk/groq';
 
 const myAgent = agent({
   name: 'assistant',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
-  tools: { bash, sql },
+  tools: { sql },
   guardrails: [errorRecoveryGuardrail, safetyFilter],
   maxGuardrailRetries: 3,
 });

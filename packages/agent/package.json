@@ -38,7 +38,6 @@
     "@deepagents/retrieval": "0.36.0",
     "ai": "^6.0.141",
     "chalk": "^5.6.2",
-    "conf": "^15.0.2",
     "dedent": "1.7.0",
     "listr2": "^9.0.4",
     "lodash-es": "^4.17.21",

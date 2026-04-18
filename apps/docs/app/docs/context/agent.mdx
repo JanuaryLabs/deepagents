@@ -5,12 +5,51 @@ description: Convenience wrapper that combines ContextEngine with the AI SDK int
 
 The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, `clone()`, `asTool()`, and `asAdvisor()` methods. It resolves context, repairs tool calls when needed, and can retry streamed output through guardrails without extra orchestration in your app.
 
+Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `readFile`, and `writeFile` tools plus a `skills` array. The sandbox is created externally and passed in; the agent does not create or dispose it.
+
+## Sandbox Options
+
+| Approach | When to use | Docker? | Supports `skills` |
+|---|---|---|---|
+| `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
+| `createContainerTool()` | Real binaries in isolated Docker containers | Yes | Yes |
+| `createBashTool({ sandbox: e2bSandbox })` | Cloud sandboxes (E2B, Daytona) via adapter | No | Yes |
+
+Import `createBashTool` from `@deepagents/context` (not the raw `bash-tool` package). The `@deepagents/context` wrapper adds the `skills` option and always returns an `AgentSandbox`.
+
+```typescript
+import { createBashTool } from '@deepagents/context';
+
+// Simplest: just-bash virtual sandbox (no Docker needed)
+const sandbox = await createBashTool();
+```
+
+```typescript
+import { createContainerTool } from '@deepagents/context';
+
+// Docker with skills: files copied in, metadata parsed, all in one call
+const sandbox = await createContainerTool({
+  packages: ['curl', 'jq'],
+  skills: [{ host: './skills', sandbox: '/workspace/skills' }],
+});
+// Don't forget: await sandbox.sandbox.dispose() when done
+```
+
+The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict.
+
 ## Creating an Agent
 
 ```typescript
-import { agent, ContextEngine, SqliteContextStore, role } from '@deepagents/context';
+import {
+  agent,
+  ContextEngine,
+  SqliteContextStore,
+  createBashTool,
+  role,
+} from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
 
+const sandbox = await createBashTool();
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
   store,
@@ -20,6 +59,7 @@ const context = new ContextEngine({
 
 const assistant = agent({
   name: 'coding_assistant',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
 });
@@ -30,9 +70,10 @@ const assistant = agent({
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | required | Identifier for logging and error messages |
+| `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` or `createContainerTool()` from `@deepagents/context` |
 | `context` | `ContextEngine` | `undefined` | Engine that resolves system prompt and messages |
 | `model` | `LanguageModelV3` | `undefined` | AI SDK model to use for generation |
-| `tools` | `ToolSet` | `{}` | AI SDK tools available to the agent |
+| `tools` | `ToolSet` | `{}` | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict) |
 | `toolChoice` | `ToolChoice` | `undefined` | Controls how the model selects tools |
 | `providerOptions` | `object` | `undefined` | Provider-specific options forwarded to the AI SDK |
 | `experimental_telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
@@ -46,7 +87,7 @@ The agent exposes these readonly properties after creation:
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `tools` | `ToolSet` | Tools registered on this agent |
+| `tools` | `ToolSet` | Merged toolset (sandbox tools + user tools) |
 | `context` | `ContextEngine \| undefined` | The context engine bound to this agent |
 | `model` | `LanguageModelV3 \| undefined` | The model configured for this agent |
 
@@ -132,12 +173,14 @@ system fragments and configuration.
 ```typescript
 const researcher = agent({
   name: 'researcher',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
 });
 
 const writer = agent({
   name: 'writer',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
   tools: {
@@ -165,6 +208,7 @@ so callers use it for strategy checks rather than raw execution work.
 ```typescript
 const reviewer = agent({
   name: 'reviewer',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
 });
@@ -176,6 +220,7 @@ const { tool: advisor, usage } = reviewer.asAdvisor({
 
 const worker = agent({
   name: 'worker',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
   tools: { advisor },
@@ -209,6 +254,7 @@ import { agent, errorRecoveryGuardrail } from '@deepagents/context';
 
 const guarded = agent({
   name: 'guarded_assistant',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
   guardrails: [errorRecoveryGuardrail],

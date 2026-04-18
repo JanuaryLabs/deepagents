@@ -13,9 +13,11 @@ import {
   SqliteContextStore,
   agent,
   chat,
+  createBashTool,
   role,
 } from '@deepagents/context';
 
+const sandbox = await createBashTool();
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
   store,
@@ -25,6 +27,7 @@ const context = new ContextEngine({
 
 const myAgent = agent({
   name: 'assistant',
+  sandbox,
   context,
   model: groq('gpt-oss-20b'),
 });
@@ -211,10 +214,12 @@ import {
   SqliteContextStore,
   agent,
   chat,
+  createBashTool,
   role,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
+const sandbox = await createBashTool();
 
 async function handleUserMessage(
   chatId: string,
@@ -229,6 +234,7 @@ async function handleUserMessage(
 
   const myAgent = agent({
     name: 'assistant',
+    sandbox,
     context,
     model: groq('gpt-oss-20b'),
   });

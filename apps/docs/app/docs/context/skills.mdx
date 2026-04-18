@@ -127,10 +127,20 @@ Throws if the frontmatter is missing or lacks the required `name` and `descripti
 
 ## The skills() Fragment
 
-The `skills()` function is the primary integration point. It scans directories, filters skills, and produces a context fragment with embedded LLM instructions:
+The `skills()` fragment is a thin projection of `sandbox.skills`. The **sandbox** is now the single source of truth: you declare skill directories when you build the sandbox, and the factory (a) uploads the files into the sandbox filesystem and (b) parses each `SKILL.md` frontmatter into `sandbox.skills`. The fragment just renders that array into the system prompt.
 
 ```typescript
-import { ContextEngine, SqliteContextStore, role, skills } from '@deepagents/context';
+import {
+  ContextEngine,
+  SqliteContextStore,
+  createBashTool,
+  role,
+  skills,
+} from '@deepagents/context';
+
+const sandbox = await createBashTool({
+  skills: [{ host: './skills', sandbox: '/skills' }],
+});
 
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
@@ -139,37 +149,13 @@ const context = new ContextEngine({
   userId: 'user-001',
 }).set(
   role('You are a helpful assistant.'),
-  skills({
-    paths: ['./skills'],
-  }),
+  skills(sandbox),
 );
 ```
 
-### SkillsFragmentOptions
-
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `paths` | `string[]` | *required* | Directories to scan for skills |
-| `exclude` | `string[]` | `undefined` | Skill names to exclude |
-| `include` | `string[]` | `undefined` | If set, only these skill names are included |
-
 ### Filtering
 
-Use `include` for an allowlist or `exclude` for a blocklist:
-
-```typescript
-skills({
-  paths: ['./skills'],
-  include: ['deploy', 'refactor'],
-})
-
-skills({
-  paths: ['./skills'],
-  exclude: ['dangerous-skill'],
-})
-```
-
-When both are set, `include` is applied first, then `exclude` filters the result.
+Filtering now happens at the sandbox level: pass only the host directories you want, or pre-filter the skills array before building the sandbox. The old `include` / `exclude` options on `skills()` have been removed because they could declare a skill that wasn't actually uploaded.
 
 ### Generated Fragment
 
@@ -190,31 +176,37 @@ The instructions also embed correct/incorrect usage examples so the LLM avoids a
 
 ## Extracting Available Skills
 
-`ContextEngine.getAvailableSkills()` returns the metadata of all skills discovered from the configured context. This is used by the agent framework to populate `GuardrailContext.availableSkills`, enabling guardrails to detect when the LLM confuses skills with tools:
+Two ways to reach skill metadata after a sandbox has been built:
+
+- **`sandbox.skills`** — the discovered mounts, directly on the sandbox. This is the source of truth.
+- **`ContextEngine.getSkillMounts()`** — reads the same data from the `available_skills` fragment after you've called `set(skills(sandbox))`. Used by the agent framework to populate `GuardrailContext.availableSkills`, enabling guardrails to detect when the LLM confuses skills with tools.
 
 ```typescript
+const sandbox = await createBashTool({
+  skills: [{ host: './skills', sandbox: '/skills' }],
+});
 const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
-  .set(skills({ paths: ['./skills'] }));
+  .set(skills(sandbox));
 
-const skills = context.getAvailableSkills();
+const { mounts } = context.getSkillMounts();
 // [
 //   {
 //     name: 'deploy',
 //     description: 'Deploy to production',
-//     path: './skills/deploy',
-//     skillMdPath: './skills/deploy/SKILL.md',
+//     host: './skills/deploy/SKILL.md',
+//     sandbox: '/skills/deploy/SKILL.md',
 //   },
 // ]
 ```
 
-Each entry is a `SkillMetadata`:
+Each entry is a `SkillPathMapping`:
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `name` | `string` | Skill name |
 | `description` | `string` | Skill description |
-| `path` | `string` | Directory containing the skill |
-| `skillMdPath` | `string` | Path to the `SKILL.md` file |
+| `host` | `string` | Path to the `SKILL.md` on the host |
+| `sandbox` | `string` | Path to the `SKILL.md` inside the sandbox |
 
 ## Skill Classifier
 

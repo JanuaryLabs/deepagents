@@ -53,7 +53,7 @@ A framework for building multi-agent AI systems with TypeScript. Create agents t
 - **Streaming** - Real-time streaming responses
 - **Context Sharing** - Type-safe state passed between agents
 
-**Main Exports:** `agent`, `execute`, `swarm`, `instructions`, memory utilities, streaming utilities
+**Main Exports:** `agent`, `execute`, `swarm`, `instructions`, streaming utilities
 
 ### @deepagents/context (`packages/context`)
 
