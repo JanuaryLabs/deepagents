@@ -198,106 +198,6 @@ describe('createResultTools sandbox isolation', () => {
   });
 });
 
-describe('bash tool reasoning contract', () => {
-  const testUsage = {
-    inputTokens: {
-      total: 3,
-      noCache: 3,
-      cacheRead: undefined,
-      cacheWrite: undefined,
-    },
-    outputTokens: {
-      total: 10,
-      text: 10,
-      reasoning: undefined,
-    },
-  } as const;
-
-  const createBashToolCallModel = (input: string) =>
-    new MockLanguageModelV3({
-      doGenerate: {
-        finishReason: { unified: 'tool-calls', raw: undefined },
-        usage: testUsage,
-        warnings: [],
-        content: [
-          {
-            type: 'tool-call',
-            toolCallId: 'call-1',
-            toolName: 'bash',
-            input,
-          },
-        ],
-      },
-    });
-
-  const runBashToolCall = async (input: string) => {
-    const { tools } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await generateText({
-      model: createBashToolCallModel(input),
-      prompt: 'test-input',
-      stopWhen: stepCountIs(1),
-      tools: { bash: tools.bash },
-    });
-
-    return result.content as Array<{
-      type: string;
-      toolName?: string;
-      error?: unknown;
-      output?: {
-        stdout: string;
-        stderr: string;
-        exitCode: number;
-      };
-    }>;
-  };
-
-  it('schema rejects missing reasoning', async () => {
-    const content = await runBashToolCall(`{"command":"echo hello"}`);
-
-    const toolError = content.find(
-      (part) => part.type === 'tool-error' && part.toolName === 'bash',
-    );
-    assert.ok(toolError, 'Expected bash tool call to fail validation');
-    assert.match(String(toolError.error), /reasoning/i);
-  });
-
-  it('schema accepts command with non-empty reasoning', async () => {
-    const content = await runBashToolCall(
-      `{"command":"echo hello","reasoning":"Read command output for report assembly."}`,
-    );
-
-    const toolError = content.find(
-      (part) => part.type === 'tool-error' && part.toolName === 'bash',
-    );
-    assert.strictEqual(toolError, undefined);
-
-    const toolResult = content.find(
-      (part) => part.type === 'tool-result' && part.toolName === 'bash',
-    );
-    assert.ok(toolResult, 'Expected bash tool call to succeed');
-  });
-
-  it('execution succeeds and output shape is unchanged when reasoning is provided', async () => {
-    const content = await runBashToolCall(
-      `{"command":"echo hello","reasoning":"Verify wrapped bash execution path."}`,
-    );
-
-    const toolResult = content.find(
-      (part) => part.type === 'tool-result' && part.toolName === 'bash',
-    );
-    assert.ok(toolResult, 'Expected bash tool call to succeed');
-    assert.ok(toolResult.output, 'Expected bash tool output');
-    assert.strictEqual(toolResult.output.exitCode, 0);
-    assert.strictEqual(toolResult.output.stderr, '');
-    assert.ok(toolResult.output.stdout.includes('hello'));
-  });
-});
-
 describe('sql proxy enforcement', () => {
   it('blocks direct DB CLI via tool path and redirects to sql validate/run', async () => {
     const { tools } = await createResultTools({
@@ -416,122 +316,6 @@ describe('sql proxy enforcement', () => {
     );
     assert.match(blockedCompound.stderr, /sql validate/i);
     assert.match(blockedCompound.stderr, /sql run/i);
-  });
-
-  it('normalizes literal backslash-n in sql validate', async () => {
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql validate "SELECT\\n  1 as val"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  it('normalizes literal backslash-n in sql run', async () => {
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql run "SELECT\\n  1 as val"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  it('strips shell-escaped parentheses in sql run', async () => {
-    const ddl =
-      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql run "SELECT senderEmail, COUNT\\(*) as c FROM Emails GROUP BY senderEmail"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  it('strips trailing backslash in sql run', async () => {
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql run "SELECT 1 as val\\\\"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  it('strips shell-escaped asterisk in sql run', async () => {
-    const ddl =
-      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql run "SELECT \\* FROM Emails LIMIT 1"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  it('strips shell-escaped parentheses in sql validate', async () => {
-    const ddl =
-      'CREATE TABLE Emails (id INTEGER PRIMARY KEY, senderEmail TEXT)';
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql validate "SELECT senderEmail, COUNT\\(*) as c FROM Emails GROUP BY senderEmail"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  it('preserves backslash before space inside SQL string literal', async () => {
-    const ddl =
-      "CREATE TABLE Files (id INTEGER PRIMARY KEY, path TEXT); INSERT INTO Files VALUES (1, 'C:\\Program Files\\test')";
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db(ddl, { grounding: [tables()] })).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql run "SELECT path FROM Files WHERE path LIKE \'C:\\\\Program%\' LIMIT 1"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
-    assert.ok(
-      result.stdout.includes('rows: 1'),
-      `expected 1 row but got: ${result.stdout}`,
-    );
-  });
-
-  it('strips shell-escaped dot in numeric literal', async () => {
-    const { sandbox } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const result = await sandbox.executeCommand(
-      'sql validate "SELECT 1\\.5 as val"',
-    );
-    assert.strictEqual(result.exitCode, 0, `stderr: ${result.stderr}`);
   });
 
   it('repairs missing closing double quote in sql run', async () => {
@@ -1554,6 +1338,14 @@ describe('sql run validation reminder', () => {
       'sql validate should not have reminder',
     );
   });
+
+  it('compound sql run + validate keeps the run reminder', async () => {
+    const result = await run(
+      'sql run "SELECT 1 as a" && sql validate "SELECT 1 as b"',
+    );
+    assert.strictEqual(result.exitCode, 0);
+    assertHasReminder(result);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1646,22 +1438,6 @@ describe('sql meta via toModelOutput', () => {
     );
   });
 
-  it('non-sql commands have no meta', async () => {
-    const content = await runBashToolCall(
-      `{"command":"echo hello","reasoning":"test no meta"}`,
-    );
-
-    const toolResult = content.find(
-      (part) => part.type === 'tool-result' && part.toolName === 'bash',
-    );
-    assert.ok(toolResult, 'Expected bash tool call to succeed');
-    assert.strictEqual(
-      toolResult.output?.meta,
-      undefined,
-      'Non-SQL commands should not have meta',
-    );
-  });
-
   it('sql run error still includes formattedSql in meta', async () => {
     const content = await runBashToolCall(
       `{"command":"sql run \\"SELECT * FROM nonexistent_xyz\\"","reasoning":"test error meta"}`,
@@ -1676,100 +1452,6 @@ describe('sql meta via toModelOutput', () => {
       (toolResult.output.meta as Record<string, unknown>).formattedSql,
       'Expected formattedSql in meta even on execution error',
     );
-  });
-
-  it('toModelOutput strips meta from model context', async () => {
-    const { tools } = await createResultTools({
-      adapter: (await init_db('')).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const bash = tools.bash as any;
-    assert.ok(bash.toModelOutput, 'bash tool should have toModelOutput');
-
-    const mockOutput = {
-      stdout: 'results stored in /sql/test.json\ncolumns: test\nrows: 1\n',
-      stderr: '',
-      exitCode: 0,
-      meta: { formattedSql: 'SELECT\n  1 AS test' },
-    };
-
-    const modelOutput = await bash.toModelOutput({
-      toolCallId: 'test',
-      input: { command: 'sql run "SELECT 1 as test"', reasoning: 'test' },
-      output: mockOutput,
-    });
-
-    assert.strictEqual(modelOutput.type, 'json');
-    assert.strictEqual(
-      (modelOutput.value as Record<string, unknown>).meta,
-      undefined,
-      'meta should be stripped from model output',
-    );
-    assert.strictEqual(
-      (modelOutput.value as Record<string, unknown>).stdout,
-      mockOutput.stdout,
-      'stdout should be preserved in model output',
-    );
-  });
-
-  it('parallel bash calls get isolated meta via AsyncLocalStorage', async () => {
-    const { tools } = await createResultTools({
-      adapter: (
-        await init_db(
-          'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)',
-          {
-            grounding: [tables({ filter: ['users'] })],
-          },
-        )
-      ).adapter,
-      skillMounts: [],
-      filesystem: new InMemoryFs(),
-    });
-
-    const execute = tools.bash.execute!;
-
-    const [sqlRun, sqlValidate, echo] = await Promise.all([
-      execute(
-        { command: 'sql run "SELECT 1 as a"', reasoning: 'test parallel 1' },
-        {} as any,
-      ),
-      execute(
-        {
-          command: 'sql validate "SELECT name FROM users"',
-          reasoning: 'test parallel 2',
-        },
-        {} as any,
-      ),
-      execute(
-        { command: 'echo hello', reasoning: 'test parallel 3' },
-        {} as any,
-      ),
-    ]);
-
-    const sqlRunResult = sqlRun as unknown as Record<string, unknown>;
-    const sqlValidateResult = sqlValidate as unknown as Record<string, unknown>;
-    const echoResult = echo as unknown as Record<string, unknown>;
-
-    assert.ok(sqlRunResult.meta, 'sql run should have meta');
-    assert.ok(
-      (
-        (sqlRunResult.meta as Record<string, unknown>).formattedSql as string
-      ).includes('SELECT'),
-      'sql run meta should contain SELECT',
-    );
-
-    assert.ok(sqlValidateResult.meta, 'sql validate should have meta');
-    assert.ok(
-      (
-        (sqlValidateResult.meta as Record<string, unknown>)
-          .formattedSql as string
-      ).includes('users'),
-      'sql validate meta should reference users table',
-    );
-
-    assert.strictEqual(echoResult.meta, undefined, 'echo should have no meta');
   });
 
   it('sql run with WITH clause includes formattedSql in meta', async () => {

@@ -8,6 +8,7 @@ import {
   ContextEngine,
   type ContextStore,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   persona,
   structuredOutput,
@@ -194,8 +195,10 @@ export async function simulateConversation(
 ): Promise<SimulationResult> {
   const store = new InMemoryContextStore();
   const model = config.model ?? groq('gpt-oss-20b');
+  const sandbox = await createBashTool();
   const text2sql = new Text2Sql({
     version: `eval-simulator-${Date.now()}`,
+    sandbox,
     store,
     model,
     adapter: config.adapter,

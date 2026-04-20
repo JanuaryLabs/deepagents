@@ -3,7 +3,7 @@ import { evalite } from 'evalite';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryContextStore } from '@deepagents/context';
+import { InMemoryContextStore, createBashTool } from '@deepagents/context';
 import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
 import { Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
@@ -31,8 +31,10 @@ evalite('SQL Output Formatting', {
     const db = new DatabaseSync(':memory:');
     db.exec(ddl);
 
+    const sandbox = await createBashTool();
     const text2sql = new Text2Sql({
-      version: randomUUID(), // Use unique version per run for cache isolation
+      version: randomUUID(),
+      sandbox,
       store: new InMemoryContextStore(),
       model: groq('gpt-oss-20b'),
       adapter: new sqlite.Sqlite({

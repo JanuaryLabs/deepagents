@@ -1,3 +1,4 @@
+import type { CommandResult } from 'bash-tool';
 import type {
   CommandNode,
   ScriptNode,
@@ -9,6 +10,8 @@ import type {
 import { parse, serialize } from 'just-bash';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
+
+import { BashException } from '@deepagents/context';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared AST Utilities
@@ -95,10 +98,14 @@ const SQL_PROXY_ENFORCEMENT_MESSAGE = [
   '2) sql run "SELECT ..."',
 ].join('\n');
 
-export class SqlProxyViolationError extends Error {
+export class SqlProxyViolationError extends BashException {
   constructor() {
     super(SQL_PROXY_ENFORCEMENT_MESSAGE);
     this.name = 'SqlProxyViolationError';
+  }
+
+  format(): CommandResult {
+    return { stdout: '', stderr: `${this.message}\n`, exitCode: 1 };
   }
 }
 

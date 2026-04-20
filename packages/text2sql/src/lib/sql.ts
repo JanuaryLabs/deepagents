@@ -13,6 +13,7 @@ import { type IFileSystem } from 'just-bash';
 
 import { type AgentModel } from '@deepagents/agent';
 import {
+  type AgentSandbox,
   type ChatMessage,
   ContextEngine,
   type ContextFragment,
@@ -38,6 +39,7 @@ export type RenderingTools = Record<string, Tool<unknown, never>>;
 export class Text2Sql {
   #config: {
     model: AgentModel;
+    sandbox: AgentSandbox;
     adapter: Adapter;
     context: (...fragments: ContextFragment[]) => ContextEngine;
     tools?: RenderingTools;
@@ -48,6 +50,7 @@ export class Text2Sql {
 
   constructor(config: {
     adapter: Adapter;
+    sandbox: AgentSandbox;
     context: (...fragments: ContextFragment[]) => ContextEngine;
     version: string;
     tools?: RenderingTools;
@@ -57,6 +60,7 @@ export class Text2Sql {
   }) {
     this.#config = {
       adapter: config.adapter,
+      sandbox: config.sandbox,
       context: config.context,
       tools: config.tools ?? {},
       model: config.model,
@@ -177,6 +181,7 @@ export class Text2Sql {
 
     const chatAgent = agent({
       name: 'text2sql',
+      sandbox: this.#config.sandbox,
       model: this.#config.model,
       context,
       tools: {

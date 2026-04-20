@@ -85,6 +85,13 @@ console.log(sql);
 
 Text2SQL works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs), including OpenAI, Anthropic, Google, Groq, and more.
 
+## Experimental: Text2SqlV3
+
+Use `Text2SqlV3` when you already own the bash sandbox and want to mount the
+`sql` subcommand into that sandbox yourself instead of letting `Text2Sql`
+create its own internal result tools. See [sqlv3.md](./sqlv3.md) for the
+caller-owned sandbox setup and the behavior differences from v1.
+
 ## Fragments
 
 Inject domain knowledge using fragments from `@deepagents/context` inside the
@@ -198,6 +205,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 
 - [Getting Started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
 - [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/to-sql)
+- [Text2SqlV3 (Experimental)](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
 - [Teach the System](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
 - [Build Conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)

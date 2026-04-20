@@ -1,6 +1,7 @@
 const sqlValidationMarker = Symbol('SQLValidationError');
 const unanswerableSqlMarker = Symbol('UnanswerableSQLError');
 const sqlScopeMarker = Symbol('SQLScopeError');
+const sqlReadOnlyMarker = Symbol('SQLReadOnlyError');
 
 export type SQLScopeErrorType = 'OUT_OF_SCOPE' | 'SQL_SCOPE_PARSE_ERROR';
 
@@ -72,5 +73,24 @@ export class SQLScopeError extends Error {
 
   static isInstance(error: unknown): error is SQLScopeError {
     return error instanceof SQLScopeError && error[sqlScopeMarker] === true;
+  }
+}
+
+/**
+ * Error thrown when a query is not read-only (does not start with SELECT or WITH).
+ */
+export class SQLReadOnlyError extends Error {
+  [sqlReadOnlyMarker]: true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'SQLReadOnlyError';
+    this[sqlReadOnlyMarker] = true;
+  }
+
+  static isInstance(error: unknown): error is SQLReadOnlyError {
+    return (
+      error instanceof SQLReadOnlyError && error[sqlReadOnlyMarker] === true
+    );
   }
 }

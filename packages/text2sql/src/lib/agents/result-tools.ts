@@ -1,183 +1,38 @@
-import { tool } from 'ai';
-import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
-import {
-  Bash,
-  type CommandContext,
-  type IFileSystem,
-  MountableFs,
-  OverlayFs,
-  defineCommand,
-  parse,
-} from 'just-bash';
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { Bash, type IFileSystem, MountableFs, OverlayFs } from 'just-bash';
 import * as path from 'node:path';
 import { v7 } from 'uuid';
-import z from 'zod';
 
-import type { SkillPathMapping } from '@deepagents/context';
+import {
+  type SkillPathMapping,
+  type SubcommandDefinition,
+  buildSubcommandRepair,
+  createBashTool,
+  defineSubcommandGroup,
+  repairQuotedArg,
+  useBashMeta,
+} from '@deepagents/context';
 
 import type { Adapter } from '../adapters/adapter.ts';
 import {
   SqlBacktickRewritePlugin,
   SqlProxyEnforcementPlugin,
-  SqlProxyViolationError,
 } from './sql-transform-plugins.ts';
-
-interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-interface SubcommandDefinition {
-  usage: string;
-  description: string;
-  repair?: (rawArgs: string) => string | null;
-  handler: (
-    args: string[],
-    ctx: CommandContext,
-  ) => CommandResult | Promise<CommandResult>;
-}
-
-/**
- * Creates a command with subcommands using a declarative API.
- *
- * @example
- * const cmd = createCommand('sql', {
- *   run: {
- *     usage: 'run "SELECT ..."',
- *     description: 'Execute query',
- *     handler: async (args, ctx) => ({ stdout: '...', stderr: '', exitCode: 0 })
- *   }
- * });
- */
-function createCommand(
-  name: string,
-  subcommands: Record<string, SubcommandDefinition>,
-) {
-  const usageLines = Object.entries(subcommands)
-    .map(([, def]) => `  ${name} ${def.usage.padEnd(30)} ${def.description}`)
-    .join('\n');
-
-  return defineCommand(name, async (args, ctx) => {
-    const subcommand = args[0];
-    const restArgs = args.slice(1);
-
-    if (subcommand && subcommand in subcommands) {
-      return subcommands[subcommand].handler(restArgs, ctx);
-    }
-
-    return {
-      stdout: '',
-      stderr: `${name}: ${subcommand ? `unknown subcommand '${subcommand}'` : 'missing subcommand'}\n\nUsage:\n${usageLines}`,
-      exitCode: 1,
-    };
-  });
-}
-
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function buildRepair(
-  name: string,
-  subcommands: Record<string, SubcommandDefinition>,
-) {
-  const subNames = Object.keys(subcommands).map(escapeRegExp).join('|');
-  const pattern = new RegExp(
-    `^(\\s*${escapeRegExp(name)}\\s+(?:${subNames}))\\s+([\\s\\S]+)$`,
-  );
-
-  return function repair(raw: string): string {
-    const match = raw.match(pattern);
-    if (!match) return raw;
-
-    try {
-      parse(raw);
-      return raw;
-    } catch {
-      // fall through to repair
-    }
-
-    const [, prefix, argsPart] = match;
-    const sub = prefix.trim().split(/\s+/).pop()!;
-    const repairFn = subcommands[sub]?.repair;
-    if (!repairFn) return raw;
-
-    const repairedArgs = repairFn(argsPart);
-    if (repairedArgs == null) return raw;
-
-    const repaired = `${prefix} ${repairedArgs}`;
-    try {
-      parse(repaired);
-      return repaired;
-    } catch {
-      return raw;
-    }
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SQL Command Implementation
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Validates that a query is read-only (SELECT or WITH).
- */
-function validateReadOnly(query: string): { valid: boolean; error?: string } {
-  const upper = query.toUpperCase().trim();
-  if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
-    return { valid: false, error: 'only SELECT or WITH queries allowed' };
-  }
-  return { valid: true };
-}
-
-type MetaStore = AsyncLocalStorage<{ value?: Record<string, unknown> }>;
 
 const SQL_VALIDATE_REMINDER =
   'Always run `sql validate` before `sql run` to catch syntax errors early.';
 
-function normalizeShellArtifacts(raw: string): string {
-  return raw
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\([().*])/g, '$1')
-    .replace(/\\(?=$)/gm, '');
-}
-
-function stripQuoteArtifacts(raw: string): string {
-  let sql = raw.trim();
-  if (sql.startsWith('"')) {
-    sql = sql.slice(1);
-    if (sql.endsWith('"')) sql = sql.slice(0, -1);
-  } else if (sql.startsWith("'")) {
-    sql = sql.slice(1);
-    if (sql.endsWith("'")) sql = sql.slice(0, -1);
-  }
-  return sql.trim();
-}
-
-function repairSqlArgs(rawArgs: string): string | null {
-  const sql = stripQuoteArtifacts(rawArgs);
-  if (!sql) return null;
-  const escaped = sql.replace(/'/g, "'\\''");
-  return `'${escaped}'`;
-}
-
-function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
+export function createSqlCommand(adapter: Adapter) {
   const subcommands = {
     run: {
       usage: 'run "SELECT ..."',
       description: 'Execute query and store results',
-      repair: repairSqlArgs,
+      repair: repairQuotedArg,
       handler: async (args, ctx) => {
-        const store = metaStore.getStore();
-        if (store) {
-          store.value = { ...store.value, reminder: SQL_VALIDATE_REMINDER };
-        }
+        const meta = useBashMeta();
+        meta?.setReminder(SQL_VALIDATE_REMINDER);
 
-        const rawQuery = normalizeShellArtifacts(args.join(' ').trim());
+        const rawQuery = args.join(' ').trim();
 
         if (!rawQuery) {
           return {
@@ -187,19 +42,8 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
           };
         }
 
-        const validation = validateReadOnly(rawQuery);
-        if (!validation.valid) {
-          return {
-            stdout: '',
-            stderr: `sql run: ${validation.error}`,
-            exitCode: 1,
-          };
-        }
-
         const query = adapter.format(rawQuery);
-        if (store) {
-          store.value = { ...store.value, formattedSql: query };
-        }
+        meta?.setHidden({ formattedSql: query });
 
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
@@ -220,6 +64,7 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
 
           await ctx.fs.mkdir('/sql', { recursive: true });
           await ctx.fs.writeFile(sqlPath, content);
+          meta?.setHidden({ resultPath: sqlPath });
 
           const columns =
             rowsArray.length > 0 ? Object.keys(rowsArray[0] as object) : [];
@@ -246,9 +91,10 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
     validate: {
       usage: 'validate "SELECT ..."',
       description: 'Validate query syntax',
-      repair: repairSqlArgs,
+      repair: repairQuotedArg,
       handler: async (args) => {
-        const rawQuery = normalizeShellArtifacts(args.join(' ').trim());
+        const meta = useBashMeta();
+        const rawQuery = args.join(' ').trim();
 
         if (!rawQuery) {
           return {
@@ -258,18 +104,8 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
           };
         }
 
-        const validation = validateReadOnly(rawQuery);
-        if (!validation.valid) {
-          return {
-            stdout: '',
-            stderr: `sql validate: ${validation.error}`,
-            exitCode: 1,
-          };
-        }
-
         const query = adapter.format(rawQuery);
-        const store = metaStore.getStore();
-        if (store) store.value = { ...store.value, formattedSql: query };
+        meta?.setHidden({ formattedSql: query });
 
         const syntaxError = await adapter.validate(query);
         if (syntaxError) {
@@ -289,8 +125,8 @@ function createSqlCommand(adapter: Adapter, metaStore: MetaStore) {
     },
   } satisfies Record<string, SubcommandDefinition>;
 
-  const command = createCommand('sql', subcommands);
-  const repair = buildRepair('sql', subcommands);
+  const command = defineSubcommandGroup('sql', subcommands);
+  const repair = buildSubcommandRepair('sql', subcommands);
   return { command, repair };
 }
 
@@ -306,13 +142,6 @@ export interface ResultToolsOptions {
   filesystem: IFileSystem;
 }
 
-function toViolationResult(error: unknown): CommandResult | null {
-  if (error instanceof SqlProxyViolationError) {
-    return { stdout: '', stderr: `${error.message}\n`, exitCode: 1 };
-  }
-  return null;
-}
-
 /**
  * Creates bash tool with integrated sql command.
  *
@@ -322,11 +151,8 @@ function toViolationResult(error: unknown): CommandResult | null {
 export async function createResultTools(options: ResultToolsOptions) {
   const { adapter, skillMounts, filesystem: baseFs } = options;
 
-  const metaStore: MetaStore = new AsyncLocalStorage();
-  const { command: sqlCommand, repair: repairCommand } = createSqlCommand(
-    adapter,
-    metaStore,
-  );
+  const { command: sqlCommand, repair: repairCommand } =
+    createSqlCommand(adapter);
 
   const fsMounts = skillMounts.map(({ host, sandbox }) => ({
     mountPoint: path.dirname(sandbox),
@@ -350,82 +176,23 @@ export async function createResultTools(options: ResultToolsOptions) {
   bashInstance.registerTransformPlugin(new SqlBacktickRewritePlugin());
   bashInstance.registerTransformPlugin(new SqlProxyEnforcementPlugin());
 
-  const { sandbox, tools } = await createBashTool({
+  const debug = Boolean(process.env.DEBUG_BASH);
+
+  return createBashTool({
     sandbox: bashInstance,
     destination: '/',
-    extraInstructions:
-      'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.',
     onBeforeBashCall: ({ command }) => {
       const repaired = repairCommand(command);
-      console.log(chalk.cyan(`[onBeforeBashCall]: ${repaired}`));
+      if (debug) {
+        console.log(chalk.cyan(`[onBeforeBashCall]: ${repaired}`));
+      }
       return { command: repaired };
     },
     onAfterBashCall: ({ result }) => {
-      if (result.exitCode !== 0) {
+      if (debug && result.exitCode !== 0) {
         console.log(chalk.yellow(`[onAfterBashCall]: ${result.exitCode}`));
       }
       return { result };
     },
   });
-
-  const guardedSandbox = {
-    ...sandbox,
-    executeCommand: async (command: string) => {
-      try {
-        return await sandbox.executeCommand(command);
-      } catch (error) {
-        const violation = toViolationResult(error);
-        if (violation) return violation;
-        throw error;
-      }
-    },
-  };
-
-  const bash = tool({
-    ...(tools as any).bash,
-    inputSchema: z.object({
-      command: z.string().describe('The bash command to execute'),
-      reasoning: z
-        .string()
-        .trim()
-        .describe('Brief reason for executing this command'),
-    }),
-    execute: async ({ command }, execOptions) => {
-      const execute = tools.bash.execute;
-      if (!execute) {
-        throw new Error('bash tool execution is not available');
-      }
-
-      return metaStore.run({}, async () => {
-        try {
-          const result = await execute({ command }, execOptions);
-          const storeValue = metaStore.getStore()?.value;
-          if (!storeValue) return result;
-
-          const { reminder, ...meta } = storeValue;
-          return { ...result, meta, reminder };
-        } catch (error) {
-          const violation = toViolationResult(error);
-          if (violation) return violation;
-          throw error;
-        }
-      });
-    },
-    toModelOutput: ({ output }) => {
-      if (typeof output !== 'object' || output === null) {
-        return { type: 'json' as const, value: output };
-      }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { meta, ...rest } = output as unknown as Record<string, unknown>;
-      return { type: 'json' as const, value: rest };
-    },
-  });
-
-  return {
-    sandbox: guardedSandbox,
-    tools: {
-      ...tools,
-      bash,
-    },
-  };
 }

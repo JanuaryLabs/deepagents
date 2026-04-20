@@ -7,12 +7,15 @@ import { describe, it } from 'node:test';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   reminder,
   user,
 } from '@deepagents/context';
 import { Text2Sql } from '@deepagents/text2sql';
 
 import { init_db } from '../src/tests/sqlite.ts';
+
+const sandbox = await createBashTool();
 
 const testUsage = {
   inputTokens: { total: 10 },
@@ -66,6 +69,7 @@ async function setup(mockText?: string) {
 
   const text2sql = new Text2Sql({
     version: 'test',
+    sandbox,
     adapter,
     model,
     filesystem: new InMemoryFs(),
@@ -384,6 +388,7 @@ describe('Text2Sql.chat()', () => {
 
     const text2sql = new Text2Sql({
       version: 'test',
+      sandbox,
       adapter,
       model,
       filesystem: new InMemoryFs(),
