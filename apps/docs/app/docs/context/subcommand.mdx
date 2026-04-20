@@ -1,0 +1,271 @@
+---
+title: Subcommand Builders
+description: Compose custom bash commands with a subcommand dispatcher, LLM-robust arg repair, and shell quote helpers
+---
+
+When you register a custom bash command like `sql`, `http`, or `s3` that takes subcommands (`sql run`, `sql validate`), three problems repeat every time:
+
+1. Dispatching from the first arg to the right handler.
+2. Recovering from malformed quoting the LLM sometimes produces.
+3. Presenting a usage message when the LLM calls the tool wrong.
+
+`@deepagents/context` exposes small primitives that cover each concern. They compose with `useBashMeta()` (for meta/reminder) and `BashException` (for error-to-`CommandResult` conversion) — see [Sandbox](/docs/context/sandbox) for both.
+
+## Quick Start
+
+Build a `greet` command with two subcommands and wire it into `createBashTool()`:
+
+```typescript
+import { Bash } from 'just-bash';
+import {
+  type SubcommandDefinition,
+  buildSubcommandRepair,
+  createBashTool,
+  defineSubcommandGroup,
+} from '@deepagents/context';
+
+const subcommands = {
+  hello: {
+    usage: 'hello <name>',
+    description: 'Say hello to someone',
+    handler: (args) => ({
+      stdout: `Hello, ${args.join(' ') || 'friend'}!\n`,
+      stderr: '',
+      exitCode: 0,
+    }),
+  },
+  goodbye: {
+    usage: 'goodbye <name>',
+    description: 'Say goodbye',
+    handler: (args) => ({
+      stdout: `Goodbye, ${args.join(' ') || 'friend'}!\n`,
+      stderr: '',
+      exitCode: 0,
+    }),
+  },
+} satisfies Record<string, SubcommandDefinition>;
+
+const greetCommand = defineSubcommandGroup('greet', subcommands);
+const repair = buildSubcommandRepair('greet', subcommands);
+
+const bashInstance = new Bash({ customCommands: [greetCommand] });
+
+const sandbox = await createBashTool({
+  sandbox: bashInstance,
+  onBeforeBashCall: ({ command }) => ({ command: repair(command) }),
+});
+```
+
+The LLM now invokes `greet hello world` or `greet goodbye alice`. If it calls `greet` alone, stderr shows the auto-generated usage message with a non-zero exit code — enough feedback for the model to try again.
+
+## `SubcommandDefinition`
+
+Each subcommand is one object with four fields:
+
+```typescript
+interface SubcommandDefinition {
+  usage: string;
+  description: string;
+  repair?: (rawArgs: string) => string | null;
+  handler: (
+    args: string[],
+    ctx: CommandContext,
+  ) => CommandResult | Promise<CommandResult>;
+}
+```
+
+| Field | Description |
+|---|---|
+| `usage` | Short usage string shown in the auto-generated help (e.g. `run "SELECT ..."`). No tool name prefix — the dispatcher adds it |
+| `description` | One-line description shown beside the usage |
+| `repair` | Optional pre-parse repair fn. Runs *only* when the original command fails to parse. Return `null` to skip |
+| `handler` | The actual implementation. Receives the remaining args (after the subcommand name) and a `CommandContext` (has `fs`, etc.) |
+
+## `defineSubcommandGroup(name, subcommands)`
+
+Builds a `just-bash` custom command that dispatches on the first positional arg. The returned command:
+
+- Routes `<name> <sub> <rest...>` to `subcommands[sub].handler(rest, ctx)` when `sub` matches a key.
+- Returns `exitCode: 1` with an auto-generated usage message when `sub` is missing or unknown.
+
+```typescript
+const bashInstance = new Bash({ customCommands: [greetCommand] });
+
+await bashInstance.exec('greet hello world');
+// → stdout: "Hello, world!\n", exitCode: 0
+
+await bashInstance.exec('greet');
+// → exitCode: 1, stderr contains:
+//   greet: missing subcommand
+//
+//   Usage:
+//     greet hello <name>             Say hello to someone
+//     greet goodbye <name>           Say goodbye
+
+await bashInstance.exec('greet whoops');
+// → exitCode: 1, stderr starts with:
+//   greet: unknown subcommand 'whoops'
+```
+
+Usage rows are padded via `usage.padEnd(30)` for column alignment. You get the help message for free — no manual maintenance as you add subcommands.
+
+## `buildSubcommandRepair(name, subcommands)`
+
+The pre-parse repair pipeline. LLMs sometimes emit malformed quoting that the shell parser rejects — `sql run "SELECT * FROM users` (unclosed quote) or `sql validate SELECT 1` (no quotes at all). When the original command fails to parse, `buildSubcommandRepair` tries each matching subcommand's `repair` function and returns the re-quoted command if the new form parses cleanly. Otherwise it returns the original unchanged and the parser emits its normal error.
+
+Wire it into `onBeforeBashCall` on `createBashTool`:
+
+```typescript
+const repair = buildSubcommandRepair('sql', subcommands);
+
+const sandbox = await createBashTool({
+  sandbox: bashInstance,
+  onBeforeBashCall: ({ command }) => ({ command: repair(command) }),
+});
+```
+
+The repair fn is a pure string → string function. It's safe to call on every command, not just ones that look malformed — when the command already parses, it's returned unchanged after a single regex test and re-parse.
+
+## Quote Repair Helpers
+
+### `stripQuoteArtifacts(raw)`
+
+Strips one layer of matching outer `"` or `'` quotes and trims whitespace. If the input isn't wrapped in a matching pair, returns it trimmed but otherwise unchanged:
+
+```typescript
+stripQuoteArtifacts('"SELECT 1"');    // 'SELECT 1'
+stripQuoteArtifacts("'SELECT 1'");    // 'SELECT 1'
+stripQuoteArtifacts('SELECT 1');      // 'SELECT 1'
+stripQuoteArtifacts('"unclosed');     // 'unclosed'  (leading " stripped)
+stripQuoteArtifacts(`"'nested'"`);    // "'nested'"  (only one layer)
+```
+
+### `repairQuotedArg(rawArgs)`
+
+The canonical repair function for subcommands whose arg slot is a single quoted payload (SQL queries, JSON bodies, etc.). Three steps:
+
+1. `stripQuoteArtifacts` to remove outer quoting.
+2. Escape inner single quotes using the POSIX `'\''` idiom.
+3. Wrap the result in single quotes.
+
+Returns `null` when the input is empty after trimming.
+
+```typescript
+repairQuotedArg('SELECT 1');     // returns:  'SELECT 1'
+repairQuotedArg('"SELECT 1"');   // returns:  'SELECT 1'
+repairQuotedArg(`don't`);        // returns:  'don'\''t'   (POSIX single-quote escape)
+repairQuotedArg('');             // returns:  null
+```
+
+Reference it directly from each subcommand's `repair` field when the payload shape matches:
+
+```typescript
+const subcommands = {
+  run: {
+    usage: 'run "SELECT ..."',
+    description: 'Execute query',
+    repair: repairQuotedArg,
+    handler: async (args) => { /* ... */ },
+  },
+} satisfies Record<string, SubcommandDefinition>;
+```
+
+### Pre-parse vs Post-parse: two stages, two jobs
+
+`repairQuotedArg` / `stripQuoteArtifacts` solve **malformed quoting that would break the parser**. They run *before* `parse()`. Once parse succeeds and the handler has its `args: string[]`, you may still have domain-specific cleanup to do inside the handler or adapter.
+
+`@deepagents/text2sql` is a good example of the split: `createSqlCommand` now forwards `args.join(' ').trim()` directly, and the adapter handles shell-escape cleanup internally inside `format()`, `validate()`, and `execute()`.
+
+In short:
+
+| Stage | Problem | Solution |
+|---|---|---|
+| Pre-parse | Malformed quoting (`"unclosed`, no quotes) | `repairQuotedArg` |
+| Post-parse | Domain-specific cleanup after args are parsed | Handler or adapter-owned normalization |
+
+## Worked Example: the `sql` Command
+
+`@deepagents/text2sql`'s `createResultTools` is built entirely from these primitives. A condensed version:
+
+```typescript
+import {
+  type SubcommandDefinition,
+  buildSubcommandRepair,
+  defineSubcommandGroup,
+  repairQuotedArg,
+  useBashMeta,
+} from '@deepagents/context';
+
+function createSqlCommand(adapter: Adapter) {
+  const subcommands = {
+    run: {
+      usage: 'run "SELECT ..."',
+      description: 'Execute query and store results',
+      repair: repairQuotedArg,
+      handler: async (args, ctx) => {
+        const meta = useBashMeta();
+        meta?.setReminder('Always run `sql validate` first.');
+
+        const rawQuery = args.join(' ').trim();
+        if (!rawQuery) {
+          return { stdout: '', stderr: 'sql run: no query provided', exitCode: 1 };
+        }
+
+        const query = adapter.format(rawQuery);
+        meta?.setHidden({ formattedSql: query });
+
+        const syntaxError = await adapter.validate(query);
+        if (syntaxError) {
+          return { stdout: '', stderr: `sql run: ${syntaxError}`, exitCode: 1 };
+        }
+
+        const rows = await adapter.execute(query);
+        const resultPath = '/sql/result.json';
+        await ctx.fs.writeFile(resultPath, JSON.stringify(rows));
+        meta?.setHidden({ resultPath });
+
+        return {
+          stdout: `results stored in ${resultPath}\n`,
+          stderr: '',
+          exitCode: 0,
+        };
+      },
+    },
+    validate: {
+      usage: 'validate "SELECT ..."',
+      description: 'Validate query syntax',
+      repair: repairQuotedArg,
+      handler: async (args) => {
+        const meta = useBashMeta();
+        const rawQuery = args.join(' ').trim();
+        const query = adapter.format(rawQuery);
+        meta?.setHidden({ formattedSql: query });
+
+        const error = await adapter.validate(query);
+        return error
+          ? { stdout: '', stderr: `sql validate: ${error}`, exitCode: 1 }
+          : { stdout: 'valid\n', stderr: '', exitCode: 0 };
+      },
+    },
+  } satisfies Record<string, SubcommandDefinition>;
+
+  return {
+    command: defineSubcommandGroup('sql', subcommands),
+    repair: buildSubcommandRepair('sql', subcommands),
+  };
+}
+```
+
+The handlers:
+
+- Use `useBashMeta()` to attach a per-call reminder plus host-only `formattedSql` / `resultPath` metadata (stripped from what the model sees).
+- Let the adapter own query normalization and validation after the shell arguments have been parsed.
+- Return `CommandResult` directly, letting the parent bash runtime handle exit codes and stderr routing.
+
+For the meta channel details, see [Sandbox → Meta Channel](/docs/context/sandbox#meta-channel).
+
+## Next Steps
+
+- [Sandbox](/docs/context/sandbox) — The `createBashTool` wrapper, `BashException`, meta channel
+- [Container Tool](/docs/context/container-tool) — Run custom subcommands inside a Docker container
+- [Agent](/docs/context/agent) — Attach a sandbox with custom commands to an AI agent

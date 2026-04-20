@@ -1,11 +1,11 @@
 ---
 title: Container Tool
-description: High-level wrapper combining Docker sandbox with bash-tool for AI agent integration
+description: High-level wrapper combining Docker sandbox with the shared bash wrapper for AI agent integration
 ---
 
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
-`createContainerTool` combines `createDockerSandbox` and `createBashTool` into a single call, giving you a bash tool ready for AI SDK agents running inside an isolated Docker container.
+`createContainerTool` combines `createDockerSandbox` and the shared `createBashTool` wrapper into a single call, giving you a bash tool ready for AI SDK agents running inside an isolated Docker container.
 
 ## Basic Usage
 
@@ -63,7 +63,7 @@ const sandbox = await createContainerTool({ ... });
 
 | Property | Type | Purpose |
 |----------|------|---------|
-| `sandbox.bash` | `BashExecuteTool` | Single bash tool for direct use |
+| `sandbox.bash` | `WrappedBashTool` | Single bash tool for direct use — schema requires `{ command, reasoning }` |
 | `sandbox.tools` | `{ bash, readFile, writeFile }` | Full toolkit — auto-registered when passed to `agent()` |
 | `sandbox.sandbox` | `DockerSandbox` | Container handle — call `sandbox.sandbox.dispose()` for cleanup |
 | `sandbox.skills` | `SkillPathMapping[]` | Discovered skills (empty if `skills` option omitted) — pass to `skills(sandbox)` fragment |

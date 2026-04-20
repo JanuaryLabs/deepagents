@@ -15,8 +15,8 @@ export interface SkillMetadata {
 }
 
 /**
- * Individual skill mount with name.
- * Output from getSkillMounts().
+ * Individual skill mount emitted by sandbox factories and consumed by the
+ * `skills()` fragment.
  */
 export interface SkillPathMapping {
   name: string;
@@ -25,29 +25,6 @@ export interface SkillPathMapping {
   host: string;
   /** Sandbox path to SKILL.md */
   sandbox: string;
-}
-
-/**
- * Options for the skills() fragment helper.
- */
-export interface SkillsFragmentOptions {
-  /**
-   * Skill directories to scan, with host-to-sandbox path mapping.
-   *
-   * @example
-   * ```ts
-   * skills({
-   *   paths: [
-   *     { host: 'apps/backend/dist/skills', sandbox: '/skills/skills' }
-   *   ]
-   * })
-   * ```
-   */
-  paths: { host: string; sandbox: string }[];
-  /** Skill names to exclude from the fragment */
-  exclude?: string[];
-  /** Skill names to include (if set, only these are included) */
-  include?: string[];
 }
 
 /**

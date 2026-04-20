@@ -135,9 +135,8 @@ await sandbox.writeFiles([
 Agent OS plugs into `createBashTool` the same way Docker does:
 
 ```typescript
-import { createBashTool } from 'bash-tool';
 import common from '@rivet-dev/agent-os-common';
-import { createAgentOsSandbox } from '@deepagents/context';
+import { createAgentOsSandbox, createBashTool } from '@deepagents/context';
 
 const sandbox = await createAgentOsSandbox({
   software: [common],

@@ -1,126 +1,56 @@
 import dedent from 'dedent';
 
 import type { ContextFragment } from '../fragments.ts';
-import { discoverSkillsInDirectory } from './loader.ts';
-import type { SkillMetadata, SkillsFragmentOptions } from './types.ts';
+import type { AgentSandbox } from '../sandbox/types.ts';
 
 /**
- * Create a context fragment containing available skills metadata.
+ * Create a context fragment containing available skills metadata from a
+ * sandbox.
  *
  * Follows Anthropic's progressive disclosure pattern:
  * - At startup: only skill metadata (name, description, path) is injected
  * - At runtime: LLM reads full SKILL.md using file tools when relevant
  *
- * @param options - Configuration including paths to scan and optional filtering
+ * @param sandbox - An AgentSandbox whose `.skills` has been populated by the
+ * sandbox factory (`createBashTool` / `createContainerTool`).
  *
  * @example
  * ```ts
- * const context = new ContextEngine({ userId: 'demo-user', store, chatId: 'demo' })
- *   .set(
- *     role('You are a helpful assistant.'),
- *     skills({
- *       paths: [
- *         { host: './skills', sandbox: '/skills/skills' }
- *       ]
- *     }),
- *   );
- *
- * // LLM now sees skill metadata with sandbox paths and can read full SKILL.md
+ * const sandbox = await createBashTool({
+ *   skills: [{ host: './skills', sandbox: '/skills/skills' }],
+ * });
+ * context.set(role('You are a helpful assistant.'), skills(sandbox));
  * ```
  */
-export function skills(options: SkillsFragmentOptions): ContextFragment {
-  // Build host-to-sandbox mapping for path rewriting
-  const pathMapping = new Map<string, string>();
-  for (const { host, sandbox } of options.paths) {
-    pathMapping.set(host, sandbox);
+export function skills(sandbox: AgentSandbox): ContextFragment {
+  const mounts = sandbox.skills ?? [];
+
+  if (mounts.length === 0) {
+    return { name: 'available_skills', data: [], metadata: { mounts: [] } };
   }
 
-  // Discover skills from all host paths (later paths override earlier ones)
-  const skillsMap = new Map<string, SkillMetadata>();
-  for (const { host } of options.paths) {
-    const discovered = discoverSkillsInDirectory(host);
-    for (const skill of discovered) {
-      skillsMap.set(skill.name, skill);
-    }
-  }
-  const allSkills = Array.from(skillsMap.values());
-
-  // Apply filtering
-  let filteredSkills = allSkills;
-  if (options.include) {
-    filteredSkills = allSkills.filter((s) => options.include!.includes(s.name));
-  }
-  if (options.exclude) {
-    filteredSkills = filteredSkills.filter(
-      (s) => !options.exclude!.includes(s.name),
-    );
-  }
-
-  // Return empty fragment if no skills found
-  // (renderers will output empty or skip gracefully)
-  if (filteredSkills.length === 0) {
-    return {
-      name: 'available_skills',
-      data: [],
-      metadata: { mounts: [] },
-    };
-  }
-
-  const mounts = filteredSkills.map((skill) => {
-    const originalPath = skill.skillMdPath;
-    let sandboxPath = originalPath;
-
-    // Rewrite path from host to sandbox
-    for (const [host, sandbox] of pathMapping) {
-      if (originalPath.startsWith(host)) {
-        const relativePath = originalPath.slice(host.length);
-        sandboxPath = sandbox + relativePath;
-        break;
-      }
-    }
-
-    return {
-      name: skill.name,
-      description: skill.description,
-      host: originalPath,
-      sandbox: sandboxPath,
-    } as const;
-  });
-
-  const skillFragments: ContextFragment[] = mounts.map((skill) => {
-    return {
-      name: 'skill',
-      data: {
-        name: skill.name,
-        path: skill.sandbox,
-        description: skill.description,
-      },
-    };
-  });
+  const skillFragments: ContextFragment[] = mounts.map((mount) => ({
+    name: 'skill',
+    data: {
+      name: mount.name,
+      path: mount.sandbox,
+      description: mount.description,
+    },
+  }));
 
   return {
     name: 'available_skills',
     data: [
-      {
-        name: 'instructions',
-        data: SKILLS_INSTRUCTIONS,
-      } as ContextFragment,
+      { name: 'instructions', data: SKILLS_INSTRUCTIONS } as ContextFragment,
       ...skillFragments,
     ],
-    metadata: {
-      mounts,
-    },
+    metadata: { mounts },
   };
 }
 
 /**
  * Instructions for the LLM on how to use available skills.
  * Follows Anthropic's progressive disclosure pattern.
- *
- * Structure:
- * - Intro explaining what skills are
- * - "How to use skills" section with detailed guidance
- * - Available skills section rendered separately as fragments
  */
 const SKILLS_INSTRUCTIONS = dedent`A skill is a set of local instructions to follow that is stored in a \`SKILL.md\` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill.
 

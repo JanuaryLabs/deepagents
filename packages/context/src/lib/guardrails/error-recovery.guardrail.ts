@@ -15,8 +15,9 @@
  * ```typescript
  * const myAgent = agent({
  *   name: 'my_agent',
+ *   sandbox,
  *   model: groq('openai/gpt-oss-20b'),
- *   tools: { bash, sql },
+ *   tools: { sql },
  *   guardrails: [errorRecoveryGuardrail],
  *   maxGuardrailRetries: 3,
  * });

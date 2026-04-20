@@ -41,6 +41,7 @@ import {
   runGuardrailChain,
 } from './guardrail.ts';
 import { createRepairToolCall } from './repair.ts';
+import type { AgentSandbox } from './sandbox/types.ts';
 
 export type OutputExtractorFn = (
   output: GenerateTextResult<ToolSet, any>,
@@ -48,6 +49,7 @@ export type OutputExtractorFn = (
 
 export interface CreateAgent<CIn, COut = CIn> {
   name: string;
+  sandbox: AgentSandbox;
   context?: ContextEngine;
   tools?: ToolSet;
   model?: AgentModel;
@@ -76,7 +78,7 @@ class Agent<CIn, COut = CIn> {
   readonly model?: AgentModel;
   constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
-    this.tools = options.tools || {};
+    this.tools = { ...options.sandbox.tools, ...(options.tools || {}) };
     this.context = options.context;
     this.model = options.model;
     this.#guardrails = options.guardrails || [];
@@ -109,7 +111,7 @@ class Agent<CIn, COut = CIn> {
         ignoreIncompleteToolCalls: true,
       }),
       stopWhen: stepCountIs(200),
-      tools: this.#options.tools,
+      tools: this.tools,
       experimental_context: contextVariables,
       experimental_repairToolCall: createRepairToolCall(
         this.#options.model,
@@ -208,7 +210,7 @@ class Agent<CIn, COut = CIn> {
       ),
       stopWhen: stepCountIs(200),
       experimental_transform: config?.transform ?? smoothStream(),
-      tools: this.#options.tools,
+      tools: this.tools,
       experimental_context: contextVariables,
       toolChoice: this.#options.toolChoice,
       onStepFinish: (step) => {
@@ -405,9 +407,10 @@ class Agent<CIn, COut = CIn> {
 
           const sub = agent({
             name: this.#options.name,
+            sandbox: this.#options.sandbox,
             model: this.model,
             context: ctx,
-            tools: this.tools,
+            tools: this.#options.tools,
             providerOptions: this.#options.providerOptions,
             experimental_telemetry: this.#options.experimental_telemetry,
           });

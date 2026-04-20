@@ -27,6 +27,7 @@
  *
  * const agent = agent({
  *   name: 'safe_assistant',
+ *   sandbox,
  *   context,
  *   model,
  *   guardrails: [safetyGuardrail],

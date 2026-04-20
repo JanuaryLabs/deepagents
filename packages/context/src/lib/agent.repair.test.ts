@@ -8,8 +8,11 @@ import {
   ContextEngine,
   InMemoryContextStore,
   agent,
+  createBashTool,
   user,
 } from '@deepagents/context';
+
+const sandbox = await createBashTool();
 
 const testUsage = {
   inputTokens: {
@@ -101,6 +104,7 @@ describe('context agent repair tool calls', () => {
     }).set(user('Find order 42'));
 
     const assistant = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,

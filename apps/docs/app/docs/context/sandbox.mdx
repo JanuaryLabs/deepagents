@@ -125,9 +125,8 @@ const output = await useSandbox(
 Bridge specific host binaries into a just-bash virtual file system (no Docker needed):
 
 ```typescript
-import { createBashTool } from 'bash-tool';
 import { Bash, ReadWriteFs } from 'just-bash';
-import { createBinaryBridges } from '@deepagents/context';
+import { createBashTool, createBinaryBridges } from '@deepagents/context';
 
 const bridges = createBinaryBridges(
   'node',
@@ -187,9 +186,150 @@ const output = await useAgentOsSandbox(
 );
 ```
 
+## Bash Tool Schema
+
+`createBashTool()` from `@deepagents/context` returns a bash tool whose input schema requires two fields: `command` and `reasoning`. The LLM must provide a brief reason on every call — the wrapper enforces it at the Zod schema level, and the upstream `bash-tool` package's `{ command }` shape is widened accordingly.
+
+```typescript
+interface BashToolInput {
+  command: string;
+  reasoning: string;
+}
+
+type WrappedBashTool = Tool<BashToolInput, CommandResult>;
+```
+
+The reasoning field is stripped before the command runs — it never influences execution. The AI SDK records it as part of the `tool-call` step input, so it remains visible in the response's content array for auditing. Calls missing `reasoning` fail schema validation before `execute` is invoked.
+
+```typescript
+const sandbox = await createBashTool();
+
+// ✅ Accepted by the tool schema
+await sandbox.tools.bash.execute(
+  { command: 'ls /workspace', reasoning: 'List files to find the entry point' },
+  {} as never,
+);
+
+// ❌ Rejected — AI SDK emits a tool-error with /reasoning/
+await sandbox.tools.bash.execute(
+  { command: 'ls /workspace' } as never,
+  {} as never,
+);
+```
+
+Type-safe consumers can import `WrappedBashTool` and `BashToolInput` directly from `@deepagents/context`.
+
+## Meta Channel
+
+Custom subcommand handlers often need to surface two flavors of metadata:
+
+- **Host-only data** — telemetry, debug context, values the model shouldn't see (formatted SQL, request IDs).
+- **Model-visible nudges** — short reminders the LLM should read on its next turn.
+
+`useBashMeta()` lets handlers surface both without threading extra fields through their own `CommandResult`. The wrapper merges the channel's contents into the final tool output. It reads from an `AsyncLocalStorage` frame that `createBashTool` sets up per `execute` call, so parallel tool calls stay isolated.
+
+```typescript
+import { useBashMeta } from '@deepagents/context';
+
+function myHandler(args: string[]) {
+  const meta = useBashMeta();
+
+  meta?.setHidden({ formattedSql: 'SELECT ...' }); // hidden from model
+  meta?.setReminder('Run validate before run.');    // visible to model
+
+  return { stdout: 'done\n', stderr: '', exitCode: 0 };
+}
+```
+
+On return, the wrapper attaches two fields to the bash tool's output:
+
+- `reminder: string` — stays top-level and is visible in the model's next context.
+- `meta: Record<string, unknown>` — stripped by `toModelOutput` before the model sees the result, preserved in the raw tool-result for host-side consumers.
+
+```typescript
+// Raw output (host sees this via generateText's content array):
+{ stdout: 'done\n', stderr: '', exitCode: 0, reminder: '...', meta: { formattedSql: '...' } }
+
+// What the model sees on its next step (via toModelOutput):
+{ stdout: 'done\n', stderr: '', exitCode: 0, reminder: '...' }
+```
+
+Handlers that don't call `useBashMeta()` produce no `meta` or `reminder` fields. Handlers called outside the ALS frame (e.g. direct `sandbox.executeCommand()` usage, not via the tool) get `null` from `useBashMeta()` and can no-op safely with `meta?.setHidden(...)`.
+
+The `BashMetaHandle` exposes:
+
+| Method | Purpose |
+|---|---|
+| `setHidden(patch)` | Merge key/value pairs into the hidden bag. Called multiple times? Last writer wins per-key |
+| `setReminder(text)` | Set the model-visible reminder string |
+| `clearReminder()` | Reset reminder back to `undefined` before returning |
+
+## Custom Errors: `BashException`
+
+When a subcommand handler or transform plugin wants to bail out with a structured error shape, subclass `BashException` and implement `format(): CommandResult`. The shared `createBashTool` wraps `sandbox.executeCommand` with a try/catch that calls `.format()` on any thrown `BashException` subclass, turning it into a normal `CommandResult`.
+
+```typescript
+import type { CommandResult } from 'bash-tool';
+import { BashException } from '@deepagents/context';
+
+class RateLimitError extends BashException {
+  constructor(public readonly retryAfterMs: number) {
+    super(`rate limited; retry in ${retryAfterMs}ms`);
+    this.name = 'RateLimitError';
+  }
+
+  format(): CommandResult {
+    return {
+      stdout: '',
+      stderr: `${this.message}\n`,
+      exitCode: 1,
+    };
+  }
+}
+
+// Inside any handler or transform plugin:
+throw new RateLimitError(5000);
+// → caller sees { stdout: '', stderr: 'rate limited; retry in 5000ms\n', exitCode: 1 }
+```
+
+The polymorphism means the wrapper never needs a central error-type registry — new exception subclasses are automatically handled as long as they extend `BashException`. Non-`BashException` errors propagate normally to the caller.
+
+`@deepagents/text2sql`'s `SqlProxyViolationError` uses exactly this pattern: a transform plugin rejects direct `psql`/`sqlite3` invocations by throwing, and the wrapper converts it into a clean `CommandResult` with the enforcement message in stderr.
+
+## Debug Logging
+
+`@deepagents/text2sql`'s `createResultTools` logs each command + non-zero exit code via chalk when `process.env.DEBUG_BASH` is truthy:
+
+```bash
+DEBUG_BASH=1 node scripts/run-demo.ts
+# [onBeforeBashCall]: sql run "SELECT 1"
+# [onAfterBashCall]: 1
+```
+
+The env var is gate-only — not a magic config. Apply the same pattern in your own bash-tool wrappers:
+
+```typescript
+const debug = Boolean(process.env.DEBUG_BASH);
+
+await createBashTool({
+  sandbox: bashInstance,
+  onBeforeBashCall: ({ command }) => {
+    if (debug) console.log(`[bash] ${command}`);
+    return { command };
+  },
+  onAfterBashCall: ({ result }) => {
+    if (debug && result.exitCode !== 0) {
+      console.log(`[bash] exit ${result.exitCode}`);
+    }
+    return { result };
+  },
+});
+```
+
 ## Next Steps
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
 - [Agent OS Sandbox](/docs/context/agent-os-sandbox) - WASM-based execution without Docker
 - [Container Tool](/docs/context/container-tool) - High-level agent integration
+- [Subcommand Builders](/docs/context/subcommand) - Compose custom commands like `sql`, `http`, `s3`
 - [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern and internals

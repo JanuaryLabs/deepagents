@@ -1,9 +1,6 @@
-import {
-  type BashToolkit,
-  type CreateBashToolOptions,
-  createBashTool,
-} from 'bash-tool';
+import type { CreateBashToolOptions } from 'bash-tool';
 
+import { createBashTool } from './bash-tool.ts';
 import {
   type BinaryInstall,
   type DockerMount,
@@ -14,6 +11,7 @@ import {
   isComposeOptions,
   isDockerfileOptions,
 } from './docker-sandbox.ts';
+import type { AgentSandbox, SkillUploadInput } from './types.ts';
 
 /**
  * Base options shared by RuntimeContainerToolOptions and DockerfileContainerToolOptions.
@@ -28,6 +26,11 @@ interface BaseContainerToolOptions extends Omit<
   resources?: DockerResources;
   /** Environment variables to set in the container */
   env?: Record<string, string>;
+  /**
+   * Skill directories to upload into the container at startup. Each entry's
+   * contents are copied to `sandbox` and parsed into `sandbox.skills`.
+   */
+  skills?: SkillUploadInput[];
 }
 
 /**
@@ -68,7 +71,11 @@ export interface ComposeContainerToolOptions extends Omit<
   service: string;
   /** Resource limits for the container */
   resources?: DockerResources;
-  // Note: mounts must be defined in compose file, not here
+  /**
+   * Skill directories to upload into the container at startup. Each entry's
+   * contents are copied to `sandbox` and parsed into `sandbox.skills`.
+   */
+  skills?: SkillUploadInput[];
 }
 
 /**
@@ -83,10 +90,11 @@ export type ContainerToolOptions =
   | ComposeContainerToolOptions;
 
 /**
- * Result of creating a container tool.
- * Extends BashToolkit but with DockerSandbox (which has dispose()) instead of base Sandbox.
+ * Result of creating a container tool. Extends AgentSandbox (so
+ * `sandbox.skills` is populated from the `skills` option) but with
+ * DockerSandbox (which has dispose()) as the underlying sandbox.
  */
-export type ContainerToolResult = Omit<BashToolkit, 'sandbox'> & {
+export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
   sandbox: DockerSandbox;
 };
 
@@ -101,6 +109,10 @@ export type ContainerToolResult = Omit<BashToolkit, 'sandbox'> & {
  * - **RuntimeStrategy**: Uses existing image, installs packages/binaries at runtime
  * - **DockerfileStrategy**: Builds custom image from Dockerfile (with caching)
  * - **ComposeStrategy**: Multi-container environments via Docker Compose
+ *
+ * The optional `skills` input makes the sandbox the single source of truth for
+ * skills: files are uploaded into the container and `sandbox.skills` is
+ * populated from on-disk `SKILL.md` frontmatter.
  *
  * @example RuntimeStrategy (default)
  * ```typescript
@@ -122,6 +134,18 @@ export type ContainerToolResult = Omit<BashToolkit, 'sandbox'> & {
  *
  * // Clean up when done
  * await sandbox.dispose();
+ * ```
+ *
+ * @example RuntimeStrategy with skills
+ * ```typescript
+ * const sandbox = await createContainerTool({
+ *   packages: ['curl', 'jq'],
+ *   skills: [
+ *     { host: './skills', sandbox: '/workspace/skills' },
+ *   ],
+ * });
+ *
+ * context.set(role('...'), skills(sandbox));
  * ```
  *
  * @example DockerfileStrategy
@@ -165,37 +189,56 @@ export type ContainerToolResult = Omit<BashToolkit, 'sandbox'> & {
 export async function createContainerTool(
   options: ContainerToolOptions = {},
 ): Promise<ContainerToolResult> {
-  // Extract sandbox options from bash tool options
   let sandboxOptions: DockerSandboxOptions;
   let bashOptions: Omit<CreateBashToolOptions, 'sandbox' | 'uploadDirectory'>;
+  let skillInputs: SkillUploadInput[] = [];
 
   if (isComposeOptions(options)) {
-    const { compose, service, resources, ...rest } = options;
+    const { compose, service, resources, skills = [], ...rest } = options;
     sandboxOptions = { compose, service, resources };
     bashOptions = rest;
+    skillInputs = skills;
   } else if (isDockerfileOptions(options)) {
-    const { dockerfile, context, mounts, resources, env, ...rest } = options;
+    const {
+      dockerfile,
+      context,
+      mounts,
+      resources,
+      env,
+      skills = [],
+      ...rest
+    } = options;
     sandboxOptions = { dockerfile, context, mounts, resources, env };
     bashOptions = rest;
+    skillInputs = skills;
   } else {
-    const { image, packages, binaries, mounts, resources, env, ...rest } =
-      options;
+    const {
+      image,
+      packages,
+      binaries,
+      mounts,
+      resources,
+      env,
+      skills = [],
+      ...rest
+    } = options;
     sandboxOptions = { image, packages, binaries, mounts, resources, env };
     bashOptions = rest;
+    skillInputs = skills;
   }
 
-  // Create the Docker sandbox
   const sandbox = await createDockerSandbox(sandboxOptions);
 
-  // Create the bash tool with our Docker sandbox
   const toolkit = await createBashTool({
     ...bashOptions,
     sandbox,
+    skills: skillInputs,
   });
 
   return {
     bash: toolkit.bash,
     tools: toolkit.tools,
     sandbox,
+    skills: toolkit.skills,
   };
 }

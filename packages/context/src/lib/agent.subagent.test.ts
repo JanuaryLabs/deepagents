@@ -9,11 +9,14 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   agent,
+  createBashTool,
   hint,
   mapGenerateErrorToCode,
   role,
   user,
 } from '@deepagents/context';
+
+const sandbox = await createBashTool();
 
 const testUsage = {
   inputTokens: {
@@ -198,6 +201,7 @@ describe('asTool', () => {
     const subModel = createGenerateModel('Sub-agent result.');
 
     const subAgent = agent({
+      sandbox,
       name: 'researcher',
       model: subModel,
       context: createContext(role('You are a research agent.')),
@@ -216,6 +220,7 @@ describe('asTool', () => {
     callerCtx.set(user('Do research on TypeScript.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'orchestrator',
       model: callerModel,
       context: callerCtx,
@@ -239,6 +244,7 @@ describe('asTool', () => {
     const subModel = createGenerateModel('Raw sub-agent text.');
 
     const subAgent = agent({
+      sandbox,
       name: 'extractor-agent',
       model: subModel,
       context: createContext(role('You extract data.')),
@@ -257,6 +263,7 @@ describe('asTool', () => {
     callerCtx.set(user('Extract data.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'caller',
       model: callerModel,
       context: callerCtx,
@@ -281,6 +288,7 @@ describe('asTool', () => {
     const subModel = createGenerateModel('Formatted result.');
 
     const subAgent = agent({
+      sandbox,
       name: 'formatter',
       model: subModel,
       context: createContext(role('You format data.')),
@@ -300,6 +308,7 @@ describe('asTool', () => {
     callerCtx.set(user('Format this data.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'caller',
       model: callerModel,
       context: callerCtx,
@@ -327,6 +336,7 @@ describe('asTool', () => {
     });
 
     const subAgent = agent({
+      sandbox,
       name: 'failing-agent',
       model: failingModel,
       context: createContext(role('You fail.')),
@@ -343,6 +353,7 @@ describe('asTool', () => {
     callerCtx.set(user('Do something.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'caller',
       model: callerModel,
       context: callerCtx,
@@ -404,6 +415,7 @@ describe('asTool', () => {
     });
 
     const subAgent = agent({
+      sandbox,
       name: 'data-agent',
       model: subModel,
       context: createContext(role('You look up data.')),
@@ -421,6 +433,7 @@ describe('asTool', () => {
     callerCtx.set(user('Get data.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'caller',
       model: callerModel,
       context: callerCtx,
@@ -437,6 +450,7 @@ describe('asTool', () => {
     const subModel = createGenerateModel();
 
     const subAgent = agent({
+      sandbox,
       name: 'sub',
       model: subModel,
       context: createContext(role('Sub.')),
@@ -453,6 +467,7 @@ describe('asTool', () => {
     callerCtx.set(user('Go.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'caller',
       model: callerModel,
       context: callerCtx,
@@ -472,6 +487,7 @@ describe('asTool', () => {
 
     const ctx = createContext(role('Test role.'));
     const subAgent = agent({
+      sandbox,
       name: 'worker',
       model: subModel,
       context: ctx,
@@ -488,6 +504,7 @@ describe('asTool', () => {
     callerCtx.set(user('Do work.'));
 
     const callerAgent = agent({
+      sandbox,
       name: 'caller',
       model: callerModel,
       context: callerCtx,
@@ -513,6 +530,7 @@ describe('asAdvisor', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'strategic-advisor',
       model: advisorModel,
       context: createContext(role('You are a coding assistant.')),
@@ -524,6 +542,7 @@ describe('asAdvisor', () => {
     executorCtx.set(user('Fix the performance issue'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -548,6 +567,7 @@ describe('asAdvisor', () => {
     const executorModel = createExecutorModel(3);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test system prompt.')),
@@ -561,6 +581,7 @@ describe('asAdvisor', () => {
     executorCtx.set(user('Do the task'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -578,6 +599,7 @@ describe('asAdvisor', () => {
     const executorModel = createExecutorModel(3);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -589,6 +611,7 @@ describe('asAdvisor', () => {
     executorCtx.set(user('Work on it'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -609,6 +632,7 @@ describe('asAdvisor', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -620,6 +644,7 @@ describe('asAdvisor', () => {
     executorCtx.set(user('Do it'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -714,6 +739,7 @@ describe('asAdvisor error handling', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -725,6 +751,7 @@ describe('asAdvisor error handling', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -744,6 +771,7 @@ describe('asAdvisor error handling', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -755,6 +783,7 @@ describe('asAdvisor error handling', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -774,6 +803,7 @@ describe('asAdvisor error handling', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -785,6 +815,7 @@ describe('asAdvisor error handling', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -804,6 +835,7 @@ describe('asAdvisor error handling', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -815,6 +847,7 @@ describe('asAdvisor error handling', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -832,6 +865,7 @@ describe('asAdvisor error handling', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -843,6 +877,7 @@ describe('asAdvisor error handling', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -864,6 +899,7 @@ describe('asAdvisor error handling', () => {
     const executorModel = createExecutorModel(1);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -875,6 +911,7 @@ describe('asAdvisor error handling', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -896,6 +933,7 @@ describe('asAdvisor maxConversationUses', () => {
     const executorModel = createExecutorModel(3);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -909,6 +947,7 @@ describe('asAdvisor maxConversationUses', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,
@@ -941,6 +980,7 @@ describe('asAdvisor maxConversationUses', () => {
     const executorModel = createExecutorModel(3);
 
     const advisorAgent = agent({
+      sandbox,
       name: 'advisor',
       model: advisorModel,
       context: createContext(role('Test.')),
@@ -954,6 +994,7 @@ describe('asAdvisor maxConversationUses', () => {
     executorCtx.set(user('Work'));
 
     const executorAgent = agent({
+      sandbox,
       name: 'executor',
       model: executorModel,
       context: executorCtx,

@@ -71,6 +71,7 @@ export interface ChatOptions<CIn> {
 
 export async function chat<CIn>(
   agent: ChatAgentLike<CIn>,
+  // FIXME: remove messages and rely on context instead
   messages: ChatMessage[],
   options?: ChatOptions<CIn>,
 ) {

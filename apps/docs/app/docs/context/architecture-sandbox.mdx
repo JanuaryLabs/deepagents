@@ -131,11 +131,11 @@ createContainerTool(options)
   ├─ 2. createDockerSandbox(sandboxOptions)
   │     └─ Returns: DockerSandbox { executeCommand, readFile, writeFiles, dispose }
   │
-  └─ 3. createBashTool({ sandbox, ...bashOptions })
-        └─ Returns: { bash, tools }
+  └─ 3. createBashTool({ sandbox, skills, ...bashOptions })
+        └─ Returns: { bash, tools, sandbox, skills }
 ```
 
-The `DockerSandbox` interface matches what `createBashTool` expects from its `sandbox` parameter — both use `executeCommand(command) → { stdout, stderr, exitCode }`. This is why Docker sandboxes can be plugged directly into `bash-tool`.
+The `DockerSandbox` interface matches what `createBashTool` expects from its `sandbox` parameter — both use `executeCommand(command) → { stdout, stderr, exitCode }`. This is why Docker sandboxes can be plugged directly into the shared `createBashTool` from `@deepagents/context`, which in turn delegates to the upstream `bash-tool` package.
 
 ### File Operations: Base64 Encoding
 

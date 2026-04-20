@@ -19,12 +19,15 @@ import {
   agent,
   assistant,
   chat,
+  createBashTool,
   errorRecoveryGuardrail,
   fail,
   pass,
   staticChatTitle,
   user,
 } from '@deepagents/context';
+
+const sandbox = await createBashTool();
 
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -113,6 +116,7 @@ describe('context chat()', () => {
   it('throws when messages array is empty', async () => {
     const { context, model } = setup();
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -124,6 +128,7 @@ describe('context chat()', () => {
     const { store, context, model } = setup('First response');
     const firstUserMessage = userMessage('Hi there');
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -149,6 +154,7 @@ describe('context chat()', () => {
     const { store, context, model } = setup('Updated response');
     const firstUserMessage = userMessage('How many users?');
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -199,6 +205,7 @@ describe('context chat()', () => {
   it('grows the chain across normal multiturn user messages', async () => {
     const { store, context, model } = setup('Next response');
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -284,7 +291,7 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'Python Help');
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     const stream = await chat(chatAgent, [userMessage('help with python')], {
       generateTitle: true,
@@ -303,7 +310,7 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModel('Response');
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     const stream = await chat(chatAgent, [userMessage('hello')]);
     await drain(stream);
@@ -320,7 +327,7 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModel('Response');
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
     const longMessage = 'a'.repeat(150);
 
     const stream = await chat(chatAgent, [userMessage(longMessage)]);
@@ -338,7 +345,7 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'First Title');
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     const firstStream = await chat(chatAgent, [userMessage('first question')], {
       generateTitle: true,
@@ -361,6 +368,7 @@ describe('chat() title generation', () => {
       'New Title',
     );
     const secondAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model: secondModel,
@@ -389,7 +397,7 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'Stream Title');
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     const stream = await chat(chatAgent, [userMessage('test')], {
       generateTitle: true,
@@ -743,7 +751,7 @@ describe('chat() abort signal integration', () => {
     });
 
     const controller = new AbortController();
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     let chunksSeen = 0;
     const stream = await chat(chatAgent, [userMessage('test')], {
@@ -831,6 +839,7 @@ describe('chat() abort signal integration', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -884,7 +893,7 @@ describe('chat() abort signal integration', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const chatAgent = agent({ name: 'assistant', context, model });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     try {
       const stream = await chat(chatAgent, [userMessage('test')], {
@@ -931,6 +940,7 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model: createMockModel(),
@@ -967,6 +977,7 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
     });
 
     const secondAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model: capturingModel,
@@ -1054,6 +1065,7 @@ describe('chat() guardrail retry context integrity', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -1089,6 +1101,7 @@ describe('chat() guardrail retry context integrity', () => {
 
     const model1 = createMockModel('First response');
     const chatAgent1 = agent({
+      sandbox,
       name: 'assistant',
       context,
       model: model1,
@@ -1161,6 +1174,7 @@ describe('chat() guardrail retry context integrity', () => {
     };
 
     const chatAgent2 = agent({
+      sandbox,
       name: 'assistant',
       context,
       model: model2,
@@ -1263,6 +1277,7 @@ describe('chat() guardrail self-correction persistence', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -1345,6 +1360,7 @@ describe('chat() guardrail self-correction persistence', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -1441,6 +1457,7 @@ describe('chat() guardrail self-correction persistence', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -1515,6 +1532,7 @@ describe('chat() guardrail self-correction persistence', () => {
     };
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,
@@ -1601,6 +1619,7 @@ describe('chat() guardrail self-correction persistence', () => {
     });
 
     const chatAgent = agent({
+      sandbox,
       name: 'assistant',
       context,
       model,

@@ -11,6 +11,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { createBashTool as createBashToolV2 } from '@deepagents/context';
+
 /**
  * Integration tests for just-bash filesystem mounting with skills.
  *
@@ -409,6 +411,161 @@ description: Data analysis skill
         ),
       /EROFS|read-only/,
       'Should not be able to write to read-only skill directory',
+    );
+  });
+});
+
+/**
+ * Integration tests for the v2 skills API: sandbox factories (`createBashTool`,
+ * `createContainerTool`) accept `skills: [{ host, sandbox }]` and populate
+ * `sandbox.skills`. These cover scenarios previously tested at the
+ * `skills()` fragment level (before the fragment became a thin projection of
+ * `sandbox.skills`): multi-path discovery, later-overrides-earlier, path
+ * remapping, non-existent directories, and walk filtering.
+ */
+describe('createBashTool with skills option', () => {
+  const testRoot = path.join(process.cwd(), '.test-sandbox-skills-v2');
+
+  beforeEach(async () => {
+    await fs.mkdir(testRoot, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(testRoot, { recursive: true, force: true });
+  });
+
+  async function writeSkill(dir: string, name: string, description: string) {
+    const skillDir = path.join(dir, name);
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`,
+    );
+  }
+
+  it('uploads files and populates sandbox.skills from a single host dir', async () => {
+    const skillsDir = path.join(testRoot, 'skills');
+    await writeSkill(skillsDir, 'dev', 'Dev skill');
+    await writeSkill(skillsDir, 'deploy', 'Deploy skill');
+
+    const sandbox = await createBashToolV2({
+      skills: [{ host: skillsDir, sandbox: '/workspace/skills' }],
+    });
+
+    assert.strictEqual(sandbox.skills.length, 2);
+    const names = sandbox.skills.map((s) => s.name).sort();
+    assert.deepStrictEqual(names, ['deploy', 'dev']);
+
+    for (const mount of sandbox.skills) {
+      assert.ok(
+        mount.sandbox.startsWith('/workspace/skills/'),
+        `expected sandbox path prefix, got ${mount.sandbox}`,
+      );
+      assert.ok(mount.sandbox.endsWith('/SKILL.md'));
+    }
+
+    const dev = sandbox.skills.find((s) => s.name === 'dev')!;
+    const content = await sandbox.sandbox.readFile(dev.sandbox);
+    assert.ok(content.includes('# dev'));
+  });
+
+  it('handles multiple skill paths and maps each to its own sandbox prefix', async () => {
+    const primary = path.join(testRoot, 'primary');
+    const secondary = path.join(testRoot, 'secondary');
+    await writeSkill(primary, 'dev', 'Dev from primary');
+    await writeSkill(secondary, 'extra', 'Extra from secondary');
+
+    const sandbox = await createBashToolV2({
+      skills: [
+        { host: primary, sandbox: '/skills/primary' },
+        { host: secondary, sandbox: '/skills/secondary' },
+      ],
+    });
+
+    const dev = sandbox.skills.find((s) => s.name === 'dev');
+    const extra = sandbox.skills.find((s) => s.name === 'extra');
+    assert.ok(dev && dev.sandbox.startsWith('/skills/primary/'));
+    assert.ok(extra && extra.sandbox.startsWith('/skills/secondary/'));
+  });
+
+  it('later skill inputs override earlier ones for the same skill name', async () => {
+    const first = path.join(testRoot, 'first');
+    const second = path.join(testRoot, 'second');
+    await writeSkill(first, 'shared', 'From first');
+    await writeSkill(second, 'shared', 'From second');
+
+    const sandbox = await createBashToolV2({
+      skills: [
+        { host: first, sandbox: '/skills/first' },
+        { host: second, sandbox: '/skills/second' },
+      ],
+    });
+
+    const shared = sandbox.skills.filter((s) => s.name === 'shared');
+    assert.strictEqual(shared.length, 1, 'later input should replace earlier');
+    assert.strictEqual(shared[0].description, 'From second');
+    assert.ok(shared[0].sandbox.startsWith('/skills/second/'));
+  });
+
+  it('returns an empty skills array for a non-existent host directory', async () => {
+    const sandbox = await createBashToolV2({
+      skills: [
+        {
+          host: path.join(testRoot, 'does-not-exist'),
+          sandbox: '/workspace/skills',
+        },
+      ],
+    });
+
+    assert.deepStrictEqual(sandbox.skills, []);
+  });
+
+  it('defaults sandbox.skills to [] when no skills option is passed', async () => {
+    const sandbox = await createBashToolV2();
+    assert.deepStrictEqual(sandbox.skills, []);
+  });
+
+  it('walks subdirectories (references/scripts/assets) and uploads them', async () => {
+    const skillsDir = path.join(testRoot, 'walk');
+    const skillDir = path.join(skillsDir, 'demo');
+    await fs.mkdir(path.join(skillDir, 'scripts'), { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: demo\ndescription: demo skill\n---\n\nBody`,
+    );
+    await fs.writeFile(
+      path.join(skillDir, 'scripts', 'run.sh'),
+      '#!/bin/sh\necho hello\n',
+    );
+
+    const sandbox = await createBashToolV2({
+      skills: [{ host: skillsDir, sandbox: '/skills' }],
+    });
+
+    const script = await sandbox.sandbox.readFile(
+      '/skills/demo/scripts/run.sh',
+    );
+    assert.ok(script.includes('echo hello'));
+  });
+
+  it('skips dotfiles and dot-directories during walk', async () => {
+    const skillsDir = path.join(testRoot, 'with-dots');
+    const skillDir = path.join(skillsDir, 'demo');
+    await fs.mkdir(path.join(skillDir, '.git'), { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: demo\ndescription: d\n---\n\nBody`,
+    );
+    await fs.writeFile(path.join(skillDir, '.env'), 'SECRET=1');
+    await fs.writeFile(path.join(skillDir, '.git', 'HEAD'), 'ref: whatever');
+
+    const sandbox = await createBashToolV2({
+      skills: [{ host: skillsDir, sandbox: '/skills' }],
+    });
+
+    await assert.rejects(() => sandbox.sandbox.readFile('/skills/demo/.env'));
+    await assert.rejects(() =>
+      sandbox.sandbox.readFile('/skills/demo/.git/HEAD'),
     );
   });
 });
