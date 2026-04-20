@@ -1,5 +1,55 @@
 import type { TracingExporter } from './processor.ts';
-import type { TraceItem } from './types.ts';
+import type {
+  FunctionSpanData,
+  OpenAISpan,
+  OpenAITrace,
+  SpanData,
+  TraceItem,
+  TranscriptionSpanData,
+} from './types.ts';
+
+type StringifiedIOSpan = FunctionSpanData | TranscriptionSpanData;
+type StringifiedIOSpanType = StringifiedIOSpan['type'];
+
+const STRINGIFIED_IO_TYPES = {
+  function: true,
+  transcription: true,
+} as const satisfies Record<StringifiedIOSpanType, true>;
+
+type WireSpanData =
+  | Exclude<SpanData, StringifiedIOSpan>
+  | (Omit<StringifiedIOSpan, 'input' | 'output'> & {
+      input?: string;
+      output?: string;
+    });
+
+type WireSpan = Omit<OpenAISpan, 'span_data'> & { span_data: WireSpanData };
+type WireTraceItem = OpenAITrace | WireSpan;
+
+function hasStringifiedIO(data: SpanData): data is StringifiedIOSpan {
+  return data.type in STRINGIFIED_IO_TYPES;
+}
+
+function encodeField(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function toWireItem(item: TraceItem): WireTraceItem {
+  if (item.object !== 'trace.span') return item;
+  const spanData = item.span_data;
+  if (!hasStringifiedIO(spanData)) {
+    return { ...item, span_data: spanData };
+  }
+  return {
+    ...item,
+    span_data: {
+      ...spanData,
+      input: encodeField(spanData.input),
+      output: encodeField(spanData.output),
+    },
+  };
+}
 
 export class OpenAIExportError extends Error {
   readonly status: number;
@@ -64,7 +114,7 @@ export class OpenAITracesExporter implements TracingExporter {
       headers['OpenAI-Project'] = this.#project;
     }
 
-    const body = JSON.stringify({ data: items });
+    const body = JSON.stringify({ data: items.map(toWireItem) });
     await this.#fetchWithRetry(this.#endpoint, {
       method: 'POST',
       headers,

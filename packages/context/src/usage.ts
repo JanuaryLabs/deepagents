@@ -4,7 +4,6 @@ import {
   createHostDirBackend,
   createOverlayBackend,
 } from '@rivet-dev/agent-os-core';
-import { createBashTool } from 'bash-tool';
 import chalk from 'chalk';
 import { Bash, OverlayFs } from 'just-bash';
 
@@ -17,6 +16,7 @@ import {
   assistantText,
   chat,
   createAgentOsSandbox,
+  createBashTool,
   createContainerTool,
   createDockerSandbox,
   hint,
@@ -497,7 +497,15 @@ async function demonstrateSearch() {
  * 4. LLM reads full SKILL.md content when relevant using file tools
  */
 async function demonstrateSkills() {
-  // Create context with skills metadata injected into system prompt
+  const demoSandbox = await createBashTool({
+    skills: [
+      {
+        host: 'packages/context/src/skills',
+        sandbox: '/skills/skills',
+      },
+    ],
+  });
+
   const skillStore = new InMemoryContextStore();
   const context = new ContextEngine({
     userId: 'demo-user',
@@ -505,14 +513,7 @@ async function demonstrateSkills() {
     chatId: 'skill-demo',
   }).set(
     role('You are a helpful assistant with access to specialized skills.'),
-    skills({
-      paths: [
-        {
-          host: 'packages/context/src/skills',
-          sandbox: '/skills/skills',
-        },
-      ],
-    }), // Injects <available_skills> into system prompt
+    skills(demoSandbox),
   );
 
   // Resolve to see what the LLM receives
@@ -560,8 +561,10 @@ const context = engine(
   hint('Greet the user badly.'),
 );
 
+const greetingSandbox = await createBashTool();
 const grettingAgent = agent({
   name: 'greeting_agent',
+  sandbox: greetingSandbox,
   model: groq('moonshotai/kimi-k2-instruct-0905'),
   context,
 });
@@ -570,19 +573,16 @@ const grettingAgent = agent({
 async function createSkillAwareAgent() {
   console.log('\n=== Skill-Aware Agent Demo (using bash-tool) ===');
 
-  const { bash } = await createBashTool({
+  const skillSandbox = await createBashTool({
     sandbox: new Bash({
       fs: new OverlayFs({ root: process.cwd() }),
-      // customCommands: createBinaryBridges(
-      //   'presenterm', // Presentation tool
-      //   'node', // Node.js runtime
-      //   { name: 'python', binaryPath: 'python3' }, // Python with alias
-      // ),
     }),
-    uploadDirectory: {
-      source: process.cwd(),
-      include: 'packages/**/src/skills/**/*.{md,ts,json}',
-    },
+    skills: [
+      {
+        host: 'packages/context/src/skills',
+        sandbox: '/skills/skills',
+      },
+    ],
     onBeforeBashCall: ({ command }) => {
       console.log(chalk.blue(`[Bash Tool] Executing: ${command}`));
       return { command };
@@ -605,20 +605,13 @@ async function createSkillAwareAgent() {
     role(
       `You are a helpful assistant with access to specialized skills. your main tool is bash tool to read files and execute commands on the user's behalf.`,
     ),
-    skills({
-      paths: [
-        {
-          host: 'packages/context/src/skills',
-          sandbox: '/skills/skills',
-        },
-      ],
-    }),
+    skills(skillSandbox),
   );
   const skillAwareAgent = agent({
     name: 'skill_agent',
+    sandbox: skillSandbox,
     model: groq('moonshotai/kimi-k2-instruct-0905'),
     context: agentContext,
-    tools: { bash },
   });
 
   const stream = await chat(skillAwareAgent, [
@@ -749,7 +742,7 @@ async function createDockerSkillAgent() {
   // Create container tool with necessary packages
   // Note: presenterm is not available in Alpine's apk repository,
   // so we install it from pre-built binaries using the `binaries` option
-  const { bash, sandbox, tools } = await createContainerTool({
+  const dockerSandbox = await createContainerTool({
     packages: ['curl', 'jq'], // curl is needed for binary downloads, jq for JSON parsing
     binaries: [
       {
@@ -764,11 +757,10 @@ async function createDockerSkillAgent() {
         binaryPath: 'presenterm', // The binary name inside the tar.gz archive
       },
     ],
-    mounts: [
+    skills: [
       {
-        hostPath: process.cwd(),
-        containerPath: '/workspace',
-        readOnly: false,
+        host: 'packages/context/src/skills',
+        sandbox: '/skills/skills',
       },
     ],
     onBeforeBashCall: ({ command }) => {
@@ -782,24 +774,14 @@ async function createDockerSkillAgent() {
       userId: 'demo-user',
       store: new InMemoryContextStore(),
       chatId: 'docker-skill-agent',
-    }).set(
-      role(`You are a system admin.`),
-      skills({
-        paths: [
-          {
-            host: 'packages/context/src/skills',
-            sandbox: '/skills/skills',
-          },
-        ],
-      }),
-    );
+    }).set(role(`You are a system admin.`), skills(dockerSandbox));
 
     // Create the agent
     const dockerAgent = agent({
       name: 'docker_skill_agent',
+      sandbox: dockerSandbox,
       model: groq('moonshotai/kimi-k2-instruct-0905'),
       context,
-      tools: { bash },
     });
 
     // Example: Agent can now execute real commands
@@ -808,7 +790,7 @@ async function createDockerSkillAgent() {
     ]);
     await printer.readableStream(stream);
   } finally {
-    await sandbox.dispose();
+    await dockerSandbox.sandbox.dispose();
   }
 }
 /**
@@ -895,10 +877,12 @@ async function demonstrateAgentOsSandbox() {
     });
     console.log('Available tools:', Object.keys(tools));
 
-    // In a real agent, pass tools to generateText/streamText:
+    // In a real agent, capture the full BashToolkit and pass as sandbox:
     //
+    // const wasmSandbox = await createBashTool({ sandbox: agentSandbox });
     // const skillAgent = agent({
     //   name: 'wasm_agent',
+    //   sandbox: wasmSandbox,
     //   model: groq('moonshotai/kimi-k2-instruct-0905'),
     //   context: new ContextEngine({
     //     userId: 'demo-user',
@@ -908,7 +892,6 @@ async function demonstrateAgentOsSandbox() {
     //     role(`You are a system assistant with access to a computer.`),
     //     hint(`Use the bash tool to execute commands.`),
     //   ),
-    //   tools,
     // });
 
     // const stream = await chat(skillAgent, [user('List all files')]);

@@ -103,7 +103,6 @@ export function normalizeUsage(
   return {
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
-    total_tokens: usage.totalTokens,
     ...(Object.keys(details).length > 0 ? { details } : {}),
   };
 }

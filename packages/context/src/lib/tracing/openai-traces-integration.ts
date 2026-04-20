@@ -44,6 +44,19 @@ interface TraceRunState {
   toolCallSpans: Map<string, string>;
 }
 
+interface ResolvableEvent {
+  functionId?: string;
+  metadata?: unknown;
+  experimental_context?: unknown;
+  abortSignal?: AbortSignal;
+  model?: { provider: string; modelId: string };
+  system?: unknown;
+  prompt?: unknown;
+  messages?: unknown;
+  response?: { id: string };
+  toolCall?: { toolCallId: string };
+}
+
 export interface OpenAITracesIntegrationOptions {
   apiKey?: string | (() => string | Promise<string>);
   baseURL?: string;
@@ -308,18 +321,7 @@ export function createOpenAITracesIntegration(
     },
   };
 
-  function resolveRunState(event: {
-    functionId?: string;
-    metadata?: unknown;
-    experimental_context?: unknown;
-    abortSignal?: AbortSignal | undefined;
-    model?: { provider: string; modelId: string } | undefined;
-    system?: unknown;
-    prompt?: unknown;
-    messages?: unknown;
-    response?: { id: string } | undefined;
-    toolCall?: { toolCallId: string } | undefined;
-  }): TraceRunState | undefined {
+  function resolveRunState(event: ResolvableEvent): TraceRunState | undefined {
     if (event.response?.id != null) {
       const state = responseIdToRun.get(event.response.id);
       if (state != null) {
@@ -341,8 +343,8 @@ export function createOpenAITracesIntegration(
       return openRuns[0];
     }
 
-    let bestState: TraceRunState | undefined;
     let bestScore = 0;
+    let bestStates: TraceRunState[] = [];
     const eventMetadataRef = asObjectRef(event.metadata);
     const eventContextRef = asObjectRef(event.experimental_context);
     const eventModelKey =
@@ -390,11 +392,26 @@ export function createOpenAITracesIntegration(
 
       if (score > bestScore) {
         bestScore = score;
-        bestState = state;
+        bestStates = [state];
+      } else if (score === bestScore && bestScore > 0) {
+        bestStates.push(state);
       }
     }
 
-    return bestState;
+    if (bestStates.length === 0) return undefined;
+    if (bestStates.length === 1) return bestStates[0];
+
+    if (event.response?.id != null) {
+      const withOpenStep = bestStates.filter((s) => s.stepSpans.length > 0);
+      if (withOpenStep.length >= 1) return withOpenStep[0];
+    }
+
+    if (event.toolCall?.toolCallId != null) {
+      const withOpenTool = bestStates.filter((s) => s.toolCallSpans.size > 0);
+      if (withOpenTool.length >= 1) return withOpenTool[0];
+    }
+
+    return bestStates[0];
   }
 
   function closeRunState(state: TraceRunState): void {
@@ -466,24 +483,36 @@ function toModelKey(model: { provider: string; modelId: string }): string {
   return `${model.provider}:${model.modelId}`;
 }
 
+function canonicalizeMessageContent(content: unknown): unknown {
+  if (typeof content === 'string') {
+    return [{ type: 'text', text: content }];
+  }
+  return content;
+}
+
+function canonicalizeMessages(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((message) => {
+    if (message == null || typeof message !== 'object') return message;
+    const record = message as Record<string, unknown>;
+    if (!('content' in record)) return record;
+    return { ...record, content: canonicalizeMessageContent(record.content) };
+  });
+}
+
 function fingerprintInput(input: {
   system?: unknown;
   prompt?: unknown;
   messages?: unknown;
 }): string | undefined {
-  const normalizedMessages =
+  const source =
     input.messages ??
     (typeof input.prompt === 'string'
-      ? [
-          {
-            role: 'user',
-            content: [{ type: 'text', text: input.prompt }],
-          },
-        ]
+      ? [{ role: 'user', content: input.prompt }]
       : input.prompt);
   const normalized = normalizeForJson({
     system: input.system,
-    messages: normalizedMessages,
+    messages: canonicalizeMessages(source),
   });
 
   if (normalized == null) {

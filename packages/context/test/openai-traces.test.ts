@@ -1,17 +1,118 @@
 import { simulateReadableStream, stepCountIs } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import nock from 'nock';
 import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
   BatchTraceProcessor,
   type OpenAISpan,
   type OpenAITrace,
   OpenAITracesExporter,
+  type SpanData,
   type TraceItem,
   type TracingExporter,
   createOpenAITracesIntegration,
 } from '@deepagents/context/tracing';
+
+interface IngestBody {
+  data: TraceItem[];
+}
+
+function captureIngestRequests() {
+  const captured: IngestBody[] = [];
+  nock('https://api.openai.com')
+    .persist()
+    .post('/v1/traces/ingest', (body) => {
+      captured.push(body as IngestBody);
+      return true;
+    })
+    .reply(200, { ok: true });
+  return captured;
+}
+
+function spansOfType(body: IngestBody, type: string): OpenAISpan[] {
+  return body.data.filter(
+    (item) =>
+      item.object === 'trace.span' &&
+      (item.span_data as { type?: string } | undefined)?.type === type,
+  ) as OpenAISpan[];
+}
+
+type WireShape = 'array' | 'string' | 'object';
+
+interface WireRule {
+  input?: WireShape;
+  output?: WireShape;
+  usageKeys?: readonly string[];
+}
+
+const WIRE_RULES: Record<SpanData['type'], WireRule> = {
+  agent: {},
+  handoff: {},
+  guardrail: {},
+  custom: {},
+  response: {},
+  mcp_list_tools: {},
+  speech_group: {},
+  generation: {
+    input: 'array',
+    output: 'array',
+    usageKeys: ['input_tokens', 'output_tokens', 'details'],
+  },
+  function: { input: 'string', output: 'string' },
+  transcription: { input: 'string', output: 'string' },
+  speech: { input: 'object', output: 'object' },
+};
+
+function matchesShape(value: unknown, shape: WireShape): boolean {
+  if (shape === 'array') return Array.isArray(value);
+  if (shape === 'string') return typeof value === 'string';
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertWireSchema(spans: OpenAISpan[]): string[] {
+  const violations: string[] = [];
+  for (const span of spans) {
+    const type = span.span_data.type;
+    const rule = WIRE_RULES[type];
+    const data = span.span_data as {
+      input?: unknown;
+      output?: unknown;
+      usage?: Record<string, unknown>;
+    };
+
+    if (rule.input && data.input !== undefined) {
+      if (!matchesShape(data.input, rule.input)) {
+        violations.push(
+          `${type} span ${span.id}: input is ${typeof data.input}${
+            Array.isArray(data.input) ? ' (array)' : ''
+          }, expected ${rule.input}`,
+        );
+      }
+    }
+    if (rule.output && data.output !== undefined) {
+      if (!matchesShape(data.output, rule.output)) {
+        violations.push(
+          `${type} span ${span.id}: output is ${typeof data.output}${
+            Array.isArray(data.output) ? ' (array)' : ''
+          }, expected ${rule.output}`,
+        );
+      }
+    }
+    if (rule.usageKeys && data.usage != null) {
+      const allowed = new Set(rule.usageKeys);
+      for (const key of Object.keys(data.usage)) {
+        if (!allowed.has(key)) {
+          violations.push(
+            `${type} span ${span.id}: usage has unknown key '${key}' (OpenAI would reject it as unknown_parameter)`,
+          );
+        }
+      }
+    }
+  }
+  return violations;
+}
 
 function createMockModel(text = 'Hello world') {
   return new MockLanguageModelV3({
@@ -112,33 +213,30 @@ function createTwoStepToolModel() {
   });
 }
 
-function createMockExporter() {
-  const exported: TraceItem[][] = [];
-
-  const exporter = new (class extends OpenAITracesExporter {
-    override async export(items: TraceItem[]) {
-      exported.push(structuredClone(items));
-    }
-  })({ apiKey: 'test-key' });
-
-  return { exporter, exported };
-}
-
 async function flushTelemetry() {
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
+
+beforeEach(() => {
+  nock.cleanAll();
+});
+
+afterEach(() => {
+  nock.cleanAll();
+});
 
 describe('OpenAI Traces Integration', () => {
   describe('createOpenAITracesIntegration', () => {
     it('produces correct trace and spans for a simple streamText call', async () => {
       const { streamText } = await import('ai');
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'test-workflow',
         groupId: 'group-123',
         metadata: { env: 'test' },
-        exporter,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       const result = streamText({
@@ -157,8 +255,8 @@ describe('OpenAI Traces Integration', () => {
       await result.response;
       await flushTelemetry();
 
-      assert.strictEqual(exported.length, 1, 'should have exported once');
-      const items = exported[0];
+      assert.strictEqual(captured.length, 1, 'should have exported once');
+      const items = captured[0].data;
 
       const trace = items.find((item) => item.object === 'trace') as
         | OpenAITrace
@@ -171,7 +269,6 @@ describe('OpenAI Traces Integration', () => {
       assert.deepStrictEqual(trace.metadata?.total_usage, {
         input_tokens: 10,
         output_tokens: 5,
-        total_tokens: 15,
         details: {
           input_token_details: {
             no_cache_tokens: 7,
@@ -206,25 +303,27 @@ describe('OpenAI Traces Integration', () => {
       assert.ok(generationSpan, 'should have a generation span');
       assert.ok(generationSpan.ended_at, 'generation span should be closed');
       assert.strictEqual(generationSpan.trace_id, trace.id);
+      const genInput = (generationSpan.span_data as { input?: unknown }).input;
+      const genOutput = (generationSpan.span_data as { output?: unknown })
+        .output;
       assert.ok(
-        Array.isArray((generationSpan.span_data as { input?: unknown }).input),
-        'generation input should be normalized to record arrays',
+        Array.isArray(genInput),
+        'generation input must be an array of message objects on the wire',
       );
       assert.ok(
-        Array.isArray(
-          (generationSpan.span_data as { output?: unknown }).output,
-        ),
-        'generation output should be normalized to record arrays',
+        Array.isArray(genOutput),
+        'generation output must be an array of message objects on the wire',
       );
     });
 
     it('can be reused without leaking trace state between runs', async () => {
       const { streamText } = await import('ai');
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'reused-workflow',
-        exporter,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       for (const prompt of ['First run', 'Second run']) {
@@ -246,17 +345,17 @@ describe('OpenAI Traces Integration', () => {
 
       await flushTelemetry();
 
-      assert.strictEqual(exported.length, 2);
+      assert.strictEqual(captured.length, 2);
 
-      const firstTrace = exported[0].find(
+      const firstTrace = captured[0].data.find(
         (item) => item.object === 'trace',
       ) as OpenAITrace;
-      const secondTrace = exported[1].find(
+      const secondTrace = captured[1].data.find(
         (item) => item.object === 'trace',
       ) as OpenAITrace;
       assert.notStrictEqual(firstTrace.id, secondTrace.id);
       assert.strictEqual(
-        exported[1].filter((item) => item.object === 'trace').length,
+        captured[1].data.filter((item) => item.object === 'trace').length,
         1,
         'each export should only contain its own trace',
       );
@@ -264,11 +363,12 @@ describe('OpenAI Traces Integration', () => {
 
     it('supports overlapping runs on the same integration instance', async () => {
       const { streamText } = await import('ai');
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'concurrent-workflow',
-        exporter,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       async function run(prompt: string) {
@@ -291,21 +391,35 @@ describe('OpenAI Traces Integration', () => {
       await Promise.all([run('Run A'), run('Run B')]);
       await flushTelemetry();
 
-      assert.strictEqual(exported.length, 2);
+      const allItems = captured.flatMap((body) => body.data);
+      const traces = allItems.filter(
+        (item) => item.object === 'trace',
+      ) as OpenAITrace[];
+      assert.strictEqual(traces.length, 2, 'both runs should emit a trace');
+      assert.strictEqual(
+        new Set(traces.map((t) => t.id)).size,
+        2,
+        'trace IDs must be distinct across concurrent runs',
+      );
 
-      const traceIds = exported.map((batch) => {
-        const trace = batch.find(
-          (item) => item.object === 'trace',
-        ) as OpenAITrace;
-        return trace.id;
-      });
-      assert.strictEqual(new Set(traceIds).size, 2);
+      for (const trace of traces) {
+        const spansForTrace = (
+          allItems.filter(
+            (item) => item.object === 'trace.span',
+          ) as OpenAISpan[]
+        ).filter((span) => span.trace_id === trace.id);
+        assert.ok(
+          spansForTrace.length >= 1,
+          `trace ${trace.id} should have its own spans`,
+        );
+      }
     });
 
     it('matches interleaved callbacks by event identity instead of stack order', async () => {
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
-        exporter,
+        apiKey: 'test-key',
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       await integration.onStart?.({
@@ -555,17 +669,17 @@ describe('OpenAI Traces Integration', () => {
         },
       } as never);
 
-      const traceForA = exported
+      const traceForA = captured
         .map(
-          (batch) =>
-            batch.find((item) => item.object === 'trace') as OpenAITrace,
+          (body) =>
+            body.data.find((item) => item.object === 'trace') as OpenAITrace,
         )
-        .find((trace) => trace.workflow_name === 'A');
+        .find((trace) => trace?.workflow_name === 'A');
       assert.ok(traceForA);
 
       const generationSpanForA = (
-        exported
-          .flat()
+        captured
+          .flatMap((body) => body.data)
           .filter((item) => item.object === 'trace.span') as OpenAISpan[]
       ).find(
         (span) =>
@@ -579,11 +693,12 @@ describe('OpenAI Traces Integration', () => {
     it('captures multi-step runs with one generation span per step', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'two-step-workflow',
-        exporter,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       const result = streamText({
@@ -610,8 +725,8 @@ describe('OpenAI Traces Integration', () => {
       await result.response;
       await flushTelemetry();
 
-      assert.strictEqual(exported.length, 1);
-      const items = exported[0];
+      assert.strictEqual(captured.length, 1);
+      const items = captured[0].data;
       const trace = items.find(
         (item) => item.object === 'trace',
       ) as OpenAITrace;
@@ -630,11 +745,12 @@ describe('OpenAI Traces Integration', () => {
     it('produces function spans for tool calls', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'tool-workflow',
-        exporter,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       const result = streamText({
@@ -661,8 +777,8 @@ describe('OpenAI Traces Integration', () => {
       await result.response;
       await flushTelemetry();
 
-      assert.strictEqual(exported.length, 1);
-      const items = exported[0];
+      assert.strictEqual(captured.length, 1);
+      const items = captured[0].data;
 
       const functionSpans = (
         items.filter((item) => item.object === 'trace.span') as OpenAISpan[]
@@ -678,20 +794,20 @@ describe('OpenAI Traces Integration', () => {
         'get_weather',
       );
       assert.ok(functionSpan.ended_at, 'function span should be closed');
-      assert.deepStrictEqual(
-        (functionSpan.span_data as { output: unknown }).output,
-        {
-          temp: 15,
-          city: 'London',
-        },
-      );
+      const fnOutput = (functionSpan.span_data as { output: unknown }).output;
+      assert.strictEqual(typeof fnOutput, 'string');
+      assert.deepStrictEqual(JSON.parse(fnOutput as string), {
+        temp: 15,
+        city: 'London',
+      });
     });
 
     it('records tool failures using span error data', async () => {
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'failing-tool-workflow',
-        exporter,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       await integration.onStart?.({
@@ -901,7 +1017,7 @@ describe('OpenAI Traces Integration', () => {
       await flushTelemetry();
 
       const functionSpan = (
-        exported[0].filter(
+        captured[0].data.filter(
           (item) => item.object === 'trace.span',
         ) as OpenAISpan[]
       ).find((span) => span.span_data.type === 'function');
@@ -918,12 +1034,13 @@ describe('OpenAI Traces Integration', () => {
     it('respects includeSensitiveData=false for generation and function spans', async () => {
       const { streamText, tool } = await import('ai');
       const { z } = await import('zod');
-      const { exporter, exported } = createMockExporter();
+      const captured = captureIngestRequests();
 
       const integration = createOpenAITracesIntegration({
+        apiKey: 'test-key',
         workflowName: 'private-workflow',
-        exporter,
         includeSensitiveData: false,
+        batch: { scheduleDelayMs: 60_000 },
       });
 
       const result = streamText({
@@ -950,7 +1067,7 @@ describe('OpenAI Traces Integration', () => {
       await result.response;
       await flushTelemetry();
 
-      const items = exported[0];
+      const items = captured[0].data;
       const spans = items.filter(
         (item) => item.object === 'trace.span',
       ) as OpenAISpan[];
@@ -1137,5 +1254,368 @@ describe('OpenAI Traces Integration', () => {
       assert.ok(gid.startsWith('group_'));
       assert.strictEqual(gid.length, 30);
     });
+  });
+});
+
+describe('OpenAI Traces wire format', () => {
+  it('sends generation span input as an array of message objects on the wire', async () => {
+    const { streamText } = await import('ai');
+    const captured = captureIngestRequests();
+
+    const integration = createOpenAITracesIntegration({
+      apiKey: 'test-key',
+      workflowName: 'wire-test',
+      batch: { scheduleDelayMs: 60_000 },
+    });
+
+    const result = streamText({
+      model: createMockModel(),
+      prompt: 'Say hello',
+      experimental_telemetry: {
+        isEnabled: true,
+        integrations: [integration],
+      },
+    });
+
+    for await (const _chunk of result.textStream) {
+      // consume
+    }
+    await result.response;
+    await flushTelemetry();
+
+    assert.ok(captured.length >= 1, 'should have posted to /v1/traces/ingest');
+    const [genSpan] = spansOfType(captured[0], 'generation');
+    assert.ok(genSpan, 'expected a generation span in the exported body');
+
+    const input = (genSpan.span_data as { input?: unknown }).input;
+    assert.ok(
+      Array.isArray(input),
+      `span_data.input must be an array of message objects, got ${typeof input}`,
+    );
+    assert.ok(
+      input.every((item) => item != null && typeof item === 'object'),
+      'every element of span_data.input must be an object (matches OpenAI traces schema)',
+    );
+  });
+
+  it('sends generation span output as an array of message objects on the wire', async () => {
+    const { streamText } = await import('ai');
+    const captured = captureIngestRequests();
+
+    const integration = createOpenAITracesIntegration({
+      apiKey: 'test-key',
+      workflowName: 'wire-test',
+      batch: { scheduleDelayMs: 60_000 },
+    });
+
+    const result = streamText({
+      model: createMockModel(),
+      prompt: 'Say hello',
+      experimental_telemetry: {
+        isEnabled: true,
+        integrations: [integration],
+      },
+    });
+
+    for await (const _chunk of result.textStream) {
+      // consume
+    }
+    await result.response;
+    await flushTelemetry();
+
+    const [genSpan] = spansOfType(captured[0], 'generation');
+    const output = (genSpan.span_data as { output?: unknown }).output;
+    assert.ok(
+      Array.isArray(output),
+      `span_data.output must be an array of message objects, got ${typeof output}`,
+    );
+    assert.ok(
+      output.every((item) => item != null && typeof item === 'object'),
+      'every element of span_data.output must be an object',
+    );
+  });
+
+  it('serializes function span input and output as JSON strings on the wire', async () => {
+    const { streamText, tool } = await import('ai');
+    const { z } = await import('zod');
+    const captured = captureIngestRequests();
+
+    const integration = createOpenAITracesIntegration({
+      apiKey: 'test-key',
+      workflowName: 'wire-tool-test',
+      batch: { scheduleDelayMs: 60_000 },
+    });
+
+    const result = streamText({
+      model: createTwoStepToolModel(),
+      prompt: 'Weather in London?',
+      tools: {
+        get_weather: tool({
+          description: 'Get weather',
+          inputSchema: z.object({ city: z.string() }),
+          execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
+        }),
+      },
+      stopWhen: stepCountIs(2),
+      experimental_telemetry: {
+        isEnabled: true,
+        integrations: [integration],
+      },
+    });
+
+    for await (const _chunk of result.textStream) {
+      // consume
+    }
+    await result.response;
+    await flushTelemetry();
+
+    const [fnSpan] = spansOfType(captured[0], 'function');
+    assert.ok(fnSpan, 'expected a function span in the exported body');
+    const input = (fnSpan.span_data as { input?: unknown }).input;
+    const output = (fnSpan.span_data as { output?: unknown }).output;
+    assert.strictEqual(typeof input, 'string', 'function input must be string');
+    assert.strictEqual(
+      typeof output,
+      'string',
+      'function output must be string',
+    );
+    assert.deepStrictEqual(JSON.parse(input as string), { city: 'London' });
+    assert.deepStrictEqual(JSON.parse(output as string), {
+      temp: 15,
+      city: 'London',
+    });
+  });
+
+  it('does not include total_tokens in generation span_data.usage on the wire', async () => {
+    const { streamText } = await import('ai');
+    const captured = captureIngestRequests();
+
+    const integration = createOpenAITracesIntegration({
+      apiKey: 'test-key',
+      workflowName: 'usage-keys',
+      batch: { scheduleDelayMs: 60_000 },
+    });
+
+    const result = streamText({
+      model: createMockModel(),
+      prompt: 'Hello',
+      experimental_telemetry: {
+        isEnabled: true,
+        integrations: [integration],
+      },
+    });
+    for await (const _chunk of result.textStream) {
+      // consume
+    }
+    await result.response;
+    await flushTelemetry();
+
+    const [genSpan] = spansOfType(captured[0], 'generation');
+    assert.ok(genSpan, 'expected a generation span');
+    const usage = (genSpan.span_data as { usage?: Record<string, unknown> })
+      .usage;
+    assert.ok(usage, 'generation span should include usage');
+    assert.ok(
+      !('total_tokens' in usage),
+      `span_data.usage must not contain total_tokens (OpenAI rejects it as unknown_parameter), got keys: ${Object.keys(usage).join(', ')}`,
+    );
+  });
+
+  it('omits function span input/output from the wire when their in-memory value is null', async () => {
+    const captured = captureIngestRequests();
+    const exporter = new OpenAITracesExporter({ apiKey: 'test-key' });
+
+    await exporter.export([
+      {
+        object: 'trace.span',
+        id: 'span_fn_null',
+        trace_id: 'trace_fn_null',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: {
+          type: 'function',
+          name: 'no_args_tool',
+          input: null,
+          output: null,
+        },
+      },
+    ]);
+
+    assert.strictEqual(captured.length, 1);
+    const [span] = spansOfType(captured[0], 'function');
+    assert.ok(span, 'function span should be on the wire');
+    const data = span.span_data as unknown as Record<string, unknown>;
+    assert.ok(
+      !('input' in data),
+      `span_data.input must be omitted for null input, got ${JSON.stringify(data.input)}`,
+    );
+    assert.ok(
+      !('output' in data),
+      `span_data.output must be omitted for null output, got ${JSON.stringify(data.output)}`,
+    );
+  });
+
+  it('stringifies transcription span input and output on the wire', async () => {
+    const captured = captureIngestRequests();
+    const exporter = new OpenAITracesExporter({ apiKey: 'test-key' });
+
+    await exporter.export([
+      {
+        object: 'trace.span',
+        id: 'span_tx',
+        trace_id: 'trace_tx',
+        started_at: new Date().toISOString(),
+        ended_at: new Date().toISOString(),
+        span_data: {
+          type: 'transcription',
+          model: 'whisper-1',
+          input: { audio_url: 'https://example.com/a.wav' },
+          output: { text: 'hello world' },
+        },
+      },
+    ]);
+
+    assert.strictEqual(captured.length, 1);
+    const [span] = spansOfType(captured[0], 'transcription');
+    assert.ok(span, 'transcription span should be on the wire');
+    const input = (span.span_data as { input?: unknown }).input;
+    const output = (span.span_data as { output?: unknown }).output;
+    assert.strictEqual(
+      typeof input,
+      'string',
+      `transcription span_data.input must be a JSON string per openai-agents spec, got ${typeof input}`,
+    );
+    assert.strictEqual(
+      typeof output,
+      'string',
+      `transcription span_data.output must be a JSON string per openai-agents spec, got ${typeof output}`,
+    );
+    assert.deepStrictEqual(JSON.parse(input as string), {
+      audio_url: 'https://example.com/a.wav',
+    });
+    assert.deepStrictEqual(JSON.parse(output as string), {
+      text: 'hello world',
+    });
+  });
+
+  it('validates the full wire schema across generation and function spans in one flow', async () => {
+    const { streamText, tool } = await import('ai');
+    const { z } = await import('zod');
+    const captured = captureIngestRequests();
+
+    const integration = createOpenAITracesIntegration({
+      apiKey: 'test-key',
+      workflowName: 'wire-schema-full',
+      batch: { scheduleDelayMs: 60_000 },
+    });
+
+    const result = streamText({
+      model: createTwoStepToolModel(),
+      prompt: 'Weather in London?',
+      tools: {
+        get_weather: tool({
+          description: 'Get weather',
+          inputSchema: z.object({ city: z.string() }),
+          execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
+        }),
+      },
+      stopWhen: stepCountIs(2),
+      experimental_telemetry: {
+        isEnabled: true,
+        integrations: [integration],
+      },
+    });
+
+    for await (const _chunk of result.textStream) {
+      // consume
+    }
+    await result.response;
+    await flushTelemetry();
+
+    const spans = captured.flatMap((body) =>
+      body.data.filter((item) => item.object === 'trace.span'),
+    ) as OpenAISpan[];
+
+    const violations = assertWireSchema(spans);
+    assert.deepStrictEqual(
+      violations,
+      [],
+      `wire schema violations detected (these would return 400 from OpenAI):\n${violations.join('\n')}`,
+    );
+
+    const hasGeneration = spans.some((s) => s.span_data.type === 'generation');
+    const hasFunction = spans.some((s) => s.span_data.type === 'function');
+    assert.ok(
+      hasGeneration && hasFunction,
+      'test must exercise both span types',
+    );
+  });
+
+  it('disambiguates concurrent runs with distinct prompts and no other discriminator', async () => {
+    const { streamText } = await import('ai');
+    const captured = captureIngestRequests();
+
+    const integration = createOpenAITracesIntegration({
+      apiKey: 'test-key',
+      workflowName: 'disambiguation-workflow',
+      batch: { scheduleDelayMs: 60_000 },
+    });
+
+    async function run(prompt: string) {
+      const result = streamText({
+        model: createMockModel(prompt),
+        prompt,
+        experimental_telemetry: {
+          isEnabled: true,
+          integrations: [integration],
+        },
+      });
+      for await (const _chunk of result.textStream) {
+        // consume
+      }
+      await result.response;
+    }
+
+    await Promise.all([run('Alpha'), run('Beta')]);
+    await flushTelemetry();
+
+    const allItems = captured.flatMap((body) => body.data);
+    const traces = allItems.filter(
+      (item) => item.object === 'trace',
+    ) as OpenAITrace[];
+    assert.strictEqual(traces.length, 2, 'each run must emit its own trace');
+    assert.strictEqual(
+      new Set(traces.map((t) => t.id)).size,
+      2,
+      'trace ids must be distinct',
+    );
+
+    const spans = allItems.filter(
+      (item) => item.object === 'trace.span',
+    ) as OpenAISpan[];
+
+    const generationByTrace = new Map<string, string>();
+    for (const span of spans) {
+      if (span.span_data.type !== 'generation') continue;
+      const input = (span.span_data as { input?: unknown }).input;
+      if (!Array.isArray(input)) continue;
+      const firstMessage = input[0] as { content?: unknown } | undefined;
+      generationByTrace.set(
+        span.trace_id,
+        JSON.stringify(firstMessage?.content),
+      );
+    }
+
+    assert.strictEqual(
+      generationByTrace.size,
+      2,
+      'each trace must own its own generation span',
+    );
+    const texts = [...generationByTrace.values()].join('|');
+    assert.ok(
+      texts.includes('Alpha'),
+      'one trace should carry the Alpha prompt',
+    );
+    assert.ok(texts.includes('Beta'), 'one trace should carry the Beta prompt');
   });
 });
