@@ -3,6 +3,7 @@ import { type SqlLanguage, format as formatSql } from 'sql-formatter';
 import type { ContextFragment, FragmentObject } from '@deepagents/context';
 
 import {
+  SQLReadOnlyError,
   SQLScopeError,
   type SQLScopeErrorPayload,
 } from '../agents/exceptions.ts';
@@ -415,11 +416,28 @@ export abstract class Adapter {
     });
   }
   format(sql: string): string {
+    const decoded = this.#decodeShellEscapes(sql);
     try {
-      return formatSql(sql, { language: this.formatterLanguage });
+      return formatSql(decoded, { language: this.formatterLanguage });
     } catch {
-      return sql;
+      return decoded;
     }
+  }
+
+  #decodeShellEscapes(sql: string): string {
+    return sql
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\([().*])/g, '$1')
+      .replace(/\\(?=$)/gm, '');
+  }
+
+  #checkReadOnly(sql: string): string | null {
+    const upper = sql.trimStart().toUpperCase();
+    if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
+      return 'only SELECT or WITH queries allowed';
+    }
+    return null;
   }
 
   #cachedAllowedEntities: string[] | null = null;
@@ -497,17 +515,23 @@ export abstract class Adapter {
   }
 
   async validate(sql: string): Promise<string | void> {
+    const decoded = this.#decodeShellEscapes(sql);
+    const readOnlyError = this.#checkReadOnly(decoded);
+    if (readOnlyError) return readOnlyError;
     const allowed = await this.#resolveScope();
-    const scopeError = await this.#checkScope(sql, allowed);
+    const scopeError = await this.#checkScope(decoded, allowed);
     if (scopeError) return JSON.stringify(scopeError);
-    return this.validateImpl(sql);
+    return this.validateImpl(decoded);
   }
 
   async execute(sql: string): Promise<any[]> {
+    const decoded = this.#decodeShellEscapes(sql);
+    const readOnlyError = this.#checkReadOnly(decoded);
+    if (readOnlyError) throw new SQLReadOnlyError(readOnlyError);
     const allowed = await this.#resolveScope();
-    const scopeError = await this.#checkScope(sql, allowed);
+    const scopeError = await this.#checkScope(decoded, allowed);
     if (scopeError) throw new SQLScopeError(scopeError);
-    return this.executeImpl(sql);
+    return this.executeImpl(decoded);
   }
 
   abstract executeImpl(sql: string): Promise<any[]> | any[];
