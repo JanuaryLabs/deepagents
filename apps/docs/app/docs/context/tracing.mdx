@@ -1,0 +1,201 @@
+---
+title: Tracing
+description: Ship AI SDK spans to OpenAI's Traces API with batching, retry, and per-span-type wire rules
+---
+
+`@deepagents/context/tracing` is a subpath export that provides a
+`TelemetryIntegration` for the AI SDK. Pass it to `experimental_telemetry`
+and every `generateText` / `streamText` call produces an OpenAI trace with
+nested spans for steps, tool calls, and handoffs — shipped to the OpenAI
+Traces ingest endpoint (or any compatible endpoint).
+
+Assuming `sandbox` and `context` have already been constructed (see
+[Sandbox](/docs/context/sandbox) and [Agent](/docs/context/agent)):
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+import { agent } from '@deepagents/context';
+import { createOpenAITracesIntegration } from '@deepagents/context/tracing';
+
+const telemetry = createOpenAITracesIntegration({
+  apiKey: process.env.OPENAI_API_KEY,
+  workflowName: 'support-agent',
+});
+
+const assistant = agent({
+  name: 'support',
+  sandbox,
+  context,
+  model: groq('gpt-oss-20b'),
+  experimental_telemetry: { integrations: [telemetry] },
+});
+```
+
+Spans are queued by a `BatchTraceProcessor`, shipped in batches via an
+`OpenAITracesExporter`, and retried with exponential backoff plus jitter on
+5xx responses.
+
+## `createOpenAITracesIntegration(options)`
+
+Returns a `TelemetryIntegration` compatible with the AI SDK's `experimental_telemetry`
+hook points. It listens for `onStart`, `onStepStart`, `onStepFinish`,
+`onToolCallStart`, `onToolCallFinish`, and `onFinish` events and emits one
+trace per run with nested spans.
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `apiKey` | `string \| (() => string \| Promise<string>)` | `process.env.OPENAI_API_KEY` | API key or resolver. Resolver is called on each export — useful for rotated credentials. Required: the exporter throws on export if both the option and env var are empty |
+| `baseURL` | `string` | `https://api.openai.com` | Override the base URL (Azure, local proxy) |
+| `endpoint` | `string` | `<baseURL>/v1/traces/ingest` | Full override of the ingest endpoint |
+| `organization` | `string` | — | Sent as `OpenAI-Organization` header |
+| `project` | `string` | — | Sent as `OpenAI-Project` header |
+| `workflowName` | `string` | `event.functionId \| 'ai-sdk-workflow'` | Name that appears on the root trace |
+| `groupId` | `string` | — | Group traces together in the UI |
+| `metadata` | `Record<string, unknown>` | — | Extra metadata merged into every trace |
+| `exporter` | `OpenAITracesExporter` | constructed from the other options | Fully custom exporter (useful for tests or alternative sinks) |
+| `processor` | `TracingProcessor \| TracingProcessor[]` | `BatchTraceProcessor(exporter)` | Replace the default batch processor or chain your own |
+| `batch` | `BatchTraceProcessorOptions` | see below | Tune the default batch processor |
+| `includeSensitiveData` | `boolean` | `env OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA !== '0'` | Include inputs/outputs on generation and function spans |
+
+Set the env var `OPENAI_AGENTS_DISABLE_TRACING=1` to return an empty
+integration — handy for disabling tracing in tests without changing call
+sites.
+
+## Trace Shape
+
+Each run produces one trace with one root `agent` span and zero or more nested
+spans:
+
+| Event | Span type | Notes |
+| --- | --- | --- |
+| `onStart` | `agent` (root) | Workflow name, available tools, output type |
+| `onStepStart` | `generation` | Model id, provider, tool choice, messages (if sensitive data is enabled) |
+| `onStepFinish` | closes the generation span | Usage tokens, response messages |
+| `onToolCallStart` | `function` | Tool name + JSON-stringified input |
+| `onToolCallFinish` | closes the function span | JSON-stringified output, or error |
+| `onFinish` | closes the root span | Total usage, step count, finish reason |
+
+When multiple runs are open concurrently (nested agents, `asAdvisor`),
+events are routed to the correct run by matching `response.id`,
+`toolCall.toolCallId`, `experimental_context`, `metadata`, `abortSignal`,
+`functionId`, `model`, and an input fingerprint — in descending priority.
+When exactly one run is open, it gets the event directly. When no run is
+open, the event is dropped rather than attached to the wrong trace.
+
+## Per-Span Wire Contracts
+
+The ingest endpoint is strict about input/output shapes. Before shipping,
+the exporter rewrites each span to match:
+
+| Span type | `input` shape | `output` shape |
+| --- | --- | --- |
+| `generation` | Array of message records | Array of message records |
+| `function` | JSON string | JSON string |
+| `transcription` | JSON string | JSON string |
+| everything else | Unchanged | Unchanged |
+
+`FunctionSpanData` and `TranscriptionSpanData` get their `input` / `output`
+`JSON.stringify`ed on the way out — sending them as objects or arrays causes
+a 400 from the API. The `GenerationSpanData` path keeps arrays. All of this
+lives in `OpenAITracesExporter` so processors and handlers can work with
+native objects until export time.
+
+## `OpenAITracesExporter`
+
+A standalone exporter you can instantiate if you want to replace the default
+pipeline:
+
+```typescript
+import { OpenAITracesExporter } from '@deepagents/context/tracing';
+
+const exporter = new OpenAITracesExporter({
+  apiKey: process.env.OPENAI_API_KEY,
+  organization: 'org-123',
+  maxRetries: 5,
+  baseDelayMs: 500,
+  maxDelayMs: 15000,
+});
+
+await exporter.export(items, abortSignal);
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `apiKey` | `process.env.OPENAI_API_KEY` | String or async resolver |
+| `baseURL` | `https://api.openai.com` | — |
+| `endpoint` | `<baseURL>/v1/traces/ingest` | — |
+| `organization`, `project` | — | Headers |
+| `maxRetries` | `3` | Only 5xx and network errors retry; 4xx throws `OpenAIExportError` immediately |
+| `baseDelayMs` | `1000` | Initial backoff |
+| `maxDelayMs` | `30000` | Upper bound on backoff |
+
+Retries use exponential backoff with 10% jitter. `OpenAIExportError` carries
+both the HTTP status code and the raw response body for debugging.
+
+## `BatchTraceProcessor`
+
+The default processor queues spans in memory, flushes on a timer or when the
+queue hits a threshold, and calls `exporter.export(batch)`.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `maxQueueSize` | `8192` | Total span + trace items buffered |
+| `maxBatchSize` | `128` | Max items shipped per export |
+| `scheduleDelayMs` | `5000` | Timer interval between flushes |
+| `exportTriggerRatio` | `0.7` | Proportion of `maxQueueSize` that triggers an immediate flush |
+| `exportTimeoutMs` | `30000` | Abort signal deadline for each export call |
+
+Pass custom `batch` options on the integration to tune it:
+
+```typescript
+createOpenAITracesIntegration({
+  batch: { maxBatchSize: 32, scheduleDelayMs: 2000 },
+});
+```
+
+## Custom Processors
+
+`TracingProcessor` is a minimal interface — start, trace/span lifecycle
+callbacks, flush, shutdown. Swap the default batch processor for your own
+implementation (e.g. to mirror spans to stdout during local development):
+
+```typescript
+import type { TracingProcessor } from '@deepagents/context/tracing';
+
+const consoleProcessor: TracingProcessor = {
+  onSpanEnd(span) {
+    console.log('[trace]', span.span_data.type, span.id);
+  },
+};
+
+createOpenAITracesIntegration({ processor: consoleProcessor });
+```
+
+Pass an array to run multiple processors — they're combined via
+`CompositeTraceProcessor`.
+
+## Usage Normalization
+
+`normalizeUsage` flattens the AI SDK's `LanguageModelUsage` into the OpenAI
+trace schema:
+
+- `input_tokens`, `output_tokens` on the span `usage`.
+- `details.input_token_details` (no-cache, cache-read, cache-write).
+- `details.output_token_details` (text, reasoning).
+- `details.reasoning_tokens`, `details.cached_input_tokens` when present.
+- `details.raw` — the provider's raw usage payload.
+
+The same function is used inside the root span's `total_usage` metadata on
+finish.
+
+## Disabling Sensitive Data
+
+Set `includeSensitiveData: false` (or env `OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA=0`)
+to strip inputs/outputs from generation and function spans. Usage counts,
+model names, tool names, and errors are still shipped. The tracing shape is
+identical — only the payload bodies drop.
+
+## Related
+
+- [Agent](/docs/context/agent) — `experimental_telemetry` on the agent options
+- [Chat Function](/docs/context/chat-function) — Streaming entry point that forwards telemetry

@@ -1,6 +1,6 @@
 export * from './lib/adapters/adapter.ts';
 export * from './lib/agents/exceptions.ts';
-export * from './lib/agents/result-tools.ts';
+export * from './lib/agents/sql-command.ts';
 export * from './lib/agents/sql-transform-plugins.ts';
 export * from './lib/agents/sql.agent.ts';
 export * from './lib/agents/suggestions.agents.ts';
@@ -9,5 +9,5 @@ export * from './lib/file-cache.ts';
 export * from './lib/fragments/schema.ts';
 export * from './lib/fs/index.ts';
 export * from './lib/instructions.ts';
+export * from './lib/sandbox.ts';
 export * from './lib/sql.ts';
-export * from './lib/sqlv3.ts';

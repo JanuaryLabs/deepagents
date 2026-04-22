@@ -1,0 +1,82 @@
+[
+  {
+    "query": "add a test for my retry wrapper around generateText. it should throw APICallError with isRetryable:true on the first call and succeed on the second",
+    "should_trigger": true
+  },
+  {
+    "query": "i need to mock streamText to return some text tokens then a tool call for the 'search' tool. using node:test",
+    "should_trigger": true
+  },
+  {
+    "query": "write a vitest test where my agent calls generateObject and i want to assert the parsed zod object matches {name:'Ada', age:36}",
+    "should_trigger": true
+  },
+  {
+    "query": "how do i test that my code handles NoObjectGeneratedError and retries with schema feedback? this uses the ai sdk",
+    "should_trigger": true
+  },
+  {
+    "query": "my streaming test hangs when the code under test uses smoothStream(). the node --test process never exits. any ideas?",
+    "should_trigger": true
+  },
+  {
+    "query": "i want to verify the system prompt my wrapper builds — it should include the user's display name. code uses @ai-sdk/anthropic and generateText",
+    "should_trigger": true
+  },
+  {
+    "query": "add coverage for the agent at packages/agent/src/lib/execute.ts — specifically the multi-step tool chain path where search returns results and the model then summarizes",
+    "should_trigger": true
+  },
+  {
+    "query": "write an integration test for this file: packages/text2sql/src/lib/sqlv3.ts. the function streams a sql query back from the model. we need to simulate the stream",
+    "should_trigger": true
+  },
+  {
+    "query": "mock the language model to return reasoning tokens alongside text, and verify result.reasoning separately from result.text",
+    "should_trigger": true
+  },
+  {
+    "query": "fix my test please — i keep getting empty result.text even though my mock returns a text delta chunk",
+    "should_trigger": true
+  },
+  {
+    "query": "write a test for my fetch wrapper that retries on 429 responses with exponential backoff. no llm involved, pure http",
+    "should_trigger": false
+  },
+  {
+    "query": "add a react testing library test for the <UserAvatar /> component. should render the initials when no image is provided",
+    "should_trigger": false
+  },
+  {
+    "query": "i need to stub the openai SDK's chat.completions.create method for my jest unit test",
+    "should_trigger": false
+  },
+  {
+    "query": "write a pytest fixture that mocks an httpx client for testing my langchain chain",
+    "should_trigger": false
+  },
+  {
+    "query": "set up a playwright e2e test that logs in to the dashboard and takes a screenshot of the usage page",
+    "should_trigger": false
+  },
+  {
+    "query": "how do i type a generic zod schema so my function accepts any object schema? this is pure typescript, no tests",
+    "should_trigger": false
+  },
+  {
+    "query": "write a sql integration test that checks my migration doesn't drop the user_preferences table",
+    "should_trigger": false
+  },
+  {
+    "query": "add a test that uses nock to intercept the outbound POST to datadog and verify the trace payload shape",
+    "should_trigger": false
+  },
+  {
+    "query": "debug this: my agent file imports from 'ai' and builds fine, but at runtime complains about LanguageModelV3 not being a constructor. not writing tests, just fixing the import",
+    "should_trigger": false
+  },
+  {
+    "query": "stub my database adapter's query() method so my repository tests don't hit postgres. i'm using node:test and @scope/db",
+    "should_trigger": false
+  }
+]

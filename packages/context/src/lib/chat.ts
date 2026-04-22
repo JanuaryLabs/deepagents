@@ -21,6 +21,7 @@ import {
   isMessageFragment,
   message,
 } from './fragments.ts';
+import type { AgentSandbox } from './sandbox/types.ts';
 import { generateChatTitle, staticChatTitle } from './title.ts';
 
 export type ChatMessage = UIMessage | MessageFragment;
@@ -42,6 +43,7 @@ export function chatMessageToUIMessage(item: ChatMessage): UIMessage {
 export interface ChatAgentLike<CIn> {
   context?: ContextEngine;
   model?: AgentModel;
+  sandbox: AgentSandbox;
   stream(
     contextVariables: CIn,
     config?: {
@@ -52,15 +54,29 @@ export interface ChatAgentLike<CIn> {
   ): Promise<StreamTextResult<ToolSet, never>>;
 }
 
+export type ChatMessageMetadata = NonNullable<
+  Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
+>['messageMetadata'];
+
+export const defaultChatMessageMetadata: NonNullable<ChatMessageMetadata> = ({
+  part,
+}) => {
+  if (part.type === 'finish-step') {
+    return { finishReason: part.finishReason, usage: part.usage };
+  }
+  if (part.type === 'finish') {
+    return { finishReason: part.finishReason, totalUsage: part.totalUsage };
+  }
+  return undefined;
+};
+
 export interface ChatOptions<CIn> {
   contextVariables?: CIn;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   abortSignal?: AbortSignal;
   generateTitle?: boolean;
   onError?: (error: unknown) => string;
-  messageMetadata?: NonNullable<
-    Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
-  >['messageMetadata'];
+  messageMetadata?: ChatMessageMetadata;
   finalAssistantMetadata?: (
     message: UIMessage,
   ) =>
@@ -76,6 +92,7 @@ export async function chat<CIn>(
   options?: ChatOptions<CIn>,
 ) {
   const context = agent.context;
+  const sandbox = agent.sandbox;
   if (!context) {
     throw new Error(
       'Agent is missing a context. Provide context when creating the agent.',
@@ -138,7 +155,7 @@ export async function chat<CIn>(
     sendSources: true,
     originalMessages: uiMessages,
     generateMessageId: () => assistantMsgId,
-    messageMetadata: options?.messageMetadata,
+    messageMetadata: options?.messageMetadata ?? defaultChatMessageMetadata,
   });
 
   return createUIMessageStream({
@@ -162,18 +179,20 @@ export async function chat<CIn>(
         normalizedMessage.parts = sanitizeAbortedParts(normalizedMessage.parts);
       }
 
+      const drained = sandbox.drainFileEvents?.() ?? [];
+      const fileEvents = isAborted ? [] : drained;
       const finalMetadata =
         await options?.finalAssistantMetadata?.(normalizedMessage);
-      const finalMessage =
-        finalMetadata === undefined
-          ? normalizedMessage
-          : ({
-              ...normalizedMessage,
-              metadata: {
-                ...((normalizedMessage.metadata as object) ?? {}),
-                ...finalMetadata,
-              },
-            } as UIMessage);
+
+      const mergedMetadata = {
+        ...((normalizedMessage.metadata as object) ?? {}),
+        ...(fileEvents.length > 0 ? { fileEvents } : {}),
+        ...(finalMetadata ?? {}),
+      };
+      const hasMetadata = Object.keys(mergedMetadata).length > 0;
+      const finalMessage = hasMetadata
+        ? ({ ...normalizedMessage, metadata: mergedMetadata } as UIMessage)
+        : normalizedMessage;
 
       context.set(assistant(finalMessage));
       await context.save({ branch: false });

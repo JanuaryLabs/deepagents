@@ -116,7 +116,7 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  *
  * @example RuntimeStrategy (default)
  * ```typescript
- * const { bash, tools, sandbox } = await createContainerTool({
+ * const sandbox = await createContainerTool({
  *   packages: ['curl', 'jq'],
  *   mounts: [{
  *     hostPath: process.cwd(),
@@ -128,12 +128,12 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  * // Use with AI SDK
  * const response = await generateText({
  *   model: yourModel,
- *   tools,
+ *   tools: sandbox.tools,
  *   prompt: 'Fetch the weather data and parse it with jq',
  * });
  *
  * // Clean up when done
- * await sandbox.dispose();
+ * await sandbox.sandbox.dispose();
  * ```
  *
  * @example RuntimeStrategy with skills
@@ -150,7 +150,7 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  *
  * @example DockerfileStrategy
  * ```typescript
- * const { bash, tools, sandbox } = await createContainerTool({
+ * const sandbox = await createContainerTool({
  *   dockerfile: `
  *     FROM python:3.11-slim
  *     RUN pip install pandas numpy
@@ -165,17 +165,17 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  *
  * @example ComposeStrategy
  * ```typescript
- * const { bash, tools, sandbox } = await createContainerTool({
+ * const sandbox = await createContainerTool({
  *   compose: './docker-compose.yml',
  *   service: 'app',
  * });
  * // Commands run in the 'app' service, can reach other services by name
- * await sandbox.dispose();  // Stops ALL services
+ * await sandbox.sandbox.dispose();  // Stops ALL services
  * ```
  *
  * @example With hooks for logging
  * ```typescript
- * const { bash, sandbox } = await createContainerTool({
+ * const sandbox = await createContainerTool({
  *   packages: ['python3'],
  *   onBeforeBashCall: ({ command }) => {
  *     console.log('Running:', command);

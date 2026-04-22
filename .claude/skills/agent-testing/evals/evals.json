@@ -1,0 +1,51 @@
+{
+  "skill_name": "agent-testing",
+  "evals": [
+    {
+      "id": 1,
+      "name": "retry-on-transient-error",
+      "prompt": "I have this function in retry.ts:\n\n```ts\nimport { generateText } from 'ai';\n\nexport async function askWithRetry(model, prompt, maxAttempts = 3) {\n  let lastErr;\n  for (let i = 0; i < maxAttempts; i++) {\n    try {\n      return await generateText({ model, prompt });\n    } catch (e) {\n      if (e?.isRetryable) { lastErr = e; continue; }\n      throw e;\n    }\n  }\n  throw lastErr;\n}\n```\n\nWrite a Node.js test runner (`node --test`) integration test that mocks the AI SDK model using `ai/test` so it throws a retryable APICallError on the first call and returns a normal text response on the second call. Assert the text comes through and that the model was called exactly twice.",
+      "files": [],
+      "assertions": [
+        { "text": "uses MockLanguageModelV3 from 'ai/test'" },
+        { "text": "throws APICallError with isRetryable: true from ai" },
+        {
+          "text": "returns a content array with a { type: 'text', text: ... } part"
+        },
+        {
+          "text": "finishReason is an object with unified field, not a bare string"
+        },
+        {
+          "text": "uses model.doGenerateCalls.length to sequence the two responses (preferred over manual callIndex)"
+        },
+        { "text": "asserts model was called exactly twice" },
+        { "text": "does NOT use obsolete 'rawCall' field" },
+        { "text": "does NOT use V2 'textDelta' field" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "stream-tool-call-with-input-deltas",
+      "prompt": "Write a node:test integration test that uses `ai/test` to mock a model that STREAMS a tool call with progressively streamed tool-input arguments (the Anthropic-style input streaming pattern). The test should verify that a tool called 'search' ends up with a final input of {\"query\":\"weather\"} after streaming. Use streamText. Don't actually run the tool — just assert that the tool call arrived with the right parsed input. Show me a complete, runnable test file.",
+      "files": [],
+      "assertions": [
+        { "text": "uses simulateReadableStream from 'ai'" },
+        { "text": "emits tool-input-start chunk with id and toolName" },
+        {
+          "text": "emits tool-input-delta chunks with delta field (not textDelta)"
+        },
+        { "text": "emits tool-input-end chunk" },
+        { "text": "emits final tool-call chunk with stringified JSON input" },
+        {
+          "text": "emits finish chunk with finishReason object and unified: 'tool-calls'"
+        },
+        {
+          "text": "does NOT include obsolete rawCall field in the doStream return value"
+        },
+        {
+          "text": "matching ids across tool-input-start/delta/end and tool-call"
+        }
+      ]
+    }
+  ]
+}

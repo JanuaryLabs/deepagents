@@ -248,13 +248,9 @@ This skill helps with grant applications.`,
     );
   });
 
-  /**
-   * Test the exact pattern from the working createResultTools implementation.
-   */
-  it('SUCCESS: matches createResultTools pattern from text2sql', async () => {
+  it('SUCCESS: OverlayFs + MountableFs exposes host skill files at sandbox path', async () => {
     const skillMounts = [{ host: skillsDir, sandbox: '/skills/skills' }];
 
-    // This is the CORRECT pattern from createResultTools
     const fsMounts = skillMounts.map(({ host, sandbox }) => ({
       mountPoint: sandbox,
       filesystem: new OverlayFs({

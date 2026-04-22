@@ -250,10 +250,11 @@ interface SkillMetadata {
   skillMdPath: string;
 }
 
-interface SkillsFragmentOptions {
-  paths: string[];
-  exclude?: string[];
-  include?: string[];
+interface SkillPathMapping {
+  name: string;
+  description: string;
+  host: string;
+  sandbox: string;
 }
 
 interface ParsedSkillMd {

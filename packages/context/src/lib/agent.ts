@@ -76,11 +76,13 @@ class Agent<CIn, COut = CIn> {
   readonly tools: ToolSet;
   readonly context?: ContextEngine;
   readonly model?: AgentModel;
+  readonly sandbox: AgentSandbox;
   constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
     this.tools = { ...options.sandbox.tools, ...(options.tools || {}) };
     this.context = options.context;
     this.model = options.model;
+    this.sandbox = options.sandbox;
     this.#guardrails = options.guardrails || [];
   }
 

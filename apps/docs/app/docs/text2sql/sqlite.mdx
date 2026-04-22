@@ -7,7 +7,7 @@ The SQLite adapter works with SQLite databases, supporting both file-based and i
 
 ## Basic Setup
 
-Reuse the shared `model`, `filesystem`, and `context` setup from
+Reuse the shared `model`, `sandbox`, and `context` setup from
 [Getting Started](/docs/text2sql/getting-started) in each example.
 
 <Tabs groupId="sqlite-driver" items={['node:sqlite', 'better-sqlite3', 'sql.js']}>
@@ -24,7 +24,7 @@ const db = new DatabaseSync('./your-database.db', { readOnly: true });
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
@@ -55,7 +55,7 @@ const db = new Database('./database.db', { readonly: true });
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
   adapter: new Sqlite({
     execute: (sql) => db.prepare(sql).all(),
@@ -87,7 +87,7 @@ const db = new SQL.Database(data);
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
   adapter: new Sqlite({
     execute: (sql) => {

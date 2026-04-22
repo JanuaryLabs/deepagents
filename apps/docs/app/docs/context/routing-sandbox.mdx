@@ -1,0 +1,249 @@
+---
+title: Routing Sandbox
+description: One extension surface that dispatches across virtual, Docker, and Agent OS backends
+---
+
+`createRoutingSandbox` is the primitive that lets a single set of host
+commands — things like `sql validate`, `sql run`, or your own `SandboxExtension` —
+run against any backend. It wraps a `Sandbox` (virtual via `createVirtualSandbox`,
+`createDockerSandbox`, or `createAgentOsSandbox`) and dispatches extension
+commands at the top level of each bash line. Anything it does not match is
+forwarded to the backend verbatim.
+
+The same extension definition ships once and runs everywhere. Swap the
+backend, keep the extension.
+
+## Quick Start
+
+```typescript
+import { InMemoryFs } from 'just-bash';
+import {
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [myExtension],
+  }),
+});
+```
+
+Swap `createVirtualSandbox` for `createDockerSandbox({ image: 'alpine' })`
+or `createAgentOsSandbox({ software: [common] })` and `myExtension` still
+dispatches — the routing layer figures out whether the backend can accept
+native install (deep dispatch) or needs a shallow router.
+
+## Backends: Deep vs Shallow Dispatch
+
+The routing sandbox picks one of two strategies based on the backend:
+
+| Backend | Strategy | How it works |
+| --- | --- | --- |
+| `createVirtualSandbox` (just-bash) | **Deep** | Calls `backend.install(merged)`; extensions plug directly into `just-bash`'s `customCommands` and transform plugins. Pipelines, redirections, and subshells dispatch natively |
+| `createDockerSandbox` / `createAgentOsSandbox` | **Shallow** | Tokenizes the first simple command, matches against `hostExtensions`, and forwards anything else to the backend. Transform plugins still run via a side `Bash` instance for AST-level rewriting |
+
+A backend opts into deep dispatch by implementing `InstallableSandbox`
+(the `Sandbox` interface plus a single-shot `install(ext)` method). Use
+`isInstallable(sandbox)` to detect it.
+
+## `createVirtualSandbox(options)`
+
+Builds an `InstallableSandbox` backed by a `just-bash` `Bash` instance. Its
+own `install()` method constructs the inner `Bash` lazily so the routing
+sandbox can pass merged `customCommands` and plugins in one shot.
+
+```typescript
+import { InMemoryFs } from 'just-bash';
+import { createVirtualSandbox } from '@deepagents/context';
+
+const backend = await createVirtualSandbox({
+  fs: new InMemoryFs(),
+  cwd: '/workspace',
+  env: { NODE_ENV: 'production' },
+});
+```
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `fs` | `IFileSystem` (from `just-bash`) | Filesystem backend — import from `just-bash` (`InMemoryFs`, `ReadWriteFs`, etc.) |
+| `cwd` | `string` | Initial working directory (defaults to just-bash's default) |
+| `env` | `Record<string, string>` | Initial environment variables (extension `env` is merged on top at install time) |
+
+Install-once: calling the sandbox's `install()` twice throws. `createRoutingSandbox`
+always calls it during construction with the merged extensions, so most callers
+never invoke `install()` directly.
+
+<Callout type="warn">
+  Using `createVirtualSandbox` without wrapping it in `createRoutingSandbox` throws
+  on the first `executeCommand` / `readFile` / `writeFiles` call — `install()` has
+  to run first. Always route through `createRoutingSandbox`.
+</Callout>
+
+## `createRoutingSandbox(options)`
+
+```typescript
+interface CreateRoutingSandboxOptions {
+  backend: Sandbox;
+  hostExtensions: SandboxExtension[];
+  cwd?: string;
+}
+```
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `backend` | `Sandbox` | Any backend that implements the `bash-tool` `Sandbox` interface. If it's also `InstallableSandbox`, deep dispatch is used |
+| `hostExtensions` | `SandboxExtension[]` | Extensions merged and installed (deep) or dispatched (shallow) |
+| `cwd` | `string` | Working directory surfaced to shallow host handlers via `ctx.cwd`. Defaults to `/`. Deep dispatch uses the backend's own cwd |
+
+Returns a `Sandbox` you can pass to `createBashTool({ sandbox })`. The returned
+sandbox spreads over the backend, so any backend-specific method (like
+`DockerSandbox.dispose()`) is still reachable.
+
+## `SandboxExtension`
+
+A portable bundle of commands, plugins, pre-call hooks, and env vars:
+
+```typescript
+interface SandboxExtension {
+  commands?: ExtensionCommand[];
+  plugins?: TransformPlugin[];
+  onBeforeBashCall?: BashCallHook;
+  env?: Record<string, string>;
+}
+```
+
+| Field | Purpose |
+| --- | --- |
+| `commands` | Host-dispatched commands (see `ExtensionCommand`). On shallow backends, only the first token of a simple command is matched |
+| `plugins` | `just-bash` transform plugins. Run on the AST before dispatch — identically on deep and shallow backends (the shallow router maintains a side `Bash` for this) |
+| `onBeforeBashCall` | Rewrite or inspect the raw command line before plugins / dispatch. Multiple extensions' hooks chain in declared order |
+| `env` | Passed to extension handlers via `ctx.env`. **Not** propagated to the backend's `executeCommand` — set backend env on construction (`createDockerSandbox({ env })`, etc.) |
+
+### `ExtensionCommand` and `ExtensionCommandContext`
+
+```typescript
+interface ExtensionCommand {
+  name: string;
+  handler: (
+    args: string[],
+    ctx: ExtensionCommandContext,
+  ) => CommandResult | Promise<CommandResult>;
+}
+
+interface ExtensionCommandContext {
+  sandbox: Sandbox;
+  cwd: string;
+  env: Record<string, string>;
+  stdin: string;
+  signal?: AbortSignal;
+}
+```
+
+`ctx.sandbox` is the backend. All filesystem IO in a handler goes through
+`ctx.sandbox.writeFiles([{ path, content }])` and `ctx.sandbox.readFile(path)`,
+so the same handler works against every backend without touching a native fs.
+
+`ctx.sandbox.executeCommand('mkdir -p /some/dir')` is how you create parent
+directories — backends don't auto-create them on `writeFiles`.
+
+## `mergeExtensions(...extensions)`
+
+Combines multiple extensions into one `MergedSandboxExtension`:
+
+- Concatenates `commands` across extensions, preserving declared order.
+- Throws `DuplicateCommandError` when two extensions declare the same command name.
+- Concatenates `plugins`.
+- Chains `onBeforeBashCall` hooks in declared order via `chainHooks`.
+- Merges `env` with later entries overriding earlier ones.
+
+```typescript
+import {
+  DuplicateCommandError,
+  mergeExtensions,
+} from '@deepagents/context';
+
+try {
+  mergeExtensions(extA, extB);
+} catch (err) {
+  if (err instanceof DuplicateCommandError) {
+    console.error(`collision on "${err.commandName}"`);
+  }
+  throw err;
+}
+```
+
+`createRoutingSandbox` calls `mergeExtensions` on your behalf, so you only
+need this helper if you're wiring extensions directly into a backend.
+
+## Pipeline Boundary on Shallow Backends
+
+Deep backends parse full pipelines and match host commands anywhere inside
+them. Shallow backends only see the first token of each top-level command:
+
+```bash
+# Virtual backend: host command `sql` matches, handler runs.
+sql run "SELECT 1"
+
+# Virtual backend: pipeline parsed, `sql` still dispatches.
+sql run "SELECT 1" | jq .
+
+# Docker / Agent OS backend: the whole pipeline runs in the container.
+# `sql` is NOT a binary in the container → "command not found".
+sql run "SELECT 1" | jq .
+```
+
+Two workarounds when you need piping against a shallow backend:
+
+1. Split into two turns: run `sql run "..."` first, then `cat /sql/result.json | jq .`.
+2. Use the virtual backend (`createVirtualSandbox`).
+
+Shallow dispatch also forwards any line containing subshells or
+redirections to the backend verbatim — host commands only match
+single simple commands with static args.
+
+Other shallow-dispatch limits worth knowing:
+
+- Host handlers see no stdin (`ctx.stdin` is always empty).
+- `drainFileEvents()` returns only what the virtual backend observed; Docker
+  and Agent OS backends do not report file events.
+
+## Composing With Docker / Agent OS
+
+The same extension bundle runs against a containerized backend — swap the
+`backend` argument and keep everything else:
+
+```typescript
+import {
+  createBashTool,
+  createDockerSandbox,
+  createRoutingSandbox,
+} from '@deepagents/context';
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createDockerSandbox({ image: 'alpine' }),
+    hostExtensions: [myExtension],
+  }),
+});
+
+try {
+  // sandbox.bash / sandbox.tools are agent-ready.
+} finally {
+  await sandbox.sandbox.dispose?.();
+}
+```
+
+`drainFileEvents` is surfaced by the optional `Sandbox.drainFileEvents` hook —
+it only returns entries when the backend was built on an `ObservedFs` (see
+`file-events.ts`). Docker and Agent OS backends do not observe fs events and
+return an empty array (or `undefined`).
+
+## Next Steps
+
+- [Subcommand Builders](/docs/context/subcommand) — Build `ExtensionCommand`s with `defineSubcommandGroup`
+- [Sandbox](/docs/context/sandbox) — `createBashTool`, `BashException`, meta channel
+- [Docker Sandbox](/docs/context/docker-sandbox) — Build the container backend
+- [Agent OS Sandbox](/docs/context/agent-os-sandbox) — Build the WASM backend

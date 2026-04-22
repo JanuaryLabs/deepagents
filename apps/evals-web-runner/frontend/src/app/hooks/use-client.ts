@@ -1,4 +1,3 @@
-// eslint-disable-next-line @nx/enforce-module-boundaries
 import { Client, type Endpoints } from '@evals/client';
 import {
   type MutationFunctionContext,

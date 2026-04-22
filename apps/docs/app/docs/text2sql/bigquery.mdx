@@ -7,7 +7,7 @@ The BigQuery adapter is **driver-agnostic**: you provide `execute(sql)` and a re
 
 ## Basic Setup
 
-Reuse the shared `model`, `filesystem`, and `context` setup from
+Reuse the shared `model`, `sandbox`, and `context` setup from
 [Getting Started](/docs/text2sql/getting-started).
 
 ```typescript
@@ -23,7 +23,7 @@ const client = new BigQueryClient({ projectId });
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
   adapter: new BigQuery({
     projectId,

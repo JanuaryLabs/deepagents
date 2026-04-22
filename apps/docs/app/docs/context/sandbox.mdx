@@ -328,11 +328,10 @@ await createBashTool({
 
 ## Routing Sandbox: Host Extensions Across Backends
 
-`createRoutingSandbox({ backend, hostExtensions })` lets a single set of host
-commands (like `sql validate`, `sql run`) run against any backend — just-bash
-(via `createVirtualSandbox`), Docker, or Agent OS. The router dispatches
-extension commands at the top level of a line; anything it does not match
-forwards to the backend verbatim.
+`createRoutingSandbox({ backend, hostExtensions })` lets a single
+`SandboxExtension` — custom commands, transform plugins, pre-call hooks — run
+against any backend. Wrap `createVirtualSandbox` for just-bash, or pass a
+`createDockerSandbox` / `createAgentOsSandbox` backend directly.
 
 ```typescript
 import {
@@ -349,21 +348,19 @@ const sandbox = await createBashTool({
 });
 ```
 
-### Pipeline Boundary on Shallow Backends
+Deep backends (just-bash) match host commands anywhere in a pipeline; shallow
+backends (Docker, Agent OS) only match the first token of a simple command and
+forward everything else verbatim. Host handlers do IO through
+`ctx.sandbox.writeFiles` / `ctx.sandbox.readFile`, so the same handler code
+works on every backend.
 
-Deep backends (just-bash) parse the full pipeline and match host commands
-anywhere inside it. Shallow backends (Docker, Agent OS) only see the first
-token of each top-level command. `cmd arg | jq .` runs in the container as a
-single line — so if `cmd` is a host extension, it will not execute. Either
-pipe the output in a separate turn (`cmd arg`, then `cat /path | jq .`), or
-use the virtual backend.
-
-Host handlers receive `ctx.sandbox` (the backend's `Sandbox`) rather than a
-direct filesystem: writes and reads go through `sandbox.writeFiles` /
-`sandbox.readFile`, so the same handler code works against every backend.
+See [Routing Sandbox](/docs/context/routing-sandbox) for the full surface —
+`SandboxExtension`, `ExtensionCommand`, `mergeExtensions`,
+`DuplicateCommandError`, and the pipeline-boundary rules.
 
 ## Next Steps
 
+- [Routing Sandbox](/docs/context/routing-sandbox) - Portable extensions across backends
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
 - [Agent OS Sandbox](/docs/context/agent-os-sandbox) - WASM-based execution without Docker
 - [Container Tool](/docs/context/container-tool) - High-level agent integration

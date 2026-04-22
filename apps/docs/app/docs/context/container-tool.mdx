@@ -94,7 +94,7 @@ All three Docker sandbox strategies are supported:
 <Tab value="Runtime">
 
 ```typescript
-const { bash, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   image: 'alpine:latest',     // default
   packages: ['python3', 'nodejs'],
   env: {
@@ -124,7 +124,7 @@ const { bash, sandbox } = await createContainerTool({
 <Tab value="Dockerfile">
 
 ```typescript
-const { bash, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   dockerfile: `
     FROM python:3.11-slim
     RUN pip install pandas numpy
@@ -143,7 +143,7 @@ const { bash, sandbox } = await createContainerTool({
 <Tab value="Compose">
 
 ```typescript
-const { bash, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   compose: './docker-compose.yml',
   service: 'app',
 });
@@ -159,7 +159,7 @@ Intercept command execution for logging, auditing, or command transformation:
 ```typescript
 import chalk from 'chalk';
 
-const { bash, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   packages: ['curl', 'jq'],
   onBeforeBashCall: ({ command }) => {
     console.log(chalk.blue(`[Container] Running: ${command}`));
@@ -185,7 +185,7 @@ import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 import { createContainerTool } from '@deepagents/context';
 
-const { tools, sandbox } = await createContainerTool({
+const sandbox = await createContainerTool({
   packages: ['python3'],
   mounts: [
     {
@@ -199,13 +199,13 @@ const { tools, sandbox } = await createContainerTool({
 try {
   const result = await generateText({
     model: groq('gpt-oss-20b'),
-    tools,
+    tools: sandbox.tools,
     prompt: 'Run python3 --version and tell me what version is installed',
   });
 
   console.log(result.text);
 } finally {
-  await sandbox.dispose();
+  await sandbox.sandbox.dispose();
 }
 ```
 

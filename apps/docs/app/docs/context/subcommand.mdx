@@ -13,14 +13,16 @@ When you register a custom bash command like `sql`, `http`, or `s3` that takes s
 
 ## Quick Start
 
-Build a `greet` command with two subcommands and wire it into `createBashTool()`:
+Build a `greet` command with two subcommands and wire it into `createBashTool()` through a routing sandbox. The subcommand is an `ExtensionCommand`, wrapped in a `SandboxExtension`, and installed on any backend (here, the in-memory virtual backend):
 
 ```typescript
-import { Bash } from 'just-bash';
+import { InMemoryFs } from 'just-bash';
 import {
   type SubcommandDefinition,
   buildSubcommandRepair,
   createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   defineSubcommandGroup,
 } from '@deepagents/context';
 
@@ -48,13 +50,16 @@ const subcommands = {
 const greetCommand = defineSubcommandGroup('greet', subcommands);
 const repair = buildSubcommandRepair('greet', subcommands);
 
-const bashInstance = new Bash({ customCommands: [greetCommand] });
-
 const sandbox = await createBashTool({
-  sandbox: bashInstance,
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [{ commands: [greetCommand] }],
+  }),
   onBeforeBashCall: ({ command }) => ({ command: repair(command) }),
 });
 ```
+
+Swap the `backend` for `createDockerSandbox(...)` or `createAgentOsSandbox(...)` and the same `greetCommand` runs unchanged. See [Routing Sandbox](/docs/context/routing-sandbox) for the backend story.
 
 The LLM now invokes `greet hello world` or `greet goodbye alice`. If it calls `greet` alone, stderr shows the auto-generated usage message with a non-zero exit code — enough feedback for the model to try again.
 
@@ -69,8 +74,16 @@ interface SubcommandDefinition {
   repair?: (rawArgs: string) => string | null;
   handler: (
     args: string[],
-    ctx: CommandContext,
+    ctx: ExtensionCommandContext,
   ) => CommandResult | Promise<CommandResult>;
+}
+
+interface ExtensionCommandContext {
+  sandbox: Sandbox;
+  cwd: string;
+  env: Record<string, string>;
+  stdin: string;
+  signal?: AbortSignal;
 }
 ```
 
@@ -79,22 +92,25 @@ interface SubcommandDefinition {
 | `usage` | Short usage string shown in the auto-generated help (e.g. `run "SELECT ..."`). No tool name prefix — the dispatcher adds it |
 | `description` | One-line description shown beside the usage |
 | `repair` | Optional pre-parse repair fn. Runs *only* when the original command fails to parse. Return `null` to skip |
-| `handler` | The actual implementation. Receives the remaining args (after the subcommand name) and a `CommandContext` (has `fs`, etc.) |
+| `handler` | The actual implementation. Receives the remaining args (after the subcommand name) and an `ExtensionCommandContext`. Use `ctx.sandbox.writeFiles` / `ctx.sandbox.readFile` for IO — the same handler then runs against any backend (virtual, Docker, Agent OS) |
 
 ## `defineSubcommandGroup(name, subcommands)`
 
-Builds a `just-bash` custom command that dispatches on the first positional arg. The returned command:
+Builds an `ExtensionCommand` that dispatches on the first positional arg. Pack it in a `SandboxExtension` (`{ commands: [group] }`) and pass it to `createRoutingSandbox` as a `hostExtension`. The returned command:
 
 - Routes `<name> <sub> <rest...>` to `subcommands[sub].handler(rest, ctx)` when `sub` matches a key.
 - Returns `exitCode: 1` with an auto-generated usage message when `sub` is missing or unknown.
 
 ```typescript
-const bashInstance = new Bash({ customCommands: [greetCommand] });
+const sandbox = await createRoutingSandbox({
+  backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  hostExtensions: [{ commands: [greetCommand] }],
+});
 
-await bashInstance.exec('greet hello world');
+await sandbox.executeCommand('greet hello world');
 // → stdout: "Hello, world!\n", exitCode: 0
 
-await bashInstance.exec('greet');
+await sandbox.executeCommand('greet');
 // → exitCode: 1, stderr contains:
 //   greet: missing subcommand
 //
@@ -102,7 +118,7 @@ await bashInstance.exec('greet');
 //     greet hello <name>             Say hello to someone
 //     greet goodbye <name>           Say goodbye
 
-await bashInstance.exec('greet whoops');
+await sandbox.executeCommand('greet whoops');
 // → exitCode: 1, stderr starts with:
 //   greet: unknown subcommand 'whoops'
 ```
@@ -185,7 +201,7 @@ In short:
 
 ## Worked Example: the `sql` Command
 
-`@deepagents/text2sql`'s `createResultTools` is built entirely from these primitives. A condensed version:
+`@deepagents/text2sql`'s `createSqlCommand` is built from these primitives. A condensed version:
 
 ```typescript
 import {
@@ -221,7 +237,11 @@ function createSqlCommand(adapter: Adapter) {
 
         const rows = await adapter.execute(query);
         const resultPath = '/sql/result.json';
-        await ctx.fs.writeFile(resultPath, JSON.stringify(rows));
+        // Backends don't auto-create parent directories on writeFiles — mkdir first.
+        await ctx.sandbox.executeCommand('mkdir -p /sql');
+        await ctx.sandbox.writeFiles([
+          { path: resultPath, content: JSON.stringify(rows) },
+        ]);
         meta?.setHidden({ resultPath });
 
         return {
@@ -266,6 +286,7 @@ For the meta channel details, see [Sandbox → Meta Channel](/docs/context/sandb
 
 ## Next Steps
 
+- [Routing Sandbox](/docs/context/routing-sandbox) — Run the same extension against virtual, Docker, or Agent OS backends
 - [Sandbox](/docs/context/sandbox) — The `createBashTool` wrapper, `BashException`, meta channel
 - [Container Tool](/docs/context/container-tool) — Run custom subcommands inside a Docker container
 - [Agent](/docs/context/agent) — Attach a sandbox with custom commands to an AI agent

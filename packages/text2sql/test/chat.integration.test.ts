@@ -1,6 +1,5 @@
 import { type UIMessage, generateId, simulateReadableStream } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
-import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -72,7 +71,6 @@ async function setup(mockText?: string) {
     sandbox,
     adapter,
     model,
-    filesystem: new InMemoryFs(),
     transform: () => new TransformStream(),
     context: (...fragments) => {
       const engine = new ContextEngine({
@@ -214,6 +212,45 @@ describe('Text2Sql.chat()', () => {
     });
   });
 
+  it('rejects empty messages without introspecting the adapter', async () => {
+    const store = new InMemoryContextStore();
+    const { adapter } = await init_db(
+      'CREATE TABLE users (id INTEGER, name TEXT)',
+    );
+    let introspectCalls = 0;
+    const original = adapter.introspect.bind(adapter);
+    adapter.introspect = async (...args) => {
+      introspectCalls++;
+      return original(...args);
+    };
+
+    const text2sql = new Text2Sql({
+      version: `test-empty-guard-${generateId()}`,
+      sandbox,
+      adapter,
+      model: createMockModel(),
+      transform: () => new TransformStream(),
+      context: (...fragments) => {
+        const engine = new ContextEngine({
+          store,
+          chatId: 'test-chat-noop',
+          userId: 'test-user',
+        });
+        engine.set(...fragments);
+        return engine;
+      },
+    });
+
+    await assert.rejects(() => text2sql.chat([]), {
+      message: 'messages must not be empty',
+    });
+    assert.strictEqual(
+      introspectCalls,
+      0,
+      'adapter.introspect must not run when messages is empty',
+    );
+  });
+
   it('grows chain correctly across multiple normal user turns', async () => {
     const { store, text2sql } = await setup();
 
@@ -334,7 +371,7 @@ describe('Text2Sql.chat()', () => {
     );
   });
 
-  it('attaches createdFiles metadata to assistant message', async () => {
+  it('omits fileEvents metadata when no file ops occurred', async () => {
     const { store, text2sql } = await setup();
     const msg = userMessage('Show users');
 
@@ -351,10 +388,10 @@ describe('Text2Sql.chat()', () => {
     const data = assistantMsg.data as UIMessage & {
       metadata?: Record<string, unknown>;
     };
-    assert.ok(data.metadata, 'assistant message should have metadata');
-    assert.ok(
-      Array.isArray(data.metadata.createdFiles),
-      'metadata should have createdFiles array',
+    assert.strictEqual(
+      (data.metadata as { fileEvents?: unknown })?.fileEvents,
+      undefined,
+      'fileEvents should be absent when the turn wrote no files',
     );
   });
 
@@ -391,7 +428,6 @@ describe('Text2Sql.chat()', () => {
       sandbox,
       adapter,
       model,
-      filesystem: new InMemoryFs(),
       transform: () => new TransformStream(),
       context: (...fragments) => {
         const engine = new ContextEngine({

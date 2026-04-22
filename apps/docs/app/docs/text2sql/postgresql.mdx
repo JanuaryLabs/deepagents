@@ -15,7 +15,7 @@ npm install @deepagents/text2sql pg
 
 ## Basic Setup
 
-Reuse the shared `model`, `filesystem`, and `context` setup from
+Reuse the shared `model`, `sandbox`, and `context` setup from
 [Getting Started](/docs/text2sql/getting-started).
 
 ```typescript
@@ -32,7 +32,7 @@ const pool = new pg.Pool({
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
   adapter: new Postgres({
     execute: async (sql) => {
