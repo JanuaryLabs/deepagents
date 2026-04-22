@@ -1,15 +1,4 @@
-import {
-  APICallError,
-  InvalidToolInputError,
-  NoSuchToolError,
-  type StreamTextTransform,
-  type Tool,
-  ToolCallRepairError,
-  type ToolSet,
-  createUIMessageStream,
-  generateId,
-} from 'ai';
-import { type IFileSystem } from 'just-bash';
+import type { StreamTextTransform, Tool, ToolSet } from 'ai';
 
 import { type AgentModel } from '@deepagents/agent';
 import {
@@ -18,54 +7,46 @@ import {
   ContextEngine,
   type ContextFragment,
   agent,
-  assistant,
-  chatMessageToUIMessage,
+  chat,
   errorRecoveryGuardrail,
-  generateChatTitle,
-  staticChatTitle,
-  toMessageFragment,
 } from '@deepagents/context';
 
 import type { Adapter } from './adapters/adapter.ts';
-import { createResultTools } from './agents/result-tools.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
-import { TrackedFs } from './fs/tracked-fs.ts';
 import { guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
 export type RenderingTools = Record<string, Tool<unknown, never>>;
 
+export interface Text2SqlConfig {
+  adapter: Adapter;
+  sandbox: AgentSandbox;
+  context: (...fragments: ContextFragment[]) => ContextEngine;
+  version: string;
+  tools?: RenderingTools;
+  model: AgentModel;
+  transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+}
+
+/**
+ * Text2Sql — the caller owns the sandbox. Build one by passing
+ * `hostExtensions: [sqlSandboxExtension(adapter), ...yourOwnExtensions]` to
+ * `createRoutingSandbox`, layered over whichever backend you want
+ * (virtual, Docker, Agent OS), then wrap with `createBashTool`. For file
+ * event tracking, wrap the fs in `ObservedFs` before passing to the
+ * backend and attach `drainFileEvents: () => observed.drain()` to the
+ * resulting sandbox.
+ */
 export class Text2Sql {
-  #config: {
-    model: AgentModel;
-    sandbox: AgentSandbox;
-    adapter: Adapter;
-    context: (...fragments: ContextFragment[]) => ContextEngine;
-    tools?: RenderingTools;
+  #config: Text2SqlConfig & {
     introspection: JsonCache<ContextFragment[]>;
-    transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-    filesystem: IFileSystem;
   };
 
-  constructor(config: {
-    adapter: Adapter;
-    sandbox: AgentSandbox;
-    context: (...fragments: ContextFragment[]) => ContextEngine;
-    version: string;
-    tools?: RenderingTools;
-    model: AgentModel;
-    transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-    filesystem: IFileSystem;
-  }) {
+  constructor(config: Text2SqlConfig) {
     this.#config = {
-      adapter: config.adapter,
-      sandbox: config.sandbox,
-      context: config.context,
+      ...config,
       tools: config.tools ?? {},
-      model: config.model,
-      transform: config.transform,
-      filesystem: config.filesystem,
       introspection: new JsonCache<ContextFragment[]>(
         'introspection-' + config.version,
       ),
@@ -83,10 +64,6 @@ export class Text2Sql {
     return result.sql;
   }
 
-  /**
-   * Introspect the database schema and return context fragments.
-   * Results are cached to avoid repeated introspection.
-   */
   public async index(): Promise<ContextFragment[]> {
     const cached = await this.#config.introspection.read();
     if (cached) {
@@ -97,25 +74,6 @@ export class Text2Sql {
     return fragments;
   }
 
-  /**
-   * Generate training data pairs using a producer factory.
-   * The factory receives the configured adapter, so users don't need to pass it manually.
-   *
-   * @example
-   * // Generate questions for existing SQL
-   * const pairs = await text2sql.toPairs(
-   *   (adapter) => new SqlExtractor(sqls, adapter, { validateSql: true })
-   * );
-   *
-   * @example
-   * // Extract from chat history with validation
-   * const pairs = await text2sql.toPairs(
-   *   (adapter) => new ValidatedProducer(
-   *     new MessageExtractor(messages),
-   *     adapter
-   *   )
-   * );
-   */
   public async toPairs<T extends PairProducer>(
     factory: (adapter: Adapter) => T,
   ): Promise<ExtractedPair[]> {
@@ -131,140 +89,25 @@ export class Text2Sql {
       throw new Error('messages must not be empty');
     }
 
-    const trackedFs = new TrackedFs(this.#config.filesystem);
-
     const context = this.#config.context(
       ...guidelines(),
       ...(await this.index()),
     );
-
-    const lastItem = messages[messages.length - 1];
-    const lastFragment = toMessageFragment(lastItem);
-    const lastUIMessage = chatMessageToUIMessage(lastItem);
-    let assistantMsgId: string;
-
-    if (lastUIMessage.role === 'assistant') {
-      context.set(lastFragment);
-      await context.save({ branch: false });
-      assistantMsgId = lastUIMessage.id;
-    } else {
-      context.set(lastFragment);
-      await context.save();
-      assistantMsgId = generateId();
-    }
-
-    const uiMessages = messages.map(chatMessageToUIMessage);
-
-    let title: string | null = null;
-    if (!context.chat?.title) {
-      const firstUserMsg = uiMessages.find((m) => m.role === 'user');
-      if (firstUserMsg) {
-        if (options?.generateTitle) {
-          title = await generateChatTitle({
-            message: firstUserMsg,
-            model: this.#config.model,
-            abortSignal: options?.abortSignal,
-          });
-        } else {
-          title = staticChatTitle(firstUserMsg);
-        }
-        await context.updateChat({ title });
-      }
-    }
-
-    const { mounts: skillMounts } = context.getSkillMounts();
-    const { tools } = await createResultTools({
-      adapter: this.#config.adapter,
-      skillMounts,
-      filesystem: trackedFs,
-    });
 
     const chatAgent = agent({
       name: 'text2sql',
       sandbox: this.#config.sandbox,
       model: this.#config.model,
       context,
-      tools: {
-        ...tools,
-        ...this.#config.tools,
-      },
+      tools: this.#config.tools,
       guardrails: [errorRecoveryGuardrail],
       maxGuardrailRetries: 3,
     });
 
-    const result = await chatAgent.stream(
-      {},
-      { abortSignal: options?.abortSignal, transform: this.#config.transform },
-    );
-
-    const uiStream = result.toUIMessageStream({
-      onError: (error) => this.#formatError(error),
-      sendStart: true,
-      sendFinish: true,
-      sendReasoning: true,
-      sendSources: true,
-      originalMessages: uiMessages,
-      generateMessageId: () => assistantMsgId,
-      messageMetadata: ({ part }) => {
-        if (part.type === 'finish-step') {
-          return {
-            finishReason: part.finishReason,
-            usage: part.usage,
-          };
-        }
-        if (part.type === 'finish') {
-          return {
-            finishReason: part.finishReason,
-            totalUsage: part.totalUsage,
-          };
-        }
-        return undefined;
-      },
+    return chat(chatAgent, messages, {
+      abortSignal: options?.abortSignal,
+      generateTitle: options?.generateTitle,
+      transform: this.#config.transform,
     });
-
-    return createUIMessageStream({
-      originalMessages: uiMessages,
-      generateId: () => assistantMsgId,
-      onStepFinish: async ({ responseMessage }) => {
-        context.set(assistant({ ...responseMessage, id: assistantMsgId }));
-        await context.save({ branch: false });
-      },
-      onFinish: async ({ responseMessage }) => {
-        const createdFiles = trackedFs.getCreatedFiles();
-        context.set(
-          assistant({
-            ...responseMessage,
-            id: assistantMsgId,
-            metadata: {
-              ...((responseMessage.metadata as object) ?? {}),
-              createdFiles,
-            },
-          }),
-        );
-        await context.save({ branch: false });
-        await context.trackUsage(await result.totalUsage);
-      },
-      execute: async ({ writer }) => {
-        writer.merge(uiStream);
-
-        if (title) {
-          writer.write({ type: 'data-chat-title', data: title });
-        }
-      },
-    });
-  }
-
-  #formatError(error: unknown): string {
-    if (NoSuchToolError.isInstance(error)) {
-      return 'The model tried to call an unknown tool.';
-    } else if (InvalidToolInputError.isInstance(error)) {
-      return 'The model called a tool with invalid arguments.';
-    } else if (ToolCallRepairError.isInstance(error)) {
-      return 'The model tried to call a tool with invalid arguments, but it was repaired.';
-    } else if (APICallError.isInstance(error)) {
-      console.error('Upstream API call failed:', error);
-      return `Upstream API call failed with status ${(error as APICallError).statusCode}: ${(error as APICallError).message}`;
-    }
-    return JSON.stringify(error);
   }
 }

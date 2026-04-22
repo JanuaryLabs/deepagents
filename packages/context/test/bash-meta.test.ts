@@ -1,20 +1,22 @@
-import { Bash } from 'just-bash';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
   type SubcommandDefinition,
   createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   defineSubcommandGroup,
   useBashMeta,
 } from '@deepagents/context';
 
 /**
- * Builds a Bash instance with a `marker` subcommand group whose handlers
- * write to the generic meta channel. Used to exercise bash-meta behavior
- * without pulling in any SQL-specific setup.
+ * Builds a sandbox with a `marker` subcommand group whose handlers write
+ * to the generic meta channel. Used to exercise bash-meta behavior without
+ * pulling in any SQL-specific setup.
  */
-function createMarkerBash() {
+async function createMarkerSandbox() {
   const subcommands = {
     hide: {
       usage: 'hide <key> <value>',
@@ -35,7 +37,11 @@ function createMarkerBash() {
   } satisfies Record<string, SubcommandDefinition>;
 
   const group = defineSubcommandGroup('marker', subcommands);
-  return new Bash({ customCommands: [group] });
+  const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+  return createRoutingSandbox({
+    backend,
+    hostExtensions: [{ commands: [group] }],
+  });
 }
 
 describe('bash-meta: toModelOutput strips meta', () => {
@@ -98,7 +104,7 @@ describe('bash-meta: no meta attached when handler does not write', () => {
 describe('bash-meta: parallel calls get isolated state via AsyncLocalStorage', () => {
   it('three parallel tool calls each see their own meta frame', async () => {
     const { tools } = await createBashTool({
-      sandbox: createMarkerBash(),
+      sandbox: await createMarkerSandbox(),
       destination: '/',
     });
     const execute = tools.bash.execute!;
@@ -126,7 +132,7 @@ describe('bash-meta: parallel calls get isolated state via AsyncLocalStorage', (
 
   it('reminder set by one parallel call does not leak into another', async () => {
     const { tools } = await createBashTool({
-      sandbox: createMarkerBash(),
+      sandbox: await createMarkerSandbox(),
       destination: '/',
     });
     const execute = tools.bash.execute!;

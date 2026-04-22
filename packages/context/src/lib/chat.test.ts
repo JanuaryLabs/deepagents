@@ -8,6 +8,7 @@ import {
   simulateReadableStream,
 } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -16,10 +17,13 @@ import {
   ContextEngine,
   type Guardrail,
   InMemoryContextStore,
+  ObservedFs,
   agent,
   assistant,
   chat,
   createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   errorRecoveryGuardrail,
   fail,
   pass,
@@ -441,6 +445,7 @@ function createAbortMockAgent(
   return {
     context,
     model,
+    sandbox,
     stream: async () =>
       ({
         toUIMessageStream: () => createChunkedStream(uiChunks),
@@ -716,6 +721,76 @@ describe('chat() abort handling', () => {
     assert.ok(pendingTool);
     assert.strictEqual(pendingTool.state, 'output-error');
     assert.strictEqual(pendingTool.errorText, 'Cancelled by user');
+  });
+
+  it('discards buffered file events on abort and does not attach fileEvents metadata', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'abort-file-events-chat',
+      userId: 'test-user',
+    });
+
+    const observed = new ObservedFs(new InMemoryFs());
+    const base = await createBashTool({
+      sandbox: await createRoutingSandbox({
+        backend: await createVirtualSandbox({ fs: observed }),
+        hostExtensions: [],
+      }),
+    });
+    const trackedSandbox = {
+      ...base,
+      drainFileEvents: () => observed.drain(),
+    };
+    await trackedSandbox.sandbox.writeFiles([
+      { path: '/tmp/pre-abort.txt', content: 'partial' },
+    ]);
+
+    const mockAgent: ChatAgentLike<Record<string, never>> = {
+      context,
+      model: createMockModel(),
+      sandbox: trackedSandbox,
+      stream: async () =>
+        ({
+          toUIMessageStream: () =>
+            createChunkedStream([
+              { type: 'start', messageId: 'msg-1' },
+              { type: 'start-step' },
+              { type: 'text-start', id: 'text-1' },
+              { type: 'text-delta', id: 'text-1', delta: 'in progress' },
+              { type: 'text-end', id: 'text-1' },
+              { type: 'abort' },
+            ]),
+          totalUsage: Promise.resolve({
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+          }),
+        }) as unknown as StreamTextResult<ToolSet, never>,
+    };
+
+    const stream = await chat(mockAgent, [userMessage('do work')]);
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('abort-file-events-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const assistantMsg = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    )?.data as UIMessage & { metadata?: Record<string, unknown> };
+    assert.ok(assistantMsg);
+
+    assert.strictEqual(
+      assistantMsg.metadata?.fileEvents,
+      undefined,
+      'fileEvents should be absent on aborted turn',
+    );
+
+    assert.strictEqual(
+      trackedSandbox.drainFileEvents?.().length,
+      0,
+      'buffer should be drained (not leaking into next turn)',
+    );
   });
 });
 

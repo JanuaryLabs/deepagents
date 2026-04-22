@@ -1,6 +1,8 @@
 import { groq } from '@ai-sdk/groq';
 import type { UIMessage } from 'ai';
 import dedent from 'dedent';
+import { InMemoryFs } from 'just-bash';
+import { randomUUID } from 'node:crypto';
 import z from 'zod';
 
 import type { AgentModel } from '@deepagents/agent';
@@ -8,7 +10,10 @@ import {
   ContextEngine,
   type ContextStore,
   InMemoryContextStore,
+  ObservedFs,
   createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   fragment,
   persona,
   structuredOutput,
@@ -16,6 +21,7 @@ import {
 } from '@deepagents/context';
 
 import type { Adapter } from '../../lib/adapters/adapter.ts';
+import { sqlSandboxExtension } from '../../lib/sandbox.ts';
 import { Text2Sql } from '../../lib/sql.ts';
 
 export interface ConversationSimulatorConfig {
@@ -195,17 +201,27 @@ export async function simulateConversation(
 ): Promise<SimulationResult> {
   const store = new InMemoryContextStore();
   const model = config.model ?? groq('gpt-oss-20b');
-  const sandbox = await createBashTool();
+  const chatId = `eval-${randomUUID()}`;
+  const userId = 'eval-user';
+  const observed = new ObservedFs(new InMemoryFs());
+  const base = await createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: observed }),
+      hostExtensions: [sqlSandboxExtension(config.adapter)],
+    }),
+  });
+  const sandbox = { ...base, drainFileEvents: () => observed.drain() };
   const text2sql = new Text2Sql({
-    version: `eval-simulator-${Date.now()}`,
+    version: `eval-simulator-${randomUUID()}`,
     sandbox,
-    store,
     model,
     adapter: config.adapter,
+    context: (...fragments) => {
+      const engine = new ContextEngine({ store, chatId, userId });
+      engine.set(...fragments);
+      return engine;
+    },
   });
-
-  const chatId = `eval-${Date.now()}`;
-  const userId = 'eval-user';
 
   const questions: string[] = [];
   let currentQuestion = config.initialQuestion;
@@ -213,11 +229,9 @@ export async function simulateConversation(
   for (let turn = 0; turn < config.turns; turn++) {
     questions.push(currentQuestion);
 
-    // Create user message
     const userMessage = createUserMessage(currentQuestion);
 
-    // Send to Text2Sql and drain the stream (messages saved to store via onFinish)
-    const stream = text2sql.chat([userMessage], { chatId, userId });
+    const stream = text2sql.chat([userMessage]);
     await drainStream(stream);
 
     // Generate follow-up for next turn (if not last)

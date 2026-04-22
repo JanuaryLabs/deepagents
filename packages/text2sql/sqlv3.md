@@ -1,52 +1,31 @@
-# Text2SqlV3 (Experimental) — Caller-owned Sandbox
+# Caller-owned Sandbox
 
-## What changes vs `Text2Sql` (v1)
+`Text2Sql` expects a caller-owned `sandbox: AgentSandbox`. `@deepagents/text2sql`
+exposes a composable `SandboxExtension` that bundles the `sql` subcommand, its
+transform plugins, and its arg-repair hook. Spread it into any sandbox backend
+that accepts the same shape.
 
-Text2Sql v1 built a **second** just-bash sandbox inside
-`createResultTools`. The caller's outer `AgentSandbox` was decorative — its
-bash tool got shadowed by the inner one, and skills were re-mounted via
-`MountableFs` onto the inner FS.
-
-v3 removes that. The caller owns their sandbox end-to-end:
-
-- wires `createSqlCommand(adapter)` onto their own `new Bash(...)`;
-- registers `SqlBacktickRewritePlugin` and `SqlProxyEnforcementPlugin` on that
-  `Bash`;
-- calls `createBashTool({ sandbox: bashInstance, onBeforeBashCall: ... })`
-  from `@deepagents/context`;
-- hands the resulting `AgentSandbox` to `Text2SqlV3`.
-
-`Text2SqlV3.chat()` passes that sandbox straight into `agent()` with no
-wrapping, no tool-merging games, no parallel FS.
-
-## API
+## Default Path
 
 ```ts
-import { Bash, InMemoryFs } from 'just-bash';
+import { InMemoryFs } from 'just-bash';
 
-import { ContextEngine, createBashTool } from '@deepagents/context';
 import {
-  SqlBacktickRewritePlugin,
-  SqlProxyEnforcementPlugin,
-  Text2SqlV3,
-  createSqlCommand,
-} from '@deepagents/text2sql';
-
-const { command: sqlCmd, repair: sqlRepair } = createSqlCommand(adapter);
-
-const bashInstance = new Bash({
-  fs: new InMemoryFs(),
-  customCommands: [sqlCmd],
-});
-bashInstance.registerTransformPlugin(new SqlBacktickRewritePlugin());
-bashInstance.registerTransformPlugin(new SqlProxyEnforcementPlugin());
+  ContextEngine,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 
 const sandbox = await createBashTool({
-  sandbox: bashInstance,
-  onBeforeBashCall: ({ command }) => ({ command: sqlRepair(command) }),
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
 });
 
-const text2sql = new Text2SqlV3({
+const text2sql = new Text2Sql({
   version: 'v3-demo',
   sandbox,
   adapter,
@@ -56,46 +35,68 @@ const text2sql = new Text2SqlV3({
 });
 ```
 
-## Config
+## Composing With Your Own Extensions
 
-`Text2SqlV3Config` = v1's config minus `filesystem: IFileSystem`.
+`mergeExtensions` concatenates `commands` and `plugins`, chains
+`onBeforeBashCall` hooks in order (each sees prior output), and merges `env`
+with last-wins semantics.
 
-| Field                    | Same as v1?                                                  |
-| ------------------------ | ------------------------------------------------------------ |
-| `adapter`                | yes                                                          |
-| `sandbox: AgentSandbox`  | yes — but caller is expected to have sql cmd + plugins wired |
-| `context`                | yes                                                          |
-| `version`                | yes                                                          |
-| `tools?: RenderingTools` | yes — merged unchanged (no inner-tool shadowing)             |
-| `model`                  | yes                                                          |
-| `transform?`             | yes                                                          |
-| `filesystem`             | **removed** — v3 owns no FS                                  |
+```ts
+import type { SandboxExtension } from '@deepagents/context';
 
-## `createdFiles` metadata
+const myExtension: SandboxExtension = {
+  commands: [myCustomCommand],
+  plugins: [myAuditPlugin],
+  onBeforeBashCall: ({ command }) => ({ command: myRewrite(command) }),
+  env: { MY_FLAG: '1' },
+};
 
-v1 populates the assistant message's `metadata.createdFiles` via `TrackedFs`
-(intercepts every FS write). v3 has no FS, so it reads the bash tool's
-hidden-meta channel instead: the `sql run` handler calls
-`useBashMeta()?.setHidden({ resultPath: sqlPath })`, and
-`Text2SqlV3.chat()`'s `onFinish` walks `result.steps[].toolResults[].output.meta`
-to collect every `resultPath`. The assertion shape on the assistant message
-is identical (`Array.isArray(metadata.createdFiles)`).
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [sqlSandboxExtension(adapter), myExtension],
+  }),
+});
+```
 
-## Inherited for free (context package already provides)
+## Low-Level Primitives
 
-- Required `reasoning` input on every bash call.
-- Per-call meta scope (`runWithBashMeta`) + strip in `toModelOutput`.
-- Sandbox-boundary catch for `BashException` — `SqlProxyViolationError`
-  thrown from the transform plugin becomes a stderr/exit-1 `CommandResult`
-  automatically.
+If `sqlSandboxExtension` does not fit your backend, the underlying pieces are
+all exported: `createSqlCommand(adapter)`, `SqlBacktickRewritePlugin`,
+`SqlProxyEnforcementPlugin`. Compose them directly into any sandbox backend
+that accepts custom commands, transform plugins, and a pre-call hook.
 
-## Non-goals
+## Config Shape
 
-- No multi-adapter map (see `sqlv2.md`).
-- `sql` stays a bash subcommand, not a first-class AI SDK tool.
-- v1 `Text2Sql` is untouched and still works. Cutover is a follow-up PR.
+`Text2SqlConfig` fields:
+
+| Field                    | Notes    |
+| ------------------------ | -------- |
+| `adapter`                | Required |
+| `sandbox: AgentSandbox`  | Required |
+| `context`                | Required |
+| `version`                | Required |
+| `model`                  | Required |
+| `tools?: RenderingTools` | Optional |
+| `transform?`             | Optional |
+
+`filesystem` is not a `Text2Sql` constructor field — it belongs on the sandbox.
+
+## File Event Behavior
+
+When the sandbox filesystem is wrapped with `ObservedFs` and `drainFileEvents`
+is exposed on the returned sandbox, file operations are observed and surfaced
+as `metadata.fileEvents` on assistant messages produced by `chat()`. The
+attachment is handled in `@deepagents/context` chat finalization via
+`sandbox.drainFileEvents?.()`.
+
+## Current Scope
+
+- File event tracking is scoped to just-bash-based sandboxes.
+- `sql` remains a bash subcommand interface (`sql validate`, `sql run`).
+- Multi-adapter routing is still out of scope.
 
 ## Suggested Checks
 
-- `node --test --no-warnings packages/text2sql/test/sqlv3/chat.integration.test.ts`
 - `node --test --no-warnings packages/text2sql/test/chat.integration.test.ts`
+- `node --test --no-warnings packages/text2sql/test/file-events.integration.test.ts`

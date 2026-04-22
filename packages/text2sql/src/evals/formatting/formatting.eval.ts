@@ -1,21 +1,23 @@
 import { groq } from '@ai-sdk/groq';
 import { evalite } from 'evalite';
+import { InMemoryFs } from 'just-bash';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import { InMemoryContextStore, createBashTool } from '@deepagents/context';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  ObservedFs,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
 import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
 import TESTS from './formatting.json' with { type: 'json' };
 
-/**
- * Formatting eval - tests that toSql returns raw SQL without:
- * - Markdown code blocks
- * - Explanations or commentary
- * - Execution results or summaries
- */
 const { indexes } = parseRecordSelection('2');
 
 evalite('SQL Output Formatting', {
@@ -31,16 +33,33 @@ evalite('SQL Output Formatting', {
     const db = new DatabaseSync(':memory:');
     db.exec(ddl);
 
-    const sandbox = await createBashTool();
+    const adapter = new sqlite.Sqlite({
+      grounding: [sqlite.info(), sqlite.tables()],
+      execute: (sql) => db.prepare(sql).all(),
+    });
+    const observed = new ObservedFs(new InMemoryFs());
+    const base = await createBashTool({
+      sandbox: await createRoutingSandbox({
+        backend: await createVirtualSandbox({ fs: observed }),
+        hostExtensions: [sqlSandboxExtension(adapter)],
+      }),
+    });
+    const sandbox = { ...base, drainFileEvents: () => observed.drain() };
+    const store = new InMemoryContextStore();
     const text2sql = new Text2Sql({
       version: randomUUID(),
       sandbox,
-      store: new InMemoryContextStore(),
+      adapter,
       model: groq('gpt-oss-20b'),
-      adapter: new sqlite.Sqlite({
-        grounding: [sqlite.info(), sqlite.tables()],
-        execute: (sql) => db.prepare(sql).all(),
-      }),
+      context: (...fragments) => {
+        const engine = new ContextEngine({
+          store,
+          chatId: `formatting-${randomUUID()}`,
+          userId: 'eval',
+        });
+        engine.set(...fragments);
+        return engine;
+      },
     });
 
     const result = await text2sql.toSql(question);

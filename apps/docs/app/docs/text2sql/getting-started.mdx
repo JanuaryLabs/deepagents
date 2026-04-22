@@ -27,7 +27,7 @@ Text2SQL requires six components:
 1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, or BigQuery)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Model** - Any AI SDK model compatible with `@deepagents/agent`
-4. **Filesystem** - A `just-bash` filesystem used by result tools
+4. **Sandbox** - A caller-owned `AgentSandbox` used for SQL command execution in `chat()`
 5. **Context Factory** - Creates a `ContextEngine` with your chosen store, `chatId`, and `userId`
 6. **Version** - A string used to manage cache invalidation (bump when schema changes)
 
@@ -37,7 +37,13 @@ Start by creating the shared model, filesystem, and context factory:
 import { groq } from '@ai-sdk/groq';
 import { InMemoryFs } from 'just-bash';
 
-import { ContextEngine, InMemoryContextStore } from '@deepagents/context';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
 
 const store = new InMemoryContextStore();
 const model = groq('openai/gpt-oss-20b');
@@ -55,29 +61,41 @@ const context = (...fragments) => {
 ```
 
 Reuse `model`, `filesystem`, and `context` in the adapter-specific examples below.
+Each example then creates `sandbox` by composing `createBashTool`, `createRoutingSandbox`, and `createVirtualSandbox({ fs: filesystem })` with `hostExtensions: [sqlSandboxExtension(adapter)]`.
+
+The `context` factory also fixes the conversation identity for `chat()`. Reuse
+the same `store`, `chatId`, and `userId` when you want follow-up turns to stay
+in the same thread. Create a new factory when you want a separate thread.
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 // Connect to your database
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [sqlite.tables(), sqlite.info()],
+});
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: filesystem }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
+});
 
 // Create the Text2SQL instance
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
-  adapter: new Sqlite({
-    execute: (sql) => db.prepare(sql).all(),
-    grounding: [sqlite.tables(), sqlite.info()],
-  }),
+  adapter,
 });
 ```
 </Tab>
@@ -85,26 +103,33 @@ const text2sql = new Text2Sql({
 ```typescript
 import pg from 'pg';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
 });
+const adapter = new Postgres({
+  execute: async (sql) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [postgres.tables(), postgres.info()],
+});
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: filesystem }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
+});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
-  adapter: new Postgres({
-    execute: async (sql) => {
-      const result = await pool.query(sql);
-      return result.rows;
-    },
-    grounding: [postgres.tables(), postgres.info()],
-  }),
+  adapter,
 });
 ```
 </Tab>
@@ -112,7 +137,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import sql from 'mssql';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -123,19 +148,26 @@ const pool = await sql.connect({
   password: process.env.DB_PASSWORD,
   options: { encrypt: true, trustServerCertificate: true },
 });
+const adapter = new SqlServer({
+  execute: async (query) => {
+    const result = await pool.request().query(query);
+    return result.recordset;
+  },
+  grounding: [sqlserver.tables(), sqlserver.info()],
+});
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: filesystem }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
+});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
-  adapter: new SqlServer({
-    execute: async (query) => {
-      const result = await pool.request().query(query);
-      return result.recordset;
-    },
-    grounding: [sqlserver.tables(), sqlserver.info()],
-  }),
+  adapter,
 });
 ```
 </Tab>
@@ -143,7 +175,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -153,19 +185,26 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
+const adapter = new Mysql({
+  execute: async (sql) => {
+    const [rows] = await pool.query(sql);
+    return rows;
+  },
+  grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
+});
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: filesystem }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
+});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
-  adapter: new Mysql({
-    execute: async (sql) => {
-      const [rows] = await pool.query(sql);
-      return rows;
-    },
-    grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
-  }),
+  adapter,
 });
 ```
 </Tab>
@@ -173,35 +212,42 @@ const text2sql = new Text2Sql({
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
 const projectId = process.env.BQ_PROJECT_ID!;
 const client = new BigQueryClient({ projectId });
+const adapter = new BigQuery({
+  projectId,
+  datasets: ['analytics'],
+  execute: async (sql) => {
+    const [job] = await client.createQueryJob({ query: sql });
+    const [rows] = await job.getQueryResults();
+    return rows;
+  },
+  validate: async (sql) => {
+    await client.createQueryJob({
+      query: sql,
+      dryRun: true,
+      useQueryCache: false,
+    });
+  },
+  grounding: [bigquery.tables(), bigquery.info()],
+});
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: filesystem }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
+});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  filesystem,
+  sandbox,
   context,
-  adapter: new BigQuery({
-    projectId,
-    datasets: ['analytics'],
-    execute: async (sql) => {
-      const [job] = await client.createQueryJob({ query: sql });
-      const [rows] = await job.getQueryResults();
-      return rows;
-    },
-    validate: async (sql) => {
-      await client.createQueryJob({
-        query: sql,
-        dryRun: true,
-        useQueryCache: false,
-      });
-    },
-    grounding: [bigquery.tables(), bigquery.info()],
-  }),
+  adapter,
 });
 ```
 </Tab>
@@ -242,6 +288,10 @@ for await (const chunk of stream) {
   }
 }
 ```
+
+`toSql()` is stateless. It reads cached schema fragments, but it does not write
+messages, titles, or usage into your `ContextStore`. Use `chat()` when you want
+multi-turn persistence.
 
 ## Understanding the Response
 

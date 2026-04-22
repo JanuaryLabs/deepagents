@@ -2,6 +2,7 @@ import type { Tool } from 'ai';
 import type { BashToolkit, CommandResult } from 'bash-tool';
 
 import type { SkillPathMapping } from '../skills/types.ts';
+import type { FileEvent } from './file-events.ts';
 
 /**
  * Declarative skill upload: a host directory whose contents are copied into
@@ -38,4 +39,10 @@ export interface AgentSandbox extends Omit<BashToolkit, 'bash' | 'tools'> {
   skills: SkillPathMapping[];
   bash: WrappedBashTool;
   tools: Omit<BashToolkit['tools'], 'bash'> & { bash: WrappedBashTool };
+  /**
+   * Drain and return file events observed since the last call. Attached by
+   * callers who composed an `ObservedFs` into their backend; omitted
+   * otherwise. The chat pipeline reads this via optional chaining.
+   */
+  drainFileEvents?(): FileEvent[];
 }

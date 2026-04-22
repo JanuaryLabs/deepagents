@@ -71,13 +71,47 @@ const assistant = agent({
 
 await execute(assistant, 'Hello!', {});`,
 
-  text2sql: `import { Text2Sql, InMemoryHistory } from '@deepagents/text2sql';
+  text2sql: `import { groq } from '@ai-sdk/groq';
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
+import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
+import { InMemoryFs } from 'just-bash';
+
+const model = groq('gpt-oss-20b');
+const execute = async (sql: string) => {
+  /* run \`sql\` against your pg pool */
+  return [];
+};
+
+const adapter = new Postgres({ execute, grounding: [] });
+const store = new InMemoryContextStore();
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [sqlSandboxExtension(adapter)],
+  }),
+});
 
 const text2sql = new Text2Sql({
   version: 'v1',
-  adapter: new Postgres({ execute, grounding: [] }),
-  history: new InMemoryHistory(),
+  adapter,
+  sandbox,
+  model,
+  context: (...fragments) => {
+    const engine = new ContextEngine({
+      store,
+      chatId: 'chat-1',
+      userId: 'user-1',
+    });
+    engine.set(...fragments);
+    return engine;
+  },
 });
 
 await text2sql.toSql('Show all customers');`,

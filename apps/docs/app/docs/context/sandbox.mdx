@@ -298,7 +298,7 @@ The polymorphism means the wrapper never needs a central error-type registry —
 
 ## Debug Logging
 
-`@deepagents/text2sql`'s `createResultTools` logs each command + non-zero exit code via chalk when `process.env.DEBUG_BASH` is truthy:
+`@deepagents/text2sql`'s `sqlSandboxExtension` wiring can log each command and non-zero exit code when `process.env.DEBUG_BASH` is truthy:
 
 ```bash
 DEBUG_BASH=1 node scripts/run-demo.ts
@@ -325,6 +325,42 @@ await createBashTool({
   },
 });
 ```
+
+## Routing Sandbox: Host Extensions Across Backends
+
+`createRoutingSandbox({ backend, hostExtensions })` lets a single set of host
+commands (like `sql validate`, `sql run`) run against any backend — just-bash
+(via `createVirtualSandbox`), Docker, or Agent OS. The router dispatches
+extension commands at the top level of a line; anything it does not match
+forwards to the backend verbatim.
+
+```typescript
+import {
+  createBashTool,
+  createDockerSandbox,
+  createRoutingSandbox,
+} from '@deepagents/context';
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createDockerSandbox({ image: 'alpine' }),
+    hostExtensions: [myExtension],
+  }),
+});
+```
+
+### Pipeline Boundary on Shallow Backends
+
+Deep backends (just-bash) parse the full pipeline and match host commands
+anywhere inside it. Shallow backends (Docker, Agent OS) only see the first
+token of each top-level command. `cmd arg | jq .` runs in the container as a
+single line — so if `cmd` is a host extension, it will not execute. Either
+pipe the output in a separate turn (`cmd arg`, then `cat /path | jq .`), or
+use the virtual backend.
+
+Host handlers receive `ctx.sandbox` (the backend's `Sandbox`) rather than a
+direct filesystem: writes and reads go through `sandbox.writeFiles` /
+`sandbox.readFile`, so the same handler code works against every backend.
 
 ## Next Steps
 

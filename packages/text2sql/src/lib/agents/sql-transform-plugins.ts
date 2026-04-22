@@ -11,56 +11,7 @@ import { parse, serialize } from 'just-bash';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 
-import { BashException } from '@deepagents/context';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared AST Utilities
-// ─────────────────────────────────────────────────────────────────────────────
-
-function asStaticWordText(word: WordNode | null | undefined): string | null {
-  if (!word) {
-    return null;
-  }
-  return asStaticWordPartText(
-    word.parts as unknown as Array<Record<string, unknown>>,
-  );
-}
-
-function asStaticWordPartText(
-  parts: Array<Record<string, unknown>>,
-): string | null {
-  let text = '';
-
-  for (const part of parts) {
-    const type = part.type;
-
-    if (type === 'Literal' || type === 'SingleQuoted' || type === 'Escaped') {
-      if (typeof part.value !== 'string') {
-        return null;
-      }
-      text += part.value;
-      continue;
-    }
-
-    if (type === 'DoubleQuoted') {
-      if (!Array.isArray(part.parts)) {
-        return null;
-      }
-      const inner = asStaticWordPartText(
-        part.parts as Array<Record<string, unknown>>,
-      );
-      if (inner == null) {
-        return null;
-      }
-      text += inner;
-      continue;
-    }
-
-    return null;
-  }
-
-  return text;
-}
+import { BashException, asStaticWordText } from '@deepagents/context';
 
 function isScriptNode(value: unknown): value is ScriptNode {
   if (typeof value !== 'object' || value === null) {

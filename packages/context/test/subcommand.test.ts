@@ -1,10 +1,12 @@
-import { Bash } from 'just-bash';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
   type SubcommandDefinition,
   buildSubcommandRepair,
+  createRoutingSandbox,
+  createVirtualSandbox,
   defineSubcommandGroup,
   repairQuotedArg,
   stripQuoteArtifacts,
@@ -33,8 +35,12 @@ const subcommands = {
 
 async function exec(command: string) {
   const group = defineSubcommandGroup('tool', subcommands);
-  const bash = new Bash({ customCommands: [group] });
-  return bash.exec(command);
+  const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+  const sandbox = await createRoutingSandbox({
+    backend,
+    hostExtensions: [{ commands: [group] }],
+  });
+  return sandbox.executeCommand(command);
 }
 
 describe('defineSubcommandGroup: dispatch', () => {
