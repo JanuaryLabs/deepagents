@@ -49,7 +49,7 @@ async function createText2Sql(chatId: string, userId: string) {
   const sandbox = await createBashTool({
     sandbox: await createRoutingSandbox({
       backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [sqlSandboxExtension(adapter)],
+      hostExtensions: [sqlSandboxExtension({ main: adapter })],
     }),
   });
 
@@ -57,7 +57,7 @@ async function createText2Sql(chatId: string, userId: string) {
     version: 'v1',
     model: groq('openai/gpt-oss-20b'),
     sandbox,
-    adapter,
+    adapters: { main: adapter },
     context: (...fragments) => {
       const engine = new ContextEngine({
         store,

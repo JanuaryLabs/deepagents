@@ -15,10 +15,12 @@ describe('virtual sandbox file-event tracking', () => {
       `CREATE TABLE users (id INTEGER, name TEXT);`,
     );
 
-    const sandbox = await buildSandbox([sqlSandboxExtension(adapter)]);
+    const sandbox = await buildSandbox([
+      sqlSandboxExtension({ main: adapter }),
+    ]);
 
     const result = await sandbox.sandbox.executeCommand(
-      `sql run "SELECT 1 AS n"`,
+      `sql run main "SELECT 1 AS n"`,
     );
     assert.strictEqual(result.exitCode, 0, result.stderr);
 

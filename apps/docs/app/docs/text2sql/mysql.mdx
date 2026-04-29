@@ -29,22 +29,24 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Mysql({
-    execute: async (sql) => {
-      const [rows] = await pool.query(sql);
-      return rows;
-    },
-    grounding: [
-      mysqlGrounding.tables(),
-      mysqlGrounding.views(),
-      mysqlGrounding.info(),
-      mysqlGrounding.indexes(),
-      mysqlGrounding.constraints(),
-      mysqlGrounding.rowCount(),
-      mysqlGrounding.columnStats(),
-      mysqlGrounding.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Mysql({
+      execute: async (sql) => {
+        const [rows] = await pool.query(sql);
+        return rows;
+      },
+      grounding: [
+        mysqlGrounding.tables(),
+        mysqlGrounding.views(),
+        mysqlGrounding.info(),
+        mysqlGrounding.indexes(),
+        mysqlGrounding.constraints(),
+        mysqlGrounding.rowCount(),
+        mysqlGrounding.columnStats(),
+        mysqlGrounding.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 

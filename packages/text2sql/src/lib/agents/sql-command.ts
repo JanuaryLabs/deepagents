@@ -11,35 +11,68 @@ import {
 import type { Adapter } from '../adapters/adapter.ts';
 
 const SQL_VALIDATE_REMINDER =
-  'Always run `sql validate` before `sql run` to catch syntax errors early.';
+  'Always run `sql validate <db> "..."` before `sql run <db> "..."` to catch syntax errors early.';
 
 export interface SqlCommandOptions {
   /** Directory under which `sql run` writes result JSON files. Default: `/sql`. */
   outputDir?: string;
 }
 
+function repairDbNameAndQuotedArg(rawArgs: string): string | null {
+  const trimmed = rawArgs.trim();
+  if (!trimmed) return null;
+  const firstSpace = trimmed.search(/\s/);
+  if (firstSpace === -1) return null;
+  const dbName = trimmed.slice(0, firstSpace);
+  const rest = trimmed.slice(firstSpace + 1);
+  const repaired = repairQuotedArg(rest);
+  if (repaired == null) return null;
+  return `${dbName} ${repaired}`;
+}
+
+function resolveAdapter(
+  adapters: Record<string, Adapter>,
+  subcommand: string,
+  args: string[],
+): { adapter: Adapter; sql: string } | { error: string } {
+  const [name, ...rest] = args;
+  const available = Object.keys(adapters).join(', ');
+  if (!name) {
+    return {
+      error: `sql ${subcommand}: missing database name. Usage: sql ${subcommand} <db> "SELECT ...". Available: ${available}`,
+    };
+  }
+  const adapter = adapters[name];
+  if (!adapter) {
+    return {
+      error: `sql ${subcommand}: unknown database "${name}". Available: ${available}`,
+    };
+  }
+  const sql = rest.join(' ').trim();
+  if (!sql) {
+    return { error: `sql ${subcommand}: no query provided` };
+  }
+  return { adapter, sql };
+}
+
 export function createSqlCommand(
-  adapter: Adapter,
+  adapters: Record<string, Adapter>,
   { outputDir = '/sql' }: SqlCommandOptions = {},
 ) {
   const subcommands = {
     run: {
-      usage: 'run "SELECT ..."',
-      description: 'Execute query and store results',
-      repair: repairQuotedArg,
+      usage: 'run <db> "SELECT ..."',
+      description: 'Execute query against <db> and store results',
+      repair: repairDbNameAndQuotedArg,
       handler: async (args, ctx) => {
         const meta = useBashMeta();
         meta?.setReminder(SQL_VALIDATE_REMINDER);
 
-        const rawQuery = args.join(' ').trim();
-
-        if (!rawQuery) {
-          return {
-            stdout: '',
-            stderr: 'sql run: no query provided',
-            exitCode: 1,
-          };
+        const resolved = resolveAdapter(adapters, 'run', args);
+        if ('error' in resolved) {
+          return { stdout: '', stderr: resolved.error, exitCode: 1 };
         }
+        const { adapter, sql: rawQuery } = resolved;
 
         const query = adapter.format(rawQuery);
         meta?.setHidden({ formattedSql: query });
@@ -99,20 +132,17 @@ export function createSqlCommand(
       },
     },
     validate: {
-      usage: 'validate "SELECT ..."',
-      description: 'Validate query syntax',
-      repair: repairQuotedArg,
+      usage: 'validate <db> "SELECT ..."',
+      description: 'Validate query syntax against <db>',
+      repair: repairDbNameAndQuotedArg,
       handler: async (args) => {
         const meta = useBashMeta();
-        const rawQuery = args.join(' ').trim();
 
-        if (!rawQuery) {
-          return {
-            stdout: '',
-            stderr: 'sql validate: no query provided',
-            exitCode: 1,
-          };
+        const resolved = resolveAdapter(adapters, 'validate', args);
+        if ('error' in resolved) {
+          return { stdout: '', stderr: resolved.error, exitCode: 1 };
         }
+        const { adapter, sql: rawQuery } = resolved;
 
         const query = adapter.format(rawQuery);
         meta?.setHidden({ formattedSql: query });

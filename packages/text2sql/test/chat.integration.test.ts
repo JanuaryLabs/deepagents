@@ -69,7 +69,7 @@ async function setup(mockText?: string) {
   const text2sql = new Text2Sql({
     version: 'test',
     sandbox,
-    adapter,
+    adapters: { main: adapter },
     model,
     transform: () => new TransformStream(),
     context: (...fragments) => {
@@ -227,7 +227,7 @@ describe('Text2Sql.chat()', () => {
     const text2sql = new Text2Sql({
       version: `test-empty-guard-${generateId()}`,
       sandbox,
-      adapter,
+      adapters: { main: adapter },
       model: createMockModel(),
       transform: () => new TransformStream(),
       context: (...fragments) => {
@@ -426,7 +426,7 @@ describe('Text2Sql.chat()', () => {
     const text2sql = new Text2Sql({
       version: 'test',
       sandbox,
-      adapter,
+      adapters: { main: adapter },
       model,
       transform: () => new TransformStream(),
       context: (...fragments) => {

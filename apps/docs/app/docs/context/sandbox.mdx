@@ -302,7 +302,7 @@ The polymorphism means the wrapper never needs a central error-type registry —
 
 ```bash
 DEBUG_BASH=1 node scripts/run-demo.ts
-# [onBeforeBashCall]: sql run "SELECT 1"
+# [onBeforeBashCall]: sql run main "SELECT 1"
 # [onAfterBashCall]: 1
 ```
 
@@ -354,9 +354,14 @@ forward everything else verbatim. Host handlers do IO through
 `ctx.sandbox.writeFiles` / `ctx.sandbox.readFile`, so the same handler code
 works on every backend.
 
+If the host command surface already comes from an OpenAPI spec, build it with
+`createOpenAPIExtension({ name, openapi, ... })` and pass the returned
+extension in `hostExtensions`.
+
 See [Routing Sandbox](/docs/context/routing-sandbox) for the full surface —
 `SandboxExtension`, `ExtensionCommand`, `mergeExtensions`,
-`DuplicateCommandError`, and the pipeline-boundary rules.
+`DuplicateCommandError`, `createOpenAPIExtension`, and the
+pipeline-boundary rules.
 
 ## Next Steps
 

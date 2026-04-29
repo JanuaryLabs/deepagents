@@ -68,7 +68,7 @@ const adapter = new Postgres({
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
@@ -76,7 +76,7 @@ const text2sql = new Text2Sql({
   version: 'v1',
   model: groq('openai/gpt-oss-20b'),
   sandbox,
-  adapter,
+  adapters: { main: adapter },
   context: (...fragments) => {
     const engine = new ContextEngine({
       store,
@@ -89,9 +89,16 @@ const text2sql = new Text2Sql({
 });
 
 // Generate SQL
-const sql = await text2sql.toSql('Show me the top 10 customers by revenue');
+const sql = await text2sql.toSql(
+  'Show me the top 10 customers by revenue',
+  'main',
+);
 console.log(sql);
 ```
+
+The adapter-map key (`main` here) is the adapter name. Reuse that same key in
+`text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
+`sql run <db> "..."` sandbox calls.
 
 ## AI Model Providers
 
@@ -99,10 +106,11 @@ Text2SQL works with any model provider supported by the [Vercel AI SDK](https://
 
 ## Advanced: Composing Sandbox Extensions
 
-`Text2Sql` takes a caller-owned `sandbox`. `sqlSandboxExtension(adapter)`
+`Text2Sql` takes a caller-owned `sandbox`. `sqlSandboxExtension(adaptersMap)`
 returns a `SandboxExtension` that bundles the `sql` subcommand, transform
-plugins, and arg-repair hook — compose it (alongside any of your own
-extensions) via `createBashTool` + `createRoutingSandbox` + `createVirtualSandbox`.
+plugins, and arg-repair hook. In the simplest case, that map is
+`{ main: adapter }`. Compose it (alongside any of your own extensions) via
+`createBashTool` + `createRoutingSandbox` + `createVirtualSandbox`.
 See [sqlv3.md](./sqlv3.md) for composition patterns.
 
 ## Fragments
@@ -218,7 +226,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 
 - [Getting Started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
 - [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/to-sql)
-- [Caller-Owned Sandbox (Experimental)](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
+- [Caller-Owned Sandbox](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
 - [Teach the System](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
 - [Build Conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)

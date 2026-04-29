@@ -13,6 +13,8 @@ import * as path from 'node:path';
 
 import { BashException, asStaticWordText } from '@deepagents/context';
 
+import { isValidAdapterName } from '../adapter-name.ts';
+
 function isScriptNode(value: unknown): value is ScriptNode {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -45,8 +47,8 @@ const WRAPPER_COMMANDS = new Set(['env', 'command', 'eval']);
 const SQL_PROXY_ENFORCEMENT_MESSAGE = [
   'Direct database querying through bash is blocked.',
   'Use SQL proxy commands in this order:',
-  '1) sql validate "SELECT ..."',
-  '2) sql run "SELECT ..."',
+  '1) sql validate <db> "SELECT ..."',
+  '2) sql run <db> "SELECT ..."',
 ].join('\n');
 
 export class SqlProxyViolationError extends BashException {
@@ -927,12 +929,15 @@ function isSqlBacktickCommand(
   if (cmd.type !== 'SimpleCommand') return false;
   if (cmd.assignments.length > 0 || cmd.redirections.length > 0) return false;
   if (asStaticWordText(cmd.name) !== 'sql') return false;
-  if (cmd.args.length < 2) return false;
+  if (cmd.args.length < 3) return false;
 
   const subcommand = asStaticWordText(cmd.args[0]);
   if (subcommand !== 'validate' && subcommand !== 'run') return false;
 
-  const sqlArgs = cmd.args.slice(1);
+  const dbName = asStaticWordText(cmd.args[1]);
+  if (dbName == null || !isValidAdapterName(dbName)) return false;
+
+  const sqlArgs = cmd.args.slice(2);
   return sqlArgs.some((arg: WordNode) =>
     wordPartsContainBacktickSubstitution(
       arg.parts as unknown as Array<Record<string, unknown>>,
@@ -970,7 +975,8 @@ function rewriteSqlBacktickCommand(
   ast: ScriptNode,
 ): CommandNode {
   const subcommand = asStaticWordText(cmd.args[0])!;
-  const sqlArgs = cmd.args.slice(1);
+  const dbName = asStaticWordText(cmd.args[1])!;
+  const sqlArgs = cmd.args.slice(2);
   const unquotedSql = extractSqlText(sqlArgs);
 
   const hash = createHash('sha256')
@@ -984,7 +990,7 @@ function rewriteSqlBacktickCommand(
     `{ cat > ${sqlPath} <<'${heredocTag}'`,
     unquotedSql,
     heredocTag,
-    `sql ${subcommand} "$(cat ${sqlPath})"; }`,
+    `sql ${subcommand} ${dbName} "$(cat ${sqlPath})"; }`,
   ].join('\n');
 
   const groupAst = parse(groupScript);

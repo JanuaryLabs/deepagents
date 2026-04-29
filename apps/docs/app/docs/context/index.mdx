@@ -1,9 +1,13 @@
 ---
 title: Overview
-description: Domain-agnostic context management for LLM applications with rendering, persistence, and cost estimation
+description: Domain-agnostic context management for LLM applications with rendering, persistence, chat orchestration, and sandbox tooling
 ---
 
 The `@deepagents/context` package provides primitives for managing LLM context: organizing fragments, rendering to multiple formats, persisting conversations, and estimating costs. It's the foundation layer that other deepagents packages build upon.
+
+It also ships the portable sandbox layer used by the rest of the repo: routing
+host-dispatched commands across virtual, Docker, and Agent OS backends, plus
+helpers for composing validated command groups from OpenAPI specs.
 
 ## The Problem with Ad-Hoc Context
 
@@ -59,6 +63,7 @@ The `resolve()` method automatically:
 | Fragment Serialization | `fromFragment()`, `toFragment()`, `encodeSerializedValue()` for storing non-message fragments as JSON |
 | Multiple Renderers          | XML, Markdown, TOML, TOON formats for different models and use cases                            |
 | Persistence                 | SQLite and in-memory stores for conversation history                                            |
+| Sandbox Tooling             | `createRoutingSandbox()`, `SandboxExtension`, and `createOpenAPIExtension()` for portable host commands |
 | Cost Estimation             | Token counting and pricing via models.dev for 1000+ models                                      |
 | AI SDK Integration          | `resolve()` returns `systemPrompt` + `messages` ready for `generateText()`                      |
 
@@ -129,5 +134,6 @@ const domainContext = new ContextEngine({ store }).set(
 - [Architecture](/docs/context/architecture-core-concepts) - Deep-dive into package design
 - [Fragments](/docs/context/fragments) - Fragment types and composition
 - [Fragment Serialization](/docs/context/fragment-serialization) - Store non-message fragments in your own database
+- [Routing Sandbox](/docs/context/routing-sandbox) - Run the same host commands across multiple backends
 - [Renderers Overview](/docs/context/renderers-overview) - Choosing the right output format
 - [Recipes](/docs/context/recipes) - Real-world integration patterns

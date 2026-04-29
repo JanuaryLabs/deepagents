@@ -7,10 +7,17 @@ The high-level `Text2Sql.toSql()` method generates SQL without executing it. It
 uses cached schema fragments from `index()`, runs the SQL generation agent, and
 returns the final SQL string after adapter formatting and validation.
 
+The second argument is the configured adapter name — the same key you used in
+`adapters` when constructing `Text2Sql`. It is required, even when only one
+adapter is configured.
+
 ## Basic Usage
 
 ```typescript
-const sql = await text2sql.toSql('Show me top 10 customers by revenue');
+const sql = await text2sql.toSql(
+  'Show me top 10 customers by revenue',
+  'main',
+);
 
 console.log(sql);
 ```
@@ -31,7 +38,7 @@ If you plan to execute the returned SQL outside `chat()`, validate it again in
 your own execution pipeline:
 
 ```typescript
-const sql = await text2sql.toSql('Show me sales data');
+const sql = await text2sql.toSql('Show me sales data', 'main');
 
 const error = await adapter.validate(sql);
 if (error) {
@@ -73,7 +80,7 @@ console.log(result.sql);
 model:
 
 ```typescript
-const sql = await text2sql.toSql('Show revenue by customer');
+const sql = await text2sql.toSql('Show revenue by customer', 'main');
 console.log(sql);
 ```
 
@@ -82,7 +89,7 @@ console.log(sql);
 | Feature | `toSql()` | `chat()` |
 | ------- | --------- | -------- |
 | Returns | SQL string | Streamed user-facing answer |
-| Execution | No execution | Executes via `sql validate` and `sql run` |
+| Execution | No execution | Executes via `sql validate <db> "..."` and `sql run <db> "..."` |
 | Persistent context | Schema cache only | Full conversation thread from your context store |
 | Extra fragments | Use low-level `toSql({ fragments })` | Use your `context` factory |
 | Streaming | No | Yes |
@@ -107,7 +114,7 @@ console.log(sql);
 ### Simple Query
 
 ```typescript
-const sql = await text2sql.toSql('Count total orders');
+const sql = await text2sql.toSql('Count total orders', 'main');
 // SELECT COUNT(*) AS total_orders FROM orders
 ```
 
@@ -116,6 +123,7 @@ const sql = await text2sql.toSql('Count total orders');
 ```typescript
 const sql = await text2sql.toSql(
   'Show monthly revenue trends for the last 12 months',
+  'main',
 );
 ```
 
@@ -124,6 +132,7 @@ const sql = await text2sql.toSql(
 ```typescript
 const sql = await text2sql.toSql(
   'Which artists have the most albums in our catalog?',
+  'main',
 );
 ```
 
@@ -140,7 +149,7 @@ The introspection cache is invalidated when you change the `version` parameter:
 ```typescript
 const text2sql = new Text2Sql({
   version: 'v2', // Bump this when schema changes
-  adapter,
+  adapters: { main: adapter },
   model,
   sandbox,
   context,

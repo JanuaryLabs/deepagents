@@ -17,7 +17,8 @@ const packages = [
   },
   {
     name: '@deepagents/context',
-    description: 'Context management with tokenization and persistence layer.',
+    description:
+      'Context, chat orchestration, and portable sandbox tooling for LLM apps.',
     href: '/docs/context',
   },
   {
@@ -94,13 +95,13 @@ const store = new InMemoryContextStore();
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
 const text2sql = new Text2Sql({
   version: 'v1',
-  adapter,
+  adapters: { main: adapter },
   sandbox,
   model,
   context: (...fragments) => {
@@ -114,7 +115,7 @@ const text2sql = new Text2Sql({
   },
 });
 
-await text2sql.toSql('Show all customers');`,
+await text2sql.toSql('Show all customers', 'main');`,
 
   context: `import { ContextEngine, role, user, XmlRenderer } from '@deepagents/context';
 import { SqliteContextStore } from '@deepagents/context';

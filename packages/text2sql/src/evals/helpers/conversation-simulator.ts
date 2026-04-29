@@ -207,7 +207,7 @@ export async function simulateConversation(
   const base = await createBashTool({
     sandbox: await createRoutingSandbox({
       backend: await createVirtualSandbox({ fs: observed }),
-      hostExtensions: [sqlSandboxExtension(config.adapter)],
+      hostExtensions: [sqlSandboxExtension({ main: config.adapter })],
     }),
   });
   const sandbox = { ...base, drainFileEvents: () => observed.drain() };
@@ -215,7 +215,7 @@ export async function simulateConversation(
     version: `eval-simulator-${randomUUID()}`,
     sandbox,
     model,
-    adapter: config.adapter,
+    adapters: { main: config.adapter },
     context: (...fragments) => {
       const engine = new ContextEngine({ store, chatId, userId });
       engine.set(...fragments);

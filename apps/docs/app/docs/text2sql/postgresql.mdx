@@ -34,22 +34,24 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Postgres({
-    execute: async (sql) => {
-      const result = await pool.query(sql);
-      return result.rows;
-    },
-    grounding: [
-      postgres.tables(),
-      postgres.views(),
-      postgres.info(),
-      postgres.indexes(),
-      postgres.constraints(),
-      postgres.rowCount(),
-      postgres.columnStats(),
-      postgres.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Postgres({
+      execute: async (sql) => {
+        const result = await pool.query(sql);
+        return result.rows;
+      },
+      grounding: [
+        postgres.tables(),
+        postgres.views(),
+        postgres.info(),
+        postgres.indexes(),
+        postgres.constraints(),
+        postgres.rowCount(),
+        postgres.columnStats(),
+        postgres.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 

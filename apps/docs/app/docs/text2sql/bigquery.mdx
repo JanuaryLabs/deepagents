@@ -25,31 +25,33 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new BigQuery({
-    projectId,
-    datasets: ['analytics'], // Only these datasets will be introspected
-    execute: async (sql) => {
-      const [job] = await client.createQueryJob({ query: sql });
-      const [rows] = await job.getQueryResults();
-      return rows;
-    },
-    validate: async (sql) => {
-      // Dry-run validation (recommended)
-      await client.createQueryJob({
-        query: sql,
-        dryRun: true,
-        useQueryCache: false,
-      });
-    },
-    grounding: [
-      bigquery.tables(),
-      bigquery.views(),
-      bigquery.info(),
-      bigquery.indexes(),
-      bigquery.constraints(),
-      bigquery.rowCount(),
-    ],
-  }),
+  adapters: {
+    main: new BigQuery({
+      projectId,
+      datasets: ['analytics'], // Only these datasets will be introspected
+      execute: async (sql) => {
+        const [job] = await client.createQueryJob({ query: sql });
+        const [rows] = await job.getQueryResults();
+        return rows;
+      },
+      validate: async (sql) => {
+        // Dry-run validation (recommended)
+        await client.createQueryJob({
+          query: sql,
+          dryRun: true,
+          useQueryCache: false,
+        });
+      },
+      grounding: [
+        bigquery.tables(),
+        bigquery.views(),
+        bigquery.info(),
+        bigquery.indexes(),
+        bigquery.constraints(),
+        bigquery.rowCount(),
+      ],
+    }),
+  },
 });
 ```
 

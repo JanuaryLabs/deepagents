@@ -33,19 +33,21 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Postgres({
-    execute: async (sql) => pool.query(sql).then(r => r.rows),
-    grounding: [
-      postgres.tables(),
-      postgres.views(),
-      postgres.info(),
-      postgres.indexes(),
-      postgres.constraints(),
-      postgres.rowCount(),
-      postgres.columnStats(),
-      postgres.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Postgres({
+      execute: async (sql) => pool.query(sql).then(r => r.rows),
+      grounding: [
+        postgres.tables(),
+        postgres.views(),
+        postgres.info(),
+        postgres.indexes(),
+        postgres.constraints(),
+        postgres.rowCount(),
+        postgres.columnStats(),
+        postgres.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -60,19 +62,21 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Sqlite({
-    execute: (sql) => db.prepare(sql).all(),
-    grounding: [
-      sqlite.tables(),
-      sqlite.views(),
-      sqlite.info(),
-      sqlite.indexes(),
-      sqlite.constraints(),
-      sqlite.rowCount(),
-      sqlite.columnStats(),
-      sqlite.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Sqlite({
+      execute: (sql) => db.prepare(sql).all(),
+      grounding: [
+        sqlite.tables(),
+        sqlite.views(),
+        sqlite.info(),
+        sqlite.indexes(),
+        sqlite.constraints(),
+        sqlite.rowCount(),
+        sqlite.columnStats(),
+        sqlite.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -87,22 +91,24 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new SqlServer({
-    execute: async (sql) => {
-      const result = await pool.request().query(sql);
-      return result.recordset;
-    },
-    grounding: [
-      sqlserver.tables(),
-      sqlserver.views(),
-      sqlserver.info(),
-      sqlserver.indexes(),
-      sqlserver.constraints(),
-      sqlserver.rowCount(),
-      sqlserver.columnStats(),
-      sqlserver.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new SqlServer({
+      execute: async (sql) => {
+        const result = await pool.request().query(sql);
+        return result.recordset;
+      },
+      grounding: [
+        sqlserver.tables(),
+        sqlserver.views(),
+        sqlserver.info(),
+        sqlserver.indexes(),
+        sqlserver.constraints(),
+        sqlserver.rowCount(),
+        sqlserver.columnStats(),
+        sqlserver.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -117,22 +123,24 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Mysql({
-    execute: async (sql) => {
-      const [rows] = await pool.query(sql);
-      return rows;
-    },
-    grounding: [
-      mysqlGrounding.tables(),
-      mysqlGrounding.views(),
-      mysqlGrounding.info(),
-      mysqlGrounding.indexes(),
-      mysqlGrounding.constraints(),
-      mysqlGrounding.rowCount(),
-      mysqlGrounding.columnStats(),
-      mysqlGrounding.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Mysql({
+      execute: async (sql) => {
+        const [rows] = await pool.query(sql);
+        return rows;
+      },
+      grounding: [
+        mysqlGrounding.tables(),
+        mysqlGrounding.views(),
+        mysqlGrounding.info(),
+        mysqlGrounding.indexes(),
+        mysqlGrounding.constraints(),
+        mysqlGrounding.rowCount(),
+        mysqlGrounding.columnStats(),
+        mysqlGrounding.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -151,26 +159,28 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new BigQuery({
-    projectId: process.env.BQ_PROJECT_ID,
-    datasets: ['analytics'],
-    execute: async (sql) => {
-      const [job] = await client.createQueryJob({ query: sql });
-      const [rows] = await job.getQueryResults();
-      return rows;
-    },
-    validate: async (sql) => {
-      await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
-    },
-    grounding: [
-      bigquery.tables(),
-      bigquery.views(),
-      bigquery.info(),
-      bigquery.indexes(),
-      bigquery.constraints(),
-      bigquery.rowCount(),
-    ],
-  }),
+  adapters: {
+    main: new BigQuery({
+      projectId: process.env.BQ_PROJECT_ID,
+      datasets: ['analytics'],
+      execute: async (sql) => {
+        const [job] = await client.createQueryJob({ query: sql });
+        const [rows] = await job.getQueryResults();
+        return rows;
+      },
+      validate: async (sql) => {
+        await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
+      },
+      grounding: [
+        bigquery.tables(),
+        bigquery.views(),
+        bigquery.info(),
+        bigquery.indexes(),
+        bigquery.constraints(),
+        bigquery.rowCount(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>

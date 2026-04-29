@@ -4,11 +4,11 @@ description: One extension surface that dispatches across virtual, Docker, and A
 ---
 
 `createRoutingSandbox` is the primitive that lets a single set of host
-commands — things like `sql validate`, `sql run`, or your own `SandboxExtension` —
-run against any backend. It wraps a `Sandbox` (virtual via `createVirtualSandbox`,
-`createDockerSandbox`, or `createAgentOsSandbox`) and dispatches extension
-commands at the top level of each bash line. Anything it does not match is
-forwarded to the backend verbatim.
+commands — things like `sql validate <db>`, `sql run <db>`, or your own
+`SandboxExtension` — run against any backend. It wraps a `Sandbox` (virtual via
+`createVirtualSandbox`, `createDockerSandbox`, or `createAgentOsSandbox`) and
+dispatches extension commands at the top level of each bash line. Anything it
+does not match is forwarded to the backend verbatim.
 
 The same extension definition ships once and runs everywhere. Swap the
 backend, keep the extension.
@@ -122,6 +122,71 @@ interface SandboxExtension {
 | `onBeforeBashCall` | Rewrite or inspect the raw command line before plugins / dispatch. Multiple extensions' hooks chain in declared order |
 | `env` | Passed to extension handlers via `ctx.env`. **Not** propagated to the backend's `executeCommand` — set backend env on construction (`createDockerSandbox({ env })`, etc.) |
 
+## `createOpenAPIExtension(options)`
+
+If your host command surface already exists as an OpenAPI document,
+`createOpenAPIExtension()` builds a portable `SandboxExtension` for it. The
+extension registers one command group named after `options.name`. Each
+operation becomes a subcommand using `x-fn-name` or `operationId`, and a
+reserved `schema` subcommand prints JSON Schema for every operation so the
+model can inspect the expected input first.
+
+```typescript
+import {
+  createBashTool,
+  createDockerSandbox,
+  createOpenAPIExtension,
+  createRoutingSandbox,
+} from '@deepagents/context';
+
+const datahub = await createOpenAPIExtension({
+  name: 'datahub',
+  openapi: './openapi.json',
+  baseUrl: 'https://api.example.test',
+  token: () => process.env.DATAHUB_TOKEN!,
+});
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createDockerSandbox({ image: 'alpine' }),
+    hostExtensions: [datahub],
+  }),
+});
+```
+
+The routed command surface then looks like:
+
+- `datahub schema` — dump the derived JSON Schema for every operation in the group.
+- `datahub widgetCreate '{"name":"foo"}'` — validate the JSON body against the OpenAPI-derived Zod schema, then send the HTTP request.
+
+Successful calls write JSON to stdout. HTTP operations return a
+`{"status": ..., "data": ...}` object, while `schema` returns a
+`{"group": ..., "operations": [...]}` payload. Validation and request
+failures return JSON on stderr with `ok: false`, `group`, `operation`, and a
+machine-friendly `code`.
+
+If the spec omits `servers`, pass `baseUrl`. Path parameters reject empty
+values, `.` / `..`, slashes, control characters, and pre-encoded percent
+sequences before the request is sent.
+
+The most important options are:
+
+| Option | Description |
+| --- | --- |
+| `name` | Command-group prefix exposed to the model (`datahub`, `crm`, etc.) |
+| `openapi` | Path to the OpenAPI document on disk |
+| `baseUrl` | Required when the spec omits `servers`; overrides the request base URL |
+| `token` / `headers` | Add authentication or fixed request headers to every call |
+| `fetch` | Inject a custom fetch implementation |
+| `includeOperation` | Filter the operations that become subcommands before registration |
+
+Each generated subcommand expects one JSON argument. If an operation needs no
+input body or params, pass `'{}'` so the schema validator still receives an
+object payload.
+
+The returned extension also exposes a generated `client` field, so host code
+can reuse the same RPC client outside the bash command surface when needed.
+
 ### `ExtensionCommand` and `ExtensionCommandContext`
 
 ```typescript
@@ -185,19 +250,19 @@ them. Shallow backends only see the first token of each top-level command:
 
 ```bash
 # Virtual backend: host command `sql` matches, handler runs.
-sql run "SELECT 1"
+sql run main "SELECT 1"
 
 # Virtual backend: pipeline parsed, `sql` still dispatches.
-sql run "SELECT 1" | jq .
+sql run main "SELECT 1" | jq .
 
 # Docker / Agent OS backend: the whole pipeline runs in the container.
 # `sql` is NOT a binary in the container → "command not found".
-sql run "SELECT 1" | jq .
+sql run main "SELECT 1" | jq .
 ```
 
 Two workarounds when you need piping against a shallow backend:
 
-1. Split into two turns: run `sql run "..."` first, then `cat /sql/result.json | jq .`.
+1. Split into two turns: run `sql run main "..."` first, then `cat /sql/result.json | jq .`.
 2. Use the virtual backend (`createVirtualSandbox`).
 
 Shallow dispatch also forwards any line containing subshells or

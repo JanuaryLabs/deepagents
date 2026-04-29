@@ -41,7 +41,7 @@ evalite('SQL Output Formatting', {
     const base = await createBashTool({
       sandbox: await createRoutingSandbox({
         backend: await createVirtualSandbox({ fs: observed }),
-        hostExtensions: [sqlSandboxExtension(adapter)],
+        hostExtensions: [sqlSandboxExtension({ main: adapter })],
       }),
     });
     const sandbox = { ...base, drainFileEvents: () => observed.drain() };
@@ -49,7 +49,7 @@ evalite('SQL Output Formatting', {
     const text2sql = new Text2Sql({
       version: randomUUID(),
       sandbox,
-      adapter,
+      adapters: { main: adapter },
       model: groq('gpt-oss-20b'),
       context: (...fragments) => {
         const engine = new ContextEngine({
@@ -62,7 +62,7 @@ evalite('SQL Output Formatting', {
       },
     });
 
-    const result = await text2sql.toSql(question);
+    const result = await text2sql.toSql(question, 'main');
     db.close();
     return result;
   },

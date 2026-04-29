@@ -61,7 +61,10 @@ const context = (...fragments) => {
 ```
 
 Reuse `model`, `filesystem`, and `context` in the adapter-specific examples below.
-Each example then creates `sandbox` by composing `createBashTool`, `createRoutingSandbox`, and `createVirtualSandbox({ fs: filesystem })` with `hostExtensions: [sqlSandboxExtension(adapter)]`.
+Each example then creates `sandbox` by composing `createBashTool`, `createRoutingSandbox`, and `createVirtualSandbox({ fs: filesystem })` with `hostExtensions: [sqlSandboxExtension({ main: adapter })]`.
+The adapter-map key (`main` in these examples) becomes the required second
+argument to `text2sql.toSql(..., 'main')` and the `<db>` selector in
+`sql validate <db> "..."` / `sql run <db> "..."`.
 
 The `context` factory also fixes the conversation identity for `chat()`. Reuse
 the same `store`, `chatId`, and `userId` when you want follow-up turns to stay
@@ -85,7 +88,7 @@ const adapter = new Sqlite({
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
@@ -95,7 +98,7 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 ```
 </Tab>
@@ -120,7 +123,7 @@ const adapter = new Postgres({
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
@@ -129,7 +132,7 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 ```
 </Tab>
@@ -158,7 +161,7 @@ const adapter = new SqlServer({
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
@@ -167,7 +170,7 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 ```
 </Tab>
@@ -195,7 +198,7 @@ const adapter = new Mysql({
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
@@ -204,7 +207,7 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 ```
 </Tab>
@@ -238,7 +241,7 @@ const adapter = new BigQuery({
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 
@@ -247,7 +250,7 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 ```
 </Tab>
@@ -262,6 +265,7 @@ Use `toSql()` to generate SQL without executing it:
 ```typescript
 const sql = await text2sql.toSql(
   'Show me the top 10 customers by total purchases',
+  'main',
 );
 
 console.log(sql);

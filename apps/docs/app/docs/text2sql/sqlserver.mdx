@@ -44,22 +44,24 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new SqlServer({
-    execute: async (query) => {
-      const result = await pool.request().query(query);
-      return result.recordset;
-    },
-    grounding: [
-      sqlserver.tables(),
-      sqlserver.views(),
-      sqlserver.info(),
-      sqlserver.indexes(),
-      sqlserver.constraints(),
-      sqlserver.rowCount(),
-      sqlserver.columnStats(),
-      sqlserver.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new SqlServer({
+      execute: async (query) => {
+        const result = await pool.request().query(query);
+        return result.recordset;
+      },
+      grounding: [
+        sqlserver.tables(),
+        sqlserver.views(),
+        sqlserver.info(),
+        sqlserver.indexes(),
+        sqlserver.constraints(),
+        sqlserver.rowCount(),
+        sqlserver.columnStats(),
+        sqlserver.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -78,33 +80,35 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new SqlServer({
-    execute: (sql) => new Promise((resolve, reject) => {
-      const rows = [];
-      const request = new Request(sql, (err) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-      request.on('row', (columns) => {
-        const row = {};
-        columns.forEach((col) => {
-          row[col.metadata.colName] = col.value;
+  adapters: {
+    main: new SqlServer({
+      execute: (sql) => new Promise((resolve, reject) => {
+        const rows = [];
+        const request = new Request(sql, (err) => {
+          if (err) reject(err);
+          else resolve(rows);
         });
-        rows.push(row);
-      });
-      connection.execSql(request);
+        request.on('row', (columns) => {
+          const row = {};
+          columns.forEach((col) => {
+            row[col.metadata.colName] = col.value;
+          });
+          rows.push(row);
+        });
+        connection.execSql(request);
+      }),
+      grounding: [
+        sqlserver.tables(),
+        sqlserver.views(),
+        sqlserver.info(),
+        sqlserver.indexes(),
+        sqlserver.constraints(),
+        sqlserver.rowCount(),
+        sqlserver.columnStats(),
+        sqlserver.columnValues(),
+      ],
     }),
-    grounding: [
-      sqlserver.tables(),
-      sqlserver.views(),
-      sqlserver.info(),
-      sqlserver.indexes(),
-      sqlserver.constraints(),
-      sqlserver.rowCount(),
-      sqlserver.columnStats(),
-      sqlserver.columnValues(),
-    ],
-  }),
+  },
 });
 ```
 </Tab>

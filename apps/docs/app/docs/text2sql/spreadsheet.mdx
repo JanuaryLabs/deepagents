@@ -22,11 +22,14 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 
 // Query your spreadsheet with natural language
-const sql = await text2sql.toSql('What are the top 5 products by revenue?');
+const sql = await text2sql.toSql(
+  'What are the top 5 products by revenue?',
+  'main',
+);
 
 // Don't forget to close when done
 adapter.close();
@@ -212,7 +215,7 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter,
+  adapters: { main: adapter },
 });
 
 // Introspect schema
@@ -221,7 +224,8 @@ console.log('Schema:', schema);
 
 // Natural language queries
 const topCustomers = await text2sql.toSql(
-  'Who are the top 10 customers by total order amount?'
+  'Who are the top 10 customers by total order amount?',
+  'main',
 );
 console.log('SQL:', topCustomers);
 

@@ -3,7 +3,9 @@ title: Subcommand Builders
 description: Compose custom bash commands with a subcommand dispatcher, LLM-robust arg repair, and shell quote helpers
 ---
 
-When you register a custom bash command like `sql`, `http`, or `s3` that takes subcommands (`sql run`, `sql validate`), three problems repeat every time:
+When you register a custom bash command like `sql`, `http`, or `s3` that takes
+subcommands (`sql run <db>`, `sql validate <db>`), three problems repeat every
+time:
 
 1. Dispatching from the first arg to the right handler.
 2. Recovering from malformed quoting the LLM sometimes produces.
@@ -89,7 +91,7 @@ interface ExtensionCommandContext {
 
 | Field | Description |
 |---|---|
-| `usage` | Short usage string shown in the auto-generated help (e.g. `run "SELECT ..."`). No tool name prefix — the dispatcher adds it |
+| `usage` | Short usage string shown in the auto-generated help (e.g. `run <db> "SELECT ..."`). No tool name prefix — the dispatcher adds it |
 | `description` | One-line description shown beside the usage |
 | `repair` | Optional pre-parse repair fn. Runs *only* when the original command fails to parse. Return `null` to skip |
 | `handler` | The actual implementation. Receives the remaining args (after the subcommand name) and an `ExtensionCommandContext`. Use `ctx.sandbox.writeFiles` / `ctx.sandbox.readFile` for IO — the same handler then runs against any backend (virtual, Docker, Agent OS) |
@@ -127,7 +129,13 @@ Usage rows are padded via `usage.padEnd(30)` for column alignment. You get the h
 
 ## `buildSubcommandRepair(name, subcommands)`
 
-The pre-parse repair pipeline. LLMs sometimes emit malformed quoting that the shell parser rejects — `sql run "SELECT * FROM users` (unclosed quote) or `sql validate SELECT 1` (no quotes at all). When the original command fails to parse, `buildSubcommandRepair` tries each matching subcommand's `repair` function and returns the re-quoted command if the new form parses cleanly. Otherwise it returns the original unchanged and the parser emits its normal error.
+The pre-parse repair pipeline. LLMs sometimes emit malformed quoting that the
+shell parser rejects — `sql run main "SELECT * FROM users` (unclosed quote) or
+`sql validate main SELECT 1` (no quotes around the SQL body). When the
+original command fails to parse, `buildSubcommandRepair` tries each matching
+subcommand's `repair` function and returns the re-quoted command if the new
+form parses cleanly. Otherwise it returns the original unchanged and the parser
+emits its normal error.
 
 Wire it into `onBeforeBashCall` on `createBashTool`:
 
@@ -186,6 +194,10 @@ const subcommands = {
 } satisfies Record<string, SubcommandDefinition>;
 ```
 
+If the command needs a leading selector before the quoted payload (for example
+`<db> "SELECT ..."`), wrap `repairQuotedArg` in a tiny local helper that keeps
+the selector intact and only repairs the payload portion.
+
 ### Pre-parse vs Post-parse: two stages, two jobs
 
 `repairQuotedArg` / `stripQuoteArtifacts` solve **malformed quoting that would break the parser**. They run *before* `parse()`. Once parse succeeds and the handler has its `args: string[]`, you may still have domain-specific cleanup to do inside the handler or adapter.
@@ -201,7 +213,8 @@ In short:
 
 ## Worked Example: the `sql` Command
 
-`@deepagents/text2sql`'s `createSqlCommand` is built from these primitives. A condensed version:
+`@deepagents/text2sql`'s `createSqlCommand` is built from these primitives. A
+condensed version of the current multi-adapter shape:
 
 ```typescript
 import {
@@ -212,20 +225,53 @@ import {
   useBashMeta,
 } from '@deepagents/context';
 
-function createSqlCommand(adapter: Adapter) {
+function repairDbNameAndQuotedArg(rawArgs: string): string | null {
+  const trimmed = rawArgs.trim();
+  if (!trimmed) return null;
+
+  const firstSpace = trimmed.search(/\s/);
+  if (firstSpace === -1) return null;
+
+  const dbName = trimmed.slice(0, firstSpace);
+  const repaired = repairQuotedArg(trimmed.slice(firstSpace + 1));
+  return repaired == null ? null : `${dbName} ${repaired}`;
+}
+
+function resolveAdapter(
+  adapters: Record<string, Adapter>,
+  subcommand: 'run' | 'validate',
+  args: string[],
+) {
+  const [name, ...rest] = args;
+  const sql = rest.join(' ').trim();
+
+  if (!name || !adapters[name]) {
+    return { error: `sql ${subcommand}: unknown database` };
+  }
+  if (!sql) {
+    return { error: `sql ${subcommand}: no query provided` };
+  }
+
+  return { adapter: adapters[name], sql };
+}
+
+function createSqlCommand(adapters: Record<string, Adapter>) {
   const subcommands = {
     run: {
-      usage: 'run "SELECT ..."',
-      description: 'Execute query and store results',
-      repair: repairQuotedArg,
+      usage: 'run <db> "SELECT ..."',
+      description: 'Execute query against <db> and store results',
+      repair: repairDbNameAndQuotedArg,
       handler: async (args, ctx) => {
         const meta = useBashMeta();
-        meta?.setReminder('Always run `sql validate` first.');
+        meta?.setReminder(
+          'Always run `sql validate <db>` before `sql run <db>`.',
+        );
 
-        const rawQuery = args.join(' ').trim();
-        if (!rawQuery) {
-          return { stdout: '', stderr: 'sql run: no query provided', exitCode: 1 };
+        const resolved = resolveAdapter(adapters, 'run', args);
+        if ('error' in resolved) {
+          return { stdout: '', stderr: resolved.error, exitCode: 1 };
         }
+        const { adapter, sql: rawQuery } = resolved;
 
         const query = adapter.format(rawQuery);
         meta?.setHidden({ formattedSql: query });
@@ -252,12 +298,17 @@ function createSqlCommand(adapter: Adapter) {
       },
     },
     validate: {
-      usage: 'validate "SELECT ..."',
-      description: 'Validate query syntax',
-      repair: repairQuotedArg,
+      usage: 'validate <db> "SELECT ..."',
+      description: 'Validate query syntax against <db>',
+      repair: repairDbNameAndQuotedArg,
       handler: async (args) => {
         const meta = useBashMeta();
-        const rawQuery = args.join(' ').trim();
+        const resolved = resolveAdapter(adapters, 'validate', args);
+        if ('error' in resolved) {
+          return { stdout: '', stderr: resolved.error, exitCode: 1 };
+        }
+        const { adapter, sql: rawQuery } = resolved;
+
         const query = adapter.format(rawQuery);
         meta?.setHidden({ formattedSql: query });
 
@@ -279,8 +330,14 @@ function createSqlCommand(adapter: Adapter) {
 The handlers:
 
 - Use `useBashMeta()` to attach a per-call reminder plus host-only `formattedSql` / `resultPath` metadata (stripped from what the model sees).
+- Resolve the adapter from the first positional arg, so `sql run main "..."` and `sql validate analytics "..."` can share the same command group.
 - Let the adapter own query normalization and validation after the shell arguments have been parsed.
 - Return `CommandResult` directly, letting the parent bash runtime handle exit codes and stderr routing.
+
+If the upstream surface is already described by OpenAPI, prefer
+`createOpenAPIExtension()` over hand-writing the dispatcher. It packages this
+same command-group pattern into a ready-made `SandboxExtension`; see
+[Routing Sandbox](/docs/context/routing-sandbox#createopenapiextensionoptions).
 
 For the meta channel details, see [Sandbox → Meta Channel](/docs/context/sandbox#meta-channel).
 

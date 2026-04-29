@@ -26,19 +26,21 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Sqlite({
-    execute: (sql) => db.prepare(sql).all(),
-    grounding: [
-      sqlite.tables(),
-      sqlite.views(),
-      sqlite.info(),
-      sqlite.indexes(),
-      sqlite.constraints(),
-      sqlite.rowCount(),
-      sqlite.columnStats(),
-      sqlite.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Sqlite({
+      execute: (sql) => db.prepare(sql).all(),
+      grounding: [
+        sqlite.tables(),
+        sqlite.views(),
+        sqlite.info(),
+        sqlite.indexes(),
+        sqlite.constraints(),
+        sqlite.rowCount(),
+        sqlite.columnStats(),
+        sqlite.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -57,19 +59,21 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Sqlite({
-    execute: (sql) => db.prepare(sql).all(),
-    grounding: [
-      sqlite.tables(),
-      sqlite.views(),
-      sqlite.info(),
-      sqlite.indexes(),
-      sqlite.constraints(),
-      sqlite.rowCount(),
-      sqlite.columnStats(),
-      sqlite.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Sqlite({
+      execute: (sql) => db.prepare(sql).all(),
+      grounding: [
+        sqlite.tables(),
+        sqlite.views(),
+        sqlite.info(),
+        sqlite.indexes(),
+        sqlite.constraints(),
+        sqlite.rowCount(),
+        sqlite.columnStats(),
+        sqlite.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
@@ -89,27 +93,29 @@ const text2sql = new Text2Sql({
   model,
   sandbox,
   context,
-  adapter: new Sqlite({
-    execute: (sql) => {
-      const stmt = db.prepare(sql);
-      const rows = [];
-      while (stmt.step()) {
-        rows.push(stmt.getAsObject());
-      }
-      stmt.free();
-      return rows;
-    },
-    grounding: [
-      sqlite.tables(),
-      sqlite.views(),
-      sqlite.info(),
-      sqlite.indexes(),
-      sqlite.constraints(),
-      sqlite.rowCount(),
-      sqlite.columnStats(),
-      sqlite.columnValues(),
-    ],
-  }),
+  adapters: {
+    main: new Sqlite({
+      execute: (sql) => {
+        const stmt = db.prepare(sql);
+        const rows = [];
+        while (stmt.step()) {
+          rows.push(stmt.getAsObject());
+        }
+        stmt.free();
+        return rows;
+      },
+      grounding: [
+        sqlite.tables(),
+        sqlite.views(),
+        sqlite.info(),
+        sqlite.indexes(),
+        sqlite.constraints(),
+        sqlite.rowCount(),
+        sqlite.columnStats(),
+        sqlite.columnValues(),
+      ],
+    }),
+  },
 });
 ```
 </Tab>
