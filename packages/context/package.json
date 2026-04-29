@@ -31,6 +31,11 @@
       "types": "./dist/lib/tracing/index.d.ts",
       "import": "./dist/lib/tracing/index.js",
       "default": "./dist/lib/tracing/index.js"
+    },
+    "./openapi-skill": {
+      "types": "./dist/lib/sandbox/openapi/skill/index.d.ts",
+      "import": "./dist/lib/sandbox/openapi/skill/index.js",
+      "default": "./dist/lib/sandbox/openapi/skill/index.js"
     }
   },
   "files": [
@@ -42,8 +47,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^3.0.31",
-    "ai": "^6.0.141",
+    "@ai-sdk/groq": "^3.0.36",
+    "@ai-sdk/openai": "^3.0.54",
+    "@ai-sdk/openai-compatible": "^2.0.42",
+    "@ai-sdk/provider": "^3.0.9",
+    "ai": "^6.0.169",
     "bash-tool": "^1.3.16",
     "chalk": "^5.6.0",
     "dedent": "^1.7.0",
@@ -57,8 +65,10 @@
     "tiny-tfidf": "^1.0.0",
     "yaml": "^2.8.0",
     "zod": "^3.25.76 || ^4.0.0",
-    "@ai-sdk/provider": "^3.0.8",
-    "@deepagents/agent": "0.36.0"
+    "zod-to-json-schema": "^3.25.1",
+    "@deepagents/agent": "0.36.0",
+    "@sdk-it/rpc": "^0.40.0",
+    "@sdk-it/spec": "^0.40.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",

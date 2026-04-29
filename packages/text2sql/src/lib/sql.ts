@@ -47,7 +47,11 @@ export class Text2Sql {
   #introspection: Map<string, JsonCache<ContextFragment[]>>;
 
   constructor(config: Text2SqlConfig) {
-    validateAdapterNames(Object.keys(config.adapters));
+    const adapterNames = Object.keys(config.adapters);
+    if (adapterNames.length === 0) {
+      throw new Error('Text2Sql requires at least one adapter');
+    }
+    validateAdapterNames(adapterNames);
     this.#config = {
       ...config,
       tools: config.tools ?? {},

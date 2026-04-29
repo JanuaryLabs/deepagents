@@ -31,7 +31,11 @@ export function sqlSandboxExtension(
   adapters: Record<string, Adapter>,
   options: SqlSandboxExtensionOptions = {},
 ): SandboxExtension {
-  validateAdapterNames(Object.keys(adapters));
+  const adapterNames = Object.keys(adapters);
+  if (adapterNames.length === 0) {
+    throw new Error('sqlSandboxExtension requires at least one adapter');
+  }
+  validateAdapterNames(adapterNames);
   const { command, repair } = createSqlCommand(adapters, options);
   return {
     commands: [command],

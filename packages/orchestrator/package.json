@@ -39,14 +39,14 @@
   "dependencies": {
     "@deepagents/agent": "0.36.0",
     "@deepagents/context": "0.36.0",
-    "@ai-sdk/groq": "^3.0.31",
+    "@ai-sdk/groq": "^3.0.36",
+    "@ai-sdk/openai": "^3.0.54",
+    "ai": "^6.0.169",
     "zod": "^3.25.76 || ^4.0.0",
-    "ai": "^6.0.141",
     "lodash-es": "^4.17.21",
     "@deepagents/retrieval": "0.36.0",
     "@deepagents/toolbox": "0.36.0",
     "p-limit": "^7.2.0",
-    "@ai-sdk/openai": "^3.0.49",
     "@tavily/core": "^0.5.12",
     "dedent": "^1.7.0"
   },

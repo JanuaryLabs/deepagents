@@ -2,6 +2,10 @@
 
 Plan for another agent to execute. Self-contained.
 
+Status note: the shipped Text2SQL surface later moved to adapter maps
+(`sqlSandboxExtension({ main: adapter })`, `sql run <db> "..."`). Examples in
+this note use the current public syntax where they illustrate the final API.
+
 ## Context
 
 `createAgentSandbox` today hard-codes `just-bash`'s `Bash` class as the
@@ -27,7 +31,7 @@ const sandbox = await createBashTool({
     backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
     //    or: await createDockerSandbox({ image: 'alpine' }),
     //    or: await createAgentOsSandbox({ software: [common] }),
-    hostExtensions: [sqlSandboxExtension(adapter), myOtherExtension],
+    hostExtensions: [sqlSandboxExtension({ main: adapter }), myOtherExtension],
   }),
 });
 ```
@@ -69,7 +73,7 @@ Confirmed by inspecting `node_modules/just-bash/dist/` (do not re-check during i
 
 ## Known Limitations (Document Explicitly)
 
-- **Pipeline boundary on shallow dispatch**: Host commands dispatch only at the top level on Docker/Agent OS backends. `sql run "..." | jq .` works on the virtual backend (Bash parses the pipeline and matches `sql` inside) but **not** on Docker/Agent OS (the whole line runs in the container, which has no `sql` binary). Users pipe `sql run` output by piping `cat /sql/{uuid}.json | jq .` in a separate turn, or by using the virtual backend.
+- **Pipeline boundary on shallow dispatch**: Host commands dispatch only at the top level on Docker/Agent OS backends. `sql run main "..." | jq .` works on the virtual backend (Bash parses the pipeline and matches `sql` inside) but **not** on Docker/Agent OS (the whole line runs in the container, which has no `sql` binary). Users pipe `sql run` output by piping `cat /sql/{uuid}.json | jq .` in a separate turn, or by using the virtual backend.
 - **Host handlers see no stdin** on shallow dispatch.
 - **`drainFileEvents`** only reflects writes against the virtual backend's `IFileSystem` (including writes that host handlers make via `ctx.sandbox.writeFiles`, because those route through Bash's fs). On Docker/Agent OS backends, `drainFileEvents` returns `[]` or is omitted.
 - **Plugin error format context may differ by a small amount between deep and shallow dispatch.** Deep dispatch: plugin throws inside `Bash.exec`'s pipeline, `BashException.format()` sees it, wrapper converts. Shallow dispatch: plugin throws inside the side-Bash's `Bash.transform`, same `BashException.format()` sees it, same wrapper converts. The `CommandResult` shape is identical; the internal stack trace is not. Documented.
@@ -619,14 +623,19 @@ After `defineSubcommandGroup` returns `ExtensionCommand`, `sqlSandboxExtension` 
 
 ## Call Site Migration
 
-All call sites currently use `...mergeExtensions(sqlSandboxExtension(adapter))` spread into `createAgentSandbox`. After the refactor, use the new `extensions` option:
+This section records the migration target from the pre-routing implementation.
+The old shape spread `mergeExtensions(sqlSandboxExtension({ main: adapter }))`
+into `createAgentSandbox`; the refactor target was the `hostExtensions` option
+on `createRoutingSandbox`:
 
 ```diff
- const sandbox = await createAgentSandbox({
-   fs: new InMemoryFs(),
--  ...mergeExtensions(sqlSandboxExtension(adapter)),
-+  extensions: [sqlSandboxExtension(adapter)],
- });
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+-   ...mergeExtensions(sqlSandboxExtension({ main: adapter })),
++   hostExtensions: [sqlSandboxExtension({ main: adapter })],
+  }),
+});
 ```
 
 Files to update (grep for `mergeExtensions(sqlSandboxExtension`):
@@ -643,7 +652,8 @@ Files to update (grep for `mergeExtensions(sqlSandboxExtension`):
 - `packages/text2sql/README.md`
 - `packages/text2sql/sqlv3.md`
 
-Also drop the `mergeExtensions` spread pattern from docs entirely; the canonical shape is `extensions: [...]`.
+Also drop the `mergeExtensions` spread pattern from docs entirely; the canonical
+shape is `hostExtensions: [...]`.
 
 Advanced pattern (Docker / Agent OS) goes in `packages/text2sql/sqlv3.md`:
 
@@ -651,7 +661,7 @@ Advanced pattern (Docker / Agent OS) goes in `packages/text2sql/sqlv3.md`:
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
     backend: await createDockerSandbox({ image: 'alpine' }),
-    hostExtensions: [sqlSandboxExtension(adapter)],
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
   }),
 });
 ```
@@ -667,7 +677,7 @@ Note: this path bypasses `createAgentSandbox`, so `drainFileEvents` won't be ava
 - Shallow dispatch with same extension against `FakeInMemorySandbox` (spec'd below) → command dispatches at top level.
 - Shallow dispatch: top-level command that does not match any extension → forwarded to backend verbatim (assert `backend.executeCommand` received the transformed line).
 - Shallow dispatch: pipeline `echo x | grep y` where neither side matches any extension → forwarded to backend as a single string; extension handlers are not invoked.
-- Shallow dispatch: `sql run "..." | jq` → extension handler is **not** called (pipeline boundary); whole line forwarded.
+- Shallow dispatch: `sql run main "..." | jq` → extension handler is **not** called (pipeline boundary); whole line forwarded.
 - `mergeExtensions` throws `DuplicateCommandError` on colliding command names; `err.name === 'DuplicateCommandError'`, `err.commandName === 'duplicated-name'`.
 - `onBeforeBashCall` chains correctly across multiple extensions (pre-existing test already covers chainHooks).
 - Host command writes via `ctx.sandbox.writeFiles` → subsequent `ctx.sandbox.readFile` returns the content (on both backends).
@@ -752,12 +762,12 @@ All steps must succeed.
 - Pipeline-aware shallow dispatch.
 - `drainFileEvents` for Docker / Agent OS backends.
 - Backend `env` propagation via `bash-tool.Sandbox.executeCommand`.
-- Multi-adapter routing for SQL (unchanged from prior scope).
+- Standalone AI SDK SQL tool surface (unchanged from prior scope).
 
 ## Success Criteria
 
 - `createVirtualSandbox`, `createRoutingSandbox`, `InstallableSandbox`, `ExtensionCommand`, `ExtensionCommandContext`, `DuplicateCommandError` exported from `@deepagents/context`.
-- `sqlSandboxExtension(adapter)` works unchanged at call sites after swapping the spread for `extensions: [...]`.
+- `sqlSandboxExtension({ main: adapter })` works unchanged at call sites after swapping the spread for `hostExtensions: [...]`.
 - Every backend (virtual, Docker, Agent OS) composes with the SQL extension through the same `createRoutingSandbox` call.
 - All existing chat integration tests pass.
 - New routing-sandbox test suite + parity test suite pass.

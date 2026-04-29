@@ -1,10 +1,10 @@
 # @deepagents/context
 
-A domain-agnostic context management system for formatting context fragments into different prompt styles.
+A domain-agnostic context system for LLM applications, including fragment rendering, persistence, chat orchestration, and portable sandbox tooling.
 
 ## Overview
 
-This package provides a flexible way to compose and render context in multiple formats (XML, Markdown, TOML, TOON). Context fragments are structured units that can be transformed into different prompt representations for different LLM styles.
+This package provides a flexible way to compose and render context in multiple formats (XML, Markdown, TOML, TOON), persist conversations, orchestrate chat flows, and expose portable host-side command surfaces. Context fragments are structured units that can be transformed into different prompt representations for different LLM styles.
 
 ## Installation
 
@@ -22,6 +22,23 @@ import { identity, reminder, term, user } from '@deepagents/context/browser';
 
 `@deepagents/context/browser` intentionally excludes server-only modules
 like store implementations, sandbox tooling, and filesystem-based skill loading.
+
+## Sandbox Tooling
+
+The server-side package also ships the sandbox primitives used by
+`@deepagents/text2sql` and other tool-driven agents. Use
+`createRoutingSandbox({ backend, hostExtensions })` to run the same host
+commands across virtual, Docker, or Agent OS backends.
+
+If an upstream service already has an OpenAPI description,
+`createOpenAPIExtension({ name, openapi, ... })` turns it into a portable
+`SandboxExtension` with validated subcommands and a built-in `schema`
+introspection command.
+
+See the docs for the full API surface:
+
+- [Routing Sandbox](https://januarylabs.github.io/deepagents/docs/context/routing-sandbox)
+- [Sandbox](https://januarylabs.github.io/deepagents/docs/context/sandbox)
 
 ## Basic Usage
 

@@ -1,4 +1,7 @@
-export * from './lib/adapter-name.ts';
+export {
+  isValidAdapterName,
+  validateAdapterNames,
+} from './lib/adapter-name.ts';
 export * from './lib/adapters/adapter.ts';
 export * from './lib/agents/exceptions.ts';
 export * from './lib/agents/sql-command.ts';

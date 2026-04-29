@@ -935,7 +935,7 @@ function isSqlBacktickCommand(
   if (subcommand !== 'validate' && subcommand !== 'run') return false;
 
   const dbName = asStaticWordText(cmd.args[1]);
-  if (dbName == null || !isValidAdapterName(dbName)) return false;
+  if (!isValidAdapterName(dbName)) return false;
 
   const sqlArgs = cmd.args.slice(2);
   return sqlArgs.some((arg: WordNode) =>
