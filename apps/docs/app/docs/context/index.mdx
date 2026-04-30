@@ -3,7 +3,10 @@ title: Overview
 description: Domain-agnostic context management for LLM applications with rendering, persistence, chat orchestration, and sandbox tooling
 ---
 
-The `@deepagents/context` package provides primitives for managing LLM context: organizing fragments, rendering to multiple formats, persisting conversations, and estimating costs. It's the foundation layer that other deepagents packages build upon.
+The `@deepagents/context` package provides primitives for composing LLM
+context: organizing fragments, rendering them to multiple prompt formats,
+persisting conversations, orchestrating chat flows, and estimating usage
+costs. It is the foundation layer that other DeepAgents packages build upon.
 
 It also ships the portable sandbox layer used by the rest of the repo: routing
 host-dispatched commands across virtual, Docker, and Agent OS backends, plus
@@ -102,7 +105,7 @@ const fragments = [
 
 ## Integration with DeepAgents
 
-The context package is designed to work seamlessly with other deepagents packages:
+The context package is designed to work seamlessly with other DeepAgents packages:
 
 ```typescript
 // With @deepagents/agent

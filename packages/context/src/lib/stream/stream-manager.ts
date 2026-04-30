@@ -69,6 +69,11 @@ export type StreamPollingTelemetryEvent =
       reason: 'terminal' | 'missing';
     }
   | {
+      type: 'watch:error-emitted';
+      streamId: string;
+      errorTextLength: number;
+    }
+  | {
       type: 'persist:cancel-poll';
       streamId: string;
       delayMs: number;
@@ -349,6 +354,20 @@ export class StreamManager {
                   delivered: drained,
                   lastSeq: lastSeqRef.value,
                 });
+              }
+              if (currentStatus === 'failed') {
+                const stream = await store.getStream(streamId);
+                if (stream?.error) {
+                  this.#emitPolling({
+                    type: 'watch:error-emitted',
+                    streamId,
+                    errorTextLength: stream.error.length,
+                  });
+                  controller.enqueue({
+                    type: 'error',
+                    errorText: stream.error,
+                  });
+                }
               }
               this.#emitPolling({
                 type: 'watch:closed',

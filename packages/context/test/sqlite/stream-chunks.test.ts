@@ -1035,7 +1035,7 @@ describe('Stream Chunks', () => {
       });
     });
 
-    it('should close normally when stream status is failed', async () => {
+    it('should emit error chunk before close on terminal failed status', async () => {
       await withStreamStore(async (store) => {
         const streams = new StreamManager({ store });
 
@@ -1060,11 +1060,50 @@ describe('Stream Chunks', () => {
           received.push(chunk);
         }
 
-        assert.strictEqual(received.length, 2);
+        assert.strictEqual(received.length, 3);
+        assert.deepStrictEqual(received[0], {
+          type: 'text-delta',
+          delta: 'chunk-0',
+        });
+        assert.deepStrictEqual(received[1], {
+          type: 'text-delta',
+          delta: 'chunk-1',
+        });
+        assert.deepStrictEqual(received[2], {
+          type: 'error',
+          errorText: 'test error',
+        });
 
         const updated = await store.getStream(stream.id);
         assert.ok(updated);
         assert.strictEqual(updated.error, 'test error');
+      });
+    });
+
+    it('should emit error chunk for late-attached watcher on already-failed stream', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+        await store.updateStreamStatus(stream.id, 'failed', {
+          error: 'boom',
+        });
+
+        const received: unknown[] = [];
+        const readable = streams.watch(stream.id, makeWatchPolling());
+        for await (const chunk of readable) {
+          received.push(chunk);
+        }
+
+        assert.strictEqual(received.length, 1);
+        assert.deepStrictEqual(received[0], {
+          type: 'error',
+          errorText: 'boom',
+        });
       });
     });
 

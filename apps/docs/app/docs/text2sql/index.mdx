@@ -76,6 +76,10 @@ const sql = await text2sql.toSql(
 // GROUP BY c.CustomerId ORDER BY TotalPurchases DESC LIMIT 10
 ```
 
+`main` is the adapter-map key. Reuse that same name in
+`text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
+`sql run <db> "..."` sandbox calls.
+
 ## Core Methods
 
 | Method                    | Description                                            |

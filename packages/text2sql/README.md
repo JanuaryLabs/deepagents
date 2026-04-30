@@ -100,6 +100,11 @@ The adapter-map key (`main` here) is the adapter name. Reuse that same key in
 `text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
 `sql run <db> "..."` sandbox calls.
 
+Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you build adapter
+maps dynamically, use `isValidAdapterName(name)` to check one key or
+`validateAdapterNames(names)` to fail fast before constructing `Text2Sql` or
+`sqlSandboxExtension`.
+
 ## AI Model Providers
 
 Text2SQL works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs), including OpenAI, Anthropic, Google, Groq, and more.
@@ -111,7 +116,8 @@ returns a `SandboxExtension` that bundles the `sql` subcommand, transform
 plugins, and arg-repair hook. In the simplest case, that map is
 `{ main: adapter }`. Compose it (alongside any of your own extensions) via
 `createBashTool` + `createRoutingSandbox` + `createVirtualSandbox`.
-See [sqlv3.md](./sqlv3.md) for composition patterns.
+See [Caller-Owned Sandbox](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
+for composition patterns.
 
 ## Fragments
 
@@ -202,6 +208,9 @@ const followUp = await text2sql.chat([
 write messages, titles, or usage into your context store.
 
 ## Direct SQL Generation with Extra Fragments
+
+This lower-level helper still takes a single `adapter` because it bypasses the
+multi-adapter `Text2Sql` wrapper entirely.
 
 ```typescript
 import { term } from '@deepagents/context';
