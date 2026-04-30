@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/context",
-  "version": "0.37.0",
+  "version": "0.37.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -66,7 +66,7 @@
     "yaml": "^2.8.0",
     "zod": "^3.25.76 || ^4.0.0",
     "zod-to-json-schema": "^3.25.1",
-    "@deepagents/agent": "0.37.0",
+    "@deepagents/agent": "0.37.1",
     "@sdk-it/rpc": "^0.40.0",
     "@sdk-it/spec": "^0.40.0"
   },
