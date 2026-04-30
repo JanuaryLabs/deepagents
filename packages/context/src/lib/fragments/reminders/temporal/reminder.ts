@@ -1,21 +1,18 @@
-import type { UIMessage } from 'ai';
-
-import type { ContextFragment } from '../../fragments.ts';
+import type { ContextFragment } from '../../../fragments.ts';
+import { type WhenPredicate, reminder } from '../../message/user.ts';
 import {
-  type WhenPredicate,
+  LOCALE_METADATA_KEY,
+  type LocaleData,
+  type TemporalReminderOptions,
   dayChanged,
+  getLocaleFromMessage,
   getSeason,
   hourChanged,
-  isRecord,
   monthChanged,
-  reminder,
+  resolveTz,
   seasonChanged,
   yearChanged,
-} from '../message/user.ts';
-
-export interface TemporalReminderOptions {
-  tz?: string;
-}
+} from './predicates.ts';
 
 export interface LocaleReminderOptions {
   language?: string;
@@ -86,9 +83,9 @@ function formatDiff(changes: (string | null)[]): string {
 export function dateReminder(
   options?: TemporalReminderOptions,
 ): ContextFragment {
-  const tz = options?.tz ?? 'UTC';
   return reminder(
     (ctx) => {
+      const tz = resolveTz(options, ctx);
       const now = new Date();
       const currentDate = formatDateKey(now, tz);
       const currentDay = formatDayOfWeek(now, tz);
@@ -104,16 +101,16 @@ export function dateReminder(
 
       return `${diff}Date: ${currentDate}\nDay of Week: ${currentDay}`;
     },
-    { when: dayChanged(tz), asPart: true },
+    { when: dayChanged(options), asPart: true },
   );
 }
 
 export function timeReminder(
   options?: TemporalReminderOptions,
 ): ContextFragment {
-  const tz = options?.tz ?? 'UTC';
   return reminder(
     (ctx) => {
+      const tz = resolveTz(options, ctx);
       const now = new Date();
       const currentTime = formatTime(now, tz);
 
@@ -127,16 +124,16 @@ export function timeReminder(
 
       return `${diff}Time: ${currentTime}`;
     },
-    { when: hourChanged(tz), asPart: true },
+    { when: hourChanged(options), asPart: true },
   );
 }
 
 export function monthReminder(
   options?: TemporalReminderOptions,
 ): ContextFragment {
-  const tz = options?.tz ?? 'UTC';
   return reminder(
     (ctx) => {
+      const tz = resolveTz(options, ctx);
       const now = new Date();
       const currentMonth = formatMonthName(now, tz);
 
@@ -150,16 +147,16 @@ export function monthReminder(
 
       return `${diff}Month: ${currentMonth}`;
     },
-    { when: monthChanged(tz), asPart: true },
+    { when: monthChanged(options), asPart: true },
   );
 }
 
 export function yearReminder(
   options?: TemporalReminderOptions,
 ): ContextFragment {
-  const tz = options?.tz ?? 'UTC';
   return reminder(
     (ctx) => {
+      const tz = resolveTz(options, ctx);
       const now = new Date();
       const currentYear = formatYear(now, tz);
 
@@ -173,16 +170,16 @@ export function yearReminder(
 
       return `${diff}Year: ${currentYear}`;
     },
-    { when: yearChanged(tz), asPart: true },
+    { when: yearChanged(options), asPart: true },
   );
 }
 
 export function seasonReminder(
   options?: TemporalReminderOptions,
 ): ContextFragment {
-  const tz = options?.tz ?? 'UTC';
   return reminder(
     (ctx) => {
+      const tz = resolveTz(options, ctx);
       const now = new Date();
       const currentSeason = getSeason(getMonthIndex(now, tz));
 
@@ -196,32 +193,8 @@ export function seasonReminder(
 
       return `${diff}Season: ${currentSeason}`;
     },
-    { when: seasonChanged(tz), asPart: true },
+    { when: seasonChanged(options), asPart: true },
   );
-}
-
-const LOCALE_METADATA_KEY = 'locale';
-
-interface LocaleData {
-  language: string;
-  timeZone: string;
-}
-
-function getLocaleFromMessage(
-  message: UIMessage | undefined,
-): LocaleData | null {
-  if (!message) return null;
-  const metadata = isRecord(message.metadata) ? message.metadata : null;
-  if (!metadata) return null;
-  const locale = metadata[LOCALE_METADATA_KEY];
-  if (!isRecord(locale)) return null;
-  if (
-    typeof locale.language !== 'string' ||
-    typeof locale.timeZone !== 'string'
-  ) {
-    return null;
-  }
-  return { language: locale.language, timeZone: locale.timeZone };
 }
 
 export function localeReminder(
@@ -261,13 +234,11 @@ export function localeReminder(
 export function temporalReminder(
   options?: TemporalReminderOptions,
 ): ContextFragment[] {
-  const tz = options?.tz ?? 'UTC';
-
   return [
-    dateReminder({ tz }),
-    timeReminder({ tz }),
-    monthReminder({ tz }),
-    yearReminder({ tz }),
-    seasonReminder({ tz }),
+    dateReminder(options),
+    timeReminder(options),
+    monthReminder(options),
+    yearReminder(options),
+    seasonReminder(options),
   ];
 }

@@ -52,146 +52,6 @@ export interface WhenContext {
 
 export type WhenPredicate = (ctx: WhenContext) => boolean | Promise<boolean>;
 
-export function everyNTurns(n: number): WhenPredicate {
-  return ({ turn }) => turn % n === 0;
-}
-
-export function once(): WhenPredicate {
-  return ({ turn }) => turn === 1;
-}
-
-export function firstN(n: number): WhenPredicate {
-  return ({ turn }) => turn <= n;
-}
-
-export function afterTurn(n: number): WhenPredicate {
-  return ({ turn }) => turn > n;
-}
-
-export type AsyncWhenPredicate = (ctx: WhenContext) => Promise<boolean>;
-
-export function and(...predicates: WhenPredicate[]): AsyncWhenPredicate {
-  return async (ctx) => {
-    for (const it of predicates) {
-      if (!(await it(ctx))) return false;
-    }
-    return true;
-  };
-}
-
-export function or(...predicates: WhenPredicate[]): AsyncWhenPredicate {
-  return async (ctx) => {
-    for (const it of predicates) {
-      if (await it(ctx)) return true;
-    }
-    return false;
-  };
-}
-
-export function not(predicate: WhenPredicate): AsyncWhenPredicate {
-  return async (ctx) => !(await predicate(ctx));
-}
-
-export function contentIncludes(keywords: string[]): WhenPredicate {
-  const lower = keywords.map((k) => k.toLowerCase());
-  return (ctx) => {
-    const text = ctx.content.toLowerCase();
-    return lower.some((kw) => text.includes(kw));
-  };
-}
-
-export function contentPattern(pattern: RegExp): WhenPredicate {
-  return (ctx) => {
-    pattern.lastIndex = 0;
-    return pattern.test(ctx.content);
-  };
-}
-
-function toDateParts(
-  date: Date,
-  tz: string,
-): { year: string; month: string; day: string; hour: string } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((p) => p.type === type)!.value;
-
-  return {
-    year: get('year'),
-    month: get('month'),
-    day: get('day'),
-    hour: get('hour'),
-  };
-}
-
-function temporalChanged(
-  ctx: WhenContext,
-  tz: string,
-  getKey: (parts: ReturnType<typeof toDateParts>) => string,
-): boolean {
-  if (ctx.lastMessageAt === undefined) return true;
-  const nowParts = toDateParts(new Date(), tz);
-  const prevParts = toDateParts(new Date(ctx.lastMessageAt), tz);
-  return getKey(nowParts) !== getKey(prevParts);
-}
-
-export function getSeason(month: number): string {
-  if (month >= 2 && month <= 4) return 'Spring';
-  if (month >= 5 && month <= 7) return 'Summer';
-  if (month >= 8 && month <= 10) return 'Fall';
-  return 'Winter';
-}
-
-function isoWeekKey(parts: ReturnType<typeof toDateParts>): string {
-  const d = new Date(
-    Date.UTC(
-      parseInt(parts.year),
-      parseInt(parts.month) - 1,
-      parseInt(parts.day),
-    ),
-  );
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil(
-    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
-  );
-  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-}
-
-export function dayChanged(tz = 'UTC'): WhenPredicate {
-  return (ctx) =>
-    temporalChanged(ctx, tz, (p) => `${p.year}-${p.month}-${p.day}`);
-}
-
-export function hourChanged(tz = 'UTC'): WhenPredicate {
-  return (ctx) =>
-    temporalChanged(ctx, tz, (p) => `${p.year}-${p.month}-${p.day}-${p.hour}`);
-}
-
-export function monthChanged(tz = 'UTC'): WhenPredicate {
-  return (ctx) => temporalChanged(ctx, tz, (p) => `${p.year}-${p.month}`);
-}
-
-export function yearChanged(tz = 'UTC'): WhenPredicate {
-  return (ctx) => temporalChanged(ctx, tz, (p) => p.year);
-}
-
-export function seasonChanged(tz = 'UTC'): WhenPredicate {
-  return (ctx) =>
-    temporalChanged(ctx, tz, (p) => getSeason(parseInt(p.month) - 1));
-}
-
-export function weekChanged(tz = 'UTC'): WhenPredicate {
-  return (ctx) => temporalChanged(ctx, tz, isoWeekKey);
-}
-
 export interface UserReminderOptions {
   asPart?: boolean;
 }
@@ -219,12 +79,6 @@ export function isConditionalReminder(
   metadata: { reminder: ConditionalReminder };
 } {
   return fragment.name === 'reminder' && !!fragment.metadata?.reminder;
-}
-
-export function getConditionalReminder(
-  fragment: ContextFragment,
-): ConditionalReminder {
-  return fragment.metadata!.reminder as ConditionalReminder;
 }
 
 export interface UserReminderMetadata {
@@ -614,13 +468,16 @@ export function reminder(
   textOrFragment: ReminderText | ContextFragment,
   options?: UserReminderOptions | ConditionalReminderOptions,
 ): UserReminder | ContextFragment {
-  const text = isFragment(textOrFragment)
+  const fromFragment = isFragment(textOrFragment);
+  const text = fromFragment
     ? new XmlRenderer().render([textOrFragment])
     : textOrFragment;
 
   if (typeof text === 'string') {
     assertReminderText(text);
   }
+
+  const asPart = options?.asPart ?? fromFragment;
 
   if (options && 'when' in options && options.when) {
     return {
@@ -630,7 +487,7 @@ export function reminder(
         reminder: {
           text,
           when: options.when,
-          asPart: options.asPart ?? false,
+          asPart,
         } satisfies ConditionalReminder,
       },
     };
@@ -638,7 +495,7 @@ export function reminder(
 
   return {
     text: text as SyncReminderText,
-    asPart: options?.asPart ?? false,
+    asPart,
   };
 }
 

@@ -10,7 +10,6 @@ import {
 import type { ContextFragment } from './fragments.ts';
 import { getFragmentData, isMessageFragment } from './fragments.ts';
 import {
-  getConditionalReminder,
   isConditionalReminder,
   resolveReminderAsync,
   user,
@@ -520,7 +519,9 @@ export class ContextEngine {
             lastAssistantMessage,
           };
 
-          const configs = conditionalReminders.map(getConditionalReminder);
+          const configs = conditionalReminders.map(
+            (it) => it.metadata.reminder,
+          );
           const whenResults = await Promise.all(
             configs.map((it) => it.when(whenCtx)),
           );

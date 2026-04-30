@@ -964,6 +964,9 @@ describe('Stream Chunks', () => {
       });
     });
 
+    // Load-bearing: the exact-length assertion here doubles as negative-case
+    // coverage for the watch:error-emitted path — only 'failed' streams emit
+    // an error chunk, completed streams must not.
     it('should replay all chunks from a completed stream', async () => {
       await withStreamStore(async (store) => {
         const streams = new StreamManager({ store });
@@ -1080,6 +1083,31 @@ describe('Stream Chunks', () => {
       });
     });
 
+    it('should emit fallback error chunk when failed stream has no error message', async () => {
+      await withStreamStore(async (store) => {
+        const streams = new StreamManager({ store });
+
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+        await store.updateStreamStatus(stream.id, 'failed', { error: '' });
+
+        const received: unknown[] = [];
+        const readable = streams.watch(stream.id, makeWatchPolling());
+        for await (const chunk of readable) {
+          received.push(chunk);
+        }
+
+        assert.strictEqual(received.length, 1);
+        assert.deepStrictEqual(received[0], {
+          type: 'error',
+          errorText: 'Stream failed',
+        });
+      });
+    });
+
     it('should emit error chunk for late-attached watcher on already-failed stream', async () => {
       await withStreamStore(async (store) => {
         const streams = new StreamManager({ store });
@@ -1107,6 +1135,9 @@ describe('Stream Chunks', () => {
       });
     });
 
+    // Load-bearing: the exact-length assertion here is the negative-case
+    // guard for cancelled streams — they must close silently without an
+    // error chunk (only 'failed' status emits).
     it('should close when stream is cancelled', async () => {
       await withStreamStore(async (store) => {
         const streams = new StreamManager({ store });

@@ -357,15 +357,16 @@ export class StreamManager {
               }
               if (currentStatus === 'failed') {
                 const stream = await store.getStream(streamId);
-                if (stream?.error) {
+                if (stream) {
+                  const errorText = stream.error || 'Stream failed';
                   this.#emitPolling({
                     type: 'watch:error-emitted',
                     streamId,
-                    errorTextLength: stream.error.length,
+                    errorTextLength: errorText.length,
                   });
                   controller.enqueue({
                     type: 'error',
-                    errorText: stream.error,
+                    errorText,
                   });
                 }
               }

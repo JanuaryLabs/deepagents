@@ -17,7 +17,7 @@ import {
   yearReminder,
 } from '@deepagents/context';
 
-import { getTextParts } from '../../text.ts';
+import { getTextParts } from '../../../text.ts';
 
 function getLastUserMessage(messages: UIMessage[]): UIMessage {
   const lastUser = [...messages]
@@ -161,6 +161,77 @@ describe('dateReminder', () => {
       assert.ok(
         datePart.includes('2026-03-28'),
         `In Tokyo at UTC 16:00, date should be 2026-03-28. Got: ${datePart}`,
+      );
+    });
+  });
+
+  it('falls back to timezone from locale metadata when tz option is omitted', async () => {
+    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'date-meta-tz',
+        userId: 'u1',
+      });
+
+      engine.set(
+        localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
+        user('turn 1'),
+      );
+      await engine.save();
+
+      engine.set(assistantText('reply'));
+      await engine.save();
+
+      mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
+
+      engine.set(dateReminder(), user('turn 2'));
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const lastUser = getLastUserMessage(messages);
+      const allText = getTextParts(lastUser).join(' ');
+
+      assert.ok(
+        allText.includes('2026-03-28'),
+        `dateReminder() with no tz should adopt Asia/Tokyo from locale metadata (UTC 16:00 = Tokyo next-day 01:00). Got: ${allText}`,
+      );
+    });
+  });
+
+  it('uses metadata tz for the change-detection predicate, not UTC', async () => {
+    await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'date-meta-when',
+        userId: 'u1',
+      });
+
+      engine.set(
+        localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
+        user('turn 1'),
+      );
+      await engine.save();
+
+      engine.set(assistantText('reply'));
+      await engine.save();
+
+      mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
+
+      engine.set(dateReminder(), user('turn 2'));
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const allText = getTextParts(getLastUserMessage(messages)).join(' ');
+
+      assert.ok(
+        allText.includes('date: 2026-03-27 -> 2026-03-28'),
+        `Tokyo crosses midnight between UTC 14:00 (Tokyo 23:00) and UTC 16:00 (Tokyo 01:00 next day); UTC stays on 2026-03-27 the whole time, so a UTC-based predicate would not fire. Got: ${allText}`,
       );
     });
   });

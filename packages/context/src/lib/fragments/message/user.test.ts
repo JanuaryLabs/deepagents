@@ -1,28 +1,18 @@
 import type { UIMessage } from 'ai';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { describe, it } from 'node:test';
 
 import {
   type WhenContext,
-  afterTurn,
-  and,
-  dayChanged,
   everyNTurns,
-  firstN,
   getReminderRanges,
-  hourChanged,
+  hint,
   isConditionalReminder,
-  monthChanged,
-  not,
   once,
-  or,
   reminder,
-  seasonChanged,
   stripReminders,
   stripTextByRanges,
   user,
-  weekChanged,
-  yearChanged,
 } from '@deepagents/context';
 
 function wctx(
@@ -596,400 +586,35 @@ describe('reminder scheduling', () => {
     });
   });
 
-  describe('when predicates', () => {
-    it('everyNTurns fires on turns divisible by N', () => {
-      const pred = everyNTurns(3);
-      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 6, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 7, content: '' })), false);
+  describe('reminder() asPart defaults (immediate path)', () => {
+    it('fragment input defaults asPart to true', () => {
+      const r = reminder(hint('Check indexes'));
+      assert.ok(!('name' in r), 'Should be a UserReminder, not a fragment');
+      assert.strictEqual(
+        r.asPart,
+        true,
+        'Fragments produce structured content; immediate fragment reminders should default to asPart: true',
+      );
     });
 
-    it('once fires only on turn 1', () => {
-      const pred = once();
-      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 10, content: '' })), false);
+    it('explicit asPart: false overrides the fragment default', () => {
+      const r = reminder(hint('Inline hint'), { asPart: false });
+      assert.ok(!('name' in r));
+      assert.strictEqual(
+        r.asPart,
+        false,
+        'Caller-provided asPart must beat the input-shape default',
+      );
     });
 
-    it('firstN fires on first N turns', () => {
-      const pred = firstN(3);
-      assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 4, content: '' })), false);
-    });
-
-    it('afterTurn fires only after turn N', () => {
-      const pred = afterTurn(5);
-      assert.strictEqual(pred(wctx({ turn: 5, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 6, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 10, content: '' })), true);
-    });
-
-    it('custom predicate', () => {
-      const pred = ({ turn }: { turn: number; content: string }) => turn === 4;
-      assert.strictEqual(pred(wctx({ turn: 3, content: '' })), false);
-      assert.strictEqual(pred(wctx({ turn: 4, content: '' })), true);
-      assert.strictEqual(pred(wctx({ turn: 5, content: '' })), false);
-    });
-
-    it('and() combines with AND logic', async () => {
-      const pred = and(everyNTurns(3), afterTurn(5));
-      assert.strictEqual(await pred(wctx({ turn: 3, content: '' })), false);
-      assert.strictEqual(await pred(wctx({ turn: 6, content: '' })), true);
-      assert.strictEqual(await pred(wctx({ turn: 7, content: '' })), false);
-      assert.strictEqual(await pred(wctx({ turn: 9, content: '' })), true);
-    });
-
-    it('or() combines with OR logic', async () => {
-      const pred = or(once(), everyNTurns(5));
-      assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), true);
-      assert.strictEqual(await pred(wctx({ turn: 2, content: '' })), false);
-      assert.strictEqual(await pred(wctx({ turn: 5, content: '' })), true);
-      assert.strictEqual(await pred(wctx({ turn: 10, content: '' })), true);
-    });
-
-    it('not() inverts a predicate', async () => {
-      const pred = not(firstN(2));
-      assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), false);
-      assert.strictEqual(await pred(wctx({ turn: 2, content: '' })), false);
-      assert.strictEqual(await pred(wctx({ turn: 3, content: '' })), true);
-    });
-  });
-
-  describe('temporal predicates', () => {
-    function useFakeTime<T>(iso: string, fn: () => T): T {
-      mock.timers.enable({ apis: ['Date'] });
-      mock.timers.setTime(new Date(iso).getTime());
-      let result: T;
-      try {
-        result = fn();
-      } catch (e) {
-        mock.timers.reset();
-        throw e;
-      }
-      if (result instanceof Promise) {
-        return result.finally(() => mock.timers.reset()) as T;
-      }
-      mock.timers.reset();
-      return result;
-    }
-
-    describe('dayChanged', () => {
-      it('fires on first turn when lastMessageAt is undefined', () => {
-        useFakeTime('2026-03-27T12:00:00Z', () => {
-          assert.strictEqual(
-            dayChanged()(wctx({ turn: 1, content: '' })),
-            true,
-          );
-        });
-      });
-
-      it('does not fire when still the same day', () => {
-        useFakeTime('2026-03-27T23:00:00Z', () => {
-          assert.strictEqual(
-            dayChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-              }),
-            ),
-            false,
-          );
-        });
-      });
-
-      it('fires when the day has changed', () => {
-        useFakeTime('2026-03-28T01:00:00Z', () => {
-          assert.strictEqual(
-            dayChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T23:00:00Z').getTime(),
-              }),
-            ),
-            true,
-          );
-        });
-      });
-
-      it('respects timezone for day boundary', () => {
-        useFakeTime('2026-03-27T16:00:00Z', () => {
-          assert.strictEqual(
-            dayChanged('Asia/Tokyo')(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T14:00:00Z').getTime(),
-              }),
-            ),
-            true,
-            'In Tokyo: now=2026-03-28 01:00, prev=2026-03-27 23:00 => day changed',
-          );
-        });
-      });
-    });
-
-    describe('hourChanged', () => {
-      it('fires on first turn', () => {
-        useFakeTime('2026-03-27T12:00:00Z', () => {
-          assert.strictEqual(
-            hourChanged()(wctx({ turn: 1, content: '' })),
-            true,
-          );
-        });
-      });
-
-      it('does not fire within the same hour', () => {
-        useFakeTime('2026-03-27T12:45:00Z', () => {
-          assert.strictEqual(
-            hourChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:10:00Z').getTime(),
-              }),
-            ),
-            false,
-          );
-        });
-      });
-
-      it('fires when the hour has changed', () => {
-        useFakeTime('2026-03-27T13:05:00Z', () => {
-          assert.strictEqual(
-            hourChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
-              }),
-            ),
-            true,
-          );
-        });
-      });
-    });
-
-    describe('monthChanged', () => {
-      it('fires on first turn', () => {
-        useFakeTime('2026-03-15T12:00:00Z', () => {
-          assert.strictEqual(
-            monthChanged()(wctx({ turn: 1, content: '' })),
-            true,
-          );
-        });
-      });
-
-      it('does not fire within the same month', () => {
-        useFakeTime('2026-03-28T12:00:00Z', () => {
-          assert.strictEqual(
-            monthChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-01T12:00:00Z').getTime(),
-              }),
-            ),
-            false,
-          );
-        });
-      });
-
-      it('fires when the month has changed', () => {
-        useFakeTime('2026-04-01T00:05:00Z', () => {
-          assert.strictEqual(
-            monthChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-31T23:55:00Z').getTime(),
-              }),
-            ),
-            true,
-          );
-        });
-      });
-    });
-
-    describe('yearChanged', () => {
-      it('fires on first turn', () => {
-        useFakeTime('2026-06-15T12:00:00Z', () => {
-          assert.strictEqual(
-            yearChanged()(wctx({ turn: 1, content: '' })),
-            true,
-          );
-        });
-      });
-
-      it('does not fire within the same year', () => {
-        useFakeTime('2026-12-31T12:00:00Z', () => {
-          assert.strictEqual(
-            yearChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-01-01T12:00:00Z').getTime(),
-              }),
-            ),
-            false,
-          );
-        });
-      });
-
-      it('fires when the year has changed', () => {
-        useFakeTime('2027-01-01T00:05:00Z', () => {
-          assert.strictEqual(
-            yearChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-12-31T23:55:00Z').getTime(),
-              }),
-            ),
-            true,
-          );
-        });
-      });
-    });
-
-    describe('seasonChanged', () => {
-      it('fires on first turn', () => {
-        useFakeTime('2026-06-15T12:00:00Z', () => {
-          assert.strictEqual(
-            seasonChanged()(wctx({ turn: 1, content: '' })),
-            true,
-          );
-        });
-      });
-
-      it('does not fire within the same season', () => {
-        useFakeTime('2026-07-15T12:00:00Z', () => {
-          assert.strictEqual(
-            seasonChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-06-15T12:00:00Z').getTime(),
-              }),
-            ),
-            false,
-            'June and July are both Summer',
-          );
-        });
-      });
-
-      it('fires when the season changes (Spring -> Summer)', () => {
-        useFakeTime('2026-06-01T12:00:00Z', () => {
-          assert.strictEqual(
-            seasonChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-05-31T12:00:00Z').getTime(),
-              }),
-            ),
-            true,
-            'May is Spring, June is Summer',
-          );
-        });
-      });
-    });
-
-    describe('weekChanged', () => {
-      it('fires on first turn', () => {
-        useFakeTime('2026-03-25T12:00:00Z', () => {
-          assert.strictEqual(
-            weekChanged()(wctx({ turn: 1, content: '' })),
-            true,
-          );
-        });
-      });
-
-      it('does not fire within the same week', () => {
-        useFakeTime('2026-03-26T12:00:00Z', () => {
-          assert.strictEqual(
-            weekChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-24T12:00:00Z').getTime(),
-              }),
-            ),
-            false,
-            'Tue Mar 24 and Thu Mar 26 are same ISO week',
-          );
-        });
-      });
-
-      it('fires when the week changes', () => {
-        useFakeTime('2026-04-06T12:00:00Z', () => {
-          assert.strictEqual(
-            weekChanged()(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-              }),
-            ),
-            true,
-            'Mar 27 (Fri) and Apr 6 (Mon) are different ISO weeks',
-          );
-        });
-      });
-    });
-
-    describe('composition', () => {
-      it('composes dayChanged with afterTurn', async () => {
-        await useFakeTime('2026-03-28T12:00:00Z', async () => {
-          const pred = and(dayChanged(), afterTurn(3));
-
-          assert.strictEqual(
-            await pred(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-              }),
-            ),
-            false,
-            'turn 2 + day changed => false (afterTurn(3) fails)',
-          );
-
-          assert.strictEqual(
-            await pred(
-              wctx({
-                turn: 4,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:00:00Z').getTime(),
-              }),
-            ),
-            true,
-            'turn 4 + day changed => true',
-          );
-        });
-      });
-
-      it('composes hourChanged with not()', async () => {
-        await useFakeTime('2026-03-27T13:05:00Z', async () => {
-          const pred = not(hourChanged());
-
-          assert.strictEqual(
-            await pred(
-              wctx({
-                turn: 2,
-                content: '',
-                lastMessageAt: new Date('2026-03-27T12:55:00Z').getTime(),
-              }),
-            ),
-            false,
-            'hour changed => not() inverts to false',
-          );
-        });
-      });
+    it('explicit asPart: true overrides the string default', () => {
+      const r = reminder('plain', { asPart: true });
+      assert.ok(!('name' in r));
+      assert.strictEqual(
+        r.asPart,
+        true,
+        'String input defaults to false but caller can override to true',
+      );
     });
   });
 });

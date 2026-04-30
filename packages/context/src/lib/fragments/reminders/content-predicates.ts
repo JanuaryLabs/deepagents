@@ -26,3 +26,18 @@ export function classifies<T>(
 ): WhenPredicate {
   return (ctx) => classifier.match(ctx.content, options).length > 0;
 }
+
+export function contentIncludes(keywords: string[]): WhenPredicate {
+  const lower = keywords.map((k) => k.toLowerCase());
+  return (ctx) => {
+    const text = ctx.content.toLowerCase();
+    return lower.some((kw) => text.includes(kw));
+  };
+}
+
+export function contentPattern(pattern: RegExp): WhenPredicate {
+  return (ctx) => {
+    pattern.lastIndex = 0;
+    return pattern.test(ctx.content);
+  };
+}
