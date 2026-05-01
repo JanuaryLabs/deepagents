@@ -4,6 +4,9 @@ import {
   type CommandContext,
   type CustomCommand,
   type IFileSystem,
+  type PipelineNode,
+  type ScriptNode,
+  type SimpleCommandNode,
   defineCommand,
   parse,
 } from 'just-bash';
@@ -157,18 +160,13 @@ function createShallowRouter(
         : raw;
 
       let transformed: string;
-      let tokens: string[];
+      let dispatch: DispatchTarget | null;
       try {
         transformed =
           ext.plugins.length > 0
             ? transformer.transform(preHook).script
             : preHook;
-        const firstCmd =
-          parse(transformed).statements[0]?.pipelines[0]?.commands[0];
-        tokens =
-          firstCmd?.type === 'SimpleCommand'
-            ? tokenizeFirstCommand(transformed)
-            : [];
+        dispatch = extractDispatchTarget(parse(transformed), cwd);
       } catch (err) {
         return {
           stdout: '',
@@ -177,13 +175,13 @@ function createShallowRouter(
         };
       }
 
-      const [name, ...args] = tokens;
+      const [name, ...args] = dispatch?.tokens ?? [];
       const cmd = name ? byName.get(name) : undefined;
 
       if (cmd) {
         return cmd.handler(args, {
           sandbox: backend,
-          cwd,
+          cwd: dispatch?.cwd ?? cwd,
           env: ext.env,
           stdin: '',
         });
@@ -194,21 +192,77 @@ function createShallowRouter(
   };
 }
 
-function tokenizeFirstCommand(commandLine: string): string[] {
-  const ast = parse(commandLine);
-  const first = ast.statements[0]?.pipelines[0]?.commands[0];
-  if (!first || first.type !== 'SimpleCommand') return [];
-  if (ast.statements.length > 1) return [];
-  if (ast.statements[0].pipelines.length > 1) return [];
-  if (ast.statements[0].pipelines[0].commands.length > 1) return [];
-  if (first.redirections.length > 0) return [];
+type DispatchTarget = {
+  tokens: string[];
+  cwd: string;
+};
 
-  const name = asStaticWordText(first.name);
-  if (!name) return [];
+function extractDispatchTarget(
+  ast: ScriptNode,
+  defaultCwd: string,
+): DispatchTarget | null {
+  if (ast.statements.length !== 1) return null;
+
+  const statement = ast.statements[0];
+  if (statement.background) return null;
+
+  if (statement.operators.length === 0 && statement.pipelines.length === 1) {
+    const tokens = tokenizeSimplePipeline(statement.pipelines[0]);
+    return tokens ? { tokens, cwd: defaultCwd } : null;
+  }
+
+  if (
+    statement.operators.length === 1 &&
+    statement.operators[0] === '&&' &&
+    statement.pipelines.length === 2
+  ) {
+    const cd = simpleCommandFromPipeline(statement.pipelines[0]);
+    const cdCwd = readCdTarget(cd);
+    if (!cdCwd) return null;
+
+    const tokens = tokenizeSimplePipeline(statement.pipelines[1]);
+    return tokens ? { tokens, cwd: cdCwd } : null;
+  }
+
+  return null;
+}
+
+function simpleCommandFromPipeline(
+  pipeline: PipelineNode | undefined,
+): SimpleCommandNode | null {
+  if (!pipeline) return null;
+  if (pipeline.negated || pipeline.timed || pipeline.commands.length !== 1) {
+    return null;
+  }
+
+  const command = pipeline.commands[0];
+  return command?.type === 'SimpleCommand' ? command : null;
+}
+
+function readCdTarget(command: SimpleCommandNode | null): string | null {
+  if (!command) return null;
+  if (command.redirections.length > 0 || command.args.length !== 1) {
+    return null;
+  }
+
+  const name = asStaticWordText(command.name);
+  if (name !== 'cd') return null;
+
+  return asStaticWordText(command.args[0]);
+}
+
+function tokenizeSimplePipeline(
+  pipeline: PipelineNode | undefined,
+): string[] | null {
+  const command = simpleCommandFromPipeline(pipeline);
+  if (!command || command.redirections.length > 0) return null;
+
+  const name = asStaticWordText(command.name);
+  if (!name) return null;
   const args: string[] = [];
-  for (const arg of first.args) {
+  for (const arg of command.args) {
     const text = asStaticWordText(arg);
-    if (text == null) return [];
+    if (text == null) return null;
     args.push(text);
   }
   return [name, ...args];

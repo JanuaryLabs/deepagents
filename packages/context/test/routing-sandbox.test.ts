@@ -375,7 +375,7 @@ describe('createRoutingSandbox: onBeforeBashCall', () => {
 });
 
 describe('createBashTool: sql extension smoke', () => {
-  it('dispatches sql run through extensions option', async () => {
+  it('dispatches sql run through the public bash tool', async () => {
     const calls: string[] = [];
     const ext: SandboxExtension = {
       commands: [
@@ -398,17 +398,74 @@ describe('createBashTool: sql extension smoke', () => {
         },
       ],
     };
-    const sandbox = await createBashTool({
-      sandbox: await createRoutingSandbox({
-        backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-        hostExtensions: [ext],
-      }),
+    const routed = await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [ext],
     });
+    await routed.executeCommand('mkdir -p /workspace');
+    const sandbox = await createBashTool({ sandbox: routed });
 
-    const result = await sandbox.sandbox.executeCommand('sql run "SELECT 1"');
+    const execute = sandbox.bash.execute;
+    assert.ok(execute, 'bash tool execution should be available');
+    const result = (await execute(
+      {
+        command: 'sql run "SELECT 1"',
+        reasoning: 'verify sql extension dispatch through public bash tool',
+      },
+      {} as never,
+    )) as CommandResult;
+
     assert.strictEqual(result.exitCode, 0, result.stderr);
     assert.match(result.stdout, /results stored in/);
     assert.deepStrictEqual(calls, ['run:SELECT 1']);
+  });
+
+  it('dispatches sql through bash tool cwd wrapper on shallow backends', async () => {
+    let captured:
+      | {
+          args: string[];
+          cwd: string;
+        }
+      | undefined;
+    const ext: SandboxExtension = {
+      commands: [
+        {
+          name: 'sql',
+          handler: async (args, ctx) => {
+            captured = { args, cwd: ctx.cwd };
+            return {
+              stdout: 'handled\n',
+              stderr: '',
+              exitCode: 0,
+            };
+          },
+        },
+      ],
+    };
+    const sandbox = await createBashTool({
+      sandbox: await createRoutingSandbox({
+        backend: await createShallowBackend(),
+        hostExtensions: [ext],
+      }),
+      destination: '/',
+    });
+
+    const execute = sandbox.bash.execute;
+    assert.ok(execute, 'bash tool execution should be available');
+    const result = (await execute(
+      {
+        command: 'sql validate billing "SELECT 1"',
+        reasoning: 'verify sql extension dispatch after cwd setup',
+      },
+      {} as never,
+    )) as CommandResult;
+
+    assert.strictEqual(result.exitCode, 0, result.stderr);
+    assert.strictEqual(result.stdout, 'handled\n');
+    assert.deepStrictEqual(captured, {
+      args: ['validate', 'billing', 'SELECT 1'],
+      cwd: '/',
+    });
   });
 });
 
