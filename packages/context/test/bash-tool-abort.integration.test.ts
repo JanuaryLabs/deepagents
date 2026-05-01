@@ -1,7 +1,8 @@
-import { createBashTool } from 'bash-tool';
 import { Bash, defineCommand } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+
+import { createBashTool } from '@deepagents/context';
 
 describe('createBashTool abort handling', () => {
   it('stops at the next statement boundary after abort', async () => {
@@ -37,7 +38,10 @@ describe('createBashTool abort handling', () => {
     };
 
     await execute(
-      { command: 'abort-now; echo reached >/marker.txt' },
+      {
+        command: 'abort-now; echo reached >/marker.txt',
+        reasoning: 'verify abort stops at next statement boundary',
+      },
       execOptions,
     );
 

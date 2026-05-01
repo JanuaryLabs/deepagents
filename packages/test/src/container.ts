@@ -5,6 +5,9 @@ export interface ContainerConfig {
   name: string;
   env: Record<string, string>;
   internalPort: number;
+  tmpfs?: string[];
+  ipcHost?: boolean;
+  memorySwappiness?: number;
 }
 
 export interface Container {
@@ -69,6 +72,13 @@ export async function createContainer(
     `${key}=${value}`,
   ]);
 
+  const tmpfsArgs = (config.tmpfs ?? []).flatMap((spec) => ['--tmpfs', spec]);
+  const ipcArgs = config.ipcHost ? ['--ipc=host'] : [];
+  const swapArgs =
+    config.memorySwappiness !== undefined
+      ? [`--memory-swappiness=${config.memorySwappiness}`]
+      : [];
+
   const runResult = await spawn('docker', [
     'run',
     '-d',
@@ -76,7 +86,10 @@ export async function createContainer(
     '--name',
     config.name,
     ...envArgs,
-    '-P', // Publish all exposed ports to random ports
+    ...tmpfsArgs,
+    ...ipcArgs,
+    ...swapArgs,
+    '-P',
     config.image,
   ]);
 

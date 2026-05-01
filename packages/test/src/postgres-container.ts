@@ -44,8 +44,8 @@ export interface PostgresContainer {
 async function waitForPostgres(
   containerId: string,
   user: string,
-  maxRetries = 30,
-  retryDelayMs = 1000,
+  maxRetries = 120,
+  retryDelayMs = 250,
 ): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -115,6 +115,9 @@ export async function withPostgresContainer<T>(
       POSTGRES_USER: user,
     },
     internalPort: 5432,
+    tmpfs: ['/var/lib/postgresql/data:rw,size=512m'],
+    ipcHost: true,
+    memorySwappiness: 0,
   });
 
   try {

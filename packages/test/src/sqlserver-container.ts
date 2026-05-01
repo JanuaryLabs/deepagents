@@ -4,11 +4,31 @@ import { randomUUID } from 'node:crypto';
 
 import { checkDockerAvailable, createContainer } from './container.ts';
 
+export const SQL_SERVER_FULL_IMAGE =
+  'mcr.microsoft.com/mssql/server:2022-latest';
+export const SQL_SERVER_EDGE_IMAGE = 'mcr.microsoft.com/azure-sql-edge:latest';
+
+function defaultSqlServerImage(): string {
+  if (process.platform === 'darwin' && process.arch === 'arm64') {
+    return SQL_SERVER_EDGE_IMAGE;
+  }
+  return SQL_SERVER_FULL_IMAGE;
+}
+
+function isAzureSqlEdge(image: string): boolean {
+  return image.includes('azure-sql-edge');
+}
+
 /**
  * SQL Server container configuration.
  */
 export interface SqlServerContainerConfig {
-  /** SQL Server image to use (default: mcr.microsoft.com/mssql/server:2022-latest) */
+  /**
+   * SQL Server image to use. Defaults to Azure SQL Edge on Apple Silicon
+   * (native ARM64 — no QEMU emulation) and full SQL Server elsewhere.
+   * Pass SQL_SERVER_FULL_IMAGE for tests that need FULLTEXT CATALOG /
+   * CONTAINSTABLE — Azure SQL Edge does not support FTS.
+   */
   image?: string;
   /** SA password - must meet SQL Server complexity requirements (default: StrongP@ssw0rd123!) */
   password?: string;
@@ -79,12 +99,11 @@ export async function waitForFtsReady(
 async function waitForSqlServer(
   containerId: string,
   password: string,
-  maxRetries = 60,
-  retryDelayMs = 2000,
+  maxRetries = 480,
+  retryDelayMs = 250,
 ): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      // Use sqlcmd to test connection
       await spawn('docker', [
         'exec',
         containerId,
@@ -95,15 +114,17 @@ async function waitForSqlServer(
         'sa',
         '-P',
         password,
-        '-C', // Trust server certificate
+        '-C',
+        '-l',
+        '1',
+        '-t',
+        '1',
         '-Q',
         'SELECT 1',
       ]);
 
-      // Success! SQL Server is ready
       return;
     } catch {
-      // SQL Server not ready yet, try older sqlcmd path
       try {
         await spawn('docker', [
           'exec',
@@ -115,12 +136,16 @@ async function waitForSqlServer(
           'sa',
           '-P',
           password,
+          '-l',
+          '1',
+          '-t',
+          '1',
           '-Q',
           'SELECT 1',
         ]);
         return;
       } catch {
-        // Still not ready
+        // not ready yet
       }
     }
 
@@ -198,21 +223,30 @@ export async function withSqlServerContainer<T>(
     return undefined;
   }
 
-  const image = config?.image ?? 'mcr.microsoft.com/mssql/server:2022-latest';
+  const image = config?.image ?? SQL_SERVER_FULL_IMAGE;
   const password = config?.password ?? 'StrongP@ssw0rd123!';
   const database = config?.database ?? 'testdb';
   const user = 'sa';
 
   const containerName = `sqlserver-test-${randomUUID()}`;
 
+  const env: Record<string, string> = {
+    ACCEPT_EULA: 'Y',
+    MSSQL_SA_PASSWORD: password,
+    MSSQL_MEMORY_LIMIT_MB: '2048',
+  };
+  if (!isAzureSqlEdge(image)) {
+    env.MSSQL_PID = 'Express';
+  }
+
   const container = await createContainer({
     image,
     name: containerName,
-    env: {
-      ACCEPT_EULA: 'Y',
-      MSSQL_SA_PASSWORD: password,
-    },
+    env,
     internalPort: 1433,
+    tmpfs: ['/var/opt/mssql:rw,size=2g,mode=1777'],
+    ipcHost: true,
+    memorySwappiness: 0,
   });
 
   try {
