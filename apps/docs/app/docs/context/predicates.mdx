@@ -24,6 +24,7 @@ interface WhenContext {
   content: string;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
+  currentMessage?: UIMessage;
   chat: StoredChatData;
   usage?: LanguageModelUsage;
   branch: string;
@@ -39,12 +40,15 @@ interface WhenContext {
 | `content` | Plain text of the user message |
 | `lastMessageAt` | Timestamp of the last persisted user message |
 | `lastMessage` | The last persisted user `UIMessage` (with metadata) |
+| `currentMessage` | The pending user `UIMessage` for the current turn (visible before persistence) |
 | `chat` | Full `StoredChatData` object (id, userId, metadata, timestamps) |
 | `usage` | Accumulated `LanguageModelUsage` from `chat.metadata.usage` |
 | `branch` | Active branch name (e.g. `"main"`) |
 | `elapsed` | Milliseconds since the last persisted user message |
 | `messageCount` | Total message count across all roles |
 | `lastAssistantMessage` | The last persisted assistant `UIMessage` |
+
+`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists.
 
 ## Turn-Based Predicates
 
@@ -154,22 +158,36 @@ Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. Al
 
 | Predicate | Fires when... |
 | --- | --- |
-| `dayChanged(tz?)` | The calendar date has changed |
-| `hourChanged(tz?)` | The hour has changed |
-| `monthChanged(tz?)` | The month has changed |
-| `yearChanged(tz?)` | The year has changed |
-| `seasonChanged(tz?)` | The meteorological season has changed |
-| `weekChanged(tz?)` | The ISO week has changed |
+| `dayChanged(options?)` | The calendar date has changed |
+| `hourChanged(options?)` | The hour has changed |
+| `monthChanged(options?)` | The month has changed |
+| `yearChanged(options?)` | The year has changed |
+| `seasonChanged(options?)` | The meteorological season has changed |
+| `weekChanged(options?)` | The ISO week has changed |
 
-Each accepts an optional timezone string (defaults to `'UTC'`).
+Each accepts an optional `{ tz?: string }`. When `tz` is omitted, the predicate falls back to `currentMessage.metadata.locale.timeZone`, then `lastMessage.metadata.locale.timeZone`, then `'UTC'`.
 
 ```ts
 import { dayChanged, hourChanged } from '@deepagents/context';
 
-dayChanged();                   // UTC
-dayChanged('America/New_York'); // Eastern time
-hourChanged('Asia/Tokyo');      // JST
+dayChanged();                          // resolves tz from message metadata, else UTC
+dayChanged({ tz: 'America/New_York' }); // explicit Eastern time
+hourChanged({ tz: 'Asia/Tokyo' });     // explicit JST
 ```
+
+Pair tz-less predicates with `localeReminder` (or any user message that sets `metadata.locale`) and they pick the user's timezone up automatically:
+
+```ts
+import { dayChanged, localeReminder, reminder, user } from '@deepagents/context';
+
+engine.set(
+  localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
+  reminder('Day rolled over', { when: dayChanged() }),
+  user('hello'),
+);
+```
+
+See [Temporal Reminders → Timezone resolution](/docs/context/temporal-reminders#timezone-resolution) for the full lookup order, including how to make turn-1 metadata visible.
 
 Seasons follow meteorological boundaries: Winter (Dec-Feb), Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov).
 

@@ -7,7 +7,7 @@ Temporal reminders inject date, time, and locale context into user messages on a
 
 ## Temporal Atoms
 
-Five atoms cover time-derived facts. Each accepts `{ tz?: string }` (defaults to `'UTC'`), uses `asPart: true` (adds a separate text part), and computes diffs purely from `lastMessageAt` — no metadata storage.
+Five atoms cover time-derived facts. Each accepts `{ tz?: string }`, uses `asPart: true` (adds a separate text part), and computes diffs purely from `lastMessageAt` — no metadata storage. When `tz` is omitted, the atom resolves the timezone from message metadata; see [Timezone resolution](#timezone-resolution).
 
 ### dateReminder
 
@@ -94,7 +94,9 @@ Diff: `season: Spring -> Summer`
 
 ## localeReminder
 
-Unlike temporal atoms, locale (language + timezone) is user configuration that can't be derived from a timestamp. `localeReminder` uses metadata persistence — it stores its values in message metadata and reads them back on the next turn to determine if anything changed.
+Unlike temporal atoms, locale (language + timezone) is user configuration that can't be derived from a timestamp. `localeReminder` renders a "Language / Timezone" line into the user message and stores those values in message metadata for next-turn diffs.
+
+It is **not** the source of truth for timezone resolution on the current turn — see [Timezone resolution](#timezone-resolution) below.
 
 ```typescript
 import { localeReminder } from '@deepagents/context';
@@ -119,6 +121,36 @@ timezone: UTC -> Asia/Riyadh
 Language: Arabic (SA)
 Timezone: Asia/Riyadh
 ```
+
+## Timezone resolution
+
+When a temporal atom is constructed without `{ tz }`, it resolves the timezone in this order:
+
+1. `options.tz` passed to the atom
+2. `metadata.locale.timeZone` on the **current** user message (visible on turn 1)
+3. `metadata.locale.timeZone` on the **last persisted** user message (kept for backward continuity)
+4. `'UTC'` fallback
+
+To make turn-1 timezone work, attach `metadata.locale` to the user message itself:
+
+```ts
+import { ContextEngine, dateReminder, user } from '@deepagents/context';
+
+engine.set(
+  dateReminder(),
+  user({
+    role: 'user',
+    parts: [{ type: 'text', text: 'hi' }],
+    metadata: { locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' } },
+  }),
+);
+```
+
+`language` and `timeZone` flow through identically — user-defined reminders can read either off `ctx.currentMessage.metadata.locale` (current turn) or `ctx.lastMessage.metadata.locale` (prior turn).
+
+<Callout type="warn" title="localeReminder alone won't propagate tz on turn 1">
+  `localeReminder({ timeZone: 'Asia/Tokyo' })` writes locale metadata at *resolution* time, after `whenCtx` has already been built and other reminders have evaluated. On the very first turn this means tz-less temporal atoms still see UTC. Put `metadata.locale` on the user message directly when you need turn-1 visibility.
+</Callout>
 
 ## temporalReminder
 

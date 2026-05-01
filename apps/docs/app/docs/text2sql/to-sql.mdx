@@ -11,6 +11,10 @@ The second argument is the configured adapter name — the same key you used in
 `adapters` when constructing `Text2Sql`. It is required, even when only one
 adapter is configured.
 
+Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you create adapter
+maps dynamically, validate the keys before constructing `Text2Sql` with
+`isValidAdapterName(name)` or `validateAdapterNames(names)`.
+
 ## Basic Usage
 
 ```typescript

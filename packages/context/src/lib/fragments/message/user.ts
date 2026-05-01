@@ -14,6 +14,7 @@ export interface ReminderContext {
   turn?: number;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
+  currentMessage?: UIMessage;
   chat?: StoredChatData;
   usage?: LanguageModelUsage;
   branch?: string;
@@ -42,6 +43,7 @@ export interface WhenContext {
   content: string;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
+  currentMessage: UIMessage;
   chat: StoredChatData;
   usage?: LanguageModelUsage;
   branch: string;

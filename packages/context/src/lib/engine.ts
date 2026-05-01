@@ -511,6 +511,7 @@ export class ContextEngine {
             content: plainText,
             lastMessageAt,
             lastMessage,
+            currentMessage: original,
             chat: this.#chatData!,
             usage,
             branch: this.#branchName,

@@ -3,7 +3,6 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
-  type WhenContext,
   everyNTurns,
   getReminderRanges,
   hint,
@@ -14,17 +13,6 @@ import {
   stripTextByRanges,
   user,
 } from '@deepagents/context';
-
-function wctx(
-  partial: Partial<WhenContext> & { turn: number; content: string },
-): WhenContext {
-  return {
-    branch: 'main',
-    chat: { id: 'test-chat', userId: 'test-user', createdAt: 0, updatedAt: 0 },
-    messageCount: 0,
-    ...partial,
-  };
-}
 
 type UserReminderMetadataRecord = {
   id: string;

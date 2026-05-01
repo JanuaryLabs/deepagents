@@ -66,6 +66,10 @@ The adapter-map key (`main` in these examples) becomes the required second
 argument to `text2sql.toSql(..., 'main')` and the `<db>` selector in
 `sql validate <db> "..."` / `sql run <db> "..."`.
 
+Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you construct the
+adapter map dynamically, validate the keys first with
+`isValidAdapterName(name)` or `validateAdapterNames(names)`.
+
 The `context` factory also fixes the conversation identity for `chat()`. Reuse
 the same `store`, `chatId`, and `userId` when you want follow-up turns to stay
 in the same thread. Create a new factory when you want a separate thread.

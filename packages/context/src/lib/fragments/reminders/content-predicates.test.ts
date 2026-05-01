@@ -189,6 +189,11 @@ describe('contentPattern', () => {
       branch: 'main' as const,
       chat: { id: 'test', userId: 'u1', createdAt: 0, updatedAt: 0 },
       messageCount: 1,
+      currentMessage: {
+        id: 'test-msg',
+        role: 'user' as const,
+        parts: [{ type: 'text' as const, text: content }],
+      },
     });
 
     assert.strictEqual(predicate(ctx('deploy app')), true, 'first call');

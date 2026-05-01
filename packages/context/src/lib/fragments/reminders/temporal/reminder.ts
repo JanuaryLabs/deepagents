@@ -1,8 +1,6 @@
 import type { ContextFragment } from '../../../fragments.ts';
 import { type WhenPredicate, reminder } from '../../message/user.ts';
 import {
-  LOCALE_METADATA_KEY,
-  type LocaleData,
   type TemporalReminderOptions,
   dayChanged,
   getLocaleFromMessage,
@@ -13,11 +11,6 @@ import {
   seasonChanged,
   yearChanged,
 } from './predicates.ts';
-
-export interface LocaleReminderOptions {
-  language?: string;
-  timeZone?: string;
-}
 
 function formatDateKey(date: Date, tz: string): string {
   return date.toLocaleDateString('en-CA', { timeZone: tz });
@@ -197,35 +190,30 @@ export function seasonReminder(
   );
 }
 
-export function localeReminder(
-  options?: LocaleReminderOptions,
-): ContextFragment {
-  const language = options?.language ?? 'English (US)';
-  const timeZone = options?.timeZone ?? 'UTC';
-
+export function localeReminder(): ContextFragment {
   const whenFn: WhenPredicate = (ctx) => {
-    const prev = getLocaleFromMessage(ctx.lastMessage);
-    if (!prev) return true;
-    return prev.language !== language || prev.timeZone !== timeZone;
+    const current = getLocaleFromMessage(ctx.currentMessage);
+    if (!current) return false;
+    const last = getLocaleFromMessage(ctx.lastMessage);
+    if (!last) return true;
+    return (
+      current.language !== last.language || current.timeZone !== last.timeZone
+    );
   };
 
   return reminder(
     (ctx) => {
-      const prev = getLocaleFromMessage(ctx.lastMessage);
-      let diff = '';
-      if (prev) {
-        diff = formatDiff([
-          diffLine('language', prev.language, language),
-          diffLine('timezone', prev.timeZone, timeZone),
-        ]);
-      }
+      const current = getLocaleFromMessage(ctx.currentMessage);
+      if (!current) return '';
+      const last = getLocaleFromMessage(ctx.lastMessage);
+      const diff = last
+        ? formatDiff([
+            diffLine('language', last.language, current.language),
+            diffLine('timezone', last.timeZone, current.timeZone),
+          ])
+        : '';
 
-      return {
-        text: `${diff}Language: ${language}\nTimezone: ${timeZone}`,
-        metadata: {
-          [LOCALE_METADATA_KEY]: { language, timeZone } satisfies LocaleData,
-        },
-      };
+      return `${diff}Language: ${current.language}\nTimezone: ${current.timeZone}`;
     },
     { when: whenFn, asPart: true },
   );

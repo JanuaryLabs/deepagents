@@ -15,7 +15,7 @@ manually, see [Caller-Owned Sandbox](/docs/text2sql/sqlv3).
 - **Natural Language to SQL**: Ask questions in plain English, get executable SQL
 - **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
 - **Multi-Database Support**: Works with PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, and BigQuery
-- **Teachable**: Add domain knowledge through context fragments and low-level SQL generation fragments
+- **Teachable**: Add domain knowledge through context fragments or low-level `toSql({ fragments })` calls
 - **Conversation Memory**: Multi-turn chat backed by your `ContextEngine` store
 - **Safe by Default**: Generates read-only queries with output limits
 
@@ -79,6 +79,10 @@ const sql = await text2sql.toSql(
 `main` is the adapter-map key. Reuse that same name in
 `text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
 `sql run <db> "..."` sandbox calls.
+
+Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you build adapter
+maps dynamically, validate the keys up front with `isValidAdapterName(name)`
+or `validateAdapterNames(names)`.
 
 ## Core Methods
 

@@ -10,6 +10,11 @@ subcommand, its transform plugins, and its arg-repair hook. Compose it into
 any backend via `createBashTool` + `createRoutingSandbox` with
 `hostExtensions`.
 
+Adapter-map keys become the `<db>` selector in `sql validate <db> "..."` and
+`sql run <db> "..."`. They must match `/^[A-Za-z_][A-Za-z0-9_]*$/`; if you
+build the map dynamically, validate the keys with `isValidAdapterName(name)`
+or `validateAdapterNames(names)` before composing the extension.
+
 ## What This Path Gives You
 
 - Full control over sandbox construction (`fs`, `cwd`, `env`, and custom commands)

@@ -22,6 +22,11 @@ function wctx(
     branch: 'main',
     chat: { id: 'test-chat', userId: 'test-user', createdAt: 0, updatedAt: 0 },
     messageCount: 0,
+    currentMessage: {
+      id: 'test-msg',
+      role: 'user',
+      parts: [{ type: 'text', text: partial.content }],
+    },
     ...partial,
   };
 }

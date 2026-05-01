@@ -12,7 +12,7 @@ const packages = [
   {
     name: '@deepagents/text2sql',
     description:
-      'Natural language to SQL with domain learning and teachable context.',
+      'Natural-language SQL with teachable context and caller-owned sandbox routing.',
     href: '/docs/text2sql',
   },
   {

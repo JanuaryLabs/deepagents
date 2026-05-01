@@ -175,8 +175,14 @@ describe('dateReminder', () => {
       });
 
       engine.set(
-        localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
-        user('turn 1'),
+        user({
+          id: 'u-turn-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'turn 1' }],
+          metadata: {
+            locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+          },
+        }),
       );
       await engine.save();
 
@@ -201,6 +207,124 @@ describe('dateReminder', () => {
     });
   });
 
+  it('adopts locale tz from the same turn via user metadata (turn 1)', async () => {
+    await useFakeTime('2026-03-27T16:00:00.000Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'date-meta-tz-turn1',
+        userId: 'u1',
+      });
+
+      engine.set(
+        dateReminder(),
+        user({
+          id: 'u-turn-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'turn 1' }],
+          metadata: {
+            locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+          },
+        }),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const allText = getTextParts(getLastUserMessage(messages)).join(' ');
+
+      assert.ok(
+        allText.includes('2026-03-28'),
+        `dateReminder() with no tz should adopt Asia/Tokyo from current user metadata (UTC 16:00 = Tokyo 01:00 next day). Got: ${allText}`,
+      );
+    });
+  });
+
+  it('current message locale wins over last message locale', async () => {
+    await useFakeTime('2026-03-26T16:00:00.000Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'date-current-wins',
+        userId: 'u1',
+      });
+
+      engine.set(
+        user({
+          id: 'u-turn-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'turn 1' }],
+          metadata: { locale: { language: 'English (US)', timeZone: 'UTC' } },
+        }),
+      );
+      await engine.save();
+
+      engine.set(assistantText('reply'));
+      await engine.save();
+
+      mock.timers.setTime(new Date('2026-03-27T16:00:00.000Z').getTime());
+
+      engine.set(
+        dateReminder(),
+        user({
+          id: 'u-turn-2',
+          role: 'user',
+          parts: [{ type: 'text', text: 'turn 2' }],
+          metadata: {
+            locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+          },
+        }),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const allText = getTextParts(getLastUserMessage(messages)).join(' ');
+
+      assert.ok(
+        allText.includes('2026-03-28'),
+        `currentMessage Tokyo locale should override lastMessage UTC locale (Tokyo date at UTC 2026-03-27T16:00 is 2026-03-28). Got: ${allText}`,
+      );
+    });
+  });
+
+  it('caller-supplied user metadata.locale survives save() unchanged', async () => {
+    await useFakeTime('2026-03-27T16:00:00.000Z', async () => {
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: 'preserve-caller-locale',
+        userId: 'u1',
+      });
+
+      engine.set(
+        localeReminder(),
+        user({
+          id: 'u-turn-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'turn 1' }],
+          metadata: {
+            locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+          },
+        }),
+      );
+      await engine.save();
+
+      const { messages } = await engine.resolve({
+        renderer: new XmlRenderer(),
+      });
+      const persisted = getLastUserMessage(messages);
+
+      assert.deepStrictEqual(
+        (persisted.metadata as { locale: unknown }).locale,
+        { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+        'caller-supplied metadata.locale must flow through save() intact',
+      );
+    });
+  });
+
   it('uses metadata tz for the change-detection predicate, not UTC', async () => {
     await useFakeTime('2026-03-27T14:00:00.000Z', async () => {
       const store = new InMemoryContextStore();
@@ -211,8 +335,14 @@ describe('dateReminder', () => {
       });
 
       engine.set(
-        localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
-        user('turn 1'),
+        user({
+          id: 'u-turn-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'turn 1' }],
+          metadata: {
+            locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+          },
+        }),
       );
       await engine.save();
 
@@ -537,7 +667,7 @@ describe('seasonReminder', () => {
 });
 
 describe('localeReminder', () => {
-  it('injects language and timezone on first turn', async () => {
+  it('renders language and timezone from current message metadata', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       store,
@@ -546,8 +676,15 @@ describe('localeReminder', () => {
     });
 
     engine.set(
-      localeReminder({ language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' }),
-      user('hello'),
+      localeReminder(),
+      user({
+        id: 'u-1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'hello' }],
+        metadata: {
+          locale: { language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' },
+        },
+      }),
     );
     await engine.save();
 
@@ -561,6 +698,26 @@ describe('localeReminder', () => {
     assert.ok(
       !localePart.includes('->'),
       'first turn should not include a diff',
+    );
+  });
+
+  it('skips when no locale metadata is present', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'locale-no-metadata',
+      userId: 'u1',
+    });
+
+    engine.set(localeReminder(), user('hello'));
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const allText = getTextParts(getLastUserMessage(messages)).join('');
+
+    assert.ok(
+      !allText.includes('Language:'),
+      `Reminder should skip when no locale metadata. Got: ${allText}`,
     );
   });
 
@@ -600,8 +757,13 @@ describe('localeReminder', () => {
     });
 
     engine.set(
-      localeReminder({ language: 'English (US)', timeZone: 'UTC' }),
-      user('turn 1'),
+      localeReminder(),
+      user({
+        id: 'u-turn-1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'turn 1' }],
+        metadata: { locale: { language: 'English (US)', timeZone: 'UTC' } },
+      }),
     );
     await engine.save();
 
@@ -609,8 +771,15 @@ describe('localeReminder', () => {
     await engine.save();
 
     engine.set(
-      localeReminder({ language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' }),
-      user('turn 2'),
+      localeReminder(),
+      user({
+        id: 'u-turn-2',
+        role: 'user',
+        parts: [{ type: 'text', text: 'turn 2' }],
+        metadata: {
+          locale: { language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' },
+        },
+      }),
     );
     await engine.save();
 
@@ -628,7 +797,7 @@ describe('localeReminder', () => {
     );
   });
 
-  it('persists locale in metadata for cross-turn comparison', async () => {
+  it('caller-supplied locale metadata persists for cross-turn comparison', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       store,
@@ -637,8 +806,13 @@ describe('localeReminder', () => {
     });
 
     engine.set(
-      localeReminder({ language: 'French', timeZone: 'Europe/Paris' }),
-      user('bonjour'),
+      localeReminder(),
+      user({
+        id: 'u-1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'bonjour' }],
+        metadata: { locale: { language: 'French', timeZone: 'Europe/Paris' } },
+      }),
     );
     await engine.save();
 
@@ -667,8 +841,13 @@ describe('localeReminder', () => {
       userId: 'u1',
     });
     engine1.set(
-      localeReminder({ language: 'English (US)', timeZone: 'UTC' }),
-      user('turn 1'),
+      localeReminder(),
+      user({
+        id: 'u-turn-1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'turn 1' }],
+        metadata: { locale: { language: 'English (US)', timeZone: 'UTC' } },
+      }),
     );
     await engine1.save();
 
@@ -681,8 +860,15 @@ describe('localeReminder', () => {
       userId: 'u1',
     });
     engine2.set(
-      localeReminder({ language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' }),
-      user('turn 2'),
+      localeReminder(),
+      user({
+        id: 'u-turn-2',
+        role: 'user',
+        parts: [{ type: 'text', text: 'turn 2' }],
+        metadata: {
+          locale: { language: 'Arabic (SA)', timeZone: 'Asia/Riyadh' },
+        },
+      }),
     );
     await engine2.save();
 
@@ -790,8 +976,15 @@ describe('temporalReminder', () => {
 
       engine.set(
         ...temporalReminder({ tz: 'Asia/Tokyo' }),
-        localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
-        user('hello'),
+        localeReminder(),
+        user({
+          id: 'u-hello',
+          role: 'user',
+          parts: [{ type: 'text', text: 'hello' }],
+          metadata: {
+            locale: { language: 'Japanese', timeZone: 'Asia/Tokyo' },
+          },
+        }),
       );
       await engine.save();
 

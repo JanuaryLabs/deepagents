@@ -36,11 +36,14 @@ export function getLocaleFromMessage(
 
 export function resolveTz(
   options: TemporalReminderOptions | undefined,
-  ctx: { lastMessage?: UIMessage },
+  ctx: { currentMessage?: UIMessage; lastMessage?: UIMessage },
 ): string {
   if (options?.tz) return options.tz;
-  const locale = getLocaleFromMessage(ctx.lastMessage);
-  return locale?.timeZone ?? 'UTC';
+  return (
+    getLocaleFromMessage(ctx.currentMessage)?.timeZone ??
+    getLocaleFromMessage(ctx.lastMessage)?.timeZone ??
+    'UTC'
+  );
 }
 
 function toDateParts(
