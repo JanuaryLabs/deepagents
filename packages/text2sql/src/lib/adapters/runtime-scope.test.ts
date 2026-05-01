@@ -495,6 +495,32 @@ describe('sqlite runtime scope traversal', () => {
     assert.strictEqual(calls.validate, 2);
   });
 
+  it('parses sqlite-only syntax (json_each, dotted quoted identifiers)', async () => {
+    const calls = { validate: 0 };
+    const adapter = new Sqlite({
+      grounding: [staticScopeGrounding(['BoardGames'])],
+      execute: async () => [{ ok: true }],
+      validate: async () => {
+        calls.validate += 1;
+        return undefined;
+      },
+    });
+
+    const sql = `WITH base AS (
+        SELECT "details.name" AS game_name, "stats.average" AS rating
+        FROM BoardGames
+        WHERE "stats.usersrated" >= 10
+      ),
+      tokens AS (
+        SELECT game_name, TRIM(value) AS mechanic
+        FROM base, json_each('["a","b"]')
+      )
+      SELECT mechanic, COUNT(*) FROM tokens GROUP BY mechanic`;
+
+    assert.strictEqual(await adapter.validate(sql), undefined);
+    assert.strictEqual(calls.validate, 1);
+  });
+
   it('allows traversal-expanded grounded tables', async () => {
     const calls = { execute: 0 };
     const adapter = new Sqlite({

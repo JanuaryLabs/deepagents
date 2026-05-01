@@ -453,28 +453,42 @@ export abstract class Adapter {
     allowedEntities: string[],
   ): Promise<SQLScopeErrorPayload | null> {
     const dialect = this.formatterLanguage as string;
-    const scopeDialects: Record<string, RuntimeScopeDialect> = {
-      sqlite: 'mysql',
-      postgresql: 'postgresql',
-      bigquery: 'bigquery',
-      transactsql: 'transactsql',
-      mysql: 'mysql',
+    // Each formatter language maps to an ordered list of node-sql-parser dialects
+    // tried in order until one parses successfully. Single-element lists are the
+    // common case; sqlite cascades because node-sql-parser's sqlite grammar
+    // (pegjs/sqlite.pegjs:2-99 reservedMap) over-reserves identifiers like COUNT
+    // and PERSIST that real SQLite accepts as identifiers. mysql's reservedMap
+    // omits both, so it serves as a lenient fallback. Verified against
+    // better-sqlite3 and pinned by parser-quirks.test.ts in this directory.
+    const scopeDialects: Record<string, RuntimeScopeDialect[]> = {
+      sqlite: ['sqlite', 'mysql'],
+      postgresql: ['postgresql'],
+      bigquery: ['bigquery'],
+      transactsql: ['transactsql'],
+      mysql: ['mysql'],
     };
-    const scopeDialect = scopeDialects[dialect];
-    if (!scopeDialect) {
+    const candidates = scopeDialects[dialect];
+    if (!candidates) {
       throw new TypeError(
         `No scope dialect mapping for formatter language "${dialect}". Add it to the scopeDialects map in Adapter.#checkScope.`,
       );
     }
 
-    let references: { db?: string | null; table: string }[];
-    try {
-      references = extractBaseEntityReferences(sql, scopeDialect);
-    } catch (error) {
+    let references: { db?: string | null; table: string }[] | null = null;
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      try {
+        references = extractBaseEntityReferences(sql, candidate);
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (references === null) {
       return buildScopeParseErrorPayload(
         sql,
         dialect as RuntimeScopeDialect,
-        error,
+        lastError,
       );
     }
 
