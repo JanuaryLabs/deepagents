@@ -311,7 +311,7 @@ engine.set(
       const hours = Math.floor((Date.now() - ctx.lastMessageAt) / 3600000);
       return `${hours}h since last message.`;
     },
-    { when: dayChanged(), asPart: true },
+    { when: dayChanged(), asPart: false },
   ),
 );
 ```

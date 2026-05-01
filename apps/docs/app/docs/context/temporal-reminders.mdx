@@ -7,7 +7,7 @@ Temporal reminders inject date, time, and locale context into user messages on a
 
 ## Temporal Atoms
 
-Five atoms cover time-derived facts. Each accepts `{ tz?: string }`, uses `asPart: true` (adds a separate text part), and computes diffs purely from `lastMessageAt` — no metadata storage. When `tz` is omitted, the atom resolves the timezone from message metadata; see [Timezone resolution](#timezone-resolution).
+Five atoms cover time-derived facts. Each accepts `{ tz?: string }`, renders inline, and computes diffs purely from `lastMessageAt` — no metadata storage. When `tz` is omitted, the atom resolves the timezone from message metadata; see [Timezone resolution](#timezone-resolution).
 
 ### dateReminder
 

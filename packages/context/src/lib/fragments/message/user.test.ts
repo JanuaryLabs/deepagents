@@ -130,10 +130,11 @@ describe('user reminders', () => {
   });
 
   it('supports asPart reminders and records part index ranges', () => {
+    const partMode = true;
     const fragment = user(
       'body',
-      reminder('before', { asPart: true }),
-      reminder('after', { asPart: true }),
+      reminder('before', { asPart: partMode }),
+      reminder('after', { asPart: partMode }),
     );
     const message = encodeMessage(fragment);
 
@@ -329,7 +330,7 @@ describe('user codec contract', () => {
     const fragment = user(
       'hi',
       reminder('r1'),
-      reminder('r2', { asPart: true }),
+      reminder('r2', { asPart: false }),
     );
     const first = encodeMessage(fragment);
     const second = encodeMessage(fragment);
@@ -405,6 +406,7 @@ describe('reminder range helpers', () => {
   });
 
   it('strips reminders from a message and removes reminder metadata', () => {
+    const partMode = true;
     const fragment = user(
       {
         id: 'msg-1',
@@ -413,7 +415,7 @@ describe('reminder range helpers', () => {
         parts: [{ type: 'text', text: 'Deploy now.' }],
       },
       reminder('inline-reminder'),
-      reminder('part-reminder', { asPart: true }),
+      reminder('part-reminder', { asPart: partMode }),
     );
     const message = encodeMessage(fragment);
     const encodedInlineReminder = taggedReminder('inline-reminder');
@@ -453,6 +455,7 @@ describe('reminder range helpers', () => {
   });
 
   it('strips reminders across multiple text parts and keeps non-reminder text', () => {
+    const partMode = true;
     const fragment = user(
       {
         id: 'msg-multi-part-strip',
@@ -464,7 +467,7 @@ describe('reminder range helpers', () => {
         ],
       },
       reminder('inline-tail'),
-      reminder('standalone-part', { asPart: true }),
+      reminder('standalone-part', { asPart: partMode }),
     );
     const message = encodeMessage(fragment);
     const stripped = stripReminders(message);
@@ -539,9 +542,10 @@ describe('reminder scheduling', () => {
     });
 
     it('stores asPart in fragment metadata when when is provided', () => {
+      const partMode = true;
       const fragment = reminder('text', {
         when: everyNTurns(3),
-        asPart: true,
+        asPart: partMode,
       });
       assert.ok(isConditionalReminder(fragment));
       const config = (fragment.metadata as { reminder: { asPart: boolean } })
@@ -575,33 +579,34 @@ describe('reminder scheduling', () => {
   });
 
   describe('reminder() asPart defaults (immediate path)', () => {
-    it('fragment input defaults asPart to true', () => {
+    it('fragment input defaults asPart to false', () => {
       const r = reminder(hint('Check indexes'));
       assert.ok(!('name' in r), 'Should be a UserReminder, not a fragment');
       assert.strictEqual(
         r.asPart,
-        true,
-        'Fragments produce structured content; immediate fragment reminders should default to asPart: true',
+        false,
+        'Immediate fragment reminders should default inline',
       );
     });
 
-    it('explicit asPart: false overrides the fragment default', () => {
+    it('explicit asPart: false keeps fragment reminders inline', () => {
       const r = reminder(hint('Inline hint'), { asPart: false });
       assert.ok(!('name' in r));
       assert.strictEqual(
         r.asPart,
         false,
-        'Caller-provided asPart must beat the input-shape default',
+        'Caller-provided asPart should be honored',
       );
     });
 
-    it('explicit asPart: true overrides the string default', () => {
-      const r = reminder('plain', { asPart: true });
+    it('explicit part mode overrides the string default', () => {
+      const partMode = true;
+      const r = reminder('plain', { asPart: partMode });
       assert.ok(!('name' in r));
       assert.strictEqual(
         r.asPart,
         true,
-        'String input defaults to false but caller can override to true',
+        'String input defaults to false but caller can override to part mode',
       );
     });
   });

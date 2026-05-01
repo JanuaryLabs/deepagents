@@ -559,6 +559,7 @@ describe('Sqlite ContextEngine Integration', () => {
 
   it('persists reminder metadata and text parts across save/resolve roundtrip', async () => {
     await withTempDb('reminder-roundtrip', async (dbPath) => {
+      const partMode = true;
       const store = new SqliteContextStore(dbPath);
       const engine = new ContextEngine({
         store,
@@ -570,7 +571,7 @@ describe('Sqlite ContextEngine Integration', () => {
         user(
           'body',
           reminder('inline'),
-          reminder('part-reminder', { asPart: true }),
+          reminder('part-reminder', { asPart: partMode }),
         ),
       );
 

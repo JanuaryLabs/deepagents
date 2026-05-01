@@ -137,6 +137,7 @@ describe('ContextEngine.inspect()', () => {
   });
 
   it('should keep reminder text visible in inspect persisted data and graph preview', async () => {
+    const partMode = true;
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       userId: 'test-user',
@@ -151,7 +152,7 @@ describe('ContextEngine.inspect()', () => {
           id: 'user-reminder-msg',
           role: 'user',
         },
-        reminder('tooltip-reminder', { asPart: true }),
+        reminder('tooltip-reminder', { asPart: partMode }),
       ),
     );
     await engine.save();

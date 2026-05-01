@@ -334,6 +334,7 @@ describe('ContextEngine conditional reminders', () => {
   });
 
   it('applies asPart conditional reminder as a separate text part', async () => {
+    const partMode = true;
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
       store,
@@ -342,7 +343,7 @@ describe('ContextEngine conditional reminders', () => {
     });
 
     engine.set(
-      reminder('part-hint', { when: everyNTurns(1), asPart: true }),
+      reminder('part-hint', { when: everyNTurns(1), asPart: partMode }),
       user('hello'),
     );
     await engine.save();
@@ -917,7 +918,7 @@ describe('ContextEngine conditional reminders', () => {
       assert.strictEqual(text, 'hello');
     });
 
-    it('defaults to asPart: true for fragment reminders', async () => {
+    it('defaults to asPart: false for fragment reminders', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -938,13 +939,16 @@ describe('ContextEngine conditional reminders', () => {
 
       assert.strictEqual(
         parts.length,
-        2,
-        'Fragment reminder should create a separate part',
+        1,
+        'Fragment reminder should default inline',
       );
-      assert.strictEqual(parts[0], 'slow query');
       assert.ok(
-        parts[1].includes('Check indexes'),
-        `Second part should contain hint. Got: ${parts[1]}`,
+        parts[0].includes('slow query'),
+        `Inline part should contain user text. Got: ${parts[0]}`,
+      );
+      assert.ok(
+        parts[0].includes('Check indexes'),
+        `Inline part should contain hint. Got: ${parts[0]}`,
       );
     });
 

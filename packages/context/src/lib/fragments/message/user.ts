@@ -426,7 +426,7 @@ export function reminder(
  * Create an immediate reminder from a context fragment.
  *
  * The fragment is pre-rendered to XML and injected as reminder text.
- * Defaults to `asPart: true` since fragments produce structured content.
+ * Defaults to inline reminder text.
  *
  * @param fragment - A context fragment to render as reminder text
  * @param options - Reminder representation options
@@ -446,7 +446,7 @@ export function reminder(
  * Create a conditional reminder from a context fragment.
  *
  * The fragment is pre-rendered to XML and injected as reminder text
- * when the predicate fires. Defaults to `asPart: true`.
+ * when the predicate fires. Defaults to inline reminder text.
  *
  * @param fragment - A context fragment to render as reminder text
  * @param options - Must include a `when` predicate
@@ -479,7 +479,7 @@ export function reminder(
     assertReminderText(text);
   }
 
-  const asPart = options?.asPart ?? fromFragment;
+  const asPart = options?.asPart ?? false;
 
   if (options && 'when' in options && options.when) {
     return {

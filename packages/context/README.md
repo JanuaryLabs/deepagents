@@ -185,7 +185,7 @@ Builder functions for user-specific context:
 - Tagged encoding: `<system-reminder>...</system-reminder>`
 - Appended to the end of message text or parts
 
-`reminder(..., { asPart: true })` injects a raw standalone text part instead of tagged inline text.
+Part mode (`asPart` set to true) injects a raw standalone text part instead of tagged inline text.
 
 When reminders are present, `user(...)` appends metadata to `message.metadata.reminders`:
 

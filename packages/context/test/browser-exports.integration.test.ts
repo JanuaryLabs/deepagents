@@ -53,10 +53,11 @@ describe('browser export path', () => {
   });
 
   it('strips reminders from messages through browser entrypoint', () => {
+    const partMode = true;
     const fragment = user(
       'Ship now.',
       reminder('hidden-inline'),
-      reminder('hidden-part', { asPart: true }),
+      reminder('hidden-part', { asPart: partMode }),
     );
 
     const message = fragment.codec?.encode() as UIMessage;

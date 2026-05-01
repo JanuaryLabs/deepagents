@@ -1005,7 +1005,7 @@ describe('temporalReminder', () => {
     });
   });
 
-  it('each atom adds a separate text part (asPart)', async () => {
+  it('each atom appends inline reminder text', async () => {
     await useFakeTime('2026-03-27T14:30:00.000Z', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
@@ -1022,11 +1022,28 @@ describe('temporalReminder', () => {
       });
       const parts = getTextParts(getLastUserMessage(messages));
 
+      assert.strictEqual(parts.length, 1, 'Expected one inline text part');
+      assert.ok(parts[0].includes('hello'), 'part should include user text');
       assert.ok(
-        parts.length > 1,
-        `Expected multiple parts from atom reminders. Got ${parts.length} part(s)`,
+        parts[0].includes('Date:'),
+        'part should include date reminder',
       );
-      assert.strictEqual(parts[0], 'hello', 'first part should be user text');
+      assert.ok(
+        parts[0].includes('Time:'),
+        'part should include time reminder',
+      );
+      assert.ok(
+        parts[0].includes('Month:'),
+        'part should include month reminder',
+      );
+      assert.ok(
+        parts[0].includes('Year:'),
+        'part should include year reminder',
+      );
+      assert.ok(
+        parts[0].includes('Season:'),
+        'part should include season reminder',
+      );
     });
   });
 

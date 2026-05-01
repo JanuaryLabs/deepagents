@@ -52,16 +52,16 @@ The default depends on the input type:
 | Input | Default `asPart` |
 | --- | --- |
 | `reminder(text: string \| factory)` | `false` (inline) |
-| `reminder(fragment: ContextFragment)` | `true` (part) |
+| `reminder(fragment: ContextFragment)` | `false` (inline) |
 
-String reminders fall inline so the model sees them next to the user's words. Fragment reminders default to part mode because the fragment is pre-rendered to XML — keeping that block as its own part avoids polluting the user's text with structured markup. Override either default with `{ asPart }`:
+Reminders default inline so the model sees the context next to the user's words. Set `asPart` to true when structured content needs to stay in a standalone text part:
 
 ```ts
-reminder('hint');                    // inline (string default)
-reminder('hint', { asPart: true });  // forced part
+const partMode = true;
 
-reminder(workflow({ task: 'Deploy', steps: ['…'] }));                  // part (fragment default)
-reminder(workflow({ task: 'Deploy', steps: ['…'] }), { asPart: false }); // forced inline
+reminder('hint'); // inline
+reminder(workflow({ task: 'Deploy', steps: ['…'] })); // inline
+reminder(workflow({ task: 'Deploy', steps: ['…'] }), { asPart: partMode }); // forced part
 ```
 
 Use part mode for structured data (dates, skill lists, fragments) to keep reminder text separate from the user's message.

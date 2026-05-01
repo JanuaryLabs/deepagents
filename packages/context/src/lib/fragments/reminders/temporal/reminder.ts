@@ -94,7 +94,7 @@ export function dateReminder(
 
       return `${diff}Date: ${currentDate}\nDay of Week: ${currentDay}`;
     },
-    { when: dayChanged(options), asPart: true },
+    { when: dayChanged(options), asPart: false },
   );
 }
 
@@ -117,7 +117,7 @@ export function timeReminder(
 
       return `${diff}Time: ${currentTime}`;
     },
-    { when: hourChanged(options), asPart: true },
+    { when: hourChanged(options), asPart: false },
   );
 }
 
@@ -140,7 +140,7 @@ export function monthReminder(
 
       return `${diff}Month: ${currentMonth}`;
     },
-    { when: monthChanged(options), asPart: true },
+    { when: monthChanged(options), asPart: false },
   );
 }
 
@@ -163,7 +163,7 @@ export function yearReminder(
 
       return `${diff}Year: ${currentYear}`;
     },
-    { when: yearChanged(options), asPart: true },
+    { when: yearChanged(options), asPart: false },
   );
 }
 
@@ -186,7 +186,7 @@ export function seasonReminder(
 
       return `${diff}Season: ${currentSeason}`;
     },
-    { when: seasonChanged(options), asPart: true },
+    { when: seasonChanged(options), asPart: false },
   );
 }
 
@@ -215,7 +215,7 @@ export function localeReminder(): ContextFragment {
 
       return `${diff}Language: ${current.language}\nTimezone: ${current.timeZone}`;
     },
-    { when: whenFn, asPart: true },
+    { when: whenFn, asPart: false },
   );
 }
 
