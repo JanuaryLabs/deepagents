@@ -57,7 +57,7 @@ export abstract class ViewGrounding extends AbstractGrounding {
   protected includeDefinition: boolean;
 
   constructor(config: ViewGroundingConfig = {}) {
-    super('view');
+    super('view', 'views');
     this.#filter = config.filter;
     this.#columns = config.columns;
     this.includeDefinition = config.includeDefinition ?? true;
@@ -76,9 +76,17 @@ export abstract class ViewGrounding extends AbstractGrounding {
   async execute(ctx: GroundingContext): Promise<void> {
     const viewNames = await this.applyFilter();
     const views = await Promise.all(
-      viewNames.map(async (name) =>
-        applyColumnFilter(await this.getView(name), this.#columns),
-      ),
+      viewNames.map(async (name, index) => {
+        ctx.onProgress?.({
+          type: 'phase:progress',
+          phase: 'views',
+          table: name,
+          message: `Loading view ${name}...`,
+          current: index + 1,
+          total: viewNames.length,
+        });
+        return applyColumnFilter(await this.getView(name), this.#columns);
+      }),
     );
     ctx.views.push(...views);
   }

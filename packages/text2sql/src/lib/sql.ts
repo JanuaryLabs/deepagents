@@ -1,4 +1,9 @@
-import type { StreamTextTransform, Tool, ToolSet } from 'ai';
+import {
+  type StreamTextTransform,
+  type Tool,
+  type ToolSet,
+  createUIMessageStream,
+} from 'ai';
 
 import { type AgentModel } from '@deepagents/agent';
 import {
@@ -13,13 +18,47 @@ import {
 } from '@deepagents/context';
 
 import { validateAdapterNames } from './adapter-name.ts';
-import type { Adapter } from './adapters/adapter.ts';
+import {
+  type Adapter,
+  type IntrospectionPhase,
+  type IntrospectionProgress,
+} from './adapters/adapter.ts';
+import { createGroundingContext } from './adapters/groundings/context.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
 import { guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
 export type RenderingTools = Record<string, Tool<unknown, never>>;
+
+export const TEXT2SQL_INDEX_PROGRESS_CHUNK =
+  'data-text2sql-index-progress' as const;
+
+export type Text2SqlIndexProgressEventType =
+  | 'index:start'
+  | 'index:end'
+  | 'adapter:start'
+  | 'adapter:end'
+  | 'adapter:cache-hit'
+  | 'adapter:cache-miss'
+  | 'phase:start'
+  | 'phase:progress'
+  | 'phase:end'
+  | 'adapter:error'
+  | 'index:error';
+
+export interface Text2SqlIndexProgressEvent {
+  type: Text2SqlIndexProgressEventType;
+  adapter?: string;
+  phase?: IntrospectionPhase;
+  table?: string;
+  message: string;
+  current?: number;
+  total?: number;
+  cached?: boolean;
+}
+
+type Text2SqlIndexProgressHandler = (event: Text2SqlIndexProgressEvent) => void;
 
 export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
@@ -88,38 +127,129 @@ export class Text2Sql {
   }
 
   public async index(): Promise<ContextFragment[]> {
+    return this.#index();
+  }
+
+  async #index(
+    onProgress?: Text2SqlIndexProgressHandler,
+  ): Promise<ContextFragment[]> {
     const entries = Object.entries(this.#config.adapters);
-    const wrapped = await Promise.all(
+    onProgress?.({
+      type: 'index:start',
+      message: `Indexing ${entries.length} adapter${entries.length === 1 ? '' : 's'}...`,
+      current: 0,
+      total: entries.length,
+    });
+    const settled = await Promise.allSettled(
       entries.map(async ([name, adapter]) => {
-        const schema = await this.#indexAdapter(name, adapter);
+        const schema = await this.#indexAdapter(name, adapter, onProgress);
         return fragment(name, ...schema);
       }),
     );
+    const failed = settled.find((result) => result.status === 'rejected');
+    if (failed) {
+      onProgress?.({
+        type: 'index:error',
+        message:
+          failed.reason instanceof Error
+            ? failed.reason.message
+            : String(failed.reason),
+      });
+      throw failed.reason;
+    }
+
+    const wrapped = settled.map((result) => {
+      if (result.status === 'rejected') {
+        throw result.reason;
+      }
+      return result.value;
+    });
+    onProgress?.({
+      type: 'index:end',
+      message: 'Finished indexing adapters.',
+      current: entries.length,
+      total: entries.length,
+    });
     return wrapped;
   }
 
   async #indexAdapter(
     name: string,
     adapter: Adapter,
+    onProgress?: Text2SqlIndexProgressHandler,
   ): Promise<ContextFragment[]> {
+    onProgress?.({
+      type: 'adapter:start',
+      adapter: name,
+      message: `Indexing adapter "${name}"...`,
+    });
     const cache = this.#introspection.get(name);
     if (!cache) {
       throw new Error(`no introspection cache registered for "${name}"`);
     }
-    const cached = await cache.read();
-    if (cached) {
-      return cached;
-    }
     try {
-      const fragments = await adapter.introspect();
+      const cached = await cache.read();
+      if (cached) {
+        onProgress?.({
+          type: 'adapter:cache-hit',
+          adapter: name,
+          message: `Using cached index for adapter "${name}".`,
+          cached: true,
+        });
+        onProgress?.({
+          type: 'adapter:end',
+          adapter: name,
+          message: `Finished indexing adapter "${name}".`,
+          cached: true,
+        });
+        return cached;
+      }
+      onProgress?.({
+        type: 'adapter:cache-miss',
+        adapter: name,
+        message: `No cached index for adapter "${name}".`,
+        cached: false,
+      });
+      const ctx = createGroundingContext({
+        onProgress: (progress) =>
+          onProgress?.(this.#adapterProgressEvent(name, progress)),
+      });
+      const fragments = await adapter.introspect(ctx);
       await cache.write(fragments);
+      onProgress?.({
+        type: 'adapter:end',
+        adapter: name,
+        message: `Finished indexing adapter "${name}".`,
+        cached: false,
+      });
       return fragments;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      onProgress?.({
+        type: 'adapter:error',
+        adapter: name,
+        message: `Failed indexing adapter "${name}": ${reason}`,
+      });
       throw new Error(`introspecting adapter "${name}": ${reason}`, {
         cause: error,
       });
     }
+  }
+
+  #adapterProgressEvent(
+    adapter: string,
+    progress: IntrospectionProgress,
+  ): Text2SqlIndexProgressEvent {
+    return {
+      type: progress.type,
+      adapter,
+      phase: progress.phase,
+      table: progress.table,
+      message: progress.message,
+      current: progress.current,
+      total: progress.total,
+      cached: false,
+    };
   }
 
   public async toPairs<T extends PairProducer>(
@@ -139,25 +269,38 @@ export class Text2Sql {
       throw new Error('messages must not be empty');
     }
 
-    const context = this.#config.context(
-      ...guidelines(),
-      ...(await this.index()),
-    );
+    return createUIMessageStream({
+      execute: async ({ writer }) => {
+        const progress = (event: Text2SqlIndexProgressEvent) => {
+          writer.write({
+            type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
+            data: event,
+          });
+        };
 
-    const chatAgent = agent({
-      name: 'text2sql',
-      sandbox: this.#config.sandbox,
-      model: this.#config.model,
-      context,
-      tools: this.#config.tools,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
-    });
+        const context = this.#config.context(
+          ...guidelines(),
+          ...(await this.#index(progress)),
+        );
 
-    return chat(chatAgent, messages, {
-      abortSignal: options?.abortSignal,
-      generateTitle: options?.generateTitle,
-      transform: this.#config.transform,
+        const chatAgent = agent({
+          name: 'text2sql',
+          sandbox: this.#config.sandbox,
+          model: this.#config.model,
+          context,
+          tools: this.#config.tools,
+          guardrails: [errorRecoveryGuardrail],
+          maxGuardrailRetries: 3,
+        });
+
+        const chatStream = await chat(chatAgent, messages, {
+          abortSignal: options?.abortSignal,
+          generateTitle: options?.generateTitle,
+          transform: this.#config.transform,
+        });
+
+        writer.merge(chatStream);
+      },
     });
   }
 }

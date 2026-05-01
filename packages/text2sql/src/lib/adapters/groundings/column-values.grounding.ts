@@ -39,7 +39,7 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
   protected maxValueLength: number;
 
   constructor(config: ColumnValuesGroundingConfig = {}) {
-    super('columnValues');
+    super('columnValues', 'column_values');
     this.lowCardinalityLimit = config.lowCardinalityLimit ?? 20;
     this.maxValueLength = config.maxValueLength ?? 100;
   }
@@ -159,7 +159,17 @@ export abstract class ColumnValuesGrounding extends AbstractGrounding {
     // Process both tables and views
     const allContainers: ColumnContainer[] = [...ctx.tables, ...ctx.views];
 
-    for (const container of allContainers) {
+    const total = allContainers.length;
+    for (let i = 0; i < allContainers.length; i++) {
+      const container = allContainers[i];
+      ctx.onProgress?.({
+        type: 'phase:progress',
+        phase: 'column_values',
+        table: container.name,
+        message: `Collecting column values for ${container.name}...`,
+        current: i + 1,
+        total,
+      });
       const table = this.getTable(ctx, container.name);
 
       for (const column of container.columns) {

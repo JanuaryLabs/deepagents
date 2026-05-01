@@ -35,7 +35,20 @@ export class BigQueryRowCountGrounding extends RowCountGrounding {
       byDataset.set(dataset, list);
     }
 
+    let current = 0;
+    const total = ctx.tables.length;
     for (const [dataset, tables] of byDataset) {
+      for (const table of tables) {
+        current++;
+        ctx.onProgress?.({
+          type: 'phase:progress',
+          phase: 'row_counts',
+          table: table.name,
+          message: `Counting rows in ${table.name}...`,
+          current,
+          total,
+        });
+      }
       const tableNames = tables.map(
         (t) => this.#adapter.parseTableName(t.name).table,
       );

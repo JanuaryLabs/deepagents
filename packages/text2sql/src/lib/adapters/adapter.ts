@@ -112,26 +112,32 @@ export type AdapterInfoProvider =
   | (() => Promise<AdapterInfo> | AdapterInfo);
 
 export type IntrospectionPhase =
+  | 'info'
   | 'tables'
+  | 'views'
   | 'row_counts'
-  | 'primary_keys'
+  | 'constraints'
   | 'indexes'
   | 'column_stats'
+  | 'column_values'
   | 'low_cardinality'
   | 'relationships';
 
+export type IntrospectionProgressType =
+  | 'phase:start'
+  | 'phase:progress'
+  | 'phase:end';
+
 export interface IntrospectionProgress {
+  type: IntrospectionProgressType;
   phase: IntrospectionPhase;
   message: string;
+  table?: string;
   current?: number;
   total?: number;
 }
 
 export type OnProgress = (progress: IntrospectionProgress) => void;
-
-export interface IntrospectOptions {
-  onProgress?: OnProgress;
-}
 
 export type GroundingFn = (adapter: Adapter) => AbstractGrounding;
 
@@ -169,7 +175,24 @@ export abstract class Adapter {
     // Phase 1: All groundings populate ctx
     for (const fn of this.grounding) {
       const grounding = fn(this);
-      await grounding.execute(ctx);
+      if (grounding.phase) {
+        ctx.onProgress?.({
+          type: 'phase:start',
+          phase: grounding.phase,
+          message: `Starting ${grounding.name} introspection...`,
+        });
+      }
+      try {
+        await grounding.execute(ctx);
+      } finally {
+        if (grounding.phase) {
+          ctx.onProgress?.({
+            type: 'phase:end',
+            phase: grounding.phase,
+            message: `Finished ${grounding.name} introspection.`,
+          });
+        }
+      }
     }
 
     // Phase 2: Generate fragments from complete ctx

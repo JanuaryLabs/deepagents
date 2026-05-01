@@ -20,7 +20,7 @@ export interface ColumnStatsGroundingConfig {
  */
 export abstract class ColumnStatsGrounding extends AbstractGrounding {
   constructor(config: ColumnStatsGroundingConfig = {}) {
-    super('columnStats');
+    super('columnStats', 'column_stats');
   }
 
   /**
@@ -39,7 +39,17 @@ export abstract class ColumnStatsGrounding extends AbstractGrounding {
   async execute(ctx: GroundingContext): Promise<void> {
     // Process both tables and views
     const allContainers: ColumnContainer[] = [...ctx.tables, ...ctx.views];
-    for (const container of allContainers) {
+    const total = allContainers.length;
+    for (let i = 0; i < allContainers.length; i++) {
+      const container = allContainers[i];
+      ctx.onProgress?.({
+        type: 'phase:progress',
+        phase: 'column_stats',
+        table: container.name,
+        message: `Collecting stats for ${container.name}...`,
+        current: i + 1,
+        total,
+      });
       for (const column of container.columns) {
         // Collect min/max/nullFraction
         try {

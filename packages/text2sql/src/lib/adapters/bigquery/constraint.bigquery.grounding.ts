@@ -47,7 +47,20 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
       byDataset.set(dataset, list);
     }
 
+    let current = 0;
+    const total = ctx.tables.length;
     for (const [dataset, tables] of byDataset) {
+      for (const table of tables) {
+        current++;
+        ctx.onProgress?.({
+          type: 'phase:progress',
+          phase: 'constraints',
+          table: table.name,
+          message: `Loading constraints for ${table.name}...`,
+          current,
+          total,
+        });
+      }
       try {
         await this.#batchConstraints(dataset, tables);
       } catch (error) {

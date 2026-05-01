@@ -21,7 +21,7 @@ export interface ConstraintGroundingConfig {
  */
 export abstract class ConstraintGrounding extends AbstractGrounding {
   constructor(config: ConstraintGroundingConfig = {}) {
-    super('constraint');
+    super('constraint', 'constraints');
   }
 
   /**
@@ -36,7 +36,17 @@ export abstract class ConstraintGrounding extends AbstractGrounding {
    * Annotates tables in ctx.tables with their constraints.
    */
   async execute(ctx: GroundingContext): Promise<void> {
-    for (const table of ctx.tables) {
+    const total = ctx.tables.length;
+    for (let i = 0; i < ctx.tables.length; i++) {
+      const table = ctx.tables[i];
+      ctx.onProgress?.({
+        type: 'phase:progress',
+        phase: 'constraints',
+        table: table.name,
+        message: `Loading constraints for ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       try {
         table.constraints = await this.getConstraints(table.name);
       } catch (error) {

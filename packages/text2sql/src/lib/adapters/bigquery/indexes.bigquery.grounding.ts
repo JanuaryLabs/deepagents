@@ -32,7 +32,20 @@ export class BigQueryIndexesGrounding extends IndexesGrounding {
       byDataset.set(dataset, list);
     }
 
+    let current = 0;
+    const total = ctx.tables.length;
     for (const [dataset, tables] of byDataset) {
+      for (const table of tables) {
+        current++;
+        ctx.onProgress?.({
+          type: 'phase:progress',
+          phase: 'indexes',
+          table: table.name,
+          message: `Loading indexes for ${table.name}...`,
+          current,
+          total,
+        });
+      }
       try {
         await this.#batchIndexes(dataset, tables);
       } catch {

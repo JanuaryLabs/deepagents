@@ -1,6 +1,7 @@
 import type {
   AdapterInfo,
   ColumnStats,
+  OnProgress,
   Relationship,
   Table,
 } from '../adapter.ts';
@@ -45,17 +46,23 @@ export interface GroundingContext {
 
   /** Shared cache for cross-grounding deduplication. Keyed by `type:key`. */
   cache: Map<string, unknown>;
+
+  /** Optional progress sink for long-running introspection work. */
+  onProgress?: OnProgress;
 }
 
 /**
  * Create a new empty grounding context.
  */
-export function createGroundingContext(): GroundingContext {
+export function createGroundingContext(
+  options: { onProgress?: OnProgress } = {},
+): GroundingContext {
   return {
     tables: [],
     views: [],
     relationships: [],
     info: undefined,
     cache: new Map(),
+    onProgress: options.onProgress,
   };
 }

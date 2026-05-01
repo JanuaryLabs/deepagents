@@ -52,7 +52,7 @@ export abstract class TableGrounding extends AbstractGrounding {
   #backward?: boolean | number;
 
   constructor(config: TableGroundingConfig = {}) {
-    super('table');
+    super('table', 'tables');
     this.#filter = config.filter;
     this.#columns = config.columns;
     this.#forward = config.forward;
@@ -87,9 +87,17 @@ export abstract class TableGrounding extends AbstractGrounding {
     // No traversal at all - just add the seed tables
     if (!forward && !backward) {
       const tables = await Promise.all(
-        seedTables.map(async (name) =>
-          applyColumnFilter(await this.getTable(name), this.#columns),
-        ),
+        seedTables.map(async (name, index) => {
+          ctx.onProgress?.({
+            type: 'phase:progress',
+            phase: 'tables',
+            table: name,
+            message: `Loading table ${name}...`,
+            current: index + 1,
+            total: seedTables.length,
+          });
+          return applyColumnFilter(await this.getTable(name), this.#columns);
+        }),
       );
       ctx.tables.push(...tables);
       return;
@@ -104,6 +112,7 @@ export abstract class TableGrounding extends AbstractGrounding {
     const backwardQueue: Array<{ name: string; depth: number }> = [];
     const forwardVisited = new Set<string>();
     const backwardVisited = new Set<string>();
+    let loadedCount = 0;
 
     // Initialize queues with seed tables at depth 0
     for (const name of seedTables) {
@@ -122,6 +131,14 @@ export abstract class TableGrounding extends AbstractGrounding {
       forwardVisited.add(name);
 
       if (!tables[name]) {
+        loadedCount++;
+        ctx.onProgress?.({
+          type: 'phase:progress',
+          phase: 'tables',
+          table: name,
+          message: `Loading table ${name}...`,
+          current: loadedCount,
+        });
         tables[name] = applyColumnFilter(
           await this.getTable(name),
           this.#columns,
@@ -151,6 +168,14 @@ export abstract class TableGrounding extends AbstractGrounding {
       backwardVisited.add(name);
 
       if (!tables[name]) {
+        loadedCount++;
+        ctx.onProgress?.({
+          type: 'phase:progress',
+          phase: 'tables',
+          table: name,
+          message: `Loading table ${name}...`,
+          current: loadedCount,
+        });
         tables[name] = applyColumnFilter(
           await this.getTable(name),
           this.#columns,

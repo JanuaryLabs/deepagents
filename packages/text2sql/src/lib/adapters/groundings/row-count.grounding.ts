@@ -20,7 +20,7 @@ export interface RowCountGroundingConfig {
  */
 export abstract class RowCountGrounding extends AbstractGrounding {
   constructor(config: RowCountGroundingConfig = {}) {
-    super('rowCount');
+    super('rowCount', 'row_counts');
   }
 
   /**
@@ -35,7 +35,17 @@ export abstract class RowCountGrounding extends AbstractGrounding {
    * Annotates tables in ctx.tables with row counts and size hints.
    */
   async execute(ctx: GroundingContext): Promise<void> {
-    for (const table of ctx.tables) {
+    const total = ctx.tables.length;
+    for (let i = 0; i < ctx.tables.length; i++) {
+      const table = ctx.tables[i];
+      ctx.onProgress?.({
+        type: 'phase:progress',
+        phase: 'row_counts',
+        table: table.name,
+        message: `Counting rows in ${table.name}...`,
+        current: i + 1,
+        total,
+      });
       const count = await this.getRowCount(table.name);
       if (count != null) {
         table.rowCount = count;

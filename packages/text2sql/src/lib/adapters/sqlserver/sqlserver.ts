@@ -295,7 +295,9 @@ export class SqlServer extends Adapter {
       const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
       onProgress?.({
+        type: 'phase:progress',
         phase: 'row_counts',
+        table: table.name,
         message: `Counting rows in ${table.name}...`,
         current: i + 1,
         total,
@@ -396,7 +398,9 @@ export class SqlServer extends Adapter {
       const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
       onProgress?.({
+        type: 'phase:progress',
         phase: 'column_stats',
+        table: table.name,
         message: `Collecting stats for ${table.name}...`,
         current: i + 1,
         total,
@@ -453,7 +457,9 @@ export class SqlServer extends Adapter {
       const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
       onProgress?.({
+        type: 'phase:progress',
         phase: 'low_cardinality',
+        table: table.name,
         message: `Analyzing cardinality in ${table.name}...`,
         current: i + 1,
         total,

@@ -19,7 +19,7 @@ export interface InfoGroundingConfig {
  */
 export abstract class InfoGrounding extends AbstractGrounding {
   constructor(config: InfoGroundingConfig = {}) {
-    super('dialectInfo');
+    super('dialectInfo', 'info');
   }
 
   /**

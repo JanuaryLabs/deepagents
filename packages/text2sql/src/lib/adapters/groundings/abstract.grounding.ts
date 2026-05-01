@@ -1,6 +1,6 @@
 import type { FragmentObject } from '@deepagents/context';
 
-import type { Adapter } from '../adapter.ts';
+import type { Adapter, IntrospectionPhase } from '../adapter.ts';
 import type { GroundingContext } from './context.ts';
 
 /**
@@ -69,9 +69,11 @@ export abstract class AbstractGrounding {
    * Grounding identifier for debugging/logging.
    */
   name: string;
+  phase?: IntrospectionPhase;
 
-  constructor(name: string) {
+  constructor(name: string, phase?: IntrospectionPhase) {
     this.name = name;
+    this.phase = phase;
   }
 
   /**
