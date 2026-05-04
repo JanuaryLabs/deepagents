@@ -211,13 +211,13 @@ export async function simulateConversation(
     }),
   });
   const sandbox = { ...base, drainFileEvents: () => observed.drain() };
+  const engine = new ContextEngine({ store, chatId, userId });
   const text2sql = new Text2Sql({
     version: `eval-simulator-${randomUUID()}`,
     sandbox,
     model,
     adapters: { main: config.adapter },
     context: (...fragments) => {
-      const engine = new ContextEngine({ store, chatId, userId });
       engine.set(...fragments);
       return engine;
     },
@@ -231,7 +231,8 @@ export async function simulateConversation(
 
     const userMessage = createUserMessage(currentQuestion);
 
-    const stream = text2sql.chat([userMessage]);
+    engine.set(user(userMessage));
+    const stream = text2sql.chat();
     await drainStream(stream);
 
     // Generate follow-up for next turn (if not last)
