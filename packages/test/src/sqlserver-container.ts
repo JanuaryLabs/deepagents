@@ -1,5 +1,4 @@
 import sql from 'mssql';
-import spawn from 'nano-spawn';
 import { randomUUID } from 'node:crypto';
 
 import { checkDockerAvailable, createContainer } from './container.ts';
@@ -93,108 +92,66 @@ export async function waitForFtsReady(
   }
 }
 
-/**
- * Wait for SQL Server to be ready to accept connections.
- */
+function masterConnectionString(
+  host: string,
+  port: number,
+  password: string,
+  timeoutMs?: number,
+): string {
+  const base = `Server=${host},${port};Database=master;User Id=sa;Password=${password};TrustServerCertificate=true;Encrypt=false;`;
+  return timeoutMs !== undefined
+    ? `${base}connectionTimeout=${timeoutMs};requestTimeout=${timeoutMs};`
+    : base;
+}
+
 async function waitForSqlServer(
-  containerId: string,
+  host: string,
+  port: number,
   password: string,
   maxRetries = 480,
   retryDelayMs = 250,
 ): Promise<void> {
+  const connStr = masterConnectionString(host, port, password, 1000);
   for (let i = 0; i < maxRetries; i++) {
+    const pool = new sql.ConnectionPool(connStr);
     try {
-      await spawn('docker', [
-        'exec',
-        containerId,
-        '/opt/mssql-tools18/bin/sqlcmd',
-        '-S',
-        'localhost',
-        '-U',
-        'sa',
-        '-P',
-        password,
-        '-C',
-        '-l',
-        '1',
-        '-t',
-        '1',
-        '-Q',
-        'SELECT 1',
-      ]);
-
+      await pool.connect();
+      await pool.request().query('SELECT 1');
+      await pool.close();
       return;
     } catch {
       try {
-        await spawn('docker', [
-          'exec',
-          containerId,
-          '/opt/mssql-tools/bin/sqlcmd',
-          '-S',
-          'localhost',
-          '-U',
-          'sa',
-          '-P',
-          password,
-          '-l',
-          '1',
-          '-t',
-          '1',
-          '-Q',
-          'SELECT 1',
-        ]);
-        return;
+        await pool.close();
       } catch {
-        // not ready yet
+        // ignore close failure on already-failed pool
       }
     }
-
     await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
   }
 
   throw new Error(
-    `SQL Server container ${containerId} failed to become ready after ${maxRetries} retries`,
+    `SQL Server at ${host}:${port} failed to become ready after ${maxRetries} retries`,
   );
 }
 
-/**
- * Create a database in the SQL Server container.
- */
 async function createDatabase(
-  containerId: string,
+  host: string,
+  port: number,
   password: string,
   database: string,
 ): Promise<void> {
-  // Try newer sqlcmd path first, then fall back to older path
+  const pool = new sql.ConnectionPool(
+    masterConnectionString(host, port, password),
+  );
+  await pool.connect();
   try {
-    await spawn('docker', [
-      'exec',
-      containerId,
-      '/opt/mssql-tools18/bin/sqlcmd',
-      '-S',
-      'localhost',
-      '-U',
-      'sa',
-      '-P',
-      password,
-      '-C',
-      '-Q',
-      `IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = '${database}') CREATE DATABASE [${database}]`,
-    ]);
-  } catch {
-    await spawn('docker', [
-      'exec',
-      containerId,
-      '/opt/mssql-tools/bin/sqlcmd',
-      '-S',
-      'localhost',
-      '-U',
-      'sa',
-      '-P',
-      password,
-      '-Q',
-      `IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = '${database}') CREATE DATABASE [${database}]`,
-    ]);
+    await pool
+      .request()
+      .query(
+        `IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = '${database}') CREATE DATABASE [${database}]`,
+      );
+  } finally {
+    await pool.close();
   }
 }
 
@@ -223,7 +180,7 @@ export async function withSqlServerContainer<T>(
     return undefined;
   }
 
-  const image = config?.image ?? SQL_SERVER_FULL_IMAGE;
+  const image = config?.image ?? defaultSqlServerImage();
   const password = config?.password ?? 'StrongP@ssw0rd123!';
   const database = config?.database ?? 'testdb';
   const user = 'sa';
@@ -250,11 +207,8 @@ export async function withSqlServerContainer<T>(
   });
 
   try {
-    // Wait for SQL Server to be ready (can take 30-60 seconds)
-    await waitForSqlServer(container.containerId, password);
-
-    // Create the test database
-    await createDatabase(container.containerId, password, database);
+    await waitForSqlServer(container.host, container.port, password);
+    await createDatabase(container.host, container.port, password, database);
 
     // Build connection string for mssql package
     const connectionString = `Server=localhost,${container.port};Database=${database};User Id=${user};Password=${password};TrustServerCertificate=true;Encrypt=false;`;
