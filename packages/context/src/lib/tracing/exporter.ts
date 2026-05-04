@@ -24,7 +24,10 @@ type WireSpanData =
     });
 
 type WireSpan = Omit<OpenAISpan, 'span_data'> & { span_data: WireSpanData };
-type WireTraceItem = OpenAITrace | WireSpan;
+type WireTrace = Omit<OpenAITrace, 'metadata'> & {
+  metadata?: Record<string, string>;
+};
+type WireTraceItem = WireTrace | WireSpan;
 
 function hasStringifiedIO(data: SpanData): data is StringifiedIOSpan {
   return data.type in STRINGIFIED_IO_TYPES;
@@ -35,8 +38,26 @@ function encodeField(value: unknown): string | undefined {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
+function encodeMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  if (metadata == null) return undefined;
+  const encoded: Record<string, string> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    const result = encodeField(value);
+    if (result !== undefined) {
+      encoded[key] = result;
+    }
+  }
+  return Object.keys(encoded).length > 0 ? encoded : undefined;
+}
+
 function toWireItem(item: TraceItem): WireTraceItem {
-  if (item.object !== 'trace.span') return item;
+  if (item.object === 'trace') {
+    const encoded = encodeMetadata(item.metadata);
+    const { metadata: _ignored, ...rest } = item;
+    return encoded != null ? { ...rest, metadata: encoded } : rest;
+  }
   const spanData = item.span_data;
   if (!hasStringifiedIO(spanData)) {
     return { ...item, span_data: spanData };
