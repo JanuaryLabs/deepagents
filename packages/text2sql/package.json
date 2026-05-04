@@ -83,7 +83,7 @@
   "dependencies": {
     "@ai-sdk/groq": "^3.0.36",
     "@ai-sdk/openai": "^3.0.49",
-    "ai": "^6.0.169",
+    "ai": "^6.0.174",
     "@deepagents/agent": "0.38.0",
     "@deepagents/context": "0.38.0",
     "@deepagents/evals": "0.38.0",
@@ -105,6 +105,7 @@
   },
   "devDependencies": {
     "@google-cloud/bigquery": "^8.1.1",
+    "@ai-sdk/react": "^3.0.176",
     "autoevals": "^0.0.132"
   },
   "peerDependencies": {
