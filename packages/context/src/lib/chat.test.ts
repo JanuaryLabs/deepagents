@@ -27,7 +27,6 @@ import {
   errorRecoveryGuardrail,
   fail,
   pass,
-  staticChatTitle,
   user,
 } from '@deepagents/context';
 
@@ -246,43 +245,6 @@ describe('context chat()', () => {
 
     const branches = await store.listBranches('test-chat');
     assert.strictEqual(branches.length, 1);
-  });
-});
-
-describe('staticChatTitle()', () => {
-  it('returns text from user message', () => {
-    assert.strictEqual(
-      staticChatTitle(userMessage('Hello world')),
-      'Hello world',
-    );
-  });
-
-  it('truncates to 100 chars with ellipsis', () => {
-    const long = 'x'.repeat(150);
-    assert.strictEqual(
-      staticChatTitle(userMessage(long)),
-      'x'.repeat(100) + '...',
-    );
-  });
-
-  it('returns exact text when at 100 chars', () => {
-    const exact = 'y'.repeat(100);
-    assert.strictEqual(staticChatTitle(userMessage(exact)), exact);
-  });
-
-  it('returns New Chat when no text parts', () => {
-    const msg: UIMessage = {
-      id: generateId(),
-      role: 'user',
-      parts: [
-        {
-          type: 'file',
-          url: 'https://example.com/img.png',
-          mediaType: 'image/png',
-        },
-      ],
-    };
-    assert.strictEqual(staticChatTitle(msg), 'New Chat');
   });
 });
 

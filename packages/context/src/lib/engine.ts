@@ -355,6 +355,29 @@ export class ContextEngine {
     return turn;
   }
 
+  public async firstUserMessage(): Promise<UIMessage | undefined> {
+    await this.#ensureInitialized();
+
+    if (this.#branch?.headMessageId) {
+      const chain = await this.#store.getMessageChain(
+        this.#branch.headMessageId,
+      );
+      for (const msg of chain) {
+        if (msg.name === 'user') return msg.data as UIMessage;
+      }
+    }
+
+    for (const fragment of this.#pendingMessages) {
+      if (fragment.name !== 'user') continue;
+      if (!fragment.codec) {
+        throw new Error(`Fragment "${fragment.name}" is missing codec.`);
+      }
+      return fragment.codec.encode() as UIMessage;
+    }
+
+    return undefined;
+  }
+
   /**
    * Add fragments to the context.
    *

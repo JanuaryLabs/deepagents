@@ -22,7 +22,7 @@ import {
   message,
 } from './fragments.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
-import { generateChatTitle, staticChatTitle } from './title.ts';
+import { TitleGenerator } from './title.ts';
 
 export type ChatMessage = UIMessage | MessageFragment;
 
@@ -120,32 +120,23 @@ export async function chat<CIn>(
 
   const uiMessages = messages.map(chatMessageToUIMessage);
 
-  let title: string | null = null;
-  if (!context.chat?.title) {
-    const firstUserMsg = uiMessages.find((m) => m.role === 'user');
-    if (firstUserMsg) {
-      if (options?.generateTitle && agent.model) {
-        title = await generateChatTitle({
-          message: firstUserMsg,
-          model: agent.model,
-          abortSignal: options?.abortSignal,
-        });
-      } else {
-        title = staticChatTitle(firstUserMsg);
-      }
-      await context.updateChat({ title });
-    }
-  }
-
   const streamContextVariables =
     options?.contextVariables === undefined
       ? ({} as CIn)
       : options.contextVariables;
 
-  const result = await agent.stream(streamContextVariables, {
-    transform: options?.transform,
-    abortSignal: options?.abortSignal,
-  });
+  const [title, result] = await Promise.all([
+    makeTitle({
+      context,
+      model: agent.model,
+      generateTitle: options?.generateTitle,
+      abortSignal: options?.abortSignal,
+    }),
+    agent.stream(streamContextVariables, {
+      transform: options?.transform,
+      abortSignal: options?.abortSignal,
+    }),
+  ]);
 
   const uiStream = result.toUIMessageStream({
     onError: options?.onError ?? formatChatError,
@@ -257,4 +248,28 @@ function formatChatError(error: unknown): string {
     return `Upstream API call failed with status ${error.statusCode}: ${error.message}`;
   }
   return JSON.stringify(error);
+}
+async function makeTitle(options: {
+  context: ContextEngine;
+  model?: AgentModel;
+  generateTitle?: boolean;
+  abortSignal?: AbortSignal;
+}): Promise<string | null> {
+  const titler = new TitleGenerator({ context: options.context });
+
+  if (options.generateTitle && !options.model) {
+    console.warn(
+      'chat: generateTitle=true but agent.model is unset; using static title.',
+    );
+  }
+
+  const result =
+    options.generateTitle && options.model
+      ? await titler.ensure({
+          model: options.model,
+          abortSignal: options.abortSignal,
+        })
+      : await titler.ensureStatic();
+
+  return result?.title ?? null;
 }

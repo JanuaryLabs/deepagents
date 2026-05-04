@@ -7,6 +7,7 @@ import { ContextEngine } from './engine.ts';
 import { role } from './fragments/domain.ts';
 import { stripReminders, user } from './fragments/message/user.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
+import { extractPlainText } from './text.ts';
 
 const TITLE_PROMPT = `Generate a short chat title (2-5 words) summarizing the user's message.
 
@@ -18,52 +19,100 @@ Examples:
 
 const titleSchema = z.object({ title: z.string() });
 
-function extractText(message: UIMessage): string {
-  const cleaned = stripReminders(message);
-  const textPart = cleaned.parts.find((p) => p.type === 'text');
-  return textPart && 'text' in textPart ? textPart.text : '';
+export interface TitleGeneratorOptions {
+  context: ContextEngine;
 }
 
-function truncateTitle(text: string): string {
-  if (!text) return 'New Chat';
-  return text.length > 100 ? text.slice(0, 100) + '...' : text;
+export interface EnsureResult {
+  title: string;
+  source: 'llm' | 'static';
 }
 
-export function staticChatTitle(message: UIMessage): string {
-  return truncateTitle(extractText(message));
-}
+export class TitleGenerator {
+  #context: ContextEngine;
 
-export interface GenerateChatTitleOptions {
-  message: UIMessage;
-  model: AgentModel;
-  abortSignal?: AbortSignal;
-}
+  constructor(options: TitleGeneratorOptions) {
+    this.#context = options.context;
+  }
 
-export async function generateChatTitle(
-  options: GenerateChatTitleOptions,
-): Promise<string> {
-  const text = extractText(options.message);
-  const fallback = truncateTitle(text);
+  async ensure(options: {
+    model: AgentModel;
+    abortSignal?: AbortSignal;
+  }): Promise<EnsureResult | null> {
+    const msg = await this.#firstUntitledUser();
+    if (!msg) return null;
+    try {
+      const title = await this.#generateTitle(msg, options);
+      return this.#applyTitle(title, 'llm');
+    } catch (error) {
+      console.warn(
+        'TitleGenerator: LLM title generation failed, falling back to static.',
+        error,
+      );
+      return this.#applyTitle(this.#staticTitle(msg), 'static');
+    }
+  }
 
-  if (!text) return fallback;
+  async ensureStatic(): Promise<EnsureResult | null> {
+    const msg = await this.#firstUntitledUser();
+    if (!msg) return null;
+    return this.#applyTitle(this.#staticTitle(msg), 'static');
+  }
 
-  const store = new InMemoryContextStore();
-  const context = new ContextEngine({
-    store,
-    chatId: crypto.randomUUID(),
-    userId: 'system',
-  });
-  context.set(role(TITLE_PROMPT), user(text));
+  #staticTitle(message: UIMessage): string {
+    return this.#truncateTitle(this.#extractText(message));
+  }
 
-  try {
+  async #generateTitle(
+    message: UIMessage,
+    options: { model: AgentModel; abortSignal?: AbortSignal },
+  ): Promise<string> {
+    const text = this.#extractText(message);
+    if (!text) {
+      throw new Error(
+        'Cannot generate chat title: message has no text content.',
+      );
+    }
+
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: crypto.randomUUID(),
+      userId: 'system',
+    });
+    context.set(role(TITLE_PROMPT), user(text));
+
     const { title } = await structuredOutput({
       context,
       model: options.model,
       schema: titleSchema,
     }).generate({}, { abortSignal: options.abortSignal });
-    return title || fallback;
-  } catch (error) {
-    console.warn('Title generation failed, using fallback:', error);
-    return fallback;
+
+    if (!title) {
+      throw new Error('Title generation returned an empty string.');
+    }
+    return title;
+  }
+
+  #extractText(message: UIMessage): string {
+    return extractPlainText(stripReminders(message));
+  }
+
+  #truncateTitle(text: string): string {
+    if (!text) return 'New Chat';
+    return text.length > 100 ? text.slice(0, 100) + '...' : text;
+  }
+
+  async #applyTitle(
+    title: string,
+    source: 'llm' | 'static',
+  ): Promise<EnsureResult> {
+    await this.#context.updateChat({ title });
+    return { title, source };
+  }
+
+  async #firstUntitledUser(): Promise<UIMessage | undefined> {
+    if (this.#context.chat?.title) return undefined;
+    return this.#context.firstUserMessage();
   }
 }
