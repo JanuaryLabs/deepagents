@@ -306,6 +306,83 @@ describe('SqliteColumnValuesGrounding', () => {
         ],
       });
     });
+
+    it('should detect enum values from OR-chained equality CHECK', async () => {
+      const ddl = `
+        CREATE TABLE flags (
+          id INTEGER PRIMARY KEY,
+          state TEXT CHECK (state = 'on' OR state = 'off' OR state = 'auto')
+        );
+      `;
+
+      const { adapter } = await init_db(ddl, {
+        grounding: [tables(), constraints(), columnValues()],
+      });
+
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'flags',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER', pk: true } },
+          {
+            name: 'column',
+            data: {
+              name: 'state',
+              type: 'TEXT',
+              values: ['on', 'off', 'auto'],
+            },
+          },
+        ],
+        constraints: [
+          {
+            name: 'constraint',
+            data: {
+              name: 'flags_check_0',
+              type: 'CHECK',
+              columns: ['state'],
+              definition: "state = 'on' OR state = 'off' OR state = 'auto'",
+            },
+          },
+        ],
+      });
+    });
+
+    it('should not produce values for non-enum CHECK shapes (numeric range)', async () => {
+      const ddl = `
+        CREATE TABLE people (
+          id INTEGER PRIMARY KEY,
+          age INTEGER CHECK (age >= 0 AND age <= 150)
+        );
+      `;
+
+      const { adapter } = await init_db(ddl, {
+        grounding: [tables(), constraints(), columnValues()],
+      });
+
+      const fragments = await adapter.introspect();
+      const tableFragment = fragments.find((f) => f.name === 'table');
+
+      assert.deepStrictEqual(tableFragment?.data, {
+        name: 'people',
+        columns: [
+          { name: 'column', data: { name: 'id', type: 'INTEGER', pk: true } },
+          { name: 'column', data: { name: 'age', type: 'INTEGER' } },
+        ],
+        constraints: [
+          {
+            name: 'constraint',
+            data: {
+              name: 'people_check_0',
+              type: 'CHECK',
+              columns: ['age'],
+              definition: 'age >= 0 AND age <= 150',
+            },
+          },
+        ],
+      });
+    });
   });
 
   describe('config options', () => {
