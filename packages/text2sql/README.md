@@ -17,6 +17,15 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 npm install @deepagents/text2sql
 ```
 
+Install the database driver or client library that matches your adapter:
+
+```bash
+npm install pg                       # PostgreSQL
+npm install mssql                    # SQL Server
+npm install mysql2                   # MySQL / MariaDB
+npm install @google-cloud/bigquery   # BigQuery
+```
+
 Requires Node.js LTS (20+).
 
 ## Quick Start
@@ -187,7 +196,7 @@ Control what schema metadata the AI receives:
 
 ## Conversations
 
-`chat()` persists history through the `ContextEngine` returned by your `context` factory. Reuse the same store, `chatId`, and `userId` to continue the same thread:
+`chat()` persists history through the `ContextEngine` returned by your `context` factory. Reuse the same store, `chatId`, and `userId` to continue the same thread. Pass only the new incoming message(s) for the current turn; do not replay earlier turns that are already stored in the context store:
 
 ```typescript
 const stream = await text2sql.chat([

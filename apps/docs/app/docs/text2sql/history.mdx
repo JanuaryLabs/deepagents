@@ -101,7 +101,9 @@ const text2sql = new Text2Sql({
 
 Reuse the same store, `chatId`, and `userId` for follow-up turns. In practice,
 that usually means reusing the same `Text2Sql` instance or creating a new one
-with the same `context` factory inputs for that thread:
+with the same `context` factory inputs for that thread. Pass only the new
+incoming message(s) for that turn; earlier turns are loaded from the store
+automatically:
 
 ```typescript
 await text2sql.chat([{ role: 'user', content: 'Show me sales data' }], {

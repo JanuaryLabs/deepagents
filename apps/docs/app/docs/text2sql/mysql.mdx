@@ -5,6 +5,14 @@ description: Configure Text2SQL with MySQL and MariaDB databases
 
 The MySQL adapter provides full support for both MySQL and MariaDB databases with automatic schema introspection, ENUM type detection, and helpful error messages. The adapter auto-detects whether you're connected to MySQL or MariaDB via the `VERSION()` string.
 
+## Installation
+
+Install the `mysql2` driver alongside `@deepagents/text2sql`:
+
+```bash
+npm install @deepagents/text2sql mysql2
+```
+
 ## Basic Setup
 
 Reuse the shared `model`, `sandbox`, and `context` setup from

@@ -442,13 +442,15 @@ export class ContextEngine {
       }
     }
 
-    // Add pending messages (not yet saved)
     for (const fragment of this.#pendingMessages) {
       if (!fragment.codec) {
         throw new Error(`Fragment "${fragment.name}" is missing codec.`);
       }
-
-      messages.push(fragment.codec.encode());
+      const encoded = fragment.codec.encode() as UIMessage;
+      if (encoded.role === 'assistant' && encoded.parts.length === 0) {
+        continue;
+      }
+      messages.push(encoded);
     }
 
     return {

@@ -51,7 +51,7 @@ trace per run with nested spans.
 | `project` | `string` | — | Sent as `OpenAI-Project` header |
 | `workflowName` | `string` | `event.functionId \| 'ai-sdk-workflow'` | Name that appears on the root trace |
 | `groupId` | `string` | — | Group traces together in the UI |
-| `metadata` | `Record<string, unknown>` | — | Extra metadata merged into every trace |
+| `metadata` | `Record<string, unknown>` | — | Extra metadata merged into every trace. Non-string values are JSON-stringified on export; `null` and `undefined` entries are dropped |
 | `exporter` | `OpenAITracesExporter` | constructed from the other options | Fully custom exporter (useful for tests or alternative sinks) |
 | `processor` | `TracingProcessor \| TracingProcessor[]` | `BatchTraceProcessor(exporter)` | Replace the default batch processor or chain your own |
 | `batch` | `BatchTraceProcessorOptions` | see below | Tune the default batch processor |
@@ -99,6 +99,10 @@ the exporter rewrites each span to match:
 a 400 from the API. The `GenerationSpanData` path keeps arrays. All of this
 lives in `OpenAITracesExporter` so processors and handlers can work with
 native objects until export time.
+
+Trace-level metadata is also normalized at export time. The wire payload sends
+`metadata` as `Record<string, string>`; non-string values are JSON-stringified
+and empty metadata objects are omitted.
 
 ## `OpenAITracesExporter`
 

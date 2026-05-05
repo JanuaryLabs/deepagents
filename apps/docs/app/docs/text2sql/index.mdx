@@ -89,7 +89,7 @@ or `validateAdapterNames(names)`.
 | Method                    | Description                                            |
 | ------------------------- | ------------------------------------------------------ |
 | `toSql(input, adapterName)` | Generate SQL without executing (routed to one adapter) |
-| `chat(messages)` | Run a multi-turn conversation using your context store |
+| `chat(messages)` | Run a persisted turn using new incoming messages |
 | `index()` | Introspect all configured adapters (cached per adapter) |
 | `toPairs(adapterName, factory)` | Generate training pairs from one configured adapter |
 

@@ -5,6 +5,14 @@ description: Configure Text2SQL with Google BigQuery (driver-agnostic)
 
 The BigQuery adapter is **driver-agnostic**: you provide `execute(sql)` and a required `validate(sql)` function (recommended: BigQuery dry-run). All introspection is scoped to an explicit list of datasets.
 
+## Installation
+
+Install the BigQuery client alongside `@deepagents/text2sql`:
+
+```bash
+npm install @deepagents/text2sql @google-cloud/bigquery
+```
+
 ## Basic Setup
 
 Reuse the shared `model`, `sandbox`, and `context` setup from
