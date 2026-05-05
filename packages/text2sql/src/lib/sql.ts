@@ -8,7 +8,6 @@ import {
 import { type AgentModel } from '@deepagents/agent';
 import {
   type AgentSandbox,
-  type ChatMessage,
   ContextEngine,
   type ContextFragment,
   agent,
@@ -63,7 +62,12 @@ type Text2SqlIndexProgressHandler = (event: Text2SqlIndexProgressEvent) => void;
 export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
   sandbox: AgentSandbox;
-  context: (...fragments: ContextFragment[]) => ContextEngine;
+  /**
+   * Context engine driving the conversation. Text2Sql appends its
+   * guidelines and index fragments to this engine before each chat turn.
+   * The same engine instance must be used for `continue()` calls upstream.
+   */
+  context: ContextEngine;
   version: string;
   tools?: RenderingTools;
   model: AgentModel;
@@ -261,16 +265,21 @@ export class Text2Sql {
     return producer.toPairs();
   }
 
-  public async chat(
-    messages: ChatMessage[],
-    options?: { abortSignal?: AbortSignal; generateTitle?: boolean },
-  ) {
-    if (messages.length === 0) {
-      throw new Error('messages must not be empty');
-    }
-
+  public async chat(options?: {
+    abortSignal?: AbortSignal;
+    generateTitle?: boolean;
+  }) {
     return createUIMessageStream({
       execute: async ({ writer }) => {
+        const context = this.#config.context;
+        const head = await context.headMessage();
+        if (!head || head.name !== 'assistant') {
+          throw new Error(
+            'text2sql.chat: expected head to be an assistant message — call context.continue() before chat()',
+          );
+        }
+        writer.write({ type: 'start', messageId: head.id });
+
         const progress = (event: Text2SqlIndexProgressEvent) => {
           writer.write({
             type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
@@ -278,10 +287,7 @@ export class Text2Sql {
           });
         };
 
-        const context = this.#config.context(
-          ...guidelines(),
-          ...(await this.#index(progress)),
-        );
+        context.set(...guidelines(), ...(await this.#index(progress)));
 
         const chatAgent = agent({
           name: 'text2sql',
@@ -293,7 +299,7 @@ export class Text2Sql {
           maxGuardrailRetries: 3,
         });
 
-        const chatStream = await chat(chatAgent, messages, {
+        const chatStream = await chat(chatAgent, {
           abortSignal: options?.abortSignal,
           generateTitle: options?.generateTitle,
           transform: this.#config.transform,

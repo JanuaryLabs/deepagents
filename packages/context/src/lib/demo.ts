@@ -77,7 +77,8 @@ const ai = agent({
 let text = 'My name is adam, and you?';
 
 while (true) {
-  const stream = await chat(ai, [user(text)]);
+  await context.continue(user(text));
+  const stream = await chat(ai);
   await printer.readableStream(stream);
   text = await input();
 }

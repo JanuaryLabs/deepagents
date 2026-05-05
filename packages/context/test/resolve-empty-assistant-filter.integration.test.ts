@@ -18,7 +18,7 @@ function makeEngine() {
   });
 }
 
-describe('ContextEngine.resolve filters empty assistant placeholders', () => {
+describe('ContextEngine.getMessages filters empty assistant placeholders', () => {
   it('omits a pending assistant fragment whose parts are empty', async () => {
     const engine = makeEngine();
     engine.set(

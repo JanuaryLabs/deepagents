@@ -65,6 +65,11 @@ async function setup(mockText?: string) {
     'CREATE TABLE users (id INTEGER, name TEXT)',
   );
   const model = createMockModel(mockText);
+  const engine = new ContextEngine({
+    store,
+    chatId: 'test-chat',
+    userId: 'test-user',
+  });
 
   const text2sql = new Text2Sql({
     version: 'test',
@@ -72,26 +77,19 @@ async function setup(mockText?: string) {
     adapters: { main: adapter },
     model,
     transform: () => new TransformStream(),
-    context: (...fragments) => {
-      const engine = new ContextEngine({
-        store,
-        chatId: 'test-chat',
-        userId: 'test-user',
-      });
-      engine.set(...fragments);
-      return engine;
-    },
+    context: engine,
   });
 
-  return { store, text2sql };
+  return { store, text2sql, engine };
 }
 
 describe('Text2Sql.chat()', () => {
   it('saves user message to context store', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
     const msg = userMessage('How many users are there?');
 
-    const stream = await text2sql.chat([msg]);
+    await engine.continue(msg);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -107,10 +105,13 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('saves assistant response to context store after stream is consumed', async () => {
-    const { store, text2sql } = await setup('SELECT count(*) FROM users');
+    const { store, text2sql, engine } = await setup(
+      'SELECT count(*) FROM users',
+    );
     const msg = userMessage('How many users?');
 
-    const stream = await text2sql.chat([msg]);
+    await engine.continue(msg);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -128,10 +129,11 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('does not create extra branches during streaming (branch: false)', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
     const msg = userMessage('List all users');
 
-    const stream = await text2sql.chat([msg]);
+    await engine.continue(msg);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const branches = await store.listBranches('test-chat');
@@ -144,10 +146,11 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('tracks token usage in chat metadata', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
     const msg = userMessage('Count users');
 
-    const stream = await text2sql.chat([msg]);
+    await engine.continue(msg);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const chat = await store.getChat('test-chat');
@@ -161,10 +164,11 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('updates assistant message in place for tool result scenario', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
 
     const msg = userMessage('How many users?');
-    const stream1 = await text2sql.chat([msg]);
+    await engine.continue(msg);
+    const stream1 = await text2sql.chat();
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -184,7 +188,8 @@ describe('Text2Sql.chat()', () => {
       ],
     };
 
-    const stream2 = await text2sql.chat([msg, updatedAssistantMsg]);
+    await engine.continue(updatedAssistantMsg);
+    const stream2 = await text2sql.chat();
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -205,57 +210,12 @@ describe('Text2Sql.chat()', () => {
     );
   });
 
-  it('throws when messages array is empty', async () => {
-    const { text2sql } = await setup();
-    await assert.rejects(() => text2sql.chat([]), {
-      message: 'messages must not be empty',
-    });
-  });
-
-  it('rejects empty messages without introspecting the adapter', async () => {
-    const store = new InMemoryContextStore();
-    const { adapter } = await init_db(
-      'CREATE TABLE users (id INTEGER, name TEXT)',
-    );
-    let introspectCalls = 0;
-    const original = adapter.introspect.bind(adapter);
-    adapter.introspect = async (...args) => {
-      introspectCalls++;
-      return original(...args);
-    };
-
-    const text2sql = new Text2Sql({
-      version: `test-empty-guard-${generateId()}`,
-      sandbox,
-      adapters: { main: adapter },
-      model: createMockModel(),
-      transform: () => new TransformStream(),
-      context: (...fragments) => {
-        const engine = new ContextEngine({
-          store,
-          chatId: 'test-chat-noop',
-          userId: 'test-user',
-        });
-        engine.set(...fragments);
-        return engine;
-      },
-    });
-
-    await assert.rejects(() => text2sql.chat([]), {
-      message: 'messages must not be empty',
-    });
-    assert.strictEqual(
-      introspectCalls,
-      0,
-      'adapter.introspect must not run when messages is empty',
-    );
-  });
-
   it('grows chain correctly across multiple normal user turns', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
 
     const msg1 = userMessage('How many users?');
-    const stream1 = await text2sql.chat([msg1]);
+    await engine.continue(msg1);
+    const stream1 = await text2sql.chat();
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -263,16 +223,9 @@ describe('Text2Sql.chat()', () => {
     const chain1 = await store.getMessageChain(branch1.headMessageId);
     assert.strictEqual(chain1.length, 2, 'first turn: user + assistant');
 
-    const assistantData = chain1.find((m) => m.name === 'assistant');
-    assert.ok(assistantData);
-    const fakeAssistant: UIMessage = {
-      id: assistantData.id,
-      role: 'assistant',
-      parts: (assistantData.data as UIMessage).parts,
-    };
-
     const msg2 = userMessage('Show me the first 10');
-    const stream2 = await text2sql.chat([msg1, fakeAssistant, msg2]);
+    await engine.continue(msg2);
+    const stream2 = await text2sql.chat();
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -293,16 +246,18 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('does not branch when assistant message ID is not in store', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
 
     const msg = userMessage('Hello');
+    await engine.continue(msg);
     const freshAssistant: UIMessage = {
       id: generateId(),
       role: 'assistant',
       parts: [{ type: 'text' as const, text: 'Fresh assistant not in store' }],
     };
 
-    const stream = await text2sql.chat([msg, freshAssistant]);
+    await engine.continue(freshAssistant);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const branches = await store.listBranches('test-chat');
@@ -314,10 +269,11 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('handles multiple consecutive tool-result rounds correctly', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
 
     const msg1 = userMessage('Analyze users');
-    const stream1 = await text2sql.chat([msg1]);
+    await engine.continue(msg1);
+    const stream1 = await text2sql.chat();
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -331,7 +287,8 @@ describe('Text2Sql.chat()', () => {
       role: 'assistant',
       parts: [{ type: 'text' as const, text: 'After first tool result' }],
     };
-    const stream2 = await text2sql.chat([msg1, toolResult1]);
+    await engine.continue(toolResult1);
+    const stream2 = await text2sql.chat();
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -351,7 +308,8 @@ describe('Text2Sql.chat()', () => {
       role: 'assistant',
       parts: [{ type: 'text' as const, text: 'After second tool result' }],
     };
-    const stream3 = await text2sql.chat([msg1, toolResult2]);
+    await engine.continue(toolResult2);
+    const stream3 = await text2sql.chat();
     await drain(stream3);
 
     const branch3 = await store.getActiveBranch('test-chat');
@@ -372,10 +330,11 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('omits fileEvents metadata when no file ops occurred', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
     const msg = userMessage('Show users');
 
-    const stream = await text2sql.chat([msg]);
+    await engine.continue(msg);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -423,26 +382,24 @@ describe('Text2Sql.chat()', () => {
       },
     });
 
+    const engine = new ContextEngine({
+      store,
+      chatId: 'test-chat-signal',
+      userId: 'test-user',
+    });
     const text2sql = new Text2Sql({
       version: 'test',
       sandbox,
       adapters: { main: adapter },
       model,
       transform: () => new TransformStream(),
-      context: (...fragments) => {
-        const engine = new ContextEngine({
-          store,
-          chatId: 'test-chat-signal',
-          userId: 'test-user',
-        });
-        engine.set(...fragments);
-        return engine;
-      },
+      context: engine,
     });
 
     const controller = new AbortController();
     const msg = userMessage('How many users?');
-    const stream = await text2sql.chat([msg], {
+    await engine.continue(msg);
+    const stream = await text2sql.chat({
       abortSignal: controller.signal,
     });
     await drain(stream);
@@ -456,13 +413,14 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
-    const { store, text2sql } = await setup();
+    const { store, text2sql, engine } = await setup();
     const fragment = user(
       'How many users are there?',
       reminder('Always explain your SQL before writing it'),
     );
 
-    const stream = await text2sql.chat([fragment]);
+    await engine.continue(fragment);
+    const stream = await text2sql.chat();
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');

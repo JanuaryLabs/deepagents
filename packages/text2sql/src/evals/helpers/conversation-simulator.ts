@@ -152,7 +152,7 @@ function buildConversationSummary(messages: UIMessage[]): string {
 /**
  * Create a UIMessage for a user question.
  */
-function createUserMessage(question: string): UIMessage {
+function createUserMessage(question: string): UIMessage & { role: 'user' } {
   return {
     id: `user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     role: 'user',
@@ -217,10 +217,7 @@ export async function simulateConversation(
     sandbox,
     model,
     adapters: { main: config.adapter },
-    context: (...fragments) => {
-      engine.set(...fragments);
-      return engine;
-    },
+    context: engine,
   });
 
   const questions: string[] = [];
@@ -231,7 +228,7 @@ export async function simulateConversation(
 
     const userMessage = createUserMessage(currentQuestion);
 
-    engine.set(user(userMessage));
+    await engine.continue(user(userMessage));
     const stream = text2sql.chat();
     await drainStream(stream);
 

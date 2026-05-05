@@ -45,21 +45,17 @@ evalite('SQL Output Formatting', {
       }),
     });
     const sandbox = { ...base, drainFileEvents: () => observed.drain() };
-    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: `formatting-${randomUUID()}`,
+      userId: 'eval',
+    });
     const text2sql = new Text2Sql({
       version: randomUUID(),
       sandbox,
       adapters: { main: adapter },
       model: groq('gpt-oss-20b'),
-      context: (...fragments) => {
-        const engine = new ContextEngine({
-          store,
-          chatId: `formatting-${randomUUID()}`,
-          userId: 'eval',
-        });
-        engine.set(...fragments);
-        return engine;
-      },
+      context: engine,
     });
 
     const result = await text2sql.toSql(question, 'main');

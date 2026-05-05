@@ -175,24 +175,22 @@ function createAdapter(
 
 function createText2Sql(adapter: Sqlite, version = `progress-${generateId()}`) {
   const store = new InMemoryContextStore();
-  let chatCount = 0;
+  const engine = new ContextEngine({
+    store,
+    chatId: `progress-chat-${generateId()}`,
+    userId: 'test-user',
+  });
 
-  return new Text2Sql({
+  const text2sql = new Text2Sql({
     version,
     sandbox,
     adapters: { main: adapter },
     model: createMockModel(),
     transform: () => new TransformStream(),
-    context: (...fragments) => {
-      const engine = new ContextEngine({
-        store,
-        chatId: `progress-chat-${chatCount++}`,
-        userId: 'test-user',
-      });
-      engine.set(...fragments);
-      return engine;
-    },
+    context: engine,
   });
+
+  return { text2sql, engine };
 }
 
 async function collect(stream: ReadableStream): Promise<unknown[]> {
@@ -242,19 +240,19 @@ describe('Text2Sql index progress events', () => {
   it('emits index progress chunks before assistant stream chunks', async () => {
     const { adapter, db } = createAdapter();
     try {
-      const text2sql = createText2Sql(adapter);
+      const { text2sql, engine } = createText2Sql(adapter);
 
-      const stream = await text2sql.chat([userMessage('How many users?')]);
+      await engine.continue(userMessage('How many users?'));
+      const stream = await text2sql.chat();
       const chunks = await collect(stream);
       const events = progressEvents(chunks);
 
       assert.ok(events.length > 0, 'expected index progress events');
-      assert.strictEqual(
-        (chunks[0] as { type?: string })?.type,
-        TEXT2SQL_INDEX_PROGRESS_CHUNK,
-        'first chunk should be index progress',
-      );
 
+      const startChunkIndex = chunks.findIndex(
+        (chunk) => (chunk as { type?: string })?.type === 'start',
+      );
+      const firstProgressChunk = chunks.findIndex(isProgressChunk);
       const firstAssistantChunk = chunks.findIndex(
         (chunk) =>
           typeof chunk === 'object' &&
@@ -265,7 +263,18 @@ describe('Text2Sql index progress events', () => {
           ),
       );
       const lastProgressChunk = chunks.findLastIndex(isProgressChunk);
+
+      assert.strictEqual(
+        startChunkIndex,
+        0,
+        'start chunk must be at wire position 0 (carries assistant id before any data)',
+      );
+      assert.ok(firstProgressChunk > 0, 'expected index progress events');
       assert.ok(firstAssistantChunk >= 0, 'expected assistant text chunks');
+      assert.ok(
+        startChunkIndex < firstProgressChunk,
+        'start chunk must precede the first progress chunk',
+      );
       assert.ok(
         lastProgressChunk < firstAssistantChunk,
         'all index progress should arrive before assistant text',
@@ -294,13 +303,14 @@ describe('Text2Sql index progress events', () => {
         return originalIntrospect(...args);
       };
 
-      const text2sql = createText2Sql(adapter, `cache-${generateId()}`);
-      const first = await collect(
-        await text2sql.chat([userMessage('First question')]),
+      const { text2sql, engine } = createText2Sql(
+        adapter,
+        `cache-${generateId()}`,
       );
-      const second = await collect(
-        await text2sql.chat([userMessage('Second question')]),
-      );
+      await engine.continue(userMessage('First question'));
+      const first = await collect(await text2sql.chat());
+      await engine.continue(userMessage('Second question'));
+      const second = await collect(await text2sql.chat());
 
       assert.ok(
         progressEvents(first).some((e) => e.type === 'adapter:cache-miss'),
@@ -391,26 +401,22 @@ describe('Text2Sql index progress events', () => {
       return [];
     });
     const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'progress-error-chat',
+      userId: 'test-user',
+    });
     const text2sql = new Text2Sql({
       version: `settled-error-${generateId()}`,
       sandbox,
       adapters: { failing, slow },
       model: createMockModel(),
       transform: () => new TransformStream(),
-      context: (...fragments) => {
-        const engine = new ContextEngine({
-          store,
-          chatId: 'progress-error-chat',
-          userId: 'test-user',
-        });
-        engine.set(...fragments);
-        return engine;
-      },
+      context: engine,
     });
 
-    const { chunks } = await collectUntilError(
-      await text2sql.chat([userMessage('This should fail')]),
-    );
+    await engine.continue(userMessage('This should fail'));
+    const { chunks } = await collectUntilError(await text2sql.chat());
     const events = progressEvents(chunks);
     const slowFinishedIndex = events.findIndex(
       (event) => event.message === 'slow adapter finished',

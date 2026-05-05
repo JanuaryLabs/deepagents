@@ -19,21 +19,17 @@ function makeText2Sql(
   version: string,
   adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
 ) {
-  const store = new InMemoryContextStore();
+  const engine = new ContextEngine({
+    store: new InMemoryContextStore(),
+    chatId: `cache-test-${generateId()}`,
+    userId: 'test',
+  });
   return new Text2Sql({
     version,
     sandbox,
     adapters,
     model: {} as never,
-    context: (...fragments) => {
-      const engine = new ContextEngine({
-        store,
-        chatId: `cache-test-${generateId()}`,
-        userId: 'test',
-      });
-      engine.set(...fragments);
-      return engine;
-    },
+    context: engine,
   });
 }
 

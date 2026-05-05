@@ -614,9 +614,8 @@ async function createSkillAwareAgent() {
     context: agentContext,
   });
 
-  const stream = await chat(skillAwareAgent, [
-    user(`Forecast sales base on the last 4 years.`),
-  ]);
+  await agentContext.continue(user(`Forecast sales base on the last 4 years.`));
+  const stream = await chat(skillAwareAgent);
   await printer.readableStream(stream);
 }
 
@@ -784,10 +783,8 @@ async function createDockerSkillAgent() {
       context,
     });
 
-    // Example: Agent can now execute real commands
-    const stream = await chat(dockerAgent, [
-      user('Show me all installed apps.'),
-    ]);
+    await context.continue(user('Show me all installed apps.'));
+    const stream = await chat(dockerAgent);
     await printer.readableStream(stream);
   } finally {
     await dockerSandbox.sandbox.dispose();

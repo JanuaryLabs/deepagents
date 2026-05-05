@@ -8,37 +8,14 @@ import {
   type ToolSet,
   type UIMessage,
   createUIMessageStream,
-  generateId,
   isToolUIPart,
 } from 'ai';
 
 import type { AgentModel } from './advisor.ts';
 import type { ContextEngine } from './engine.ts';
-import {
-  type MessageFragment,
-  assistant,
-  isFragment,
-  isMessageFragment,
-  message,
-} from './fragments.ts';
+import { assistant } from './fragments.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
-
-export type ChatMessage = UIMessage | MessageFragment;
-
-export function toMessageFragment(item: ChatMessage): MessageFragment {
-  if (isFragment(item) && isMessageFragment(item)) {
-    return item;
-  }
-  return message(item);
-}
-
-export function chatMessageToUIMessage(item: ChatMessage): UIMessage {
-  if (isFragment(item) && isMessageFragment(item)) {
-    return item.codec.encode() as UIMessage;
-  }
-  return item;
-}
 
 export interface ChatAgentLike<CIn> {
   context?: ContextEngine;
@@ -85,11 +62,27 @@ export interface ChatOptions<CIn> {
     | Promise<Record<string, unknown> | undefined>;
 }
 
+/**
+ * Stream an assistant turn into the conversation context.
+ *
+ * **Precondition:** the chain head must be an assistant fragment. This is
+ * established by calling `context.continue(input)` first — that method
+ * appends the input and reserves an empty assistant placeholder whose id
+ * becomes the streaming target. `chat()` throws if the precondition is
+ * violated (caller forgot `continue()` or used manual `set + save`).
+ *
+ * The streamed content is written to that placeholder in place
+ * (`branch: false`), and on finish usage is tracked via `context.trackUsage`.
+ *
+ * @example
+ * ```ts
+ * await context.continue(user('hi'));
+ * const stream = await chat(agent);
+ * ```
+ */
 export async function chat<CIn>(
   agent: ChatAgentLike<CIn>,
-  // FIXME: remove messages and rely on context instead
-  messages: ChatMessage[],
-  options?: ChatOptions<CIn>,
+  options: ChatOptions<CIn> = {},
 ) {
   const context = agent.context;
   const sandbox = agent.sandbox;
@@ -99,29 +92,17 @@ export async function chat<CIn>(
     );
   }
 
-  if (messages.length === 0) {
-    throw new Error('messages must not be empty');
+  const head = await context.headMessage();
+  if (head?.name !== 'assistant') {
+    throw new Error(
+      'chat: expected an assistant message at head. Call context.continue(input) before chat().',
+    );
   }
-
-  const lastItem = messages[messages.length - 1];
-  const lastFragment = toMessageFragment(lastItem);
-  const lastUIMessage = chatMessageToUIMessage(lastItem);
-  let assistantMsgId: string;
-
-  if (lastUIMessage.role === 'assistant') {
-    context.set(lastFragment);
-    await context.save({ branch: false });
-    assistantMsgId = lastUIMessage.id;
-  } else {
-    context.set(lastFragment);
-    await context.save();
-    assistantMsgId = generateId();
-  }
-
-  const uiMessages = messages.map(chatMessageToUIMessage);
+  const assistantMsgId = head.id;
+  const uiMessages = await context.getMessages();
 
   const streamContextVariables =
-    options?.contextVariables === undefined
+    options.contextVariables === undefined
       ? ({} as CIn)
       : options.contextVariables;
 
@@ -129,24 +110,24 @@ export async function chat<CIn>(
     makeTitle({
       context,
       model: agent.model,
-      generateTitle: options?.generateTitle,
-      abortSignal: options?.abortSignal,
+      generateTitle: options.generateTitle,
+      abortSignal: options.abortSignal,
     }),
     agent.stream(streamContextVariables, {
-      transform: options?.transform,
-      abortSignal: options?.abortSignal,
+      transform: options.transform,
+      abortSignal: options.abortSignal,
     }),
   ]);
 
   const uiStream = result.toUIMessageStream({
-    onError: options?.onError ?? formatChatError,
+    onError: options.onError ?? formatChatError,
     sendStart: true,
     sendFinish: true,
     sendReasoning: true,
     sendSources: true,
     originalMessages: uiMessages,
     generateMessageId: () => assistantMsgId,
-    messageMetadata: options?.messageMetadata ?? defaultChatMessageMetadata,
+    messageMetadata: options.messageMetadata ?? defaultChatMessageMetadata,
   });
 
   return createUIMessageStream({
@@ -173,7 +154,7 @@ export async function chat<CIn>(
       const drained = sandbox.drainFileEvents?.() ?? [];
       const fileEvents = isAborted ? [] : drained;
       const finalMetadata =
-        await options?.finalAssistantMetadata?.(normalizedMessage);
+        await options.finalAssistantMetadata?.(normalizedMessage);
 
       const mergedMetadata = {
         ...((normalizedMessage.metadata as object) ?? {}),
@@ -193,7 +174,6 @@ export async function chat<CIn>(
     },
     execute: async ({ writer }) => {
       writer.merge(uiStream);
-
       if (title) {
         writer.write({ type: 'data-chat-title', data: title });
       }
@@ -214,16 +194,11 @@ function sanitizeAbortedParts(parts: UIMessage['parts']): UIMessage['parts'] {
       sanitized.push(part);
       continue;
     }
-
     if (TERMINAL_TOOL_STATES.has(part.state)) {
       sanitized.push(part);
       continue;
     }
-
-    if (part.state === 'input-streaming') {
-      continue;
-    }
-
+    if (part.state === 'input-streaming') continue;
     sanitized.push({
       ...part,
       state: 'output-error',
@@ -249,6 +224,7 @@ function formatChatError(error: unknown): string {
   }
   return JSON.stringify(error);
 }
+
 async function makeTitle(options: {
   context: ContextEngine;
   model?: AgentModel;

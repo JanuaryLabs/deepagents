@@ -52,13 +52,14 @@ const text2sql = new Text2Sql({
   sandbox,
   adapters,
   model: openai('gpt-5.4-mini'),
-  context: (...fragments) => engine.set(...fragments),
+  context: engine,
 });
 
 let text = 'List the top 5 board games by rating.';
 
 while (true) {
-  const stream = await text2sql.chat([user(text)]);
+  await engine.continue(user(text));
+  const stream = await text2sql.chat();
   await printer.readableStream(stream);
   text = await input();
 }

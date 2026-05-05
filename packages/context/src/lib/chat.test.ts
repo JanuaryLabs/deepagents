@@ -116,17 +116,6 @@ function setup(mockText?: string) {
 }
 
 describe('context chat()', () => {
-  it('throws when messages array is empty', async () => {
-    const { context, model } = setup();
-    const chatAgent = agent({
-      sandbox,
-      name: 'assistant',
-      context,
-      model,
-    });
-    await assert.rejects(() => chat(chatAgent, []));
-  });
-
   it('saves user and assistant messages and tracks usage', async () => {
     const { store, context, model } = setup('First response');
     const firstUserMessage = userMessage('Hi there');
@@ -137,7 +126,8 @@ describe('context chat()', () => {
       model,
     });
 
-    const stream = await chat(chatAgent, [firstUserMessage]);
+    await context.continue(firstUserMessage);
+    const stream = await chat(chatAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -163,7 +153,8 @@ describe('context chat()', () => {
       model,
     });
 
-    const firstStream = await chat(chatAgent, [firstUserMessage]);
+    await context.continue(firstUserMessage);
+    const firstStream = await chat(chatAgent);
     await drain(firstStream);
 
     const firstBranch = await store.getActiveBranch('test-chat');
@@ -180,10 +171,8 @@ describe('context chat()', () => {
       parts: [{ type: 'text', text: 'Tool returned extra details' }],
     };
 
-    const secondStream = await chat(chatAgent, [
-      firstUserMessage,
-      assistantUpdate,
-    ]);
+    await context.continue(assistantUpdate);
+    const secondStream = await chat(chatAgent);
     await drain(secondStream);
 
     const secondBranch = await store.getActiveBranch('test-chat');
@@ -215,7 +204,8 @@ describe('context chat()', () => {
     });
 
     const firstUserMessage = userMessage('Question one');
-    const firstStream = await chat(chatAgent, [firstUserMessage]);
+    await context.continue(firstUserMessage);
+    const firstStream = await chat(chatAgent);
     await drain(firstStream);
 
     const firstBranch = await store.getActiveBranch('test-chat');
@@ -227,11 +217,8 @@ describe('context chat()', () => {
     assert.ok(firstAssistant);
 
     const secondUserMessage = userMessage('Question two');
-    const secondStream = await chat(chatAgent, [
-      firstUserMessage,
-      firstAssistant.data as UIMessage,
-      secondUserMessage,
-    ]);
+    await context.continue(secondUserMessage);
+    const secondStream = await chat(chatAgent);
     await drain(secondStream);
 
     const secondBranch = await store.getActiveBranch('test-chat');
@@ -259,9 +246,8 @@ describe('chat() title generation', () => {
     const model = createMockModelWithTitle('Response', 'Python Help');
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
-    const stream = await chat(chatAgent, [userMessage('help with python')], {
-      generateTitle: true,
-    });
+    await context.continue(userMessage('help with python'));
+    const stream = await chat(chatAgent, { generateTitle: true });
     await drain(stream);
 
     const chatData = await store.getChat('title-chat');
@@ -278,7 +264,8 @@ describe('chat() title generation', () => {
     const model = createMockModel('Response');
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
-    const stream = await chat(chatAgent, [userMessage('hello')]);
+    await context.continue(userMessage('hello'));
+    const stream = await chat(chatAgent);
     await drain(stream);
 
     const chatData = await store.getChat('no-title-chat');
@@ -296,7 +283,8 @@ describe('chat() title generation', () => {
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
     const longMessage = 'a'.repeat(150);
 
-    const stream = await chat(chatAgent, [userMessage(longMessage)]);
+    await context.continue(userMessage(longMessage));
+    const stream = await chat(chatAgent);
     await drain(stream);
 
     const chatData = await store.getChat('long-title-chat');
@@ -313,9 +301,8 @@ describe('chat() title generation', () => {
     const model = createMockModelWithTitle('Response', 'First Title');
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
-    const firstStream = await chat(chatAgent, [userMessage('first question')], {
-      generateTitle: true,
-    });
+    await context.continue(userMessage('first question'));
+    const firstStream = await chat(chatAgent, { generateTitle: true });
     await drain(firstStream);
 
     const firstChat = await store.getChat('multi-turn-chat');
@@ -340,15 +327,8 @@ describe('chat() title generation', () => {
       model: secondModel,
     });
 
-    const secondStream = await chat(
-      secondAgent,
-      [
-        userMessage('first question'),
-        assistantMsg.data as UIMessage,
-        userMessage('second question'),
-      ],
-      { generateTitle: true },
-    );
+    await context.continue(userMessage('second question'));
+    const secondStream = await chat(secondAgent, { generateTitle: true });
     await drain(secondStream);
 
     const secondChat = await store.getChat('multi-turn-chat');
@@ -365,9 +345,8 @@ describe('chat() title generation', () => {
     const model = createMockModelWithTitle('Response', 'Stream Title');
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
-    const stream = await chat(chatAgent, [userMessage('test')], {
-      generateTitle: true,
-    });
+    await context.continue(userMessage('test'));
+    const stream = await chat(chatAgent, { generateTitle: true });
 
     const reader = stream.getReader();
     const parts: unknown[] = [];
@@ -438,7 +417,8 @@ describe('chat() abort handling', () => {
       { type: 'abort' },
     ]);
 
-    const stream = await chat(mockAgent, [userMessage('search')]);
+    await context.continue(userMessage('search'));
+    const stream = await chat(mockAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('abort-text-chat');
@@ -495,7 +475,8 @@ describe('chat() abort handling', () => {
       { type: 'abort' },
     ]);
 
-    const stream = await chat(mockAgent, [userMessage('search something')]);
+    await context.continue(userMessage('search something'));
+    const stream = await chat(mockAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('abort-tool-chat');
@@ -536,7 +517,8 @@ describe('chat() abort handling', () => {
       { type: 'abort' },
     ]);
 
-    const stream = await chat(mockAgent, [userMessage('search something')]);
+    await context.continue(userMessage('search something'));
+    const stream = await chat(mockAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('abort-streaming-chat');
@@ -590,7 +572,8 @@ describe('chat() abort handling', () => {
       { type: 'abort' },
     ]);
 
-    const stream = await chat(mockAgent, [userMessage('do the thing')]);
+    await context.continue(userMessage('do the thing'));
+    const stream = await chat(mockAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('abort-approval-chat');
@@ -660,7 +643,8 @@ describe('chat() abort handling', () => {
       { type: 'abort' },
     ]);
 
-    const stream = await chat(mockAgent, [userMessage('lookup and search')]);
+    await context.continue(userMessage('lookup and search'));
+    const stream = await chat(mockAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('abort-mixed-chat');
@@ -731,7 +715,8 @@ describe('chat() abort handling', () => {
         }) as unknown as StreamTextResult<ToolSet, never>,
     };
 
-    const stream = await chat(mockAgent, [userMessage('do work')]);
+    await context.continue(userMessage('do work'));
+    const stream = await chat(mockAgent);
     await drain(stream);
 
     const branch = await store.getActiveBranch('abort-file-events-chat');
@@ -791,7 +776,8 @@ describe('chat() abort signal integration', () => {
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     let chunksSeen = 0;
-    const stream = await chat(chatAgent, [userMessage('test')], {
+    await context.continue(userMessage('test'));
+    const stream = await chat(chatAgent, {
       abortSignal: controller.signal,
       transform: () =>
         new TransformStream({
@@ -883,7 +869,8 @@ describe('chat() abort signal integration', () => {
       guardrails: [alwaysFailGuardrail],
     });
 
-    const stream = await chat(chatAgent, [userMessage('test')], {
+    await context.continue(userMessage('test'));
+    const stream = await chat(chatAgent, {
       abortSignal: controller.signal,
       transform: () => new TransformStream(),
     });
@@ -933,7 +920,8 @@ describe('chat() abort signal integration', () => {
     const chatAgent = agent({ sandbox, name: 'assistant', context, model });
 
     try {
-      const stream = await chat(chatAgent, [userMessage('test')], {
+      await context.continue(userMessage('test'));
+      const stream = await chat(chatAgent, {
         abortSignal: controller.signal,
         transform: () => new TransformStream(),
       });
@@ -983,7 +971,8 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
       model: createMockModel(),
     });
 
-    const firstStream = await chat(chatAgent, [firstMsg], {
+    await context.continue(firstMsg);
+    const firstStream = await chat(chatAgent, {
       transform: () => new TransformStream(),
     });
     await drain(firstStream);
@@ -1020,11 +1009,10 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
       model: capturingModel,
     });
 
-    const secondStream = await chat(
-      secondAgent,
-      [firstMsg, corruptAssistant, userMessage('what did you find?')],
-      { transform: () => new TransformStream() },
-    );
+    await context.continue(userMessage('what did you find?'));
+    const secondStream = await chat(secondAgent, {
+      transform: () => new TransformStream(),
+    });
     await drain(secondStream);
 
     assert.ok(
@@ -1109,7 +1097,8 @@ describe('chat() guardrail retry context integrity', () => {
       guardrails: [failOnceGuardrail],
     });
 
-    const stream = await chat(chatAgent, [userMessage('show me emails')], {
+    await context.continue(userMessage('show me emails'));
+    const stream = await chat(chatAgent, {
       transform: () => new TransformStream(),
     });
     await drain(stream);
@@ -1144,7 +1133,8 @@ describe('chat() guardrail retry context integrity', () => {
       model: model1,
     });
 
-    const stream1 = await chat(chatAgent1, [userMessage('hello')], {
+    await context.continue(userMessage('hello'));
+    const stream1 = await chat(chatAgent1, {
       transform: () => new TransformStream(),
     });
     await drain(stream1);
@@ -1155,15 +1145,6 @@ describe('chat() guardrail retry context integrity', () => {
     assert.deepStrictEqual(
       chain1.map((e: { name: string }) => e.name),
       ['user', 'assistant'],
-    );
-
-    const firstAssistantData = chain1.find(
-      (e: { name: string }) => e.name === 'assistant',
-    )!;
-    const firstAssistantContent = JSON.parse(
-      typeof firstAssistantData.data === 'string'
-        ? firstAssistantData.data
-        : JSON.stringify(firstAssistantData.data),
     );
 
     let doStreamCalls = 0;
@@ -1218,19 +1199,10 @@ describe('chat() guardrail retry context integrity', () => {
       guardrails: [failOnceGuardrail],
     });
 
-    const firstAssistantMsg: UIMessage = {
-      id: firstAssistantData.id,
-      role: 'assistant',
-      parts: firstAssistantContent.parts ?? [
-        { type: 'text', text: 'First response' },
-      ],
-    };
-
-    const stream2 = await chat(
-      chatAgent2,
-      [userMessage('hello'), firstAssistantMsg, userMessage('find my file')],
-      { transform: () => new TransformStream() },
-    );
+    await context.continue(userMessage('find my file'));
+    const stream2 = await chat(chatAgent2, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('guardrail-multiturn-test');
@@ -1321,7 +1293,8 @@ describe('chat() guardrail self-correction persistence', () => {
       guardrails: [failOnceGuardrail],
     });
 
-    const stream = await chat(chatAgent, [userMessage('test')], {
+    await context.continue(userMessage('test'));
+    const stream = await chat(chatAgent, {
       transform: () => new TransformStream(),
     });
     await drain(stream);
@@ -1404,7 +1377,8 @@ describe('chat() guardrail self-correction persistence', () => {
       guardrails: [failOnceGuardrail],
     });
 
-    const stream = await chat(chatAgent, [userMessage('test')], {
+    await context.continue(userMessage('test'));
+    const stream = await chat(chatAgent, {
       transform: () => new TransformStream(),
     });
     await drain(stream);
@@ -1501,7 +1475,8 @@ describe('chat() guardrail self-correction persistence', () => {
       guardrails: [failOnceGuardrail],
     });
 
-    const stream = await chat(chatAgent, [userMessage('go')], {
+    await context.continue(userMessage('go'));
+    const stream = await chat(chatAgent, {
       transform: () => new TransformStream(),
     });
     await drain(stream);
@@ -1663,7 +1638,8 @@ describe('chat() guardrail self-correction persistence', () => {
       guardrails: [errorRecoveryGuardrail],
     });
 
-    const stream = await chat(chatAgent, [userMessage('show me data')], {
+    await context.continue(userMessage('show me data'));
+    const stream = await chat(chatAgent, {
       transform: () => new TransformStream(),
     });
     await drain(stream);

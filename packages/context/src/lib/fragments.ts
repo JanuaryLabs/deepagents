@@ -154,6 +154,16 @@ export function assistant(message: UIMessage): MessageFragment {
     },
   };
 }
+
+export type ChatMessage = UIMessage | MessageFragment;
+
+export function toMessageFragment(item: ChatMessage): MessageFragment {
+  if (isFragment(item) && isMessageFragment(item)) {
+    return item;
+  }
+  return message(item);
+}
+
 export function message(content: string | UIMessage): MessageFragment {
   const message =
     typeof content === 'string'

@@ -1,5 +1,9 @@
-import type { LanguageModelUsage, UIMessage } from 'ai';
-import { validateUIMessages } from 'ai';
+import {
+  type LanguageModelUsage,
+  type UIMessage,
+  generateId,
+  validateUIMessages,
+} from 'ai';
 import { mergeWith } from 'lodash-es';
 
 import {
@@ -7,8 +11,14 @@ import {
   type FragmentEstimate,
   getModelsRegistry,
 } from './estimate.ts';
-import type { ContextFragment } from './fragments.ts';
-import { getFragmentData, isMessageFragment } from './fragments.ts';
+import {
+  type ChatMessage,
+  type ContextFragment,
+  assistant,
+  getFragmentData,
+  isMessageFragment,
+  toMessageFragment,
+} from './fragments.ts';
 import {
   isConditionalReminder,
   resolveReminderAsync,
@@ -79,6 +89,10 @@ function estimateMessageContent(data: unknown): string {
 
 function isLanguageModelUsage(value: unknown): value is LanguageModelUsage {
   return typeof value === 'object' && value !== null && 'totalTokens' in value;
+}
+
+function isEmptyAssistantPlaceholder(message: UIMessage): boolean {
+  return message.role === 'assistant' && message.parts.length === 0;
 }
 
 /**
@@ -379,6 +393,113 @@ export class ContextEngine {
   }
 
   /**
+   * Return the head of the conversation — pending tail or persisted branch head.
+   *
+   * Includes empty assistant placeholders (use this for id-lookup, not for
+   * building model prompts — see `getMessages()` for prompt-ready output).
+   *
+   * @throws if the pending tail is missing an id (programming error).
+   */
+  public async headMessage(): Promise<
+    { id: string; name: string } | undefined
+  > {
+    await this.#ensureInitialized();
+
+    if (this.#pendingMessages.length > 0) {
+      const tail = this.#pendingMessages[this.#pendingMessages.length - 1];
+      if (!tail.id) {
+        throw new Error(
+          `headMessage: pending fragment "${tail.name}" is missing id`,
+        );
+      }
+      return { id: tail.id, name: tail.name };
+    }
+
+    if (this.#branch?.headMessageId) {
+      const msg = await this.#store.getMessage(this.#branch.headMessageId);
+      if (msg) return { id: msg.id, name: msg.name };
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Return the model-ready conversation: persisted chain plus pending fragments,
+   * with empty assistant placeholders filtered out.
+   *
+   * For id-lookup use `headMessage()` instead — that one keeps placeholders.
+   */
+  public async getMessages(): Promise<UIMessage[]> {
+    await this.#ensureInitialized();
+
+    const messages: UIMessage[] = [];
+
+    if (this.#branch?.headMessageId) {
+      const chain = await this.#store.getMessageChain(
+        this.#branch.headMessageId,
+      );
+      for (const msg of chain) {
+        const data = msg.data as UIMessage;
+        if (isEmptyAssistantPlaceholder(data)) continue;
+        messages.push(data);
+      }
+    }
+
+    for (const fragment of this.#pendingMessages) {
+      if (!fragment.codec) {
+        throw new Error(`Fragment "${fragment.name}" is missing codec.`);
+      }
+      const encoded = fragment.codec.encode() as UIMessage;
+      if (isEmptyAssistantPlaceholder(encoded)) continue;
+      messages.push(encoded);
+    }
+
+    return messages.length === 0 ? [] : validateUIMessages({ messages });
+  }
+
+  /**
+   * Advance the conversation by one turn. Required setup before `chat()`.
+   *
+   * - User input → persists the message AND appends an empty assistant
+   *   placeholder reserving the id of the next streamed response.
+   * - Assistant input (tool-resume / continuation) → persists in-place
+   *   (`branch: false`), reusing the input's id.
+   *
+   * Always leaves the chain head as an assistant fragment, satisfying chat()'s
+   * precondition.
+   *
+   * @returns the assistant id that will receive the streamed response — useful
+   *   for telemetry, optimistic UI, or correlating logs before the stream starts.
+   * @throws if assistant input is missing an id.
+   *
+   * @example
+   * ```ts
+   * const assistantId = await context.continue(user('hi'));
+   * const stream = await chat(agent); // streams into assistantId
+   * ```
+   */
+  public async continue(input: ChatMessage): Promise<string> {
+    const fragment = toMessageFragment(input);
+    const isAssistantUpdate = fragment.name === 'assistant';
+    let assistantId: string;
+    if (isAssistantUpdate) {
+      if (!fragment.id) {
+        throw new Error('continue: assistant input is missing id');
+      }
+      assistantId = fragment.id;
+      this.set(fragment);
+    } else {
+      assistantId = generateId();
+      this.set(
+        fragment,
+        assistant({ id: assistantId, role: 'assistant', parts: [] }),
+      );
+    }
+    await this.save({ branch: !isAssistantUpdate });
+    return assistantId;
+  }
+
+  /**
    * Add fragments to the context.
    *
    * - Message fragments (user/assistant) are queued for persistence
@@ -427,37 +548,9 @@ export class ContextEngine {
    */
   public async resolve(options: ResolveOptions): Promise<ResolveResult> {
     await this.#ensureInitialized();
-
     const systemPrompt = options.renderer.render(this.#renderableFragments);
-
-    // Get persisted messages from graph
-    const messages: unknown[] = [];
-    if (this.#branch?.headMessageId) {
-      const chain = await this.#store.getMessageChain(
-        this.#branch.headMessageId,
-      );
-
-      for (const msg of chain) {
-        messages.push(msg.data);
-      }
-    }
-
-    for (const fragment of this.#pendingMessages) {
-      if (!fragment.codec) {
-        throw new Error(`Fragment "${fragment.name}" is missing codec.`);
-      }
-      const encoded = fragment.codec.encode() as UIMessage;
-      if (encoded.role === 'assistant' && encoded.parts.length === 0) {
-        continue;
-      }
-      messages.push(encoded);
-    }
-
-    return {
-      systemPrompt,
-      messages:
-        messages.length === 0 ? [] : await validateUIMessages({ messages }),
-    };
+    const messages = await this.getMessages();
+    return { systemPrompt, messages };
   }
 
   /**
