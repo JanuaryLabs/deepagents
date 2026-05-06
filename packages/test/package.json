@@ -35,7 +35,7 @@
   ],
   "dependencies": {
     "nano-spawn": "^2.0.0",
-    "mssql": "^12.2.0"
+    "mssql": "^12.5.2"
   },
   "peerDependencies": {},
   "devDependencies": {

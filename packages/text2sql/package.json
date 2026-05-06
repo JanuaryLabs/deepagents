@@ -83,11 +83,11 @@
   "dependencies": {
     "@ai-sdk/groq": "^3.0.36",
     "@ai-sdk/openai": "^3.0.49",
-    "ai": "^6.0.174",
     "@deepagents/agent": "0.38.1",
     "@deepagents/context": "0.38.1",
     "@deepagents/evals": "0.38.1",
-    "@google-cloud/bigquery": "8.1.1",
+    "@google-cloud/bigquery": "8.3.0",
+    "ai": "^6.0.174",
     "autoevals": "0.0.132",
     "bash-tool": "^1.3.16",
     "chalk": "^5.6.0",
@@ -98,19 +98,19 @@
     "openai": "5.12.2",
     "p-limit": "^6.2.0",
     "p-retry": "^7.1.1",
-    "sql-formatter": "^15.7.2",
+    "sql-formatter": "^15.7.3",
     "uuid": "^13.0.0",
     "xlsx": "^0.18.5",
     "zod": "^3.25.76 || ^4.0.0"
   },
   "devDependencies": {
-    "@google-cloud/bigquery": "^8.1.1",
     "@ai-sdk/react": "^3.0.176",
+    "@google-cloud/bigquery": "^8.3.0",
     "autoevals": "^0.0.132"
   },
   "peerDependencies": {
-    "mssql": "^12.2.0",
-    "pg": "^8.17.2"
+    "mssql": "^12.5.2",
+    "pg": "^8.20.0"
   },
   "peerDependenciesMeta": {
     "mssql": {

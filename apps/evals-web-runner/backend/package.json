@@ -10,7 +10,7 @@
     "@deepagents/text2sql": "0.38.1",
     "@hono/node-server": "^1.19.5",
     "hono": "^4.12.3",
-    "mssql": "^12.2.0",
+    "mssql": "^12.5.2",
     "zod": "^3.24.2"
   }
 }
