@@ -39,6 +39,11 @@ import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 
 const store = new InMemoryContextStore();
 const model = groq('openai/gpt-oss-20b');
+const engine = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
 
 const sandbox = await createBashTool({
   sandbox: await createRoutingSandbox({
@@ -52,15 +57,7 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
   sandbox,
   model,
-  context: (...fragments) => {
-    const engine = new ContextEngine({
-      store,
-      chatId: 'chat-123',
-      userId: 'user-456',
-    });
-    engine.set(...fragments);
-    return engine;
-  },
+  context: engine,
 });
 ```
 

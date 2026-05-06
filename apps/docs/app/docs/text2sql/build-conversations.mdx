@@ -4,19 +4,17 @@ description: Create multi-turn chat experiences with a persistent ContextEngine 
 ---
 
 The `chat()` method streams answers and persists each turn through the
-`ContextEngine` returned by your `context` factory. Thread identity comes from
-the `chatId` and `userId` on that engine, not from the `Text2Sql` instance.
+`ContextEngine` you pass to `Text2Sql`. Thread identity comes from the
+`chatId` and `userId` on that engine, not from the `Text2Sql` instance.
 Use `chat()` when you want a durable thread. `toSql()` stays stateless and only
-uses the fragments you pass into that one call. Each `chat()` call should
-contain only the new incoming message(s) for that turn.
+uses the fragments you pass into that one call. Before each `chat()` call,
+append only the new incoming message for that turn with `engine.continue(...)`.
 
 ## Basic Usage
 
 ```typescript
-const stream = await text2sql.chat(
-  [{ role: 'user', content: 'Show me top 10 customers' }],
-  { generateTitle: true },
-);
+await engine.continue(user('Show me top 10 customers'));
+const stream = await text2sql.chat({ generateTitle: true });
 
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {
@@ -25,8 +23,56 @@ for await (const chunk of stream) {
 }
 ```
 
-That `messages` array is the current turn payload, not the full thread
-transcript.
+That `engine.continue(...)` call should contain only the current turn payload,
+not the full thread transcript.
+
+## Indexing Progress
+
+`chat()` indexes schema context before the assistant response starts. That work
+can be expensive on large databases, so Text2SQL emits typed progress chunks in
+the same UI stream:
+
+```typescript
+import {
+  TEXT2SQL_INDEX_PROGRESS_CHUNK,
+  type Text2SqlIndexProgressEvent,
+} from '@deepagents/text2sql';
+
+await engine.continue(user('Show me top 10 customers'));
+const stream = await text2sql.chat();
+
+for await (const chunk of stream) {
+  if (chunk.type === TEXT2SQL_INDEX_PROGRESS_CHUNK) {
+    const event = chunk.data as Text2SqlIndexProgressEvent;
+
+    renderIndexingStatus({
+      type: event.type,
+      adapter: event.adapter,
+      phase: event.phase,
+      table: event.table,
+      message: event.message,
+      current: event.current,
+      total: event.total,
+      cached: event.cached,
+      timestampMs: event.timestampMs,
+    });
+
+    continue;
+  }
+
+  renderAssistantChunk(chunk);
+}
+```
+
+Progress events include `index:start`, `index:end`, `adapter:start`,
+`adapter:end`, `adapter:cache-hit`, `adapter:cache-miss`, `phase:start`,
+`phase:progress`, `phase:end`, `adapter:error`, and `index:error`.
+
+Use the Unix epoch `timestampMs` to derive durations in the client. For example,
+subtract the `timestampMs` on a `phase:start` event from the matching
+`phase:end` event for that adapter and phase. Text2SQL does not emit
+`elapsedMs`, because UIs may want to group timing by index, adapter, phase,
+table, or their own display model.
 
 ## Reusing the Same Thread
 
@@ -43,12 +89,13 @@ import {
   createBashTool,
   createRoutingSandbox,
   createVirtualSandbox,
+  user,
 } from '@deepagents/context';
 import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 
 const store = new SqliteContextStore('./text2sql-chat.sqlite');
 
-async function createText2Sql(chatId: string, userId: string) {
+async function createThread(chatId: string, userId: string) {
   // Reuse your configured database adapter from Getting Started.
   const sandbox = await createBashTool({
     sandbox: await createRoutingSandbox({
@@ -57,30 +104,33 @@ async function createText2Sql(chatId: string, userId: string) {
     }),
   });
 
-  return new Text2Sql({
+  const engine = new ContextEngine({
+    store,
+    chatId,
+    userId,
+  });
+  const text2sql = new Text2Sql({
     version: 'v1',
     model: groq('openai/gpt-oss-20b'),
     sandbox,
     adapters: { main: adapter },
-    context: (...fragments) => {
-      const engine = new ContextEngine({
-        store,
-        chatId,
-        userId,
-      });
-      engine.set(...fragments);
-      return engine;
-    },
+    context: engine,
   });
+
+  return { engine, text2sql };
 }
 
-const firstTurn = await createText2Sql('chat-123', 'user-456');
-await firstTurn.chat([{ role: 'user', content: 'Show me total revenue' }]);
+const firstTurn = await createThread('chat-123', 'user-456');
+await firstTurn.engine.continue(user('Show me total revenue'));
+for await (const _ of await firstTurn.text2sql.chat()) {
+  // drain or stream chunks to your UI
+}
 
-const followUp = await createText2Sql('chat-123', 'user-456');
-await followUp.chat([
-  { role: 'user', content: 'Break that down by quarter' },
-]);
+const followUp = await createThread('chat-123', 'user-456');
+await followUp.engine.continue(user('Break that down by quarter'));
+for await (const _ of await followUp.text2sql.chat()) {
+  // drain or stream chunks to your UI
+}
 ```
 
 ## How It Works
@@ -90,26 +140,25 @@ When you call `chat()`:
 1. **Load stored context** - The `ContextEngine` resolves prior messages for the same thread.
 2. **Inject SQL guidance** - Text2SQL adds its built-in workflow guidance plus cached schema fragments.
 3. **Run tools** - The agent can validate SQL, execute read-only queries, and inspect saved results.
-4. **Persist the turn** - The incoming message(s) are saved before streaming starts, then the assistant reply plus chat metadata are finalized when the turn finishes.
+4. **Persist the turn** - `engine.continue(...)` saves the incoming message and reserves the assistant slot before streaming starts, then the assistant reply plus chat metadata are finalized when the turn finishes.
 
 ## Message Format
 
-`chat()` accepts `ChatMessage[]` from `@deepagents/context`. In most apps, plain
-`{ role, content }` objects are enough. When prior turns are already stored in
-your `ContextEngine`, do not resend them here:
+`ContextEngine.continue()` accepts `ChatMessage` from `@deepagents/context`. In
+most apps, `user('...')` or `user(uiMessage)` is enough. When prior turns are
+already stored in your `ContextEngine`, do not resend them:
 
 ```typescript
-await text2sql.chat([
-  { role: 'user', content: 'Show me sales by region' },
-]);
+await engine.continue(user('Show me sales by region'));
+const stream = await text2sql.chat();
 ```
 
 If your UI keeps a full transcript client-side, strip it down to the new
-message(s) for this request before calling `chat()`.
+message for this request before calling `engine.continue(...)`.
 
 ## Options
 
-`chat()` accepts an optional second argument:
+`chat()` accepts an optional options object:
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
@@ -121,9 +170,8 @@ message(s) for this request before calling `chat()`.
 ```typescript
 const controller = new AbortController();
 
-const stream = await text2sql.chat(messages, {
-  abortSignal: controller.signal,
-});
+await engine.continue(user('Show me top 10 customers'));
+const stream = await text2sql.chat({ abortSignal: controller.signal });
 
 setTimeout(() => controller.abort(), 10_000);
 ```
@@ -140,13 +188,12 @@ continue the thread, or use a new `chatId` to start a separate conversation.
 
 ```typescript
 app.post('/api/chat', async (req, res) => {
-  const { incomingMessages, chatId } = req.body;
+  const { message, chatId } = req.body;
   const userId = req.user.id;
 
-  const text2sql = await createText2Sql(chatId, userId);
-  const stream = await text2sql.chat(incomingMessages, {
-    generateTitle: true,
-  });
+  const { engine, text2sql } = await createThread(chatId, userId);
+  await engine.continue(user(message));
+  const stream = await text2sql.chat({ generateTitle: true });
 
   res.setHeader('Content-Type', 'text/event-stream');
 
@@ -158,7 +205,7 @@ app.post('/api/chat', async (req, res) => {
 });
 ```
 
-`incomingMessages` should contain only the new turn payload for this request.
+`message` should be only the new turn payload for this request.
 
 ## Best Practices
 

@@ -95,7 +95,7 @@ console.log(sql);
 | Returns | SQL string | Streamed user-facing answer |
 | Execution | No execution | Executes via `sql validate <db> "..."` and `sql run <db> "..."` |
 | Persistent context | Schema cache only | Full conversation thread from your context store |
-| Extra fragments | Use low-level `toSql({ fragments })` | Use your `context` factory |
+| Extra fragments | Use low-level `toSql({ fragments })` | Set fragments on your `ContextEngine` |
 | Streaming | No | Yes |
 | Best for | Previews, review flows, offline execution | Interactive data assistants |
 
@@ -156,6 +156,6 @@ const text2sql = new Text2Sql({
   adapters: { main: adapter },
   model,
   sandbox,
-  context,
+  context: engine,
 });
 ```

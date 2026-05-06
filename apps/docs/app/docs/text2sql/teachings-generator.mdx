@@ -34,8 +34,8 @@ ORDER BY delinquent_loans DESC`,
 ];
 ```
 
-Use this array in your `context(...fragments)` factory for `chat()`, or pass it
-to the lower-level `toSql({ fragments })` helper for direct SQL generation.
+Set this array on your `ContextEngine` for `chat()`, or pass it to the
+lower-level `toSql({ fragments })` helper for direct SQL generation.
 
 ## Option 2: Feed Teachings into SchemaSynthesizer
 

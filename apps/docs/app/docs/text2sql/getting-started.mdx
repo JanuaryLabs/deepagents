@@ -31,10 +31,10 @@ Text2SQL requires six components:
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Model** - Any AI SDK model compatible with `@deepagents/agent`
 4. **Sandbox** - A caller-owned `AgentSandbox` used for SQL command execution in `chat()`
-5. **Context Factory** - Creates a `ContextEngine` with your chosen store, `chatId`, and `userId`
+5. **Context Engine** - A `ContextEngine` with your chosen store, `chatId`, and `userId`
 6. **Version** - A string used to manage cache invalidation (bump when schema changes)
 
-Start by creating the shared model, filesystem, and context factory:
+Start by creating the shared model, filesystem, and context engine:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
@@ -46,24 +46,20 @@ import {
   createBashTool,
   createRoutingSandbox,
   createVirtualSandbox,
+  user,
 } from '@deepagents/context';
 
 const store = new InMemoryContextStore();
 const model = groq('openai/gpt-oss-20b');
 const filesystem = new InMemoryFs();
-
-const context = (...fragments) => {
-  const engine = new ContextEngine({
-    store,
-    chatId: 'chat-123',
-    userId: 'user-456',
-  });
-  engine.set(...fragments);
-  return engine;
-};
+const engine = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
 ```
 
-Reuse `model`, `filesystem`, and `context` in the adapter-specific examples below.
+Reuse `model`, `filesystem`, and `engine` in the adapter-specific examples below.
 Each example then creates `sandbox` by composing `createBashTool`, `createRoutingSandbox`, and `createVirtualSandbox({ fs: filesystem })` with `hostExtensions: [sqlSandboxExtension({ main: adapter })]`.
 The adapter-map key (`main` in these examples) becomes the required second
 argument to `text2sql.toSql(..., 'main')` and the `<db>` selector in
@@ -73,9 +69,9 @@ Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you construct the
 adapter map dynamically, validate the keys first with
 `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
-The `context` factory also fixes the conversation identity for `chat()`. Reuse
-the same `store`, `chatId`, and `userId` when you want follow-up turns to stay
-in the same thread. Create a new factory when you want a separate thread.
+The `engine` also fixes the conversation identity for `chat()`. Reuse the same
+`store`, `chatId`, and `userId` when you want follow-up turns to stay in the
+same thread. Create a new engine when you want a separate thread.
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="SQLite">
@@ -104,7 +100,7 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
   sandbox,
-  context,
+  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -138,7 +134,7 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
   sandbox,
-  context,
+  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -176,7 +172,7 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
   sandbox,
-  context,
+  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -213,7 +209,7 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
   sandbox,
-  context,
+  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -256,7 +252,7 @@ const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
   sandbox,
-  context,
+  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -286,12 +282,12 @@ console.log(sql);
 
 ### Chat with Streaming
 
-Use `chat()` for streaming responses. Conversation identity comes from the `context` factory you created above:
+Use `chat()` for streaming responses. Conversation identity comes from the
+`ContextEngine` you created above:
 
 ```typescript
-const stream = await text2sql.chat([
-  { role: 'user', content: 'What are the most popular genres?' },
-]);
+await engine.continue(user('What are the most popular genres?'));
+const stream = await text2sql.chat();
 
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {
@@ -314,7 +310,8 @@ When Text2SQL processes a query, it:
 4. **Validates** - The adapter validates the generated SQL before it is returned or executed.
 5. **Returns results** - `toSql()` returns the SQL string; `chat()` streams an end-user answer.
 
-`chat()` also injects Text2SQL's built-in SQL workflow guidance and any extra fragments you add in your `context` factory.
+`chat()` also injects Text2SQL's built-in SQL workflow guidance and any extra
+fragments you add to your `ContextEngine`.
 
 ## Environment Variables
 

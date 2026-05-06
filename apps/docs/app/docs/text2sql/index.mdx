@@ -39,6 +39,11 @@ import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./chinook.db', { readOnly: true });
 const store = new InMemoryContextStore();
+const engine = new ContextEngine({
+  store,
+  chatId: 'chinook-demo',
+  userId: 'demo-user',
+});
 const adapter = new Sqlite({
   execute: (sql) => db.prepare(sql).all(),
   grounding: [sqlite.tables(), sqlite.info()],
@@ -55,15 +60,7 @@ const text2sql = new Text2Sql({
   model: groq('openai/gpt-oss-20b'),
   sandbox,
   adapters: { main: adapter },
-  context: (...fragments) => {
-    const engine = new ContextEngine({
-      store,
-      chatId: 'chinook-demo',
-      userId: 'demo-user',
-    });
-    engine.set(...fragments);
-    return engine;
-  },
+  context: engine,
 });
 
 // Generate SQL from natural language
@@ -89,7 +86,7 @@ or `validateAdapterNames(names)`.
 | Method                    | Description                                            |
 | ------------------------- | ------------------------------------------------------ |
 | `toSql(input, adapterName)` | Generate SQL without executing (routed to one adapter) |
-| `chat(messages)` | Run a persisted turn using new incoming messages |
+| `chat(options?)` | Run a persisted turn after `engine.continue(input)` and stream the answer |
 | `index()` | Introspect all configured adapters (cached per adapter) |
 | `toPairs(adapterName, factory)` | Generate training pairs from one configured adapter |
 

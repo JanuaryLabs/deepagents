@@ -45,9 +45,8 @@ const recipe = [
 ];
 ```
 
-Spread `...recipe` into your `context(...fragments)` factory for `chat()`, or
-append it to the low-level `toSql({ fragments })` helper when you need direct
-SQL generation.
+Set `...recipe` on your `ContextEngine` for `chat()`, or append it to the
+low-level `toSql({ fragments })` helper when you need direct SQL generation.
 
 ## Combining Recipes
 

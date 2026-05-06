@@ -9,12 +9,12 @@ of the supported patterns below when you need plain English explanations of SQL.
 ## Option 1: Use chat() for Execution + Explanation
 
 ```typescript
-const stream = await text2sql.chat([
-  {
-    role: 'user',
-    content: 'Show revenue by month and explain the result in plain English.',
-  },
-]);
+import { user } from '@deepagents/context';
+
+await engine.continue(
+  user('Show revenue by month and explain the result in plain English.'),
+);
+const stream = await text2sql.chat();
 
 for await (const chunk of stream) {
   if (chunk.type === 'text-delta') {

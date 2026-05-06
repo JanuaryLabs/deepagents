@@ -41,6 +41,7 @@ import {
   createBashTool,
   createRoutingSandbox,
   createVirtualSandbox,
+  user,
 } from '@deepagents/context';
 import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import {
@@ -59,6 +60,11 @@ const pool = new pg.Pool({
 });
 
 const store = new InMemoryContextStore();
+const engine = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
 const adapter = new Postgres({
   execute: async (sql) => {
     const result = await pool.query(sql);
@@ -86,15 +92,7 @@ const text2sql = new Text2Sql({
   model: groq('openai/gpt-oss-20b'),
   sandbox,
   adapters: { main: adapter },
-  context: (...fragments) => {
-    const engine = new ContextEngine({
-      store,
-      chatId: 'chat-123',
-      userId: 'user-456',
-    });
-    engine.set(...fragments);
-    return engine;
-  },
+  context: engine,
 });
 
 // Generate SQL
@@ -130,10 +128,10 @@ for composition patterns.
 
 ## Fragments
 
-Inject domain knowledge using fragments from `@deepagents/context` inside the
-`context` factory you pass to `Text2Sql`. Those fragments affect `chat()`
-sessions. If you need direct SQL generation with extra fragments, use the
-lower-level `toSql({ fragments })` helper exported from `@deepagents/text2sql`.
+Inject domain knowledge by setting fragments on the `ContextEngine` you pass to
+`Text2Sql`. Those fragments affect `chat()` sessions. If you need direct SQL
+generation with extra fragments, use the lower-level `toSql({ fragments })`
+helper exported from `@deepagents/text2sql`.
 
 ```typescript
 import {
@@ -146,31 +144,25 @@ import {
 } from '@deepagents/context';
 
 const store = new InMemoryContextStore();
+const engine = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
 
-const context = (...fragments) => {
-  const engine = new ContextEngine({
-    store,
-    chatId: 'chat-123',
-    userId: 'user-456',
-  });
-
-  engine.set(
-    term('MRR', 'monthly recurring revenue'),
-    hint('Always exclude test accounts with email ending in @test.com'),
-    guardrail({
-      rule: 'Never expose individual salaries',
-      reason: 'Confidential HR data',
-      action: 'Aggregate by department instead',
-    }),
-    example({
-      question: 'show me churned customers',
-      answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
-    }),
-    ...fragments,
-  );
-
-  return engine;
-};
+engine.set(
+  term('MRR', 'monthly recurring revenue'),
+  hint('Always exclude test accounts with email ending in @test.com'),
+  guardrail({
+    rule: 'Never expose individual salaries',
+    reason: 'Confidential HR data',
+    action: 'Aggregate by department instead',
+  }),
+  example({
+    question: 'show me churned customers',
+    answer: `SELECT * FROM customers WHERE status = 'churned' ORDER BY churned_at DESC`,
+  }),
+);
 ```
 
 **Domain fragments** (11 types): `term`, `hint`, `guardrail`, `example`, `explain`, `clarification`, `workflow`, `quirk`, `styleGuide`, `analogy`, `glossary`.
@@ -196,22 +188,67 @@ Control what schema metadata the AI receives:
 
 ## Conversations
 
-`chat()` persists history through the `ContextEngine` returned by your `context` factory. Reuse the same store, `chatId`, and `userId` to continue the same thread. Pass only the new incoming message(s) for the current turn; do not replay earlier turns that are already stored in the context store:
+`chat()` persists history through the `ContextEngine` you pass to `Text2Sql`.
+Reuse the same store, `chatId`, and `userId` to continue the same thread.
+Before each turn, append only the new incoming message to the engine; do not
+replay earlier turns that are already stored in the context store:
 
 ```typescript
-const stream = await text2sql.chat([
-  { role: 'user', content: 'Show me orders from last month' },
-]);
+await engine.continue(user('Show me orders from last month'));
+const stream = await text2sql.chat();
 
 for await (const chunk of stream) {
   // handle streaming response
 }
 
 // Continue the same conversation
-const followUp = await text2sql.chat([
-  { role: 'user', content: 'Now filter to only completed ones' },
-]);
+await engine.continue(user('Now filter to only completed ones'));
+const followUp = await text2sql.chat();
+for await (const chunk of followUp) {
+  // handle streaming response
+}
 ```
+
+While `chat()` builds or reads cached schema context, it emits progress chunks
+before assistant text starts:
+
+```typescript
+import {
+  TEXT2SQL_INDEX_PROGRESS_CHUNK,
+  type Text2SqlIndexProgressEvent,
+} from '@deepagents/text2sql';
+
+await engine.continue(user('Show me top 10 customers'));
+const stream = await text2sql.chat();
+const startedAt = new Map<string, number>();
+
+for await (const chunk of stream) {
+  if (chunk.type === TEXT2SQL_INDEX_PROGRESS_CHUNK) {
+    const event = chunk.data as Text2SqlIndexProgressEvent;
+    const scope =
+      [event.adapter, event.phase].filter(Boolean).join(':') || 'index';
+
+    if (event.type.endsWith(':start') || event.type === 'index:start') {
+      startedAt.set(scope, event.timestampMs ?? Date.now());
+    }
+
+    if (event.type.endsWith(':end') || event.type.endsWith(':error')) {
+      const durationMs =
+        (event.timestampMs ?? Date.now()) -
+        (startedAt.get(scope) ?? event.timestampMs ?? Date.now());
+      console.log(event.message, durationMs);
+    }
+
+    continue;
+  }
+
+  // handle assistant stream chunks
+}
+```
+
+Each progress event includes a generic Unix epoch `timestampMs` so clients can
+calculate per-index, per-adapter, or per-phase durations without Text2SQL
+imposing one duration policy.
 
 `toSql()` is stateless. It reads the current schema fragments, but it does not
 write messages, titles, or usage into your context store.

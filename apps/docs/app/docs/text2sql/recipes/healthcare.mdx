@@ -193,8 +193,8 @@ const healthcareRecipe = [
 ];
 ```
 
-Spread `...healthcareRecipe` into your `context(...fragments)` factory for
-`chat()`, or append it to the low-level `toSql({ fragments })` helper.
+Set `...healthcareRecipe` on your `ContextEngine` for `chat()`, or append it to
+the low-level `toSql({ fragments })` helper.
 
 ## Fragment Breakdown
 
