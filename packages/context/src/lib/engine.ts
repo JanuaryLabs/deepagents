@@ -320,6 +320,7 @@ export class ContextEngine {
     lastMessageAt?: number;
     lastMessage?: UIMessage;
     lastAssistantMessage?: UIMessage;
+    lastAssistantMessages?: UIMessage[];
   }> {
     await this.#ensureInitialized();
 
@@ -328,6 +329,7 @@ export class ContextEngine {
     let lastMessageAt: number | undefined;
     let lastMessage: UIMessage | undefined;
     let lastAssistantMessage: UIMessage | undefined;
+    const lastAssistantMessages: UIMessage[] = [];
 
     if (this.#branch?.headMessageId) {
       const chain = await this.#store.getMessageChain(
@@ -337,7 +339,9 @@ export class ContextEngine {
         messageCount++;
 
         if (msg.name === 'assistant') {
-          lastAssistantMessage = msg.data as UIMessage;
+          const assistantMsg = msg.data as UIMessage;
+          lastAssistantMessage = assistantMsg;
+          lastAssistantMessages.push(assistantMsg);
         }
 
         if (msg.name !== 'user') {
@@ -361,6 +365,7 @@ export class ContextEngine {
       lastMessageAt,
       lastMessage,
       lastAssistantMessage,
+      lastAssistantMessages,
     };
   }
 
@@ -612,6 +617,7 @@ export class ContextEngine {
             lastMessageAt,
             lastMessage,
             lastAssistantMessage,
+            lastAssistantMessages,
           } = await this.#getChainContext();
           const original = lastUserFragment.codec.encode() as UIMessage & {
             role: 'user';
@@ -636,6 +642,7 @@ export class ContextEngine {
             elapsed,
             messageCount,
             lastAssistantMessage,
+            lastAssistantMessages,
           };
 
           const configs = conditionalReminders.map(

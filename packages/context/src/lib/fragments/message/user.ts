@@ -50,6 +50,7 @@ export interface WhenContext {
   elapsed?: number;
   messageCount: number;
   lastAssistantMessage?: UIMessage;
+  lastAssistantMessages?: UIMessage[];
 }
 
 export type WhenPredicate = (ctx: WhenContext) => boolean | Promise<boolean>;
