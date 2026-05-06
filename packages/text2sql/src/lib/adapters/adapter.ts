@@ -135,6 +135,7 @@ export interface IntrospectionProgress {
   table?: string;
   current?: number;
   total?: number;
+  timestampMs?: number;
 }
 
 export type OnProgress = (progress: IntrospectionProgress) => void;
@@ -176,7 +177,7 @@ export abstract class Adapter {
     for (const fn of this.grounding) {
       const grounding = fn(this);
       if (grounding.phase) {
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:start',
           phase: grounding.phase,
           message: `Starting ${grounding.name} introspection...`,
@@ -186,7 +187,7 @@ export abstract class Adapter {
         await grounding.execute(ctx);
       } finally {
         if (grounding.phase) {
-          ctx.onProgress?.({
+          ctx.onProgress({
             type: 'phase:end',
             phase: grounding.phase,
             message: `Finished ${grounding.name} introspection.`,

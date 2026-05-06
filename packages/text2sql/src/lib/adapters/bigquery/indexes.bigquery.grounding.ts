@@ -37,7 +37,7 @@ export class BigQueryIndexesGrounding extends IndexesGrounding {
     for (const [dataset, tables] of byDataset) {
       for (const table of tables) {
         current++;
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:progress',
           phase: 'indexes',
           table: table.name,

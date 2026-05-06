@@ -47,8 +47,20 @@ export interface GroundingContext {
   /** Shared cache for cross-grounding deduplication. Keyed by `type:key`. */
   cache: Map<string, unknown>;
 
-  /** Optional progress sink for long-running introspection work. */
-  onProgress?: OnProgress;
+  /** Progress sink for long-running introspection work. */
+  onProgress: OnProgress;
+}
+
+const noopProgress: OnProgress = () => {};
+
+function timestampProgress(onProgress?: OnProgress): OnProgress {
+  if (!onProgress) return noopProgress;
+  return (progress) => {
+    onProgress({
+      ...progress,
+      timestampMs: progress.timestampMs ?? Date.now(),
+    });
+  };
 }
 
 /**
@@ -63,6 +75,6 @@ export function createGroundingContext(
     relationships: [],
     info: undefined,
     cache: new Map(),
-    onProgress: options.onProgress,
+    onProgress: timestampProgress(options.onProgress),
   };
 }

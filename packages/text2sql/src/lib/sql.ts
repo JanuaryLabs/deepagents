@@ -55,9 +55,24 @@ export interface Text2SqlIndexProgressEvent {
   current?: number;
   total?: number;
   cached?: boolean;
+  timestampMs?: number;
 }
 
 type Text2SqlIndexProgressHandler = (event: Text2SqlIndexProgressEvent) => void;
+
+const noopProgressHandler: Text2SqlIndexProgressHandler = () => {};
+
+function timestampProgressHandler(
+  onProgress?: Text2SqlIndexProgressHandler,
+): Text2SqlIndexProgressHandler {
+  if (!onProgress) return noopProgressHandler;
+  return (event) => {
+    onProgress({
+      ...event,
+      timestampMs: event.timestampMs ?? Date.now(),
+    });
+  };
+}
 
 export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
@@ -137,8 +152,9 @@ export class Text2Sql {
   async #index(
     onProgress?: Text2SqlIndexProgressHandler,
   ): Promise<ContextFragment[]> {
+    const progress = timestampProgressHandler(onProgress);
     const entries = Object.entries(this.#config.adapters);
-    onProgress?.({
+    progress({
       type: 'index:start',
       message: `Indexing ${entries.length} adapter${entries.length === 1 ? '' : 's'}...`,
       current: 0,
@@ -146,13 +162,13 @@ export class Text2Sql {
     });
     const settled = await Promise.allSettled(
       entries.map(async ([name, adapter]) => {
-        const schema = await this.#indexAdapter(name, adapter, onProgress);
+        const schema = await this.#indexAdapter(name, adapter, progress);
         return fragment(name, ...schema);
       }),
     );
     const failed = settled.find((result) => result.status === 'rejected');
     if (failed) {
-      onProgress?.({
+      progress({
         type: 'index:error',
         message:
           failed.reason instanceof Error
@@ -168,7 +184,7 @@ export class Text2Sql {
       }
       return result.value;
     });
-    onProgress?.({
+    progress({
       type: 'index:end',
       message: 'Finished indexing adapters.',
       current: entries.length,
@@ -180,9 +196,9 @@ export class Text2Sql {
   async #indexAdapter(
     name: string,
     adapter: Adapter,
-    onProgress?: Text2SqlIndexProgressHandler,
+    onProgress: Text2SqlIndexProgressHandler = noopProgressHandler,
   ): Promise<ContextFragment[]> {
-    onProgress?.({
+    onProgress({
       type: 'adapter:start',
       adapter: name,
       message: `Indexing adapter "${name}"...`,
@@ -194,13 +210,13 @@ export class Text2Sql {
     try {
       const cached = await cache.read();
       if (cached) {
-        onProgress?.({
+        onProgress({
           type: 'adapter:cache-hit',
           adapter: name,
           message: `Using cached index for adapter "${name}".`,
           cached: true,
         });
-        onProgress?.({
+        onProgress({
           type: 'adapter:end',
           adapter: name,
           message: `Finished indexing adapter "${name}".`,
@@ -208,19 +224,19 @@ export class Text2Sql {
         });
         return cached;
       }
-      onProgress?.({
+      onProgress({
         type: 'adapter:cache-miss',
         adapter: name,
         message: `No cached index for adapter "${name}".`,
         cached: false,
       });
       const ctx = createGroundingContext({
-        onProgress: (progress) =>
-          onProgress?.(this.#adapterProgressEvent(name, progress)),
+        onProgress: (event) =>
+          onProgress(this.#adapterProgressEvent(name, event)),
       });
       const fragments = await adapter.introspect(ctx);
       await cache.write(fragments);
-      onProgress?.({
+      onProgress({
         type: 'adapter:end',
         adapter: name,
         message: `Finished indexing adapter "${name}".`,
@@ -229,7 +245,7 @@ export class Text2Sql {
       return fragments;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      onProgress?.({
+      onProgress({
         type: 'adapter:error',
         adapter: name,
         message: `Failed indexing adapter "${name}": ${reason}`,
@@ -253,6 +269,7 @@ export class Text2Sql {
       current: progress.current,
       total: progress.total,
       cached: false,
+      timestampMs: progress.timestampMs,
     };
   }
 

@@ -52,7 +52,7 @@ export class BigQueryConstraintGrounding extends ConstraintGrounding {
     for (const [dataset, tables] of byDataset) {
       for (const table of tables) {
         current++;
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:progress',
           phase: 'constraints',
           table: table.name,

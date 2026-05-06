@@ -42,7 +42,7 @@ export abstract class ColumnStatsGrounding extends AbstractGrounding {
     const total = allContainers.length;
     for (let i = 0; i < allContainers.length; i++) {
       const container = allContainers[i];
-      ctx.onProgress?.({
+      ctx.onProgress({
         type: 'phase:progress',
         phase: 'column_stats',
         table: container.name,

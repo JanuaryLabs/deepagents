@@ -38,7 +38,7 @@ export abstract class RowCountGrounding extends AbstractGrounding {
     const total = ctx.tables.length;
     for (let i = 0; i < ctx.tables.length; i++) {
       const table = ctx.tables[i];
-      ctx.onProgress?.({
+      ctx.onProgress({
         type: 'phase:progress',
         phase: 'row_counts',
         table: table.name,

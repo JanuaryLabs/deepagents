@@ -77,7 +77,7 @@ export abstract class ViewGrounding extends AbstractGrounding {
     const viewNames = await this.applyFilter();
     const views = await Promise.all(
       viewNames.map(async (name, index) => {
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:progress',
           phase: 'views',
           table: name,

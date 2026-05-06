@@ -236,6 +236,27 @@ function progressEvents(chunks: unknown[]): Text2SqlIndexProgressEvent[] {
   return chunks.filter(isProgressChunk).map((chunk) => chunk.data);
 }
 
+function assertTimestamped(
+  events: Array<Text2SqlIndexProgressEvent | IntrospectionProgress>,
+) {
+  for (const event of events) {
+    const timestampMs = event.timestampMs;
+    assert.strictEqual(
+      typeof timestampMs,
+      'number',
+      `${event.type} should include timestampMs`,
+    );
+    assert.ok(
+      Number.isFinite(timestampMs),
+      `${event.type} timestampMs should be finite`,
+    );
+    assert.ok(
+      !('elapsedMs' in event),
+      `${event.type} should not expose elapsedMs; clients can derive duration from timestampMs`,
+    );
+  }
+}
+
 describe('Text2Sql index progress events', () => {
   it('emits index progress chunks before assistant stream chunks', async () => {
     const { adapter, db } = createAdapter();
@@ -248,6 +269,7 @@ describe('Text2Sql index progress events', () => {
       const events = progressEvents(chunks);
 
       assert.ok(events.length > 0, 'expected index progress events');
+      assertTimestamped(events);
 
       const startChunkIndex = chunks.findIndex(
         (chunk) => (chunk as { type?: string })?.type === 'start',
@@ -288,6 +310,17 @@ describe('Text2Sql index progress events', () => {
       );
       assert.ok(events.some((e) => e.type === 'adapter:end'));
       assert.ok(events.some((e) => e.type === 'index:end'));
+
+      const indexStart = events.find((e) => e.type === 'index:start');
+      const indexEnd = events.find((e) => e.type === 'index:end');
+      assert.ok(indexStart);
+      assert.ok(indexEnd);
+      assert.ok(typeof indexStart.timestampMs === 'number');
+      assert.ok(typeof indexEnd.timestampMs === 'number');
+      assert.ok(
+        indexEnd.timestampMs >= indexStart.timestampMs,
+        'clients should be able to derive non-negative duration from event timestamps',
+      );
     } finally {
       db.close();
     }
@@ -311,13 +344,18 @@ describe('Text2Sql index progress events', () => {
       const first = await collect(await text2sql.chat());
       await engine.continue(userMessage('Second question'));
       const second = await collect(await text2sql.chat());
+      const firstEvents = progressEvents(first);
+      const secondEvents = progressEvents(second);
+
+      assertTimestamped(firstEvents);
+      assertTimestamped(secondEvents);
 
       assert.ok(
-        progressEvents(first).some((e) => e.type === 'adapter:cache-miss'),
+        firstEvents.some((e) => e.type === 'adapter:cache-miss'),
         'first chat should miss the cache',
       );
       assert.ok(
-        progressEvents(second).some((e) => e.type === 'adapter:cache-hit'),
+        secondEvents.some((e) => e.type === 'adapter:cache-hit'),
         'second chat should hit the cache',
       );
       assert.strictEqual(
@@ -339,6 +377,7 @@ describe('Text2Sql index progress events', () => {
           onProgress: (event) => events.push(event),
         }),
       );
+      assertTimestamped(events);
 
       assert.ok(
         events.some((e) => e.type === 'phase:start' && e.phase === 'tables'),
@@ -386,14 +425,14 @@ describe('Text2Sql index progress events', () => {
       throw new Error('fast adapter failed');
     });
     const slow = new TestAdapter(async (ctx) => {
-      ctx.onProgress?.({
+      ctx.onProgress({
         type: 'phase:progress',
         phase: 'tables',
         message: 'slow adapter started',
       });
       markSlowStarted();
       await slowReleased;
-      ctx.onProgress?.({
+      ctx.onProgress({
         type: 'phase:progress',
         phase: 'tables',
         message: 'slow adapter finished',
@@ -418,6 +457,7 @@ describe('Text2Sql index progress events', () => {
     await engine.continue(userMessage('This should fail'));
     const { chunks } = await collectUntilError(await text2sql.chat());
     const events = progressEvents(chunks);
+    assertTimestamped(events);
     const slowFinishedIndex = events.findIndex(
       (event) => event.message === 'slow adapter finished',
     );
@@ -470,6 +510,7 @@ describe('Text2Sql index progress events', () => {
       /grounding failed/,
     );
 
+    assertTimestamped(events);
     assert.deepStrictEqual(
       events.map((event) => event.type),
       ['phase:start', 'phase:end'],

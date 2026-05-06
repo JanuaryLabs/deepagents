@@ -40,7 +40,7 @@ export class BigQueryRowCountGrounding extends RowCountGrounding {
     for (const [dataset, tables] of byDataset) {
       for (const table of tables) {
         current++;
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:progress',
           phase: 'row_counts',
           table: table.name,

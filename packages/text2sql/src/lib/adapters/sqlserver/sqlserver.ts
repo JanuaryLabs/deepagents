@@ -74,6 +74,7 @@ const SQL_SERVER_ERROR_MAP: Record<string, { type: string; hint: string }> = {
 };
 
 const LOW_CARDINALITY_LIMIT = 20;
+const noopProgress: OnProgress = () => {};
 
 function getErrorCode(error: unknown) {
   if (
@@ -289,12 +290,15 @@ export class SqlServer extends Adapter {
     return Array.from(relationships.values());
   }
 
-  async #annotateRowCounts(tables: Table[], onProgress?: OnProgress) {
+  async #annotateRowCounts(
+    tables: Table[],
+    onProgress: OnProgress = noopProgress,
+  ) {
     const total = tables.length;
     for (let i = 0; i < tables.length; i++) {
       const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
-      onProgress?.({
+      onProgress({
         type: 'phase:progress',
         phase: 'row_counts',
         table: table.name,
@@ -389,7 +393,10 @@ export class SqlServer extends Adapter {
     }
   }
 
-  async #annotateColumnStats(tables: Table[], onProgress?: OnProgress) {
+  async #annotateColumnStats(
+    tables: Table[],
+    onProgress: OnProgress = noopProgress,
+  ) {
     if (!tables.length) {
       return;
     }
@@ -397,7 +404,7 @@ export class SqlServer extends Adapter {
     for (let i = 0; i < tables.length; i++) {
       const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
-      onProgress?.({
+      onProgress({
         type: 'phase:progress',
         phase: 'column_stats',
         table: table.name,
@@ -450,13 +457,13 @@ export class SqlServer extends Adapter {
 
   async #annotateLowCardinalityColumns(
     tables: Table[],
-    onProgress?: OnProgress,
+    onProgress: OnProgress = noopProgress,
   ) {
     const total = tables.length;
     for (let i = 0; i < tables.length; i++) {
       const table = tables[i];
       const tableIdentifier = this.#formatQualifiedTableName(table);
-      onProgress?.({
+      onProgress({
         type: 'phase:progress',
         phase: 'low_cardinality',
         table: table.name,

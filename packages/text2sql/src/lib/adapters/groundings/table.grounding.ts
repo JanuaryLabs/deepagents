@@ -88,7 +88,7 @@ export abstract class TableGrounding extends AbstractGrounding {
     if (!forward && !backward) {
       const tables = await Promise.all(
         seedTables.map(async (name, index) => {
-          ctx.onProgress?.({
+          ctx.onProgress({
             type: 'phase:progress',
             phase: 'tables',
             table: name,
@@ -132,7 +132,7 @@ export abstract class TableGrounding extends AbstractGrounding {
 
       if (!tables[name]) {
         loadedCount++;
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:progress',
           phase: 'tables',
           table: name,
@@ -169,7 +169,7 @@ export abstract class TableGrounding extends AbstractGrounding {
 
       if (!tables[name]) {
         loadedCount++;
-        ctx.onProgress?.({
+        ctx.onProgress({
           type: 'phase:progress',
           phase: 'tables',
           table: name,

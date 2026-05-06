@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { createGroundingContext } from '@deepagents/text2sql/grounding';
 import {
   Sqlite,
   columnValues,
@@ -307,6 +308,7 @@ describe('Column restriction', () => {
       });
 
       const fragments = await adapter.introspect({
+        ...createGroundingContext(),
         tables: [
           {
             name: 'inventory',
@@ -323,7 +325,6 @@ describe('Column restriction', () => {
             ],
           },
         ],
-        views: [],
         relationships: [
           {
             table: 'inventory',
@@ -332,7 +333,6 @@ describe('Column restriction', () => {
             to: ['region', 'code'],
           },
         ],
-        cache: new Map(),
       });
 
       assert.strictEqual(
