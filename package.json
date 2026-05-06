@@ -3,6 +3,9 @@
   "version": "0.38.1",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "prepare": "husky"
   },
