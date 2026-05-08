@@ -39,6 +39,8 @@ export * from './lib/stream-buffer.ts';
 export * from './lib/stream/change-source.ts';
 export * from './lib/stream/polling-change-source.ts';
 export * from './lib/stream/polling-policy.ts';
+export * from './lib/stream/postgres-notify-change-source.ts';
+export * from './lib/stream/postgres.stream-store.ts';
 export * from './lib/stream/sqlite.stream-store.ts';
 export * from './lib/stream/stream-manager.ts';
 export * from './lib/stream/stream-store.ts';

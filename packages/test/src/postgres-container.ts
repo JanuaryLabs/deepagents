@@ -6,7 +6,7 @@ import { checkDockerAvailable, createContainer } from './container.ts';
  * PostgreSQL container configuration.
  */
 export interface PostgresContainerConfig {
-  /** PostgreSQL image to use (default: postgres:16-alpine) */
+  /** PostgreSQL image to use (default: postgres:18-alpine) */
   image?: string;
   /** Database password (default: testpassword) */
   password?: string;
@@ -99,7 +99,7 @@ export async function withPostgresContainer<T>(
     return undefined;
   }
 
-  const image = config?.image ?? 'postgres:17-alpine';
+  const image = config?.image ?? 'postgres:18-alpine';
   const password = config?.password ?? 'testpassword';
   const database = config?.database ?? 'testdb';
   const user = config?.user ?? 'postgres';
@@ -115,7 +115,7 @@ export async function withPostgresContainer<T>(
       POSTGRES_USER: user,
     },
     internalPort: 5432,
-    tmpfs: ['/var/lib/postgresql/data:rw,size=512m'],
+    tmpfs: ['/var/lib/postgresql:rw,size=512m'],
     ipcHost: true,
     memorySwappiness: 0,
   });
