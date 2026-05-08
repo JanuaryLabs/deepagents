@@ -51,7 +51,7 @@ class SqlLinkInstaller extends Installer {
 
 const model = openai('gpt-5.4-mini');
 const sandbox = await createContainerTool({
-  image: 'node:22-alpine',
+  image: 'node:lts-alpine',
   installers: [new SqlLinkInstaller(sqlBinaryContainer)],
   mounts: [
     {
