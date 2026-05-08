@@ -1,6 +1,5 @@
 import {
   type StreamTextTransform,
-  type Tool,
   type ToolSet,
   createUIMessageStream,
 } from 'ai';
@@ -28,10 +27,7 @@ import { JsonCache } from './file-cache.ts';
 import { guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
-export type RenderingTools = Record<string, Tool<unknown, never>>;
-
-export const TEXT2SQL_INDEX_PROGRESS_CHUNK =
-  'data-text2sql-index-progress' as const;
+export const TEXT2SQL_INDEX_PROGRESS_CHUNK = 'data-text2sql-index-progress';
 
 export type Text2SqlIndexProgressEventType =
   | 'index:start'
@@ -84,7 +80,7 @@ export interface Text2SqlConfig {
    */
   context: ContextEngine;
   version: string;
-  tools?: RenderingTools;
+  tools?: ToolSet;
   model: AgentModel;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
 }
@@ -100,7 +96,7 @@ export interface Text2SqlConfig {
  */
 export class Text2Sql {
   #config: Omit<Text2SqlConfig, 'tools'> & {
-    tools: RenderingTools;
+    tools: ToolSet;
   };
   #introspection: Map<string, JsonCache<ContextFragment[]>>;
 
