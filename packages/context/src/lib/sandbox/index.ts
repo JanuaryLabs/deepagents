@@ -8,6 +8,7 @@ export * from './file-events.ts';
 export * from './binary-bridges.ts';
 export * from './container-tool.ts';
 export * from './docker-sandbox.ts';
+export * from './installers/index.ts';
 export * from './routing-sandbox.ts';
 export * from './openapi/extension.ts';
 export * from './openapi/format.ts';

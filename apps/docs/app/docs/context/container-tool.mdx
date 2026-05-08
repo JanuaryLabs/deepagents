@@ -17,13 +17,14 @@ import {
   InMemoryContextStore,
   agent,
   createContainerTool,
+  pkg,
   role,
   skills,
   user,
 } from '@deepagents/context';
 
 const sandbox = await createContainerTool({
-  packages: ['curl', 'jq'],
+  installers: [pkg(['curl', 'jq'])],
   skills: [
     { host: './skills', sandbox: '/workspace/skills' },
   ],
@@ -94,21 +95,23 @@ All three Docker sandbox strategies are supported:
 <Tab value="Runtime">
 
 ```typescript
+import { createContainerTool, pkg, urlBinary } from '@deepagents/context';
+
 const sandbox = await createContainerTool({
   image: 'alpine:latest',     // default
-  packages: ['python3', 'nodejs'],
   env: {
     NODE_ENV: 'production',
     API_KEY: process.env.API_KEY || '',
   },
-  binaries: [
-    {
+  installers: [
+    pkg(['python3', 'nodejs']),
+    urlBinary({
       name: 'presenterm',
       url: {
         x86_64: 'https://github.com/.../presenterm-x86_64-musl.tar.gz',
         aarch64: 'https://github.com/.../presenterm-aarch64-musl.tar.gz',
       },
-    },
+    }),
   ],
   mounts: [
     {
@@ -160,7 +163,7 @@ Intercept command execution for logging, auditing, or command transformation:
 import chalk from 'chalk';
 
 const sandbox = await createContainerTool({
-  packages: ['curl', 'jq'],
+  installers: [pkg(['curl', 'jq'])],
   onBeforeBashCall: ({ command }) => {
     console.log(chalk.blue(`[Container] Running: ${command}`));
     return { command };
@@ -186,7 +189,7 @@ import { groq } from '@ai-sdk/groq';
 import { createContainerTool } from '@deepagents/context';
 
 const sandbox = await createContainerTool({
-  packages: ['python3'],
+  installers: [pkg(['python3'])],
   mounts: [
     {
       hostPath: process.cwd(),

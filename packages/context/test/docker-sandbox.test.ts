@@ -7,12 +7,17 @@ import { after, before, describe, it } from 'node:test';
 
 import {
   type DockerSandbox,
-  // Error classes
   DockerSandboxError,
+  InstallError,
+  MissingRuntimeError,
   MountPathError,
   PackageInstallError,
   createContainerTool,
   createDockerSandbox,
+  npm,
+  pip,
+  pkg,
+  urlBinary,
   useSandbox,
 } from '@deepagents/context';
 
@@ -99,7 +104,7 @@ describe('Docker Sandbox', async () => {
     describe('package installation', () => {
       it('installs packages with apk on Alpine', async () => {
         const sandbox = await createDockerSandbox({
-          packages: ['curl'],
+          installers: [pkg(['curl'])],
         });
 
         try {
@@ -114,7 +119,7 @@ describe('Docker Sandbox', async () => {
       it('installs packages with apt-get on Debian', async () => {
         const sandbox = await createDockerSandbox({
           image: 'debian:stable-slim',
-          packages: ['curl'],
+          installers: [pkg(['curl'])],
         });
 
         try {
@@ -128,7 +133,7 @@ describe('Docker Sandbox', async () => {
 
       it('creates sandbox without packages when array is empty', async () => {
         const sandbox = await createDockerSandbox({
-          packages: [],
+          installers: [],
         });
 
         try {
@@ -143,7 +148,7 @@ describe('Docker Sandbox', async () => {
       it('throws error for non-existent package', async () => {
         await assert.rejects(
           createDockerSandbox({
-            packages: ['nonexistent-pkg-xyz-12345'],
+            installers: [pkg(['nonexistent-pkg-xyz-12345'])],
           }),
           /Package installation failed/,
         );
@@ -470,7 +475,7 @@ describe('Docker Sandbox', async () => {
   describe('createContainerTool', () => {
     it('returns bash tool and sandbox', async () => {
       const { bash, tools, sandbox } = await createContainerTool({
-        packages: [],
+        installers: [],
       });
 
       try {
@@ -499,9 +504,9 @@ describe('Docker Sandbox', async () => {
       }
     });
 
-    it('respects packages option', async () => {
+    it('respects installers option', async () => {
       const { sandbox } = await createContainerTool({
-        packages: ['curl'],
+        installers: [pkg(['curl'])],
       });
 
       try {
@@ -606,7 +611,7 @@ describe('Docker Sandbox', async () => {
 
     it('returns the value from the callback', async () => {
       const result = await useSandbox(
-        { packages: ['curl'] },
+        { installers: [pkg(['curl'])] },
         async (sandbox) => {
           const output = await sandbox.executeCommand('curl --version');
           return {
@@ -618,6 +623,146 @@ describe('Docker Sandbox', async () => {
 
       assert.strictEqual(result.exitCode, 0);
       assert.strictEqual(result.hasCurl, true);
+    });
+  });
+
+  describe('installers', () => {
+    describe('npm', () => {
+      it('throws MissingRuntimeError on alpine without ensureRuntime', async () => {
+        await assert.rejects(
+          createDockerSandbox({ installers: [npm('prettier')] }),
+          (err: Error) => {
+            assert.ok(err instanceof MissingRuntimeError);
+            assert.ok(err instanceof DockerSandboxError);
+            const missing = err as MissingRuntimeError;
+            assert.strictEqual(missing.runtime, 'npm');
+            assert.deepStrictEqual(missing.required, ['node', 'npm']);
+            return true;
+          },
+        );
+      });
+
+      it('auto-installs nodejs+npm when ensureRuntime is true', async () => {
+        const sandbox = await createDockerSandbox({
+          installers: [npm('cowsay', { ensureRuntime: true })],
+        });
+        try {
+          const node = await sandbox.executeCommand('which node');
+          assert.strictEqual(node.exitCode, 0);
+          const cli = await sandbox.executeCommand('which cowsay');
+          assert.strictEqual(cli.exitCode, 0);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('skips ensureRuntime when node base image already has node+npm', async () => {
+        const sandbox = await createDockerSandbox({
+          image: 'node:22-alpine',
+          installers: [npm('cowsay')],
+        });
+        try {
+          const result = await sandbox.executeCommand('cowsay -t hi');
+          assert.strictEqual(result.exitCode, 0);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('pip', () => {
+      it('throws MissingRuntimeError on alpine without ensureRuntime', async () => {
+        await assert.rejects(
+          createDockerSandbox({ installers: [pip('requests')] }),
+          (err: Error) => {
+            assert.ok(err instanceof MissingRuntimeError);
+            const missing = err as MissingRuntimeError;
+            assert.strictEqual(missing.runtime, 'pip');
+            assert.deepStrictEqual(missing.required, ['python3', 'pip3']);
+            return true;
+          },
+        );
+      });
+
+      it('auto-installs python3+pip when ensureRuntime is true', async () => {
+        const sandbox = await createDockerSandbox({
+          installers: [pip('requests', { ensureRuntime: true })],
+        });
+        try {
+          const result = await sandbox.executeCommand(
+            'python3 -c "import requests; print(requests.__version__)"',
+          );
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /^\d+\.\d+/);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('urlBinary', () => {
+      it('auto-ensures curl on a fresh alpine image', async () => {
+        const sandbox = await createDockerSandbox({
+          installers: [
+            urlBinary({
+              name: 'yq',
+              url: {
+                x86_64:
+                  'https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64',
+                aarch64:
+                  'https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_arm64',
+              },
+            }),
+          ],
+        });
+        try {
+          const curl = await sandbox.executeCommand('which curl');
+          assert.strictEqual(curl.exitCode, 0);
+          const yq = await sandbox.executeCommand('yq --version');
+          assert.strictEqual(yq.exitCode, 0);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('apt-get update is run only once across installers', () => {
+      it('multiple ensureTool / pkg calls do not re-run apt-get update', async () => {
+        const sandbox = await createDockerSandbox({
+          image: 'debian:stable-slim',
+          installers: [pkg(['curl']), pkg(['jq'])],
+        });
+        try {
+          const r1 = await sandbox.executeCommand('which curl');
+          assert.strictEqual(r1.exitCode, 0);
+          const r2 = await sandbox.executeCommand('which jq');
+          assert.strictEqual(r2.exitCode, 0);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('InstallError', () => {
+      it('throws InstallError for an invalid url-binary URL', async () => {
+        await assert.rejects(
+          createDockerSandbox({
+            installers: [
+              urlBinary({
+                name: 'bogus',
+                url: 'https://invalid.example.invalid/does-not-exist.tar.gz',
+              }),
+            ],
+          }),
+          (err: Error) => {
+            assert.ok(err instanceof InstallError);
+            const installErr = err as InstallError;
+            assert.strictEqual(installErr.target, 'bogus');
+            assert.strictEqual(installErr.source, 'url');
+            return true;
+          },
+        );
+      });
     });
   });
 
@@ -653,7 +798,7 @@ describe('Docker Sandbox', async () => {
       it('throws PackageInstallError for invalid package', async () => {
         await assert.rejects(
           createDockerSandbox({
-            packages: ['nonexistent-package-xyz-12345'],
+            installers: [pkg(['nonexistent-package-xyz-12345'])],
           }),
           (err: Error) => {
             assert.ok(err instanceof PackageInstallError);

@@ -9,6 +9,7 @@ import { ContextEngine } from './engine.ts';
 import { user } from './fragments/message/user.ts';
 import { errorRecoveryGuardrail } from './guardrails/error-recovery.guardrail.ts';
 import { createContainerTool } from './sandbox/container-tool.ts';
+import { pkg } from './sandbox/installers/index.ts';
 import { skills } from './skills/fragments.ts';
 import { soul } from './soul/fragments.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
@@ -16,7 +17,7 @@ import { createOpenAITracesIntegration } from './tracing/index.ts';
 
 const sandbox = await createContainerTool({
   image: 'alpine:latest',
-  packages: ['curl', 'jq', 'nodejs', 'npm'],
+  installers: [pkg(['curl', 'jq', 'nodejs', 'npm'])],
   resources: {
     cpus: 0.5,
     memory: '512m',

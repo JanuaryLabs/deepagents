@@ -19,7 +19,9 @@ import {
   createBashTool,
   createContainerTool,
   createDockerSandbox,
+  githubRelease,
   hint,
+  pkg,
   role,
   skills,
   useAgentOsSandbox,
@@ -639,7 +641,7 @@ async function demonstrateDockerSandbox() {
 
   const sandbox = await createDockerSandbox({
     image: 'alpine:latest',
-    packages: ['curl', 'jq'],
+    installers: [pkg(['curl', 'jq'])],
     mounts: [
       {
         hostPath: process.cwd(),
@@ -688,7 +690,7 @@ async function demonstrateDockerSandbox() {
     tools,
     sandbox: agentSandbox,
   } = await createContainerTool({
-    packages: ['python3', 'nodejs'],
+    installers: [pkg(['python3', 'nodejs'])],
     mounts: [
       {
         hostPath: process.cwd(),
@@ -738,23 +740,18 @@ async function demonstrateDockerSandbox() {
 async function createDockerSkillAgent() {
   console.log('\n=== Docker + Skills Agent Demo ===');
 
-  // Create container tool with necessary packages
-  // Note: presenterm is not available in Alpine's apk repository,
-  // so we install it from pre-built binaries using the `binaries` option
+  // presenterm isn't in Alpine's apk repo, so we pull it from its GitHub release.
+  // githubRelease auto-ensures curl, so we don't need to add it to pkg().
   const dockerSandbox = await createContainerTool({
-    packages: ['curl', 'jq'], // curl is needed for binary downloads, jq for JSON parsing
-    binaries: [
-      {
+    installers: [
+      pkg(['jq']),
+      githubRelease({
+        owner: 'mfontanini',
+        repo: 'presenterm',
+        version: 'v0.15.1',
         name: 'presenterm',
-        url: {
-          // Pre-built musl binaries for Alpine Linux
-          x86_64:
-            'https://github.com/mfontanini/presenterm/releases/download/v0.15.1/presenterm-0.15.1-x86_64-unknown-linux-musl.tar.gz',
-          aarch64:
-            'https://github.com/mfontanini/presenterm/releases/download/v0.15.1/presenterm-0.15.1-aarch64-unknown-linux-musl.tar.gz',
-        },
-        binaryPath: 'presenterm', // The binary name inside the tar.gz archive
-      },
+        asset: (arch) => `presenterm-0.15.1-${arch}-unknown-linux-musl.tar.gz`,
+      }),
     ],
     skills: [
       {

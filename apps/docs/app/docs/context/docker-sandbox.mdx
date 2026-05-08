@@ -12,14 +12,14 @@ The Docker sandbox provides isolated code execution by running commands inside D
 <Tabs groupId="strategy" items={['Runtime', 'Dockerfile', 'Compose']}>
 <Tab value="Runtime">
 
-Starts a vanilla image and installs packages/binaries at container startup. Best for quick experiments and when dependencies change frequently.
+Starts a vanilla image and runs an ordered list of installers at container startup. Best for quick experiments and when dependencies change frequently.
 
 ```typescript
-import { createDockerSandbox } from '@deepagents/context';
+import { createDockerSandbox, pkg } from '@deepagents/context';
 
 const sandbox = await createDockerSandbox({
   image: 'alpine:latest',
-  packages: ['curl', 'jq', 'python3'],
+  installers: [pkg(['curl', 'jq', 'python3'])],
   mounts: [
     {
       hostPath: process.cwd(),
@@ -39,7 +39,9 @@ try {
 
 **Default image:** `alpine:latest`
 
-**Package manager detection:** Alpine images use `apk`, Debian-based images (debian, ubuntu, node, python) use `apt-get`.
+**Installers** are the unit of "put a tool in the container." Built-ins: `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`, `githubRelease({...})`. They run in array order and share state (architecture, package manager, idempotent tool ensures) via an `InstallerContext`.
+
+**Package manager detection:** Alpine images use `apk`, Debian-based images (debian, ubuntu, node, python) use `apt-get`. `pkg([...])` picks automatically.
 
 </Tab>
 <Tab value="Dockerfile">
@@ -162,29 +164,115 @@ Supported on Runtime and Dockerfile strategies. For Compose, define environment 
 
 Keys are validated — empty keys and keys containing `=` throw a `DockerSandboxError`.
 
-## Installing Binaries from URLs
+## Installers
 
-For tools not available in package managers, install pre-built binaries directly from URLs. Architecture is auto-detected via `uname -m`.
+Installers are the polymorphic unit that puts a tool inside a running container. Mix and match them in the `installers:` array — they run in order and share an `InstallerContext` (memoised arch, idempotent tool ensures, resolved package manager).
+
+### `pkg([...])` — OS packages
+
+Auto-detects `apk` vs `apt-get` from the image.
 
 ```typescript
-const sandbox = await createDockerSandbox({
-  packages: ['curl'],  // curl required for downloads
-  binaries: [
-    {
+import { pkg } from '@deepagents/context';
+
+createDockerSandbox({ installers: [pkg(['curl', 'jq', 'python3'])] });
+```
+
+### `urlBinary({...})` — pre-built binary from a URL
+
+Architecture-aware via `uname -m`. Supports raw binaries and `.tar.gz`/`.tgz` archives.
+
+```typescript
+import { urlBinary } from '@deepagents/context';
+
+createDockerSandbox({
+  installers: [
+    urlBinary({
       name: 'presenterm',
       url: {
         x86_64: 'https://github.com/.../presenterm-x86_64-linux-musl.tar.gz',
         aarch64: 'https://github.com/.../presenterm-aarch64-linux-musl.tar.gz',
       },
       binaryPath: 'presenterm',  // filename inside the archive
-    },
+    }),
   ],
 });
 ```
 
-**Supported formats:**
-- `.tar.gz` / `.tgz` — extracted, binary found by name, moved to `/usr/local/bin/`
-- Raw binary URL — downloaded directly to `/usr/local/bin/`
+`urlBinary` ensures `curl` itself — no need to add it to `pkg([...])` first.
+
+### `npm('<pkg>')` — global npm install
+
+Fails loudly with `MissingRuntimeError` if `nodejs`/`npm` aren't in the image. Pass `{ ensureRuntime: true }` to auto-install them.
+
+```typescript
+import { npm } from '@deepagents/context';
+
+createDockerSandbox({
+  installers: [
+    npm('prettier', { ensureRuntime: true }),       // installs node + npm too
+    npm('typescript', { version: '5.4.5' }),         // pinned version
+  ],
+});
+
+// Or use a node base image and skip ensureRuntime:
+createDockerSandbox({
+  image: 'node:22-alpine',
+  installers: [npm('prettier')],
+});
+```
+
+### `pip('<pkg>')` — pip install
+
+Same shape as `npm`. `ensureRuntime: true` adds `python3` + the right pip package (`py3-pip` on Alpine, `python3-pip` on Debian).
+
+```typescript
+import { pip } from '@deepagents/context';
+
+createDockerSandbox({
+  installers: [pip('requests', { ensureRuntime: true, version: '2.31.0' })],
+});
+```
+
+### `githubRelease({...})` — GitHub release asset
+
+Convenience over `urlBinary` for GitHub releases. The `asset(arch)` callback builds the asset filename per architecture.
+
+```typescript
+import { githubRelease } from '@deepagents/context';
+
+createDockerSandbox({
+  installers: [
+    githubRelease({
+      owner: 'mfontanini',
+      repo: 'presenterm',
+      version: 'v0.15.1',
+      name: 'presenterm',
+      asset: (arch) => `presenterm-0.15.1-${arch}-unknown-linux-musl.tar.gz`,
+    }),
+  ],
+});
+```
+
+### Custom installers
+
+Subclass `Installer` for anything not covered. The base class is a one-method contract.
+
+```typescript
+import { Installer, type InstallerContext } from '@deepagents/context';
+
+class CargoInstaller extends Installer {
+  readonly kind = `cargo:${this.crate}`;
+
+  constructor(private crate: string) { super(); }
+
+  async install(ctx: InstallerContext) {
+    await ctx.ensureTool('cargo');
+    const result = await ctx.exec(`cargo install ${this.crate}`);
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+  }
+}
+```
 
 ## File I/O
 
@@ -210,7 +298,7 @@ Parent directories are created automatically during writes.
 Always wrap sandbox usage in `try/finally`:
 
 ```typescript
-const sandbox = await createDockerSandbox({ packages: ['curl'] });
+const sandbox = await createDockerSandbox({ installers: [pkg(['curl'])] });
 try {
   await sandbox.executeCommand('curl --version');
 } finally {
@@ -224,7 +312,7 @@ try {
 import { useSandbox } from '@deepagents/context';
 
 const version = await useSandbox(
-  { packages: ['curl'] },
+  { installers: [pkg(['curl'])] },
   async (sandbox) => {
     const result = await sandbox.executeCommand('curl --version');
     return result.stdout.split('\n')[0];
@@ -243,7 +331,8 @@ All errors extend `DockerSandboxError`:
 | `DockerNotAvailableError` | Docker daemon is not running |
 | `ContainerCreationError` | Container fails to start |
 | `PackageInstallError` | Package installation fails (includes package names, manager type, stderr) |
-| `BinaryInstallError` | Binary download/install fails (includes binary name, URL, reason) |
+| `InstallError` | Installer fails. Carries `target` (logical name), `source` (`'url' \| 'npm' \| 'pypi' \| 'github-release'`), `reason` (stderr), `url` (when applicable) |
+| `MissingRuntimeError` | `npm()`/`pip()` ran without `ensureRuntime: true` and the runtime is absent. Carries `runtime` and `required` (binary names) |
 | `MountPathError` | Host path doesn't exist (includes both host and container paths) |
 | `DockerfileBuildError` | Dockerfile build fails (includes stderr) |
 | `ComposeStartError` | Docker Compose startup fails (includes compose file path, stderr) |
@@ -257,7 +346,7 @@ import {
 
 try {
   const sandbox = await createDockerSandbox({
-    packages: ['nonexistent-package'],
+    installers: [pkg(['nonexistent-package'])],
   });
 } catch (error) {
   if (error instanceof DockerNotAvailableError) {

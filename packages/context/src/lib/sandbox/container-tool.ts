@@ -2,7 +2,6 @@ import type { CreateBashToolOptions } from 'bash-tool';
 
 import { createBashTool } from './bash-tool.ts';
 import {
-  type BinaryInstall,
   type DockerMount,
   type DockerResources,
   type DockerSandbox,
@@ -11,6 +10,7 @@ import {
   isComposeOptions,
   isDockerfileOptions,
 } from './docker-sandbox.ts';
+import type { Installer } from './installers/installer.ts';
 import type { AgentSandbox, SkillUploadInput } from './types.ts';
 
 /**
@@ -40,10 +40,31 @@ interface BaseContainerToolOptions extends Omit<
 export interface RuntimeContainerToolOptions extends BaseContainerToolOptions {
   /** Docker image to use (default: 'alpine:latest') */
   image?: string;
-  /** Packages to install in the container via package manager (apk/apt) */
-  packages?: string[];
-  /** Binaries to install from URLs (for tools not in package managers) */
-  binaries?: BinaryInstall[];
+  /**
+   * Ordered list of installers run after the container starts.
+   *
+   * Built-in factory helpers:
+   * - `pkg([...])` — OS packages (apk/apt-get auto-detected)
+   * - `urlBinary({ name, url, binaryPath? })` — pre-built binary from a URL
+   * - `npm(name, { ensureRuntime?, version? })` — global npm install
+   * - `pip(name, { ensureRuntime?, version? })` — pip install
+   * - `githubRelease({ owner, repo, version, name, asset })` — GitHub release asset
+   *
+   * For anything else, subclass `Installer` and pass an instance directly.
+   *
+   * @example
+   * ```ts
+   * import { pkg, urlBinary, npm } from '@deepagents/context';
+   *
+   * createContainerTool({
+   *   installers: [
+   *     pkg(['curl', 'jq']),
+   *     npm('prettier', { ensureRuntime: true }),
+   *   ],
+   * });
+   * ```
+   */
+  installers?: Installer[];
 }
 
 /**
@@ -116,8 +137,10 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  *
  * @example RuntimeStrategy (default)
  * ```typescript
+ * import { createContainerTool, pkg } from '@deepagents/context';
+ *
  * const sandbox = await createContainerTool({
- *   packages: ['curl', 'jq'],
+ *   installers: [pkg(['curl', 'jq'])],
  *   mounts: [{
  *     hostPath: process.cwd(),
  *     containerPath: '/workspace',
@@ -139,7 +162,7 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  * @example RuntimeStrategy with skills
  * ```typescript
  * const sandbox = await createContainerTool({
- *   packages: ['curl', 'jq'],
+ *   installers: [pkg(['curl', 'jq'])],
  *   skills: [
  *     { host: './skills', sandbox: '/workspace/skills' },
  *   ],
@@ -176,7 +199,7 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  * @example With hooks for logging
  * ```typescript
  * const sandbox = await createContainerTool({
- *   packages: ['python3'],
+ *   installers: [pkg(['python3'])],
  *   onBeforeBashCall: ({ command }) => {
  *     console.log('Running:', command);
  *   },
@@ -214,15 +237,14 @@ export async function createContainerTool(
   } else {
     const {
       image,
-      packages,
-      binaries,
+      installers,
       mounts,
       resources,
       env,
       skills = [],
       ...rest
     } = options;
-    sandboxOptions = { image, packages, binaries, mounts, resources, env };
+    sandboxOptions = { image, installers, mounts, resources, env };
     bashOptions = rest;
     skillInputs = skills;
   }

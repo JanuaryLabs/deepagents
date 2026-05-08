@@ -25,11 +25,11 @@ const sandbox = await createBashTool();
 ```
 
 ```typescript
-import { createContainerTool } from '@deepagents/context';
+import { createContainerTool, pkg } from '@deepagents/context';
 
 // Docker with skills: files copied in, metadata parsed, all in one call
 const sandbox = await createContainerTool({
-  packages: ['curl', 'jq'],
+  installers: [pkg(['curl', 'jq'])],
   skills: [{ host: './skills', sandbox: '/workspace/skills' }],
 });
 // Don't forget: await sandbox.sandbox.dispose() when done

@@ -3,339 +3,114 @@ import spawn from 'nano-spawn';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
-// Re-export types from bash-tool for convenience
+import {
+  ComposeStartError,
+  ContainerCreationError,
+  DockerNotAvailableError,
+  DockerSandboxError,
+  DockerfileBuildError,
+  MountPathError,
+} from './docker-sandbox-errors.ts';
+import {
+  type Installer,
+  createInstallerContext,
+} from './installers/installer.ts';
+
 export type { CommandResult as ExecResult, Sandbox } from 'bash-tool';
+export {
+  ComposeStartError,
+  ContainerCreationError,
+  DockerNotAvailableError,
+  DockerSandboxError,
+  DockerfileBuildError,
+  type InstallErrorOptions,
+  type InstallSource,
+  InstallError,
+  MissingRuntimeError,
+  MountPathError,
+  PackageInstallError,
+} from './docker-sandbox-errors.ts';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Error Classes
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Base error for all Docker sandbox operations.
- */
-export class DockerSandboxError extends Error {
-  readonly containerId?: string;
-
-  constructor(message: string, containerId?: string) {
-    super(message);
-    this.name = 'DockerSandboxError';
-    this.containerId = containerId;
-  }
-}
-
-/**
- * Thrown when Docker daemon is not available.
- */
-export class DockerNotAvailableError extends DockerSandboxError {
-  constructor() {
-    super('Docker is not available. Ensure Docker daemon is running.');
-    this.name = 'DockerNotAvailableError';
-  }
-}
-
-/**
- * Thrown when container creation fails.
- */
-export class ContainerCreationError extends DockerSandboxError {
-  readonly image: string;
-  override cause?: Error;
-
-  constructor(message: string, image: string, cause?: Error) {
-    super(`Failed to create container from image "${image}": ${message}`);
-    this.name = 'ContainerCreationError';
-    this.image = image;
-    this.cause = cause;
-  }
-}
-
-/**
- * Thrown when package installation fails.
- */
-export class PackageInstallError extends DockerSandboxError {
-  readonly packages: string[];
-  readonly image: string;
-  readonly packageManager: 'apk' | 'apt-get';
-  readonly stderr: string;
-
-  constructor(
-    packages: string[],
-    image: string,
-    packageManager: 'apk' | 'apt-get',
-    stderr: string,
-    containerId?: string,
-  ) {
-    super(
-      `Package installation failed for [${packages.join(', ')}] ` +
-        `using ${packageManager} on ${image}: ${stderr}`,
-      containerId,
-    );
-    this.name = 'PackageInstallError';
-    this.packages = packages;
-    this.image = image;
-    this.packageManager = packageManager;
-    this.stderr = stderr;
-  }
-}
-
-/**
- * Thrown when a binary installation from URL fails.
- */
-export class BinaryInstallError extends DockerSandboxError {
-  readonly binaryName: string;
-  readonly url: string;
-  readonly reason: string;
-
-  constructor(
-    binaryName: string,
-    url: string,
-    reason: string,
-    containerId?: string,
-  ) {
-    super(
-      `Failed to install binary "${binaryName}" from ${url}: ${reason}`,
-      containerId,
-    );
-    this.name = 'BinaryInstallError';
-    this.binaryName = binaryName;
-    this.url = url;
-    this.reason = reason;
-  }
-}
-
-/**
- * Thrown when a mount path doesn't exist on the host.
- */
-export class MountPathError extends DockerSandboxError {
-  readonly hostPath: string;
-  readonly containerPath: string;
-
-  constructor(hostPath: string, containerPath: string) {
-    super(
-      `Mount path does not exist on host: "${hostPath}" -> "${containerPath}"`,
-    );
-    this.name = 'MountPathError';
-    this.hostPath = hostPath;
-    this.containerPath = containerPath;
-  }
-}
-
-/**
- * Thrown when Dockerfile build fails.
- */
-export class DockerfileBuildError extends DockerSandboxError {
-  readonly stderr: string;
-
-  constructor(stderr: string) {
-    super(`Dockerfile build failed: ${stderr}`);
-    this.name = 'DockerfileBuildError';
-    this.stderr = stderr;
-  }
-}
-
-/**
- * Thrown when docker compose up fails.
- */
-export class ComposeStartError extends DockerSandboxError {
-  readonly composeFile: string;
-  readonly stderr: string;
-
-  constructor(composeFile: string, stderr: string) {
-    super(`Docker Compose failed to start: ${stderr}`);
-    this.name = 'ComposeStartError';
-    this.composeFile = composeFile;
-    this.stderr = stderr;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Interfaces
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Configuration for mounting a host directory into the container.
- */
 export interface DockerMount {
-  /** Absolute path on the host machine */
   hostPath: string;
-  /** Path inside the container */
   containerPath: string;
-  /** Whether the mount is read-only (default: true) */
+  /** Default: `true`. */
   readOnly?: boolean;
 }
 
-/**
- * Resource limits for the container.
- */
 export interface DockerResources {
-  /** Memory limit (e.g., '1g', '512m') */
+  /** e.g. `'1g'`, `'512m'`. */
   memory?: string;
-  /** CPU limit (number of CPUs) */
+  /** Number of CPUs. */
   cpus?: number;
 }
 
-/**
- * Architecture-specific URL mapping for binary downloads.
- * Maps container architecture (from `uname -m`) to download URLs.
- */
-export interface ArchitectureUrls {
-  /** URL for x86_64 architecture (amd64) */
-  x86_64?: string;
-  /** URL for ARM64 architecture (aarch64) */
-  aarch64?: string;
-  /** URL for ARMv7 architecture */
-  armv7l?: string;
-}
-
-/**
- * Configuration for installing a binary from a URL.
- *
- * Binaries are downloaded, extracted (if tar.gz), and installed to /usr/local/bin.
- */
-export interface BinaryInstall {
-  /** Name of the binary (used for the final executable name) */
-  name: string;
-  /**
-   * URL or architecture-specific URLs.
-   * - If a string, used for all architectures
-   * - If ArchitectureUrls, selects based on container architecture
-   */
-  url: string | ArchitectureUrls;
-  /**
-   * Optional: The binary filename inside the archive if different from `name`.
-   * Useful when the archive contains versioned binaries like "presenterm-0.15.1".
-   */
-  binaryPath?: string;
-}
-
-/**
- * Options for RuntimeStrategy - installs packages/binaries at container runtime.
- */
 export interface RuntimeSandboxOptions {
-  /** Docker image to use (default: 'alpine:latest') */
+  /** Docker image to use (default: `'alpine:latest'`). */
   image?: string;
-  /** Packages to install in the container via package manager (apk/apt) */
-  packages?: string[];
-  /** Binaries to install from URLs (for tools not in package managers) */
-  binaries?: BinaryInstall[];
-  /** Directories to mount from host */
+  /**
+   * Ordered list of installers run after the container starts. Use
+   * `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`,
+   * `githubRelease({...})`, or any custom `Installer` subclass.
+   */
+  installers?: Installer[];
   mounts?: DockerMount[];
-  /** Resource limits */
   resources?: DockerResources;
-  /** Environment variables to set in the container */
   env?: Record<string, string>;
 }
 
-/**
- * Options for DockerfileStrategy - builds custom image from Dockerfile.
- */
 export interface DockerfileSandboxOptions {
-  /** Dockerfile content (if contains newlines) or path to Dockerfile */
+  /** Inline Dockerfile content (contains `\n`) or a path. */
   dockerfile: string;
-  /** Build context directory (default: '.') */
+  /** Build context directory (default: `'.'`). */
   context?: string;
-  /** Directories to mount from host */
   mounts?: DockerMount[];
-  /** Resource limits */
   resources?: DockerResources;
-  /** Environment variables to set in the container */
   env?: Record<string, string>;
 }
 
-/**
- * Options for ComposeStrategy - manages multi-container environments.
- */
 export interface ComposeSandboxOptions {
-  /** Path to docker-compose.yml file */
   compose: string;
-  /** Service name to execute commands in (required) */
   service: string;
-  /** Resource limits (applied to target service only) */
   resources?: DockerResources;
-  // Note: mounts must be defined in compose file, not here
 }
 
-/**
- * Union type for Docker sandbox options.
- * - RuntimeSandboxOptions: Runtime package/binary installation
- * - DockerfileSandboxOptions: Pre-built images from Dockerfile
- * - ComposeSandboxOptions: Multi-container environments via Docker Compose
- */
 export type DockerSandboxOptions =
   | RuntimeSandboxOptions
   | DockerfileSandboxOptions
   | ComposeSandboxOptions;
 
-/**
- * Extended sandbox interface with disposal method.
- */
 export interface DockerSandbox extends Sandbox {
-  /** Stop and remove the container */
   dispose(): Promise<void>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Detects if the image is Debian-based (uses apt-get) or Alpine-based (uses apk).
- */
-function isDebianBased(image: string): boolean {
-  const lower = image.toLowerCase();
-  if (lower.includes('alpine')) return false;
-  const debianPatterns = ['debian', 'ubuntu', 'node', 'python'];
-  return debianPatterns.some((pattern) => lower.includes(pattern));
-}
-
-/**
- * Type guard to determine if options are for DockerfileStrategy.
- */
 export function isDockerfileOptions(
   opts: DockerSandboxOptions,
 ): opts is DockerfileSandboxOptions {
   return 'dockerfile' in opts;
 }
 
-/**
- * Type guard to determine if options are for ComposeStrategy.
- */
 export function isComposeOptions(
   opts: DockerSandboxOptions,
 ): opts is ComposeSandboxOptions {
   return 'compose' in opts;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Strategy Pattern - Base Class
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Internal context shared across strategy methods.
- */
 interface StrategyContext {
   containerId: string;
   image: string;
 }
 
+export interface DockerSandboxStrategyArgs {
+  mounts?: DockerMount[];
+  resources?: DockerResources;
+  env?: Record<string, string>;
+}
+
 /**
- * Abstract base class for Docker sandbox creation strategies.
- *
- * Uses the Template Method pattern to define the skeleton of the sandbox
- * creation algorithm, deferring specific steps to subclasses.
- *
- * @example Extending the strategy
- * ```typescript
- * class CustomStrategy extends DockerSandboxStrategy {
- *   protected async getImage(): Promise<string> {
- *     // Custom image resolution logic
- *     return 'my-custom-image:latest';
- *   }
- *
- *   protected async configure(): Promise<void> {
- *     // Custom configuration after container starts
- *   }
- * }
- * ```
+ * Template Method base for sandbox creation strategies. Subclasses choose
+ * the image and define post-start configuration; the base owns container
+ * lifecycle, exec, and file I/O.
  */
 export abstract class DockerSandboxStrategy {
   protected context!: StrategyContext;
@@ -343,11 +118,8 @@ export abstract class DockerSandboxStrategy {
   protected resources: DockerResources;
   protected env: Record<string, string>;
 
-  constructor(
-    mounts: DockerMount[] = [],
-    resources: DockerResources = {},
-    env: Record<string, string> = {},
-  ) {
+  constructor(args: DockerSandboxStrategyArgs = {}) {
+    const { mounts = [], resources = {}, env = {} } = args;
     for (const key of Object.keys(env)) {
       if (key.length === 0 || key.includes('=')) {
         throw new DockerSandboxError(
@@ -360,16 +132,6 @@ export abstract class DockerSandboxStrategy {
     this.env = env;
   }
 
-  /**
-   * Template method - defines the algorithm skeleton for creating a sandbox.
-   *
-   * Steps:
-   * 1. Validate mount paths exist on host
-   * 2. Get/build the Docker image (strategy-specific)
-   * 3. Start the container
-   * 4. Configure the container (strategy-specific)
-   * 5. Create and return sandbox methods
-   */
   async create(): Promise<DockerSandbox> {
     this.validateMounts();
     const image = await this.getImage();
@@ -379,7 +141,6 @@ export abstract class DockerSandboxStrategy {
     try {
       await this.configure();
     } catch (error) {
-      // Clean up container if configuration fails
       await this.stopContainer(containerId);
       throw error;
     }
@@ -387,13 +148,6 @@ export abstract class DockerSandboxStrategy {
     return this.createSandboxMethods();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Common implementations (shared by all strategies)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Validates that all mount paths exist on the host filesystem.
-   */
   protected validateMounts(): void {
     for (const mount of this.mounts) {
       if (!existsSync(mount.hostPath)) {
@@ -402,22 +156,19 @@ export abstract class DockerSandboxStrategy {
     }
   }
 
-  /**
-   * Builds the docker run command arguments.
-   */
   protected buildDockerArgs(image: string, containerId: string): string[] {
     const { memory = '1g', cpus = 2 } = this.resources;
 
     const args: string[] = [
       'run',
-      '-d', // Detached mode
-      '--rm', // Remove container when stopped
+      '-d',
+      '--rm',
       '--name',
       containerId,
       `--memory=${memory}`,
       `--cpus=${cpus}`,
       '-w',
-      '/workspace', // Set working directory
+      '/workspace',
     ];
 
     for (const [key, value] of Object.entries(this.env)) {
@@ -429,15 +180,11 @@ export abstract class DockerSandboxStrategy {
       args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mode}`);
     }
 
-    // Add image and command to keep container alive
     args.push(image, 'tail', '-f', '/dev/null');
 
     return args;
   }
 
-  /**
-   * Starts a Docker container with the given image.
-   */
   protected async startContainer(image: string): Promise<string> {
     const containerId = `sandbox-${crypto.randomUUID().slice(0, 8)}`;
     const args = this.buildDockerArgs(image, containerId);
@@ -459,20 +206,14 @@ export abstract class DockerSandboxStrategy {
     return containerId;
   }
 
-  /**
-   * Stops a Docker container.
-   */
   protected async stopContainer(containerId: string): Promise<void> {
     try {
       await spawn('docker', ['stop', containerId]);
     } catch {
-      // Container may already be stopped, ignore errors
+      // already stopped
     }
   }
 
-  /**
-   * Executes a command in the container.
-   */
   protected async exec(command: string): Promise<CommandResult> {
     try {
       const result = await spawn('docker', [
@@ -501,9 +242,6 @@ export abstract class DockerSandboxStrategy {
     }
   }
 
-  /**
-   * Creates the DockerSandbox interface with all methods.
-   */
   protected createSandboxMethods(): DockerSandbox {
     const { containerId } = this.context;
 
@@ -513,8 +251,6 @@ export abstract class DockerSandboxStrategy {
       },
 
       readFile: async (path: string): Promise<string> => {
-        // Use base64 encoding to preserve exact content (including trailing newlines)
-        // nano-spawn strips trailing newlines from stdout, so we encode/decode
         const result = await sandbox.executeCommand(`base64 "${path}"`);
         if (result.exitCode !== 0) {
           throw new Error(`Failed to read file "${path}": ${result.stderr}`);
@@ -526,13 +262,11 @@ export abstract class DockerSandboxStrategy {
         files: Array<{ path: string; content: string }>,
       ): Promise<void> => {
         for (const file of files) {
-          // Create parent directories
           const dir = file.path.substring(0, file.path.lastIndexOf('/'));
           if (dir) {
             await sandbox.executeCommand(`mkdir -p "${dir}"`);
           }
 
-          // Use base64 encoding for binary-safe file writes
           const base64Content = Buffer.from(file.content).toString('base64');
           const result = await sandbox.executeCommand(
             `echo "${base64Content}" | base64 -d > "${file.path}"`,
@@ -554,63 +288,38 @@ export abstract class DockerSandboxStrategy {
     return sandbox;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Strategy-specific hooks (to be implemented by subclasses)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Returns the Docker image to use for the container.
-   * For RuntimeStrategy: returns the image name directly.
-   * For DockerfileStrategy: builds the image and returns the tag.
-   */
   protected abstract getImage(): Promise<string>;
-
-  /**
-   * Configures the container after it starts.
-   * For RuntimeStrategy: installs packages and binaries.
-   * For DockerfileStrategy: no-op (Dockerfile already configured).
-   */
   protected abstract configure(): Promise<void>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RuntimeStrategy - Installs packages/binaries at container runtime
-// ─────────────────────────────────────────────────────────────────────────────
+export interface RuntimeStrategyArgs extends DockerSandboxStrategyArgs {
+  image?: string;
+  installers?: Installer[];
+}
 
 /**
- * Strategy that uses an existing Docker image and installs packages/binaries
- * at container runtime.
- *
- * This is the "configure-on-demand" approach - starts a vanilla image and
- * customizes it by executing installation commands.
+ * Starts a vanilla image and runs the supplied installers in order.
  *
  * @example
- * ```typescript
- * const strategy = new RuntimeStrategy(
- *   'alpine:latest',
- *   ['curl', 'jq'],
- *   [{ name: 'presenterm', url: {...} }],
- * );
- * const sandbox = await strategy.create();
+ * ```ts
+ * new RuntimeStrategy({
+ *   image: 'alpine:latest',
+ *   installers: [
+ *     pkg(['curl', 'jq']),
+ *     urlBinary({ name: 'presenterm', url: {...} }),
+ *     npm('prettier', { ensureRuntime: true }),
+ *   ],
+ * });
  * ```
  */
 export class RuntimeStrategy extends DockerSandboxStrategy {
   private image: string;
-  private packages: string[];
-  private binaries: BinaryInstall[];
+  private installers: Installer[];
 
-  constructor(
-    image = 'alpine:latest',
-    packages: string[] = [],
-    binaries: BinaryInstall[] = [],
-    mounts?: DockerMount[],
-    resources?: DockerResources,
-    env?: Record<string, string>,
-  ) {
-    super(mounts, resources, env);
-    this.image = image;
-    this.packages = packages;
-    this.binaries = binaries;
+  constructor(args: RuntimeStrategyArgs = {}) {
+    super({ mounts: args.mounts, resources: args.resources, env: args.env });
+    this.image = args.image ?? 'alpine:latest';
+    this.installers = args.installers ?? [];
   }
 
   protected async getImage(): Promise<string> {
@@ -618,244 +327,34 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
   }
 
   protected async configure(): Promise<void> {
-    await this.installPackages();
-    await this.installBinaries();
-  }
-
-  /**
-   * Installs packages using the appropriate package manager (apk/apt-get).
-   */
-  private async installPackages(): Promise<void> {
-    if (this.packages.length === 0) return;
-
-    const useApt = isDebianBased(this.image);
-    const installCmd = useApt
-      ? `apt-get update && apt-get install -y ${this.packages.join(' ')}`
-      : `apk add --no-cache ${this.packages.join(' ')}`;
-
-    try {
-      await spawn('docker', [
-        'exec',
-        this.context.containerId,
-        'sh',
-        '-c',
-        installCmd,
-      ]);
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      throw new PackageInstallError(
-        this.packages,
-        this.image,
-        useApt ? 'apt-get' : 'apk',
-        err.stderr || err.message,
-        this.context.containerId,
-      );
-    }
-  }
-
-  /**
-   * Installs binaries from URLs.
-   */
-  private async installBinaries(): Promise<void> {
-    if (this.binaries.length === 0) return;
-
-    // Ensure curl is available for downloading
-    await this.ensureCurl();
-
-    // Detect container architecture
-    const arch = await this.detectArchitecture();
-
-    // Install each binary
-    for (const binary of this.binaries) {
-      await this.installBinary(binary, arch);
-    }
-  }
-
-  /**
-   * Ensures curl is installed in the container.
-   */
-  private async ensureCurl(): Promise<void> {
-    const checkResult = await spawn('docker', [
-      'exec',
-      this.context.containerId,
-      'which',
-      'curl',
-    ]).catch(() => null);
-
-    if (checkResult) return; // curl already installed
-
-    const useApt = isDebianBased(this.image);
-    const curlInstallCmd = useApt
-      ? 'apt-get update && apt-get install -y curl'
-      : 'apk add --no-cache curl';
-
-    try {
-      await spawn('docker', [
-        'exec',
-        this.context.containerId,
-        'sh',
-        '-c',
-        curlInstallCmd,
-      ]);
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      throw new BinaryInstallError(
-        'curl',
-        'package-manager',
-        `Required for binary downloads: ${err.stderr || err.message}`,
-        this.context.containerId,
-      );
-    }
-  }
-
-  /**
-   * Detects the container's CPU architecture.
-   */
-  private async detectArchitecture(): Promise<string> {
-    try {
-      const result = await spawn('docker', [
-        'exec',
-        this.context.containerId,
-        'uname',
-        '-m',
-      ]);
-      return result.stdout.trim();
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      throw new DockerSandboxError(
-        `Failed to detect container architecture: ${err.stderr || err.message}`,
-        this.context.containerId,
-      );
-    }
-  }
-
-  /**
-   * Installs a single binary from URL.
-   */
-  private async installBinary(
-    binary: BinaryInstall,
-    arch: string,
-  ): Promise<void> {
-    // Resolve URL based on architecture
-    let url: string;
-    if (typeof binary.url === 'string') {
-      url = binary.url;
-    } else {
-      const archUrl = binary.url[arch as keyof ArchitectureUrls];
-      if (!archUrl) {
-        throw new BinaryInstallError(
-          binary.name,
-          `arch:${arch}`,
-          `No URL provided for architecture "${arch}". Available: ${Object.keys(binary.url).join(', ')}`,
-          this.context.containerId,
-        );
-      }
-      url = archUrl;
-    }
-
-    // Download and install the binary
-    const isTarGz = url.endsWith('.tar.gz') || url.endsWith('.tgz');
-    let installCmd: string;
-
-    if (isTarGz) {
-      const binaryPathInArchive = binary.binaryPath || binary.name;
-      installCmd = `
-        set -e
-        TMPDIR=$(mktemp -d)
-        cd "$TMPDIR"
-        curl -fsSL "${url}" -o archive.tar.gz
-        tar -xzf archive.tar.gz
-        BINARY_FILE=$(find . -name "${binaryPathInArchive}" -o -name "${binary.name}" | head -1)
-        if [ -z "$BINARY_FILE" ]; then
-          echo "Binary not found in archive. Contents:" >&2
-          find . -type f >&2
-          exit 1
-        fi
-        chmod +x "$BINARY_FILE"
-        mv "$BINARY_FILE" /usr/local/bin/${binary.name}
-        cd /
-        rm -rf "$TMPDIR"
-      `;
-    } else {
-      installCmd = `
-        curl -fsSL "${url}" -o /usr/local/bin/${binary.name}
-        chmod +x /usr/local/bin/${binary.name}
-      `;
-    }
-
-    try {
-      await spawn('docker', [
-        'exec',
-        this.context.containerId,
-        'sh',
-        '-c',
-        installCmd,
-      ]);
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      throw new BinaryInstallError(
-        binary.name,
-        url,
-        err.stderr || err.message,
-        this.context.containerId,
-      );
+    const ctx = createInstallerContext(this.context.containerId, this.image);
+    for (const installer of this.installers) {
+      await installer.install(ctx);
     }
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DockerfileStrategy - Builds image from Dockerfile
-// ─────────────────────────────────────────────────────────────────────────────
+export interface DockerfileStrategyArgs extends DockerSandboxStrategyArgs {
+  dockerfile: string;
+  context?: string;
+}
 
 /**
- * Strategy that builds a custom Docker image from a Dockerfile.
- *
- * This is the "build-once, run-many" approach - builds the image upfront
- * (with caching) and runs containers from the pre-configured image.
- *
- * Image caching: Uses a deterministic tag based on Dockerfile content hash.
- * If the same Dockerfile is used, the existing image is reused (cache hit).
- *
- * @example Inline Dockerfile
- * ```typescript
- * const strategy = new DockerfileStrategy(`
- *   FROM alpine:latest
- *   RUN apk add --no-cache curl jq
- * `);
- * const sandbox = await strategy.create();
- * ```
- *
- * @example Dockerfile path
- * ```typescript
- * const strategy = new DockerfileStrategy(
- *   './Dockerfile.sandbox',
- *   './docker',  // build context
- * );
- * const sandbox = await strategy.create();
- * ```
+ * Builds a custom image from a Dockerfile (with content-hash caching).
+ * Runs no post-start configuration — the Dockerfile defines the image.
  */
 export class DockerfileStrategy extends DockerSandboxStrategy {
   private imageTag: string;
   private dockerfile: string;
   private dockerContext: string;
 
-  constructor(
-    dockerfile: string,
-    dockerContext = '.',
-    mounts?: DockerMount[],
-    resources?: DockerResources,
-    env?: Record<string, string>,
-  ) {
-    super(mounts, resources, env);
-    this.dockerfile = dockerfile;
-    this.dockerContext = dockerContext;
+  constructor(args: DockerfileStrategyArgs) {
+    super({ mounts: args.mounts, resources: args.resources, env: args.env });
+    this.dockerfile = args.dockerfile;
+    this.dockerContext = args.context ?? '.';
     this.imageTag = this.computeImageTag();
   }
 
-  /**
-   * Computes a deterministic image tag based on Dockerfile content.
-   * Same Dockerfile → same tag → Docker skips rebuild if image exists.
-   */
   private computeImageTag(): string {
     const content = this.isInlineDockerfile()
       ? this.dockerfile
@@ -867,15 +366,11 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
     return `sandbox-${hash}`;
   }
 
-  /**
-   * Checks if the dockerfile property is inline content or a file path.
-   */
   private isInlineDockerfile(): boolean {
     return this.dockerfile.includes('\n');
   }
 
   protected async getImage(): Promise<string> {
-    // Check if image already exists (cache hit)
     const exists = await this.imageExists();
     if (!exists) {
       await this.buildImage();
@@ -884,12 +379,9 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   }
 
   protected async configure(): Promise<void> {
-    // No-op - Dockerfile already configured the image
+    // Dockerfile already configured the image.
   }
 
-  /**
-   * Checks if the image already exists locally.
-   */
   private async imageExists(): Promise<boolean> {
     try {
       await spawn('docker', ['image', 'inspect', this.imageTag]);
@@ -899,17 +391,12 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
     }
   }
 
-  /**
-   * Builds the Docker image from the Dockerfile.
-   */
   private async buildImage(): Promise<void> {
     try {
       if (this.isInlineDockerfile()) {
-        // Inline Dockerfile - use heredoc via shell
         const buildCmd = `echo '${this.dockerfile.replace(/'/g, "'\\''")}' | docker build -t ${this.imageTag} -f - ${this.dockerContext}`;
         await spawn('sh', ['-c', buildCmd]);
       } else {
-        // Path to Dockerfile
         await spawn('docker', [
           'build',
           '-t',
@@ -926,71 +413,38 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ComposeStrategy - Multi-container environments via Docker Compose
-// ─────────────────────────────────────────────────────────────────────────────
+export interface ComposeStrategyArgs {
+  compose: string;
+  service: string;
+  resources?: DockerResources;
+}
 
 /**
- * Strategy that manages multi-container environments using Docker Compose.
- *
- * Unlike other strategies that manage a single container, ComposeStrategy
- * orchestrates multiple services as a unit using docker compose commands.
- *
- * @example
- * ```typescript
- * const strategy = new ComposeStrategy(
- *   './docker-compose.yml',
- *   'app',  // Service to execute commands in
- * );
- * const sandbox = await strategy.create();
- *
- * // Commands run in the 'app' service
- * await sandbox.executeCommand('node --version');
- *
- * // Can communicate with other services via service names
- * await sandbox.executeCommand('curl http://api:3000/health');
- *
- * // Stops ALL services
- * await sandbox.dispose();
- * ```
+ * Manages multi-container environments via `docker compose`.
+ * Commands run inside the named service; `dispose()` brings the whole stack down.
  */
 export class ComposeStrategy extends DockerSandboxStrategy {
   private projectName: string;
   private composeFile: string;
   private service: string;
 
-  constructor(
-    composeFile: string,
-    service: string,
-    resources?: DockerResources,
-  ) {
-    // Pass empty mounts - compose handles its own volumes
-    super([], resources);
-    this.composeFile = composeFile;
-    this.service = service;
+  constructor(args: ComposeStrategyArgs) {
+    super({ resources: args.resources });
+    this.composeFile = args.compose;
+    this.service = args.service;
     this.projectName = this.computeProjectName();
   }
 
-  /**
-   * Deterministic project name based on compose file content for caching.
-   * Same compose file → same project name → faster subsequent startups.
-   */
   private computeProjectName(): string {
     const content = readFileSync(this.composeFile, 'utf-8');
     const hash = createHash('sha256').update(content).digest('hex').slice(0, 8);
     return `sandbox-${hash}`;
   }
 
-  /**
-   * Override: No image to get - compose manages its own images.
-   */
   protected async getImage(): Promise<string> {
-    return ''; // Not used for compose
+    return '';
   }
 
-  /**
-   * Override: Start all services with docker compose up.
-   */
   protected override async startContainer(_image: string): Promise<string> {
     try {
       await spawn('docker', [
@@ -1010,17 +464,13 @@ export class ComposeStrategy extends DockerSandboxStrategy {
       throw new ComposeStartError(this.composeFile, err.stderr || err.message);
     }
 
-    // Return project name as the "container ID" for context
     return this.projectName;
   }
 
   protected async configure(): Promise<void> {
-    // No additional configuration - compose file defines everything
+    // Compose file is the source of truth.
   }
 
-  /**
-   * Override: Execute commands in the target service.
-   */
   protected override async exec(command: string): Promise<CommandResult> {
     try {
       const result = await spawn('docker', [
@@ -1030,7 +480,7 @@ export class ComposeStrategy extends DockerSandboxStrategy {
         '-p',
         this.projectName,
         'exec',
-        '-T', // -T disables pseudo-TTY
+        '-T',
         this.service,
         'sh',
         '-c',
@@ -1051,9 +501,6 @@ export class ComposeStrategy extends DockerSandboxStrategy {
     }
   }
 
-  /**
-   * Override: Stop all services with docker compose down.
-   */
   protected override async stopContainer(_containerId: string): Promise<void> {
     try {
       await spawn('docker', [
@@ -1065,58 +512,44 @@ export class ComposeStrategy extends DockerSandboxStrategy {
         'down',
       ]);
     } catch {
-      // Ignore cleanup errors
+      // ignore cleanup errors
     }
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Factory Function
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Creates a Docker-based sandbox for executing commands in an isolated container.
+ * Create a Docker-backed sandbox.
  *
- * Supports three strategies:
- * - **RuntimeStrategy**: Uses existing image, installs packages/binaries at runtime
- * - **DockerfileStrategy**: Builds custom image from Dockerfile (with caching)
- * - **ComposeStrategy**: Multi-container environments via Docker Compose
+ * @example Runtime with installers
+ * ```ts
+ * import { createDockerSandbox, pkg, urlBinary, npm } from '@deepagents/context';
  *
- * @example RuntimeStrategy (default)
- * ```typescript
  * const sandbox = await createDockerSandbox({
  *   image: 'alpine:latest',
- *   packages: ['curl', 'jq'],
- *   binaries: [{ name: 'presenterm', url: {...} }],
+ *   installers: [
+ *     pkg(['curl', 'jq']),
+ *     urlBinary({ name: 'presenterm', url: {...} }),
+ *     npm('prettier', { ensureRuntime: true }),
+ *   ],
  * });
- * await sandbox.executeCommand('curl --version');
- * await sandbox.dispose();
  * ```
  *
- * @example DockerfileStrategy
- * ```typescript
+ * @example Dockerfile
+ * ```ts
  * const sandbox = await createDockerSandbox({
  *   dockerfile: `
  *     FROM alpine:latest
  *     RUN apk add --no-cache curl jq
  *   `,
- *   context: '.',
  * });
- * await sandbox.executeCommand('curl --version');
- * await sandbox.dispose();
  * ```
  *
- * @example ComposeStrategy
- * ```typescript
+ * @example Compose
+ * ```ts
  * const sandbox = await createDockerSandbox({
  *   compose: './docker-compose.yml',
  *   service: 'app',
  * });
- * // Commands run in the 'app' service
- * await sandbox.executeCommand('node --version');
- * // Can reach other services by name
- * await sandbox.executeCommand('curl http://db:5432');
- * await sandbox.dispose();  // Stops ALL services
  * ```
  */
 export async function createDockerSandbox(
@@ -1125,48 +558,35 @@ export async function createDockerSandbox(
   let strategy: DockerSandboxStrategy;
 
   if (isComposeOptions(options)) {
-    strategy = new ComposeStrategy(
-      options.compose,
-      options.service,
-      options.resources,
-    );
+    strategy = new ComposeStrategy({
+      compose: options.compose,
+      service: options.service,
+      resources: options.resources,
+    });
   } else if (isDockerfileOptions(options)) {
-    strategy = new DockerfileStrategy(
-      options.dockerfile,
-      options.context,
-      options.mounts,
-      options.resources,
-      options.env,
-    );
+    strategy = new DockerfileStrategy({
+      dockerfile: options.dockerfile,
+      context: options.context,
+      mounts: options.mounts,
+      resources: options.resources,
+      env: options.env,
+    });
   } else {
-    strategy = new RuntimeStrategy(
-      options.image,
-      options.packages,
-      options.binaries,
-      options.mounts,
-      options.resources,
-      options.env,
-    );
+    strategy = new RuntimeStrategy({
+      image: options.image,
+      installers: options.installers,
+      mounts: options.mounts,
+      resources: options.resources,
+      env: options.env,
+    });
   }
 
   return strategy.create();
 }
 
 /**
- * Execute a function with a Docker sandbox that auto-disposes on completion.
- * Ensures cleanup even if the function throws.
- *
- * @example
- * ```typescript
- * const output = await useSandbox(
- *   { packages: ['curl', 'jq'] },
- *   async (sandbox) => {
- *     const result = await sandbox.executeCommand('curl --version');
- *     return result.stdout;
- *   },
- * );
- * // Container is automatically disposed - no try/finally needed
- * ```
+ * Run a function with a Docker sandbox; the container is disposed on
+ * completion (success or thrown).
  */
 export async function useSandbox<T>(
   options: DockerSandboxOptions,

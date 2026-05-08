@@ -30,13 +30,14 @@ import {
   InMemoryContextStore,
   agent,
   createContainerTool,
+  pkg,
   role,
   skills,
   user,
 } from '@deepagents/context';
 
 const sandbox = await createContainerTool({
-  packages: ['curl', 'jq'],
+  installers: [pkg(['curl', 'jq'])],
   skills: [
     { host: './skills', sandbox: '/workspace/skills' },
   ],
@@ -76,11 +77,11 @@ try {
 For direct container control without AI agent wiring:
 
 ```typescript
-import { createDockerSandbox } from '@deepagents/context';
+import { createDockerSandbox, pkg } from '@deepagents/context';
 
 const sandbox = await createDockerSandbox({
   image: 'alpine:latest',
-  packages: ['curl', 'jq'],
+  installers: [pkg(['curl', 'jq'])],
   mounts: [
     {
       hostPath: process.cwd(),
@@ -112,7 +113,7 @@ Or use `useSandbox` for automatic cleanup:
 import { useSandbox } from '@deepagents/context';
 
 const output = await useSandbox(
-  { packages: ['curl'] },
+  { installers: [pkg(['curl'])] },
   async (sandbox) => {
     const result = await sandbox.executeCommand('curl --version');
     return result.stdout;
