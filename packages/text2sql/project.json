@@ -6,6 +6,14 @@
   "tags": [],
   "targets": {
     "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-lib", "build-cli"],
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "command": "true"
+      }
+    },
+    "build-lib": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
       "options": {
@@ -19,6 +27,15 @@
           "packages/text2sql/src/lib/adapters/spreadsheet/index.ts",
           "packages/text2sql/src/lib/synthesis/index.ts"
         ]
+      }
+    },
+    "build-cli": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-lib"],
+      "outputs": ["{projectRoot}/dist/bin"],
+      "options": {
+        "cwd": "packages/text2sql",
+        "command": "esbuild src/bin/sql.ts src/bin/handlers.ts src/bin/load-adapters.ts --outdir=dist/bin --format=esm --platform=node --bundle=false && chmod +x dist/bin/sql.js"
       }
     },
     "test": {
