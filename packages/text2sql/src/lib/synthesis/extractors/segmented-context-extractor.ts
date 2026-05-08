@@ -6,6 +6,7 @@ import z from 'zod';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   persona,
   structuredOutput,
@@ -88,6 +89,7 @@ async function detectTopicChange(params: {
     model: groq('openai/gpt-oss-20b'),
     context,
     schema: topicChangeSchema,
+    sandbox: await createBashTool(),
   });
 
   return topicOutput.generate();

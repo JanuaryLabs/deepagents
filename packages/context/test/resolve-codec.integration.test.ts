@@ -1,4 +1,5 @@
 import { type UIMessage } from 'ai';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -7,7 +8,19 @@ import {
   InMemoryContextStore,
   type MessageFragment,
   XmlRenderer,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 function encodedMessage(
   text: string,
@@ -52,7 +65,10 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
 
     engine.set(codecBackedMessageFragment(message));
 
-    const result = await engine.resolve({ renderer: new XmlRenderer() });
+    const result = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.deepStrictEqual(result.messages, [message]);
   });
@@ -78,7 +94,10 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
     assert.strictEqual(chain.length, 1);
     assert.deepStrictEqual(chain[0].data, message);
 
-    const resolved = await engine.resolve({ renderer: new XmlRenderer() });
+    const resolved = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     assert.deepStrictEqual(resolved.messages, [message]);
   });
 
@@ -90,7 +109,10 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
       userId: 'codec-user',
     });
 
-    await writer.resolve({ renderer: new XmlRenderer() });
+    await writer.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     const branch = await store.getActiveBranch('codec-chat-invalid');
     assert.ok(branch);
@@ -112,9 +134,10 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
       userId: 'codec-user',
     });
 
+    const sandbox = await createVirtualAgentSandbox();
     await assert.rejects(
-      reader.resolve({ renderer: new XmlRenderer() }),
-      /Type validation failed:/,
+      reader.resolve({ renderer: new XmlRenderer(), sandbox }),
+      /Stored message "invalid-msg-1" is not a UIMessage/,
     );
   });
 });

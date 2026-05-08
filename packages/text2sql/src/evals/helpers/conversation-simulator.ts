@@ -105,6 +105,7 @@ async function generateFollowUp(params: {
     model: groq('openai/gpt-oss-20b'),
     context,
     schema: followUpSchema,
+    sandbox: await createBashTool(),
   });
 
   return followUpOutput.generate();

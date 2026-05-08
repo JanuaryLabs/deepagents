@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -7,7 +8,19 @@ import {
   TomlRenderer,
   ToonRenderer,
   XmlRenderer,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 function codecBackedFragment(): ContextFragment {
   return {

@@ -1,4 +1,5 @@
 import type { LanguageModelUsage, UIMessage } from 'ai';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,11 +10,23 @@ import {
   type WhenContext,
   XmlRenderer,
   assistantText,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   reminder,
   user,
 } from '@deepagents/context';
 
 import { getTextParts } from '../../text.ts';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 describe('WhenContext: chat', () => {
   it('exposes chat metadata set via engine constructor', async () => {
@@ -33,7 +46,10 @@ describe('WhenContext: chat', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('enterprise-hint'),
@@ -91,7 +107,10 @@ describe('WhenContext: usage', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
     assert.ok(
@@ -123,7 +142,10 @@ describe('WhenContext: branch', () => {
     await engine.save();
 
     assert.strictEqual(capturedBranch, 'main');
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('main-hint'),
@@ -243,7 +265,10 @@ describe('WhenContext: content.length', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('long-msg-hint'),
@@ -267,7 +292,10 @@ describe('WhenContext: content.length', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(!text.includes('nope'), `Expected skip. Got: ${text}`);
   });
@@ -298,7 +326,10 @@ describe('WhenContext: lastAssistantMessage', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
     assert.ok(

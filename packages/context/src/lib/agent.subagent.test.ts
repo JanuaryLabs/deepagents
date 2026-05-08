@@ -1,5 +1,6 @@
 import { APICallError, tool } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import z from 'zod';
@@ -10,11 +11,22 @@ import {
   XmlRenderer,
   agent,
   createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   hint,
   mapGenerateErrorToCode,
   role,
   user,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 const sandbox = await createBashTool();
 
@@ -157,8 +169,14 @@ describe('ContextEngine.fork', () => {
     assert.notStrictEqual(ctx.chatId, forked.chatId);
 
     const renderer = new XmlRenderer();
-    const original = await ctx.resolve({ renderer });
-    const forkedResult = await forked.resolve({ renderer });
+    const original = await ctx.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    const forkedResult = await forked.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.strictEqual(original.systemPrompt, forkedResult.systemPrompt);
     assert.strictEqual(original.messages.length, 0);
@@ -173,8 +191,14 @@ describe('ContextEngine.fork', () => {
     const forked = ctx.fork();
 
     const renderer = new XmlRenderer();
-    const original = await ctx.resolve({ renderer });
-    const forkedResult = await forked.resolve({ renderer });
+    const original = await ctx.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    const forkedResult = await forked.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.ok(original.systemPrompt.includes('data analyst'));
     assert.ok(original.systemPrompt.includes('UTC timestamps'));
@@ -188,8 +212,14 @@ describe('ContextEngine.fork', () => {
     const forked = ctx.fork();
 
     const renderer = new XmlRenderer();
-    const parentResult = await ctx.resolve({ renderer });
-    const forkedResult = await forked.resolve({ renderer });
+    const parentResult = await ctx.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    const forkedResult = await forked.resolve({
+      renderer,
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.strictEqual(parentResult.messages.length, 1);
     assert.strictEqual(forkedResult.messages.length, 0);
@@ -513,7 +543,10 @@ describe('asTool', () => {
 
     await callerAgent.generate({});
 
-    const parentResult = await ctx.resolve({ renderer: new XmlRenderer() });
+    const parentResult = await ctx.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     assert.strictEqual(
       parentResult.messages.length,
       0,

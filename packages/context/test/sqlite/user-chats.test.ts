@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -6,10 +7,22 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
 import { withSqliteContainer } from '../helpers/sqlite-container.ts';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 const renderer = new XmlRenderer();
 
@@ -256,7 +269,10 @@ describe('User Chat Management', () => {
         });
 
         // Trigger initialization
-        await engine.resolve({ renderer });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         const chat = await store.getChat('chat-1');
         assert.ok(chat);
@@ -272,7 +288,10 @@ describe('User Chat Management', () => {
           userId: 'bob',
         });
 
-        await engine.resolve({ renderer });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         const chatMeta = engine.chat;
         assert.ok(chatMeta);
@@ -306,21 +325,30 @@ describe('User Chat Management', () => {
           chatId: 'alice-chat-1',
           userId: 'alice',
         });
-        await aliceChat1.resolve({ renderer });
+        await aliceChat1.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         const aliceChat2 = new ContextEngine({
           store,
           chatId: 'alice-chat-2',
           userId: 'alice',
         });
-        await aliceChat2.resolve({ renderer });
+        await aliceChat2.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         const bobChat = new ContextEngine({
           store,
           chatId: 'bob-chat-1',
           userId: 'bob',
         });
-        await bobChat.resolve({ renderer });
+        await bobChat.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         // List Alice's chats
         const aliceChats = await store.listChats({ userId: 'alice' });
@@ -342,19 +370,19 @@ describe('User Chat Management', () => {
           store,
           chatId: 'chat-a',
           userId: 'user-1',
-        }).resolve({ renderer });
+        }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
 
         await new ContextEngine({
           store,
           chatId: 'chat-b',
           userId: 'user-2',
-        }).resolve({ renderer });
+        }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
 
         await new ContextEngine({
           store,
           chatId: 'chat-c',
           userId: 'user-3',
-        }).resolve({ renderer });
+        }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
 
         // List all chats
         const allChats = await store.listChats();
@@ -368,7 +396,7 @@ describe('User Chat Management', () => {
           store,
           chatId: 'chat-1',
           userId: 'alice',
-        }).resolve({ renderer });
+        }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
 
         const bobChats = await store.listChats({ userId: 'bob' });
         assert.strictEqual(bobChats.length, 0);
@@ -385,7 +413,7 @@ describe('User Chat Management', () => {
             store,
             chatId: `chat-${i}`,
             userId: 'alice',
-          }).resolve({ renderer });
+          }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
         }
 
         const limitedChats = await store.listChats({
@@ -405,7 +433,10 @@ describe('User Chat Management', () => {
             chatId: `chat-${i}`,
             userId: 'alice',
           });
-          await engine.resolve({ renderer });
+          await engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
           // Add a message to update the timestamp
           engine.set(user(`Message ${i}`));
           await engine.save();
@@ -481,7 +512,7 @@ describe('User Chat Management', () => {
           store,
           chatId: 'chat-1',
           userId: 'user-abc',
-        }).resolve({ renderer });
+        }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
 
         const chats = await store.listChats();
         assert.strictEqual(chats[0].userId, 'user-abc');
@@ -497,7 +528,10 @@ describe('User Chat Management', () => {
           chatId: 'updatable-chat',
           userId: 'original-user',
         });
-        await engine.resolve({ renderer });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         // Update chat title
         await engine.updateChat({ title: 'My Updated Title' });
@@ -878,7 +912,10 @@ describe('User Chat Management', () => {
           chatId: 'reconnect-chat',
           userId: 'different-user', // Different userId!
         });
-        await engine2.resolve({ renderer });
+        await engine2.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         // The stored chat should still have original userId
         const storedChat = await store.getChat('reconnect-chat');

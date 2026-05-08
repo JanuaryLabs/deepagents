@@ -6,6 +6,7 @@ import { type AgentModel } from '@deepagents/agent';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   guardrail,
   persona,
@@ -146,6 +147,7 @@ export async function generateQuestions(
     model: model ?? groq('openai/gpt-oss-20b'),
     context,
     schema: outputSchema,
+    sandbox: await createBashTool(),
   });
 
   return questionOutput.generate();

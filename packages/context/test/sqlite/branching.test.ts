@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -5,10 +6,22 @@ import {
   ContextEngine,
   XmlRenderer,
   assistantText,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 
 import { withSqliteContainer } from '../helpers/sqlite-container.ts';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 const renderer = new XmlRenderer();
 
@@ -23,7 +36,10 @@ describe('Branching', () => {
         });
 
         // Trigger initialization
-        await engine.resolve({ renderer });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         // Verify branch was created
         const branches = await store.listBranches('test-branch-1');
@@ -143,7 +159,10 @@ describe('Branching', () => {
         engine.set(user('Third'));
         await engine.save();
 
-        const { messages } = await engine.resolve({ renderer });
+        const { messages } = await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         assert.strictEqual(messages.length, 3);
         // resolve() returns decoded UIMessage objects
@@ -333,7 +352,10 @@ describe('Branching', () => {
         // Rewind should clear pending
         await engine.rewind('msg-1');
 
-        const { messages } = await engine.resolve({ renderer });
+        const { messages } = await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
         assert.strictEqual(messages.length, 1); // Only msg-1
       });
     });
@@ -396,7 +418,10 @@ describe('Branching', () => {
         await engine.save();
 
         // Get messages from forked branch
-        const { messages: forkedMessages } = await engine.resolve({ renderer });
+        const { messages: forkedMessages } = await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
         assert.strictEqual(forkedMessages.length, 2);
         assert.strictEqual(
           (forkedMessages[1] as any).parts[0].text,
@@ -405,7 +430,10 @@ describe('Branching', () => {
 
         // Switch to main and get its messages
         await engine.switchBranch('main');
-        const { messages: mainMessages } = await engine.resolve({ renderer });
+        const { messages: mainMessages } = await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
         assert.strictEqual(mainMessages.length, 2);
         assert.strictEqual(
           (mainMessages[1] as any).parts[0].text,
@@ -422,7 +450,10 @@ describe('Branching', () => {
           chatId: 'test-switch-3',
         });
 
-        await engine.resolve({ renderer }); // Initialize
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }); // Initialize
 
         await assert.rejects(async () => {
           await engine.switchBranch('nonexistent');
@@ -568,7 +599,10 @@ describe('Branching', () => {
         });
 
         // Initialize but don't add messages
-        await engine.resolve({ renderer });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         // btw should fail - no messages to branch from
         await assert.rejects(
@@ -597,7 +631,10 @@ describe('Branching', () => {
         await engine.btw();
 
         // Resolve should still include the pending message
-        const { messages } = await engine.resolve({ renderer });
+        const { messages } = await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
         assert.strictEqual(messages.length, 2);
       });
     });

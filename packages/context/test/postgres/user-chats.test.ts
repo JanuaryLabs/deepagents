@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -6,9 +7,21 @@ import {
   PostgresContextStore,
   XmlRenderer,
   assistantText,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   user,
 } from '@deepagents/context';
 import { withPostgresContainer } from '@deepagents/test';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 const renderer = new XmlRenderer();
 
@@ -27,7 +40,10 @@ describe('User Chat Management', () => {
             userId: 'alice',
           });
 
-          await engine.resolve({ renderer });
+          await engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
           const chat = await store.getChat('user-chat-1');
           assert.ok(chat);
@@ -51,7 +67,10 @@ describe('User Chat Management', () => {
             userId: 'bob',
           });
 
-          await engine.resolve({ renderer });
+          await engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
           const chatMeta = engine.chat;
           assert.ok(chatMeta);
@@ -77,21 +96,30 @@ describe('User Chat Management', () => {
             chatId: 'alice-list-1',
             userId: 'alice-list',
           });
-          await aliceChat1.resolve({ renderer });
+          await aliceChat1.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
           const aliceChat2 = new ContextEngine({
             store,
             chatId: 'alice-list-2',
             userId: 'alice-list',
           });
-          await aliceChat2.resolve({ renderer });
+          await aliceChat2.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
           const bobChat = new ContextEngine({
             store,
             chatId: 'bob-list-1',
             userId: 'bob-list',
           });
-          await bobChat.resolve({ renderer });
+          await bobChat.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
           const aliceChats = await store.listChats({ userId: 'alice-list' });
           assert.strictEqual(aliceChats.length, 2);
@@ -175,7 +203,7 @@ describe('User Chat Management', () => {
             store,
             chatId: 'chatinfo-test',
             userId: 'user-abc-info',
-          }).resolve({ renderer });
+          }).resolve({ renderer, sandbox: await createVirtualAgentSandbox() });
 
           const chats = await store.listChats({ userId: 'user-abc-info' });
           assert.strictEqual(chats[0].userId, 'user-abc-info');
@@ -585,7 +613,10 @@ describe('User Chat Management', () => {
             chatId: 'reconnect-pg-chat',
             userId: 'different-pg-user',
           });
-          await engine2.resolve({ renderer });
+          await engine2.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
           const storedChat = await store.getChat('reconnect-pg-chat');
           assert.ok(storedChat);

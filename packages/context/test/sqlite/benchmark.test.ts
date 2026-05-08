@@ -4,6 +4,7 @@
  * Measures key operations before/after optimization.
  * Run with: node --test --no-warnings  packages/context/test/sqlite/benchmark.test.ts
  */
+import { InMemoryFs } from 'just-bash';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,8 +14,20 @@ import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   user,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 const renderer = new XmlRenderer();
 
@@ -89,7 +102,10 @@ describe('SQLite Performance Benchmark', () => {
 
         // Measure resolve (which calls getMessageChain internally)
         const start = performance.now();
-        const result = await engine.resolve({ renderer });
+        const result = await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
         const elapsed = performance.now() - start;
 
         console.log(

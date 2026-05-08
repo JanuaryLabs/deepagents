@@ -8,6 +8,7 @@ import {
   type ContextFragment,
   InMemoryContextStore,
   XmlRenderer,
+  createBashTool,
   fragment,
   guardrail,
   persona as personaFragment,
@@ -151,6 +152,7 @@ export async function generatePersonas(
     model: options?.model ?? groq('openai/gpt-oss-20b'),
     context,
     schema: outputSchema,
+    sandbox: await createBashTool(),
   });
 
   const output = await personaOutput.generate();

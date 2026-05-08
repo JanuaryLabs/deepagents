@@ -5,6 +5,7 @@ import { lmstudio } from '@deepagents/agent';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   persona,
   structuredOutput,
@@ -317,6 +318,7 @@ export async function plan(
     model: plannerModel,
     context,
     schema: PlannerOutputSchema,
+    sandbox: await createBashTool(),
   });
 
   const output = await plannerOutput.generate(state);

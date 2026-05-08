@@ -5,6 +5,7 @@ import z from 'zod';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   persona,
   structuredOutput,
@@ -119,6 +120,7 @@ export class SqlExtractor extends PairProducer {
         model: groq('openai/gpt-oss-20b'),
         context,
         schema: outputSchema,
+        sandbox: await createBashTool(),
       });
 
       const output = await sqlToQuestionOutput.generate();

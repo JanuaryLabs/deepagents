@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -13,6 +14,9 @@ import {
   contentIncludes,
   contentMatches,
   contentPattern,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   everyNTurns,
   not,
   or,
@@ -21,6 +25,15 @@ import {
 } from '@deepagents/context';
 
 import { getTextParts } from '../../text.ts';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 describe('contentIncludes', () => {
   it('fires when message contains a keyword', async () => {
@@ -39,7 +52,10 @@ describe('contentIncludes', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(text.includes('db-hint'), `Expected reminder. Got: ${text}`);
   });
@@ -60,7 +76,10 @@ describe('contentIncludes', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('found-it'),
@@ -84,7 +103,10 @@ describe('contentIncludes', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(!text.includes('nope'), `Expected skip. Got: ${text}`);
   });
@@ -105,7 +127,10 @@ describe('contentIncludes', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('dark-mode-hint'),
@@ -131,7 +156,10 @@ describe('contentPattern', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('version-hint'),
@@ -155,7 +183,10 @@ describe('contentPattern', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(!text.includes('nope'), `Expected skip. Got: ${text}`);
   });
@@ -176,7 +207,10 @@ describe('contentPattern', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(text.includes('error-hint'), `Expected flag match. Got: ${text}`);
   });
@@ -231,7 +265,10 @@ describe('contentMatches (BM25)', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('security-hint'),
@@ -255,7 +292,10 @@ describe('contentMatches (BM25)', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(text.includes('sql-hint'), `Expected topic match. Got: ${text}`);
   });
@@ -279,7 +319,10 @@ describe('contentMatches (BM25)', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(!text.includes('nope'), `Expected skip. Got: ${text}`);
   });
@@ -318,7 +361,10 @@ describe('classifies', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('deploy-tip'),
@@ -352,7 +398,10 @@ describe('classifies', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(!text.includes('nope'), `Expected skip. Got: ${text}`);
   });
@@ -378,7 +427,10 @@ describe('composition with existing predicates', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
     assert.ok(
@@ -403,7 +455,10 @@ describe('composition with existing predicates', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       !text.includes('too-early'),
@@ -427,7 +482,10 @@ describe('composition with existing predicates', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('found-version'),
@@ -454,7 +512,10 @@ describe('composition with existing predicates', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       text.includes('no-tests'),
@@ -481,7 +542,10 @@ describe('composition with existing predicates', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const text = getTextParts(messages[0]).join('');
     assert.ok(
       !text.includes('blocked'),
@@ -508,7 +572,10 @@ describe('composition with existing predicates', () => {
     );
     await engine.save();
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
     const lastMsg = messages[messages.length - 1];
     const text = getTextParts(lastMsg).join('');
     assert.ok(

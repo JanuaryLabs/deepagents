@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -12,9 +13,21 @@ import {
   SqliteContextStore,
   XmlRenderer,
   assistantText,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   reminder,
   user,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 const renderer = new XmlRenderer();
 
@@ -191,7 +204,10 @@ describe('Sqlite ContextEngine Integration', () => {
       });
 
       const result = await withTimeout('resolve empty chat', 10000, () =>
-        engine.resolve({ renderer }),
+        engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
       );
       assert.strictEqual(result.messages.length, 0);
 
@@ -218,7 +234,10 @@ describe('Sqlite ContextEngine Integration', () => {
       });
 
       const result = await withTimeout('resolve empty sqlite file', 10000, () =>
-        engine.resolve({ renderer }),
+        engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
       );
       assert.strictEqual(result.messages.length, 0);
     });
@@ -251,7 +270,10 @@ describe('Sqlite ContextEngine Integration', () => {
         10000,
         async () => {
           try {
-            return await engine.resolve({ renderer });
+            return await engine.resolve({
+              renderer,
+              sandbox: await createVirtualAgentSandbox(),
+            });
           } catch (error) {
             return { error } as { error: unknown };
           }
@@ -290,7 +312,10 @@ describe('Sqlite ContextEngine Integration', () => {
 
       await withTimeout('resolve missing branch', 10000, async () => {
         try {
-          await nextEngine.resolve({ renderer });
+          await nextEngine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
         } catch {
           // No hang is the requirement for this edge case.
         }
@@ -325,7 +350,10 @@ describe('Sqlite ContextEngine Integration', () => {
       });
 
       const result = await withTimeout('resolve missing head', 10000, () =>
-        nextEngine.resolve({ renderer }),
+        nextEngine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
       );
       assert.strictEqual(result.messages.length, 0);
     });
@@ -362,7 +390,10 @@ describe('Sqlite ContextEngine Integration', () => {
 
       // The original message should still be accessible
       const result = await withTimeout('resolve after rejection', 10000, () =>
-        engine.resolve({ renderer }),
+        engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
       );
       assert.strictEqual(result.messages.length, 1);
     });
@@ -380,7 +411,10 @@ describe('Sqlite ContextEngine Integration', () => {
             chatId: 'chat-corrupt',
             userId: 'user-1',
           });
-          await engine.resolve({ renderer });
+          await engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
         }, /database|file/i);
       });
     });
@@ -399,7 +433,10 @@ describe('Sqlite ContextEngine Integration', () => {
           userId: 'user-1',
         });
 
-        await engine.resolve({ renderer });
+        await engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        });
 
         let failure: unknown;
 
@@ -461,7 +498,10 @@ describe('Sqlite ContextEngine Integration', () => {
         }
 
         const result = await withTimeout('resolve large chain', 120000, () =>
-          engine.resolve({ renderer }),
+          engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          }),
         );
         assert.strictEqual(result.messages.length, totalMessages);
       });
@@ -545,12 +585,18 @@ describe('Sqlite ContextEngine Integration', () => {
       assert.strictEqual(engine.branch, 'main-v2', 'Should be on new branch');
 
       // 5. Verify main-v2 chain: user → new_assistant (2 messages)
-      const result = await engine.resolve({ renderer });
+      const result = await engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      });
       assert.strictEqual(result.messages.length, 2);
 
       // 6. Verify main branch is preserved with original assistant message
       await engine.switchBranch('main');
-      const mainResult = await engine.resolve({ renderer });
+      const mainResult = await engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      });
       assert.strictEqual(mainResult.messages.length, 2);
       const mainAssistant = mainResult.messages[1] as { id?: string };
       assert.strictEqual(mainAssistant.id, 'assistant-pending');
@@ -575,7 +621,10 @@ describe('Sqlite ContextEngine Integration', () => {
         ),
       );
 
-      const beforeSave = await engine.resolve({ renderer });
+      const beforeSave = await engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      });
       const messageBefore = beforeSave.messages[0] as {
         parts: Array<{ type: string; text?: string }>;
         metadata?: {
@@ -600,7 +649,10 @@ describe('Sqlite ContextEngine Integration', () => {
 
       await engine.save();
 
-      const afterSave = await engine.resolve({ renderer });
+      const afterSave = await engine.resolve({
+        renderer,
+        sandbox: await createVirtualAgentSandbox(),
+      });
       const messageAfter = afterSave.messages[0] as {
         parts: Array<{ type: string; text?: string }>;
         metadata?: unknown;

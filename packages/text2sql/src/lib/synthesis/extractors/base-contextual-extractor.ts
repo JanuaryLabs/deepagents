@@ -6,6 +6,7 @@ import z from 'zod';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   persona,
   structuredOutput,
@@ -95,6 +96,7 @@ export async function resolveContext(params: {
     model: groq('openai/gpt-oss-20b'),
     context,
     schema: contextResolverSchema,
+    sandbox: await createBashTool(),
   });
 
   return resolverOutput.generate();

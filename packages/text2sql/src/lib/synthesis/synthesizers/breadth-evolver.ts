@@ -7,6 +7,7 @@ import { type AgentModel } from '@deepagents/agent';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   guardrail,
   persona as personaFragment,
@@ -125,6 +126,7 @@ async function paraphraseQuestion(params: {
     model: params.model ?? groq('openai/gpt-oss-20b'),
     context,
     schema: paraphraserOutputSchema,
+    sandbox: await createBashTool(),
   });
 
   return paraphraserOutput.generate();

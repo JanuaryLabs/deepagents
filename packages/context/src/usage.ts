@@ -5,7 +5,7 @@ import {
   createOverlayBackend,
 } from '@rivet-dev/agent-os-core';
 import chalk from 'chalk';
-import { Bash, OverlayFs } from 'just-bash';
+import { Bash, InMemoryFs, OverlayFs } from 'just-bash';
 
 import { printer } from '@deepagents/agent';
 
@@ -19,6 +19,8 @@ import {
   createBashTool,
   createContainerTool,
   createDockerSandbox,
+  createRoutingSandbox,
+  createVirtualSandbox,
   githubRelease,
   hint,
   pkg,
@@ -33,6 +35,15 @@ import { ContextEngine } from './lib/engine.ts';
 
 // Create a shared store for persistence
 const store = new InMemoryContextStore();
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 /**
  * Example: Using ContextEngine with messages and chatId
@@ -64,6 +75,7 @@ async function demonstrateContextEngine() {
 
   const { systemPrompt, messages } = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
 
   console.log('System Prompt:\n', systemPrompt);
@@ -85,6 +97,7 @@ async function demonstrateContextEngine() {
   // Resolve again - now includes previous conversation
   const result2 = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('\nSecond turn messages:', result2.messages.length);
 
@@ -95,6 +108,7 @@ async function demonstrateContextEngine() {
   const inspection = await context.inspect({
     modelId: 'groq:moonshotai/kimi-k2-instruct-0905',
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log(JSON.stringify(inspection, null, 2));
 
@@ -122,6 +136,7 @@ async function demonstrateSessionRestore() {
   // Resolve loads persisted messages from store
   const { messages } = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
 
   console.log('Restored messages from previous session:', messages.length);
@@ -218,6 +233,7 @@ async function demonstrateRewind() {
 
   const before = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('Before rewind - messages:', before.messages.length);
   console.log('Current branch:', context.branch);
@@ -229,6 +245,7 @@ async function demonstrateRewind() {
 
   const after = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('After rewind - messages:', after.messages.length);
   console.log('Kept message:', after.messages[0]);
@@ -239,6 +256,7 @@ async function demonstrateRewind() {
 
   const final = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('Final messages on new branch:', final.messages);
 
@@ -255,6 +273,7 @@ async function demonstrateRewind() {
   await context.switchBranch('main');
   const originalMessages = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log(
     '\nOriginal branch still has:',
@@ -300,6 +319,7 @@ async function demonstrateBranching() {
 
   const branchA = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('Branch A messages:', branchA.messages.length);
 
@@ -314,6 +334,7 @@ async function demonstrateBranching() {
 
   const branchB = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('Branch B messages:', branchB.messages.length);
   console.log('Last message in Branch B:', branchB.messages.at(-1));
@@ -366,13 +387,17 @@ async function demonstrateBranchSwitching() {
   await context.switchBranch('main');
   console.log('Switched back to:', context.branch);
 
-  const mainMessages = await context.resolve({ renderer: new XmlRenderer() });
+  const mainMessages = await context.resolve({
+    renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
+  });
   console.log('Main branch messages:', mainMessages.messages);
 
   // Switch to alternative
   await context.switchBranch('main-v2');
   const altMessages = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
   });
   console.log('Alt branch messages:', altMessages.messages);
 }
@@ -499,7 +524,7 @@ async function demonstrateSearch() {
  * 4. LLM reads full SKILL.md content when relevant using file tools
  */
 async function demonstrateSkills() {
-  const demoSandbox = await createBashTool({
+  const skillSandbox = await createBashTool({
     skills: [
       {
         host: 'packages/context/src/skills',
@@ -515,12 +540,13 @@ async function demonstrateSkills() {
     chatId: 'skill-demo',
   }).set(
     role('You are a helpful assistant with access to specialized skills.'),
-    skills(demoSandbox),
+    skills(skillSandbox),
   );
 
   // Resolve to see what the LLM receives
   const { systemPrompt } = await context.resolve({
     renderer: new XmlRenderer(),
+    sandbox: skillSandbox,
   });
 
   console.log('\nSystem prompt with skills metadata:');

@@ -1,6 +1,7 @@
 import { type UIMessage, generateId } from 'ai';
 
 import type { FragmentCodec } from './codec/codec.ts';
+import type { LoadContext } from './resolvers/types.ts';
 
 /**
  * Fragment type identifier.
@@ -42,7 +43,9 @@ export interface ContextFragment<T extends FragmentData = FragmentData> {
 }
 
 /**
- * Fragment data can be a primitive, array, object, or nested fragment.
+ * Fragment data can be a primitive, array, object, nested fragment, or a
+ * lazy value (function, generator, promise, iterable) that is materialized
+ * by the resolver chain at engine.resolve() time.
  */
 export type FragmentData =
   | string
@@ -52,7 +55,17 @@ export type FragmentData =
   | boolean
   | ContextFragment
   | FragmentData[]
-  | { [key: string]: FragmentData };
+  | { [key: string]: FragmentData }
+  | ((
+      ctx: LoadContext,
+    ) =>
+      | FragmentData
+      | Promise<FragmentData>
+      | Iterable<FragmentData>
+      | AsyncIterable<FragmentData>)
+  | Promise<FragmentData>
+  | Iterable<FragmentData>
+  | AsyncIterable<FragmentData>;
 
 /**
  * Type guard to check if data is a ContextFragment.
@@ -73,15 +86,17 @@ export function isFragment(data: unknown): data is ContextFragment {
 export type FragmentObject = Record<string, FragmentData>;
 
 /**
- * Type guard to check if data is a plain object (not array, not fragment, not primitive).
+ * Type guard for plain objects in fragment data. The resolver chain dispatches
+ * Promises/iterables to handlers first, so this guard would not normally see them.
+ * Kept defensive so direct render paths that bypass the resolver still reject lazy values.
  */
 export function isFragmentObject(data: unknown): data is FragmentObject {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    !Array.isArray(data) &&
-    !isFragment(data)
-  );
+  if (typeof data !== 'object' || data === null) return false;
+  if (Array.isArray(data)) return false;
+  if (data instanceof Promise) return false;
+  if (Symbol.asyncIterator in data || Symbol.iterator in data) return false;
+  if (isFragment(data)) return false;
+  return true;
 }
 
 /**

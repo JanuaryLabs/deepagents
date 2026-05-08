@@ -5,6 +5,7 @@ import { lmstudio } from '@deepagents/agent';
 import {
   ContextEngine,
   InMemoryContextStore,
+  createBashTool,
   fragment,
   persona,
   structuredOutput,
@@ -281,6 +282,7 @@ export async function replan(context: ExecutionContext) {
     model: replannerModel,
     context: plannerContext,
     schema: ReplanDecisionSchema,
+    sandbox: await createBashTool(),
   });
 
   const output = await replannerOutput.generate();

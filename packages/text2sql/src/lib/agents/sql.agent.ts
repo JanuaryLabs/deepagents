@@ -18,6 +18,7 @@ import {
   ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
+  createBashTool,
   example,
   fragment,
   guardrail,
@@ -339,6 +340,7 @@ Question: ${options.input}
       const sqlOutput = structuredOutput({
         model: model,
         context,
+        sandbox: await createBashTool(),
         schema: z.object({
           result: z.union([
             z.object({
@@ -387,6 +389,7 @@ Question: ${options.input}
         const forcedSqlOutput = structuredOutput({
           model,
           context,
+          sandbox: await createBashTool(),
           schema: z.object({
             sql: z
               .string()

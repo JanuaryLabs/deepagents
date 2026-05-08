@@ -1,4 +1,5 @@
 import { type UIMessage } from 'ai';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -7,8 +8,20 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   assistant,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   user,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 function makeEngine() {
   return new ContextEngine({
@@ -26,7 +39,10 @@ describe('ContextEngine.getMessages filters empty assistant placeholders', () =>
     );
     engine.set(assistant({ id: 'a1', role: 'assistant', parts: [] }));
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.deepStrictEqual(
       messages.map((m) => ({ id: m.id, role: m.role })),
@@ -46,7 +62,10 @@ describe('ContextEngine.getMessages filters empty assistant placeholders', () =>
     };
     engine.set(assistant(filledAssistant));
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.strictEqual(messages.length, 2);
     assert.strictEqual(messages[1].id, 'a1');
@@ -63,7 +82,10 @@ describe('ContextEngine.getMessages filters empty assistant placeholders', () =>
       user({ id: 'u2', role: 'user', parts: [{ type: 'text', text: 'q2' }] }),
     );
 
-    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
 
     assert.deepStrictEqual(
       messages.map((m) => m.id),

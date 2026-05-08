@@ -1,5 +1,6 @@
 import type { ToolUIPart, UIMessage } from 'ai';
 import { generateId } from 'ai';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,6 +10,9 @@ import {
   XmlRenderer,
   anyToolCalled,
   assistant,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   reminder,
   toolCall,
   toolCallCount,
@@ -18,6 +22,15 @@ import {
 } from '@deepagents/context';
 
 import { getTextParts } from '../../text.ts';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 interface ToolPartInit {
   name: string;
@@ -95,7 +108,10 @@ async function setupTurn(
 }
 
 async function lastUserText(engine: ContextEngine): Promise<string> {
-  const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+  const { messages } = await engine.resolve({
+    renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
+  });
   return getTextParts(messages[messages.length - 1]).join('');
 }
 

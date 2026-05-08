@@ -100,8 +100,13 @@ class Agent<CIn, COut = CIn> {
     if (!this.#options.model) {
       throw new Error(`Agent ${this.#options.name} is missing a model.`);
     }
+    // Signal is intentionally NOT forwarded to context.resolve(): aborting the model
+    // call should not preempt the resolver chain mid-walk. Loaders that need
+    // cancellation should subscribe to the signal via their own ctx (passed
+    // explicitly to context.resolve when callers want resolver-level cancellation).
     const { messages, systemPrompt } = await this.#options.context.resolve({
       renderer: new XmlRenderer(),
+      sandbox: this.#options.sandbox,
     });
     return generateText({
       abortSignal: config?.abortSignal,
@@ -194,6 +199,7 @@ class Agent<CIn, COut = CIn> {
 
     const { messages, systemPrompt } = await context.resolve({
       renderer: new XmlRenderer(),
+      sandbox: this.#options.sandbox,
     });
 
     const runId = generateId();
@@ -534,6 +540,7 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
   context?: ContextEngine;
   model?: AgentModel;
   schema: TSchema;
+  sandbox: AgentSandbox;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   experimental_telemetry?: Parameters<
     typeof generateText
@@ -600,6 +607,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
 
       const { messages, systemPrompt } = await options.context.resolve({
         renderer: new XmlRenderer(),
+        sandbox: options.sandbox,
       });
 
       const result = await generateText({
@@ -642,6 +650,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
 
       const { messages, systemPrompt } = await options.context.resolve({
         renderer: new XmlRenderer(),
+        sandbox: options.sandbox,
       });
 
       return streamText({

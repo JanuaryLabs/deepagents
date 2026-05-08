@@ -1,4 +1,5 @@
 import { generateId } from 'ai';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -8,12 +9,24 @@ import {
   XmlRenderer,
   assertCountSpec,
   assistant,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   lastAssistantLength,
   reminder,
   user,
 } from '@deepagents/context';
 
 import { getTextParts } from '../../text.ts';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 async function setupAssistantText(chatId: string, text: string) {
   const store = new InMemoryContextStore();
@@ -31,7 +44,10 @@ async function setupAssistantText(chatId: string, text: string) {
 }
 
 async function lastUserText(engine: ContextEngine): Promise<string> {
-  const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+  const { messages } = await engine.resolve({
+    renderer: new XmlRenderer(),
+    sandbox: await createVirtualAgentSandbox(),
+  });
   return getTextParts(messages[messages.length - 1]).join('');
 }
 

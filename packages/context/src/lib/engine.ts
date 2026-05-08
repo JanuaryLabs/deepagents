@@ -25,6 +25,12 @@ import {
   type ContextRenderer,
   XmlRenderer,
 } from './renderers/abstract.renderer.ts';
+import {
+  FragmentLoaderResolver,
+  type ValueResolver,
+  defaultResolvers,
+} from './resolvers/index.ts';
+import type { AgentSandbox } from './sandbox/types.ts';
 import type {
   BaseWhenCtx,
   ReminderTargetHandler,
@@ -65,6 +71,10 @@ export interface ResolveResult {
 export interface ResolveOptions {
   /** Renderer to use for system prompt (defaults to XmlRenderer) */
   renderer: ContextRenderer;
+  /** Sandbox passed to async fragment loaders */
+  sandbox: AgentSandbox;
+  /** Optional cancellation signal forwarded to loaders */
+  signal?: AbortSignal;
 }
 
 /**
@@ -79,6 +89,8 @@ export interface ContextEngineOptions {
   userId: string;
   /** Optional initial metadata for the chat (merged with existing if chat exists) */
   metadata?: Record<string, unknown>;
+  /** Custom resolver chain (defaults to async, generator, function, promise, iterable) */
+  resolvers?: ValueResolver[];
 }
 
 function estimateMessageContent(data: unknown): string {
@@ -168,6 +180,10 @@ export interface InspectOptions {
   modelId: Models;
   /** Renderer for estimation (required) */
   renderer: ContextRenderer;
+  /** Sandbox passed to async fragment loaders */
+  sandbox: AgentSandbox;
+  /** Optional cancellation signal forwarded to loaders */
+  signal?: AbortSignal;
 }
 
 /**
@@ -221,6 +237,7 @@ export class ContextEngine {
   #initialized = false;
   /** Initial metadata to merge on first initialization */
   #initialMetadata: Record<string, unknown> | undefined;
+  #loaderResolver: FragmentLoaderResolver;
 
   get #activeBranch(): BranchData {
     if (!this.#branch) {
@@ -247,6 +264,9 @@ export class ContextEngine {
     this.#userId = options.userId;
     this.#branchName = 'main';
     this.#initialMetadata = options.metadata;
+    this.#loaderResolver = new FragmentLoaderResolver(
+      options.resolvers ?? defaultResolvers(),
+    );
   }
 
   /**
@@ -586,6 +606,11 @@ export class ContextEngine {
    */
   public async resolve(options: ResolveOptions): Promise<ResolveResult> {
     await this.#ensureInitialized();
+    await this.#loaderResolver.resolve(this.#fragments, {
+      sandbox: options.sandbox,
+      context: this,
+      signal: options.signal,
+    });
     const systemPrompt = options.renderer.render(this.#renderableFragments);
     const messages = await this.getMessages();
     return { systemPrompt, messages };
@@ -691,9 +716,16 @@ export class ContextEngine {
     modelId: Models,
     options: {
       renderer?: ContextRenderer;
-    } = {},
+      sandbox: AgentSandbox;
+      signal?: AbortSignal;
+    },
   ): Promise<EstimateResult> {
     await this.#ensureInitialized();
+    await this.#loaderResolver.resolve(this.#fragments, {
+      sandbox: options.sandbox,
+      context: this,
+      signal: options.signal,
+    });
 
     const renderer = options.renderer ?? new XmlRenderer();
     const registry = getModelsRegistry();
@@ -1110,8 +1142,11 @@ export class ContextEngine {
 
     const { renderer } = options;
 
-    // Get token/cost estimation
-    const estimateResult = await this.estimate(options.modelId, { renderer });
+    const estimateResult = await this.estimate(options.modelId, {
+      renderer,
+      sandbox: options.sandbox,
+      signal: options.signal,
+    });
 
     // Render using provided renderer (exclude conditional reminders)
     const rendered = renderer.render(this.#renderableFragments);

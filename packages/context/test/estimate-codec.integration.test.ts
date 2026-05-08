@@ -1,3 +1,4 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { before, describe, it } from 'node:test';
 
@@ -5,9 +6,21 @@ import {
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
   getModelsRegistry,
   user,
 } from '@deepagents/context';
+
+async function createVirtualAgentSandbox() {
+  return createBashTool({
+    sandbox: await createRoutingSandbox({
+      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      hostExtensions: [],
+    }),
+  });
+}
 
 describe('ContextEngine.estimate() with message codecs', () => {
   before(async () => {
@@ -35,9 +48,11 @@ describe('ContextEngine.estimate() with message codecs', () => {
 
     const shortEstimate = await shortEngine.estimate('openai:gpt-4o', {
       renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
     });
     const longEstimate = await longEngine.estimate('openai:gpt-4o', {
       renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
     });
 
     const shortUser = shortEstimate.fragments.find((f) => f.name === 'user');
@@ -74,9 +89,11 @@ describe('ContextEngine.estimate() with message codecs', () => {
 
     const shortEstimate = await shortEngine.estimate('openai:gpt-4o', {
       renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
     });
     const longEstimate = await longEngine.estimate('openai:gpt-4o', {
       renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
     });
 
     const shortUser = shortEstimate.fragments.find((f) => f.name === 'user');
