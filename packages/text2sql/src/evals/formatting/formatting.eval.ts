@@ -1,19 +1,10 @@
 import { groq } from '@ai-sdk/groq';
 import { evalite } from 'evalite';
-import { InMemoryFs } from 'just-bash';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  ObservedFs,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
-} from '@deepagents/context';
 import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
 import TESTS from './formatting.json' with { type: 'json' };
@@ -37,25 +28,10 @@ evalite('SQL Output Formatting', {
       grounding: [sqlite.info(), sqlite.tables()],
       execute: (sql) => db.prepare(sql).all(),
     });
-    const observed = new ObservedFs(new InMemoryFs());
-    const base = await createBashTool({
-      sandbox: await createRoutingSandbox({
-        backend: await createVirtualSandbox({ fs: observed }),
-        hostExtensions: [sqlSandboxExtension({ main: adapter })],
-      }),
-    });
-    const sandbox = { ...base, drainFileEvents: () => observed.drain() };
-    const engine = new ContextEngine({
-      store: new InMemoryContextStore(),
-      chatId: `formatting-${randomUUID()}`,
-      userId: 'eval',
-    });
     const text2sql = new Text2Sql({
       version: randomUUID(),
-      sandbox,
       adapters: { main: adapter },
       model: groq('gpt-oss-20b'),
-      context: engine,
     });
 
     const result = await text2sql.toSql(question, 'main');

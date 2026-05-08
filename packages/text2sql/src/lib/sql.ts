@@ -1,19 +1,5 @@
-import {
-  type StreamTextTransform,
-  type ToolSet,
-  createUIMessageStream,
-} from 'ai';
-
 import { type AgentModel } from '@deepagents/agent';
-import {
-  type AgentSandbox,
-  ContextEngine,
-  type ContextFragment,
-  agent,
-  chat,
-  errorRecoveryGuardrail,
-  fragment,
-} from '@deepagents/context';
+import { type ContextFragment, fragment } from '@deepagents/context';
 
 import { validateAdapterNames } from './adapter-name.ts';
 import {
@@ -24,7 +10,6 @@ import {
 import { createGroundingContext } from './adapters/groundings/context.ts';
 import { toSql } from './agents/sql.agent.ts';
 import { JsonCache } from './file-cache.ts';
-import { guidelines } from './instructions.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
 export const TEXT2SQL_INDEX_PROGRESS_CHUNK = 'data-text2sql-index-progress';
@@ -72,32 +57,22 @@ function timestampProgressHandler(
 
 export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
-  sandbox: AgentSandbox;
-  /**
-   * Context engine driving the conversation. Text2Sql appends its
-   * guidelines and index fragments to this engine before each chat turn.
-   * The same engine instance must be used for `continue()` calls upstream.
-   */
-  context: ContextEngine;
   version: string;
-  tools?: ToolSet;
   model: AgentModel;
-  transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+}
+
+export interface Text2SqlIndexOptions {
+  onProgress?: (event: Text2SqlIndexProgressEvent) => void;
 }
 
 /**
- * Text2Sql — the caller owns the sandbox. Build one by passing
- * `hostExtensions: [sqlSandboxExtension({ main: adapter }), ...yourOwnExtensions]`
- * to `createRoutingSandbox`, layered over whichever backend you want
- * (virtual, Docker, Agent OS), then wrap with `createBashTool`. For file
- * event tracking, wrap the fs in `ObservedFs` before passing to the
- * backend and attach `drainFileEvents: () => observed.drain()` to the
- * resulting sandbox.
+ * Schema indexer + stateless `toSql` for one or more configured adapters.
+ * Build the streaming chat agent yourself with `agent` + `chat` from
+ * `@deepagents/context`, passing `instructions()` and `index()` fragments
+ * into the engine.
  */
 export class Text2Sql {
-  #config: Omit<Text2SqlConfig, 'tools'> & {
-    tools: ToolSet;
-  };
+  #config: Text2SqlConfig;
   #introspection: Map<string, JsonCache<ContextFragment[]>>;
 
   constructor(config: Text2SqlConfig) {
@@ -106,10 +81,7 @@ export class Text2Sql {
       throw new Error('Text2Sql requires at least one adapter');
     }
     validateAdapterNames(adapterNames);
-    this.#config = {
-      ...config,
-      tools: config.tools ?? {},
-    };
+    this.#config = config;
     this.#introspection = new Map(
       Object.keys(config.adapters).map((name) => [
         name,
@@ -141,14 +113,10 @@ export class Text2Sql {
     return result.sql;
   }
 
-  public async index(): Promise<ContextFragment[]> {
-    return this.#index();
-  }
-
-  async #index(
-    onProgress?: Text2SqlIndexProgressHandler,
+  public async index(
+    options?: Text2SqlIndexOptions,
   ): Promise<ContextFragment[]> {
-    const progress = timestampProgressHandler(onProgress);
+    const progress = timestampProgressHandler(options?.onProgress);
     const entries = Object.entries(this.#config.adapters);
     progress({
       type: 'index:start',
@@ -276,50 +244,5 @@ export class Text2Sql {
     const adapter = this.#requireAdapter(adapterName);
     const producer = factory(adapter);
     return producer.toPairs();
-  }
-
-  public async chat(options?: {
-    abortSignal?: AbortSignal;
-    generateTitle?: boolean;
-  }) {
-    return createUIMessageStream({
-      execute: async ({ writer }) => {
-        const context = this.#config.context;
-        const head = await context.headMessage();
-        if (!head || head.name !== 'assistant') {
-          throw new Error(
-            'text2sql.chat: expected head to be an assistant message — call context.continue() before chat()',
-          );
-        }
-        writer.write({ type: 'start', messageId: head.id });
-
-        const progress = (event: Text2SqlIndexProgressEvent) => {
-          writer.write({
-            type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
-            data: event,
-          });
-        };
-
-        context.set(...guidelines(), ...(await this.#index(progress)));
-
-        const chatAgent = agent({
-          name: 'text2sql',
-          sandbox: this.#config.sandbox,
-          model: this.#config.model,
-          context,
-          tools: this.#config.tools,
-          guardrails: [errorRecoveryGuardrail],
-          maxGuardrailRetries: 3,
-        });
-
-        const chatStream = await chat(chatAgent, {
-          abortSignal: options?.abortSignal,
-          generateTitle: options?.generateTitle,
-          transform: this.#config.transform,
-        });
-
-        writer.merge(chatStream);
-      },
-    });
   }
 }

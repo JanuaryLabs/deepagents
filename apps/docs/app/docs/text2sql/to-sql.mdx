@@ -38,8 +38,8 @@ When you call `toSql()`:
 
 ## Validation Example
 
-If you plan to execute the returned SQL outside `chat()`, validate it again in
-your own execution pipeline:
+If you plan to execute the returned SQL outside the chat agent loop, validate
+it again in your own execution pipeline:
 
 ```typescript
 const sql = await text2sql.toSql('Show me sales data', 'main');
@@ -88,10 +88,15 @@ const sql = await text2sql.toSql('Show revenue by customer', 'main');
 console.log(sql);
 ```
 
-## When to Use toSql() vs chat()
+## When to Use toSql() vs a Chat Agent
 
-| Feature | `toSql()` | `chat()` |
-| ------- | --------- | -------- |
+`toSql()` is a method on `Text2Sql`. The streaming chat agent is built by the
+caller using `agent` + `chat` from `@deepagents/context` plus `instructions()`
+and `text2sql.index()` — see
+[Build Conversations](/docs/text2sql/build-conversations).
+
+| Feature | `toSql()` | Chat agent (`chat(ai)`) |
+| ------- | --------- | ----------------------- |
 | Returns | SQL string | Streamed user-facing answer |
 | Execution | No execution | Executes via `sql validate <db> "..."` and `sql run <db> "..."` |
 | Persistent context | Schema cache only | Full conversation thread from your context store |
@@ -106,7 +111,7 @@ console.log(sql);
 - Integrate with an existing query runner
 - Build non-interactive workflows
 
-### Use chat() when you need to:
+### Use a chat agent when you need to:
 
 - Build interactive query interfaces
 - Maintain conversation context across multiple queries
@@ -155,7 +160,5 @@ const text2sql = new Text2Sql({
   version: 'v2', // Bump this when schema changes
   adapters: { main: adapter },
   model,
-  sandbox,
-  context: engine,
 });
 ```

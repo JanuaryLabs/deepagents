@@ -42,8 +42,6 @@ const pool = await sql.connect({
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: {
     main: new SqlServer({
       execute: async (query) => {
@@ -78,8 +76,6 @@ const connection = new Connection(config);
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: {
     main: new SqlServer({
       execute: (sql) => new Promise((resolve, reject) => {

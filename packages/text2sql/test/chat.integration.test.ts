@@ -6,11 +6,14 @@ import { describe, it } from 'node:test';
 import {
   ContextEngine,
   InMemoryContextStore,
+  agent,
+  chat,
   createBashTool,
+  errorRecoveryGuardrail,
   reminder,
   user,
 } from '@deepagents/context';
-import { Text2Sql } from '@deepagents/text2sql';
+import { Text2Sql, instructions } from '@deepagents/text2sql';
 
 import { init_db } from '../src/tests/sqlite.ts';
 
@@ -73,23 +76,30 @@ async function setup(mockText?: string) {
 
   const text2sql = new Text2Sql({
     version: 'test',
-    sandbox,
     adapters: { main: adapter },
     model,
-    transform: () => new TransformStream(),
-    context: engine,
   });
 
-  return { store, text2sql, engine };
+  return { store, text2sql, engine, model };
 }
 
-describe('Text2Sql.chat()', () => {
+describe('Text2Sql user-constructed chat', () => {
   it('saves user message to context store', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
     const msg = userMessage('How many users are there?');
 
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
+
     await engine.continue(msg);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -105,13 +115,23 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('saves assistant response to context store after stream is consumed', async () => {
-    const { store, text2sql, engine } = await setup(
+    const { store, text2sql, engine, model } = await setup(
       'SELECT count(*) FROM users',
     );
     const msg = userMessage('How many users?');
 
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
+
     await engine.continue(msg);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -129,11 +149,21 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('does not create extra branches during streaming (branch: false)', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
     const msg = userMessage('List all users');
 
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
+
     await engine.continue(msg);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
     const branches = await store.listBranches('test-chat');
@@ -146,29 +176,49 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('tracks token usage in chat metadata', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
     const msg = userMessage('Count users');
 
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
+
     await engine.continue(msg);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
-    const chat = await store.getChat('test-chat');
-    assert.ok(chat, 'chat should exist');
-    assert.ok(chat.metadata?.usage, 'chat metadata should have usage');
+    const persistedChat = await store.getChat('test-chat');
+    assert.ok(persistedChat, 'chat should exist');
+    assert.ok(persistedChat.metadata?.usage, 'chat metadata should have usage');
 
-    const usage = chat.metadata.usage as Record<string, number>;
+    const usage = persistedChat.metadata.usage as Record<string, number>;
     assert.ok(usage.inputTokens > 0, 'inputTokens should be > 0');
     assert.ok(usage.outputTokens > 0, 'outputTokens should be > 0');
     assert.ok(usage.totalTokens > 0, 'totalTokens should be > 0');
   });
 
   it('updates assistant message in place for tool result scenario', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
+
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
 
     const msg = userMessage('How many users?');
     await engine.continue(msg);
-    const stream1 = await text2sql.chat();
+    const stream1 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -189,7 +239,7 @@ describe('Text2Sql.chat()', () => {
     };
 
     await engine.continue(updatedAssistantMsg);
-    const stream2 = await text2sql.chat();
+    const stream2 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -211,11 +261,21 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('grows chain correctly across multiple normal user turns', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
+
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
 
     const msg1 = userMessage('How many users?');
     await engine.continue(msg1);
-    const stream1 = await text2sql.chat();
+    const stream1 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -225,7 +285,7 @@ describe('Text2Sql.chat()', () => {
 
     const msg2 = userMessage('Show me the first 10');
     await engine.continue(msg2);
-    const stream2 = await text2sql.chat();
+    const stream2 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -246,7 +306,17 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('does not branch when assistant message ID is not in store', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
+
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
 
     const msg = userMessage('Hello');
     await engine.continue(msg);
@@ -257,7 +327,7 @@ describe('Text2Sql.chat()', () => {
     };
 
     await engine.continue(freshAssistant);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
     const branches = await store.listBranches('test-chat');
@@ -269,11 +339,21 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('handles multiple consecutive tool-result rounds correctly', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
+
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
 
     const msg1 = userMessage('Analyze users');
     await engine.continue(msg1);
-    const stream1 = await text2sql.chat();
+    const stream1 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -288,7 +368,7 @@ describe('Text2Sql.chat()', () => {
       parts: [{ type: 'text' as const, text: 'After first tool result' }],
     };
     await engine.continue(toolResult1);
-    const stream2 = await text2sql.chat();
+    const stream2 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -309,7 +389,7 @@ describe('Text2Sql.chat()', () => {
       parts: [{ type: 'text' as const, text: 'After second tool result' }],
     };
     await engine.continue(toolResult2);
-    const stream3 = await text2sql.chat();
+    const stream3 = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream3);
 
     const branch3 = await store.getActiveBranch('test-chat');
@@ -330,11 +410,21 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('omits fileEvents metadata when no file ops occurred', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
     const msg = userMessage('Show users');
 
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
+
     await engine.continue(msg);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -389,18 +479,26 @@ describe('Text2Sql.chat()', () => {
     });
     const text2sql = new Text2Sql({
       version: 'test',
-      sandbox,
       adapters: { main: adapter },
       model,
-      transform: () => new TransformStream(),
+    });
+
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
       context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
     });
 
     const controller = new AbortController();
     const msg = userMessage('How many users?');
     await engine.continue(msg);
-    const stream = await text2sql.chat({
+    const stream = await chat(ai, {
       abortSignal: controller.signal,
+      transform: () => new TransformStream(),
     });
     await drain(stream);
 
@@ -413,14 +511,24 @@ describe('Text2Sql.chat()', () => {
   });
 
   it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
-    const { store, text2sql, engine } = await setup();
+    const { store, text2sql, engine, model } = await setup();
     const fragment = user(
       'How many users are there?',
       reminder('Always explain your SQL before writing it'),
     );
 
+    engine.set(...instructions(), ...(await text2sql.index()));
+    const ai = agent({
+      name: 'text2sql',
+      sandbox,
+      model,
+      context: engine,
+      guardrails: [errorRecoveryGuardrail],
+      maxGuardrailRetries: 3,
+    });
+
     await engine.continue(fragment);
-    const stream = await text2sql.chat();
+    const stream = await chat(ai, { transform: () => new TransformStream() });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');

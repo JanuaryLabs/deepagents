@@ -13,7 +13,7 @@ import {
   workflow,
 } from '@deepagents/context';
 
-export function guidelines(): ContextFragment[] {
+export function instructions(): ContextFragment[] {
   const baseTeachings: ContextFragment[] = [
     // Include the meta-cognitive reasoning framework
     ...reasoningFramework(),

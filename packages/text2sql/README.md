@@ -41,7 +41,6 @@ import {
   createBashTool,
   createRoutingSandbox,
   createVirtualSandbox,
-  user,
 } from '@deepagents/context';
 import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
 import {
@@ -59,12 +58,6 @@ const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-const store = new InMemoryContextStore();
-const engine = new ContextEngine({
-  store,
-  chatId: 'chat-123',
-  userId: 'user-456',
-});
 const adapter = new Postgres({
   execute: async (sql) => {
     const result = await pool.query(sql);
@@ -80,19 +73,11 @@ const adapter = new Postgres({
     columnValues(),
   ],
 });
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
 
 const text2sql = new Text2Sql({
   version: 'v1',
   model: groq('openai/gpt-oss-20b'),
-  sandbox,
   adapters: { main: adapter },
-  context: engine,
 });
 
 // Generate SQL
@@ -116,21 +101,84 @@ maps dynamically, use `isValidAdapterName(name)` to check one key or
 
 Text2SQL works with any model provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/docs), including OpenAI, Anthropic, Google, Groq, and more.
 
+## Building a Conversational Agent
+
+`Text2Sql` ships only the SQL-aware primitives — `toSql`, `index`, `toPairs`,
+and `instructions()`. You build the chat agent yourself by composing a
+`ContextEngine`, a sandbox, and `agent` + `chat` from `@deepagents/context`:
+
+```typescript
+import { InMemoryFs } from 'just-bash';
+
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  chat,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+  errorRecoveryGuardrail,
+  user,
+} from '@deepagents/context';
+import {
+  Text2Sql,
+  instructions,
+  sqlSandboxExtension,
+} from '@deepagents/text2sql';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
+  }),
+});
+
+context.set(...instructions(), ...(await text2sql.index()));
+
+const ai = agent({
+  name: 'sql-assistant',
+  sandbox,
+  model: groq('openai/gpt-oss-20b'),
+  context,
+  guardrails: [errorRecoveryGuardrail],
+  maxGuardrailRetries: 3,
+});
+
+await context.continue(user('Show me the top 10 customers by revenue'));
+const stream = await chat(ai);
+
+for await (const chunk of stream) {
+  // handle streaming response
+}
+```
+
+`instructions()` returns the SQL-flavored system fragments (policies, workflows,
+clarifications, style guides) — spread them into `context.set()` alongside the
+schema fragments returned by `text2sql.index()`. Add or replace them with your
+own domain fragments as needed.
+
 ## Advanced: Composing Sandbox Extensions
 
-`Text2Sql` takes a caller-owned `sandbox`. `sqlSandboxExtension(adaptersMap)`
-returns a `SandboxExtension` that bundles the `sql` subcommand, transform
-plugins, and arg-repair hook. In the simplest case, that map is
-`{ main: adapter }`. Compose it (alongside any of your own extensions) via
-`createBashTool` + `createRoutingSandbox` + `createVirtualSandbox`.
+`sqlSandboxExtension(adaptersMap)` returns a `SandboxExtension` that bundles the
+`sql` subcommand, transform plugins, and arg-repair hook. In the simplest case,
+that map is `{ main: adapter }`. Compose it (alongside any of your own
+extensions) via `createBashTool` + `createRoutingSandbox` + `createVirtualSandbox`.
 See [Caller-Owned Sandbox](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
 for composition patterns.
 
 ## Fragments
 
-Inject domain knowledge by setting fragments on the `ContextEngine` you pass to
-`Text2Sql`. Those fragments affect `chat()` sessions. If you need direct SQL
-generation with extra fragments, use the lower-level `toSql({ fragments })`
+Inject domain knowledge by setting fragments on the `ContextEngine` you build
+for the agent. Those fragments affect every `chat()` turn. If you need direct
+SQL generation with extra fragments, use the lower-level `toSql({ fragments })`
 helper exported from `@deepagents/text2sql`.
 
 ```typescript
@@ -144,13 +192,13 @@ import {
 } from '@deepagents/context';
 
 const store = new InMemoryContextStore();
-const engine = new ContextEngine({
+const context = new ContextEngine({
   store,
   chatId: 'chat-123',
   userId: 'user-456',
 });
 
-engine.set(
+context.set(
   term('MRR', 'monthly recurring revenue'),
   hint('Always exclude test accounts with email ending in @test.com'),
   guardrail({
@@ -188,62 +236,67 @@ Control what schema metadata the AI receives:
 
 ## Conversations
 
-`chat()` persists history through the `ContextEngine` you pass to `Text2Sql`.
-Reuse the same store, `chatId`, and `userId` to continue the same thread.
-Before each turn, append only the new incoming message to the engine; do not
-replay earlier turns that are already stored in the context store:
+`chat()` (from `@deepagents/context`) persists history through the
+`ContextEngine` you build for the agent. Reuse the same store, `chatId`, and
+`userId` to continue the same thread. Before each turn, append only the new
+incoming message to the engine; do not replay earlier turns that are already
+stored in the context store:
 
 ```typescript
-await engine.continue(user('Show me orders from last month'));
-const stream = await text2sql.chat();
+await context.continue(user('Show me orders from last month'));
+const stream = await chat(ai);
 
 for await (const chunk of stream) {
   // handle streaming response
 }
 
 // Continue the same conversation
-await engine.continue(user('Now filter to only completed ones'));
-const followUp = await text2sql.chat();
+await context.continue(user('Now filter to only completed ones'));
+const followUp = await chat(ai);
 for await (const chunk of followUp) {
   // handle streaming response
 }
 ```
 
-While `chat()` builds or reads cached schema context, it emits progress chunks
-before assistant text starts:
+## Streaming Index Progress
+
+`text2sql.index({ onProgress })` emits progress events while it warms or reads
+the schema cache. To interleave those events with the chat stream so a UI can
+render indexing status before assistant text starts, wrap the loop in your own
+`createUIMessageStream`:
 
 ```typescript
+import { createUIMessageStream } from 'ai';
+
 import {
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
 
-await engine.continue(user('Show me top 10 customers'));
-const stream = await text2sql.chat();
-const startedAt = new Map<string, number>();
+await context.continue(user('Show me top 10 customers'));
 
-for await (const chunk of stream) {
-  if (chunk.type === TEXT2SQL_INDEX_PROGRESS_CHUNK) {
-    const event = chunk.data as Text2SqlIndexProgressEvent;
-    const scope =
-      [event.adapter, event.phase].filter(Boolean).join(':') || 'index';
-
-    if (event.type.endsWith(':start') || event.type === 'index:start') {
-      startedAt.set(scope, event.timestampMs ?? Date.now());
+const stream = createUIMessageStream({
+  execute: async ({ writer }) => {
+    const head = await context.headMessage();
+    if (!head || head.name !== 'assistant') {
+      throw new Error(
+        'expected head to be an assistant message — call context.continue() before chat()',
+      );
     }
+    writer.write({ type: 'start', messageId: head.id });
 
-    if (event.type.endsWith(':end') || event.type.endsWith(':error')) {
-      const durationMs =
-        (event.timestampMs ?? Date.now()) -
-        (startedAt.get(scope) ?? event.timestampMs ?? Date.now());
-      console.log(event.message, durationMs);
-    }
+    const fragments = await text2sql.index({
+      onProgress: (event) =>
+        writer.write({
+          type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
+          data: event,
+        }),
+    });
 
-    continue;
-  }
-
-  // handle assistant stream chunks
-}
+    context.set(...instructions(), ...fragments);
+    writer.merge(await chat(ai));
+  },
+});
 ```
 
 Each progress event includes a generic Unix epoch `timestampMs` so clients can

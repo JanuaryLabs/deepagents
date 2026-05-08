@@ -2,34 +2,20 @@ import { generateId } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  createBashTool,
-  getFragmentData,
-} from '@deepagents/context';
+import { getFragmentData } from '@deepagents/context';
 import { Text2Sql } from '@deepagents/text2sql';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../src/tests/sqlite.ts';
 
-const sandbox = await createBashTool();
-
 function makeText2Sql(
   version: string,
   adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
 ) {
-  const engine = new ContextEngine({
-    store: new InMemoryContextStore(),
-    chatId: `cache-test-${generateId()}`,
-    userId: 'test',
-  });
   return new Text2Sql({
     version,
-    sandbox,
     adapters,
     model: {} as never,
-    context: engine,
   });
 }
 

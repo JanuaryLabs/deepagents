@@ -2,6 +2,7 @@ import { Chat } from '@ai-sdk/react';
 import {
   type ChatTransport,
   type UIMessage,
+  createUIMessageStream,
   generateId,
   simulateReadableStream,
 } from 'ai';
@@ -13,9 +14,16 @@ import { describe, it } from 'node:test';
 import {
   ContextEngine,
   InMemoryContextStore,
+  agent,
+  chat,
   createBashTool,
+  errorRecoveryGuardrail,
 } from '@deepagents/context';
-import { TEXT2SQL_INDEX_PROGRESS_CHUNK, Text2Sql } from '@deepagents/text2sql';
+import {
+  TEXT2SQL_INDEX_PROGRESS_CHUNK,
+  Text2Sql,
+  instructions,
+} from '@deepagents/text2sql';
 import {
   Sqlite,
   type SqliteAdapterOptions,
@@ -94,37 +102,57 @@ function createAdapter(
   return { adapter, db };
 }
 
-function createText2Sql(adapter: Sqlite) {
-  const store = new InMemoryContextStore();
-  const engine = new ContextEngine({
-    store,
-    chatId: `allocation-chat-${generateId()}`,
-    userId: 'test-user',
-  });
-
-  const text2sql = new Text2Sql({
-    version: `allocation-${generateId()}`,
-    sandbox,
-    adapters: { main: adapter },
-    model: createMockModel(),
-    transform: () => new TransformStream(),
-    context: engine,
-  });
-
-  return { text2sql, engine };
-}
-
-describe('Text2Sql.chat client message allocation', () => {
+describe('Text2Sql client message allocation', () => {
   it('produces exactly ONE assistant message when index progress streams before model output', async () => {
     const { adapter, db } = createAdapter();
     try {
-      const { text2sql, engine } = createText2Sql(adapter);
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: `allocation-chat-${generateId()}`,
+        userId: 'test-user',
+      });
+      const model = createMockModel();
+      const text2sql = new Text2Sql({
+        version: `allocation-${generateId()}`,
+        adapters: { main: adapter },
+        model,
+      });
 
       const transport: ChatTransport<UIMessage> = {
         sendMessages: async ({ messages }) => {
           const last = messages[messages.length - 1] as UIMessage;
           await engine.continue(last);
-          return text2sql.chat();
+          return createUIMessageStream({
+            execute: async ({ writer }) => {
+              const head = await engine.headMessage();
+              if (!head || head.name !== 'assistant') {
+                throw new Error(
+                  'expected head to be an assistant message — call engine.continue() before chat()',
+                );
+              }
+              writer.write({ type: 'start', messageId: head.id });
+              const fragments = await text2sql.index({
+                onProgress: (event) =>
+                  writer.write({
+                    type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
+                    data: event,
+                  }),
+              });
+              engine.set(...instructions(), ...fragments);
+              const ai = agent({
+                name: 'text2sql',
+                sandbox,
+                model,
+                context: engine,
+                guardrails: [errorRecoveryGuardrail],
+                maxGuardrailRetries: 3,
+              });
+              writer.merge(
+                await chat(ai, { transform: () => new TransformStream() }),
+              );
+            },
+          });
         },
         reconnectToStream: async () => null,
       };
@@ -136,16 +164,18 @@ describe('Text2Sql.chat client message allocation', () => {
         rejectFinished = reject;
       });
 
-      const chat = new Chat<UIMessage>({
+      const chatClient = new Chat<UIMessage>({
         transport,
         onFinish: () => resolveFinished(),
         onError: (e) => rejectFinished(e),
       });
 
-      await chat.sendMessage({ text: 'How many users?' });
+      await chatClient.sendMessage({ text: 'How many users?' });
       await finished;
 
-      const assistants = chat.messages.filter((m) => m.role === 'assistant');
+      const assistants = chatClient.messages.filter(
+        (m) => m.role === 'assistant',
+      );
       assert.strictEqual(
         assistants.length,
         1,

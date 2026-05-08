@@ -62,14 +62,13 @@ engine.set(
 const text2sql = new Text2Sql({
   version: 'v1',
   model: groq('openai/gpt-oss-20b'),
-  sandbox,
   adapters: { main: adapter },
-  context: engine,
 });
 ```
 
-Those fragments are available to `chat()` because Text2SQL resolves the same
-engine whenever it prepares a chat turn.
+Use that engine when building the chat agent
+(`const ai = agent({ context: engine, ... })`) and call `chat(ai)` from
+`@deepagents/context` to make those fragments available on every turn.
 
 ## Teach Direct SQL Generation with `toSql()`
 

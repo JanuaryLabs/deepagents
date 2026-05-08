@@ -55,9 +55,7 @@ const sandbox = await createBashTool({
 const text2sql = new Text2Sql({
   version: 'v3-demo',
   adapters: { main: adapter },
-  sandbox,
   model,
-  context: engine,
 });
 ```
 

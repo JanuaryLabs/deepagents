@@ -24,43 +24,21 @@ manually, see [Caller-Owned Sandbox](/docs/text2sql/sqlv3).
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
-} from '@deepagents/context';
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 const db = new DatabaseSync('./chinook.db', { readOnly: true });
-const store = new InMemoryContextStore();
-const engine = new ContextEngine({
-  store,
-  chatId: 'chinook-demo',
-  userId: 'demo-user',
-});
 const adapter = new Sqlite({
   execute: (sql) => db.prepare(sql).all(),
   grounding: [sqlite.tables(), sqlite.info()],
-});
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
 });
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model: groq('openai/gpt-oss-20b'),
-  sandbox,
   adapters: { main: adapter },
-  context: engine,
 });
 
 // Generate SQL from natural language
@@ -86,9 +64,12 @@ or `validateAdapterNames(names)`.
 | Method                    | Description                                            |
 | ------------------------- | ------------------------------------------------------ |
 | `toSql(input, adapterName)` | Generate SQL without executing (routed to one adapter) |
-| `chat(options?)` | Run a persisted turn after `engine.continue(input)` and stream the answer |
-| `index()` | Introspect all configured adapters (cached per adapter) |
+| `index(options?)` | Introspect all configured adapters (cached per adapter); accepts `{ onProgress }` to stream events |
 | `toPairs(adapterName, factory)` | Generate training pairs from one configured adapter |
+
+To run a streaming, multi-turn agent on top of `Text2Sql`, build the chat
+loop yourself with `agent` + `chat` from `@deepagents/context`. See
+[Build Conversations](/docs/text2sql/build-conversations).
 
 ## When to Use Text2SQL
 

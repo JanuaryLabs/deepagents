@@ -73,49 +73,27 @@ const assistant = agent({
 await execute(assistant, 'Hello!', {});`,
 
   text2sql: `import { groq } from '@ai-sdk/groq';
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
-} from '@deepagents/context';
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
-import { InMemoryFs } from 'just-bash';
 
-const model = groq('gpt-oss-20b');
-const execute = async (sql: string) => {
-  /* run \`sql\` against your pg pool */
-  return [];
-};
-
-const adapter = new Postgres({ execute, grounding: [] });
-const store = new InMemoryContextStore();
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
+const adapter = new Postgres({
+  execute: async (sql) => {
+    /* run \`sql\` against your pg pool */
+    return [];
+  },
+  grounding: [],
 });
 
 const text2sql = new Text2Sql({
   version: 'v1',
   adapters: { main: adapter },
-  sandbox,
-  model,
-  context: (...fragments) => {
-    const engine = new ContextEngine({
-      store,
-      chatId: 'chat-1',
-      userId: 'user-1',
-    });
-    engine.set(...fragments);
-    return engine;
-  },
+  model: groq('gpt-oss-20b'),
 });
 
-await text2sql.toSql('Show all customers', 'main');`,
+await text2sql.toSql('Show all customers', 'main');
+
+// For multi-turn streaming chat, build the agent yourself with
+// agent + chat from @deepagents/context — see /docs/text2sql.`,
 
   context: `import { ContextEngine, role, user, XmlRenderer } from '@deepagents/context';
 import { SqliteContextStore } from '@deepagents/context';

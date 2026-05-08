@@ -11,9 +11,12 @@ import {
   type ContextStore,
   InMemoryContextStore,
   ObservedFs,
+  agent,
+  chat,
   createBashTool,
   createRoutingSandbox,
   createVirtualSandbox,
+  errorRecoveryGuardrail,
   fragment,
   persona,
   structuredOutput,
@@ -21,6 +24,7 @@ import {
 } from '@deepagents/context';
 
 import type { Adapter } from '../../lib/adapters/adapter.ts';
+import { instructions } from '../../lib/instructions.ts';
 import { sqlSandboxExtension } from '../../lib/sandbox.ts';
 import { Text2Sql } from '../../lib/sql.ts';
 
@@ -160,20 +164,8 @@ function createUserMessage(question: string): UIMessage & { role: 'user' } {
   };
 }
 
-/**
- * Drain the UI message stream to completion.
- *
- * The stream is an SSE-formatted ReadableStream. We don't need to parse it -
- * the Text2Sql.chat onFinish callback saves messages to history automatically.
- * We just need to consume the stream to allow completion.
- */
-async function drainStream(
-  streamPromise: ReturnType<typeof Text2Sql.prototype.chat>,
-): Promise<void> {
-  const stream = await streamPromise;
+async function drainStream(stream: ReadableStream): Promise<void> {
   const reader = stream.getReader();
-
-  // Drain the stream - messages are saved to history via onFinish callback
   while (true) {
     const { done } = await reader.read();
     if (done) break;
@@ -214,10 +206,17 @@ export async function simulateConversation(
   const engine = new ContextEngine({ store, chatId, userId });
   const text2sql = new Text2Sql({
     version: `eval-simulator-${randomUUID()}`,
-    sandbox,
     model,
     adapters: { main: config.adapter },
+  });
+
+  const ai = agent({
+    name: 'text2sql',
+    sandbox,
+    model,
     context: engine,
+    guardrails: [errorRecoveryGuardrail],
+    maxGuardrailRetries: 3,
   });
 
   const questions: string[] = [];
@@ -228,8 +227,9 @@ export async function simulateConversation(
 
     const userMessage = createUserMessage(currentQuestion);
 
+    engine.set(...instructions(), ...(await text2sql.index()));
     await engine.continue(user(userMessage));
-    const stream = text2sql.chat();
+    const stream = await chat(ai);
     await drainStream(stream);
 
     // Generate follow-up for next turn (if not last)

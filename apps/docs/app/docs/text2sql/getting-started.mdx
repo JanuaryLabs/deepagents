@@ -25,60 +25,36 @@ SQLite uses the built-in `node:sqlite` module and requires no additional driver.
 
 ## Basic Setup
 
-Text2SQL requires six components:
+Text2SQL requires four components:
 
 1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, or BigQuery)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Model** - Any AI SDK model compatible with `@deepagents/agent`
-4. **Sandbox** - A caller-owned `AgentSandbox` used for SQL command execution in `chat()`
-5. **Context Engine** - A `ContextEngine` with your chosen store, `chatId`, and `userId`
-6. **Version** - A string used to manage cache invalidation (bump when schema changes)
+4. **Version** - A string used to manage cache invalidation (bump when schema changes)
 
-Start by creating the shared model, filesystem, and context engine:
+Start by creating the shared model:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
-  user,
-} from '@deepagents/context';
-
-const store = new InMemoryContextStore();
 const model = groq('openai/gpt-oss-20b');
-const filesystem = new InMemoryFs();
-const engine = new ContextEngine({
-  store,
-  chatId: 'chat-123',
-  userId: 'user-456',
-});
 ```
 
-Reuse `model`, `filesystem`, and `engine` in the adapter-specific examples below.
-Each example then creates `sandbox` by composing `createBashTool`, `createRoutingSandbox`, and `createVirtualSandbox({ fs: filesystem })` with `hostExtensions: [sqlSandboxExtension({ main: adapter })]`.
-The adapter-map key (`main` in these examples) becomes the required second
-argument to `text2sql.toSql(..., 'main')` and the `<db>` selector in
+Reuse `model` in the adapter-specific examples below. The adapter-map key
+(`main` in these examples) becomes the required second argument to
+`text2sql.toSql(..., 'main')` and the `<db>` selector in
 `sql validate <db> "..."` / `sql run <db> "..."`.
 
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you construct the
 adapter map dynamically, validate the keys first with
 `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
-The `engine` also fixes the conversation identity for `chat()`. Reuse the same
-`store`, `chatId`, and `userId` when you want follow-up turns to stay in the
-same thread. Create a new engine when you want a separate thread.
-
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -88,19 +64,11 @@ const adapter = new Sqlite({
   execute: (sql) => db.prepare(sql).all(),
   grounding: [sqlite.tables(), sqlite.info()],
 });
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
 
 // Create the Text2SQL instance
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -109,7 +77,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import pg from 'pg';
 
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
@@ -123,18 +91,10 @@ const adapter = new Postgres({
   },
   grounding: [postgres.tables(), postgres.info()],
 });
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -143,7 +103,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import sql from 'mssql';
 
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -161,18 +121,10 @@ const adapter = new SqlServer({
   },
   grounding: [sqlserver.tables(), sqlserver.info()],
 });
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -181,7 +133,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -198,18 +150,10 @@ const adapter = new Mysql({
   },
   grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
 });
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -218,7 +162,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -241,18 +185,10 @@ const adapter = new BigQuery({
   },
   grounding: [bigquery.tables(), bigquery.info()],
 });
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: filesystem }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
 
 const text2sql = new Text2Sql({
   version: 'v1', // Bump this when your schema changes
   model,
-  sandbox,
-  context: engine,
   adapters: { main: adapter },
 });
 ```
@@ -282,36 +218,72 @@ console.log(sql);
 
 ### Chat with Streaming
 
-Use `chat()` for streaming responses. Conversation identity comes from the
-`ContextEngine` you created above:
+For streaming, build the chat agent yourself with primitives from
+`@deepagents/context` and feed it the Text2SQL index plus instructions:
 
 ```typescript
-await engine.continue(user('What are the most popular genres?'));
-const stream = await text2sql.chat();
+import { InMemoryFs } from 'just-bash';
+
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  chat,
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+  errorRecoveryGuardrail,
+  user,
+} from '@deepagents/context';
+import { instructions, sqlSandboxExtension } from '@deepagents/text2sql';
+
+const store = new InMemoryContextStore();
+const context = new ContextEngine({ store, chatId: 'chat-123', userId: 'user-456' });
+
+context.set(...instructions(), ...(await text2sql.index()));
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [sqlSandboxExtension({ main: adapter })],
+  }),
+});
+
+const ai = agent({
+  name: 'sql-assistant',
+  sandbox,
+  model,
+  context,
+  guardrails: [errorRecoveryGuardrail],
+  maxGuardrailRetries: 3,
+});
+
+await context.continue(user('What are the most popular genres?'));
+const stream = await chat(ai);
 
 for await (const chunk of stream) {
-  if (chunk.type === 'text-delta') {
-    process.stdout.write(chunk.textDelta);
-  }
+  // render
 }
 ```
 
 `toSql()` is stateless. It reads cached schema fragments, but it does not write
-messages, titles, or usage into your `ContextStore`. Use `chat()` when you want
-multi-turn persistence.
+messages, titles, or usage into your `ContextStore`. Use the `chat()` helper
+above when you want multi-turn persistence. See
+[Build Conversations](/docs/text2sql/build-conversations) for the full pattern.
 
 ## Understanding the Response
 
 When Text2SQL processes a query, it:
 
 1. **Runs grounding** - Introspects your database schema (tables, columns, relationships, indexes, constraints).
-2. **Builds SQL context** - `toSql()` uses cached schema fragments, while `chat()` also resolves the stored conversation thread from your context store.
+2. **Builds SQL context** - `toSql()` uses cached schema fragments. The `chat()` helper from `@deepagents/context` wired to your text2sql index + instructions also resolves the stored conversation thread from your context store.
 3. **Generates SQL** - The model maps the request to the available schema.
 4. **Validates** - The adapter validates the generated SQL before it is returned or executed.
-5. **Returns results** - `toSql()` returns the SQL string; `chat()` streams an end-user answer.
+5. **Returns results** - `toSql()` returns the SQL string; the `chat()` helper from `@deepagents/context` wired to your text2sql index + instructions streams an end-user answer.
 
-`chat()` also injects Text2SQL's built-in SQL workflow guidance and any extra
-fragments you add to your `ContextEngine`.
+The `chat()` helper from `@deepagents/context` wired to your text2sql index +
+instructions also injects Text2SQL's built-in SQL workflow guidance and any
+extra fragments you add to your `ContextEngine`.
 
 ## Environment Variables
 

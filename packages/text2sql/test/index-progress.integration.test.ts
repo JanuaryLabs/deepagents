@@ -1,4 +1,9 @@
-import { type UIMessage, generateId, simulateReadableStream } from 'ai';
+import {
+  type UIMessage,
+  createUIMessageStream,
+  generateId,
+  simulateReadableStream,
+} from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +13,10 @@ import {
   ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
+  agent,
+  chat,
   createBashTool,
+  errorRecoveryGuardrail,
 } from '@deepagents/context';
 import {
   Adapter,
@@ -16,6 +24,7 @@ import {
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   Text2Sql,
   type Text2SqlIndexProgressEvent,
+  instructions,
 } from '@deepagents/text2sql';
 import {
   AbstractGrounding,
@@ -173,24 +182,39 @@ function createAdapter(
   return { adapter, db };
 }
 
-function createText2Sql(adapter: Sqlite, version = `progress-${generateId()}`) {
-  const store = new InMemoryContextStore();
-  const engine = new ContextEngine({
-    store,
-    chatId: `progress-chat-${generateId()}`,
-    userId: 'test-user',
+function chatStream(args: {
+  engine: ContextEngine;
+  text2sql: Text2Sql;
+  model: any;
+}) {
+  return createUIMessageStream({
+    execute: async ({ writer }) => {
+      const head = await args.engine.headMessage();
+      if (!head || head.name !== 'assistant') {
+        throw new Error(
+          'expected head to be an assistant message — call engine.continue() before chat()',
+        );
+      }
+      writer.write({ type: 'start', messageId: head.id });
+      const fragments = await args.text2sql.index({
+        onProgress: (event) =>
+          writer.write({
+            type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
+            data: event,
+          }),
+      });
+      args.engine.set(...instructions(), ...fragments);
+      const ai = agent({
+        name: 'text2sql',
+        sandbox,
+        model: args.model,
+        context: args.engine,
+        guardrails: [errorRecoveryGuardrail],
+        maxGuardrailRetries: 3,
+      });
+      writer.merge(await chat(ai, { transform: () => new TransformStream() }));
+    },
   });
-
-  const text2sql = new Text2Sql({
-    version,
-    sandbox,
-    adapters: { main: adapter },
-    model: createMockModel(),
-    transform: () => new TransformStream(),
-    context: engine,
-  });
-
-  return { text2sql, engine };
 }
 
 async function collect(stream: ReadableStream): Promise<unknown[]> {
@@ -261,10 +285,21 @@ describe('Text2Sql index progress events', () => {
   it('emits index progress chunks before assistant stream chunks', async () => {
     const { adapter, db } = createAdapter();
     try {
-      const { text2sql, engine } = createText2Sql(adapter);
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: `progress-chat-${generateId()}`,
+        userId: 'test-user',
+      });
+      const model = createMockModel();
+      const text2sql = new Text2Sql({
+        version: `progress-${generateId()}`,
+        adapters: { main: adapter },
+        model,
+      });
 
       await engine.continue(userMessage('How many users?'));
-      const stream = await text2sql.chat();
+      const stream = chatStream({ engine, text2sql, model });
       const chunks = await collect(stream);
       const events = progressEvents(chunks);
 
@@ -336,14 +371,23 @@ describe('Text2Sql index progress events', () => {
         return originalIntrospect(...args);
       };
 
-      const { text2sql, engine } = createText2Sql(
-        adapter,
-        `cache-${generateId()}`,
-      );
+      const store = new InMemoryContextStore();
+      const engine = new ContextEngine({
+        store,
+        chatId: `progress-chat-${generateId()}`,
+        userId: 'test-user',
+      });
+      const model = createMockModel();
+      const text2sql = new Text2Sql({
+        version: `cache-${generateId()}`,
+        adapters: { main: adapter },
+        model,
+      });
+
       await engine.continue(userMessage('First question'));
-      const first = await collect(await text2sql.chat());
+      const first = await collect(chatStream({ engine, text2sql, model }));
       await engine.continue(userMessage('Second question'));
-      const second = await collect(await text2sql.chat());
+      const second = await collect(chatStream({ engine, text2sql, model }));
       const firstEvents = progressEvents(first);
       const secondEvents = progressEvents(second);
 
@@ -445,17 +489,17 @@ describe('Text2Sql index progress events', () => {
       chatId: 'progress-error-chat',
       userId: 'test-user',
     });
+    const model = createMockModel();
     const text2sql = new Text2Sql({
       version: `settled-error-${generateId()}`,
-      sandbox,
       adapters: { failing, slow },
-      model: createMockModel(),
-      transform: () => new TransformStream(),
-      context: engine,
+      model,
     });
 
     await engine.continue(userMessage('This should fail'));
-    const { chunks } = await collectUntilError(await text2sql.chat());
+    const { chunks } = await collectUntilError(
+      chatStream({ engine, text2sql, model }),
+    );
     const events = progressEvents(chunks);
     assertTimestamped(events);
     const slowFinishedIndex = events.findIndex(
