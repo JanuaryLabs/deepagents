@@ -1,4 +1,3 @@
-import type { FragmentData } from '../fragments.ts';
 import type {
   LoadContext,
   SyncFragmentLoader,
@@ -12,7 +11,8 @@ export class FunctionResolver implements ValueResolver {
     return typeof value === 'function';
   }
 
-  resolve(value: unknown, ctx: LoadContext): Promise<unknown> {
-    return Promise.resolve((value as SyncFragmentLoader)(ctx));
+  async resolve(value: unknown, ctx: LoadContext): Promise<unknown> {
+    const loader = value as SyncFragmentLoader;
+    return loader(ctx);
   }
 }

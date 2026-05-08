@@ -1,5 +1,4 @@
 import type { ContextEngine } from '../engine.ts';
-import type { FragmentData } from '../fragments.ts';
 import type { AgentSandbox } from '../sandbox/types.ts';
 
 export interface LoadContext {
@@ -8,11 +7,17 @@ export interface LoadContext {
   signal?: AbortSignal;
 }
 
-export type AsyncFragmentLoader = (ctx: LoadContext) => Promise<FragmentData>;
-export type SyncFragmentLoader = (ctx: LoadContext) => FragmentData;
+/**
+ * Loader functions return `unknown` (not `FragmentData`) because `FragmentData`'s
+ * inclusion of `Promise<unknown>`/`AsyncIterable<unknown>` makes TypeScript's
+ * recursive-promise inference blow up at the boundary. The walker re-feeds every
+ * loader result through `walkData`, so any nested lazy values still get materialized.
+ */
+export type AsyncFragmentLoader = (ctx: LoadContext) => Promise<unknown>;
+export type SyncFragmentLoader = (ctx: LoadContext) => unknown;
 export type GeneratorFragmentLoader = (
   ctx: LoadContext,
-) => AsyncIterable<FragmentData> | Iterable<FragmentData>;
+) => AsyncIterable<unknown> | Iterable<unknown>;
 
 export interface ValueResolver {
   readonly name: string;

@@ -203,7 +203,7 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      const result = await withTimeout('resolve empty chat', 10000, () =>
+      const result = await withTimeout('resolve empty chat', 10000, async () =>
         engine.resolve({
           renderer,
           sandbox: await createVirtualAgentSandbox(),
@@ -233,11 +233,14 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      const result = await withTimeout('resolve empty sqlite file', 10000, () =>
-        engine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
+      const result = await withTimeout(
+        'resolve empty sqlite file',
+        10000,
+        async () =>
+          engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          }),
       );
       assert.strictEqual(result.messages.length, 0);
     });
@@ -349,11 +352,14 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      const result = await withTimeout('resolve missing head', 10000, () =>
-        nextEngine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
+      const result = await withTimeout(
+        'resolve missing head',
+        10000,
+        async () =>
+          nextEngine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          }),
       );
       assert.strictEqual(result.messages.length, 0);
     });
@@ -389,11 +395,14 @@ describe('Sqlite ContextEngine Integration', () => {
       }, /cannot be its own parent/);
 
       // The original message should still be accessible
-      const result = await withTimeout('resolve after rejection', 10000, () =>
-        engine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        }),
+      const result = await withTimeout(
+        'resolve after rejection',
+        10000,
+        async () =>
+          engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          }),
       );
       assert.strictEqual(result.messages.length, 1);
     });
@@ -497,11 +506,14 @@ describe('Sqlite ContextEngine Integration', () => {
           await withTimeout('save final batch', 60000, () => engine.save());
         }
 
-        const result = await withTimeout('resolve large chain', 120000, () =>
-          engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          }),
+        const result = await withTimeout(
+          'resolve large chain',
+          120000,
+          async () =>
+            engine.resolve({
+              renderer,
+              sandbox: await createVirtualAgentSandbox(),
+            }),
         );
         assert.strictEqual(result.messages.length, totalMessages);
       });

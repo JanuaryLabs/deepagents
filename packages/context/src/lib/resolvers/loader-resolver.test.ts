@@ -6,6 +6,7 @@ import {
   AsyncResolver,
   ContextEngine,
   type ContextFragment,
+  type FragmentData,
   FragmentLoaderResolver,
   FunctionResolver,
   GeneratorResolver,
@@ -174,7 +175,7 @@ describe('FragmentLoaderResolver — cycle handling', () => {
   });
 
   it('terminates on a self-referential array cycle', async () => {
-    const arr: unknown[] = ['a'];
+    const arr: FragmentData[] = ['a'];
     arr.push(arr);
     const f = fragment('cyclic', arr);
     const walker = newWalker();

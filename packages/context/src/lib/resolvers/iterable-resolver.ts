@@ -40,14 +40,35 @@ export class IterableResolver implements ValueResolver {
   async resolve(value: unknown, _ctx: LoadContext): Promise<unknown> {
     const iterable = value as AsyncIterable<unknown> | Iterable<unknown>;
     const collected: unknown[] = [];
-    for await (const chunk of iterable) {
-      if (collected.length >= this.#maxItems) {
-        throw new Error(
-          `IterableResolver: iterable yielded more than ${this.#maxItems} items`,
-        );
+    if (isAsyncIterable(iterable)) {
+      for await (const chunk of iterable) {
+        pushLimited(collected, chunk, this.#maxItems, this.name);
       }
-      collected.push(chunk);
+    } else {
+      for (const chunk of iterable) {
+        pushLimited(collected, chunk, this.#maxItems, this.name);
+      }
     }
     return collected;
   }
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === 'object' && value !== null && Symbol.asyncIterator in value
+  );
+}
+
+function pushLimited(
+  collected: unknown[],
+  chunk: unknown,
+  maxItems: number,
+  resolverName: string,
+): void {
+  if (collected.length >= maxItems) {
+    throw new Error(
+      `${resolverName}: iterable yielded more than ${maxItems} items`,
+    );
+  }
+  collected.push(chunk);
 }
