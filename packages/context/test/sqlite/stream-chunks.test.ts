@@ -3,18 +3,23 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   type ListStreamIdsOptions,
+  PollingChangeSource,
+  type PollingTelemetryEvent,
   SqliteStreamStore,
+  type StreamChange,
+  type StreamChangeSource,
   type StreamChunkData,
   type StreamData,
   StreamManager,
-  type StreamPollingTelemetryEvent,
   type StreamStatus,
   StreamStore,
-  type WatchStreamOptions,
+  type StreamWatchTelemetryEvent,
+  type WatchPollingConfig,
   createAdaptivePollingState,
   nextAdaptivePollingDelay,
 } from '@deepagents/context';
@@ -160,42 +165,105 @@ class FlakyFlushStore extends StreamStore {
   }
 }
 
-const FAST_WATCH_POLLING: WatchStreamOptions = {
+class TestChangeSource implements StreamChangeSource {
+  cleanupCount = 0;
+  cleanupDelayMs = 0;
+  throwOnSubscribe = false;
+  throwAfterFirstYield = false;
+
+  async *subscribe(
+    _streamId: string,
+    signal: AbortSignal,
+  ): AsyncIterable<StreamChange> {
+    try {
+      if (this.throwOnSubscribe) {
+        throw new Error('subscribe failed');
+      }
+      yield { kind: 'tick' };
+      if (this.throwAfterFirstYield) {
+        throw new Error('mid-stream failure');
+      }
+      await new Promise<void>((_, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), {
+          once: true,
+        });
+      });
+    } finally {
+      if (this.cleanupDelayMs > 0) {
+        await new Promise((r) => globalThis.setTimeout(r, this.cleanupDelayMs));
+      }
+      this.cleanupCount++;
+    }
+  }
+}
+
+const FAST_WATCH_POLLING: WatchPollingConfig = {
   minMs: 20,
   maxMs: 20,
   multiplier: 2,
   jitterRatio: 0,
   statusCheckEvery: 1,
-  chunkPageSize: 128,
 };
 
-function makeWatchPolling(overrides?: WatchStreamOptions): WatchStreamOptions {
-  return {
-    ...FAST_WATCH_POLLING,
-    ...overrides,
-  };
+interface ManagerHelperOptions {
+  config?: Partial<WatchPollingConfig>;
+  chunkPageSize?: number;
+  onPoll?: (event: PollingTelemetryEvent) => void;
+  onWatchEvent?: (event: StreamWatchTelemetryEvent) => void;
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = globalThis.setTimeout(() => {
-      reject(new Error(message));
-    }, timeoutMs);
+const DEFAULT_WAIT_TIMEOUT_MS = (() => {
+  const raw = process.env.CONTEXT_TEST_TIMEOUT_MS;
+  if (raw == null) return 5_000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000;
+})();
 
-    promise.then(
-      (value) => {
-        globalThis.clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        globalThis.clearTimeout(timer);
-        reject(error);
-      },
-    );
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  {
+    timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
+    pollMs = 10,
+    label = 'condition',
+  }: {
+    timeoutMs?: number;
+    pollMs?: number;
+    label?: string;
+  } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await sleep(pollMs);
+  }
+  throw new Error(`waitFor(${label}) timed out after ${timeoutMs}ms`);
+}
+
+function waitForStatus(
+  store: StreamStore,
+  streamId: string,
+  target: StreamStatus,
+): Promise<void> {
+  return waitFor(
+    async () => (await store.getStreamStatus(streamId)) === target,
+    { label: `status="${target}" for ${streamId}` },
+  );
+}
+
+function makeManager(
+  store: StreamStore,
+  options?: ManagerHelperOptions,
+): StreamManager {
+  const changeSource = new PollingChangeSource({
+    reads: store,
+    config: options?.config ?? FAST_WATCH_POLLING,
+    onPoll: options?.onPoll,
+  });
+  return new StreamManager({
+    store,
+    changeSource,
+    chunkPageSize: options?.chunkPageSize,
+    onWatchEvent: options?.onWatchEvent,
   });
 }
 
@@ -333,7 +401,7 @@ describe('Stream Chunks', () => {
   describe('Regression guards', () => {
     it('should reject when aborted flush fails during persist', async () => {
       const store = new FlakyFlushStore();
-      const streams = new StreamManager({ store });
+      const streams = makeManager(store);
       const streamId = crypto.randomUUID();
       await streams.register(streamId);
 
@@ -348,25 +416,15 @@ describe('Stream Chunks', () => {
         },
       });
 
-      const persistPromise = streams.persist(source, streamId, {
-        cancelPolling: {
-          minMs: 5,
-          maxMs: 5,
-          multiplier: 1,
-          jitterRatio: 0,
-        },
-      });
-
-      globalThis.setTimeout(() => {
-        void streams.cancel(streamId);
-      }, 20);
+      const persistPromise = streams.persist(source, streamId);
+      await waitForStatus(store, streamId, 'running');
+      void streams.cancel(streamId);
 
       await assert.rejects(() => persistPromise, /flush failed once/);
     });
 
     it('should keep adaptive jitter delay within configured bounds', () => {
-      const originalRandom = Math.random;
-      Math.random = () => 1;
+      mock.method(Math, 'random', () => 1);
       try {
         const state = createAdaptivePollingState({
           minMs: 100,
@@ -374,7 +432,6 @@ describe('Stream Chunks', () => {
           multiplier: 2,
           jitterRatio: 0.5,
         });
-        // first call promotes polling interval to max
         nextAdaptivePollingDelay(state);
         const delay = nextAdaptivePollingDelay(state);
         assert.ok(
@@ -382,7 +439,7 @@ describe('Stream Chunks', () => {
           `delay should stay within max bound, got ${delay}`,
         );
       } finally {
-        Math.random = originalRandom;
+        mock.reset();
       }
     });
 
@@ -556,7 +613,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.register() idempotency', () => {
     it('should return created: true on first call', async () => {
       await withStreamStore(async (store) => {
-        const manager = new StreamManager({ store });
+        const manager = makeManager(store);
         const streamId = crypto.randomUUID();
         const result = await manager.register(streamId);
         assert.strictEqual(result.created, true);
@@ -567,7 +624,7 @@ describe('Stream Chunks', () => {
 
     it('should return created: false on duplicate call', async () => {
       await withStreamStore(async (store) => {
-        const manager = new StreamManager({ store });
+        const manager = makeManager(store);
         const streamId = crypto.randomUUID();
         await manager.register(streamId);
         const result = await manager.register(streamId);
@@ -577,7 +634,7 @@ describe('Stream Chunks', () => {
 
     it('should not overwrite status of existing stream', async () => {
       await withStreamStore(async (store) => {
-        const manager = new StreamManager({ store });
+        const manager = makeManager(store);
         const streamId = crypto.randomUUID();
         await manager.register(streamId);
         await store.updateStreamStatus(streamId, 'running');
@@ -589,7 +646,7 @@ describe('Stream Chunks', () => {
 
     it('should not reset completed stream to queued', async () => {
       await withStreamStore(async (store) => {
-        const manager = new StreamManager({ store });
+        const manager = makeManager(store);
         const streamId = crypto.randomUUID();
         await manager.register(streamId);
         await store.updateStreamStatus(streamId, 'running');
@@ -604,7 +661,7 @@ describe('Stream Chunks', () => {
 
     it('should not reset failed stream to queued', async () => {
       await withStreamStore(async (store) => {
-        const manager = new StreamManager({ store });
+        const manager = makeManager(store);
         const streamId = crypto.randomUUID();
         await manager.register(streamId);
         await store.updateStreamStatus(streamId, 'running');
@@ -621,7 +678,7 @@ describe('Stream Chunks', () => {
 
     it('should not reset cancelled stream to queued', async () => {
       await withStreamStore(async (store) => {
-        const manager = new StreamManager({ store });
+        const manager = makeManager(store);
         const streamId = crypto.randomUUID();
         await manager.register(streamId);
         await store.updateStreamStatus(streamId, 'cancelled');
@@ -893,10 +950,47 @@ describe('Stream Chunks', () => {
     });
   });
 
+  describe('PollingChangeSource', () => {
+    it('should propagate non-abort errors from reads.getStreamStatus', async () => {
+      let calls = 0;
+      const source = new PollingChangeSource({
+        reads: {
+          async getStreamStatus() {
+            calls++;
+            if (calls === 1) return 'running';
+            throw new TypeError('reads exploded');
+          },
+        },
+        config: {
+          minMs: 1,
+          maxMs: 1,
+          multiplier: 1,
+          jitterRatio: 0,
+          statusCheckEvery: 1,
+        },
+      });
+      const ac = new AbortController();
+      try {
+        const iterator = source
+          .subscribe('s1', ac.signal)
+          [Symbol.asyncIterator]();
+        const first = await iterator.next();
+        assert.deepStrictEqual(first.value, { kind: 'tick' });
+        await assert.rejects(() => iterator.next(), /reads exploded/);
+        assert.deepStrictEqual(await iterator.next(), {
+          value: undefined,
+          done: true,
+        });
+      } finally {
+        ac.abort();
+      }
+    });
+  });
+
   describe('StreamManager.register', () => {
     it('should create a queued stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
@@ -911,7 +1005,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.listStreamIds', () => {
     it('returns IDs with status filtering and ordering', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         await store.createStream(
           createStream({
             id: 'manager-stream-queued',
@@ -953,7 +1047,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.watch()', () => {
     it('should throw when stream does not exist', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const readable = streams.watch('non-existent');
         const reader = readable.getReader();
@@ -969,7 +1063,7 @@ describe('Stream Chunks', () => {
     // an error chunk, completed streams must not.
     it('should replay all chunks from a completed stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1002,7 +1096,7 @@ describe('Stream Chunks', () => {
 
     it('should catchup then live-tail until stream completes', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1014,17 +1108,16 @@ describe('Stream Chunks', () => {
         await store.appendChunks([createChunk(stream.id, 1)]);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
+        const consume = (async () => {
+          for await (const chunk of readable) received.push(chunk);
+        })();
 
-        setTimeout(async () => {
-          await store.appendChunks([createChunk(stream.id, 2)]);
-          await store.appendChunks([createChunk(stream.id, 3)]);
-          await store.updateStreamStatus(stream.id, 'completed');
-        }, 60);
+        await store.appendChunks([createChunk(stream.id, 2)]);
+        await store.appendChunks([createChunk(stream.id, 3)]);
+        await store.updateStreamStatus(stream.id, 'completed');
 
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
+        await consume;
 
         assert.strictEqual(received.length, 4);
         assert.deepStrictEqual(received[0], {
@@ -1040,7 +1133,7 @@ describe('Stream Chunks', () => {
 
     it('should emit error chunk before close on terminal failed status', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1050,18 +1143,18 @@ describe('Stream Chunks', () => {
 
         await store.appendChunks([createChunk(stream.id, 0)]);
 
-        setTimeout(async () => {
-          await store.appendChunks([createChunk(stream.id, 1)]);
-          await store.updateStreamStatus(stream.id, 'failed', {
-            error: 'test error',
-          });
-        }, 60);
-
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
+        const readable = streams.watch(stream.id);
+        const consume = (async () => {
+          for await (const chunk of readable) received.push(chunk);
+        })();
+
+        await store.appendChunks([createChunk(stream.id, 1)]);
+        await store.updateStreamStatus(stream.id, 'failed', {
+          error: 'test error',
+        });
+
+        await consume;
 
         assert.strictEqual(received.length, 3);
         assert.deepStrictEqual(received[0], {
@@ -1085,7 +1178,7 @@ describe('Stream Chunks', () => {
 
     it('should emit fallback error chunk when failed stream has no error message', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1095,7 +1188,7 @@ describe('Stream Chunks', () => {
         await store.updateStreamStatus(stream.id, 'failed', { error: '' });
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
         for await (const chunk of readable) {
           received.push(chunk);
         }
@@ -1110,7 +1203,7 @@ describe('Stream Chunks', () => {
 
     it('should emit error chunk for late-attached watcher on already-failed stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1122,7 +1215,7 @@ describe('Stream Chunks', () => {
         });
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
         for await (const chunk of readable) {
           received.push(chunk);
         }
@@ -1140,7 +1233,7 @@ describe('Stream Chunks', () => {
     // error chunk (only 'failed' status emits).
     it('should close when stream is cancelled', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1152,7 +1245,7 @@ describe('Stream Chunks', () => {
         await store.updateStreamStatus(stream.id, 'cancelled');
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
         for await (const chunk of readable) {
           received.push(chunk);
         }
@@ -1168,24 +1261,23 @@ describe('Stream Chunks', () => {
 
     it('should watch a queued stream that transitions to running then completed', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({ status: 'queued' });
         await store.createStream(stream);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
+        const consume = (async () => {
+          for await (const chunk of readable) received.push(chunk);
+        })();
 
-        setTimeout(async () => {
-          await store.updateStreamStatus(stream.id, 'running');
-          await store.appendChunks([createChunk(stream.id, 0)]);
-          await store.appendChunks([createChunk(stream.id, 1)]);
-          await store.updateStreamStatus(stream.id, 'completed');
-        }, 60);
+        await store.updateStreamStatus(stream.id, 'running');
+        await store.appendChunks([createChunk(stream.id, 0)]);
+        await store.appendChunks([createChunk(stream.id, 1)]);
+        await store.updateStreamStatus(stream.id, 'completed');
 
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
+        await consume;
 
         assert.strictEqual(received.length, 2);
         assert.deepStrictEqual(received[0], {
@@ -1201,7 +1293,7 @@ describe('Stream Chunks', () => {
 
     it('should close gracefully when stream is deleted during watch', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const stream = createStream({
           status: 'running',
           startedAt: Date.now(),
@@ -1210,22 +1302,17 @@ describe('Stream Chunks', () => {
         await store.appendChunks([createChunk(stream.id, 0)]);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
         const consume = (async () => {
           for await (const chunk of readable) {
             received.push(chunk);
+            if (received.length === 1) {
+              await store.deleteStream(stream.id);
+            }
           }
         })();
 
-        globalThis.setTimeout(async () => {
-          await store.deleteStream(stream.id);
-        }, 60);
-
-        await withTimeout(
-          consume,
-          1_500,
-          'watch should close when stream is deleted',
-        );
+        await consume;
         assert.strictEqual(received.length, 1);
       });
     });
@@ -1235,7 +1322,7 @@ describe('Stream Chunks', () => {
         const writerStore = new SqliteStreamStore(dbPath);
         const watcherStore = new SqliteStreamStore(dbPath);
         try {
-          const streams = new StreamManager({ store: watcherStore });
+          const streams = makeManager(watcherStore);
           const stream = createStream({
             status: 'running',
             startedAt: Date.now(),
@@ -1244,24 +1331,18 @@ describe('Stream Chunks', () => {
           await writerStore.appendChunks([createChunk(stream.id, 0)]);
 
           const received: unknown[] = [];
-          const readable = streams.watch(stream.id, makeWatchPolling());
+          const readable = streams.watch(stream.id);
           const consume = (async () => {
             for await (const chunk of readable) {
               received.push(chunk);
             }
           })();
 
-          globalThis.setTimeout(async () => {
-            await writerStore.appendChunks([createChunk(stream.id, 1)]);
-            await writerStore.appendChunks([createChunk(stream.id, 2)]);
-            await writerStore.updateStreamStatus(stream.id, 'completed');
-          }, 60);
+          await writerStore.appendChunks([createChunk(stream.id, 1)]);
+          await writerStore.appendChunks([createChunk(stream.id, 2)]);
+          await writerStore.updateStreamStatus(stream.id, 'completed');
 
-          await withTimeout(
-            consume,
-            1_500,
-            'cross-connection watch should complete',
-          );
+          await consume;
           assert.strictEqual(received.length, 3);
           assert.deepStrictEqual(received[0], {
             type: 'text-delta',
@@ -1278,13 +1359,19 @@ describe('Stream Chunks', () => {
       });
     });
 
-    it('should keep adaptive delays within bounds and reset after activity', async () => {
+    it('should keep adaptive delays within configured bounds', async () => {
       await withStreamStore(async (store) => {
-        const events: StreamPollingTelemetryEvent[] = [];
-        const streams = new StreamManager({
-          store,
-          onPollingEvent: (event) => {
-            events.push(event);
+        const pollEvents: PollingTelemetryEvent[] = [];
+        const streams = makeManager(store, {
+          config: {
+            minMs: 10,
+            maxMs: 40,
+            multiplier: 2,
+            jitterRatio: 0,
+            statusCheckEvery: 1,
+          },
+          onPoll: (event) => {
+            pollEvents.push(event);
           },
         });
         const stream = createStream({
@@ -1293,60 +1380,110 @@ describe('Stream Chunks', () => {
         });
         await store.createStream(stream);
 
-        const readable = streams.watch(stream.id, {
-          minMs: 10,
-          maxMs: 40,
-          multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-          chunkPageSize: 64,
-        });
-
+        const readable = streams.watch(stream.id);
         const consume = (async () => {
-          for await (const _ of readable) {
+          for await (const _chunk of readable) {
             /* consume stream */
           }
         })();
 
-        globalThis.setTimeout(async () => {
-          await store.appendChunks([createChunk(stream.id, 0)]);
-        }, 85);
+        const idleCount = () =>
+          pollEvents.filter((e) => e.type === 'idle').length;
+        await waitFor(() => idleCount() >= 3, { label: 'idleCount >= 3' });
+        await store.appendChunks([createChunk(stream.id, 0)]);
+        await waitFor(() => idleCount() >= 5, { label: 'idleCount >= 5' });
+        await store.updateStreamStatus(stream.id, 'completed');
+        await consume;
 
-        globalThis.setTimeout(async () => {
-          await store.updateStreamStatus(stream.id, 'completed');
-        }, 180);
-
-        await withTimeout(
-          consume,
-          2_000,
-          'adaptive polling watch should complete',
-        );
-
-        const emptyDelays = events
-          .filter((event) => event.type === 'watch:empty')
+        const idleDelays = pollEvents
+          .filter((event) => event.type === 'idle')
           .map((event) => event.delayMs);
-        assert.ok(emptyDelays.length >= 2);
-        assert.ok(emptyDelays.every((delay) => delay >= 10 && delay <= 40));
+        assert.ok(idleDelays.length >= 2);
+        assert.ok(idleDelays.every((d) => d >= 10 && d <= 40));
+        const max = Math.max(...idleDelays);
         assert.ok(
-          emptyDelays.includes(40),
-          `expected delays to include capped max interval: ${emptyDelays.join(',')}`,
+          max >= 20,
+          `expected backoff to ramp past minMs; observed delays: ${idleDelays.join(',')}`,
         );
+      });
+    });
 
-        const firstChunkIndex = events.findIndex(
-          (event) => event.type === 'watch:chunks',
+    it('should reset adaptive delays on queued→running transition', async () => {
+      await withStreamStore(async (store) => {
+        const pollEvents: PollingTelemetryEvent[] = [];
+        const streams = makeManager(store, {
+          config: {
+            minMs: 10,
+            maxMs: 40,
+            multiplier: 2,
+            jitterRatio: 0,
+            statusCheckEvery: 1,
+          },
+          onPoll: (event) => {
+            pollEvents.push(event);
+          },
+        });
+        const stream = createStream({ status: 'queued' });
+        await store.createStream(stream);
+
+        const readable = streams.watch(stream.id);
+        const consume = (async () => {
+          for await (const _chunk of readable) {
+            /* consume stream */
+          }
+        })();
+
+        await waitFor(
+          () => pollEvents.filter((e) => e.type === 'idle').length >= 3,
+          { label: 'queued idle count >= 3' },
         );
-        assert.ok(firstChunkIndex >= 0);
-        const nextEmpty = events
-          .slice(firstChunkIndex + 1)
-          .find((event) => event.type === 'watch:empty');
-        assert.ok(nextEmpty && nextEmpty.type === 'watch:empty');
-        assert.strictEqual(nextEmpty.delayMs, 10);
+        await store.updateStreamStatus(stream.id, 'running');
+        await waitFor(
+          () =>
+            pollEvents.some((e) => e.type === 'poll' && e.status === 'running'),
+          { label: 'observed running poll' },
+        );
+        await store.updateStreamStatus(stream.id, 'completed');
+        await consume;
+
+        const transitionIndex = pollEvents.findIndex(
+          (event) => event.type === 'poll' && event.status === 'running',
+        );
+        assert.ok(transitionIndex >= 0, 'expected to observe running status');
+        const idleAtMaxBeforeTransition = pollEvents
+          .slice(0, transitionIndex)
+          .some((e) => e.type === 'idle' && e.delayMs >= 40);
+        assert.ok(
+          idleAtMaxBeforeTransition,
+          'expected backoff to have reached cap before running transition',
+        );
+        const nextIdle = pollEvents
+          .slice(transitionIndex + 1)
+          .find((event) => event.type === 'idle');
+        assert.ok(nextIdle && nextIdle.type === 'idle');
+        assert.ok(
+          nextIdle.delayMs <= 20,
+          `expected reset after running transition (delay ≤ minMs*multiplier=20); got ${nextIdle.delayMs}`,
+        );
       });
     });
 
     it('should page chunk reads and preserve ordering for large completed streams', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const watchEvents: StreamWatchTelemetryEvent[] = [];
+        const streams = makeManager(store, {
+          config: {
+            minMs: 5,
+            maxMs: 5,
+            multiplier: 2,
+            jitterRatio: 0,
+            statusCheckEvery: 1,
+          },
+          chunkPageSize: 32,
+          onWatchEvent: (event) => {
+            watchEvents.push(event);
+          },
+        });
         const stream = createStream({
           status: 'running',
           startedAt: Date.now(),
@@ -1361,14 +1498,7 @@ describe('Stream Chunks', () => {
         await store.updateStreamStatus(stream.id, 'completed');
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, {
-          minMs: 5,
-          maxMs: 5,
-          multiplier: 2,
-          jitterRatio: 0,
-          statusCheckEvery: 1,
-          chunkPageSize: 32,
-        });
+        const readable = streams.watch(stream.id);
         for await (const chunk of readable) {
           received.push(chunk);
         }
@@ -1382,6 +1512,14 @@ describe('Stream Chunks', () => {
           type: 'text-delta',
           delta: `chunk-${totalChunks - 1}`,
         });
+
+        const chunkBatches = watchEvents.filter(
+          (event) => event.type === 'watch:chunks',
+        );
+        assert.ok(
+          chunkBatches.length >= 2,
+          `expected multiple chunk batches with page size 32, got ${chunkBatches.length}`,
+        );
       });
     });
   });
@@ -1389,7 +1527,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.watch() detach is passive', () => {
     it('should NOT change stream status when reader detaches', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1399,7 +1537,7 @@ describe('Stream Chunks', () => {
 
         await store.appendChunks([createChunk(stream.id, 0)]);
 
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
         const reader = readable.getReader();
 
         const first = await reader.read();
@@ -1417,7 +1555,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.cancel()', () => {
     it('should set stream status to cancelled', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1436,7 +1574,7 @@ describe('Stream Chunks', () => {
 
     it('should cause watcher to close after cancel', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
 
         const stream = createStream({
           status: 'running',
@@ -1447,16 +1585,15 @@ describe('Stream Chunks', () => {
         await store.appendChunks([createChunk(stream.id, 0)]);
 
         const received: unknown[] = [];
-        const readable = streams.watch(stream.id, makeWatchPolling());
+        const readable = streams.watch(stream.id);
+        const consume = (async () => {
+          for await (const chunk of readable) received.push(chunk);
+        })();
 
-        globalThis.setTimeout(async () => {
-          await store.appendChunks([createChunk(stream.id, 1)]);
-          await streams.cancel(stream.id);
-        }, 60);
+        await store.appendChunks([createChunk(stream.id, 1)]);
+        await streams.cancel(stream.id);
 
-        for await (const chunk of readable) {
-          received.push(chunk);
-        }
+        await consume;
 
         assert.strictEqual(received.length, 2);
 
@@ -1467,10 +1604,132 @@ describe('Stream Chunks', () => {
     });
   });
 
+  describe('Failure-mode coverage', () => {
+    it('should continue watch loop when onWatchEvent callback throws', async () => {
+      await withStreamStore(async (store) => {
+        const streams = makeManager(store, {
+          onWatchEvent: () => {
+            throw new Error('telemetry exploded');
+          },
+        });
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+        await store.appendChunks([
+          createChunk(stream.id, 0),
+          createChunk(stream.id, 1),
+        ]);
+        await store.updateStreamStatus(stream.id, 'completed');
+
+        const received: unknown[] = [];
+        for await (const chunk of streams.watch(stream.id)) {
+          received.push(chunk);
+        }
+
+        assert.strictEqual(received.length, 2);
+      });
+    });
+
+    it('should await source cleanup when reader cancels watch', async () => {
+      await withStreamStore(async (store) => {
+        const slowSource = new TestChangeSource();
+        slowSource.cleanupDelayMs = 100;
+        const streams = new StreamManager({
+          store,
+          changeSource: slowSource,
+        });
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+
+        const reader = streams.watch(stream.id).getReader();
+        const readPromise = reader.read();
+        await sleep(2);
+
+        const startedAt = Date.now();
+        await reader.cancel();
+        const elapsedMs = Date.now() - startedAt;
+        await readPromise.catch(() => undefined);
+
+        assert.ok(
+          elapsedMs >= 80,
+          `cancel should await ~100ms cleanup, elapsed=${elapsedMs}ms`,
+        );
+        assert.strictEqual(slowSource.cleanupCount, 1);
+      });
+    });
+
+    it('should run source cleanup when iterator throws mid-stream', async () => {
+      await withStreamStore(async (store) => {
+        const faultySource = new TestChangeSource();
+        faultySource.throwAfterFirstYield = true;
+        const streams = new StreamManager({
+          store,
+          changeSource: faultySource,
+        });
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+
+        const readable = streams.watch(stream.id);
+        const consume = (async () => {
+          for await (const _chunk of readable) {
+            /* consume */
+          }
+        })();
+
+        await assert.rejects(() => consume, /mid-stream failure/);
+
+        assert.strictEqual(
+          faultySource.cleanupCount,
+          1,
+          'iterator finally must run when generator throws',
+        );
+      });
+    });
+
+    it('should not mask persist success when cancel watcher source throws', async () => {
+      await withStreamStore(async (store) => {
+        const faultySource = new TestChangeSource();
+        faultySource.throwOnSubscribe = true;
+        const streams = new StreamManager({
+          store,
+          changeSource: faultySource,
+        });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const source = new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'text-start', id: 'p1' });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'p1',
+              delta: 'hello',
+            });
+            controller.close();
+          },
+        });
+
+        await streams.persist(source, streamId);
+
+        const final = await store.getStream(streamId);
+        assert.ok(final);
+        assert.strictEqual(final.status, 'completed');
+      });
+    });
+  });
+
   describe('StreamManager.persist() onCancelDetected', () => {
     it('should invoke onCancelDetected exactly once when cancelled', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
@@ -1486,17 +1745,14 @@ describe('Stream Chunks', () => {
         });
 
         const calls: { streamId: string; latencyMs: number | null }[] = [];
-
         const persistPromise = streams.persist(source, streamId, {
-          cancelPolling: { minMs: 5, maxMs: 5, multiplier: 1, jitterRatio: 0 },
           onCancelDetected: (info) => {
             calls.push(info);
           },
         });
 
-        globalThis.setTimeout(() => {
-          void streams.cancel(streamId);
-        }, 20);
+        await waitForStatus(store, streamId, 'running');
+        void streams.cancel(streamId);
 
         await persistPromise;
 
@@ -1512,7 +1768,7 @@ describe('Stream Chunks', () => {
 
     it('should not fail persist when onCancelDetected throws', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
@@ -1528,15 +1784,13 @@ describe('Stream Chunks', () => {
         });
 
         const persistPromise = streams.persist(source, streamId, {
-          cancelPolling: { minMs: 5, maxMs: 5, multiplier: 1, jitterRatio: 0 },
           onCancelDetected: () => {
             throw new Error('callback exploded');
           },
         });
 
-        globalThis.setTimeout(() => {
-          void streams.cancel(streamId);
-        }, 20);
+        await waitForStatus(store, streamId, 'running');
+        void streams.cancel(streamId);
 
         await persistPromise;
 
@@ -1548,7 +1802,7 @@ describe('Stream Chunks', () => {
 
     it('should work unchanged when no onCancelDetected is provided', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
@@ -1563,13 +1817,10 @@ describe('Stream Chunks', () => {
           },
         });
 
-        const persistPromise = streams.persist(source, streamId, {
-          cancelPolling: { minMs: 5, maxMs: 5, multiplier: 1, jitterRatio: 0 },
-        });
+        const persistPromise = streams.persist(source, streamId);
 
-        globalThis.setTimeout(() => {
-          void streams.cancel(streamId);
-        }, 20);
+        await waitForStatus(store, streamId, 'running');
+        void streams.cancel(streamId);
 
         await persistPromise;
 
@@ -1583,7 +1834,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.persist() terminal state guard', () => {
     it('should return early without changing status when stream is cancelled', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const stream = createStream({
           status: 'cancelled',
           startedAt: Date.now(),
@@ -1608,7 +1859,7 @@ describe('Stream Chunks', () => {
 
     it('should return early without changing status when stream is completed', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const stream = createStream({
           status: 'completed',
           startedAt: Date.now(),
@@ -1632,7 +1883,7 @@ describe('Stream Chunks', () => {
 
     it('should return early without changing status when stream is failed', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const stream = createStream({
           status: 'failed',
           startedAt: Date.now(),
@@ -1658,7 +1909,15 @@ describe('Stream Chunks', () => {
 
     it('should not wait for full cancel polling interval when stream finishes quickly', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store, {
+          config: {
+            minMs: 1_000,
+            maxMs: 1_000,
+            multiplier: 2,
+            jitterRatio: 0,
+            statusCheckEvery: 1,
+          },
+        });
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
@@ -1669,19 +1928,12 @@ describe('Stream Chunks', () => {
         });
 
         const startedAt = Date.now();
-        await streams.persist(dummy, streamId, {
-          cancelPolling: {
-            minMs: 1_000,
-            maxMs: 1_000,
-            multiplier: 2,
-            jitterRatio: 0,
-          },
-        });
+        await streams.persist(dummy, streamId);
         const elapsedMs = Date.now() - startedAt;
 
         assert.ok(
-          elapsedMs < 700,
-          `persist should not block on long cancel poll sleep; elapsed=${elapsedMs}ms`,
+          elapsedMs < 500,
+          `persist should not block on long cancel poll sleep; elapsed=${elapsedMs}ms (1000ms cancel poll configured)`,
         );
       });
     });
@@ -1690,7 +1942,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.cleanup', () => {
     it('should delete stream and all chunks', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
         await streams.register(streamId);
 
@@ -1710,7 +1962,7 @@ describe('Stream Chunks', () => {
   describe('StreamManager.reopen()', () => {
     it('should reopen a completed stream as queued with no old chunks', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);
@@ -1736,7 +1988,7 @@ describe('Stream Chunks', () => {
 
     it('should reopen a failed stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);
@@ -1759,7 +2011,7 @@ describe('Stream Chunks', () => {
 
     it('should reopen a cancelled stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);
@@ -1775,7 +2027,7 @@ describe('Stream Chunks', () => {
 
     it('should throw when trying to reopen a running stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);
@@ -1794,7 +2046,7 @@ describe('Stream Chunks', () => {
 
     it('should throw when trying to reopen a queued stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);
@@ -1808,7 +2060,7 @@ describe('Stream Chunks', () => {
 
     it('should throw for a non-existent stream', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await assert.rejects(
@@ -1820,7 +2072,7 @@ describe('Stream Chunks', () => {
 
     it('should throw on double reopen (second call sees queued status)', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);
@@ -1838,7 +2090,7 @@ describe('Stream Chunks', () => {
 
     it('should allow persist() after reopen()', async () => {
       await withStreamStore(async (store) => {
-        const streams = new StreamManager({ store });
+        const streams = makeManager(store);
         const streamId = crypto.randomUUID();
 
         await streams.register(streamId);

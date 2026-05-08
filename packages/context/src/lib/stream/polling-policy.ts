@@ -7,7 +7,6 @@ export interface AdaptivePollingConfig {
 
 export interface WatchPollingConfig extends AdaptivePollingConfig {
   statusCheckEvery: number;
-  chunkPageSize: number;
 }
 
 export type CancelPollingConfig = AdaptivePollingConfig;
@@ -23,7 +22,6 @@ export const DEFAULT_WATCH_POLLING: WatchPollingConfig = {
   multiplier: 2,
   jitterRatio: 0.15,
   statusCheckEvery: 3,
-  chunkPageSize: 128,
 };
 
 export const DEFAULT_CANCEL_POLLING: CancelPollingConfig = {
@@ -45,7 +43,6 @@ export function normalizeWatchPolling(
   return {
     ...normalizedBase,
     statusCheckEvery: clampInt(merged.statusCheckEvery, 1, 10_000),
-    chunkPageSize: clampInt(merged.chunkPageSize, 1, 10_000),
   };
 }
 

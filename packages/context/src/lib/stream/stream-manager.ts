@@ -1,25 +1,13 @@
 import { createUIMessageStream } from 'ai';
-import { setTimeout } from 'node:timers/promises';
 
 import type { StreamPart } from '../guardrail.ts';
 import {
   type PersistedWriterOptions,
   persistedWriter,
 } from '../stream-buffer.ts';
-import {
-  type CancelPollingConfig,
-  DEFAULT_CANCEL_POLLING,
-  DEFAULT_WATCH_POLLING,
-  type WatchPollingConfig,
-  createAdaptivePollingState,
-  nextAdaptivePollingDelay,
-  normalizeCancelPolling,
-  normalizeWatchPolling,
-  resetAdaptivePolling,
-} from './polling-policy.ts';
+import type { StreamChange, StreamChangeSource } from './change-source.ts';
 import type {
   ListStreamIdsOptions,
-  StreamChunkData,
   StreamData,
   StreamStatus,
   StreamStore,
@@ -29,34 +17,17 @@ function isTerminal(status: StreamStatus) {
   return status !== 'queued' && status !== 'running';
 }
 
-export type WatchStreamOptions = Partial<WatchPollingConfig>;
-export type PersistCancelPollingOptions = Partial<CancelPollingConfig>;
-
 export interface PersistStreamOptions extends Pick<
   PersistedWriterOptions,
   'strategy' | 'flushSize'
 > {
-  cancelPolling?: PersistCancelPollingOptions;
   onCancelDetected?: (info: {
     streamId: string;
     latencyMs: number | null;
   }) => void | Promise<void>;
 }
 
-export type StreamPollingTelemetryEvent =
-  | {
-      type: 'watch:poll';
-      streamId: string;
-      fromSeq: number;
-      chunkCount: number;
-      statusChecked: boolean;
-    }
-  | {
-      type: 'watch:empty';
-      streamId: string;
-      fromSeq: number;
-      delayMs: number;
-    }
+export type StreamWatchTelemetryEvent =
   | {
       type: 'watch:chunks';
       streamId: string;
@@ -66,18 +37,12 @@ export type StreamPollingTelemetryEvent =
   | {
       type: 'watch:closed';
       streamId: string;
-      reason: 'terminal' | 'missing';
+      reason: 'terminal' | 'missing' | 'source-ended';
     }
   | {
       type: 'watch:error-emitted';
       streamId: string;
       errorTextLength: number;
-    }
-  | {
-      type: 'persist:cancel-poll';
-      streamId: string;
-      delayMs: number;
-      status: StreamStatus | 'missing';
     }
   | {
       type: 'persist:cancel-detected';
@@ -87,28 +52,24 @@ export type StreamPollingTelemetryEvent =
 
 export interface StreamManagerOptions {
   store: StreamStore;
-  watchPolling?: WatchStreamOptions;
-  cancelPolling?: PersistCancelPollingOptions;
-  onPollingEvent?: (event: StreamPollingTelemetryEvent) => void;
+  changeSource: StreamChangeSource;
+  chunkPageSize?: number;
+  onWatchEvent?: (event: StreamWatchTelemetryEvent) => void;
 }
+
+const DEFAULT_CHUNK_PAGE_SIZE = 128;
 
 export class StreamManager {
   #store: StreamStore;
-  #watchPollingDefaults: WatchPollingConfig;
-  #cancelPollingDefaults: CancelPollingConfig;
-  #onPollingEvent?: (event: StreamPollingTelemetryEvent) => void;
+  #changeSource: StreamChangeSource;
+  #chunkPageSize: number;
+  #onWatchEvent?: (event: StreamWatchTelemetryEvent) => void;
 
   constructor(options: StreamManagerOptions) {
     this.#store = options.store;
-    this.#watchPollingDefaults = normalizeWatchPolling(
-      options.watchPolling,
-      DEFAULT_WATCH_POLLING,
-    );
-    this.#cancelPollingDefaults = normalizeCancelPolling(
-      options.cancelPolling,
-      DEFAULT_CANCEL_POLLING,
-    );
-    this.#onPollingEvent = options.onPollingEvent;
+    this.#changeSource = options.changeSource;
+    this.#chunkPageSize = options.chunkPageSize ?? DEFAULT_CHUNK_PAGE_SIZE;
+    this.#onWatchEvent = options.onWatchEvent;
   }
 
   get store(): StreamStore {
@@ -150,56 +111,7 @@ export class StreamManager {
     await this.#store.updateStreamStatus(streamId, 'running');
 
     const ac = new AbortController();
-    const cancelPolling = normalizeCancelPolling(
-      options?.cancelPolling,
-      this.#cancelPollingDefaults,
-    );
-    const pollState = createAdaptivePollingState(cancelPolling);
-
-    const pollCancel = (async () => {
-      while (!ac.signal.aborted) {
-        const delayMs = nextAdaptivePollingDelay(pollState);
-        const continued = await waitForDelay(delayMs, ac.signal);
-        if (!continued || ac.signal.aborted) break;
-
-        const status = await this.#store.getStreamStatus(streamId);
-        this.#emitPolling({
-          type: 'persist:cancel-poll',
-          streamId,
-          delayMs,
-          status: status ?? 'missing',
-        });
-
-        if (status === undefined) {
-          ac.abort();
-          break;
-        }
-
-        if (status === 'cancelled') {
-          const current = await this.#store.getStream(streamId);
-          const latencyMs =
-            current?.cancelRequestedAt != null
-              ? Math.max(0, Date.now() - current.cancelRequestedAt)
-              : null;
-          this.#emitPolling({
-            type: 'persist:cancel-detected',
-            streamId,
-            latencyMs,
-          });
-
-          if (options?.onCancelDetected) {
-            try {
-              await options.onCancelDetected({ streamId, latencyMs });
-            } catch {
-              /* best-effort — never block cancellation */
-            }
-          }
-
-          ac.abort();
-          break;
-        }
-      }
-    })();
+    const cancelWatcher = this.#runCancelWatcher(streamId, ac, options);
 
     let pw!: Awaited<ReturnType<typeof persistedWriter>>;
 
@@ -244,158 +156,159 @@ export class StreamManager {
       }
     } finally {
       if (!ac.signal.aborted) ac.abort();
-      await pollCancel;
+      await cancelWatcher;
     }
 
     return { streamId: pw?.streamId ?? streamId };
   }
 
-  watch(
+  async #runCancelWatcher(
     streamId: string,
-    options?: WatchStreamOptions,
-  ): ReadableStream<StreamPart> {
+    ac: AbortController,
+    options: PersistStreamOptions | undefined,
+  ): Promise<void> {
+    try {
+      for await (const change of this.#changeSource.subscribe(
+        streamId,
+        ac.signal,
+      )) {
+        if (change.kind === 'chunks') continue;
+        const status = await this.#store.getStreamStatus(streamId);
+        if (status === undefined) {
+          ac.abort();
+          return;
+        }
+        if (status === 'cancelled') {
+          const current = await this.#store.getStream(streamId);
+          const latencyMs =
+            current?.cancelRequestedAt != null
+              ? Math.max(0, Date.now() - current.cancelRequestedAt)
+              : null;
+          this.#emit({
+            type: 'persist:cancel-detected',
+            streamId,
+            latencyMs,
+          });
+          if (options?.onCancelDetected) {
+            try {
+              await options.onCancelDetected({ streamId, latencyMs });
+            } catch {
+              /* best-effort — never block cancellation */
+            }
+          }
+          ac.abort();
+          return;
+        }
+      }
+    } catch {
+      /* cancel watcher failed unexpectedly — persist continues without cancel-detection */
+    }
+  }
+
+  watch(streamId: string): ReadableStream<StreamPart> {
     const store = this.#store;
-    const polling = normalizeWatchPolling(options, this.#watchPollingDefaults);
-    const delayState = createAdaptivePollingState(polling);
+    const changeSource = this.#changeSource;
+    const pageSize = this.#chunkPageSize;
+    const emit = this.#emit.bind(this);
     const ac = new AbortController();
     const lastSeqRef = { value: -1 };
-    let chunkPollsSinceStatus = 0;
+    let iterator: AsyncIterator<StreamChange> | undefined;
 
-    const emitChunks = (
+    const emitPage = (delivered: number, lastSeq: number): void => {
+      emit({ type: 'watch:chunks', streamId, delivered, lastSeq });
+    };
+
+    const finalize = async (
       controller: ReadableStreamDefaultController<StreamPart>,
-      chunks: StreamChunkData[],
-    ): number => {
-      for (const chunk of chunks) {
-        controller.enqueue(chunk.data as StreamPart);
-        lastSeqRef.value = chunk.seq;
+      reason: 'terminal' | 'missing' | 'source-ended',
+      knownStatus?: StreamStatus,
+    ): Promise<void> => {
+      await drainAvailable(
+        controller,
+        store,
+        streamId,
+        lastSeqRef,
+        pageSize,
+        emitPage,
+      );
+      const finalStatus =
+        knownStatus ?? (await store.getStreamStatus(streamId));
+      if (finalStatus === 'failed') {
+        const stream = await store.getStream(streamId);
+        if (stream) {
+          const errorText = stream.error || 'Stream failed';
+          emit({
+            type: 'watch:error-emitted',
+            streamId,
+            errorTextLength: errorText.length,
+          });
+          controller.enqueue({ type: 'error', errorText });
+        }
       }
-      return chunks.length;
+      emit({ type: 'watch:closed', streamId, reason });
+      controller.close();
+      ac.abort();
     };
 
     return new ReadableStream<StreamPart>({
-      async start() {
-        const stream = await store.getStream(streamId);
-        if (!stream) {
-          throw new Error(`Stream "${streamId}" not found`);
-        }
+      start: () => {
+        iterator = changeSource
+          .subscribe(streamId, ac.signal)
+          [Symbol.asyncIterator]();
       },
       pull: async (controller) => {
+        if (!iterator) return;
         while (!ac.signal.aborted) {
-          const fromSeq = lastSeqRef.value + 1;
-          const chunks = await store.getChunks(
-            streamId,
-            fromSeq,
-            polling.chunkPageSize,
-          );
-
-          let statusChecked = false;
-          let currentStatus: StreamStatus | undefined;
-          if (chunks.length === 0) {
-            chunkPollsSinceStatus = polling.statusCheckEvery;
-          } else {
-            chunkPollsSinceStatus += 1;
-          }
-          if (chunkPollsSinceStatus >= polling.statusCheckEvery) {
-            statusChecked = true;
-            chunkPollsSinceStatus = 0;
-            currentStatus = await store.getStreamStatus(streamId);
+          let result: IteratorResult<StreamChange>;
+          try {
+            result = await iterator.next();
+          } catch (error) {
+            // ignore — iterator already terminated by an upstream throw
+            iterator.return?.().catch(() => undefined);
+            if (isAbortError(error)) return;
+            throw error;
           }
 
-          this.#emitPolling({
-            type: 'watch:poll',
-            streamId,
-            fromSeq,
-            chunkCount: chunks.length,
-            statusChecked,
-          });
+          if (result.done) {
+            await finalize(controller, 'source-ended');
+            return;
+          }
 
-          if (chunks.length > 0) {
-            const delivered = emitChunks(controller, chunks);
-            this.#emitPolling({
-              type: 'watch:chunks',
+          const change = result.value;
+
+          let delivered = 0;
+          if (change.kind !== 'status') {
+            delivered = await drainAvailable(
+              controller,
+              store,
               streamId,
-              delivered,
-              lastSeq: lastSeqRef.value,
-            });
-            resetAdaptivePolling(delayState);
-            if (chunks.length >= polling.chunkPageSize) {
-              continue;
-            }
-            return;
+              lastSeqRef,
+              pageSize,
+              emitPage,
+            );
           }
 
-          if (statusChecked) {
-            if (currentStatus === undefined) {
-              this.#emitPolling({
-                type: 'watch:closed',
-                streamId,
-                reason: 'missing',
-              });
-              controller.close();
-              ac.abort();
+          if (change.kind !== 'chunks') {
+            const status = await store.getStreamStatus(streamId);
+            if (status === undefined) {
+              await finalize(controller, 'missing');
               return;
             }
-
-            if (isTerminal(currentStatus)) {
-              const drained = await drainRemainingChunks({
-                controller,
-                store,
-                streamId,
-                fromSeq: lastSeqRef.value + 1,
-                chunkPageSize: polling.chunkPageSize,
-                onChunk: (seq) => {
-                  lastSeqRef.value = seq;
-                },
-              });
-              if (drained > 0) {
-                this.#emitPolling({
-                  type: 'watch:chunks',
-                  streamId,
-                  delivered: drained,
-                  lastSeq: lastSeqRef.value,
-                });
-              }
-              if (currentStatus === 'failed') {
-                const stream = await store.getStream(streamId);
-                if (stream) {
-                  const errorText = stream.error || 'Stream failed';
-                  this.#emitPolling({
-                    type: 'watch:error-emitted',
-                    streamId,
-                    errorTextLength: errorText.length,
-                  });
-                  controller.enqueue({
-                    type: 'error',
-                    errorText,
-                  });
-                }
-              }
-              this.#emitPolling({
-                type: 'watch:closed',
-                streamId,
-                reason: 'terminal',
-              });
-              controller.close();
-              ac.abort();
+            if (isTerminal(status)) {
+              await finalize(controller, 'terminal', status);
               return;
             }
           }
 
-          const delayMs = nextAdaptivePollingDelay(delayState);
-          this.#emitPolling({
-            type: 'watch:empty',
-            streamId,
-            fromSeq: lastSeqRef.value + 1,
-            delayMs,
-          });
-          const continued = await waitForDelay(delayMs, ac.signal);
-          if (!continued) {
-            return;
-          }
+          if (delivered > 0) return;
         }
       },
-      cancel() {
+      cancel: () => {
         ac.abort();
+        return iterator?.return?.().then(
+          () => undefined,
+          () => undefined,
+        );
       },
     });
   }
@@ -411,62 +324,41 @@ export class StreamManager {
     await this.#store.deleteStream(streamId);
   }
 
-  #emitPolling(event: StreamPollingTelemetryEvent): void {
-    if (!this.#onPollingEvent) return;
+  #emit(event: StreamWatchTelemetryEvent): void {
+    if (!this.#onWatchEvent) return;
     try {
-      this.#onPollingEvent(event);
+      this.#onWatchEvent(event);
     } catch {
-      /* empty - telemetry callbacks must never break stream processing */
+      // swallow telemetry errors — watch must not be coupled to observer faults
     }
   }
 }
 
-interface DrainRemainingChunksOptions {
-  controller: ReadableStreamDefaultController<StreamPart>;
-  store: StreamStore;
-  streamId: string;
-  fromSeq: number;
-  chunkPageSize: number;
-  onChunk: (seq: number) => void;
-}
-
-async function drainRemainingChunks(
-  options: DrainRemainingChunksOptions,
+async function drainAvailable(
+  controller: ReadableStreamDefaultController<StreamPart>,
+  store: StreamStore,
+  streamId: string,
+  lastSeqRef: { value: number },
+  pageSize: number,
+  onPage?: (delivered: number, lastSeq: number) => void,
 ): Promise<number> {
-  const { controller, store, streamId, chunkPageSize, onChunk } = options;
-  let fromSeq = options.fromSeq;
-  let drained = 0;
-
+  let total = 0;
   while (true) {
-    const chunks = await store.getChunks(streamId, fromSeq, chunkPageSize);
+    const chunks = await store.getChunks(
+      streamId,
+      lastSeqRef.value + 1,
+      pageSize,
+    );
     if (chunks.length === 0) break;
-
     for (const chunk of chunks) {
       controller.enqueue(chunk.data as StreamPart);
-      onChunk(chunk.seq);
-      drained++;
-      fromSeq = chunk.seq + 1;
+      lastSeqRef.value = chunk.seq;
     }
-
-    if (chunks.length < chunkPageSize) {
-      break;
-    }
+    total += chunks.length;
+    onPage?.(chunks.length, lastSeqRef.value);
+    if (chunks.length < pageSize) break;
   }
-
-  return drained;
-}
-
-async function waitForDelay(
-  ms: number,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  try {
-    await setTimeout(ms, undefined, signal ? { signal } : undefined);
-    return true;
-  } catch (error) {
-    if (isAbortError(error)) return false;
-    throw error;
-  }
+  return total;
 }
 
 function isAbortError(error: unknown): boolean {

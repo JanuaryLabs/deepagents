@@ -35,6 +35,8 @@ export * from './lib/store/sqlite.store.ts';
 export * from './lib/store/sqlserver.store.ts';
 export * from './lib/store/store.ts';
 export * from './lib/stream-buffer.ts';
+export * from './lib/stream/change-source.ts';
+export * from './lib/stream/polling-change-source.ts';
 export * from './lib/stream/polling-policy.ts';
 export * from './lib/stream/sqlite.stream-store.ts';
 export * from './lib/stream/stream-manager.ts';
