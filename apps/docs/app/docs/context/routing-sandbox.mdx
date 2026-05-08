@@ -6,9 +6,10 @@ description: One extension surface that dispatches across virtual, Docker, and A
 `createRoutingSandbox` is the primitive that lets a single set of host
 commands — things like `sql validate <db>`, `sql run <db>`, or your own
 `SandboxExtension` — run against any backend. It wraps a `Sandbox` (virtual via
-`createVirtualSandbox`, `createDockerSandbox`, or `createAgentOsSandbox`) and
-dispatches extension commands at the top level of each bash line. Anything it
-does not match is forwarded to the backend verbatim.
+`createVirtualSandbox`, `createDockerSandbox`, `createAgentOsSandbox`, or
+another `Sandbox` implementation) and dispatches extension commands at the top
+level of each bash line. Anything it does not match is forwarded to the backend
+verbatim.
 
 The same extension definition ships once and runs everywhere. Swap the
 backend, keep the extension.
@@ -31,10 +32,10 @@ const sandbox = await createBashTool({
 });
 ```
 
-Swap `createVirtualSandbox` for `createDockerSandbox({ image: 'alpine' })`
-or `createAgentOsSandbox({ software: [common] })` and `myExtension` still
-dispatches — the routing layer figures out whether the backend can accept
-native install (deep dispatch) or needs a shallow router.
+Swap `createVirtualSandbox` for `createDockerSandbox({ image: 'alpine' })` or
+`createAgentOsSandbox({ software: [common] })` and `myExtension` still
+dispatches — the routing layer figures out whether the backend can accept native
+install (deep dispatch) or needs a shallow router.
 
 ## Backends: Deep vs Shallow Dispatch
 
@@ -43,7 +44,7 @@ The routing sandbox picks one of two strategies based on the backend:
 | Backend | Strategy | How it works |
 | --- | --- | --- |
 | `createVirtualSandbox` (just-bash) | **Deep** | Calls `backend.install(merged)`; extensions plug directly into `just-bash`'s `customCommands` and transform plugins. Pipelines, redirections, and subshells dispatch natively |
-| `createDockerSandbox` / `createAgentOsSandbox` | **Shallow** | Tokenizes the first simple command, matches against `hostExtensions`, and forwards anything else to the backend. Transform plugins still run via a side `Bash` instance for AST-level rewriting |
+| `createDockerSandbox` / `createAgentOsSandbox` / custom `Sandbox` | **Shallow** | Tokenizes the first simple command, matches against `hostExtensions`, and forwards anything else to the backend. Transform plugins still run via a side `Bash` instance for AST-level rewriting |
 
 A backend opts into deep dispatch by implementing `InstallableSandbox`
 (the `Sandbox` interface plus a single-shot `install(ext)` method). Use
@@ -277,8 +278,8 @@ Other shallow-dispatch limits worth knowing:
 
 ## Composing With Docker / Agent OS
 
-The same extension bundle runs against a containerized backend — swap the
-`backend` argument and keep everything else:
+The same extension bundle runs against a containerized or Agent OS backend —
+swap the `backend` argument and keep everything else:
 
 ```typescript
 import {
@@ -304,7 +305,7 @@ try {
 `drainFileEvents` is surfaced by the optional `Sandbox.drainFileEvents` hook —
 it only returns entries when the backend was built on an `ObservedFs` (see
 `file-events.ts`). Docker and Agent OS backends do not observe fs events and
-return an empty array (or `undefined`).
+return `undefined`.
 
 ## Next Steps
 

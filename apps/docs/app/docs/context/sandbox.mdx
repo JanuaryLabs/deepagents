@@ -12,6 +12,7 @@ The sandbox system lets AI agents execute real commands in isolated environments
 | `createContainerTool` | Agent needs real binaries in isolated container | Yes |
 | `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
 | `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
+| `createVirtualSandbox` | In-process bash with a virtual filesystem | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
 
 <Callout type="warn">
@@ -187,6 +188,34 @@ const output = await useAgentOsSandbox(
 );
 ```
 
+## Quick Start: Virtual Sandbox
+
+Use the virtual sandbox when an agent needs the standard bash/read/write tool
+surface without Docker:
+
+```typescript
+import { InMemoryFs } from 'just-bash';
+import {
+  createBashTool,
+  createRoutingSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
+
+const sandbox = await createBashTool({
+  sandbox: await createRoutingSandbox({
+    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    hostExtensions: [],
+  }),
+});
+
+const result = await sandbox.sandbox.executeCommand('echo "hello"');
+console.log(result.stdout); // hello
+```
+
+The virtual backend uses `just-bash`, so command execution and file IO stay
+in-process while still exercising the same `createBashTool` and routing path
+used by agents.
+
 ## Bash Tool Schema
 
 `createBashTool()` from `@deepagents/context` returns a bash tool whose input schema requires two fields: `command` and `reasoning`. The LLM must provide a brief reason on every call — the wrapper enforces it at the Zod schema level, and the upstream `bash-tool` package's `{ command }` shape is widened accordingly.
@@ -332,7 +361,8 @@ await createBashTool({
 `createRoutingSandbox({ backend, hostExtensions })` lets a single
 `SandboxExtension` — custom commands, transform plugins, pre-call hooks — run
 against any backend. Wrap `createVirtualSandbox` for just-bash, or pass a
-`createDockerSandbox` / `createAgentOsSandbox` backend directly.
+`createDockerSandbox`, `createAgentOsSandbox`, or custom `Sandbox` backend
+directly.
 
 ```typescript
 import {
