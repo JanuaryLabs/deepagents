@@ -218,6 +218,42 @@ const messageWithoutReminders = stripReminders(message);
 ```
 
 - `getReminderRanges(metadata)` returns `metadata.reminders` as offset ranges (or `[]` when missing).
+
+Conditional reminders are registered on the engine, not inside `user(...)`.
+They can react to turn cadence, classifier matches, tool activity, assistant
+history, token usage, and idle time:
+
+```ts
+import {
+  anyToolCalled,
+  everyOfLastN,
+  not,
+  reminder,
+  toolCalled,
+  usageExceeds,
+  user,
+} from '@deepagents/context';
+
+engine.set(
+  reminder('Ask for confirmation before repeating destructive tool calls', {
+    when: toolCalled('bash'),
+  }),
+  reminder('Pause and summarize if the thread is getting expensive', {
+    when: usageExceeds(20_000),
+  }),
+  reminder('If no tools were needed for three turns, keep the answer brief', {
+    when: everyOfLastN(3, not(anyToolCalled())),
+  }),
+  user('continue'),
+);
+```
+
+Other exported helpers include `toolCallCount(...)`,
+`lastAssistantLength(...)`, `withinLastN(...)`, `everyOfLastN(...)`, and
+`elapsedExceeds(...)`. See the
+[Predicates](https://januarylabs.github.io/deepagents/docs/context/predicates)
+page for the full catalog.
+
 - `stripTextByRanges(text, ranges)` removes offset spans from text and returns the remaining visible content.
 - `stripReminders(message)` strips inline/part reminders from a `UIMessage` and removes `metadata.reminders`.
 - Reminder ranges are local to a message part, so filter by `partIndex` before stripping a specific part's text.

@@ -1,8 +1,9 @@
-import type { UIMessage } from 'ai';
+import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  type UserReminderMetadata,
   everyNTurns,
   getReminderRanges,
   hint,
@@ -14,26 +15,88 @@ import {
   user,
 } from '@deepagents/context';
 
-type UserReminderMetadataRecord = {
-  id: string;
-  text: string;
-  partIndex: number;
-  start: number;
-  end: number;
-  mode: 'inline' | 'part';
+type OutputAvailableToolPart = ToolUIPart & {
+  state: 'output-available';
+  output: unknown;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isUIMessage(value: unknown): value is UIMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    (value.role === 'system' ||
+      value.role === 'user' ||
+      value.role === 'assistant') &&
+    Array.isArray(value.parts)
+  );
+}
+
+function isReminderMetadata(value: unknown): value is UserReminderMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.text === 'string' &&
+    (value.target === 'user' || value.target === 'tool-output') &&
+    typeof value.partIndex === 'number' &&
+    typeof value.start === 'number' &&
+    typeof value.end === 'number' &&
+    (value.mode === 'inline' ||
+      value.mode === 'part' ||
+      value.mode === 'tool-output')
+  );
+}
+
+function getMetadata(message: UIMessage): Record<string, unknown> {
+  return isRecord(message.metadata) ? message.metadata : {};
+}
+
+function isOutputAvailableToolPart(
+  part: UIMessage['parts'][number] | undefined,
+): part is OutputAvailableToolPart {
+  return (
+    part !== undefined &&
+    isStaticToolUIPart(part) &&
+    part.state === 'output-available'
+  );
+}
+
+function getToolOutput(message: UIMessage, index = 0): unknown {
+  const part = message.parts[index];
+  assert.ok(
+    isOutputAvailableToolPart(part),
+    `Expected output-available tool part at index ${index}`,
+  );
+  return part.output;
+}
 
 function encodeMessage(fragment: ReturnType<typeof user>): UIMessage {
   const message = fragment.codec?.encode();
-  assert.ok(message, 'Expected user fragment to have an encodable message');
-  return message as UIMessage;
+  assert.ok(
+    isUIMessage(message),
+    'Expected user fragment to have an encodable UIMessage',
+  );
+  return message;
 }
 
-function getReminderMetadata(message: UIMessage): UserReminderMetadataRecord[] {
-  const metadata = message.metadata as
-    | { reminders?: UserReminderMetadataRecord[] }
-    | undefined;
-  return metadata?.reminders ?? [];
+function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
+  const message = fragment.codec?.decode();
+  assert.ok(
+    isUIMessage(message),
+    'Expected user fragment to decode to a UIMessage',
+  );
+  return message;
+}
+
+function getReminderMetadata(message: UIMessage): UserReminderMetadata[] {
+  const reminders = getMetadata(message).reminders;
+  if (!Array.isArray(reminders)) {
+    return [];
+  }
+  return reminders.filter(isReminderMetadata);
 }
 
 function getTextPart(message: UIMessage, index = 0): string {
@@ -211,42 +274,37 @@ describe('user reminders', () => {
   });
 
   it('merges reminder metadata with existing metadata and keeps user role', () => {
-    const existingReminder = {
+    const existingReminder: UserReminderMetadata = {
       id: 'existing-reminder',
       text: 'existing',
+      target: 'user',
       partIndex: 0,
       start: 0,
       end: 8,
-      mode: 'part' as const,
+      mode: 'part',
+    };
+    const content: UIMessage & { role: 'user' } = {
+      id: 'msg-with-metadata',
+      role: 'user',
+      metadata: {
+        source: 'seed',
+        reminders: [existingReminder],
+      },
+      parts: [{ type: 'text', text: 'payload' }],
     };
 
-    const fragment = user(
-      {
-        id: 'msg-with-metadata',
-        role: 'assistant',
-        metadata: {
-          source: 'seed',
-          reminders: [existingReminder],
-        },
-        parts: [{ type: 'text', text: 'payload' }],
-      } as unknown as UIMessage & { role: 'user' },
-      reminder('new-reminder'),
-    );
+    const fragment = user(content, reminder('new-reminder'));
     const message = encodeMessage(fragment);
-    const metadata = message.metadata as
-      | {
-          source?: string;
-          reminders?: UserReminderMetadataRecord[];
-        }
-      | undefined;
+    const metadata = getMetadata(message);
+    const reminders = getReminderMetadata(message);
 
     assert.strictEqual(message.id, 'msg-with-metadata');
     assert.strictEqual(message.role, 'user');
     assert.deepStrictEqual(
       {
         source: metadata?.source,
-        existingReminder: metadata?.reminders?.[0],
-        reminderCount: metadata?.reminders?.length,
+        existingReminder: reminders[0],
+        reminderCount: reminders.length,
       },
       {
         source: 'seed',
@@ -255,7 +313,7 @@ describe('user reminders', () => {
       },
     );
 
-    const appendedReminder = metadata?.reminders?.[1];
+    const appendedReminder = reminders[1];
     assert.ok(appendedReminder?.id, 'Appended reminder should include id');
     assert.deepStrictEqual(
       {
@@ -290,12 +348,7 @@ describe('user reminders', () => {
       })),
     );
     const message = encodeMessage(fragment);
-    const metadata = message.metadata as
-      | {
-          environmentReminder?: Record<string, unknown>;
-          reminders?: UserReminderMetadataRecord[];
-        }
-      | undefined;
+    const metadata = getMetadata(message);
 
     assert.ok(
       getTextPart(message).includes(taggedReminder('structured-hint')),
@@ -305,14 +358,14 @@ describe('user reminders', () => {
       version: 1,
       snapshot: { dateKey: '2026-03-27' },
     });
-    assert.strictEqual(metadata?.reminders?.length, 1);
+    assert.strictEqual(getReminderMetadata(message).length, 1);
   });
 });
 
 describe('user codec contract', () => {
   it('decode and encode return the same message with inline reminders', () => {
     const fragment = user('hello', reminder('secret'));
-    const decoded = fragment.codec?.decode() as UIMessage;
+    const decoded = decodeMessage(fragment);
     const encoded = encodeMessage(fragment);
 
     assert.strictEqual(
@@ -344,7 +397,7 @@ describe('user codec contract', () => {
 
   it('decode preserves inline reminders and metadata', () => {
     const fragment = user('payload', reminder('injected'));
-    const decoded = fragment.codec?.decode() as UIMessage;
+    const decoded = decodeMessage(fragment);
 
     const text = getTextPart(decoded);
     assert.ok(text.includes('payload'), 'original content should be present');
@@ -437,10 +490,7 @@ describe('reminder range helpers', () => {
       ['Deploy now.'],
     );
 
-    const strippedMetadata = stripped.metadata as
-      | { source?: string; reminders?: unknown }
-      | undefined;
-    assert.deepStrictEqual(strippedMetadata, { source: 'seed' });
+    assert.deepStrictEqual(stripped.metadata, { source: 'seed' });
 
     assert.deepStrictEqual(
       message.parts.map((part) =>
@@ -448,10 +498,7 @@ describe('reminder range helpers', () => {
       ),
       [`Deploy now.${encodedInlineReminder}`, 'part-reminder'],
     );
-    const originalMetadata = message.metadata as
-      | { source?: string; reminders?: unknown }
-      | undefined;
-    assert.ok(originalMetadata?.reminders);
+    assert.ok(getMetadata(message).reminders);
   });
 
   it('strips reminders across multiple text parts and keeps non-reminder text', () => {
@@ -479,10 +526,7 @@ describe('reminder range helpers', () => {
       ['first', 'second'],
     );
 
-    const metadata = stripped.metadata as
-      | { source?: string; reminders?: unknown }
-      | undefined;
-    assert.deepStrictEqual(metadata, { source: 'seed' });
+    assert.deepStrictEqual(stripped.metadata, { source: 'seed' });
   });
 
   it('removes metadata object when reminders is the only metadata key', () => {
@@ -518,10 +562,111 @@ describe('reminder range helpers', () => {
       ['plain text'],
     );
 
-    const metadata = stripped.metadata as
-      | { source?: string; reminders?: unknown }
-      | undefined;
-    assert.deepStrictEqual(metadata, { source: 'seed' });
+    assert.deepStrictEqual(stripped.metadata, { source: 'seed' });
+  });
+
+  it('strips user reminders and tool-output reminders from string and envelope outputs', () => {
+    const userFragment = user('Deploy now.', reminder('user-reminder'));
+    const userMessage = encodeMessage(userFragment);
+
+    const stringReminder = taggedReminder('string-tool-reminder');
+    const stringToolMessage: UIMessage = {
+      id: 'assistant-string-tool-reminder',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-bash',
+          toolCallId: 'tool-string',
+          state: 'output-available',
+          input: {},
+          output: `stdout${stringReminder}`,
+        },
+      ],
+      metadata: {
+        reminders: [
+          {
+            id: 'tool-string-reminder',
+            text: 'string-tool-reminder',
+            target: 'tool-output',
+            partIndex: 0,
+            start: 'stdout'.length,
+            end: 'stdout'.length + stringReminder.length,
+            mode: 'tool-output',
+          },
+        ],
+      },
+    };
+
+    const envelopeToolMessage: UIMessage = {
+      id: 'assistant-envelope-tool-reminder',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-sql',
+          toolCallId: 'tool-envelope',
+          state: 'output-available',
+          input: {},
+          output: {
+            result: { rows: [{ id: 1 }] },
+            systemReminder: 'object-tool-reminder',
+          },
+        },
+      ],
+      metadata: {
+        reminders: [
+          {
+            id: 'tool-envelope-reminder',
+            text: 'object-tool-reminder',
+            target: 'tool-output',
+            partIndex: 0,
+            start: 0,
+            end: 0,
+            mode: 'tool-output',
+          },
+        ],
+      },
+    };
+
+    const strippedUser = stripReminders(userMessage);
+    const strippedStringTool = stripReminders(stringToolMessage);
+    const strippedEnvelopeTool = stripReminders(envelopeToolMessage);
+
+    assert.strictEqual(getTextPart(strippedUser), 'Deploy now.');
+    assert.strictEqual(strippedUser.metadata, undefined);
+
+    assert.strictEqual(getToolOutput(strippedStringTool), 'stdout');
+    assert.strictEqual(strippedStringTool.metadata, undefined);
+
+    assert.deepStrictEqual(getToolOutput(strippedEnvelopeTool), {
+      rows: [{ id: 1 }],
+    });
+    assert.strictEqual(strippedEnvelopeTool.metadata, undefined);
+  });
+
+  it('treats old reminder metadata without target as a user reminder', () => {
+    const encodedReminder = taggedReminder('legacy-reminder');
+    const message: UIMessage = {
+      id: 'legacy-reminder-metadata',
+      role: 'user',
+      parts: [{ type: 'text', text: `body${encodedReminder}` }],
+      metadata: {
+        reminders: [
+          {
+            id: 'legacy-reminder',
+            text: 'legacy-reminder',
+            partIndex: 0,
+            start: 'body'.length,
+            end: 'body'.length + encodedReminder.length,
+            mode: 'inline',
+          },
+        ],
+      },
+    };
+
+    const stripped = stripReminders(message);
+
+    assert.strictEqual(getTextPart(stripped), 'body');
+    assert.strictEqual(stripped.metadata, undefined);
   });
 });
 
@@ -532,6 +677,7 @@ describe('reminder scheduling', () => {
       assert.ok(isConditionalReminder(fragment));
       assert.strictEqual(fragment.name, 'reminder');
       assert.strictEqual(typeof fragment.metadata?.reminder, 'object');
+      assert.strictEqual(fragment.metadata?.reminder.target, 'user');
     });
 
     it('returns a UserReminder without when', () => {
@@ -548,18 +694,23 @@ describe('reminder scheduling', () => {
         asPart: partMode,
       });
       assert.ok(isConditionalReminder(fragment));
-      const config = (fragment.metadata as { reminder: { asPart: boolean } })
-        .reminder;
-      assert.strictEqual(config.asPart, true);
+      assert.strictEqual(fragment.metadata.reminder.asPart, true);
+    });
+
+    it('stores explicit tool-output target in conditional reminder metadata', () => {
+      const fragment = reminder('text', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      });
+      assert.ok(isConditionalReminder(fragment));
+      assert.strictEqual(fragment.metadata.reminder.target, 'tool-output');
     });
 
     it('stores callback text in fragment metadata when when is provided', () => {
       const cb = (ctx: { turn?: number }) => `turn ${ctx.turn}`;
       const fragment = reminder(cb, { when: once() });
       assert.ok(isConditionalReminder(fragment));
-      const config = (fragment.metadata as { reminder: { text: unknown } })
-        .reminder;
-      assert.strictEqual(typeof config.text, 'function');
+      assert.strictEqual(typeof fragment.metadata.reminder.text, 'function');
     });
 
     it('rejects empty string text even with when', () => {

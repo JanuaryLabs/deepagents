@@ -1,6 +1,6 @@
 ---
 title: Predicates
-description: Composable functions that control when conditional reminders fire based on turn count, message content, or time
+description: Composable functions that control when conditional reminders fire based on turns, content, assistant history, tool usage, token usage, or time
 ---
 
 A predicate is a function that receives a `WhenContext` and returns `true` (fire the reminder) or `false` (skip it). Pass predicates to `reminder()` via the `when` option to create conditional reminders.
@@ -31,6 +31,7 @@ interface WhenContext {
   elapsed?: number;
   messageCount: number;
   lastAssistantMessage?: UIMessage;
+  lastAssistantMessages?: UIMessage[];
 }
 ```
 
@@ -47,6 +48,7 @@ interface WhenContext {
 | `elapsed` | Milliseconds since the last persisted user message |
 | `messageCount` | Total message count across all roles |
 | `lastAssistantMessage` | The last persisted assistant `UIMessage` |
+| `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()` |
 
 `currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists.
 
@@ -152,6 +154,117 @@ engine.set(
 
 See [Skill Reminders](/docs/context/skill-reminders) for details on `IClassifier`, `BM25Classifier`, and building custom classifiers.
 
+## Assistant-History Predicates
+
+### lastAssistantLength(spec)
+
+Fires when the plain-text length of the last persisted assistant reply matches a count spec.
+
+```ts
+import { lastAssistantLength } from '@deepagents/context';
+
+lastAssistantLength({ gte: 2_000 }); // assistant reply is at least 2,000 chars
+lastAssistantLength({ eq: 0 });      // assistant reply is empty
+```
+
+`spec` uses this shape:
+
+```ts
+type CountSpec = { gte?: number; lte?: number; eq?: number };
+```
+
+Use either `eq` or a `gte`/`lte` range. `eq` cannot be combined with range bounds.
+
+## Tool-Based Predicates
+
+These predicates inspect tool parts on `lastAssistantMessage`.
+
+### toolCalled(name)
+
+Fires when the last assistant reply includes at least one completed tool call whose tool name matches `name`.
+
+```ts
+import { toolCalled } from '@deepagents/context';
+
+toolCalled('bash');
+toolCalled((name) => name.startsWith('http_'));
+```
+
+### toolFailed(name)
+
+Fires when the last assistant reply includes a matching tool call with state `output-error`.
+
+```ts
+import { toolFailed } from '@deepagents/context';
+
+toolFailed('bash');
+```
+
+### anyToolCalled()
+
+Fires when the last assistant reply includes any completed tool call.
+
+```ts
+import { anyToolCalled } from '@deepagents/context';
+
+anyToolCalled();
+```
+
+### toolCall(options)
+
+Low-level matcher for tool parts. If you omit `state`, it only considers completed tool parts: `input-available`, `output-available`, and `output-error`.
+
+```ts
+import { toolCall } from '@deepagents/context';
+
+toolCall({
+  name: 'bash',
+  state: 'output-error',
+  errorText: (text) => text.includes('permission denied'),
+});
+```
+
+| Option | Type | Description |
+| --- | --- | --- |
+| `name` | `string \| ((name: string) => boolean)` | Match a tool name exactly or with a predicate |
+| `state` | `ToolUIPart['state']` | Restrict matching to a specific tool part state |
+| `input` | `(input: unknown) => boolean` | Inspect the tool input payload |
+| `output` | `(output: unknown) => boolean` | Inspect the output payload for `output-available` parts |
+| `errorText` | `(text: string) => boolean` | Inspect the error text for `output-error` parts |
+
+### toolCallCount(name, spec)
+
+Counts completed tool calls in the last assistant reply whose name matches `name`, then applies a `CountSpec`.
+
+```ts
+import { toolCallCount } from '@deepagents/context';
+
+toolCallCount('bash', { gte: 3 });
+toolCallCount('sql', { eq: 1 });
+```
+
+## Usage and Elapsed Predicates
+
+### usageExceeds(totalTokens)
+
+Fires when accumulated `chat.metadata.usage.totalTokens` is greater than or equal to `totalTokens`.
+
+```ts
+import { usageExceeds } from '@deepagents/context';
+
+usageExceeds(10_000);
+```
+
+### elapsedExceeds(ms)
+
+Fires when the elapsed time since the last persisted user message is greater than or equal to `ms`.
+
+```ts
+import { elapsedExceeds } from '@deepagents/context';
+
+elapsedExceeds(60_000); // one minute
+```
+
 ## Temporal Predicates
 
 Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. All return `true` on the first turn (when `lastMessageAt` is `undefined`).
@@ -191,7 +304,33 @@ See [Temporal Reminders → Timezone resolution](/docs/context/temporal-reminder
 
 Seasons follow meteorological boundaries: Winter (Dec-Feb), Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov).
 
-## Combinators
+## History Window Combinators
+
+These helpers scan multiple assistant replies by rebinding only `lastAssistantMessage`. Fields such as `content`, `turn`, `usage`, and `elapsed` stay fixed from the outer `WhenContext`.
+
+### withinLastN(n, predicate)
+
+Fires when `predicate` matches at least one of the last `n` assistant replies.
+
+```ts
+import { toolFailed, withinLastN } from '@deepagents/context';
+
+withinLastN(5, toolFailed('bash'));
+```
+
+### everyOfLastN(n, predicate)
+
+Fires only when `predicate` matches every one of the last `n` assistant replies.
+
+```ts
+import { anyToolCalled, everyOfLastN, not } from '@deepagents/context';
+
+everyOfLastN(3, not(anyToolCalled()));
+```
+
+These pair best with `toolCalled()`, `toolCall()`, `toolCallCount()`, `anyToolCalled()`, `toolFailed()`, and `lastAssistantLength()`.
+
+## Boolean Combinators
 
 Compose predicates with boolean logic.
 

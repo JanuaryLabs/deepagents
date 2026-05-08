@@ -1,13 +1,17 @@
-import type { UIMessage } from 'ai';
+import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
 import assert from 'node:assert';
 import { describe, it, mock } from 'node:test';
 
 import {
   ContextEngine,
+  type ContextFragment,
   InMemoryContextStore,
+  type MessageData,
+  type MessageFragment,
   XmlRenderer,
   afterTurn,
   and,
+  assistant,
   assistantText,
   contentIncludes,
   dayChanged,
@@ -24,6 +28,153 @@ import {
 } from '@deepagents/context';
 
 import { getTextParts } from '../../text.ts';
+
+type TestToolName = 'bash' | 'sql';
+type TestToolType = 'tool-bash' | 'tool-sql';
+type TestToolState =
+  | 'output-available'
+  | 'output-error'
+  | 'input-available'
+  | 'input-streaming';
+type OutputAvailableToolPart = ToolUIPart & {
+  state: 'output-available';
+  output: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isUIMessage(value: unknown): value is UIMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    (value.role === 'system' ||
+      value.role === 'user' ||
+      value.role === 'assistant') &&
+    Array.isArray(value.parts)
+  );
+}
+
+function requireUIMessage(value: unknown, label: string): UIMessage {
+  assert.ok(isUIMessage(value), `${label} should be a UIMessage`);
+  return value;
+}
+
+function findMessage(messages: MessageData[], name: string): MessageData {
+  const message = messages.find((item) => item.name === name);
+  assert.ok(message, `Expected stored ${name} message`);
+  return message;
+}
+
+function isOutputAvailableToolPart(
+  part: UIMessage['parts'][number],
+): part is OutputAvailableToolPart {
+  return isStaticToolUIPart(part) && part.state === 'output-available';
+}
+
+function getStoredMessageText(message: MessageData): string {
+  return getTextParts(requireUIMessage(message.data, message.id)).join('');
+}
+
+function requireFragmentId(fragment: ContextFragment): string {
+  assert.ok(fragment.id, 'Expected fragment to have an id');
+  return fragment.id;
+}
+
+function toolPart(init: {
+  name: TestToolName;
+  state: TestToolState;
+  output?: unknown;
+  errorText?: string;
+}): ToolUIPart {
+  const type: TestToolType = init.name === 'bash' ? 'tool-bash' : 'tool-sql';
+  const base: {
+    type: TestToolType;
+    toolCallId: string;
+    input: Record<string, never>;
+  } = {
+    type,
+    toolCallId: `${init.name}-call`,
+    input: {},
+  };
+
+  switch (init.state) {
+    case 'output-available':
+      return {
+        ...base,
+        state: 'output-available',
+        output: init.output,
+      };
+    case 'output-error':
+      return {
+        ...base,
+        state: 'output-error',
+        errorText: init.errorText ?? 'failed',
+      };
+    case 'input-available':
+      return {
+        ...base,
+        state: 'input-available',
+      };
+    case 'input-streaming':
+      return {
+        ...base,
+        state: 'input-streaming',
+      };
+    default:
+      throw new Error(`Unsupported tool state: ${init.state}`);
+  }
+}
+
+function assistantWithToolParts(id: string, parts: ToolUIPart[]): UIMessage {
+  return {
+    id,
+    role: 'assistant',
+    parts,
+  };
+}
+
+function codecBackedAssistant(message: UIMessage): MessageFragment {
+  return {
+    id: message.id,
+    name: 'assistant',
+    type: 'message',
+    persist: true,
+    codec: {
+      decode() {
+        return structuredClone(message);
+      },
+      encode() {
+        return structuredClone(message);
+      },
+    },
+  };
+}
+
+function getOnlyToolPart(message: UIMessage): ToolUIPart {
+  const part = message.parts.find((item): item is ToolUIPart =>
+    item.type.startsWith('tool-'),
+  );
+  assert.ok(part, 'Expected an assistant tool part');
+  return part;
+}
+
+function getToolOutput(message: UIMessage): unknown {
+  const part = getOnlyToolPart(message);
+  return part.state === 'output-available' ? part.output : undefined;
+}
+
+function getReminderMetadata(
+  message: UIMessage,
+): { reminders?: unknown[] } | undefined {
+  if (!isRecord(message.metadata)) {
+    return undefined;
+  }
+
+  const { reminders } = message.metadata;
+  return Array.isArray(reminders) ? { reminders } : undefined;
+}
 
 async function useFakeTime<T>(
   iso: string,
@@ -391,8 +542,8 @@ describe('ContextEngine conditional reminders', () => {
     await engine.save();
 
     const storedMessages = await store.getMessages('save-persist');
-    const storedUser = storedMessages.find((m) => m.name === 'user')!;
-    const storedData = storedUser.data as UIMessage;
+    const storedUser = findMessage(storedMessages, 'user');
+    const storedData = requireUIMessage(storedUser.data, storedUser.id);
 
     const text = getTextParts(storedData).join('');
     assert.ok(
@@ -401,9 +552,7 @@ describe('ContextEngine conditional reminders', () => {
     );
 
     assert.ok(
-      Array.isArray(
-        (storedData.metadata as Record<string, unknown>)?.reminders,
-      ),
+      Array.isArray(getReminderMetadata(storedData)?.reminders),
       'Stored message should have reminder metadata',
     );
   });
@@ -420,7 +569,8 @@ describe('ContextEngine conditional reminders', () => {
     await engine.save();
 
     const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
-    const userMsg = messages.find((m) => m.role === 'user')!;
+    const userMsg = messages.find((m) => m.role === 'user');
+    assert.ok(userMsg, 'Expected resolved user message');
     const text = getTextParts(userMsg).join('');
 
     assert.strictEqual(
@@ -473,6 +623,497 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
+  it('explicit target:user applies reminder to the pending user message', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-user-explicit',
+      userId: 'u1',
+    });
+
+    engine.set(
+      reminder('user-targeted', { when: everyNTurns(1), target: 'user' }),
+      user('hello'),
+    );
+    await engine.save();
+
+    const { messages } = await engine.resolve({ renderer: new XmlRenderer() });
+    const text = getTextParts(messages[0]).join('');
+
+    assert.ok(
+      text.includes('user-targeted'),
+      `Explicit user target should preserve user reminder behavior. Got: ${text}`,
+    );
+  });
+
+  it('target:tool-output appends reminder to a single string output-available tool output', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-string',
+      userId: 'u1',
+    });
+
+    engine.set(user('run bash'));
+    await engine.save();
+
+    engine.set(
+      reminder('inspect stdout before answering', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      assistant(
+        assistantWithToolParts('assistant-string-tool', [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'stdout',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-string'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(
+      part.state,
+      'output-available',
+      'Tool state should remain completed',
+    );
+    assert.strictEqual(
+      part.output,
+      'stdout<system-reminder>inspect stdout before answering</system-reminder>',
+    );
+    assert.strictEqual(
+      getReminderMetadata(assistantMessage)?.reminders?.length,
+      1,
+    );
+  });
+
+  it('target:tool-output persists reminders for codec-backed assistant fragments', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-codec-backed',
+      userId: 'u1',
+    });
+
+    engine.set(user('run bash'));
+    await engine.save();
+
+    engine.set(
+      reminder('inspect cloned stdout before answering', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      codecBackedAssistant(
+        assistantWithToolParts('assistant-codec-backed-tool', [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'stdout',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-codec-backed'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(
+      part.state === 'output-available' ? part.output : undefined,
+      'stdout<system-reminder>inspect cloned stdout before answering</system-reminder>',
+    );
+    assert.strictEqual(
+      getReminderMetadata(assistantMessage)?.reminders?.length,
+      1,
+    );
+  });
+
+  it('target:tool-output preserves branch IDs when updating an existing assistant', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-branch-id',
+      userId: 'u1',
+    });
+
+    const originalAssistantId = 'assistant-branch-tool';
+    engine.set(
+      user('run bash'),
+      assistant(
+        assistantWithToolParts(originalAssistantId, [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'stdout',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    engine.set(
+      reminder('inspect branched stdout before answering', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      codecBackedAssistant(
+        assistantWithToolParts(originalAssistantId, [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'updated stdout',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const activeMessages = await store.getMessages(
+      'cond-target-tool-branch-id',
+    );
+    const branchedAssistant = activeMessages.find((message) => {
+      if (message.name !== 'assistant') return false;
+      const storedMessage = requireUIMessage(message.data, message.id);
+      const output = getToolOutput(storedMessage);
+      return typeof output === 'string' && output.includes('updated stdout');
+    });
+
+    assert.ok(
+      branchedAssistant,
+      'Updated assistant message should exist on the new branch',
+    );
+    assert.notStrictEqual(
+      branchedAssistant.id,
+      originalAssistantId,
+      'Branched assistant should get a new graph message id',
+    );
+
+    const branchedMessage = requireUIMessage(
+      branchedAssistant.data,
+      branchedAssistant.id,
+    );
+    assert.strictEqual(
+      branchedMessage.id,
+      branchedAssistant.id,
+      'Branched stored assistant message should keep UIMessage.id aligned with the graph message id',
+    );
+    assert.strictEqual(
+      getToolOutput(branchedMessage),
+      'updated stdout<system-reminder>inspect branched stdout before answering</system-reminder>',
+    );
+
+    const originalAssistant = await store.getMessage(originalAssistantId);
+    assert.ok(
+      originalAssistant,
+      'Original assistant message should still exist on the old branch',
+    );
+    const originalMessage = requireUIMessage(
+      originalAssistant.data,
+      originalAssistant.id,
+    );
+    assert.strictEqual(getToolOutput(originalMessage), 'stdout');
+  });
+
+  it('target:tool-output wraps a single non-string output-available tool output', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-object',
+      userId: 'u1',
+    });
+
+    engine.set(user('query data'));
+    await engine.save();
+
+    engine.set(
+      reminder('validate rows before answering', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      assistant(
+        assistantWithToolParts('assistant-object-tool', [
+          toolPart({
+            name: 'sql',
+            state: 'output-available',
+            output: { rows: [{ id: 1 }] },
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-object'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(part.state, 'output-available');
+    assert.deepStrictEqual(part.output, {
+      result: { rows: [{ id: 1 }] },
+      systemReminder: 'validate rows before answering',
+    });
+    assert.strictEqual(
+      getReminderMetadata(assistantMessage)?.reminders?.length,
+      1,
+    );
+  });
+
+  it('target:tool-output no-ops when there is no eligible output-available tool output', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-none',
+      userId: 'u1',
+    });
+
+    engine.set(user('call a tool'));
+    await engine.save();
+
+    engine.set(
+      reminder('should not appear', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      assistant(
+        assistantWithToolParts('assistant-no-output-tool', [
+          toolPart({ name: 'bash', state: 'input-available' }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-none'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(part.state, 'input-available');
+    assert.strictEqual(
+      getReminderMetadata(assistantMessage)?.reminders,
+      undefined,
+    );
+  });
+
+  it('target:tool-output no-ops when multiple output-available tool outputs exist', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-parallel',
+      userId: 'u1',
+    });
+
+    engine.set(user('run parallel tools'));
+    await engine.save();
+
+    engine.set(
+      reminder('ambiguous target', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      assistant(
+        assistantWithToolParts('assistant-parallel-tool', [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'one',
+          }),
+          toolPart({
+            name: 'sql',
+            state: 'output-available',
+            output: 'two',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-parallel'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const outputs = assistantMessage.parts
+      .filter((part): part is ToolUIPart => part.type.startsWith('tool-'))
+      .map((part) => (part.state === 'output-available' ? part.output : null));
+
+    assert.deepStrictEqual(outputs, ['one', 'two']);
+    assert.strictEqual(
+      getReminderMetadata(assistantMessage)?.reminders,
+      undefined,
+    );
+  });
+
+  it('target:tool-output ignores asPart', async () => {
+    const partMode = true;
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-ignore-aspart',
+      userId: 'u1',
+    });
+
+    engine.set(user('run bash'));
+    await engine.save();
+
+    engine.set(
+      reminder('stay on output', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+        asPart: partMode,
+      }),
+      assistant(
+        assistantWithToolParts('assistant-ignore-aspart-tool', [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'stdout',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-ignore-aspart'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(assistantMessage.parts.length, 1);
+    assert.strictEqual(
+      part.state === 'output-available' ? part.output : undefined,
+      'stdout<system-reminder>stay on output</system-reminder>',
+    );
+  });
+
+  it('target:tool-output does not apply to output-error tool parts', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-error',
+      userId: 'u1',
+    });
+
+    engine.set(user('run bash'));
+    await engine.save();
+
+    engine.set(
+      reminder('should not apply to errors', {
+        when: everyNTurns(1),
+        target: 'tool-output',
+      }),
+      assistant(
+        assistantWithToolParts('assistant-error-tool', [
+          toolPart({
+            name: 'bash',
+            state: 'output-error',
+            errorText: 'boom',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-error'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(part.state, 'output-error');
+    assert.strictEqual(
+      part.state === 'output-error' ? part.errorText : undefined,
+      'boom',
+    );
+    assert.strictEqual(
+      getReminderMetadata(assistantMessage)?.reminders,
+      undefined,
+    );
+  });
+
+  it('target:tool-output sees pending user message in same turn (no user-target reminders configured)', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'cond-target-tool-pending-user',
+      userId: 'u1',
+    });
+
+    engine.set(
+      reminder('check this', {
+        when: contentIncludes(['flag']),
+        target: 'tool-output',
+      }),
+      user('flag is set'),
+      assistant(
+        assistantWithToolParts('a-pending-user', [
+          toolPart({
+            name: 'bash',
+            state: 'output-available',
+            output: 'stdout',
+          }),
+        ]),
+      ),
+    );
+    await engine.save();
+
+    const storedAssistant = findMessage(
+      await store.getMessages('cond-target-tool-pending-user'),
+      'assistant',
+    );
+    const assistantMessage = requireUIMessage(
+      storedAssistant.data,
+      storedAssistant.id,
+    );
+    const part = getOnlyToolPart(assistantMessage);
+
+    assert.strictEqual(
+      part.state === 'output-available' ? part.output : undefined,
+      'stdout<system-reminder>check this</system-reminder>',
+      'tool-output predicate must see pending user message even when no user-target reminders are configured',
+    );
+  });
+
   it('applies reminder regardless of set() order (reminder after user)', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -516,12 +1157,14 @@ describe('ContextEngine conditional reminders', () => {
       (m) =>
         m.role === 'user' &&
         getTextParts(m).some((t) => t.includes('persisted-msg')),
-    )!;
+    );
     const pendingUser = messages.find(
       (m) =>
         m.role === 'user' &&
         getTextParts(m).some((t) => t.includes('pending-msg')),
-    )!;
+    );
+    assert.ok(persistedUser, 'Expected persisted user message');
+    assert.ok(pendingUser, 'Expected pending user message');
 
     const persistedText = getTextParts(persistedUser).join('');
     const pendingText = getTextParts(pendingUser).join('');
@@ -574,7 +1217,7 @@ describe('ContextEngine conditional reminders', () => {
     await engine.save();
 
     const original = user('hello');
-    const originalId = original.id!;
+    const originalId = requireFragmentId(original);
     engine.set(original, assistantText('reply'));
     await engine.save();
 
@@ -590,11 +1233,7 @@ describe('ContextEngine conditional reminders', () => {
 
     const activeBranchMessages = await store.getMessages('branch-cond');
     const branchedUser = activeBranchMessages.find(
-      (m) =>
-        m.name === 'user' &&
-        getTextParts(m.data as UIMessage)
-          .join('')
-          .includes('updated'),
+      (m) => m.name === 'user' && getStoredMessageText(m).includes('updated'),
     );
 
     assert.ok(
@@ -602,20 +1241,23 @@ describe('ContextEngine conditional reminders', () => {
       'Updated user message should exist on the new branch',
     );
     assert.notStrictEqual(
-      branchedUser!.id,
+      branchedUser.id,
       originalId,
       'Branched message should have a new ID, not the original',
     );
     assert.ok(
-      getTextParts(branchedUser!.data as UIMessage)
-        .join('')
-        .includes('branch-hint'),
+      getStoredMessageText(branchedUser).includes('branch-hint'),
       'Conditional reminder should be applied to the branched message',
+    );
+    assert.strictEqual(
+      requireUIMessage(branchedUser.data, branchedUser.id).id,
+      branchedUser.id,
+      'Branched stored user message should keep UIMessage.id aligned with the graph message id',
     );
 
     const originalMsg = await store.getMessage(originalId);
     assert.ok(originalMsg, 'Original message should still exist on old branch');
-    const originalText = getTextParts(originalMsg!.data as UIMessage).join('');
+    const originalText = getStoredMessageText(originalMsg);
     assert.ok(
       !originalText.includes('branch-hint'),
       `Original message should be untouched. Got: ${originalText}`,
@@ -1145,7 +1787,7 @@ describe('ContextEngine conditional reminders', () => {
     });
 
     it('throws on empty fragment for immediate reminder', () => {
-      const emptyFragment = { name: 'empty', data: null } as any;
+      const emptyFragment: ContextFragment = { name: 'empty', data: null };
       assert.throws(
         () => reminder(emptyFragment),
         /Reminder text must not be empty/,
@@ -1153,7 +1795,7 @@ describe('ContextEngine conditional reminders', () => {
     });
 
     it('throws on empty fragment for conditional reminder', () => {
-      const emptyFragment = { name: 'empty', data: null } as any;
+      const emptyFragment: ContextFragment = { name: 'empty', data: null };
       assert.throws(
         () => reminder(emptyFragment, { when: everyNTurns(1) }),
         /Reminder text must not be empty/,

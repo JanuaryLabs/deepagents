@@ -4,8 +4,8 @@ import {
   generateId,
   validateUIMessages,
 } from 'ai';
-import { mergeWith } from 'lodash-es';
 
+import { type ChainSummary, ChainSummaryBuilder } from './chain-summary.ts';
 import {
   type EstimateResult,
   type FragmentEstimate,
@@ -19,16 +19,19 @@ import {
   isMessageFragment,
   toMessageFragment,
 } from './fragments.ts';
-import {
-  isConditionalReminder,
-  resolveReminderAsync,
-  user,
-} from './fragments/message/user.ts';
+import { isConditionalReminder } from './fragments/message/user.ts';
 import type { Models } from './models.generated.ts';
 import {
   type ContextRenderer,
   XmlRenderer,
 } from './renderers/abstract.renderer.ts';
+import type {
+  BaseWhenCtx,
+  ReminderTargetHandler,
+} from './save/reminder-target-handler.ts';
+import { SavePipeline, type SaveResult } from './save/save-pipeline.ts';
+import { ToolOutputTargetHandler } from './save/tool-output-target-handler.ts';
+import { UserTargetHandler } from './save/user-target-handler.ts';
 import type { SkillPathMapping } from './skills/types.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import {
@@ -42,7 +45,9 @@ import {
   type MessageData,
   type StoredChatData,
 } from './store/store.ts';
-import { extractPlainText } from './text.ts';
+import { requireUIMessage } from './ui-message-guards.ts';
+
+export type { SaveResult } from './save/save-pipeline.ts';
 
 /**
  * Result of resolving context - ready for AI SDK consumption.
@@ -60,13 +65,6 @@ export interface ResolveResult {
 export interface ResolveOptions {
   /** Renderer to use for system prompt (defaults to XmlRenderer) */
   renderer: ContextRenderer;
-}
-
-/**
- * Result of saving pending messages to the graph.
- */
-export interface SaveResult {
-  headMessageId: string | undefined;
 }
 
 /**
@@ -89,6 +87,73 @@ function estimateMessageContent(data: unknown): string {
 
 function isLanguageModelUsage(value: unknown): value is LanguageModelUsage {
   return typeof value === 'object' && value !== null && 'totalTokens' in value;
+}
+
+function addUsageValue(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  if (current === undefined && next === undefined) {
+    return undefined;
+  }
+
+  return (current ?? 0) + (next ?? 0);
+}
+
+function mergeLanguageModelUsage(
+  current: LanguageModelUsage | undefined,
+  next: LanguageModelUsage,
+): LanguageModelUsage {
+  return {
+    inputTokens: addUsageValue(current?.inputTokens, next.inputTokens),
+    inputTokenDetails: {
+      noCacheTokens: addUsageValue(
+        current?.inputTokenDetails?.noCacheTokens,
+        next.inputTokenDetails?.noCacheTokens,
+      ),
+      cacheReadTokens: addUsageValue(
+        current?.inputTokenDetails?.cacheReadTokens,
+        next.inputTokenDetails?.cacheReadTokens,
+      ),
+      cacheWriteTokens: addUsageValue(
+        current?.inputTokenDetails?.cacheWriteTokens,
+        next.inputTokenDetails?.cacheWriteTokens,
+      ),
+    },
+    outputTokens: addUsageValue(current?.outputTokens, next.outputTokens),
+    outputTokenDetails: {
+      textTokens: addUsageValue(
+        current?.outputTokenDetails?.textTokens,
+        next.outputTokenDetails?.textTokens,
+      ),
+      reasoningTokens: addUsageValue(
+        current?.outputTokenDetails?.reasoningTokens,
+        next.outputTokenDetails?.reasoningTokens,
+      ),
+    },
+    totalTokens: addUsageValue(current?.totalTokens, next.totalTokens),
+    reasoningTokens: addUsageValue(
+      current?.reasoningTokens,
+      next.reasoningTokens,
+    ),
+    cachedInputTokens: addUsageValue(
+      current?.cachedInputTokens,
+      next.cachedInputTokens,
+    ),
+    raw: next.raw ?? current?.raw,
+  };
+}
+
+function isSkillPathMapping(value: unknown): value is SkillPathMapping {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).name === 'string' &&
+    typeof (value as Record<string, unknown>).description === 'string' &&
+    typeof (value as Record<string, unknown>).host === 'string' &&
+    typeof (value as Record<string, unknown>).sandbox === 'string'
+  );
 }
 
 function isEmptyAssistantPlaceholder(message: UIMessage): boolean {
@@ -314,59 +379,19 @@ export class ContextEngine {
    * Count user turns in the conversation and return the previous saved user message context.
    * Includes persisted messages and pending messages in the turn count.
    */
-  async #getChainContext(): Promise<{
-    turn: number;
-    messageCount: number;
-    lastMessageAt?: number;
-    lastMessage?: UIMessage;
-    lastAssistantMessage?: UIMessage;
-    lastAssistantMessages?: UIMessage[];
-  }> {
+  async #getChainContext(): Promise<ChainSummary> {
     await this.#ensureInitialized();
 
-    let turn = 0;
-    let messageCount = 0;
-    let lastMessageAt: number | undefined;
-    let lastMessage: UIMessage | undefined;
-    let lastAssistantMessage: UIMessage | undefined;
-    const lastAssistantMessages: UIMessage[] = [];
-
+    const builder = new ChainSummaryBuilder();
     if (this.#branch?.headMessageId) {
       const chain = await this.#store.getMessageChain(
         this.#branch.headMessageId,
       );
-      for (const msg of chain) {
-        messageCount++;
-
-        if (msg.name === 'assistant') {
-          const assistantMsg = msg.data as UIMessage;
-          lastAssistantMessage = assistantMsg;
-          lastAssistantMessages.push(assistantMsg);
-        }
-
-        if (msg.name !== 'user') {
-          continue;
-        }
-
-        turn++;
-        lastMessageAt = msg.createdAt;
-        lastMessage = msg.data as UIMessage;
-      }
+      for (const msg of chain) builder.ingestStored(msg);
     }
-
-    for (const fragment of this.#pendingMessages) {
-      messageCount++;
-      if (fragment.name === 'user') turn++;
-    }
-
-    return {
-      turn,
-      messageCount,
-      lastMessageAt,
-      lastMessage,
-      lastAssistantMessage,
-      lastAssistantMessages,
-    };
+    for (const fragment of this.#pendingMessages)
+      builder.ingestPending(fragment);
+    return builder.build();
   }
 
   public async getTurnCount(): Promise<number> {
@@ -382,7 +407,9 @@ export class ContextEngine {
         this.#branch.headMessageId,
       );
       for (const msg of chain) {
-        if (msg.name === 'user') return msg.data as UIMessage;
+        if (msg.name === 'user') {
+          return requireUIMessage(msg.data, `Stored user message "${msg.id}"`);
+        }
       }
     }
 
@@ -391,7 +418,10 @@ export class ContextEngine {
       if (!fragment.codec) {
         throw new Error(`Fragment "${fragment.name}" is missing codec.`);
       }
-      return fragment.codec.encode() as UIMessage;
+      return requireUIMessage(
+        fragment.codec.encode(),
+        `Pending fragment "${fragment.name}"`,
+      );
     }
 
     return undefined;
@@ -444,7 +474,7 @@ export class ContextEngine {
         this.#branch.headMessageId,
       );
       for (const msg of chain) {
-        const data = msg.data as UIMessage;
+        const data = requireUIMessage(msg.data, `Stored message "${msg.id}"`);
         if (isEmptyAssistantPlaceholder(data)) continue;
         messages.push(data);
       }
@@ -454,7 +484,10 @@ export class ContextEngine {
       if (!fragment.codec) {
         throw new Error(`Fragment "${fragment.name}" is missing codec.`);
       }
-      const encoded = fragment.codec.encode() as UIMessage;
+      const encoded = requireUIMessage(
+        fragment.codec.encode(),
+        `Pending fragment "${fragment.name}"`,
+      );
       if (isEmptyAssistantPlaceholder(encoded)) continue;
       messages.push(encoded);
     }
@@ -579,146 +612,67 @@ export class ContextEngine {
       return { headMessageId: this.#branch?.headMessageId ?? undefined };
     }
 
-    const shouldBranch = options?.branch ?? true;
+    const pipeline = new SavePipeline(
+      this.#asSavePipelineEngine(),
+      this.#pendingMessages,
+      this.#fragments,
+    );
+    await pipeline.applyUpdateBranching(options?.branch ?? true);
+    await pipeline.evaluateReminders(this.#reminderHandlers);
+    const result = await pipeline.persist();
 
-    if (shouldBranch) {
-      // Check if any fragment is an update to an existing message.
-      // If so, rewind to the parent to create a new branch, preserving the original.
-      for (const fragment of this.#pendingMessages) {
-        if (fragment.id) {
-          const existing = await this.#store.getMessage(fragment.id);
-          if (existing && existing.parentId) {
-            // Rewind to parent, creates new branch, preserves pending
-            await this.#rewindForUpdate(existing.parentId);
-            // Regenerate ID so the original message stays untouched on old branch
-            fragment.id = crypto.randomUUID();
-            break; // Only need to rewind once
-          }
-        }
-      }
-    }
-
-    const conditionalReminders = this.#fragments.filter(isConditionalReminder);
-    if (conditionalReminders.length > 0) {
-      let lastUserIndex = -1;
-      for (let i = this.#pendingMessages.length - 1; i >= 0; i--) {
-        if (this.#pendingMessages[i].name === 'user') {
-          lastUserIndex = i;
-          break;
-        }
-      }
-
-      if (lastUserIndex >= 0) {
-        const lastUserFragment = this.#pendingMessages[lastUserIndex];
-        if (lastUserFragment.codec) {
-          const {
-            turn,
-            messageCount,
-            lastMessageAt,
-            lastMessage,
-            lastAssistantMessage,
-            lastAssistantMessages,
-          } = await this.#getChainContext();
-          const original = lastUserFragment.codec.encode() as UIMessage & {
-            role: 'user';
-          };
-          const plainText = extractPlainText(original);
-          const rawUsage = this.#chatData?.metadata?.usage;
-          const usage = isLanguageModelUsage(rawUsage) ? rawUsage : undefined;
-          const elapsed =
-            lastMessageAt !== undefined
-              ? Date.now() - lastMessageAt
-              : undefined;
-
-          const whenCtx = {
-            turn,
-            content: plainText,
-            lastMessageAt,
-            lastMessage,
-            currentMessage: original,
-            chat: this.#chatData!,
-            usage,
-            branch: this.#branchName,
-            elapsed,
-            messageCount,
-            lastAssistantMessage,
-            lastAssistantMessages,
-          };
-
-          const configs = conditionalReminders.map(
-            (it) => it.metadata.reminder,
-          );
-          const whenResults = await Promise.all(
-            configs.map((it) => it.when(whenCtx)),
-          );
-          const firedReminders = configs.filter((_, i) => whenResults[i]);
-
-          if (firedReminders.length > 0) {
-            const resolvedOrNull = await Promise.all(
-              firedReminders.map((it) => resolveReminderAsync(it, whenCtx)),
-            );
-            const reminders = resolvedOrNull.flatMap((resolved, i) => {
-              if (!resolved) return [];
-              return [
-                {
-                  text: resolved.text,
-                  asPart: firedReminders[i].asPart,
-                  metadata: resolved.metadata,
-                },
-              ];
-            });
-            const recreated = user(original, ...reminders);
-            recreated.id = lastUserFragment.id;
-            this.#pendingMessages[lastUserIndex] = recreated;
-          }
-        }
-      }
-    }
-
-    let parentId = this.#activeBranch.headMessageId;
-    const now = Date.now();
-
-    // Add each pending message to the graph
-    for (const fragment of this.#pendingMessages) {
-      if (!fragment.codec) {
-        throw new Error(`Fragment "${fragment.name}" is missing codec.`);
-      }
-
-      const msgId = fragment.id ?? crypto.randomUUID();
-
-      // When updating in place, a fragment's ID may equal the current branch head.
-      // Deriving parentId from the head would create a self-reference.
-      // Use the existing message's original parentId instead.
-      let msgParentId = parentId;
-      if (!shouldBranch && msgId === parentId) {
-        const existing = await this.#store.getMessage(msgId);
-        if (existing) {
-          msgParentId = existing.parentId;
-        }
-      }
-
-      const messageData: MessageData = {
-        id: msgId,
-        chatId: this.#chatId,
-        parentId: msgParentId,
-        name: fragment.name,
-        type: fragment.type,
-        data: fragment.codec.encode(),
-        createdAt: now,
-      };
-
-      await this.#store.addMessage(messageData);
-      parentId = messageData.id;
-    }
-
-    // Update branch head to last message
-    await this.#store.updateBranchHead(this.#activeBranch.id, parentId);
-    this.#activeBranch.headMessageId = parentId;
-
-    // Clear pending messages
     this.#pendingMessages = [];
+    return result;
+  }
 
-    return { headMessageId: this.#activeBranch.headMessageId ?? undefined };
+  #reminderHandlers: ReminderTargetHandler[] = [
+    new UserTargetHandler(),
+    new ToolOutputTargetHandler(),
+  ];
+
+  #asSavePipelineEngine() {
+    return {
+      store: this.#store,
+      chatId: this.#chatId,
+      branchName: this.#branchName,
+      getActiveBranch: () => ({
+        id: this.#activeBranch.id,
+        headMessageId: this.#activeBranch.headMessageId,
+      }),
+      commitHead: async (headMessageId: string) => {
+        await this.#store.updateBranchHead(
+          this.#activeBranch.id,
+          headMessageId,
+        );
+        this.#activeBranch.headMessageId = headMessageId;
+      },
+      rewindForUpdate: (parentId: string) => this.#rewindForUpdate(parentId),
+      getChainSummary: () => this.#getChainContext(),
+      buildBaseWhenCtx: (chain: ChainSummary): BaseWhenCtx => {
+        const rawUsage = this.#chatData?.metadata?.usage;
+        const usage = isLanguageModelUsage(rawUsage) ? rawUsage : undefined;
+        const elapsed =
+          chain.lastMessageAt !== undefined
+            ? Date.now() - chain.lastMessageAt
+            : undefined;
+        const chatData = this.#chatData;
+        if (!chatData) {
+          throw new Error(
+            'ContextEngine must be initialized before reminders run',
+          );
+        }
+        return {
+          turn: chain.turn,
+          messageCount: chain.messageCount,
+          lastMessageAt: chain.lastMessageAt,
+          lastMessage: chain.lastMessage,
+          chat: chatData,
+          usage,
+          branch: this.#branchName,
+          elapsed,
+        };
+      },
+    };
   }
 
   /**
@@ -1056,16 +1010,11 @@ export class ContextEngine {
     // Read fresh data from store to prevent race conditions with concurrent calls
     const freshChatData = await this.#store.getChat(this.#chatId);
 
-    // Get current usage from metadata (if any)
-    const currentUsage = (freshChatData?.metadata?.usage ??
-      {}) as Partial<LanguageModelUsage>;
-
-    // Accumulate usage - recursively add all numeric fields
-    const updatedUsage = mergeWith({}, currentUsage, usage, (a, b) =>
-      typeof a === 'number' || typeof b === 'number'
-        ? (a ?? 0) + (b ?? 0)
-        : undefined,
-    ) as LanguageModelUsage;
+    const storedUsage = freshChatData?.metadata?.usage;
+    const currentUsage = isLanguageModelUsage(storedUsage)
+      ? storedUsage
+      : undefined;
+    const updatedUsage = mergeLanguageModelUsage(currentUsage, usage);
 
     // Update chat metadata with accumulated usage
     this.#chatData = await this.#store.updateChat(this.#chatId, {
@@ -1125,8 +1074,13 @@ export class ContextEngine {
    */
   public getSkillMounts() {
     for (const fragment of this.#fragments) {
-      if (fragment.name === 'available_skills' && fragment.metadata?.mounts) {
-        return { mounts: fragment.metadata.mounts as SkillPathMapping[] };
+      const mounts = fragment.metadata?.mounts;
+      if (
+        fragment.name === 'available_skills' &&
+        Array.isArray(mounts) &&
+        mounts.every(isSkillPathMapping)
+      ) {
+        return { mounts };
       }
     }
     return { mounts: [] };

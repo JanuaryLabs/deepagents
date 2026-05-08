@@ -1,9 +1,9 @@
 ---
 title: Reminders
-description: Inject situational context into user messages so the LLM stays aware of things it cannot see in the conversation history
+description: Inject situational context into user messages so the LLM stays aware of hidden runtime facts, active skills, and recent conversation signals
 ---
 
-Reminders inject hidden text into user messages to give the LLM situational awareness — current date, active skills, recurring instructions. The text is invisible to the user but visible to the model.
+Reminders inject hidden text into user messages to give the LLM situational awareness — current date, active skills, recent tool behavior, recurring instructions. The text is invisible to the user but visible to the model.
 
 ## How Reminders Work
 
@@ -68,7 +68,7 @@ Use part mode for structured data (dates, skill lists, fragments) to keep remind
 
 ## Conditional Reminders
 
-Add a `when` predicate to create reminders that fire based on turn count, content, or time. Pass them to `engine.set()`; the engine evaluates them at `save()` time.
+Add a `when` predicate to create reminders that fire based on turn count, message content, assistant/tool history, token usage, or time. Pass them to `engine.set()`; the engine evaluates them at `save()` time.
 
 ```ts
 import { reminder, everyNTurns, user } from '@deepagents/context';
@@ -79,7 +79,7 @@ engine.set(
 );
 ```
 
-The engine applies conditional reminders to the **last pending user message** during `save()`. It builds a `WhenContext` with the current turn count, message content, and last persisted message, then evaluates each predicate.
+The engine applies conditional reminders to the **last pending user message** during `save()`. It builds a `WhenContext` with the current turn count, message content, usage totals, message counts, and recent assistant history, then evaluates each predicate.
 
 ```ts
 import { reminder, contentIncludes, afterTurn, and, user } from '@deepagents/context';
@@ -115,10 +115,16 @@ interface ReminderContext {
   lastMessageAt?: number;     // Timestamp of last persisted user message
   lastMessage?: UIMessage;    // Last persisted user message (with metadata)
   currentMessage?: UIMessage; // Pending user message for the current turn
+  chat?: StoredChatData;      // Active chat record
+  usage?: LanguageModelUsage; // Accumulated usage metadata
+  branch?: string;            // Active branch name
+  elapsed?: number;           // Milliseconds since last persisted user message
+  messageCount?: number;      // Total message count across all roles
+  lastAssistantMessage?: UIMessage; // Last persisted assistant message
 }
 ```
 
-Conditional reminders populate all fields at `save()` time. Immediate reminders receive only `content`.
+Conditional reminders populate these fields at `save()` time. Immediate reminders receive only `content`.
 
 ## Stripping Reminders
 
