@@ -66,8 +66,7 @@ engine.set(...instructions(), ...schemaFragments);
 
 That `TEXT2SQL_ADAPTERS` path must point to a module inside the sandbox whose
 default export is the adapter map for the `sql` CLI. Mount, upload, or write
-that module before starting the agent. See
-[SQL CLI in Sandboxes](/docs/text2sql/sqlv3) for the sandbox setup details.
+that module before starting the agent.
 
 Use that engine when building the chat agent
 (`const ai = agent({ context: engine, ... })`) and call `chat(ai)` from

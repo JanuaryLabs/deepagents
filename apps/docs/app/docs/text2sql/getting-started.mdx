@@ -278,8 +278,7 @@ for await (const chunk of stream) {
 The `/workspace/text2sql-adapters.ts` module must exist inside the sandbox and
 default-export the adapter map the CLI should load. If you are mounting your
 app source into the container, point `TEXT2SQL_ADAPTERS` at that mounted module;
-otherwise upload or write the file before calling `chat()`. See
-[SQL CLI in Sandboxes](/docs/text2sql/sqlv3) for the full setup.
+otherwise upload or write the file before calling `chat()`.
 
 `toSql()` is stateless. It reads cached schema fragments, but it does not write
 messages, titles, or usage into your `ContextStore`. Use the `chat()` helper
