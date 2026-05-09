@@ -175,6 +175,25 @@ export async function withSqlServerContainer<T>(
   fn: (container: SqlServerContainer) => Promise<T>,
   config?: SqlServerContainerConfig,
 ): Promise<T | undefined> {
+  const container = await startSqlServerContainer(config);
+  if (!container) {
+    return undefined;
+  }
+
+  try {
+    return await fn(container);
+  } finally {
+    await container.cleanup();
+  }
+}
+
+/**
+ * Start a SQL Server test container and return it to the caller.
+ * The caller owns cleanup.
+ */
+export async function startSqlServerContainer(
+  config?: SqlServerContainerConfig,
+): Promise<SqlServerContainer | undefined> {
   const dockerAvailable = await checkDockerAvailable('SQL Server tests');
   if (!dockerAvailable) {
     return undefined;
@@ -213,7 +232,7 @@ export async function withSqlServerContainer<T>(
     // Build connection string for mssql package
     const connectionString = `Server=localhost,${container.port};Database=${database};User Id=${user};Password=${password};TrustServerCertificate=true;Encrypt=false;`;
 
-    const sqlServerContainer: SqlServerContainer = {
+    return {
       connectionString,
       containerId: container.containerId,
       host: container.host,
@@ -223,9 +242,8 @@ export async function withSqlServerContainer<T>(
       database,
       cleanup: container.cleanup,
     };
-
-    return await fn(sqlServerContainer);
-  } finally {
+  } catch (error) {
     await container.cleanup();
+    throw error;
   }
 }

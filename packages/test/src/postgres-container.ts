@@ -94,6 +94,25 @@ export async function withPostgresContainer<T>(
   fn: (container: PostgresContainer) => Promise<T>,
   config?: PostgresContainerConfig,
 ): Promise<T | undefined> {
+  const container = await startPostgresContainer(config);
+  if (!container) {
+    return undefined;
+  }
+
+  try {
+    return await fn(container);
+  } finally {
+    await container.cleanup();
+  }
+}
+
+/**
+ * Start a PostgreSQL test container and return it to the caller.
+ * The caller owns cleanup.
+ */
+export async function startPostgresContainer(
+  config?: PostgresContainerConfig,
+): Promise<PostgresContainer | undefined> {
   const dockerAvailable = await checkDockerAvailable('PostgreSQL tests');
   if (!dockerAvailable) {
     return undefined;
@@ -125,7 +144,7 @@ export async function withPostgresContainer<T>(
 
     const connectionString = `postgresql://${user}:${password}@localhost:${container.port}/${database}`;
 
-    const postgresContainer: PostgresContainer = {
+    return {
       connectionString,
       containerId: container.containerId,
       host: container.host,
@@ -135,9 +154,8 @@ export async function withPostgresContainer<T>(
       database,
       cleanup: container.cleanup,
     };
-
-    return await fn(postgresContainer);
-  } finally {
+  } catch (error) {
     await container.cleanup();
+    throw error;
   }
 }
