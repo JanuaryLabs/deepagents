@@ -6,6 +6,7 @@ import type {
 
 export class FunctionResolver implements ValueResolver {
   readonly name = 'FunctionResolver';
+  readonly requiresSandbox = true;
 
   canResolve(value: unknown): boolean {
     return typeof value === 'function';

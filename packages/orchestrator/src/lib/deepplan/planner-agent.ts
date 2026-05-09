@@ -318,7 +318,6 @@ export async function plan(
     model: plannerModel,
     context,
     schema: PlannerOutputSchema,
-    sandbox: await createBashTool(),
   });
 
   const output = await plannerOutput.generate(state);

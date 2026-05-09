@@ -2,8 +2,19 @@ import type { ContextEngine } from '../engine.ts';
 import type { AgentSandbox } from '../sandbox/types.ts';
 
 export interface LoadContext {
-  sandbox: AgentSandbox;
-  context: ContextEngine;
+  /**
+   * Sandbox available to loaders for IO. Optional — required only when a
+   * resolver with `requiresSandbox = true` is dispatched. The walker throws a
+   * clear error in that case if the sandbox is absent.
+   */
+  sandbox?: AgentSandbox;
+  /**
+   * The owning engine. Optional in `LoadContext` so unit tests of resolvers
+   * don't need to construct a real engine — production callsites (engine.resolve
+   * and engine.estimate) always pass `this`, so loaders can safely use
+   * `ctx.context!` when they need it.
+   */
+  context?: ContextEngine;
   signal?: AbortSignal;
 }
 
@@ -21,6 +32,13 @@ export type GeneratorFragmentLoader = (
 
 export interface ValueResolver {
   readonly name: string;
+  /**
+   * When true, the walker throws if this resolver is dispatched without a
+   * sandbox in `LoadContext`. Default false (Promise/Iterable resolvers don't
+   * touch the sandbox). Function-bodied resolvers (async/sync/generator) set
+   * this to true so loaders can safely access `ctx.sandbox` in their bodies.
+   */
+  readonly requiresSandbox?: boolean;
   canResolve(value: unknown): boolean;
   /**
    * Returns the materialized value. Typed `unknown` (not `FragmentData`) to avoid

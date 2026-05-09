@@ -66,6 +66,11 @@ export class FragmentLoaderResolver {
 
     const handler = this.#resolvers.find((r) => r.canResolve(value));
     if (handler) {
+      if (handler.requiresSandbox && !ctx.sandbox) {
+        throw new Error(
+          `Fragment '${path}' is dispatched to ${handler.name}, which requires a sandbox; none was provided`,
+        );
+      }
       let resolved: unknown;
       try {
         resolved = await this.#raceWithSignal(

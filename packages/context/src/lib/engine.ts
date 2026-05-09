@@ -71,8 +71,13 @@ export interface ResolveResult {
 export interface ResolveOptions {
   /** Renderer to use for system prompt (defaults to XmlRenderer) */
   renderer: ContextRenderer;
-  /** Sandbox passed to async fragment loaders */
-  sandbox: AgentSandbox;
+  /**
+   * Sandbox forwarded to resolvers that declare `requiresSandbox`. Optional —
+   * required only if fragments contain values that dispatch to such resolvers
+   * (default chain: AsyncResolver, FunctionResolver, GeneratorResolver). Walker
+   * throws pre-dispatch with the fragment path otherwise.
+   */
+  sandbox?: AgentSandbox;
   /** Optional cancellation signal forwarded to loaders */
   signal?: AbortSignal;
 }
@@ -180,8 +185,12 @@ export interface InspectOptions {
   modelId: Models;
   /** Renderer for estimation (required) */
   renderer: ContextRenderer;
-  /** Sandbox passed to async fragment loaders */
-  sandbox: AgentSandbox;
+  /**
+   * Sandbox forwarded to the resolver chain via estimate(). Optional —
+   * required only if fragments contain values that dispatch to resolvers
+   * declaring `requiresSandbox`.
+   */
+  sandbox?: AgentSandbox;
   /** Optional cancellation signal forwarded to loaders */
   signal?: AbortSignal;
 }
@@ -716,9 +725,9 @@ export class ContextEngine {
     modelId: Models,
     options: {
       renderer?: ContextRenderer;
-      sandbox: AgentSandbox;
+      sandbox?: AgentSandbox;
       signal?: AbortSignal;
-    },
+    } = {},
   ): Promise<EstimateResult> {
     await this.#ensureInitialized();
     await this.#loaderResolver.resolve(this.#fragments, {

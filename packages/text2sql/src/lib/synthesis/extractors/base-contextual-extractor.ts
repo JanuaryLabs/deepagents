@@ -96,7 +96,6 @@ export async function resolveContext(params: {
     model: groq('openai/gpt-oss-20b'),
     context,
     schema: contextResolverSchema,
-    sandbox: await createBashTool(),
   });
 
   return resolverOutput.generate();

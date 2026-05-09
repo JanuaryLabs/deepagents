@@ -6,6 +6,7 @@ import type {
 
 export class AsyncResolver implements ValueResolver {
   readonly name = 'AsyncResolver';
+  readonly requiresSandbox = true;
 
   canResolve(value: unknown): boolean {
     return (

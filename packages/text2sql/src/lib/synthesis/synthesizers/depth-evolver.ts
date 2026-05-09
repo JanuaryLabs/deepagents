@@ -158,7 +158,6 @@ async function evolveQuestion(params: {
     model: params.model ?? groq('openai/gpt-oss-20b'),
     context,
     schema: evolverOutputSchema,
-    sandbox: await createBashTool(),
   });
 
   return evolverOutput.generate();

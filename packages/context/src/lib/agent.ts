@@ -540,7 +540,12 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
   context?: ContextEngine;
   model?: AgentModel;
   schema: TSchema;
-  sandbox: AgentSandbox;
+  /**
+   * Optional sandbox forwarded to context.resolve(). Required only when the
+   * referenced context contains values that dispatch to resolvers declaring
+   * `requiresSandbox` (e.g. async/sync/generator function loaders).
+   */
+  sandbox?: AgentSandbox;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   experimental_telemetry?: Parameters<
     typeof generateText

@@ -126,7 +126,6 @@ async function paraphraseQuestion(params: {
     model: params.model ?? groq('openai/gpt-oss-20b'),
     context,
     schema: paraphraserOutputSchema,
-    sandbox: await createBashTool(),
   });
 
   return paraphraserOutput.generate();

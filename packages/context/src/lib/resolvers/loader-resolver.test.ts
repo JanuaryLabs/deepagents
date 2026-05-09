@@ -16,7 +16,6 @@ import {
   PromiseResolver,
   XmlRenderer,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   defaultResolvers,
   fragment,
@@ -24,10 +23,7 @@ import {
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 
@@ -176,12 +172,79 @@ describe('FragmentLoaderResolver — cycle handling', () => {
 
   it('terminates on a self-referential array cycle', async () => {
     const arr: FragmentData[] = ['a'];
-    arr.push(arr);
+    arr.push(arr); // arr[1] === arr — circular reference
     const f = fragment('cyclic', arr);
     const walker = newWalker();
     await walker.resolve([f], await ctx());
     const data = f.data as unknown[][];
     assert.strictEqual(data[0][0], 'a');
+    assert.strictEqual(
+      data[0][1],
+      undefined,
+      'cycle slot must be dropped (returned as undefined)',
+    );
+  });
+});
+
+describe('FragmentLoaderResolver — sandbox optionality', () => {
+  const emptyCtx = (): LoadContext => ({});
+
+  it('throws pre-dispatch when a function loader has no sandbox', async () => {
+    const f = fragment('readme', async () => 'contents');
+    const walker = newWalker();
+    await assert.rejects(
+      () => walker.resolve([f], emptyCtx()),
+      /Fragment 'readme' is dispatched to AsyncResolver, which requires a sandbox; none was provided/,
+    );
+  });
+
+  it('throws pre-dispatch for sync function loaders too', async () => {
+    const f = fragment('val', () => 'contents');
+    const walker = newWalker();
+    await assert.rejects(
+      () => walker.resolve([f], emptyCtx()),
+      /Fragment 'val' is dispatched to FunctionResolver, which requires a sandbox; none was provided/,
+    );
+  });
+
+  it('allows promise values without a sandbox', async () => {
+    const f = fragment('promised', Promise.resolve('hi'));
+    const walker = newWalker();
+    await walker.resolve([f], emptyCtx());
+    assert.deepStrictEqual(f.data, ['hi']);
+  });
+
+  it('allows iterable values without a sandbox', async () => {
+    const f = fragment('iterated', new Set(['a', 'b']));
+    const walker = newWalker();
+    await walker.resolve([f], emptyCtx());
+    assert.deepStrictEqual(f.data, [['a', 'b']]);
+  });
+
+  it('allows static fragments without a sandbox', async () => {
+    const f = fragment('static', 'hello', 42);
+    const walker = newWalker();
+    await walker.resolve([f], emptyCtx());
+    assert.deepStrictEqual(f.data, ['hello', 42]);
+  });
+
+  it('honors a custom resolver that opts out of sandbox', async () => {
+    class FunctionNoSandboxResolver {
+      readonly name = 'FunctionNoSandboxResolver';
+      readonly requiresSandbox = false;
+      canResolve(v: unknown): boolean {
+        return typeof v === 'function';
+      }
+      async resolve(v: unknown): Promise<unknown> {
+        return (v as () => unknown)();
+      }
+    }
+    const walker = new FragmentLoaderResolver([
+      new FunctionNoSandboxResolver(),
+    ]);
+    const f = fragment('safe', () => 'no-sandbox-needed');
+    await walker.resolve([f], emptyCtx());
+    assert.deepStrictEqual(f.data, ['no-sandbox-needed']);
   });
 });
 
@@ -206,10 +269,9 @@ describe('FragmentLoaderResolver — abort signal', () => {
     const ac = new AbortController();
     const f = fragment(
       'slow',
-      () =>
-        new Promise<string>((resolve) =>
-          setTimeout(() => resolve('too-late'), 200),
-        ),
+      // Never-resolves; the only way out is through the abort signal.
+      // Topology-based race avoids the timing flakiness of setTimeout vs setTimeout.
+      () => new Promise<string>(() => {}),
     );
     const walker = newWalker();
     setTimeout(() => ac.abort(new Error('mid-flight')), 20);
@@ -262,6 +324,8 @@ describe('FragmentLoaderResolver — full default chain integration', () => {
       new IterableResolver(),
     ]);
     await walker.resolve([f], await ctx());
+    // f.data is `[children]` because fragment(name, ...children) wraps in array.
+    // The Set materializes to its own array (['from-iterable']).
     assert.deepStrictEqual(f.data, [
       ['from-async', 'from-sync', 'from-promise', ['from-iterable']],
     ]);

@@ -17,6 +17,7 @@ const GENERATOR_CTOR_NAMES = new Set([
 
 export class GeneratorResolver implements ValueResolver {
   readonly name = 'GeneratorResolver';
+  readonly requiresSandbox = true;
   readonly #maxItems: number;
 
   constructor(options: GeneratorResolverOptions = {}) {

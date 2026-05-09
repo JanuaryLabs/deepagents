@@ -12,17 +12,13 @@ import {
   type LoadContext,
   PromiseResolver,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   fragment,
 } from '@deepagents/context';
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 
@@ -75,7 +71,7 @@ describe('FunctionResolver', () => {
     );
   });
 
-  it('claims async functions too (called last in chain)', () => {
+  it('claims any function (default chain orders Async/Generator before this one)', () => {
     assert.strictEqual(
       r.canResolve(async () => 1),
       true,
@@ -134,6 +130,15 @@ describe('GeneratorResolver', () => {
     const result = await r.resolve(gen, await ctx());
     assert.deepStrictEqual(result, [1, 2, 3]);
   });
+
+  it('propagates errors thrown mid-iteration', async () => {
+    async function* gen() {
+      yield 'a';
+      throw new Error('mid-iteration');
+    }
+    const loadCtx = await ctx();
+    await assert.rejects(() => r.resolve(gen, loadCtx), /mid-iteration/);
+  });
 });
 
 describe('PromiseResolver', () => {
@@ -154,6 +159,14 @@ describe('PromiseResolver', () => {
   it('awaits the promise', async () => {
     const result = await r.resolve(Promise.resolve('done'), await ctx());
     assert.strictEqual(result, 'done');
+  });
+
+  it('propagates rejected promises', async () => {
+    const loadCtx = await ctx();
+    const rejected = Promise.reject(new Error('boom'));
+    // Suppress the unhandled-rejection warning before assert.rejects can catch it.
+    rejected.catch(() => {});
+    await assert.rejects(() => r.resolve(rejected, loadCtx), /boom/);
   });
 });
 
@@ -184,5 +197,19 @@ describe('IterableResolver', () => {
   it('collects iterable values into an array', async () => {
     const result = await r.resolve(new Set(['a', 'b', 'c']), await ctx());
     assert.deepStrictEqual(result, ['a', 'b', 'c']);
+  });
+
+  it('iterates a Map as entry pairs (not as an object)', async () => {
+    const result = await r.resolve(
+      new Map([
+        ['k1', 'v1'],
+        ['k2', 'v2'],
+      ]),
+      await ctx(),
+    );
+    assert.deepStrictEqual(result, [
+      ['k1', 'v1'],
+      ['k2', 'v2'],
+    ]);
   });
 });

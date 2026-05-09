@@ -7,7 +7,6 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   fragment,
   hint,
@@ -16,10 +15,7 @@ import {
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 
@@ -48,17 +44,12 @@ describe('engine + resolver chain integration', () => {
 
   it('caches resolved values across resolve() calls', async () => {
     const engine = newEngine();
+    const sandbox = await createVirtualAgentSandbox();
     const loader = mock.fn(async () => 'loaded-once');
     engine.set(fragment('cached', loader));
 
-    await engine.resolve({
-      renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
-    });
-    await engine.resolve({
-      renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
-    });
+    await engine.resolve({ renderer: new XmlRenderer(), sandbox });
+    await engine.resolve({ renderer: new XmlRenderer(), sandbox });
 
     assert.strictEqual(loader.mock.callCount(), 1);
   });
@@ -153,5 +144,47 @@ describe('engine + resolver chain integration', () => {
 
     assert.ok(systemPrompt.includes('Be brief.'));
     assert.ok(systemPrompt.includes('Use UTC timestamps.'));
+  });
+
+  it('estimate() materializes loaders before counting tokens', async () => {
+    const engine = newEngine();
+    const sandbox = await createVirtualAgentSandbox();
+    const longString = 'x'.repeat(2000);
+    engine.set(fragment('big', async () => longString));
+
+    const result = await engine.estimate('openai:gpt-4o', { sandbox });
+
+    // The 2000-char string materialized into the system prompt should bump
+    // the input token count well above what an empty context produces.
+    assert.ok(
+      result.tokens > 100,
+      `expected materialized tokens, got ${result.tokens}`,
+    );
+  });
+
+  it('estimate() invokes a loader exactly once (caching)', async () => {
+    const engine = newEngine();
+    const sandbox = await createVirtualAgentSandbox();
+    const loader = mock.fn(async () => 'estimate-content');
+    engine.set(fragment('once', loader));
+
+    await engine.estimate('openai:gpt-4o', { sandbox });
+    await engine.estimate('openai:gpt-4o', { sandbox });
+
+    assert.strictEqual(loader.mock.callCount(), 1);
+  });
+
+  it('inspect() materializes loaders before rendering', async () => {
+    const engine = newEngine();
+    const sandbox = await createVirtualAgentSandbox();
+    engine.set(fragment('readme', async () => 'inspected-content'));
+
+    const result = await engine.inspect({
+      modelId: 'openai:gpt-4o',
+      renderer: new XmlRenderer(),
+      sandbox,
+    });
+
+    assert.ok(result.rendered.includes('inspected-content'));
   });
 });
