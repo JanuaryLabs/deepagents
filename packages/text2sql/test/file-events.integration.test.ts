@@ -1,35 +1,22 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { sqlSandboxExtension } from '@deepagents/text2sql';
-
-import { init_db } from '../src/tests/sqlite.ts';
 import { buildSandbox } from './helpers/build-sandbox.ts';
 
 type BuiltSandbox = Awaited<ReturnType<typeof buildSandbox>>;
 const drainEvents = (sandbox: BuiltSandbox) => sandbox.drainFileEvents();
 
 describe('virtual sandbox file-event tracking', () => {
-  it('records a write event when sql run persists a result file', async () => {
-    const { adapter } = await init_db(
-      `CREATE TABLE users (id INTEGER, name TEXT);`,
-    );
-
-    const sandbox = await buildSandbox([
-      sqlSandboxExtension({ main: adapter }),
+  it('records a write event for sandbox result artifacts', async () => {
+    const sandbox = await buildSandbox();
+    await sandbox.sandbox.writeFiles([
+      { path: '/sql/result.json', content: '[{"n":1}]' },
     ]);
-
-    const result = await sandbox.sandbox.executeCommand(
-      `sql run main "SELECT 1 AS n"`,
-    );
-    assert.strictEqual(result.exitCode, 0, result.stderr);
 
     const events = drainEvents(sandbox) ?? [];
     const writes = events.filter((e) => e.op === 'write');
     assert.ok(
-      writes.some(
-        (e) => e.path.startsWith('/sql/') && e.path.endsWith('.json'),
-      ),
+      writes.some((e) => e.path === '/sql/result.json'),
       `expected a write event under /sql/*.json, got ${JSON.stringify(events)}`,
     );
   });

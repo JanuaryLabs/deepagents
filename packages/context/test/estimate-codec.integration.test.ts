@@ -7,7 +7,6 @@ import {
   InMemoryContextStore,
   XmlRenderer,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   getModelsRegistry,
   user,
@@ -15,10 +14,7 @@ import {
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

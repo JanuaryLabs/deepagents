@@ -30,12 +30,20 @@
       }
     },
     "build-cli": {
-      "executor": "nx:run-commands",
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
       "dependsOn": ["build-lib"],
-      "outputs": ["{projectRoot}/dist/bin"],
       "options": {
-        "cwd": "packages/text2sql",
-        "command": "esbuild src/bin/sql.ts src/bin/handlers.ts src/bin/load-adapters.ts --outdir=dist/bin --format=esm --platform=node --bundle=false && chmod +x dist/bin/sql.js"
+        "main": "packages/text2sql/src/bin/sql.ts",
+        "outputPath": "{projectRoot}/dist/bin",
+        "declaration": false,
+        "skipTypeCheck": true,
+        "sourcemap": false,
+        "thirdParty": false,
+        "format": ["esm"],
+        "esbuildOptions": {
+          "packages": "external"
+        }
       }
     },
     "test": {

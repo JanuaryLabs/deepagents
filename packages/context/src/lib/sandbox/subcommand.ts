@@ -1,7 +1,10 @@
-import type { CommandResult } from 'bash-tool';
-import { parse } from 'just-bash';
-
-import type { ExtensionCommand, ExtensionCommandContext } from './extension.ts';
+import {
+  type Command,
+  type CommandContext,
+  type ExecResult,
+  defineCommand,
+  parse,
+} from 'just-bash';
 
 /**
  * Describes one subcommand inside a subcommand group (e.g. `sql run`,
@@ -19,47 +22,46 @@ export interface SubcommandDefinition {
   repair?: (rawArgs: string) => string | null;
   handler: (
     args: string[],
-    ctx: ExtensionCommandContext,
-  ) => CommandResult | Promise<CommandResult>;
+    ctx: CommandContext,
+  ) => ExecResult | Promise<ExecResult>;
 }
 
 /**
- * Creates an {@link ExtensionCommand} that dispatches to one of several
- * subcommand handlers based on the first positional arg. Unknown or missing
- * subcommands print an auto-generated usage message to stderr with exit
- * code 1.
+ * Builds a `Command` for just-bash that dispatches to one of several
+ * subcommand handlers based on the first positional arg. Plug it into a
+ * `Bash` instance via `customCommands` (or feed it to any sandbox that
+ * accepts just-bash custom commands). Unknown or missing subcommands
+ * print an auto-generated usage message to stderr with exit code 1.
  *
  * @example
  * const sqlCommand = defineSubcommandGroup('sql', {
  *   run:      { usage: 'run "SELECT ..."',      description: 'Execute query',  handler: ... },
  *   validate: { usage: 'validate "SELECT ..."', description: 'Validate only', handler: ... },
  * });
+ * new Bash({ fs, customCommands: [sqlCommand] });
  */
 export function defineSubcommandGroup(
   name: string,
   subcommands: Record<string, SubcommandDefinition>,
-): ExtensionCommand {
+): Command {
   const usageLines = Object.entries(subcommands)
     .map(([, def]) => `  ${name} ${def.usage.padEnd(30)} ${def.description}`)
     .join('\n');
 
-  return {
-    name,
-    handler: async (args, ctx) => {
-      const subcommand = args[0];
-      const restArgs = args.slice(1);
+  return defineCommand(name, async (args, ctx) => {
+    const subcommand = args[0];
+    const restArgs = args.slice(1);
 
-      if (subcommand && subcommand in subcommands) {
-        return subcommands[subcommand].handler(restArgs, ctx);
-      }
+    if (subcommand && subcommand in subcommands) {
+      return subcommands[subcommand].handler(restArgs, ctx);
+    }
 
-      return {
-        stdout: '',
-        stderr: `${name}: ${subcommand ? `unknown subcommand '${subcommand}'` : 'missing subcommand'}\n\nUsage:\n${usageLines}`,
-        exitCode: 1,
-      };
-    },
-  };
+    return {
+      stdout: '',
+      stderr: `${name}: ${subcommand ? `unknown subcommand '${subcommand}'` : 'missing subcommand'}\n\nUsage:\n${usageLines}`,
+      exitCode: 1,
+    };
+  });
 }
 
 function escapeRegExp(s: string) {
@@ -84,9 +86,8 @@ export function stripQuoteArtifacts(raw: string): string {
 }
 
 /**
- * Pre-parse repair for a subcommand's raw arg string. Fires when the
- * surrounding command fails to parse (via `buildSubcommandRepair`). Strips
- * any leading/trailing quote, escapes inner single quotes with the POSIX
+ * Pre-parse repair for a subcommand's raw arg string. Strips any
+ * leading/trailing quote, escapes inner single quotes with the POSIX
  * `'\''` idiom, and wraps the result in single quotes so the shell parser
  * will treat the payload as an opaque literal on the next pass.
  *

@@ -32,17 +32,9 @@ Requires Node.js LTS (20+).
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 import pg from 'pg';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
-} from '@deepagents/context';
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { Text2Sql } from '@deepagents/text2sql';
 import {
   Postgres,
   columnValues,
@@ -90,12 +82,12 @@ console.log(sql);
 
 The adapter-map key (`main` here) is the adapter name. Reuse that same key in
 `text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
-`sql run <db> "..."` sandbox calls.
+`sql run <db> "..."` calls from a sandbox where the package CLI is installed.
 
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you build adapter
 maps dynamically, use `isValidAdapterName(name)` to check one key or
 `validateAdapterNames(names)` to fail fast before constructing `Text2Sql` or
-`sqlSandboxExtension`.
+the sandbox-side adapter module used by the `sql` CLI.
 
 ## AI Model Providers
 
@@ -103,29 +95,24 @@ Text2SQL works with any model provider supported by the [Vercel AI SDK](https://
 
 ## Building a Conversational Agent
 
-`Text2Sql` ships only the SQL-aware primitives — `toSql`, `index`, `toPairs`,
-and `instructions()`. You build the chat agent yourself by composing a
-`ContextEngine`, a sandbox, and `agent` + `chat` from `@deepagents/context`:
+`Text2Sql` ships only the SQL-aware primitives: `toSql`, `toPairs`,
+`AdapterIndexer`, and `instructions()`. You build the chat agent yourself by
+composing a `ContextEngine`, a sandbox, and `agent` + `chat` from
+`@deepagents/context`:
 
 ```typescript
-import { InMemoryFs } from 'just-bash';
-
 import {
   ContextEngine,
+  type ContextFragment,
   InMemoryContextStore,
   agent,
   chat,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
+  createContainerTool,
   errorRecoveryGuardrail,
+  npm,
   user,
 } from '@deepagents/context';
-import {
-  Text2Sql,
-  instructions,
-  sqlSandboxExtension,
-} from '@deepagents/text2sql';
+import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 
 const store = new InMemoryContextStore();
 const context = new ContextEngine({
@@ -134,14 +121,21 @@ const context = new ContextEngine({
   userId: 'user-456',
 });
 
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
+const sandbox = await createContainerTool({
+  installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  env: {
+    TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+  },
+  ...createSqlCommandHooks({ adapters: { main: adapter } }),
 });
 
-context.set(...instructions(), ...(await text2sql.index()));
+const indexResult = await sandbox.sandbox.executeCommand('sql index');
+if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
+const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
+const fragments = JSON.parse(
+  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+) as ContextFragment[];
+context.set(...instructions(), ...fragments);
 
 const ai = agent({
   name: 'sql-assistant',
@@ -162,17 +156,26 @@ for await (const chunk of stream) {
 
 `instructions()` returns the SQL-flavored system fragments (policies, workflows,
 clarifications, style guides) — spread them into `context.set()` alongside the
-schema fragments returned by `text2sql.index()`. Add or replace them with your
+schema fragments returned by `sql index`. Add or replace them with your
 own domain fragments as needed.
 
-## Advanced: Composing Sandbox Extensions
+## Advanced: SQL CLI in Sandboxes
 
-`sqlSandboxExtension(adaptersMap)` returns a `SandboxExtension` that bundles the
-`sql` subcommand, transform plugins, and arg-repair hook. In the simplest case,
-that map is `{ main: adapter }`. Compose it (alongside any of your own
-extensions) via `createBashTool` + `createRoutingSandbox` + `createVirtualSandbox`.
-See [Caller-Owned Sandbox](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
-for composition patterns.
+`sql validate <db> "..."` and `sql run <db> "..."` are real commands from the
+`@deepagents/text2sql` package. `sql index [adapter ...]` writes schema
+fragments plus progress events for chat setup. Install the package inside the
+sandbox and set `TEXT2SQL_ADAPTERS` to a module whose default export is
+`Record<string, Adapter>`. Missing `sql` means the sandbox was not prepared
+correctly.
+
+Spread `createSqlCommandHooks({ adapters })` into `createBashTool()` or
+`createContainerTool()` for model-driven bash calls. The before hook preserves
+the old virtual-command tolerance for common LLM quote mistakes, rewrites SQL
+identifier backticks so bash does not run them as command substitutions, and
+blocks raw database access so read-only and scope checks stay behind
+`sql validate` / `sql run`. The after hook restores hidden `formattedSql`
+metadata from the host adapter map without putting that concern into the real
+CLI.
 
 ## Fragments
 
@@ -260,18 +263,20 @@ for await (const chunk of followUp) {
 
 ## Streaming Index Progress
 
-`text2sql.index({ onProgress })` emits progress events while it warms or reads
-the schema cache. To interleave those events with the chat stream so a UI can
-render indexing status before assistant text starts, wrap the loop in your own
-`createUIMessageStream`:
+`AdapterIndexer#index({ onProgress })` emits progress events while it warms or reads
+the schema cache for host-side indexing. The sandbox CLI writes the same event
+shape to the `eventsPath` file returned by `sql index`:
 
 ```typescript
 import { createUIMessageStream } from 'ai';
 
 import {
+  AdapterIndexer,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
+
+const indexer = new AdapterIndexer({ adapters, version: 'v1' });
 
 await context.continue(user('Show me top 10 customers'));
 
@@ -285,7 +290,7 @@ const stream = createUIMessageStream({
     }
     writer.write({ type: 'start', messageId: head.id });
 
-    const fragments = await text2sql.index({
+    const fragments = await indexer.index({
       onProgress: (event) =>
         writer.write({
           type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
@@ -334,7 +339,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 
 - [Getting Started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
 - [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/to-sql)
-- [Caller-Owned Sandbox](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
+- [SQL CLI in Sandboxes](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
 - [Teach the System](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
 - [Build Conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)

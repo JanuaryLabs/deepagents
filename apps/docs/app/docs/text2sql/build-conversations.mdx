@@ -5,7 +5,7 @@ description: Create multi-turn chat experiences with a persistent ContextEngine 
 
 The `chat()` helper from `@deepagents/context` streams answers and persists
 each turn through the `ContextEngine` it is wired to. Text2SQL contributes
-`instructions()` and `text2sql.index()` — the caller composes them into a
+`instructions()` and `AdapterIndexer` — the caller composes them into a
 `ContextEngine` and an `agent`, then passes that agent to `chat()`. Thread
 identity comes from the `chatId` and `userId` on the engine. Use `chat()` when
 you want a durable thread. `toSql()` stays stateless and only uses the
@@ -22,10 +22,11 @@ import {
   errorRecoveryGuardrail,
   user,
 } from '@deepagents/context';
-import { instructions } from '@deepagents/text2sql';
+import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 const context = new ContextEngine({ store, chatId, userId });
-context.set(...instructions(), ...(await text2sql.index()));
+const indexer = new AdapterIndexer({ adapters, version: 'v1' });
+context.set(...instructions(), ...(await indexer.index()));
 
 const ai = agent({
   name: 'sql-assistant',
@@ -49,7 +50,7 @@ not the full thread transcript.
 
 ## Indexing Progress
 
-Schema indexing can be expensive on large databases. `text2sql.index()` accepts
+Schema indexing can be expensive on large databases. `AdapterIndexer#index()` accepts
 an `onProgress` callback that emits typed progress events. Wrap indexing and
 the chat stream together with `createUIMessageStream` from `ai`, so the client
 sees progress before the assistant reply starts:
@@ -58,15 +59,23 @@ sees progress before the assistant reply starts:
 import { createUIMessageStream } from 'ai';
 
 import { chat, user } from '@deepagents/context';
-import { TEXT2SQL_INDEX_PROGRESS_CHUNK, instructions } from '@deepagents/text2sql';
+import {
+  AdapterIndexer,
+  TEXT2SQL_INDEX_PROGRESS_CHUNK,
+  instructions,
+} from '@deepagents/text2sql';
+
+const indexer = new AdapterIndexer({ adapters, version: 'v1' });
 
 const stream = createUIMessageStream({
   execute: async ({ writer }) => {
     const head = await context.headMessage();
-    if (head?.name === 'assistant') writer.write({ type: 'start', messageId: head.id });
+    if (head?.name === 'assistant')
+      writer.write({ type: 'start', messageId: head.id });
 
-    const fragments = await text2sql.index({
-      onProgress: (event) => writer.write({ type: TEXT2SQL_INDEX_PROGRESS_CHUNK, data: event }),
+    const fragments = await indexer.index({
+      onProgress: (event) =>
+        writer.write({ type: TEXT2SQL_INDEX_PROGRESS_CHUNK, data: event }),
     });
     context.set(...instructions(), ...fragments);
 
@@ -92,40 +101,38 @@ follow-up request to see prior messages:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 
 import {
   ContextEngine,
   SqliteContextStore,
   agent,
   chat,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
+  createContainerTool,
   errorRecoveryGuardrail,
+  npm,
   user,
 } from '@deepagents/context';
-import { Text2Sql, instructions, sqlSandboxExtension } from '@deepagents/text2sql';
+import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 
 const store = new SqliteContextStore('./text2sql-chat.sqlite');
 const model = groq('openai/gpt-oss-20b');
-const text2sql = new Text2Sql({
-  version: 'v1',
-  model,
-  adapters: { main: adapter },
-});
-
 async function createThread(chatId: string, userId: string) {
-  // Reuse your configured database adapter from Getting Started.
-  const sandbox = await createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [sqlSandboxExtension({ main: adapter })],
-    }),
+  const sandbox = await createContainerTool({
+    installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+    env: {
+      TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+    },
+    ...createSqlCommandHooks({ adapters }),
   });
 
   const context = new ContextEngine({ store, chatId, userId });
-  context.set(...instructions(), ...(await text2sql.index()));
+  const indexResult = await sandbox.sandbox.executeCommand('sql index');
+  if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
+  const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
+  const fragments = JSON.parse(
+    await sandbox.sandbox.readFile(manifest.fragmentsPath),
+  );
+  context.set(...instructions(), ...fragments);
 
   const ai = agent({
     name: 'sql-assistant',
@@ -151,6 +158,11 @@ for await (const _ of await chat(followUp.ai)) {
   // drain or stream chunks to your UI
 }
 ```
+
+`TEXT2SQL_ADAPTERS` must resolve inside the sandbox to a module whose default
+export is your adapter map. Mount, upload, or write that file before the first
+`chat()` call. See [SQL CLI in Sandboxes](/docs/text2sql/sqlv3) for the
+adapter-module setup.
 
 ## How It Works
 
@@ -180,10 +192,10 @@ message for this request before calling `context.continue(...)`.
 The `chat()` helper from `@deepagents/context` accepts an optional options
 object. These options belong to that helper, not to `Text2Sql`:
 
-| Option | Type | Description |
-| ------ | ---- | ----------- |
-| `abortSignal` | `AbortSignal` | Cancels title generation, repair attempts, and the active stream |
-| `generateTitle` | `boolean` | Uses the model to generate the first chat title instead of the static fallback |
+| Option          | Type          | Description                                                                    |
+| --------------- | ------------- | ------------------------------------------------------------------------------ |
+| `abortSignal`   | `AbortSignal` | Cancels title generation, repair attempts, and the active stream               |
+| `generateTitle` | `boolean`     | Uses the model to generate the first chat title instead of the static fallback |
 
 ### Abort Signal
 

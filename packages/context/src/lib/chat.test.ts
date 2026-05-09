@@ -22,7 +22,6 @@ import {
   assistant,
   chat,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   errorRecoveryGuardrail,
   fail,
@@ -679,10 +678,7 @@ describe('chat() abort handling', () => {
 
     const observed = new ObservedFs(new InMemoryFs());
     const base = await createBashTool({
-      sandbox: await createRoutingSandbox({
-        backend: await createVirtualSandbox({ fs: observed }),
-        hostExtensions: [],
-      }),
+      sandbox: await createVirtualSandbox({ fs: observed }),
     });
     const trackedSandbox = {
       ...base,

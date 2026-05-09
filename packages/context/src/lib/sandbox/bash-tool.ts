@@ -99,7 +99,16 @@ export async function createBashTool(
         throw new Error('bash tool execution is not available');
       }
       return runWithBashMeta(async () => {
-        const result = await originalExecute({ command }, execOptions);
+        let result: CommandResult;
+        try {
+          result = await originalExecute({ command }, execOptions);
+        } catch (err) {
+          if (err instanceof BashException) {
+            result = err.format();
+          } else {
+            throw err;
+          }
+        }
         const state = readBashMeta();
         if (!state) return result;
         const hasHidden = Object.keys(state.hidden).length > 0;

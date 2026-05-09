@@ -1,5 +1,4 @@
 import type { UIMessage } from 'ai';
-import { InMemoryFs } from 'just-bash';
 import { z } from 'zod';
 
 import type { AgentModel } from './advisor.ts';
@@ -7,11 +6,6 @@ import { structuredOutput } from './agent.ts';
 import { ContextEngine } from './engine.ts';
 import { role } from './fragments/domain.ts';
 import { stripReminders, user } from './fragments/message/user.ts';
-import { createBashTool } from './sandbox/bash-tool.ts';
-import {
-  createRoutingSandbox,
-  createVirtualSandbox,
-} from './sandbox/routing-sandbox.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import { extractPlainText } from './text.ts';
 
@@ -92,12 +86,6 @@ export class TitleGenerator {
       context,
       model: options.model,
       schema: titleSchema,
-      sandbox: await createBashTool({
-        sandbox: await createRoutingSandbox({
-          backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-          hostExtensions: [],
-        }),
-      }),
     }).generate({}, { abortSignal: options.abortSignal });
 
     if (!title) {

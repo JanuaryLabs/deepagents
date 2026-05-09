@@ -286,8 +286,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
       }),
       guardrail({
         rule: 'Do not attempt SQL access through non-bash tools.',
-        reason:
-          'SQL access is only available through the virtual bash environment.',
+        reason: 'SQL access is only available through the bash tool.',
         action:
           'Use `sql run <db> "SELECT ..."` and `sql validate <db> "SELECT ..."` through bash, where `<db>` is the configured database name.',
       }),
@@ -300,7 +299,13 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
       }),
       quirk({
         issue:
-          'This is a virtual bash environment, so you cannot access underlying SQL files directly.',
+          'The SQL command is a real CLI installed inside the sandbox, so shell quoting rules apply before SQL validation runs.',
+        workaround:
+          'Keep the whole SQL query in one quoted argument. If quoting is difficult, write the query to a file and call `sql validate <db> "$(cat query.sql)"` or `sql run <db> "$(cat query.sql)"`.',
+      }),
+      quirk({
+        issue:
+          'SQL result artifacts live inside the sandbox, so you cannot access underlying SQL files directly.',
         workaround:
           'Treat the returned result path as the artifact to inspect, rather than trying to access SQL files themselves.',
       }),

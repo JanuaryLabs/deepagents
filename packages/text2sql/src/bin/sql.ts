@@ -1,35 +1,123 @@
 #!/usr/bin/env node
-import { runCommand, validateCommand } from './handlers.js';
-import { loadAdapters } from './load-adapters.js';
+import { type CAC, cac } from 'cac';
 
-const USAGE = 'Usage: sql <run|validate> <db> "<sql>"';
+import {
+  CommandError,
+  type CommandResult,
+  type ExecutionContext,
+  type SqlCommand,
+  errorMessage,
+} from './command.ts';
+import { commands } from './commands/registry.ts';
+import { loadAdapters } from './load-adapters.ts';
 
-async function main(): Promise<number> {
-  const [subcommand, db, ...sqlParts] = process.argv.slice(2);
-  const sql = sqlParts.join(' ');
+const cli = cac('sql');
 
-  if (subcommand !== 'run' && subcommand !== 'validate') {
-    process.stderr.write(
-      `sql: unknown subcommand "${subcommand ?? ''}". ${USAGE}\n`,
-    );
-    return 2;
-  }
+cli
+  .usage('<run|validate|index> ...')
+  .help((sections) =>
+    sections.map((section) =>
+      section.title === 'Commands'
+        ? { ...section, body: rewriteCommandsHelp(section.body) }
+        : section,
+    ),
+  );
 
-  let adapters;
+for (const command of commands) {
+  registerCommand(cli, command);
+}
+
+process.exit(await runCli());
+
+async function runCli(): Promise<number> {
   try {
-    adapters = await loadAdapters();
+    cli.parse(process.argv, { run: false });
+
+    if (cli.options.help) return 0;
+
+    if (!cli.matchedCommand) {
+      try {
+        cli.globalCommand.checkUnknownOptions();
+        cli.globalCommand.checkOptionValue();
+      } catch (error) {
+        return writeCliError(error);
+      }
+      const [subcommand] = cli.args;
+      const label = subcommand
+        ? `unknown subcommand "${String(subcommand)}"`
+        : 'missing subcommand';
+      process.stderr.write(`sql: ${label}\n`);
+      cli.outputHelp();
+      return 2;
+    }
+
+    const result = await cli.runMatchedCommand();
+    return typeof result === 'number' ? result : 0;
   } catch (error) {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    return writeCliError(error);
+  }
+}
+
+function registerCommand(cli: CAC, command: SqlCommand): void {
+  const cliCommand = cli
+    .command(`${command.name} ${command.args}`, command.description)
+    .usage(command.usage);
+
+  for (const option of command.options) {
+    cliCommand.option(option.flag, option.description);
+  }
+
+  cliCommand.action(async (...callArgs: unknown[]) => {
+    const options = (callArgs[callArgs.length - 1] ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const positional = callArgs.slice(0, -1);
+    return runCommand(command, positional, options);
+  });
+}
+
+async function runCommand(
+  command: SqlCommand,
+  positional: unknown[],
+  options: Record<string, unknown>,
+): Promise<number> {
+  let ctx: ExecutionContext;
+  try {
+    ctx = {
+      adapters: await loadAdapters(),
+      cwd: process.cwd(),
+      env: process.env,
+    };
+  } catch (error) {
+    process.stderr.write(`${errorMessage(error)}\n`);
     return 2;
   }
 
-  const result =
-    subcommand === 'run'
-      ? await runCommand(adapters, db, sql)
-      : await validateCommand(adapters, db, sql);
+  try {
+    const result = await command.execute(ctx, positional, options);
+    writeCommandResult(result);
+    return result.exitCode;
+  } catch (error) {
+    if (error instanceof CommandError) {
+      writeCommandResult(error.toResult());
+      return error.exitCode;
+    }
+    throw error;
+  }
+}
 
+function rewriteCommandsHelp(body: string): string {
+  return commands.reduce((current, command) => {
+    if (!command.helpDisplay) return current;
+    return current.replace(
+      `${command.name} ${command.args}`,
+      `${command.name} ${command.helpDisplay}`,
+    );
+  }, body);
+}
+
+function writeCommandResult(result: CommandResult): void {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) {
     const out = result.stderr.endsWith('\n')
@@ -37,15 +125,20 @@ async function main(): Promise<number> {
       : result.stderr + '\n';
     process.stderr.write(out);
   }
-  return result.exitCode;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err) => {
-    process.stderr.write(
-      `sql: unexpected error: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
-    );
-    process.exit(1);
-  },
-);
+function writeCliError(error: unknown): number {
+  if (error instanceof Error && error.name === 'CACError') {
+    process.stderr.write(`sql: ${error.message}\n`);
+    cli.outputHelp();
+    return 2;
+  }
+  if (error instanceof CommandError) {
+    writeCommandResult(error.toResult());
+    return error.exitCode;
+  }
+  process.stderr.write(
+    `sql: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+  );
+  return 1;
+}

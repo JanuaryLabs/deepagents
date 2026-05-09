@@ -38,6 +38,7 @@ export * from './lib/store/store.ts';
 export * from './lib/stream-buffer.ts';
 export * from './lib/stream/change-source.ts';
 export * from './lib/stream/polling-change-source.ts';
+export * from './lib/sandbox/ast-utils.ts';
 export * from './lib/stream/polling-policy.ts';
 export * from './lib/stream/postgres-notify-change-source.ts';
 export * from './lib/stream/postgres.stream-store.ts';

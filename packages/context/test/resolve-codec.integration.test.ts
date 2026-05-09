@@ -9,16 +9,12 @@ import {
   type MessageFragment,
   XmlRenderer,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
 } from '@deepagents/context';
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

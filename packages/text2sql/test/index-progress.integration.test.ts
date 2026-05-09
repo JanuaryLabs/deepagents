@@ -20,9 +20,9 @@ import {
 } from '@deepagents/context';
 import {
   Adapter,
+  AdapterIndexer,
   type IntrospectionProgress,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
-  Text2Sql,
   type Text2SqlIndexProgressEvent,
   instructions,
 } from '@deepagents/text2sql';
@@ -184,7 +184,8 @@ function createAdapter(
 
 function chatStream(args: {
   engine: ContextEngine;
-  text2sql: Text2Sql;
+  adapters: Record<string, Adapter>;
+  version: string;
   model: any;
 }) {
   return createUIMessageStream({
@@ -196,7 +197,10 @@ function chatStream(args: {
         );
       }
       writer.write({ type: 'start', messageId: head.id });
-      const fragments = await args.text2sql.index({
+      const fragments = await new AdapterIndexer({
+        adapters: args.adapters,
+        version: args.version,
+      }).index({
         onProgress: (event) =>
           writer.write({
             type: TEXT2SQL_INDEX_PROGRESS_CHUNK,
@@ -292,14 +296,11 @@ describe('Text2Sql index progress events', () => {
         userId: 'test-user',
       });
       const model = createMockModel();
-      const text2sql = new Text2Sql({
-        version: `progress-${generateId()}`,
-        adapters: { main: adapter },
-        model,
-      });
+      const adapters = { main: adapter };
+      const version = `progress-${generateId()}`;
 
       await engine.continue(userMessage('How many users?'));
-      const stream = chatStream({ engine, text2sql, model });
+      const stream = chatStream({ engine, adapters, version, model });
       const chunks = await collect(stream);
       const events = progressEvents(chunks);
 
@@ -378,16 +379,17 @@ describe('Text2Sql index progress events', () => {
         userId: 'test-user',
       });
       const model = createMockModel();
-      const text2sql = new Text2Sql({
-        version: `cache-${generateId()}`,
-        adapters: { main: adapter },
-        model,
-      });
+      const adapters = { main: adapter };
+      const version = `cache-${generateId()}`;
 
       await engine.continue(userMessage('First question'));
-      const first = await collect(chatStream({ engine, text2sql, model }));
+      const first = await collect(
+        chatStream({ engine, adapters, version, model }),
+      );
       await engine.continue(userMessage('Second question'));
-      const second = await collect(chatStream({ engine, text2sql, model }));
+      const second = await collect(
+        chatStream({ engine, adapters, version, model }),
+      );
       const firstEvents = progressEvents(first);
       const secondEvents = progressEvents(second);
 
@@ -490,15 +492,12 @@ describe('Text2Sql index progress events', () => {
       userId: 'test-user',
     });
     const model = createMockModel();
-    const text2sql = new Text2Sql({
-      version: `settled-error-${generateId()}`,
-      adapters: { failing, slow },
-      model,
-    });
+    const adapters = { failing, slow };
+    const version = `settled-error-${generateId()}`;
 
     await engine.continue(userMessage('This should fail'));
     const { chunks } = await collectUntilError(
-      chatStream({ engine, text2sql, model }),
+      chatStream({ engine, adapters, version, model }),
     );
     const events = progressEvents(chunks);
     assertTimestamped(events);

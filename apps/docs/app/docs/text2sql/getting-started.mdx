@@ -43,7 +43,8 @@ const model = groq('openai/gpt-oss-20b');
 Reuse `model` in the adapter-specific examples below. The adapter-map key
 (`main` in these examples) becomes the required second argument to
 `text2sql.toSql(..., 'main')` and the `<db>` selector in
-`sql validate <db> "..."` / `sql run <db> "..."`.
+`sql validate <db> "..."` / `sql run <db> "..."` when the package CLI is
+installed inside the sandbox.
 
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you construct the
 adapter map dynamically, validate the keys first with
@@ -222,32 +223,40 @@ For streaming, build the chat agent yourself with primitives from
 `@deepagents/context` and feed it the Text2SQL index plus instructions:
 
 ```typescript
-import { InMemoryFs } from 'just-bash';
-
 import {
   ContextEngine,
   InMemoryContextStore,
   agent,
   chat,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
+  createContainerTool,
   errorRecoveryGuardrail,
+  npm,
   user,
 } from '@deepagents/context';
-import { instructions, sqlSandboxExtension } from '@deepagents/text2sql';
+import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 
 const store = new InMemoryContextStore();
-const context = new ContextEngine({ store, chatId: 'chat-123', userId: 'user-456' });
-
-context.set(...instructions(), ...(await text2sql.index()));
-
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
 });
+
+const sandbox = await createContainerTool({
+  installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  env: {
+    TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+  },
+  ...createSqlCommandHooks({ adapters: { main: adapter } }),
+});
+
+const indexResult = await sandbox.sandbox.executeCommand('sql index');
+if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
+const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
+const fragments = JSON.parse(
+  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+);
+context.set(...instructions(), ...fragments);
 
 const ai = agent({
   name: 'sql-assistant',
@@ -266,6 +275,12 @@ for await (const chunk of stream) {
 }
 ```
 
+The `/workspace/text2sql-adapters.ts` module must exist inside the sandbox and
+default-export the adapter map the CLI should load. If you are mounting your
+app source into the container, point `TEXT2SQL_ADAPTERS` at that mounted module;
+otherwise upload or write the file before calling `chat()`. See
+[SQL CLI in Sandboxes](/docs/text2sql/sqlv3) for the full setup.
+
 `toSql()` is stateless. It reads cached schema fragments, but it does not write
 messages, titles, or usage into your `ContextStore`. Use the `chat()` helper
 above when you want multi-turn persistence. See
@@ -276,14 +291,13 @@ above when you want multi-turn persistence. See
 When Text2SQL processes a query, it:
 
 1. **Runs grounding** - Introspects your database schema (tables, columns, relationships, indexes, constraints).
-2. **Builds SQL context** - `toSql()` uses cached schema fragments. The `chat()` helper from `@deepagents/context` wired to your text2sql index + instructions also resolves the stored conversation thread from your context store.
+2. **Builds SQL context** - `toSql()` uses cached schema fragments. Chat flows use fragments from `AdapterIndexer` or `sql index`, then resolve the stored conversation thread from your context store.
 3. **Generates SQL** - The model maps the request to the available schema.
 4. **Validates** - The adapter validates the generated SQL before it is returned or executed.
-5. **Returns results** - `toSql()` returns the SQL string; the `chat()` helper from `@deepagents/context` wired to your text2sql index + instructions streams an end-user answer.
+5. **Returns results** - `toSql()` returns the SQL string; the `chat()` helper streams an end-user answer from indexed schema fragments, Text2SQL instructions, and sandbox query results.
 
-The `chat()` helper from `@deepagents/context` wired to your text2sql index +
-instructions also injects Text2SQL's built-in SQL workflow guidance and any
-extra fragments you add to your `ContextEngine`.
+The `chat()` helper also injects Text2SQL's built-in SQL workflow guidance and
+any extra fragments you add to your `ContextEngine`.
 
 ## Environment Variables
 

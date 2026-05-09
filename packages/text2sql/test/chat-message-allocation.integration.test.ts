@@ -20,8 +20,8 @@ import {
   errorRecoveryGuardrail,
 } from '@deepagents/context';
 import {
+  AdapterIndexer,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
-  Text2Sql,
   instructions,
 } from '@deepagents/text2sql';
 import {
@@ -113,11 +113,8 @@ describe('Text2Sql client message allocation', () => {
         userId: 'test-user',
       });
       const model = createMockModel();
-      const text2sql = new Text2Sql({
-        version: `allocation-${generateId()}`,
-        adapters: { main: adapter },
-        model,
-      });
+      const adapters = { main: adapter };
+      const version = `allocation-${generateId()}`;
 
       const transport: ChatTransport<UIMessage> = {
         sendMessages: async ({ messages }) => {
@@ -132,7 +129,10 @@ describe('Text2Sql client message allocation', () => {
                 );
               }
               writer.write({ type: 'start', messageId: head.id });
-              const fragments = await text2sql.index({
+              const fragments = await new AdapterIndexer({
+                adapters,
+                version,
+              }).index({
                 onProgress: (event) =>
                   writer.write({
                     type: TEXT2SQL_INDEX_PROGRESS_CHUNK,

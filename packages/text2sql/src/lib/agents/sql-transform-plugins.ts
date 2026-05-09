@@ -894,22 +894,21 @@ export class SqlProxyEnforcementPlugin implements TransformPlugin<SqlProxyEnforc
 // SQL Backtick Rewrite Plugin
 // ─────────────────────────────────────────────────────────────────────────────
 
-function wordPartsContainBacktickSubstitution(
+function wordPartsContainExpansion(
   parts: Array<Record<string, unknown>>,
 ): boolean {
   for (const part of parts) {
     if (
-      part.type === 'CommandSubstitution' &&
-      (part as Record<string, unknown>).legacy === true
+      part.type === 'CommandSubstitution' ||
+      part.type === 'ParameterExpansion' ||
+      part.type === 'ArithmeticExpansion'
     ) {
       return true;
     }
 
     if (part.type === 'DoubleQuoted' && Array.isArray(part.parts)) {
       if (
-        wordPartsContainBacktickSubstitution(
-          part.parts as Array<Record<string, unknown>>,
-        )
+        wordPartsContainExpansion(part.parts as Array<Record<string, unknown>>)
       ) {
         return true;
       }
@@ -919,11 +918,11 @@ function wordPartsContainBacktickSubstitution(
   return false;
 }
 
-export interface SqlBacktickRewriteMetadata {
+export interface SqlCommandRewriteMetadata {
   rewritten: boolean;
 }
 
-function isSqlBacktickCommand(
+function isSqlCommandRequiringRewrite(
   cmd: CommandNode,
 ): cmd is Extract<CommandNode, { type: 'SimpleCommand' }> {
   if (cmd.type !== 'SimpleCommand') return false;
@@ -938,8 +937,9 @@ function isSqlBacktickCommand(
   if (!isValidAdapterName(dbName)) return false;
 
   const sqlArgs = cmd.args.slice(2);
+  if (sqlArgs.length > 1) return true;
   return sqlArgs.some((arg: WordNode) =>
-    wordPartsContainBacktickSubstitution(
+    wordPartsContainExpansion(
       arg.parts as unknown as Array<Record<string, unknown>>,
     ),
   );
@@ -955,9 +955,37 @@ function extractWordPartText(parts: Array<Record<string, unknown>>): string {
       text += extractWordPartText(part.parts as Array<Record<string, unknown>>);
     } else if (type === 'CommandSubstitution' && part.legacy === true) {
       text += '`' + serialize(part.body as ScriptNode).trim() + '`';
+    } else if (type === 'CommandSubstitution') {
+      text += '$(' + serialize(part.body as ScriptNode).trim() + ')';
+    } else if (type === 'ParameterExpansion') {
+      text += emitParameterExpansion(part);
+    } else if (type === 'ArithmeticExpansion') {
+      const expression = part.expression as
+        | { originalText?: string }
+        | undefined;
+      text += '$((' + (expression?.originalText ?? '') + '))';
     }
   }
   return text;
+}
+
+function emitParameterExpansion(part: Record<string, unknown>): string {
+  const parameter = part.parameter as string;
+  const operation = part.operation as
+    | {
+        type: string;
+        word?: { parts: Array<Record<string, unknown>> };
+        checkEmpty?: boolean;
+      }
+    | null
+    | undefined;
+  if (!operation) return '$' + parameter;
+  if (operation.type === 'DefaultValue' && operation.word) {
+    const fallback = extractWordPartText(operation.word.parts);
+    const separator = operation.checkEmpty ? ':-' : '-';
+    return '${' + parameter + separator + fallback + '}';
+  }
+  return '${' + parameter + '}';
 }
 
 function extractSqlText(args: WordNode[]): string {
@@ -970,7 +998,7 @@ function extractSqlText(args: WordNode[]): string {
     .join(' ');
 }
 
-function rewriteSqlBacktickCommand(
+function rewriteSqlCommand(
   cmd: Extract<CommandNode, { type: 'SimpleCommand' }>,
   ast: ScriptNode,
 ): CommandNode {
@@ -997,52 +1025,52 @@ function rewriteSqlBacktickCommand(
   return groupAst.statements[0].pipelines[0].commands[0];
 }
 
-function rewriteBackticksInCommands(
+function rewriteSqlCommandsInList(
   commands: CommandNode[],
   ast: ScriptNode,
 ): boolean {
   let rewritten = false;
   for (let i = 0; i < commands.length; i++) {
     const cmd = commands[i];
-    if (isSqlBacktickCommand(cmd)) {
-      commands[i] = rewriteSqlBacktickCommand(cmd, ast);
+    if (isSqlCommandRequiringRewrite(cmd)) {
+      commands[i] = rewriteSqlCommand(cmd, ast);
       rewritten = true;
       continue;
     }
 
     if (cmd.type === 'If') {
       for (const clause of cmd.clauses) {
-        if (rewriteBackticksInStatements(clause.condition, ast))
+        if (rewriteSqlCommandsInStatements(clause.condition, ast))
           rewritten = true;
-        if (rewriteBackticksInStatements(clause.body, ast)) rewritten = true;
+        if (rewriteSqlCommandsInStatements(clause.body, ast)) rewritten = true;
       }
-      if (cmd.elseBody && rewriteBackticksInStatements(cmd.elseBody, ast)) {
+      if (cmd.elseBody && rewriteSqlCommandsInStatements(cmd.elseBody, ast)) {
         rewritten = true;
       }
     } else if (cmd.type === 'While' || cmd.type === 'Until') {
-      if (rewriteBackticksInStatements(cmd.condition, ast)) rewritten = true;
-      if (rewriteBackticksInStatements(cmd.body, ast)) rewritten = true;
+      if (rewriteSqlCommandsInStatements(cmd.condition, ast)) rewritten = true;
+      if (rewriteSqlCommandsInStatements(cmd.body, ast)) rewritten = true;
     } else if (cmd.type === 'For' || cmd.type === 'CStyleFor') {
-      if (rewriteBackticksInStatements(cmd.body, ast)) rewritten = true;
+      if (rewriteSqlCommandsInStatements(cmd.body, ast)) rewritten = true;
     } else if (cmd.type === 'Case') {
       for (const item of cmd.items) {
-        if (rewriteBackticksInStatements(item.body, ast)) rewritten = true;
+        if (rewriteSqlCommandsInStatements(item.body, ast)) rewritten = true;
       }
     } else if (cmd.type === 'Subshell' || cmd.type === 'Group') {
-      if (rewriteBackticksInStatements(cmd.body, ast)) rewritten = true;
+      if (rewriteSqlCommandsInStatements(cmd.body, ast)) rewritten = true;
     }
   }
   return rewritten;
 }
 
-function rewriteBackticksInStatements(
+function rewriteSqlCommandsInStatements(
   statements: Array<{ pipelines: Array<{ commands: CommandNode[] }> }>,
   ast: ScriptNode,
 ): boolean {
   let rewritten = false;
   for (const statement of statements) {
     for (const pipeline of statement.pipelines) {
-      if (rewriteBackticksInCommands(pipeline.commands, ast)) {
+      if (rewriteSqlCommandsInList(pipeline.commands, ast)) {
         rewritten = true;
       }
     }
@@ -1050,14 +1078,14 @@ function rewriteBackticksInStatements(
   return rewritten;
 }
 
-export class SqlBacktickRewritePlugin implements TransformPlugin<SqlBacktickRewriteMetadata> {
-  name = 'sql-backtick-rewrite';
+export class SqlCommandRewritePlugin implements TransformPlugin<SqlCommandRewriteMetadata> {
+  name = 'sql-command-rewrite';
 
   transform(
     context: TransformContext,
-  ): TransformResult<SqlBacktickRewriteMetadata> {
+  ): TransformResult<SqlCommandRewriteMetadata> {
     const ast = context.ast;
-    const rewritten = rewriteBackticksInStatements(ast.statements, ast);
+    const rewritten = rewriteSqlCommandsInStatements(ast.statements, ast);
     return { ast, metadata: { rewritten } };
   }
 }

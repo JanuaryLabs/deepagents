@@ -1,29 +1,26 @@
 ---
 title: Subcommand Builders
-description: Compose custom bash commands with a subcommand dispatcher, LLM-robust arg repair, and shell quote helpers
+description: Build just-bash command groups with dispatch, quote repair, and structured bash metadata
 ---
 
-When you register a custom bash command like `sql`, `http`, or `s3` that takes
-subcommands (`sql run <db>`, `sql validate <db>`), three problems repeat every
-time:
+Use these helpers when a just-bash-backed sandbox needs a command surface such
+as `sql run`, `marker remind`, or `tool validate`. They target
+`createVirtualSandbox()` or any custom `Bash` instance that accepts
+`customCommands`.
 
-1. Dispatching from the first arg to the right handler.
-2. Recovering from malformed quoting the LLM sometimes produces.
-3. Presenting a usage message when the LLM calls the tool wrong.
-
-`@deepagents/context` exposes small primitives that cover each concern. They compose with `useBashMeta()` (for meta/reminder) and `BashException` (for error-to-`CommandResult` conversion) — see [Sandbox](/docs/context/sandbox) for both.
+If you need the same workflow inside Docker or Agent OS, ship a real CLI or
+script into that environment instead. `defineSubcommandGroup()` is a
+just-bash command builder, not a cross-backend routing layer.
 
 ## Quick Start
 
-Build a `greet` command with two subcommands and wire it into `createBashTool()` through a routing sandbox. The subcommand is an `ExtensionCommand`, wrapped in a `SandboxExtension`, and installed on any backend (here, the in-memory virtual backend):
-
 ```typescript
 import { InMemoryFs } from 'just-bash';
+
 import {
   type SubcommandDefinition,
   buildSubcommandRepair,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   defineSubcommandGroup,
 } from '@deepagents/context';
@@ -49,301 +46,132 @@ const subcommands = {
   },
 } satisfies Record<string, SubcommandDefinition>;
 
-const greetCommand = defineSubcommandGroup('greet', subcommands);
+const greet = defineSubcommandGroup('greet', subcommands);
 const repair = buildSubcommandRepair('greet', subcommands);
 
 const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [{ commands: [greetCommand] }],
+  sandbox: await createVirtualSandbox({
+    fs: new InMemoryFs(),
+    customCommands: [greet],
   }),
   onBeforeBashCall: ({ command }) => ({ command: repair(command) }),
 });
 ```
 
-Swap the `backend` for `createDockerSandbox(...)` or `createAgentOsSandbox(...)` and the same `greetCommand` runs unchanged. See [Routing Sandbox](/docs/context/routing-sandbox) for the backend story.
-
-The LLM now invokes `greet hello world` or `greet goodbye alice`. If it calls `greet` alone, stderr shows the auto-generated usage message with a non-zero exit code — enough feedback for the model to try again.
+The tool can now execute `greet hello world` or `greet goodbye alice`. Missing
+or unknown subcommands return `exitCode: 1` with an auto-generated usage
+message, which is usually enough feedback for the model to retry correctly.
 
 ## `SubcommandDefinition`
 
-Each subcommand is one object with four fields:
+Each subcommand definition describes one leaf command:
 
 ```typescript
+import type { CommandContext, ExecResult } from 'just-bash';
+
 interface SubcommandDefinition {
   usage: string;
   description: string;
   repair?: (rawArgs: string) => string | null;
   handler: (
     args: string[],
-    ctx: ExtensionCommandContext,
-  ) => CommandResult | Promise<CommandResult>;
-}
-
-interface ExtensionCommandContext {
-  sandbox: Sandbox;
-  cwd: string;
-  env: Record<string, string>;
-  stdin: string;
-  signal?: AbortSignal;
+    ctx: CommandContext,
+  ) => ExecResult | Promise<ExecResult>;
 }
 ```
 
 | Field | Description |
-|---|---|
-| `usage` | Short usage string shown in the auto-generated help (e.g. `run <db> "SELECT ..."`). No tool name prefix — the dispatcher adds it |
-| `description` | One-line description shown beside the usage |
-| `repair` | Optional pre-parse repair fn. Runs *only* when the original command fails to parse. Return `null` to skip |
-| `handler` | The actual implementation. Receives the remaining args (after the subcommand name) and an `ExtensionCommandContext`. Use `ctx.sandbox.writeFiles` / `ctx.sandbox.readFile` for IO — the same handler then runs against any backend (virtual, Docker, Agent OS) |
+| --- | --- |
+| `usage` | Usage text shown in the generated help, for example `run <db> "SELECT ..."` |
+| `description` | One-line help text shown beside the usage |
+| `repair` | Optional pre-parse repair for malformed LLM output |
+| `handler` | Command implementation. Receives the remaining args after the subcommand name |
 
 ## `defineSubcommandGroup(name, subcommands)`
 
-Builds an `ExtensionCommand` that dispatches on the first positional arg. Pack it in a `SandboxExtension` (`{ commands: [group] }`) and pass it to `createRoutingSandbox` as a `hostExtension`. The returned command:
-
-- Routes `<name> <sub> <rest...>` to `subcommands[sub].handler(rest, ctx)` when `sub` matches a key.
-- Returns `exitCode: 1` with an auto-generated usage message when `sub` is missing or unknown.
+`defineSubcommandGroup()` returns a just-bash `Command` that dispatches on the
+first positional argument.
 
 ```typescript
-const sandbox = await createRoutingSandbox({
-  backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  hostExtensions: [{ commands: [greetCommand] }],
+const sandbox = await createVirtualSandbox({
+  fs: new InMemoryFs(),
+  customCommands: [defineSubcommandGroup('greet', subcommands)],
 });
 
 await sandbox.executeCommand('greet hello world');
-// → stdout: "Hello, world!\n", exitCode: 0
+// stdout: "Hello, world!\n"
 
 await sandbox.executeCommand('greet');
-// → exitCode: 1, stderr contains:
-//   greet: missing subcommand
+// exitCode: 1
+// stderr includes:
+// greet: missing subcommand
 //
-//   Usage:
-//     greet hello <name>             Say hello to someone
-//     greet goodbye <name>           Say goodbye
-
-await sandbox.executeCommand('greet whoops');
-// → exitCode: 1, stderr starts with:
-//   greet: unknown subcommand 'whoops'
+// Usage:
+//   greet hello <name> ...
+//   greet goodbye <name> ...
 ```
-
-Usage rows are padded via `usage.padEnd(30)` for column alignment. You get the help message for free — no manual maintenance as you add subcommands.
 
 ## `buildSubcommandRepair(name, subcommands)`
 
-The pre-parse repair pipeline. LLMs sometimes emit malformed quoting that the
-shell parser rejects — `sql run main "SELECT * FROM users` (unclosed quote) or
-`sql validate main SELECT 1` (no quotes around the SQL body). When the
-original command fails to parse, `buildSubcommandRepair` tries each matching
-subcommand's `repair` function and returns the re-quoted command if the new
-form parses cleanly. Otherwise it returns the original unchanged and the parser
-emits its normal error.
-
-Wire it into `onBeforeBashCall` on `createBashTool`:
+LLMs often produce malformed quoting. `buildSubcommandRepair()` lets you attach
+per-subcommand repair logic that only runs when the raw command fails to parse.
 
 ```typescript
-const repair = buildSubcommandRepair('sql', subcommands);
+const repair = buildSubcommandRepair('sql', {
+  run: {
+    usage: 'run <db> "SELECT ..."',
+    description: 'Execute query',
+    repair: repairDbAndPayload,
+    handler: async (args) => ({
+      stdout: args.join(' '),
+      stderr: '',
+      exitCode: 0,
+    }),
+  },
+});
 
-const sandbox = await createBashTool({
-  sandbox: bashInstance,
+await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   onBeforeBashCall: ({ command }) => ({ command: repair(command) }),
 });
 ```
 
-The repair fn is a pure string → string function. It's safe to call on every command, not just ones that look malformed — when the command already parses, it's returned unchanged after a single regex test and re-parse.
+If the repaired command still fails to parse, the original input is preserved
+and just-bash reports the normal parse error.
 
-## Quote Repair Helpers
+## Quote Helpers
 
 ### `stripQuoteArtifacts(raw)`
 
-Strips one layer of matching outer `"` or `'` quotes and trims whitespace. If the input isn't wrapped in a matching pair, returns it trimmed but otherwise unchanged:
+Strips one outer layer of matching quotes and trims whitespace:
 
 ```typescript
-stripQuoteArtifacts('"SELECT 1"');    // 'SELECT 1'
-stripQuoteArtifacts("'SELECT 1'");    // 'SELECT 1'
-stripQuoteArtifacts('SELECT 1');      // 'SELECT 1'
-stripQuoteArtifacts('"unclosed');     // 'unclosed'  (leading " stripped)
-stripQuoteArtifacts(`"'nested'"`);    // "'nested'"  (only one layer)
+stripQuoteArtifacts('"SELECT 1"'); // SELECT 1
+stripQuoteArtifacts("'SELECT 1'"); // SELECT 1
+stripQuoteArtifacts('"unclosed'); // unclosed
 ```
 
 ### `repairQuotedArg(rawArgs)`
 
-The canonical repair function for subcommands whose arg slot is a single quoted payload (SQL queries, JSON bodies, etc.). Three steps:
-
-1. `stripQuoteArtifacts` to remove outer quoting.
-2. Escape inner single quotes using the POSIX `'\''` idiom.
-3. Wrap the result in single quotes.
-
-Returns `null` when the input is empty after trimming.
+Repairs a single quoted payload by stripping outer quotes, escaping inner
+single quotes with the POSIX `'\''` pattern, and re-wrapping the result:
 
 ```typescript
-repairQuotedArg('SELECT 1');     // returns:  'SELECT 1'
-repairQuotedArg('"SELECT 1"');   // returns:  'SELECT 1'
-repairQuotedArg(`don't`);        // returns:  'don'\''t'   (POSIX single-quote escape)
-repairQuotedArg('');             // returns:  null
+repairQuotedArg('SELECT 1'); // 'SELECT 1'
+repairQuotedArg(`don't`); // 'don'\''t'
+repairQuotedArg(''); // null
 ```
 
-Reference it directly from each subcommand's `repair` field when the payload shape matches:
+Use it directly when the payload is one quoted argument, or wrap it in a small
+helper when your command has a selector before the quoted body, such as
+`sql run <db> "SELECT ..."`.
 
-```typescript
-const subcommands = {
-  run: {
-    usage: 'run "SELECT ..."',
-    description: 'Execute query',
-    repair: repairQuotedArg,
-    handler: async (args) => { /* ... */ },
-  },
-} satisfies Record<string, SubcommandDefinition>;
-```
+## Related Sandbox Helpers
 
-If the command needs a leading selector before the quoted payload (for example
-`<db> "SELECT ..."`), wrap `repairQuotedArg` in a tiny local helper that keeps
-the selector intact and only repairs the payload portion.
+Subcommand handlers compose cleanly with two other sandbox APIs:
 
-### Pre-parse vs Post-parse: two stages, two jobs
+- `useBashMeta()` attaches host-only metadata or a model-visible reminder to the current tool result.
+- `BashException` lets a handler fail with a structured `CommandResult` instead of throwing a generic error.
 
-`repairQuotedArg` / `stripQuoteArtifacts` solve **malformed quoting that would break the parser**. They run *before* `parse()`. Once parse succeeds and the handler has its `args: string[]`, you may still have domain-specific cleanup to do inside the handler or adapter.
-
-`@deepagents/text2sql` is a good example of the split: `createSqlCommand` now forwards `args.join(' ').trim()` directly, and the adapter handles shell-escape cleanup internally inside `format()`, `validate()`, and `execute()`.
-
-In short:
-
-| Stage | Problem | Solution |
-|---|---|---|
-| Pre-parse | Malformed quoting (`"unclosed`, no quotes) | `repairQuotedArg` |
-| Post-parse | Domain-specific cleanup after args are parsed | Handler or adapter-owned normalization |
-
-## Worked Example: the `sql` Command
-
-`@deepagents/text2sql`'s `createSqlCommand` is built from these primitives. A
-condensed version of the current multi-adapter shape:
-
-```typescript
-import {
-  type SubcommandDefinition,
-  buildSubcommandRepair,
-  defineSubcommandGroup,
-  repairQuotedArg,
-  useBashMeta,
-} from '@deepagents/context';
-
-function repairDbNameAndQuotedArg(rawArgs: string): string | null {
-  const trimmed = rawArgs.trim();
-  if (!trimmed) return null;
-
-  const firstSpace = trimmed.search(/\s/);
-  if (firstSpace === -1) return null;
-
-  const dbName = trimmed.slice(0, firstSpace);
-  const repaired = repairQuotedArg(trimmed.slice(firstSpace + 1));
-  return repaired == null ? null : `${dbName} ${repaired}`;
-}
-
-function resolveAdapter(
-  adapters: Record<string, Adapter>,
-  subcommand: 'run' | 'validate',
-  args: string[],
-) {
-  const [name, ...rest] = args;
-  const sql = rest.join(' ').trim();
-
-  if (!name || !adapters[name]) {
-    return { error: `sql ${subcommand}: unknown database` };
-  }
-  if (!sql) {
-    return { error: `sql ${subcommand}: no query provided` };
-  }
-
-  return { adapter: adapters[name], sql };
-}
-
-function createSqlCommand(adapters: Record<string, Adapter>) {
-  const subcommands = {
-    run: {
-      usage: 'run <db> "SELECT ..."',
-      description: 'Execute query against <db> and store results',
-      repair: repairDbNameAndQuotedArg,
-      handler: async (args, ctx) => {
-        const meta = useBashMeta();
-        meta?.setReminder(
-          'Always run `sql validate <db>` before `sql run <db>`.',
-        );
-
-        const resolved = resolveAdapter(adapters, 'run', args);
-        if ('error' in resolved) {
-          return { stdout: '', stderr: resolved.error, exitCode: 1 };
-        }
-        const { adapter, sql: rawQuery } = resolved;
-
-        const query = adapter.format(rawQuery);
-        meta?.setHidden({ formattedSql: query });
-
-        const syntaxError = await adapter.validate(query);
-        if (syntaxError) {
-          return { stdout: '', stderr: `sql run: ${syntaxError}`, exitCode: 1 };
-        }
-
-        const rows = await adapter.execute(query);
-        const resultPath = '/sql/result.json';
-        // Backends don't auto-create parent directories on writeFiles — mkdir first.
-        await ctx.sandbox.executeCommand('mkdir -p /sql');
-        await ctx.sandbox.writeFiles([
-          { path: resultPath, content: JSON.stringify(rows) },
-        ]);
-        meta?.setHidden({ resultPath });
-
-        return {
-          stdout: `results stored in ${resultPath}\n`,
-          stderr: '',
-          exitCode: 0,
-        };
-      },
-    },
-    validate: {
-      usage: 'validate <db> "SELECT ..."',
-      description: 'Validate query syntax against <db>',
-      repair: repairDbNameAndQuotedArg,
-      handler: async (args) => {
-        const meta = useBashMeta();
-        const resolved = resolveAdapter(adapters, 'validate', args);
-        if ('error' in resolved) {
-          return { stdout: '', stderr: resolved.error, exitCode: 1 };
-        }
-        const { adapter, sql: rawQuery } = resolved;
-
-        const query = adapter.format(rawQuery);
-        meta?.setHidden({ formattedSql: query });
-
-        const error = await adapter.validate(query);
-        return error
-          ? { stdout: '', stderr: `sql validate: ${error}`, exitCode: 1 }
-          : { stdout: 'valid\n', stderr: '', exitCode: 0 };
-      },
-    },
-  } satisfies Record<string, SubcommandDefinition>;
-
-  return {
-    command: defineSubcommandGroup('sql', subcommands),
-    repair: buildSubcommandRepair('sql', subcommands),
-  };
-}
-```
-
-The handlers:
-
-- Use `useBashMeta()` to attach a per-call reminder plus host-only `formattedSql` / `resultPath` metadata (stripped from what the model sees).
-- Resolve the adapter from the first positional arg, so `sql run main "..."` and `sql validate analytics "..."` can share the same command group.
-- Let the adapter own query normalization and validation after the shell arguments have been parsed.
-- Return `CommandResult` directly, letting the parent bash runtime handle exit codes and stderr routing.
-
-If the upstream surface is already described by OpenAPI, prefer
-`createOpenAPIExtension()` over hand-writing the dispatcher. It packages this
-same command-group pattern into a ready-made `SandboxExtension`; see
-[Routing Sandbox](/docs/context/routing-sandbox#createopenapiextensionoptions).
-
-For the meta channel details, see [Sandbox → Meta Channel](/docs/context/sandbox#meta-channel).
-
-## Next Steps
-
-- [Routing Sandbox](/docs/context/routing-sandbox) — Run the same extension against virtual, Docker, or Agent OS backends
-- [Sandbox](/docs/context/sandbox) — The `createBashTool` wrapper, `BashException`, meta channel
-- [Container Tool](/docs/context/container-tool) — Run custom subcommands inside a Docker container
-- [Agent](/docs/context/agent) — Attach a sandbox with custom commands to an AI agent
+See [Sandbox](/docs/context/sandbox) for those helpers and for the broader
+`createBashTool()` wrapper behavior.

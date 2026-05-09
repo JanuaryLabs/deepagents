@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { validateAdapterNames } from '../lib/adapter-name.ts';
 import type { Adapter } from '../lib/adapters/adapter.ts';
+import { errorMessage } from './command.ts';
 
 export async function loadAdapters(): Promise<Record<string, Adapter>> {
   const target = process.env.TEXT2SQL_ADAPTERS;
@@ -21,7 +23,7 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
     mod = (await import(specifier)) as { default?: unknown };
   } catch (cause) {
     throw new Error(
-      `TEXT2SQL_ADAPTERS=${target}: failed to import module - ${cause instanceof Error ? cause.message : String(cause)}`,
+      `TEXT2SQL_ADAPTERS=${target}: failed to import module - ${errorMessage(cause)}`,
     );
   }
 
@@ -45,6 +47,12 @@ export async function loadAdapters(): Promise<Record<string, Adapter>> {
         `TEXT2SQL_ADAPTERS=${target}: adapter "${name}" is missing one of the required methods (format, validate, execute).`,
       );
     }
+  }
+
+  try {
+    validateAdapterNames(entries.map(([name]) => name));
+  } catch (cause) {
+    throw new Error(`TEXT2SQL_ADAPTERS=${target}: ${errorMessage(cause)}`);
   }
 
   return exported as Record<string, Adapter>;

@@ -7,7 +7,6 @@ import {
   XmlRenderer,
   assistantText,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   user,
 } from '@deepagents/context';
@@ -16,10 +15,7 @@ import { withSqliteContainer } from '../helpers/sqlite-container.ts';
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

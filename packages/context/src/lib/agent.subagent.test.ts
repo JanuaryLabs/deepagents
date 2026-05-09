@@ -11,7 +11,6 @@ import {
   XmlRenderer,
   agent,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   hint,
   mapGenerateErrorToCode,
@@ -21,10 +20,7 @@ import {
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

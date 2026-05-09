@@ -14,7 +14,6 @@ import {
   agent,
   chat,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   errorRecoveryGuardrail,
   fragment,
@@ -23,10 +22,9 @@ import {
   user,
 } from '@deepagents/context';
 
+import { AdapterIndexer } from '../../lib/adapter-index.ts';
 import type { Adapter } from '../../lib/adapters/adapter.ts';
 import { instructions } from '../../lib/instructions.ts';
-import { sqlSandboxExtension } from '../../lib/sandbox.ts';
-import { Text2Sql } from '../../lib/sql.ts';
 
 export interface ConversationSimulatorConfig {
   /** Database adapter to use */
@@ -105,7 +103,6 @@ async function generateFollowUp(params: {
     model: groq('openai/gpt-oss-20b'),
     context,
     schema: followUpSchema,
-    sandbox: await createBashTool(),
   });
 
   return followUpOutput.generate();
@@ -198,18 +195,12 @@ export async function simulateConversation(
   const userId = 'eval-user';
   const observed = new ObservedFs(new InMemoryFs());
   const base = await createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: observed }),
-      hostExtensions: [sqlSandboxExtension({ main: config.adapter })],
-    }),
+    sandbox: await createVirtualSandbox({ fs: observed }),
   });
   const sandbox = { ...base, drainFileEvents: () => observed.drain() };
   const engine = new ContextEngine({ store, chatId, userId });
-  const text2sql = new Text2Sql({
-    version: `eval-simulator-${randomUUID()}`,
-    model,
-    adapters: { main: config.adapter },
-  });
+  const adapters = { main: config.adapter };
+  const version = `eval-simulator-${randomUUID()}`;
 
   const ai = agent({
     name: 'text2sql',
@@ -228,7 +219,10 @@ export async function simulateConversation(
 
     const userMessage = createUserMessage(currentQuestion);
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(
+      ...instructions(),
+      ...(await new AdapterIndexer({ adapters, version }).index()),
+    );
     await engine.continue(user(userMessage));
     const stream = await chat(ai);
     await drainStream(stream);

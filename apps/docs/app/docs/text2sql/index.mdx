@@ -8,7 +8,7 @@ your database schema, carries conversation state through your context store, and
 can stream user-facing answers grounded in validated query results.
 
 If you already own the bash sandbox and want to wire the `sql` command
-manually, see [Caller-Owned Sandbox](/docs/text2sql/sqlv3).
+manually, see [SQL CLI in Sandboxes](/docs/text2sql/sqlv3).
 
 ## Key Features
 
@@ -22,8 +22,8 @@ manually, see [Caller-Owned Sandbox](/docs/text2sql/sqlv3).
 ## Quick Example
 
 ```typescript
-import { DatabaseSync } from 'node:sqlite';
 import { groq } from '@ai-sdk/groq';
+import { DatabaseSync } from 'node:sqlite';
 
 import { Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
@@ -53,7 +53,7 @@ const sql = await text2sql.toSql(
 
 `main` is the adapter-map key. Reuse that same name in
 `text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
-`sql run <db> "..."` sandbox calls.
+`sql run <db> "..."` calls from a sandbox where the package CLI is installed.
 
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you build adapter
 maps dynamically, validate the keys up front with `isValidAdapterName(name)`
@@ -61,11 +61,12 @@ or `validateAdapterNames(names)`.
 
 ## Core Methods
 
-| Method                    | Description                                            |
-| ------------------------- | ------------------------------------------------------ |
-| `toSql(input, adapterName)` | Generate SQL without executing (routed to one adapter) |
-| `index(options?)` | Introspect all configured adapters (cached per adapter); accepts `{ onProgress }` to stream events |
-| `toPairs(adapterName, factory)` | Generate training pairs from one configured adapter |
+| API                                                    | Description                                                                                    |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `Text2Sql#toSql(input, adapterName)`                   | Generate SQL without executing, routed to one adapter                                          |
+| `Text2Sql#toPairs(adapterName, factory)`               | Generate training pairs from one configured adapter                                            |
+| `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments, with optional progress events                 |
+| `sql index [adapter ...]`                              | Run adapter indexing inside a sandbox and write schema fragments plus progress events to files |
 
 To run a streaming, multi-turn agent on top of `Text2Sql`, build the chat
 loop yourself with `agent` + `chat` from `@deepagents/context`. See
@@ -113,7 +114,7 @@ User Question
 ## Next Steps
 
 - [Getting Started](/docs/text2sql/getting-started) - Installation and first query
-- [Caller-Owned Sandbox](/docs/text2sql/sqlv3) - Compose the SQL sandbox extension with your own commands, plugins, and backends
+- [SQL CLI in Sandboxes](/docs/text2sql/sqlv3) - Install and configure the real `sql` command for chat flows
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific setup
 - [MySQL / MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific setup
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific setup

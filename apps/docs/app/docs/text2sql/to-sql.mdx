@@ -4,7 +4,7 @@ description: Convert natural language to SQL queries without execution
 ---
 
 The high-level `Text2Sql.toSql()` method generates SQL without executing it. It
-uses cached schema fragments from `index()`, runs the SQL generation agent, and
+uses cached schema fragments from adapter indexing, runs the SQL generation agent, and
 returns the final SQL string after adapter formatting and validation.
 
 The second argument is the configured adapter name — the same key you used in
@@ -30,7 +30,7 @@ console.log(sql);
 
 When you call `toSql()`:
 
-1. **Load schema** - `index()` introspects the adapter or returns cached fragments.
+1. **Load schema** - Adapter indexing introspects the adapter or returns cached fragments.
 2. **Generate SQL** - The SQL agent maps the question to the available schema.
 3. **Format** - The adapter normalizes the generated SQL for its dialect.
 4. **Validate** - The adapter validates the SQL before it is returned.
@@ -52,7 +52,7 @@ if (error) {
 
 ## Adding Extra Fragments
 
-`Text2Sql.toSql()` uses schema fragments from `index()`. If you want direct SQL
+`Text2Sql.toSql()` uses cached schema fragments from adapter indexing. If you want direct SQL
 generation with extra business vocabulary or guardrails, call the lower-level
 `toSql()` helper exported from `@deepagents/text2sql` and pass your own
 fragments explicitly:
@@ -92,13 +92,13 @@ console.log(sql);
 
 `toSql()` is a method on `Text2Sql`. The streaming chat agent is built by the
 caller using `agent` + `chat` from `@deepagents/context` plus `instructions()`
-and `text2sql.index()` — see
+and schema fragments from `AdapterIndexer` or `sql index` — see
 [Build Conversations](/docs/text2sql/build-conversations).
 
 | Feature | `toSql()` | Chat agent (`chat(ai)`) |
 | ------- | --------- | ----------------------- |
 | Returns | SQL string | Streamed user-facing answer |
-| Execution | No execution | Executes via `sql validate <db> "..."` and `sql run <db> "..."` |
+| Execution | No execution | Executes via the sandbox-installed `sql validate <db> "..."` and `sql run <db> "..."` CLI |
 | Persistent context | Schema cache only | Full conversation thread from your context store |
 | Extra fragments | Use low-level `toSql({ fragments })` | Set fragments on your `ContextEngine` |
 | Streaming | No | Yes |

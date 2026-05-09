@@ -42,7 +42,6 @@
     "stream-persistence",
     "---Sandbox---",
     "sandbox",
-    "routing-sandbox",
     "docker-sandbox",
     "container-tool",
     "agent-os-sandbox",

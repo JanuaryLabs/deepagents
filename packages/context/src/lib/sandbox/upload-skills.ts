@@ -19,22 +19,16 @@ function joinSandbox(base: string, relative: string): string {
 }
 
 /**
- * Discover skills under each host directory, write all non-dotfile, non-symlink
- * files into the sandbox under the mapped path, and return the discovered
- * skill metadata with sandbox paths.
- *
- * Later inputs override earlier ones when the same skill name appears twice.
- * Files with the same sandbox path are overwritten in order, so the last
- * writer wins.
+ * Discover skill metadata and map each host SKILL.md path to its sandbox path
+ * without uploading any files. Later inputs override earlier ones when the same
+ * skill name appears twice.
  */
-export async function uploadSkills(
-  sandbox: Sandbox,
+export function discoverSkillMappings(
   inputs: SkillUploadInput[],
-): Promise<SkillPathMapping[]> {
+): SkillPathMapping[] {
   if (inputs.length === 0) return [];
 
   const discoveredByName = new Map<string, SkillPathMapping>();
-  const filesToUpload: { path: string; content: string | Buffer }[] = [];
 
   for (const { host, sandbox: sandboxBase } of inputs) {
     const absoluteHost = path.resolve(expandHome(host));
@@ -52,7 +46,30 @@ export async function uploadSkills(
         sandbox: joinSandbox(sandboxBase, relative),
       });
     }
+  }
 
+  return Array.from(discoveredByName.values());
+}
+
+/**
+ * Discover skills under each host directory, write all non-dotfile, non-symlink
+ * files into the sandbox under the mapped path, and return the discovered
+ * skill metadata with sandbox paths.
+ *
+ * Later inputs override earlier ones when the same skill name appears twice.
+ * Files with the same sandbox path are overwritten in order, so the last
+ * writer wins.
+ */
+export async function uploadSkills(
+  sandbox: Sandbox,
+  inputs: SkillUploadInput[],
+): Promise<SkillPathMapping[]> {
+  if (inputs.length === 0) return [];
+
+  const skills = discoverSkillMappings(inputs);
+  const filesToUpload: { path: string; content: string | Buffer }[] = [];
+
+  for (const { host, sandbox: sandboxBase } of inputs) {
     const walked = await walkDirectory(host);
     for (const file of walked) {
       filesToUpload.push({
@@ -66,5 +83,5 @@ export async function uploadSkills(
     await sandbox.writeFiles(filesToUpload);
   }
 
-  return Array.from(discoveredByName.values());
+  return skills;
 }

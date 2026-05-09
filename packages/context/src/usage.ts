@@ -19,7 +19,6 @@ import {
   createBashTool,
   createContainerTool,
   createDockerSandbox,
-  createRoutingSandbox,
   createVirtualSandbox,
   githubRelease,
   hint,
@@ -38,10 +37,7 @@ const store = new InMemoryContextStore();
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

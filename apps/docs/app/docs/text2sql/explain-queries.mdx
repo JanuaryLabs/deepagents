@@ -9,13 +9,17 @@ of the supported patterns below when you need plain English explanations of SQL.
 ## Option 1: Use chat() for Execution + Explanation
 
 Build the chat agent with primitives from `@deepagents/context`, wired to
-Text2SQL's `instructions()` and `index()`:
+Text2SQL's `instructions()` and indexed schema fragments:
 
 ```typescript
 import { agent, chat, user } from '@deepagents/context';
 import { instructions } from '@deepagents/text2sql';
 
-context.set(...instructions(), ...(await text2sql.index()));
+const indexResult = await sandbox.sandbox.executeCommand('sql index');
+if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
+const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
+const fragments = JSON.parse(await sandbox.sandbox.readFile(manifest.fragmentsPath));
+context.set(...instructions(), ...fragments);
 
 const ai = agent({ name: 'sql-assistant', sandbox, model, context });
 

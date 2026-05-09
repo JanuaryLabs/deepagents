@@ -1,0 +1,252 @@
+---
+title: Build an Agent (SQLite Store)
+description: Step-by-step recipe for a streaming Text2SQL agent with a SQLite-backed context store
+---
+
+A copy-paste recipe that wires `@deepagents/text2sql` into a streaming chat
+agent backed by a `SqliteContextStore`. Each step adds one piece. By the end
+you have a durable multi-turn agent in roughly fifty lines.
+
+## 1. Install
+
+```bash
+npm install @deepagents/context @deepagents/text2sql @ai-sdk/groq
+```
+
+Add the driver for the database you want to query:
+
+```bash
+npm install pg          # PostgreSQL
+npm install mssql       # SQL Server
+npm install mysql2      # MySQL / MariaDB
+npm install @google-cloud/bigquery   # BigQuery
+# SQLite uses node:sqlite — no driver needed
+```
+
+## 2. Open the SQLite context store
+
+The context store persists every turn — messages, fragments, usage — to a
+single `.db` file. Pass a path; `SqliteContextStore` opens it via
+`node:sqlite` and runs the DDL on first use.
+
+```typescript
+import { SqliteContextStore } from '@deepagents/context';
+
+const store = new SqliteContextStore('./agent.db');
+```
+
+## 3. Create the SQL adapter
+
+The adapter is the database the agent will query. Pick one. The adapter map
+key (`main` here) is the selector the CLI uses inside the sandbox.
+
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
+<Tab value="SQLite">
+```typescript
+import { DatabaseSync } from 'node:sqlite';
+
+import { Sqlite } from '@deepagents/text2sql/sqlite';
+import * as sqlite from '@deepagents/text2sql/sqlite';
+
+const db = new DatabaseSync('./your-database.db', { readOnly: true });
+const adapter = new Sqlite({
+  execute: (sql) => db.prepare(sql).all(),
+  grounding: [sqlite.tables(), sqlite.info()],
+});
+```
+</Tab>
+<Tab value="PostgreSQL">
+```typescript
+import pg from 'pg';
+
+import { Postgres } from '@deepagents/text2sql/postgres';
+import * as postgres from '@deepagents/text2sql/postgres';
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new Postgres({
+  execute: async (sql) => (await pool.query(sql)).rows,
+  grounding: [postgres.tables(), postgres.info()],
+});
+```
+</Tab>
+<Tab value="SQL Server">
+```typescript
+import sql from 'mssql';
+
+import { SqlServer } from '@deepagents/text2sql/sqlserver';
+import * as sqlserver from '@deepagents/text2sql/sqlserver';
+
+const pool = await sql.connect({
+  server: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  options: { encrypt: true, trustServerCertificate: true },
+});
+const adapter = new SqlServer({
+  execute: async (query) => (await pool.request().query(query)).recordset,
+  grounding: [sqlserver.tables(), sqlserver.info()],
+});
+```
+</Tab>
+<Tab value="MySQL/MariaDB">
+```typescript
+import mysql from 'mysql2/promise';
+
+import { Mysql } from '@deepagents/text2sql/mysql';
+import * as mysqlGrounding from '@deepagents/text2sql/mysql';
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+const adapter = new Mysql({
+  execute: async (sql) => {
+    const [rows] = await pool.query(sql);
+    return rows;
+  },
+  grounding: [mysqlGrounding.tables(), mysqlGrounding.info()],
+});
+```
+</Tab>
+<Tab value="BigQuery">
+```typescript
+import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
+
+import { BigQuery } from '@deepagents/text2sql/bigquery';
+import * as bigquery from '@deepagents/text2sql/bigquery';
+
+const projectId = process.env.BQ_PROJECT_ID!;
+const client = new BigQueryClient({ projectId });
+const adapter = new BigQuery({
+  projectId,
+  datasets: ['analytics'],
+  execute: async (sql) => {
+    const [job] = await client.createQueryJob({ query: sql });
+    const [rows] = await job.getQueryResults();
+    return rows;
+  },
+  validate: async (sql) => {
+    await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
+  },
+  grounding: [bigquery.tables(), bigquery.info()],
+});
+```
+</Tab>
+</Tabs>
+
+## 4. Create the model
+
+```typescript
+import { groq } from '@ai-sdk/groq';
+
+const model = groq('openai/gpt-oss-20b');
+```
+
+## 5. Build the ContextEngine and index the schema
+
+`ContextEngine` reads and writes the SQLite store using `chatId` + `userId` as
+the thread key. `AdapterIndexer` walks the adapter's grounding once and
+returns cacheable schema fragments. Bump `version` when your schema changes.
+
+```typescript
+import { ContextEngine } from '@deepagents/context';
+import { AdapterIndexer, instructions } from '@deepagents/text2sql';
+
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-123',
+  userId: 'user-456',
+});
+
+const indexer = new AdapterIndexer({
+  adapters: { main: adapter },
+  version: 'v1',
+});
+
+context.set(...instructions(), ...(await indexer.index()));
+```
+
+## 6. Author the adapter map for the sandbox
+
+The agent runs the `sql` CLI inside a container. The CLI loads adapters from
+the path in `TEXT2SQL_ADAPTERS`. Write a module that default-exports your
+adapter map and mount it into the sandbox.
+
+```typescript
+// /workspace/text2sql-adapters.ts (inside the sandbox)
+import { adapter } from './build-adapter.ts';
+
+export default { main: adapter };
+```
+
+## 7. Provision the sandbox
+
+```typescript
+import { createContainerTool, npm } from '@deepagents/context';
+
+const sandbox = await createContainerTool({
+  installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  env: {
+    TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+  },
+});
+```
+
+## 8. Wire the agent
+
+```typescript
+import { agent, errorRecoveryGuardrail } from '@deepagents/context';
+
+const ai = agent({
+  name: 'sql-assistant',
+  sandbox,
+  model,
+  context,
+  guardrails: [errorRecoveryGuardrail],
+  maxGuardrailRetries: 3,
+});
+```
+
+## 9. Run a turn
+
+`context.continue(...)` appends the new user message and reserves an empty
+assistant slot. `chat(ai)` streams into that slot and persists each chunk
+through the SQLite store.
+
+```typescript
+import { chat, user } from '@deepagents/context';
+
+await context.continue(user('What are the most popular genres?'));
+const stream = await chat(ai);
+
+for await (const chunk of stream) {
+  // render chunk
+}
+```
+
+## 10. Reuse the thread
+
+Open a new process pointing the same `chatId`/`userId` at the same
+`./agent.db`. The history loads automatically; just call `continue` + `chat`
+again.
+
+```typescript
+const store = new SqliteContextStore('./agent.db');
+const context = new ContextEngine({ store, chatId: 'chat-123', userId: 'user-456' });
+context.set(...instructions(), ...(await indexer.index()));
+// ai = agent({ ... }) as before
+
+await context.continue(user('Now break it down by country.'));
+for await (const chunk of await chat(ai)) {
+  // render chunk
+}
+```
+
+## Next
+
+- [Build Conversations](/docs/text2sql/build-conversations) — title generation, indexing progress events, advanced wiring
+- [SQL CLI in Sandboxes](/docs/text2sql/sqlv3) — what the `sql` CLI does inside the container
+- [Teach the System](/docs/text2sql/teach-the-system) — terms, hints, guardrails, examples

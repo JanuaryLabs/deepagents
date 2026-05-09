@@ -16,7 +16,6 @@ import {
   assistantText,
   contentIncludes,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
   dayChanged,
   everyNTurns,
@@ -35,10 +34,7 @@ import { getTextParts } from '../../text.ts';
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
-    sandbox: await createRoutingSandbox({
-      backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-      hostExtensions: [],
-    }),
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
 }
 

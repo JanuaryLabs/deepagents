@@ -5,7 +5,6 @@ import { describe, it } from 'node:test';
 import {
   type SubcommandDefinition,
   buildSubcommandRepair,
-  createRoutingSandbox,
   createVirtualSandbox,
   defineSubcommandGroup,
   repairQuotedArg,
@@ -34,11 +33,9 @@ const subcommands = {
 } satisfies Record<string, SubcommandDefinition>;
 
 async function exec(command: string) {
-  const group = defineSubcommandGroup('tool', subcommands);
-  const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-  const sandbox = await createRoutingSandbox({
-    backend,
-    hostExtensions: [{ commands: [group] }],
+  const sandbox = await createVirtualSandbox({
+    fs: new InMemoryFs(),
+    customCommands: [defineSubcommandGroup('tool', subcommands)],
   });
   return sandbox.executeCommand(command);
 }

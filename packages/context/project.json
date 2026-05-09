@@ -11,16 +11,9 @@
       "options": {
         "additionalEntryPoints": [
           "packages/context/src/browser.ts",
-          "packages/context/src/lib/tracing/index.ts",
-          "packages/context/src/lib/sandbox/openapi/skill/index.ts"
+          "packages/context/src/lib/tracing/index.ts"
         ],
-        "assets": [
-          {
-            "glob": "**/*.md",
-            "input": "packages/context/src/lib/sandbox/openapi/skill",
-            "output": "lib/sandbox/openapi/skill"
-          }
-        ]
+        "assets": []
       }
     },
     "test": {

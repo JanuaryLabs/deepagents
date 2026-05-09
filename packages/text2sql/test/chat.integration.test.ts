@@ -13,7 +13,7 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
-import { Text2Sql, instructions } from '@deepagents/text2sql';
+import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 import { init_db } from '../src/tests/sqlite.ts';
 
@@ -74,21 +74,25 @@ async function setup(mockText?: string) {
     userId: 'test-user',
   });
 
-  const text2sql = new Text2Sql({
-    version: 'test',
-    adapters: { main: adapter },
-    model,
-  });
+  const adapters = { main: adapter };
+  const version = `test-${generateId()}`;
 
-  return { store, text2sql, engine, model };
+  return { store, adapters, version, engine, model };
+}
+
+function indexFragments(
+  adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
+  version: string,
+) {
+  return new AdapterIndexer({ adapters, version }).index();
 }
 
 describe('Text2Sql user-constructed chat', () => {
   it('saves user message to context store', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
     const msg = userMessage('How many users are there?');
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -115,12 +119,12 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('saves assistant response to context store after stream is consumed', async () => {
-    const { store, text2sql, engine, model } = await setup(
+    const { store, adapters, version, engine, model } = await setup(
       'SELECT count(*) FROM users',
     );
     const msg = userMessage('How many users?');
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -149,10 +153,10 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('does not create extra branches during streaming (branch: false)', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
     const msg = userMessage('List all users');
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -176,10 +180,10 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('tracks token usage in chat metadata', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
     const msg = userMessage('Count users');
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -204,9 +208,9 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('updates assistant message in place for tool result scenario', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -261,9 +265,9 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('grows chain correctly across multiple normal user turns', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -306,9 +310,9 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('does not branch when assistant message ID is not in store', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -339,9 +343,9 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('handles multiple consecutive tool-result rounds correctly', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -410,10 +414,10 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('omits fileEvents metadata when no file ops occurred', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
     const msg = userMessage('Show users');
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -477,13 +481,10 @@ describe('Text2Sql user-constructed chat', () => {
       chatId: 'test-chat-signal',
       userId: 'test-user',
     });
-    const text2sql = new Text2Sql({
-      version: 'test',
-      adapters: { main: adapter },
-      model,
-    });
+    const adapters = { main: adapter };
+    const version = `test-signal-${generateId()}`;
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,
@@ -511,13 +512,13 @@ describe('Text2Sql user-constructed chat', () => {
   });
 
   it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
-    const { store, text2sql, engine, model } = await setup();
+    const { store, adapters, version, engine, model } = await setup();
     const fragment = user(
       'How many users are there?',
       reminder('Always explain your SQL before writing it'),
     );
 
-    engine.set(...instructions(), ...(await text2sql.index()));
+    engine.set(...instructions(), ...(await indexFragments(adapters, version)));
     const ai = agent({
       name: 'text2sql',
       sandbox,

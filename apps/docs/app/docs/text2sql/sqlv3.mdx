@@ -1,177 +1,98 @@
 ---
-title: Caller-Owned Sandbox
-description: Compose the SQL sandbox extension with your own commands, plugins, and backends
+title: SQL CLI in Sandboxes
+description: Run Text2SQL chat flows with the real sql command installed inside the sandbox
 ---
 
-`Text2Sql` uses a caller-owned sandbox. `@deepagents/text2sql` exposes a
-composable `sqlSandboxExtension(adaptersMap)` — for example
-`sqlSandboxExtension({ main: adapter })` — as a bundle of the `sql`
-subcommand, its transform plugins, and its arg-repair hook. Compose it into
-any backend via `createBashTool` + `createRoutingSandbox` with
-`hostExtensions`.
+Text2SQL chat flows use a caller-owned sandbox. The `sql` command is a real
+CLI from `@deepagents/text2sql`; it is not a host-routed sandbox extension.
+Install the package in the sandbox before the agent tries to run:
 
-Adapter-map keys become the `<db>` selector in `sql validate <db> "..."` and
-`sql run <db> "..."`. They must match `/^[A-Za-z_][A-Za-z0-9_]*$/`; if you
-build the map dynamically, validate the keys with `isValidAdapterName(name)`
-or `validateAdapterNames(names)` before composing the extension.
+```bash
+sql validate <db> "SELECT ..."
+sql run <db> "SELECT ..."
+```
 
-## What This Path Gives You
+Adapter-map keys become the `<db>` selector. They must match
+`/^[A-Za-z_][A-Za-z0-9_]*$/`; if you build the map dynamically, validate the
+keys with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
-- Full control over sandbox construction (`fs`, `cwd`, `env`, and custom commands)
-- Manual registration of `createSqlCommand(adaptersMap)`
-- Explicit plugin control (`SqlBacktickRewritePlugin`, `SqlProxyEnforcementPlugin`)
-- Swappable backends — virtual (just-bash), Docker, Agent OS, or any `Sandbox` implementation
-
-## Quick Start
+## Container Setup
 
 ```typescript
-import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
-
 import {
   ContextEngine,
   InMemoryContextStore,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
+  createContainerTool,
+  npm,
 } from '@deepagents/context';
-import { Text2Sql, sqlSandboxExtension } from '@deepagents/text2sql';
+import { createSqlCommandHooks } from '@deepagents/text2sql';
 
-const store = new InMemoryContextStore();
-const model = groq('openai/gpt-oss-20b');
-const engine = new ContextEngine({
-  store,
+const sandbox = await createContainerTool({
+  installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  env: {
+    TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+  },
+  ...createSqlCommandHooks({ adapters: { main: adapter } }),
+});
+
+const context = new ContextEngine({
+  store: new InMemoryContextStore(),
   chatId: 'chat-123',
   userId: 'user-456',
 });
-
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
-
-const text2sql = new Text2Sql({
-  version: 'v3-demo',
-  adapters: { main: adapter },
-  model,
-});
 ```
 
-## Composing With Your Own Extensions
+`TEXT2SQL_ADAPTERS` must point to a module inside the sandbox whose default
+export is `Record<string, Adapter>`. Mount or upload that file alongside any
+database files or credentials the adapter needs. If you already mount your app
+source into the container, point the env var at that mounted module path.
 
-`mergeExtensions` concatenates `commands` and `plugins`, chains
-`onBeforeBashCall` hooks (each sees the prior hook's output), and merges `env`
-with last-wins semantics. Your extensions sit alongside SQL's.
+The host-side `createSqlCommandHooks()` call repairs common model quoting
+mistakes before the command reaches bash, blocks raw database CLIs, and attaches
+formatted-SQL metadata to `sql validate` and `sql run` results. It should use
+the same adapter map that the sandbox adapter module exports.
 
-```typescript
-import type { SandboxExtension } from '@deepagents/context';
+## CLI Commands
 
-const myExtension: SandboxExtension = {
-  commands: [myCustomCommand],
-  plugins: [myAuditPlugin],
-  onBeforeBashCall: ({ command }) => ({ command: myRewrite(command) }),
-  env: { MY_FLAG: '1' },
-};
-
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter }), myExtension],
-  }),
-});
+```bash
+sql index [adapter ...]
+sql validate <db> "SELECT ..."
+sql run <db> "SELECT ..." [--out-dir ./sql]
 ```
 
-## Swapping the Backend (Docker / Agent OS)
-
-The sandbox composition shape is the same for every backend — only the
-`backend` argument to `createRoutingSandbox` changes. Virtual (just-bash),
-Docker, Agent OS, and any other implementation of `bash-tool`'s `Sandbox`
-interface all plug in the same way.
-
-```typescript
-import {
-  createBashTool,
-  createDockerSandbox,
-  createRoutingSandbox,
-} from '@deepagents/context';
-import { sqlSandboxExtension } from '@deepagents/text2sql';
-
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createDockerSandbox({ image: 'alpine' }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
-});
-```
-
-Host commands (like `sql validate <db> "..."`, `sql run <db> "..."`) execute in
-Node — the backend is only used for file I/O and pass-through commands. File
-events are only observable on the virtual backend; wrap its `fs` in
-`ObservedFs` when you need them (see [File Event Metadata](#file-event-metadata)).
-
-### Pipeline Boundary
-
-On Docker and Agent OS backends, host commands dispatch only at the top of a
-line. `sql run main "..." | jq .` works on the virtual backend (bash parses
-the pipeline and matches `sql` inside) but on Docker/Agent OS the entire line
-runs in the container, which has no `sql` binary. Pipe in two turns
-(`sql run main ...` then `cat /sql/<uuid>.json | jq .`), or use the virtual
-backend.
-
-## Low-Level Primitives
-
-If you need something `sqlSandboxExtension` does not model, the underlying
-pieces are all exported: `createSqlCommand(adapters)`,
-`SqlBacktickRewritePlugin`, `SqlProxyEnforcementPlugin`. Compose them directly
-into any sandbox backend that accepts custom commands, plugins, and a
-pre-call hook.
+`sql index` writes a JSON manifest to stdout. The manifest includes
+`fragmentsPath`, `eventsPath`, `adapters`, and the fragment count. Read
+`fragmentsPath` and pass those fragments to your `ContextEngine` with
+`instructions()` before the first `chat()` call.
 
 ## File Event Metadata
 
-Wrap your filesystem with `ObservedFs` and expose `drainFileEvents` on the
-returned sandbox. During `chat()`, the context chat pipeline drains those file
-events and stores them on the assistant message as `metadata.fileEvents`.
+File event tracking is scoped to virtual sandboxes backed by `ObservedFs`.
+Commands installed inside Docker or Agent OS do real filesystem work in those
+environments, but they do not emit `ObservedFs` events.
 
 ```typescript
+import { InMemoryFs } from 'just-bash';
+
 import {
   ObservedFs,
   createBashTool,
-  createRoutingSandbox,
   createVirtualSandbox,
 } from '@deepagents/context';
-import { InMemoryFs } from 'just-bash';
 
 const observed = new ObservedFs(new InMemoryFs());
 const base = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: observed }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
+  sandbox: await createVirtualSandbox({ fs: observed }),
 });
 const sandbox = { ...base, drainFileEvents: () => observed.drain() };
-```
-
-```typescript
-interface FileEvent {
-  path: string;
-  op: 'read' | 'write' | 'delete' | 'modify';
-  timestamp: number;
-}
 ```
 
 When no file operations occur in a turn, `fileEvents` is omitted.
 
 ## Current Scope
 
-- File event tracking is currently scoped to just-bash-backed sandboxes.
-- The SQL interface remains a bash subcommand (`sql validate <db> "..."`,
-  `sql run <db> "..."`), not a standalone AI SDK tool.
-
-## Next Steps
-
-- [Getting Started](/docs/text2sql/getting-started) - Recommended setup
-- [Generate SQL](/docs/text2sql/to-sql) - Direct SQL generation
-- [Build Conversations](/docs/text2sql/build-conversations) - Context-backed chat flows
-- [Sandbox](/docs/context/sandbox) - Shared bash wrapper details
+- The SQL interface is a real bash command installed from the package.
+- Missing `sql` means the sandbox was not prepared correctly; install
+  `@deepagents/text2sql` before starting the agent.
+- OpenAPI-style command surfaces should also be generated or installed as real
+  CLIs, not host-routed through bash.

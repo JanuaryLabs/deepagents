@@ -16,41 +16,40 @@ Use in-memory storage for tests and short-lived processes:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 
 import {
   ContextEngine,
   InMemoryContextStore,
   agent,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
+  createContainerTool,
   errorRecoveryGuardrail,
+  npm,
   user,
 } from '@deepagents/context';
-import { Text2Sql, instructions, sqlSandboxExtension } from '@deepagents/text2sql';
+import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 
 const model = groq('openai/gpt-oss-20b');
-const text2sql = new Text2Sql({
-  version: 'v1',
-  model,
-  adapters: { main: adapter },
-});
 
 const store = new InMemoryContextStore();
-// Reuse your configured database adapter from Getting Started.
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
+const sandbox = await createContainerTool({
+  installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  env: {
+    TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+  },
+  ...createSqlCommandHooks({ adapters }),
 });
 const context = new ContextEngine({
   store,
   chatId: 'chat-123',
   userId: 'user-456',
 });
-context.set(...instructions(), ...(await text2sql.index()));
+const indexResult = await sandbox.sandbox.executeCommand('sql index');
+if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
+const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
+const fragments = JSON.parse(
+  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+);
+context.set(...instructions(), ...fragments);
 
 const ai = agent({
   name: 'sql-assistant',
@@ -61,47 +60,47 @@ const ai = agent({
   maxGuardrailRetries: 3,
 });
 ```
+
 </Tab>
 <Tab value="SqliteContextStore">
 Use SQLite when you want persistence across server restarts:
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 
 import {
   ContextEngine,
   SqliteContextStore,
   agent,
-  createBashTool,
-  createRoutingSandbox,
-  createVirtualSandbox,
+  createContainerTool,
   errorRecoveryGuardrail,
+  npm,
   user,
 } from '@deepagents/context';
-import { Text2Sql, instructions, sqlSandboxExtension } from '@deepagents/text2sql';
+import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 
 const model = groq('openai/gpt-oss-20b');
-const text2sql = new Text2Sql({
-  version: 'v1',
-  model,
-  adapters: { main: adapter },
-});
 
 const store = new SqliteContextStore('./text2sql-history.sqlite');
-// Reuse your configured database adapter from Getting Started.
-const sandbox = await createBashTool({
-  sandbox: await createRoutingSandbox({
-    backend: await createVirtualSandbox({ fs: new InMemoryFs() }),
-    hostExtensions: [sqlSandboxExtension({ main: adapter })],
-  }),
+const sandbox = await createContainerTool({
+  installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  env: {
+    TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
+  },
+  ...createSqlCommandHooks({ adapters }),
 });
 const context = new ContextEngine({
   store,
   chatId: 'chat-123',
   userId: 'user-456',
 });
-context.set(...instructions(), ...(await text2sql.index()));
+const indexResult = await sandbox.sandbox.executeCommand('sql index');
+if (indexResult.exitCode !== 0) throw new Error(indexResult.stderr);
+const manifest = JSON.parse(indexResult.stdout) as { fragmentsPath: string };
+const fragments = JSON.parse(
+  await sandbox.sandbox.readFile(manifest.fragmentsPath),
+);
+context.set(...instructions(), ...fragments);
 
 const ai = agent({
   name: 'sql-assistant',
@@ -112,8 +111,15 @@ const ai = agent({
   maxGuardrailRetries: 3,
 });
 ```
+
 </Tab>
 </Tabs>
+
+Both history examples assume `adapters` is the host-side adapter map and that
+`/workspace/text2sql-adapters.ts` exists inside the sandbox with the same map
+as its default export. Mount, upload, or write that module before calling
+`chat()`. See [SQL CLI in Sandboxes](/docs/text2sql/sqlv3) for the
+sandbox-side adapter file.
 
 ## Continuing a Conversation
 

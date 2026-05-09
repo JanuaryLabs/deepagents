@@ -3,23 +3,22 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { getFragmentData } from '@deepagents/context';
-import { Text2Sql } from '@deepagents/text2sql';
+import { AdapterIndexer } from '@deepagents/text2sql';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../src/tests/sqlite.ts';
 
-function makeText2Sql(
+function indexTestAdapters(
   version: string,
   adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
 ) {
-  return new Text2Sql({
+  return new AdapterIndexer({
     version,
     adapters,
-    model: {} as never,
-  });
+  }).index();
 }
 
-describe('Text2Sql.index() — cache isolation', () => {
+describe('AdapterIndexer — cache isolation', () => {
   it('does not re-introspect an adapter when a second adapter is added under the same version', async () => {
     const version = `cache-iso-${generateId()}`;
 
@@ -35,8 +34,7 @@ describe('Text2Sql.index() — cache isolation', () => {
       return originalIntrospect(...args);
     };
 
-    const first = makeText2Sql(version, { main: mainAdapter });
-    await first.index();
+    await indexTestAdapters(version, { main: mainAdapter });
     assert.strictEqual(mainIntrospectCalls, 1, 'warmed main cache');
 
     const { adapter: analyticsAdapter } = await init_db(
@@ -44,11 +42,10 @@ describe('Text2Sql.index() — cache isolation', () => {
       { grounding: [sqlite.tables()] },
     );
 
-    const second = makeText2Sql(version, {
+    const fragments = await indexTestAdapters(version, {
       main: mainAdapter,
       analytics: analyticsAdapter,
     });
-    const fragments = await second.index();
 
     assert.strictEqual(
       mainIntrospectCalls,
@@ -65,10 +62,9 @@ describe('Text2Sql.index() — cache isolation', () => {
       grounding: [sqlite.tables()],
     });
 
-    const t2s = makeText2Sql(`wrap-${generateId()}`, {
+    const fragments = await indexTestAdapters(`wrap-${generateId()}`, {
       my_db: adapter,
     });
-    const fragments = await t2s.index();
 
     assert.strictEqual(fragments.length, 1);
     assert.strictEqual(fragments[0].name, 'my_db');
@@ -84,7 +80,7 @@ describe('Text2Sql.index() — cache isolation', () => {
   });
 });
 
-describe('Text2Sql.index() — error annotation', () => {
+describe('AdapterIndexer — error annotation', () => {
   it('annotates introspection errors with the failing adapter name', async () => {
     const { adapter: goodAdapter } = await init_db(
       `CREATE TABLE t (n INTEGER);`,
@@ -97,13 +93,12 @@ describe('Text2Sql.index() — error annotation', () => {
       throw new Error('connection refused');
     };
 
-    const t2s = makeText2Sql(`err-${generateId()}`, {
-      main: goodAdapter,
-      broken: badAdapter,
-    });
-
     await assert.rejects(
-      () => t2s.index(),
+      () =>
+        indexTestAdapters(`err-${generateId()}`, {
+          main: goodAdapter,
+          broken: badAdapter,
+        }),
       (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         assert.match(message, /broken/);

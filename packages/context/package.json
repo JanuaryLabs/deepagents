@@ -31,11 +31,6 @@
       "types": "./dist/lib/tracing/index.d.ts",
       "import": "./dist/lib/tracing/index.js",
       "default": "./dist/lib/tracing/index.js"
-    },
-    "./openapi-skill": {
-      "types": "./dist/lib/sandbox/openapi/skill/index.d.ts",
-      "import": "./dist/lib/sandbox/openapi/skill/index.js",
-      "default": "./dist/lib/sandbox/openapi/skill/index.js"
     }
   },
   "files": [

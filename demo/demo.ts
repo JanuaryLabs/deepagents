@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { input, printer } from '@deepagents/agent';
 import {
   ContextEngine,
+  type ContextFragment,
   InMemoryContextStore,
   Installer,
   type InstallerContext,
@@ -14,9 +15,7 @@ import {
   errorRecoveryGuardrail,
   user,
 } from '@deepagents/context';
-import { Text2Sql, instructions } from '@deepagents/text2sql';
-
-import adapters from './demo-adapters.ts';
+import { instructions } from '@deepagents/text2sql';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -25,12 +24,12 @@ const containerWorkspace = '/workspace';
 const sqlBinaryContainer = `${containerWorkspace}/packages/text2sql/dist/bin/sql.js`;
 const adaptersContainer = `${containerWorkspace}/demo/demo-adapters.ts`;
 
-const gameboardDbHost =
-  process.env.TEXT2SQL_DEMO_GAMEBOARD_DB ??
-  '/Users/ezzabuzaid/Desktop/January/text2sql/tools/gameboard.sqlite';
-const gpuDbHost =
-  process.env.TEXT2SQL_DEMO_GPU_DB ??
-  '/Users/ezzabuzaid/Desktop/January/text2sql/tools/gpu-database.sqlite';
+interface SqlIndexManifest {
+  fragmentsPath: string;
+  eventsPath: string;
+  adapters: string[];
+  fragments: number;
+}
 
 class SqlLinkInstaller extends Installer {
   readonly kind = 'sql-link';
@@ -60,12 +59,14 @@ const sandbox = await createContainerTool({
       readOnly: false,
     },
     {
-      hostPath: gameboardDbHost,
+      hostPath:
+        '/Users/ezzabuzaid/Desktop/January/text2sql/tools/gameboard.sqlite',
       containerPath: '/data/gameboard.sqlite',
       readOnly: true,
     },
     {
-      hostPath: gpuDbHost,
+      hostPath:
+        '/Users/ezzabuzaid/Desktop/January/text2sql/tools/gpu-database.sqlite',
       containerPath: '/data/gpu-database.sqlite',
       readOnly: true,
     },
@@ -73,8 +74,6 @@ const sandbox = await createContainerTool({
   env: {
     NODE_NO_WARNINGS: '1',
     TEXT2SQL_ADAPTERS: adaptersContainer,
-    TEXT2SQL_DEMO_GAMEBOARD_DB: '/data/gameboard.sqlite',
-    TEXT2SQL_DEMO_GPU_DB: '/data/gpu-database.sqlite',
   },
 });
 const store = new InMemoryContextStore();
@@ -84,9 +83,16 @@ const context = new ContextEngine({
   store,
 });
 
-const text2sql = new Text2Sql({ version: 'demo', adapters, model });
-context.set(...instructions(), ...(await text2sql.index()));
+const indexResult = await sandbox.sandbox.executeCommand('sql index');
+if (indexResult.exitCode !== 0) {
+  throw new Error(`sql index failed: ${indexResult.stderr}`);
+}
+const indexManifest = JSON.parse(indexResult.stdout) as SqlIndexManifest;
+const indexFragments = JSON.parse(
+  await sandbox.sandbox.readFile(indexManifest.fragmentsPath),
+) as ContextFragment[];
 
+context.set(...instructions(), ...indexFragments);
 const demoAgent = agent({
   name: 'text2sql',
   sandbox,
