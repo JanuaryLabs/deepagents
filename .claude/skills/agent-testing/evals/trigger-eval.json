@@ -28,10 +28,6 @@
     "should_trigger": true
   },
   {
-    "query": "write an integration test for this file: packages/text2sql/src/lib/sqlv3.ts. the function streams a sql query back from the model. we need to simulate the stream",
-    "should_trigger": true
-  },
-  {
     "query": "mock the language model to return reasoning tokens alongside text, and verify result.reasoning separately from result.text",
     "should_trigger": true
   },
