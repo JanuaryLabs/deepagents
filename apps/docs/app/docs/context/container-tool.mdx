@@ -83,8 +83,8 @@ This replaces the earlier pattern of manually mounting a host directory and sepa
 
 <Callout type="warn">
   The `sandbox` destination of a skill entry must be writable — it's written via
-  `writeFiles` on container start. Do not place it under a `readOnly: true` mount,
-  or put it in a separate, writable location from your read-only host mounts.
+  `writeFiles` on container start. Do not place it under a `readOnly: true` volume,
+  or put it in a separate, writable location from your read-only volumes.
 </Callout>
 
 ## Strategy Options
@@ -113,8 +113,9 @@ const sandbox = await createContainerTool({
       },
     }),
   ],
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/workspace',
     },
@@ -133,8 +134,9 @@ const sandbox = await createContainerTool({
     RUN pip install pandas numpy
   `,
   context: '.',
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/workspace',
     },
@@ -190,8 +192,9 @@ import { createContainerTool } from '@deepagents/context';
 
 const sandbox = await createContainerTool({
   installers: [pkg(['python3'])],
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/project',
       readOnly: false,

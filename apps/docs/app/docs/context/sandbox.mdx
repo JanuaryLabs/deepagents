@@ -87,8 +87,9 @@ import { createDockerSandbox, pkg } from '@deepagents/context';
 const sandbox = await createDockerSandbox({
   image: 'alpine:latest',
   installers: [pkg(['curl', 'jq'])],
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/workspace',
       readOnly: true,

@@ -664,8 +664,9 @@ async function demonstrateDockerSandbox() {
   const sandbox = await createDockerSandbox({
     image: 'alpine:latest',
     installers: [pkg(['curl', 'jq'])],
-    mounts: [
+    volumes: [
       {
+        type: 'bind',
         hostPath: process.cwd(),
         containerPath: '/workspace',
         readOnly: true, // Read-only by default for security
@@ -713,8 +714,9 @@ async function demonstrateDockerSandbox() {
     sandbox: agentSandbox,
   } = await createContainerTool({
     installers: [pkg(['python3', 'nodejs'])],
-    mounts: [
+    volumes: [
       {
+        type: 'bind',
         hostPath: process.cwd(),
         containerPath: '/project',
         readOnly: false, // Allow writes for agent work

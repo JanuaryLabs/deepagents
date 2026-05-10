@@ -20,8 +20,9 @@ import { createDockerSandbox, pkg } from '@deepagents/context';
 const sandbox = await createDockerSandbox({
   image: 'alpine:latest',
   installers: [pkg(['curl', 'jq', 'python3'])],
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/workspace',
       readOnly: true,
@@ -58,8 +59,9 @@ const sandbox = await createDockerSandbox({
     RUN pip install pandas numpy matplotlib
   `,
   context: '.',
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/workspace',
     },
@@ -102,35 +104,55 @@ try {
 }
 ```
 
-**Volumes:** Must be defined in the compose file itself, not via `mounts`.
+**Volumes:** Must be defined in the compose file itself, not via `volumes`.
 
 **Lifecycle:** `dispose()` runs `docker compose down`, stopping all services.
 
 </Tab>
 </Tabs>
 
-## Mounts
+## Volumes
 
-Mount host directories into the container. Read-only by default for security.
+Attach bind paths or Docker-managed volumes to the container. Read-only by default for security.
 
 ```typescript
 const sandbox = await createDockerSandbox({
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: '/absolute/path/on/host',
       containerPath: '/workspace',
       readOnly: true,   // default
     },
     {
+      type: 'bind',
       hostPath: process.cwd(),
       containerPath: '/project',
       readOnly: false,  // allow writes
+    },
+    {
+      type: 'volume',
+      name: 'existing-dataset',
+      containerPath: '/data',
+      // lifecycle defaults to 'external': the Docker volume must already exist.
+    },
+    {
+      type: 'volume',
+      name: 'sandbox-output',
+      containerPath: '/output',
+      lifecycle: 'managed',
+      readOnly: false,
+      // managed volumes are created before container start and removed on dispose.
     },
   ],
 });
 ```
 
-Mount paths are validated at creation time — a `MountPathError` is thrown if the `hostPath` doesn't exist on the host.
+Bind paths are validated at creation time. A `VolumePathError` is thrown if a bind `hostPath` doesn't exist on the host.
+
+External Docker volumes are inspected before the container starts. Managed Docker volumes are created before the container starts and removed on `dispose()` unless `removeOnDispose: false` is set.
+
+Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. Do not pass cloud credentials through `driverOptions`.
 
 ## Resource Limits
 
@@ -333,7 +355,10 @@ All errors extend `DockerSandboxError`:
 | `PackageInstallError` | Package installation fails (includes package names, manager type, stderr) |
 | `InstallError` | Installer fails. Carries `target` (logical name), `source` (`'url' \| 'npm' \| 'pypi' \| 'github-release'`), `reason` (stderr), `url` (when applicable) |
 | `MissingRuntimeError` | `npm()`/`pip()` ran without `ensureRuntime: true` and the runtime is absent. Carries `runtime` and `required` (binary names) |
-| `MountPathError` | Host path doesn't exist (includes both host and container paths) |
+| `VolumePathError` | Invalid bind or volume path configuration |
+| `VolumeInspectError` | External Docker volume does not exist or cannot be inspected |
+| `VolumeCreateError` | Managed Docker volume cannot be created |
+| `VolumeRemoveError` | Managed Docker volume cannot be removed during cleanup |
 | `DockerfileBuildError` | Dockerfile build fails (includes stderr) |
 | `ComposeStartError` | Docker Compose startup fails (includes compose file path, stderr) |
 

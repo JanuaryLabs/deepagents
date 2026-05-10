@@ -23,12 +23,12 @@ The base class defines the creation algorithm. Subclasses override `getImage()` 
 ```
 create()
   │
-  ├─ 1. validateMounts()     ← common: check host paths exist
-  │
-  ├─ 2. getImage()           ← strategy-specific
+  ├─ 1. getImage()           ← strategy-specific
   │     ├─ Runtime:    return image name (e.g., 'alpine:latest')
   │     ├─ Dockerfile: build image, return cached tag
   │     └─ Compose:    return '' (compose manages images)
+  │
+  ├─ 2. prepareVolumes()     ← common: validate bind paths, inspect/create Docker volumes
   │
   ├─ 3. startContainer()     ← common: docker run -d --rm
   │     └─ Compose override:  docker compose up -d
@@ -52,7 +52,7 @@ docker run -d --rm \
   --name sandbox-<uuid> \
   --memory=1g --cpus=2 \
   -w /workspace \
-  -v /host/path:/container/path:ro \
+  --mount type=bind,src=/host/path,dst=/container/path,readonly \
   alpine:latest tail -f /dev/null
 ```
 
