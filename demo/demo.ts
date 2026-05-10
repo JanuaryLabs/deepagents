@@ -24,13 +24,6 @@ const containerWorkspace = '/workspace';
 const sqlBinaryContainer = `${containerWorkspace}/packages/text2sql/dist/bin/sql.js`;
 const adaptersContainer = `${containerWorkspace}/demo/demo-adapters.ts`;
 
-interface SqlIndexManifest {
-  fragmentsPath: string;
-  eventsPath: string;
-  adapters: string[];
-  fragments: number;
-}
-
 class SqlLinkInstaller extends Installer {
   readonly kind = 'sql-link';
   readonly #binary: string;
@@ -52,19 +45,22 @@ const model = openai('gpt-5.4-mini');
 const sandbox = await createContainerTool({
   image: 'node:lts-alpine',
   installers: [new SqlLinkInstaller(sqlBinaryContainer)],
-  mounts: [
+  volumes: [
     {
+      type: 'bind',
       hostPath: repoRoot,
       containerPath: containerWorkspace,
       readOnly: false,
     },
     {
+      type: 'bind',
       hostPath:
         '/Users/ezzabuzaid/Desktop/January/text2sql/tools/gameboard.sqlite',
       containerPath: '/data/gameboard.sqlite',
       readOnly: true,
     },
     {
+      type: 'bind',
       hostPath:
         '/Users/ezzabuzaid/Desktop/January/text2sql/tools/gpu-database.sqlite',
       containerPath: '/data/gpu-database.sqlite',
@@ -83,16 +79,23 @@ const context = new ContextEngine({
   store,
 });
 
-const indexResult = await sandbox.sandbox.executeCommand('sql index');
-if (indexResult.exitCode !== 0) {
-  throw new Error(`sql index failed: ${indexResult.stderr}`);
+async function index() {
+  const result = await sandbox.sandbox.executeCommand('sql index');
+  if (result.exitCode !== 0) {
+    throw new Error(`sql index failed: ${result.stderr}`);
+  }
+  const indexManifest = JSON.parse(result.stdout) as {
+    fragmentsPath: string;
+    eventsPath: string;
+    adapters: string[];
+    fragments: number;
+  };
+  return JSON.parse(
+    await sandbox.sandbox.readFile(indexManifest.fragmentsPath),
+  ) as ContextFragment[];
 }
-const indexManifest = JSON.parse(indexResult.stdout) as SqlIndexManifest;
-const indexFragments = JSON.parse(
-  await sandbox.sandbox.readFile(indexManifest.fragmentsPath),
-) as ContextFragment[];
 
-context.set(...instructions(), ...indexFragments);
+context.set(...instructions(), ...(await index()));
 const demoAgent = agent({
   name: 'text2sql',
   sandbox,
