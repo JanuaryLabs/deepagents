@@ -9,7 +9,10 @@ import {
   DockerNotAvailableError,
   DockerSandboxError,
   DockerfileBuildError,
-  MountPathError,
+  VolumeCreateError,
+  VolumeInspectError,
+  VolumePathError,
+  VolumeRemoveError,
 } from './docker-sandbox-errors.ts';
 import {
   type Installer,
@@ -27,16 +30,40 @@ export {
   type InstallSource,
   InstallError,
   MissingRuntimeError,
-  MountPathError,
   PackageInstallError,
+  VolumeCreateError,
+  VolumeInspectError,
+  VolumePathError,
+  VolumeRemoveError,
 } from './docker-sandbox-errors.ts';
 
-export interface DockerMount {
+export interface DockerBindVolume {
+  type: 'bind';
   hostPath: string;
   containerPath: string;
   /** Default: `true`. */
   readOnly?: boolean;
 }
+
+export interface DockerNamedVolume {
+  type: 'volume';
+  name: string;
+  containerPath: string;
+  /** Default: `true`. */
+  readOnly?: boolean;
+  /** Default: `'external'`. */
+  lifecycle?: 'external' | 'managed';
+  /** Docker volume driver used when `lifecycle` is `'managed'`. */
+  driver?: string;
+  /** Docker volume driver options used when `lifecycle` is `'managed'`. */
+  driverOptions?: Record<string, string>;
+  subPath?: string;
+  noCopy?: boolean;
+  /** Default: `true` for managed volumes created by this sandbox. */
+  removeOnDispose?: boolean;
+}
+
+export type DockerSandboxVolume = DockerBindVolume | DockerNamedVolume;
 
 export interface DockerResources {
   /** e.g. `'1g'`, `'512m'`. */
@@ -54,7 +81,7 @@ export interface RuntimeSandboxOptions {
    * `githubRelease({...})`, or any custom `Installer` subclass.
    */
   installers?: Installer[];
-  mounts?: DockerMount[];
+  volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
 }
@@ -64,7 +91,7 @@ export interface DockerfileSandboxOptions {
   dockerfile: string;
   /** Build context directory (default: `'.'`). */
   context?: string;
-  mounts?: DockerMount[];
+  volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
 }
@@ -102,7 +129,7 @@ interface StrategyContext {
 }
 
 export interface DockerSandboxStrategyArgs {
-  mounts?: DockerMount[];
+  volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
 }
@@ -114,12 +141,13 @@ export interface DockerSandboxStrategyArgs {
  */
 export abstract class DockerSandboxStrategy {
   protected context!: StrategyContext;
-  protected mounts: DockerMount[];
+  protected volumes: DockerSandboxVolume[];
   protected resources: DockerResources;
   protected env: Record<string, string>;
+  private createdVolumes = new Set<string>();
 
   constructor(args: DockerSandboxStrategyArgs = {}) {
-    const { mounts = [], resources = {}, env = {} } = args;
+    const { volumes = [], resources = {}, env = {} } = args;
     for (const key of Object.keys(env)) {
       if (key.length === 0 || key.includes('=')) {
         throw new DockerSandboxError(
@@ -127,33 +155,133 @@ export abstract class DockerSandboxStrategy {
         );
       }
     }
-    this.mounts = mounts;
+    this.volumes = volumes;
     this.resources = resources;
     this.env = env;
   }
 
   async create(): Promise<DockerSandbox> {
-    this.validateMounts();
     const image = await this.getImage();
-    const containerId = await this.startContainer(image);
-    this.context = { containerId, image };
+    let containerId: string | undefined;
 
     try {
+      await this.prepareVolumes();
+      containerId = await this.startContainer(image);
+      this.context = { containerId, image };
       await this.configure();
     } catch (error) {
-      await this.stopContainer(containerId);
+      if (containerId) {
+        await this.stopContainer(containerId);
+      }
+      await this.cleanupCreatedVolumesAfterFailure(error);
       throw error;
     }
 
     return this.createSandboxMethods();
   }
 
-  protected validateMounts(): void {
-    for (const mount of this.mounts) {
-      if (!existsSync(mount.hostPath)) {
-        throw new MountPathError(mount.hostPath, mount.containerPath);
+  protected async prepareVolumes(): Promise<void> {
+    this.validateVolumes();
+
+    for (const volume of this.volumes) {
+      if (volume.type !== 'volume') {
+        continue;
+      }
+
+      const lifecycle = volume.lifecycle ?? 'external';
+      if (lifecycle === 'external') {
+        await this.inspectVolume(volume.name);
+        continue;
+      }
+
+      const exists = await this.volumeExists(volume.name);
+      if (exists) {
+        throw new VolumeCreateError(
+          volume.name,
+          'managed volume already exists',
+        );
+      }
+
+      await this.createVolume(volume);
+      if (volume.removeOnDispose !== false) {
+        this.createdVolumes.add(volume.name);
       }
     }
+  }
+
+  protected validateVolumes(): void {
+    const containerPaths = new Set<string>();
+
+    for (const volume of this.volumes) {
+      const source = volume.type === 'bind' ? volume.hostPath : volume.name;
+
+      if (!volume.containerPath.startsWith('/')) {
+        throw new VolumePathError(
+          source,
+          volume.containerPath,
+          'containerPath must be absolute',
+        );
+      }
+      this.validateMountValue('containerPath', volume.containerPath, volume);
+
+      if (containerPaths.has(volume.containerPath)) {
+        throw new VolumePathError(
+          source,
+          volume.containerPath,
+          'containerPath must be unique',
+        );
+      }
+      containerPaths.add(volume.containerPath);
+
+      if (volume.type === 'bind') {
+        this.validateMountValue('hostPath', volume.hostPath, volume);
+        if (!existsSync(volume.hostPath)) {
+          throw new VolumePathError(
+            volume.hostPath,
+            volume.containerPath,
+            'hostPath does not exist on host',
+          );
+        }
+        continue;
+      }
+
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(volume.name)) {
+        throw new VolumePathError(
+          volume.name,
+          volume.containerPath,
+          'volume name must start with an alphanumeric character and contain only letters, numbers, underscore, period, or hyphen',
+        );
+      }
+      if (volume.subPath) {
+        this.validateMountValue('subPath', volume.subPath, volume);
+      }
+
+      if ((volume.lifecycle ?? 'external') === 'external') {
+        if (volume.driver || volume.driverOptions) {
+          throw new VolumePathError(
+            volume.name,
+            volume.containerPath,
+            'driver and driverOptions require lifecycle "managed"',
+          );
+        }
+      }
+    }
+  }
+
+  private validateMountValue(
+    field: 'hostPath' | 'containerPath' | 'subPath',
+    value: string,
+    volume: DockerSandboxVolume,
+  ): void {
+    if (!value.includes(',')) {
+      return;
+    }
+    const source = volume.type === 'bind' ? volume.hostPath : volume.name;
+    throw new VolumePathError(
+      source,
+      volume.containerPath,
+      `${field} must not contain commas`,
+    );
   }
 
   protected buildDockerArgs(image: string, containerId: string): string[] {
@@ -175,14 +303,125 @@ export abstract class DockerSandboxStrategy {
       args.push('-e', `${key}=${value}`);
     }
 
-    for (const mount of this.mounts) {
-      const mode = mount.readOnly !== false ? 'ro' : 'rw';
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mode}`);
+    for (const volume of this.volumes) {
+      args.push('--mount', this.buildVolumeMountArg(volume));
     }
 
     args.push(image, 'tail', '-f', '/dev/null');
 
     return args;
+  }
+
+  protected buildVolumeMountArg(volume: DockerSandboxVolume): string {
+    const readOnly = volume.readOnly !== false;
+    const parts =
+      volume.type === 'bind'
+        ? ['type=bind', `src=${volume.hostPath}`, `dst=${volume.containerPath}`]
+        : [
+            'type=volume',
+            `src=${volume.name}`,
+            `dst=${volume.containerPath}`,
+            ...(volume.subPath ? [`volume-subpath=${volume.subPath}`] : []),
+            ...(volume.noCopy ? ['volume-nocopy'] : []),
+          ];
+
+    if (readOnly) {
+      parts.push('readonly');
+    }
+
+    return parts.join(',');
+  }
+
+  private async inspectVolume(name: string): Promise<void> {
+    try {
+      await spawn('docker', ['volume', 'inspect', name]);
+    } catch (error) {
+      const reason = this.getDockerErrorMessage(error);
+      if (this.isDockerUnavailableError(reason)) {
+        throw new DockerNotAvailableError();
+      }
+      throw new VolumeInspectError(name, reason);
+    }
+  }
+
+  private async volumeExists(name: string): Promise<boolean> {
+    try {
+      await this.inspectVolume(name);
+      return true;
+    } catch (error) {
+      if (error instanceof VolumeInspectError) {
+        if (this.isMissingVolumeInspectError(error.reason)) {
+          return false;
+        }
+        throw error;
+      }
+      throw error;
+    }
+  }
+
+  private async createVolume(volume: DockerNamedVolume): Promise<void> {
+    const args = ['volume', 'create'];
+    if (volume.driver) {
+      args.push('--driver', volume.driver);
+    }
+    for (const [key, value] of Object.entries(volume.driverOptions ?? {})) {
+      args.push('--opt', `${key}=${value}`);
+    }
+    args.push(volume.name);
+
+    try {
+      await spawn('docker', args);
+    } catch (error) {
+      const reason = this.getDockerErrorMessage(error);
+      if (this.isDockerUnavailableError(reason)) {
+        throw new DockerNotAvailableError();
+      }
+      throw new VolumeCreateError(volume.name, reason);
+    }
+  }
+
+  private async cleanupCreatedVolumes(): Promise<void> {
+    const volumes = [...this.createdVolumes].reverse();
+    for (const volume of volumes) {
+      try {
+        await spawn('docker', ['volume', 'rm', volume]);
+        this.createdVolumes.delete(volume);
+      } catch (error) {
+        const reason = this.getDockerErrorMessage(error);
+        if (this.isDockerUnavailableError(reason)) {
+          throw new DockerNotAvailableError();
+        }
+        throw new VolumeRemoveError(volume, reason);
+      }
+    }
+  }
+
+  private async cleanupCreatedVolumesAfterFailure(
+    originalError: unknown,
+  ): Promise<void> {
+    try {
+      await this.cleanupCreatedVolumes();
+    } catch (cleanupError) {
+      if (originalError instanceof Error) {
+        const original = originalError as Error & { suppressed?: unknown[] };
+        original.suppressed = [...(original.suppressed ?? []), cleanupError];
+      }
+    }
+  }
+
+  private getDockerErrorMessage(error: unknown): string {
+    const err = error as Error & { stderr?: string; stdout?: string };
+    return err.stderr || err.stdout || err.message || String(error);
+  }
+
+  private isDockerUnavailableError(message: string): boolean {
+    return (
+      message.includes('Cannot connect') || message.includes('docker daemon')
+    );
+  }
+
+  private isMissingVolumeInspectError(message: string): boolean {
+    return message.toLowerCase().includes('no such volume');
   }
 
   protected async startContainer(image: string): Promise<string> {
@@ -282,6 +521,7 @@ export abstract class DockerSandboxStrategy {
 
       dispose: async (): Promise<void> => {
         await this.stopContainer(containerId);
+        await this.cleanupCreatedVolumes();
       },
     };
 
@@ -317,7 +557,7 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
   private installers: Installer[];
 
   constructor(args: RuntimeStrategyArgs = {}) {
-    super({ mounts: args.mounts, resources: args.resources, env: args.env });
+    super({ volumes: args.volumes, resources: args.resources, env: args.env });
     this.image = args.image ?? 'alpine:latest';
     this.installers = args.installers ?? [];
   }
@@ -349,7 +589,7 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   private dockerContext: string;
 
   constructor(args: DockerfileStrategyArgs) {
-    super({ mounts: args.mounts, resources: args.resources, env: args.env });
+    super({ volumes: args.volumes, resources: args.resources, env: args.env });
     this.dockerfile = args.dockerfile;
     this.dockerContext = args.context ?? '.';
     this.imageTag = this.computeImageTag();
@@ -567,7 +807,7 @@ export async function createDockerSandbox(
     strategy = new DockerfileStrategy({
       dockerfile: options.dockerfile,
       context: options.context,
-      mounts: options.mounts,
+      volumes: options.volumes,
       resources: options.resources,
       env: options.env,
     });
@@ -575,7 +815,7 @@ export async function createDockerSandbox(
     strategy = new RuntimeStrategy({
       image: options.image,
       installers: options.installers,
-      mounts: options.mounts,
+      volumes: options.volumes,
       resources: options.resources,
       env: options.env,
     });

@@ -105,17 +105,55 @@ export class MissingRuntimeError extends DockerSandboxError {
   }
 }
 
-export class MountPathError extends DockerSandboxError {
-  readonly hostPath: string;
+export class VolumePathError extends DockerSandboxError {
+  readonly source: string;
   readonly containerPath: string;
+  readonly reason: string;
 
-  constructor(hostPath: string, containerPath: string) {
+  constructor(source: string, containerPath: string, reason: string) {
     super(
-      `Mount path does not exist on host: "${hostPath}" -> "${containerPath}"`,
+      `Invalid Docker volume path "${source}" -> "${containerPath}": ${reason}`,
     );
-    this.name = 'MountPathError';
-    this.hostPath = hostPath;
+    this.name = 'VolumePathError';
+    this.source = source;
     this.containerPath = containerPath;
+    this.reason = reason;
+  }
+}
+
+export class VolumeInspectError extends DockerSandboxError {
+  readonly volume: string;
+  readonly reason: string;
+
+  constructor(volume: string, reason: string) {
+    super(`Failed to inspect Docker volume "${volume}": ${reason}`);
+    this.name = 'VolumeInspectError';
+    this.volume = volume;
+    this.reason = reason;
+  }
+}
+
+export class VolumeCreateError extends DockerSandboxError {
+  readonly volume: string;
+  readonly reason: string;
+
+  constructor(volume: string, reason: string) {
+    super(`Failed to create Docker volume "${volume}": ${reason}`);
+    this.name = 'VolumeCreateError';
+    this.volume = volume;
+    this.reason = reason;
+  }
+}
+
+export class VolumeRemoveError extends DockerSandboxError {
+  readonly volume: string;
+  readonly reason: string;
+
+  constructor(volume: string, reason: string) {
+    super(`Failed to remove Docker volume "${volume}": ${reason}`);
+    this.name = 'VolumeRemoveError';
+    this.volume = volume;
+    this.reason = reason;
   }
 }
 

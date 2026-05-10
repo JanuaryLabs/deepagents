@@ -1,6 +1,6 @@
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -9,9 +9,13 @@ import {
   type DockerSandbox,
   DockerSandboxError,
   InstallError,
+  Installer,
+  type InstallerContext,
   MissingRuntimeError,
-  MountPathError,
   PackageInstallError,
+  VolumeCreateError,
+  VolumeInspectError,
+  VolumePathError,
   createContainerTool,
   createDockerSandbox,
   npm,
@@ -30,6 +34,34 @@ async function isDockerAvailable(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+function testVolumeName(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function removeDockerVolume(name: string): Promise<void> {
+  try {
+    await spawn('docker', ['volume', 'rm', name]);
+  } catch {
+    // Test cleanup should be best-effort.
+  }
+}
+
+class DeleteVolumeThenFailInstaller extends Installer {
+  readonly kind = 'delete-volume-then-fail';
+  private readonly volumeName: string;
+
+  constructor(volumeName: string) {
+    super();
+    this.volumeName = volumeName;
+  }
+
+  async install(ctx: InstallerContext): Promise<void> {
+    await spawn('docker', ['stop', ctx.containerId]);
+    await spawn('docker', ['volume', 'rm', this.volumeName]);
+    throw new Error('installer failed after deleting volume');
   }
 }
 
@@ -265,7 +297,7 @@ describe('Docker Sandbox', async () => {
       });
     });
 
-    describe('mounts', () => {
+    describe('volumes', () => {
       let tempDir: string;
 
       before(async () => {
@@ -278,10 +310,11 @@ describe('Docker Sandbox', async () => {
         await rm(tempDir, { recursive: true, force: true });
       });
 
-      it('mounts directory as read-only by default', async () => {
+      it('attaches bind volume as read-only by default', async () => {
         const sandbox = await createDockerSandbox({
-          mounts: [
+          volumes: [
             {
+              type: 'bind',
               hostPath: tempDir,
               containerPath: '/data',
             },
@@ -307,10 +340,11 @@ describe('Docker Sandbox', async () => {
         }
       });
 
-      it('mounts directory as read-write when specified', async () => {
+      it('attaches bind volume as read-write when specified', async () => {
         const sandbox = await createDockerSandbox({
-          mounts: [
+          volumes: [
             {
+              type: 'bind',
               hostPath: tempDir,
               containerPath: '/data',
               readOnly: false,
@@ -334,6 +368,181 @@ describe('Docker Sandbox', async () => {
         } finally {
           await sandbox.dispose();
         }
+      });
+
+      it('attaches an existing Docker volume and keeps it after dispose', async () => {
+        const volumeName = testVolumeName('deepagents-external');
+        await spawn('docker', ['volume', 'create', volumeName]);
+
+        try {
+          const writer = await createDockerSandbox({
+            volumes: [
+              {
+                type: 'volume',
+                name: volumeName,
+                containerPath: '/data',
+                readOnly: false,
+              },
+            ],
+          });
+
+          try {
+            const writeResult = await writer.executeCommand(
+              'echo "persisted" > /data/file.txt',
+            );
+            assert.strictEqual(writeResult.exitCode, 0);
+          } finally {
+            await writer.dispose();
+          }
+
+          const reader = await createDockerSandbox({
+            volumes: [
+              {
+                type: 'volume',
+                name: volumeName,
+                containerPath: '/data',
+              },
+            ],
+          });
+
+          try {
+            const readResult =
+              await reader.executeCommand('cat /data/file.txt');
+            assert.strictEqual(readResult.exitCode, 0);
+            assert.strictEqual(readResult.stdout.trim(), 'persisted');
+          } finally {
+            await reader.dispose();
+          }
+        } finally {
+          await removeDockerVolume(volumeName);
+        }
+      });
+
+      it('throws VolumeInspectError for a missing external Docker volume', async () => {
+        const volumeName = testVolumeName('deepagents-missing');
+
+        await assert.rejects(
+          createDockerSandbox({
+            volumes: [
+              {
+                type: 'volume',
+                name: volumeName,
+                containerPath: '/data',
+              },
+            ],
+          }),
+          (err: Error) => {
+            assert.ok(err instanceof VolumeInspectError);
+            assert.strictEqual(err.name, 'VolumeInspectError');
+            const volumeErr = err as VolumeInspectError;
+            assert.strictEqual(volumeErr.volume, volumeName);
+            return true;
+          },
+        );
+      });
+
+      it('creates and removes a managed Docker volume on dispose', async () => {
+        const volumeName = testVolumeName('deepagents-managed');
+        const sandbox = await createDockerSandbox({
+          volumes: [
+            {
+              type: 'volume',
+              name: volumeName,
+              containerPath: '/data',
+              lifecycle: 'managed',
+              readOnly: false,
+            },
+          ],
+        });
+
+        try {
+          const writeResult = await sandbox.executeCommand(
+            'echo "managed" > /data/file.txt',
+          );
+          assert.strictEqual(writeResult.exitCode, 0);
+        } finally {
+          await sandbox.dispose();
+        }
+
+        await assert.rejects(
+          spawn('docker', ['volume', 'inspect', volumeName]),
+          (err: Error & { exitCode?: number; stderr?: string }) => {
+            assert.strictEqual(err.exitCode, 1);
+            return true;
+          },
+        );
+      });
+
+      it('attaches managed Docker volume as read-only by default', async () => {
+        const volumeName = testVolumeName('deepagents-managed-ro');
+        const sandbox = await createDockerSandbox({
+          volumes: [
+            {
+              type: 'volume',
+              name: volumeName,
+              containerPath: '/data',
+              lifecycle: 'managed',
+            },
+          ],
+        });
+
+        try {
+          const writeResult = await sandbox.executeCommand(
+            'echo "blocked" > /data/file.txt',
+          );
+          assert.notStrictEqual(writeResult.exitCode, 0);
+          assert.match(writeResult.stderr, /read-only/i);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('throws VolumeCreateError when managed volume already exists', async () => {
+        const volumeName = testVolumeName('deepagents-existing-managed');
+        await spawn('docker', ['volume', 'create', volumeName]);
+
+        try {
+          await assert.rejects(
+            createDockerSandbox({
+              volumes: [
+                {
+                  type: 'volume',
+                  name: volumeName,
+                  containerPath: '/data',
+                  lifecycle: 'managed',
+                },
+              ],
+            }),
+            (err: Error) => {
+              assert.ok(err instanceof VolumeCreateError);
+              assert.strictEqual(err.name, 'VolumeCreateError');
+              const volumeErr = err as VolumeCreateError;
+              assert.strictEqual(volumeErr.volume, volumeName);
+              return true;
+            },
+          );
+        } finally {
+          await removeDockerVolume(volumeName);
+        }
+      });
+
+      it('preserves original configuration error when managed volume cleanup fails', async () => {
+        const volumeName = testVolumeName('deepagents-cleanup-failure');
+
+        await assert.rejects(
+          createDockerSandbox({
+            volumes: [
+              {
+                type: 'volume',
+                name: volumeName,
+                containerPath: '/data',
+                lifecycle: 'managed',
+              },
+            ],
+            installers: [new DeleteVolumeThenFailInstaller(volumeName)],
+          }),
+          /installer failed after deleting volume/,
+        );
       });
     });
 
@@ -531,14 +740,15 @@ describe('Docker Sandbox', async () => {
       }
     });
 
-    it('respects mounts option', async () => {
+    it('respects volumes option', async () => {
       const tempDir = join(tmpdir(), `container-tool-test-${Date.now()}`);
       await mkdir(tempDir, { recursive: true });
       await writeFile(join(tempDir, 'test.txt'), 'mounted content');
 
       const { sandbox } = await createContainerTool({
-        mounts: [
+        volumes: [
           {
+            type: 'bind',
             hostPath: tempDir,
             containerPath: '/mounted',
             readOnly: true,
@@ -767,30 +977,171 @@ describe('Docker Sandbox', async () => {
   });
 
   describe('error classes', () => {
-    describe('MountPathError', () => {
-      it('throws MountPathError for non-existent host path', async () => {
+    describe('VolumePathError', () => {
+      it('throws VolumePathError for non-existent bind host path', async () => {
         await assert.rejects(
           createDockerSandbox({
-            mounts: [
+            volumes: [
               {
+                type: 'bind',
                 hostPath: '/nonexistent/path/that/does/not/exist',
                 containerPath: '/app',
               },
             ],
           }),
           (err: Error) => {
-            assert.ok(err instanceof MountPathError);
+            assert.ok(err instanceof VolumePathError);
             assert.ok(err instanceof DockerSandboxError);
-            assert.strictEqual(err.name, 'MountPathError');
-            const mountErr = err as MountPathError;
+            assert.strictEqual(err.name, 'VolumePathError');
+            const volumeErr = err as VolumePathError;
             assert.strictEqual(
-              mountErr.hostPath,
+              volumeErr.source,
               '/nonexistent/path/that/does/not/exist',
             );
-            assert.strictEqual(mountErr.containerPath, '/app');
+            assert.strictEqual(volumeErr.containerPath, '/app');
+            assert.strictEqual(
+              volumeErr.reason,
+              'hostPath does not exist on host',
+            );
             return true;
           },
         );
+      });
+
+      it('throws VolumePathError for bind host paths containing commas', async () => {
+        const tempDir = join(tmpdir(), `docker-sandbox-comma,${Date.now()}`);
+        await mkdir(tempDir, { recursive: true });
+
+        try {
+          await assert.rejects(
+            createDockerSandbox({
+              volumes: [
+                {
+                  type: 'bind',
+                  hostPath: tempDir,
+                  containerPath: '/app',
+                },
+              ],
+            }),
+            (err: Error) => {
+              assert.ok(err instanceof VolumePathError);
+              const volumeErr = err as VolumePathError;
+              assert.strictEqual(volumeErr.source, tempDir);
+              assert.strictEqual(
+                volumeErr.reason,
+                'hostPath must not contain commas',
+              );
+              return true;
+            },
+          );
+        } finally {
+          await rm(tempDir, { recursive: true, force: true });
+        }
+      });
+
+      it('throws VolumePathError for container paths containing commas', async () => {
+        await assert.rejects(
+          createDockerSandbox({
+            volumes: [
+              {
+                type: 'volume',
+                name: testVolumeName('deepagents-container-comma'),
+                containerPath: '/app,data',
+                lifecycle: 'managed',
+              },
+            ],
+          }),
+          (err: Error) => {
+            assert.ok(err instanceof VolumePathError);
+            const volumeErr = err as VolumePathError;
+            assert.strictEqual(
+              volumeErr.reason,
+              'containerPath must not contain commas',
+            );
+            return true;
+          },
+        );
+      });
+
+      it('throws VolumePathError for volume subpaths containing commas', async () => {
+        await assert.rejects(
+          createDockerSandbox({
+            volumes: [
+              {
+                type: 'volume',
+                name: testVolumeName('deepagents-subpath-comma'),
+                containerPath: '/data',
+                lifecycle: 'managed',
+                subPath: 'bad,path',
+              },
+            ],
+          }),
+          (err: Error) => {
+            assert.ok(err instanceof VolumePathError);
+            const volumeErr = err as VolumePathError;
+            assert.strictEqual(
+              volumeErr.reason,
+              'subPath must not contain commas',
+            );
+            return true;
+          },
+        );
+      });
+
+      it('does not treat non-missing managed volume inspect failures as absent volumes', async () => {
+        const fakeBinDir = join(
+          tmpdir(),
+          `docker-sandbox-fake-bin-${Date.now()}`,
+        );
+        const fakeDocker = join(fakeBinDir, 'docker');
+        const originalPath = process.env.PATH;
+        await mkdir(fakeBinDir, { recursive: true });
+        await writeFile(
+          fakeDocker,
+          [
+            '#!/bin/sh',
+            'if [ "$1" = "volume" ] && [ "$2" = "inspect" ]; then',
+            '  echo "permission denied inspecting volume" >&2',
+            '  exit 1',
+            'fi',
+            'if [ "$1" = "volume" ] && [ "$2" = "create" ]; then',
+            '  echo "create should not run" >&2',
+            '  exit 1',
+            'fi',
+            'echo "unexpected docker call: $*" >&2',
+            'exit 1',
+            '',
+          ].join('\n'),
+        );
+        await chmod(fakeDocker, 0o755);
+        process.env.PATH = `${fakeBinDir}:${originalPath ?? ''}`;
+
+        try {
+          await assert.rejects(
+            createDockerSandbox({
+              volumes: [
+                {
+                  type: 'volume',
+                  name: testVolumeName('deepagents-inspect-failure'),
+                  containerPath: '/data',
+                  lifecycle: 'managed',
+                },
+              ],
+            }),
+            (err: Error) => {
+              assert.ok(err instanceof VolumeInspectError);
+              const volumeErr = err as VolumeInspectError;
+              assert.match(
+                volumeErr.reason,
+                /permission denied inspecting volume/,
+              );
+              return true;
+            },
+          );
+        } finally {
+          process.env.PATH = originalPath;
+          await rm(fakeBinDir, { recursive: true, force: true });
+        }
       });
     });
 
@@ -818,7 +1169,11 @@ describe('Docker Sandbox', async () => {
 
     describe('DockerSandboxError base class', () => {
       it('all errors extend DockerSandboxError', () => {
-        const mountErr = new MountPathError('/host', '/container');
+        const volumeErr = new VolumePathError(
+          '/host',
+          '/container',
+          'hostPath does not exist on host',
+        );
         const pkgErr = new PackageInstallError(
           ['pkg'],
           'alpine',
@@ -826,9 +1181,9 @@ describe('Docker Sandbox', async () => {
           'error',
         );
 
-        assert.ok(mountErr instanceof DockerSandboxError);
+        assert.ok(volumeErr instanceof DockerSandboxError);
         assert.ok(pkgErr instanceof DockerSandboxError);
-        assert.ok(mountErr instanceof Error);
+        assert.ok(volumeErr instanceof Error);
         assert.ok(pkgErr instanceof Error);
       });
     });

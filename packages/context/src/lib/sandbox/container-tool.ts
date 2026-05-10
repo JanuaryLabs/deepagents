@@ -2,10 +2,10 @@ import type { CreateBashToolOptions } from 'bash-tool';
 
 import { createBashTool } from './bash-tool.ts';
 import {
-  type DockerMount,
   type DockerResources,
   type DockerSandbox,
   type DockerSandboxOptions,
+  type DockerSandboxVolume,
   createDockerSandbox,
   isComposeOptions,
   isDockerfileOptions,
@@ -20,8 +20,8 @@ interface BaseContainerToolOptions extends Omit<
   CreateBashToolOptions,
   'sandbox' | 'uploadDirectory'
 > {
-  /** Directories to mount from host into the container */
-  mounts?: DockerMount[];
+  /** Bind paths or Docker-managed volumes to attach to the container. */
+  volumes?: DockerSandboxVolume[];
   /** Resource limits for the container */
   resources?: DockerResources;
   /** Environment variables to set in the container */
@@ -141,7 +141,8 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  *
  * const sandbox = await createContainerTool({
  *   installers: [pkg(['curl', 'jq'])],
- *   mounts: [{
+ *   volumes: [{
+ *     type: 'bind',
  *     hostPath: process.cwd(),
  *     containerPath: '/workspace',
  *     readOnly: false,
@@ -179,7 +180,8 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  *     RUN pip install pandas numpy
  *   `,
  *   context: '.',
- *   mounts: [{
+ *   volumes: [{
+ *     type: 'bind',
  *     hostPath: process.cwd(),
  *     containerPath: '/workspace',
  *   }],
@@ -225,26 +227,26 @@ export async function createContainerTool(
     const {
       dockerfile,
       context,
-      mounts,
+      volumes,
       resources,
       env,
       skills = [],
       ...rest
     } = options;
-    sandboxOptions = { dockerfile, context, mounts, resources, env };
+    sandboxOptions = { dockerfile, context, volumes, resources, env };
     bashOptions = rest;
     skillInputs = skills;
   } else {
     const {
       image,
       installers,
-      mounts,
+      volumes,
       resources,
       env,
       skills = [],
       ...rest
     } = options;
-    sandboxOptions = { image, installers, mounts, resources, env };
+    sandboxOptions = { image, installers, volumes, resources, env };
     bashOptions = rest;
     skillInputs = skills;
   }
