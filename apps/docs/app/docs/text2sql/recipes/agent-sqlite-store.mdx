@@ -186,14 +186,27 @@ export default { main: adapter };
 
 ```typescript
 import { createContainerTool, npm } from '@deepagents/context';
+import { createSqlCommandHooks } from '@deepagents/text2sql';
 
 const sandbox = await createContainerTool({
   installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  volumes: [
+    {
+      type: 'bind',
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
   },
+  ...createSqlCommandHooks({ adapters: { main: adapter } }),
 });
 ```
+
+If you are not mounting your project into `/workspace`, upload or write
+`/workspace/text2sql-adapters.ts` before the first `chat()` call.
 
 ## 8. Wire the agent
 

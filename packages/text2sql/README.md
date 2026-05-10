@@ -26,7 +26,7 @@ npm install mysql2                   # MySQL / MariaDB
 npm install @google-cloud/bigquery   # BigQuery
 ```
 
-Requires Node.js LTS (20+).
+Requires Node.js LTS
 
 ## Quick Start
 
@@ -95,10 +95,9 @@ Text2SQL works with any model provider supported by the [Vercel AI SDK](https://
 
 ## Building a Conversational Agent
 
-`Text2Sql` ships only the SQL-aware primitives: `toSql`, `toPairs`,
-`AdapterIndexer`, and `instructions()`. You build the chat agent yourself by
-composing a `ContextEngine`, a sandbox, and `agent` + `chat` from
-`@deepagents/context`:
+`Text2Sql` owns SQL generation and schema indexing, but you own the chat loop.
+Build the agent by composing a `ContextEngine`, a sandbox, and `agent` +
+`chat` from `@deepagents/context`:
 
 ```typescript
 import {
@@ -339,7 +338,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 
 - [Getting Started](https://januarylabs.github.io/deepagents/docs/text2sql/getting-started)
 - [Generate SQL](https://januarylabs.github.io/deepagents/docs/text2sql/to-sql)
-- [SQL CLI in Sandboxes](https://januarylabs.github.io/deepagents/docs/text2sql/sqlv3)
+- [Agent + SQLite Store Recipe](https://januarylabs.github.io/deepagents/docs/text2sql/recipes/agent-sqlite-store)
 - [Teach the System](https://januarylabs.github.io/deepagents/docs/text2sql/teach-the-system)
 - [Build Conversations](https://januarylabs.github.io/deepagents/docs/text2sql/build-conversations)
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)
