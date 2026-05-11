@@ -244,6 +244,14 @@ const context = new ContextEngine({
 
 const sandbox = await createContainerTool({
   installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  volumes: [
+    {
+      type: 'bind',
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
   },

@@ -12,7 +12,7 @@ The storage system persists conversation history using a graph-based model. Mess
 <Tabs groupId="context-store" items={['SQLite', 'PostgreSQL', 'SQL Server', 'In-Memory']}>
 <Tab value="SQLite">
 
-File-based persistence using Node.js 22+ native SQLite.
+File-based persistence using the native SQLite module in Node.js LTS.
 
 ```typescript
 import { ContextEngine, SqliteContextStore } from '@deepagents/context';
@@ -26,7 +26,7 @@ const context = new ContextEngine({
 ```
 
 **Requirements:**
-- Node.js 22+ (uses `node:sqlite` module)
+- Node.js LTS (uses `node:sqlite` module)
 - No additional packages needed
 
 **Features:**

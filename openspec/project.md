@@ -13,7 +13,7 @@ DeepAgents is a collection of TypeScript packages for building AI-powered applic
 
 ## Tech Stack
 
-- **Language:** TypeScript (ESM modules, Node.js 20+)
+- **Language:** TypeScript (ESM modules, Node.js LTS)
 - **Build System:** Nx monorepo
 - **AI SDK:** Vercel AI SDK (compatible with OpenAI, Anthropic, Groq, etc.)
 - **Schema Validation:** Zod

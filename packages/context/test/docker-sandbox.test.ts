@@ -868,7 +868,7 @@ describe('Docker Sandbox', async () => {
 
       it('skips ensureRuntime when node base image already has node+npm', async () => {
         const sandbox = await createDockerSandbox({
-          image: 'node:22-alpine',
+          image: 'node:lts-alpine',
           installers: [npm('cowsay')],
         });
         try {

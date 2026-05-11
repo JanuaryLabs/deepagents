@@ -239,7 +239,7 @@ createDockerSandbox({
 
 // Or use a node base image and skip ensureRuntime:
 createDockerSandbox({
-  image: 'node:22-alpine',
+  image: 'node:lts-alpine',
   installers: [npm('prettier')],
 });
 ```

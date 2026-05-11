@@ -122,6 +122,14 @@ const context = new ContextEngine({
 
 const sandbox = await createContainerTool({
   installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
+  volumes: [
+    {
+      type: 'bind',
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
   },
@@ -152,6 +160,10 @@ for await (const chunk of stream) {
   // handle streaming response
 }
 ```
+
+The `/workspace/text2sql-adapters.ts` module must exist in the sandbox and
+default-export your adapter map. Mount your project into `/workspace` (as above)
+or upload/write that module before you call `sql index` or `chat()`.
 
 `instructions()` returns the SQL-flavored system fragments (policies, workflows,
 clarifications, style guides) — spread them into `context.set()` alongside the

@@ -17,7 +17,7 @@ A framework for building multi-agent AI systems with TypeScript. Create agents t
 npm install @deepagents/agent
 ```
 
-Requires Node.js LTS (20+) and a `zod` peer dependency.
+Requires Node.js LTS and a `zod` peer dependency.
 
 ## Quick Start
 
