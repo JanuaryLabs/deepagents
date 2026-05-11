@@ -3,10 +3,10 @@ import { type CAC, cac } from 'cac';
 
 import {
   CommandError,
-  type CommandResult,
   type ExecutionContext,
   type SqlCommand,
   errorMessage,
+  renderCommandError,
 } from './command.ts';
 import { commands } from './commands/registry.ts';
 import { loadAdapters } from './load-adapters.ts';
@@ -27,7 +27,7 @@ for (const command of commands) {
   registerCommand(cli, command);
 }
 
-process.exit(await runCli());
+process.exitCode = await runCli();
 
 async function runCli(): Promise<number> {
   try {
@@ -88,6 +88,8 @@ async function runCommand(
       adapters: await loadAdapters(),
       cwd: process.cwd(),
       env: process.env,
+      stdout: process.stdout,
+      stderr: process.stderr,
     };
   } catch (error) {
     process.stderr.write(`${errorMessage(error)}\n`);
@@ -95,12 +97,10 @@ async function runCommand(
   }
 
   try {
-    const result = await command.execute(ctx, positional, options);
-    writeCommandResult(result);
-    return result.exitCode;
+    return await command.execute(ctx, positional, options);
   } catch (error) {
     if (error instanceof CommandError) {
-      writeCommandResult(error.toResult());
+      renderCommandError(error, process.stderr);
       return error.exitCode;
     }
     throw error;
@@ -117,16 +117,6 @@ function rewriteCommandsHelp(body: string): string {
   }, body);
 }
 
-function writeCommandResult(result: CommandResult): void {
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) {
-    const out = result.stderr.endsWith('\n')
-      ? result.stderr
-      : result.stderr + '\n';
-    process.stderr.write(out);
-  }
-}
-
 function writeCliError(error: unknown): number {
   if (error instanceof Error && error.name === 'CACError') {
     process.stderr.write(`sql: ${error.message}\n`);
@@ -134,7 +124,7 @@ function writeCliError(error: unknown): number {
     return 2;
   }
   if (error instanceof CommandError) {
-    writeCommandResult(error.toResult());
+    renderCommandError(error, process.stderr);
     return error.exitCode;
   }
   process.stderr.write(

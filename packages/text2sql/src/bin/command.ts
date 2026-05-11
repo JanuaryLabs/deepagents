@@ -1,20 +1,33 @@
-import type { Adapter } from '../lib/adapters/adapter.ts';
+import * as path from 'node:path';
+import type { Writable } from 'node:stream';
 
-export interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
+import type { Adapter } from '../lib/adapters/adapter.ts';
 
 export interface ExecutionContext {
   adapters: Record<string, Adapter>;
   cwd: string;
   env: NodeJS.ProcessEnv;
+  stdout: Writable;
+  stderr: Writable;
 }
 
 export interface SqlCommandOption {
   flag: string;
   description: string;
+}
+
+export const OUT_DIR_OPTION: SqlCommandOption = {
+  flag: '--out-dir <path>',
+  description: 'Output directory (default: $TEXT2SQL_OUT_DIR or ./sql)',
+};
+
+export function resolveOutputDir(
+  ctx: ExecutionContext,
+  options: Record<string, unknown>,
+): string {
+  const explicit =
+    typeof options.outDir === 'string' ? options.outDir : undefined;
+  return path.resolve(ctx.cwd, explicit ?? ctx.env.TEXT2SQL_OUT_DIR ?? './sql');
 }
 
 export class CommandError extends Error {
@@ -26,14 +39,13 @@ export class CommandError extends Error {
     this.command = command;
     this.exitCode = exitCode;
   }
+}
 
-  toResult(): CommandResult {
-    return {
-      stdout: '',
-      stderr: `sql ${this.command}: ${this.message}\n`,
-      exitCode: this.exitCode,
-    };
-  }
+export function renderCommandError(
+  error: CommandError,
+  stderr: Writable,
+): void {
+  stderr.write(`sql ${error.command}: ${error.message}\n`);
 }
 
 export function errorMessage(error: unknown): string {
@@ -52,7 +64,7 @@ export abstract class SqlCommand {
     ctx: ExecutionContext,
     args: unknown[],
     options: Record<string, unknown>,
-  ): Promise<CommandResult>;
+  ): Promise<number>;
 
   protected fail(message: string, exitCode = 1): never {
     throw new CommandError(this.name, message, exitCode);
@@ -83,7 +95,7 @@ export abstract class SqlQueryCommand extends SqlCommand {
     ctx: ExecutionContext,
     args: unknown[],
     options: Record<string, unknown>,
-  ): Promise<CommandResult> {
+  ): Promise<number> {
     const [db, sqlParts] = args as [string | undefined, string[] | undefined];
     const adapter = this.requireAdapter(ctx.adapters, db);
     const sql = (sqlParts ?? []).join(' ').trim();
@@ -116,5 +128,5 @@ export abstract class SqlQueryCommand extends SqlCommand {
     adapter: Adapter,
     sql: string,
     options: Record<string, unknown>,
-  ): Promise<CommandResult>;
+  ): Promise<number>;
 }

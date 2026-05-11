@@ -4,10 +4,11 @@ import { v7 } from 'uuid';
 
 import type { Adapter } from '../../lib/adapters/adapter.ts';
 import {
-  type CommandResult,
   type ExecutionContext,
+  OUT_DIR_OPTION,
   SqlQueryCommand,
   errorMessage,
+  resolveOutputDir,
 } from '../command.ts';
 
 export class RunCommand extends SqlQueryCommand {
@@ -15,21 +16,15 @@ export class RunCommand extends SqlQueryCommand {
   readonly description = 'Execute query against <db> and store results';
   readonly usage = '<db> "SELECT ..." [--out-dir <path>]';
   override readonly helpDisplay = '<db> "SELECT ..."';
-  override readonly options = [
-    {
-      flag: '--out-dir <path>',
-      description:
-        'Directory for `sql run` result files (default: $TEXT2SQL_OUT_DIR or ./sql)',
-    },
-  ];
+  override readonly options = [OUT_DIR_OPTION];
 
   protected async afterValidation(
     ctx: ExecutionContext,
     adapter: Adapter,
     sql: string,
     options: Record<string, unknown>,
-  ): Promise<CommandResult> {
-    const outputDir = this.resolveOutputDir(ctx, options);
+  ): Promise<number> {
+    const outputDir = resolveOutputDir(ctx, options);
 
     let rows: unknown;
     try {
@@ -51,27 +46,9 @@ export class RunCommand extends SqlQueryCommand {
     }
 
     const columns = rows.length > 0 ? Object.keys(rows[0] as object) : [];
-    return {
-      stdout:
-        [
-          `results stored in ${outPath}`,
-          `columns: ${columns.join(', ') || '(none)'}`,
-          `rows: ${rows.length}`,
-        ].join('\n') + '\n',
-      stderr: '',
-      exitCode: 0,
-    };
-  }
-
-  private resolveOutputDir(
-    ctx: ExecutionContext,
-    options: Record<string, unknown>,
-  ): string {
-    const explicit =
-      typeof options.outDir === 'string' ? options.outDir : undefined;
-    return path.resolve(
-      ctx.cwd,
-      explicit ?? ctx.env.TEXT2SQL_OUT_DIR ?? './sql',
-    );
+    ctx.stdout.write(`results stored in ${outPath}\n`);
+    ctx.stdout.write(`columns: ${columns.join(', ') || '(none)'}\n`);
+    ctx.stdout.write(`rows: ${rows.length}\n`);
+    return 0;
   }
 }

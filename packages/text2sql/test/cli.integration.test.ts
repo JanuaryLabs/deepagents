@@ -558,6 +558,55 @@ describe('sql binary', () => {
     assert.ok(events.every((event) => typeof event.timestampMs === 'number'));
   });
 
+  it('index: stderr is silent without --verbose', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['index'], { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.stderr, '');
+  });
+
+  it('index: --verbose mirrors pretty progress lines to stderr without polluting stdout', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['index', '--verbose'], { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+
+    const manifest = JSON.parse(result.stdout) as IndexManifest;
+    assert.deepEqual(manifest.adapters, ['mem']);
+
+    const lines = result.stderr.trim().split('\n');
+    assert.ok(lines.some((line) => line.startsWith('[index:start]')));
+    assert.ok(
+      lines.some((line) => /^\[adapter:start mem\]/.test(line)),
+      `expected adapter:start line, got:\n${result.stderr}`,
+    );
+    assert.ok(lines.some((line) => /^\[phase:progress mem\]/.test(line)));
+    assert.ok(lines.some((line) => line.startsWith('[index:end]')));
+  });
+
+  it('index: --verbose=json mirrors raw NDJSON events to stderr', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['index', '--verbose', 'json'], { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+
+    const events = result.stderr
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; timestampMs: number });
+
+    const types = events.map((event) => event.type);
+    assert.ok(types.includes('index:start'));
+    assert.ok(types.includes('index:end'));
+    assert.ok(events.every((event) => typeof event.timestampMs === 'number'));
+  });
+
+  it('index: --verbose with invalid format fails with helpful message', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['index', '--verbose', 'garbage'], { cwd });
+    assert.notEqual(result.exitCode, 0);
+    assert.match(result.stderr, /sql index: invalid --verbose value "garbage"/);
+    assert.match(result.stderr, /Expected "pretty" or "json"/);
+  });
+
   it('index: introspection failures are reported and recorded as events', async () => {
     const cwd = makeTmpDir();
     const adaptersPath = writeAdaptersModule(
@@ -666,7 +715,10 @@ describe('sql binary', () => {
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout, /run <db> "SELECT \.\.\."/);
     assert.match(result.stdout, /validate <db> "SELECT \.\.\."/);
-    assert.match(result.stdout, /index \[--all\] \[adapter \.\.\.\]/);
+    assert.match(
+      result.stdout,
+      /index \[--all\] \[--verbose\] \[adapter \.\.\.\]/,
+    );
     assert.match(result.stdout, /Execute query against <db> and store results/);
     assert.match(result.stdout, /Validate query syntax against <db>/);
     assert.match(
@@ -705,9 +757,13 @@ describe('sql binary', () => {
     assert.equal(result.stderr, '');
     assert.match(
       result.stdout,
-      /Usage:\n\s+\$ sql \[--all\] \[adapter \.\.\.\]/,
+      /Usage:\n\s+\$ sql \[--all\] \[--verbose \[pretty\|json\]\] \[adapter \.\.\.\]/,
     );
     assert.match(result.stdout, /--all\s+Index all adapters \(default\)/);
+    assert.match(
+      result.stdout,
+      /-v, --verbose \[format\]\s+Mirror progress events to stderr/,
+    );
   });
 
   it('validate: query can be passed as multiple argv parts', async () => {
