@@ -10,7 +10,6 @@ import {
   ContextEngine,
   type ContextStore,
   InMemoryContextStore,
-  ObservedFs,
   agent,
   chat,
   createBashTool,
@@ -193,11 +192,10 @@ export async function simulateConversation(
   const model = config.model ?? groq('gpt-oss-20b');
   const chatId = `eval-${randomUUID()}`;
   const userId = 'eval-user';
-  const observed = new ObservedFs(new InMemoryFs());
-  const base = await createBashTool({
-    sandbox: await createVirtualSandbox({ fs: observed }),
+  const sandbox = await createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    destination: '/',
   });
-  const sandbox = { ...base, drainFileEvents: () => observed.drain() };
   const engine = new ContextEngine({ store, chatId, userId });
   const adapters = { main: config.adapter };
   const version = `eval-simulator-${randomUUID()}`;

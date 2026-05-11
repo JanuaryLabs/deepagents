@@ -1,9 +1,9 @@
 import type { CommandResult } from 'bash-tool';
-import { Bash, defineCommand } from 'just-bash';
+import { InMemoryFs, defineCommand } from 'just-bash';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createBashTool } from '@deepagents/context';
+import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 import { createSqlCommandHooks } from '@deepagents/text2sql';
 
 interface CapturedSqlInvocation {
@@ -32,7 +32,8 @@ async function executeWithSqlHooks(
   command: string,
   hooks: SqlCommandHooks = createSqlCommandHooks({ adapters: {} }),
 ): Promise<BashCommandResult> {
-  const bashEnv = new Bash({
+  const sandbox = await createVirtualSandbox({
+    fs: new InMemoryFs(),
     cwd: '/',
     customCommands: [
       defineCommand('sql', async (args) => ({
@@ -44,7 +45,7 @@ async function executeWithSqlHooks(
   });
 
   const { bash } = await createBashTool({
-    sandbox: bashEnv,
+    sandbox,
     destination: '/',
     ...hooks,
   });

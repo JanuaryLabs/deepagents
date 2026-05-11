@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import {
-  type DockerSandbox,
+  type DisposableSandbox,
   DockerSandboxError,
   InstallError,
   Installer,
@@ -188,7 +188,7 @@ describe('Docker Sandbox', async () => {
     });
 
     describe('command execution', () => {
-      let sandbox: DockerSandbox;
+      let sandbox: DisposableSandbox;
 
       before(async () => {
         sandbox = await createDockerSandbox();
@@ -238,7 +238,7 @@ describe('Docker Sandbox', async () => {
     });
 
     describe('file operations', () => {
-      let sandbox: DockerSandbox;
+      let sandbox: DisposableSandbox;
 
       before(async () => {
         sandbox = await createDockerSandbox();
@@ -769,7 +769,7 @@ describe('Docker Sandbox', async () => {
 
   describe('useSandbox', () => {
     it('auto-disposes sandbox on successful completion', async () => {
-      let sandboxRef: DockerSandbox | null = null;
+      let sandboxRef: DisposableSandbox | null = null;
 
       const result = await useSandbox({}, async (sandbox) => {
         sandboxRef = sandbox;
@@ -782,7 +782,7 @@ describe('Docker Sandbox', async () => {
       assert.strictEqual(result, 'hello from useSandbox');
 
       // Verify sandbox is disposed (command should fail)
-      const captured1 = sandboxRef as DockerSandbox | null;
+      const captured1 = sandboxRef as DisposableSandbox | null;
       if (captured1) {
         try {
           await captured1.executeCommand('echo test');
@@ -794,7 +794,7 @@ describe('Docker Sandbox', async () => {
     });
 
     it('auto-disposes sandbox even when function throws', async () => {
-      let sandboxRef: DockerSandbox | null = null;
+      let sandboxRef: DisposableSandbox | null = null;
 
       await assert.rejects(
         useSandbox({}, async (sandbox) => {
@@ -809,7 +809,7 @@ describe('Docker Sandbox', async () => {
       );
 
       // Verify sandbox is disposed (command should fail)
-      const captured2 = sandboxRef as DockerSandbox | null;
+      const captured2 = sandboxRef as DisposableSandbox | null;
       if (captured2) {
         try {
           await captured2.executeCommand('echo test');

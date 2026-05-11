@@ -151,7 +151,7 @@ export async function chat<CIn>(
         normalizedMessage.parts = sanitizeAbortedParts(normalizedMessage.parts);
       }
 
-      const drained = sandbox.drainFileEvents?.() ?? [];
+      const drained = sandbox.drainFileEvents();
       const fileEvents = isAborted ? [] : drained;
       const finalMetadata =
         await options.finalAssistantMetadata?.(normalizedMessage);

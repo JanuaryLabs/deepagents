@@ -1,5 +1,6 @@
 import { type UIMessage, generateId, simulateReadableStream } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -9,6 +10,7 @@ import {
   agent,
   chat,
   createBashTool,
+  createVirtualSandbox,
   errorRecoveryGuardrail,
   reminder,
   user,
@@ -17,7 +19,9 @@ import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 import { init_db } from '../src/tests/sqlite.ts';
 
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 
 const testUsage = {
   inputTokens: { total: 10 },

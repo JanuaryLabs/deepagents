@@ -24,7 +24,9 @@ async function createVirtualAgentSandbox() {
   });
 }
 
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 
 const testUsage = {
   inputTokens: {

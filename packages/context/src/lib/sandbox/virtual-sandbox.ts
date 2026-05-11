@@ -1,5 +1,6 @@
-import type { Sandbox } from 'bash-tool';
 import { Bash, type CustomCommand, type IFileSystem } from 'just-bash';
+
+import type { DisposableSandbox } from './types.ts';
 
 export interface CreateVirtualSandboxOptions {
   fs: IFileSystem;
@@ -10,7 +11,7 @@ export interface CreateVirtualSandboxOptions {
 
 export async function createVirtualSandbox(
   options: CreateVirtualSandboxOptions,
-): Promise<Sandbox> {
+): Promise<DisposableSandbox> {
   const bash = new Bash({
     fs: options.fs,
     cwd: options.cwd,
@@ -19,8 +20,11 @@ export async function createVirtualSandbox(
   });
 
   return {
-    async executeCommand(command) {
-      const result = await bash.exec(command);
+    async executeCommand(command, options) {
+      const result = await bash.exec(
+        command,
+        options?.signal ? { signal: options.signal } : undefined,
+      );
       return {
         stdout: result.stdout,
         stderr: result.stderr,
@@ -42,5 +46,7 @@ export async function createVirtualSandbox(
         );
       }
     },
+
+    async dispose() {},
   };
 }

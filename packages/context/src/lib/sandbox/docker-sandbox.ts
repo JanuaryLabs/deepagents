@@ -1,4 +1,4 @@
-import { type CommandResult, type Sandbox } from 'bash-tool';
+import { type CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -18,6 +18,7 @@ import {
   type Installer,
   createInstallerContext,
 } from './installers/installer.ts';
+import type { DisposableSandbox } from './types.ts';
 
 export type { CommandResult as ExecResult, Sandbox } from 'bash-tool';
 export {
@@ -107,10 +108,6 @@ export type DockerSandboxOptions =
   | DockerfileSandboxOptions
   | ComposeSandboxOptions;
 
-export interface DockerSandbox extends Sandbox {
-  dispose(): Promise<void>;
-}
-
 export function isDockerfileOptions(
   opts: DockerSandboxOptions,
 ): opts is DockerfileSandboxOptions {
@@ -160,7 +157,7 @@ export abstract class DockerSandboxStrategy {
     this.env = env;
   }
 
-  async create(): Promise<DockerSandbox> {
+  async create(): Promise<DisposableSandbox> {
     const image = await this.getImage();
     let containerId: string | undefined;
 
@@ -481,11 +478,12 @@ export abstract class DockerSandboxStrategy {
     }
   }
 
-  protected createSandboxMethods(): DockerSandbox {
+  protected createSandboxMethods(): DisposableSandbox {
     const { containerId } = this.context;
 
-    const sandbox: DockerSandbox = {
+    const sandbox: DisposableSandbox = {
       executeCommand: async (command: string): Promise<CommandResult> => {
+        // Docker exec cancellation is not yet wired; accept and ignore options.
         return this.exec(command);
       },
 
@@ -794,7 +792,7 @@ export class ComposeStrategy extends DockerSandboxStrategy {
  */
 export async function createDockerSandbox(
   options: DockerSandboxOptions = {},
-): Promise<DockerSandbox> {
+): Promise<DisposableSandbox> {
   let strategy: DockerSandboxStrategy;
 
   if (isComposeOptions(options)) {
@@ -830,7 +828,7 @@ export async function createDockerSandbox(
  */
 export async function useSandbox<T>(
   options: DockerSandboxOptions,
-  fn: (sandbox: DockerSandbox) => Promise<T>,
+  fn: (sandbox: DisposableSandbox) => Promise<T>,
 ): Promise<T> {
   const sandbox = await createDockerSandbox(options);
   try {

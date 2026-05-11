@@ -1,3 +1,4 @@
+export * from './abort.ts';
 export * from './agent-os-sandbox.ts';
 export * from './bash-exception.ts';
 export * from './bash-meta.ts';

@@ -1,4 +1,6 @@
-import { type CommandResult, type Sandbox } from 'bash-tool';
+import { type CommandResult } from 'bash-tool';
+
+import type { DisposableSandbox } from './types.ts';
 
 const textDecoder = new TextDecoder();
 
@@ -63,10 +65,6 @@ export interface AgentOsSandboxOptions {
   moduleAccessCwd?: string;
 }
 
-export interface AgentOsSandbox extends Sandbox {
-  dispose(): Promise<void>;
-}
-
 async function importAgentOs(): Promise<{ AgentOs: AgentOsStatic }> {
   try {
     return await import('@rivet-dev/agent-os-core');
@@ -112,7 +110,7 @@ async function importAgentOs(): Promise<{ AgentOs: AgentOsStatic }> {
  */
 export async function createAgentOsSandbox(
   options: AgentOsSandboxOptions = {},
-): Promise<AgentOsSandbox> {
+): Promise<DisposableSandbox> {
   const { AgentOs } = await importAgentOs();
 
   let os: AgentOsInstance;
@@ -205,7 +203,7 @@ export async function createAgentOsSandbox(
  */
 export async function useAgentOsSandbox<T>(
   options: AgentOsSandboxOptions,
-  fn: (sandbox: AgentOsSandbox) => Promise<T>,
+  fn: (sandbox: DisposableSandbox) => Promise<T>,
 ): Promise<T> {
   const sandbox = await createAgentOsSandbox(options);
   try {

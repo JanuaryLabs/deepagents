@@ -2,25 +2,21 @@ import { InMemoryFs } from 'just-bash';
 
 import {
   type AgentSandbox,
-  type FileEvent,
-  ObservedFs,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
 
 /**
- * Build a virtual-backed `AgentSandbox` with `drainFileEvents` attached,
- * using the full composition (ObservedFs + createVirtualSandbox +
- * createBashTool). Centralized so tests + evals share one shape.
+ * Build a virtual-backed `AgentSandbox`. Centralized so tests + evals share
+ * one shape.
  *
- * Always attaches `drainFileEvents`; callers can assume it is present.
+ * `destination: '/'` is the whole in-memory filesystem — cheap because the
+ * InMemoryFs has at most a handful of files per test. Do not copy this
+ * wiring for real filesystems; pick a workspace subdir there.
  */
-export async function buildSandbox(): Promise<
-  AgentSandbox & { drainFileEvents: () => FileEvent[] }
-> {
-  const observed = new ObservedFs(new InMemoryFs());
-  const base = await createBashTool({
-    sandbox: await createVirtualSandbox({ fs: observed }),
+export async function buildSandbox(): Promise<AgentSandbox> {
+  return createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    destination: '/',
   });
-  return { ...base, drainFileEvents: () => observed.drain() };
 }

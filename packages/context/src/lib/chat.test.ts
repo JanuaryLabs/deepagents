@@ -17,7 +17,6 @@ import {
   ContextEngine,
   type Guardrail,
   InMemoryContextStore,
-  ObservedFs,
   agent,
   assistant,
   chat,
@@ -29,7 +28,9 @@ import {
   user,
 } from '@deepagents/context';
 
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 
 const testUsage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -676,14 +677,10 @@ describe('chat() abort handling', () => {
       userId: 'test-user',
     });
 
-    const observed = new ObservedFs(new InMemoryFs());
-    const base = await createBashTool({
-      sandbox: await createVirtualSandbox({ fs: observed }),
+    const trackedSandbox = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      destination: '/',
     });
-    const trackedSandbox = {
-      ...base,
-      drainFileEvents: () => observed.drain(),
-    };
     await trackedSandbox.sandbox.writeFiles([
       { path: '/tmp/pre-abort.txt', content: 'partial' },
     ]);
@@ -730,7 +727,7 @@ describe('chat() abort handling', () => {
     );
 
     assert.strictEqual(
-      trackedSandbox.drainFileEvents?.().length,
+      trackedSandbox.drainFileEvents().length,
       0,
       'buffer should be drained (not leaking into next turn)',
     );

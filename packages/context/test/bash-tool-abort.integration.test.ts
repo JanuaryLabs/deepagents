@@ -1,29 +1,23 @@
-import { Bash, defineCommand } from 'just-bash';
+import { InMemoryFs, defineCommand } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { createBashTool } from '@deepagents/context';
+import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 
 describe('createBashTool abort handling', () => {
   it('stops at the next statement boundary after abort', async () => {
     const abortController = new AbortController();
     const abortNow = defineCommand('abort-now', async () => {
       abortController.abort(new Error('stop after this statement'));
-
-      return {
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-      };
-    });
-
-    const bashEnv = new Bash({
-      cwd: '/',
-      customCommands: [abortNow],
+      return { stdout: '', stderr: '', exitCode: 0 };
     });
 
     const { bash, sandbox } = await createBashTool({
-      sandbox: bashEnv,
+      sandbox: await createVirtualSandbox({
+        fs: new InMemoryFs(),
+        cwd: '/',
+        customCommands: [abortNow],
+      }),
       destination: '/',
     });
 

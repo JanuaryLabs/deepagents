@@ -5,7 +5,7 @@ import {
   createOverlayBackend,
 } from '@rivet-dev/agent-os-core';
 import chalk from 'chalk';
-import { Bash, InMemoryFs, OverlayFs } from 'just-bash';
+import { InMemoryFs, OverlayFs } from 'just-bash';
 
 import { printer } from '@deepagents/agent';
 
@@ -521,6 +521,7 @@ async function demonstrateSearch() {
  */
 async function demonstrateSkills() {
   const skillSandbox = await createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
     skills: [
       {
         host: 'packages/context/src/skills',
@@ -585,7 +586,9 @@ const context = engine(
   hint('Greet the user badly.'),
 );
 
-const greetingSandbox = await createBashTool();
+const greetingSandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 const grettingAgent = agent({
   name: 'greeting_agent',
   sandbox: greetingSandbox,
@@ -598,7 +601,7 @@ async function createSkillAwareAgent() {
   console.log('\n=== Skill-Aware Agent Demo (using bash-tool) ===');
 
   const skillSandbox = await createBashTool({
-    sandbox: new Bash({
+    sandbox: await createVirtualSandbox({
       fs: new OverlayFs({ root: process.cwd() }),
     }),
     skills: [

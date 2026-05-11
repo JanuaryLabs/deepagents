@@ -3,7 +3,6 @@ import type { CreateBashToolOptions } from 'bash-tool';
 import { createBashTool } from './bash-tool.ts';
 import {
   type DockerResources,
-  type DockerSandbox,
   type DockerSandboxOptions,
   type DockerSandboxVolume,
   createDockerSandbox,
@@ -111,15 +110,6 @@ export type ContainerToolOptions =
   | ComposeContainerToolOptions;
 
 /**
- * Result of creating a container tool. Extends AgentSandbox (so
- * `sandbox.skills` is populated from the `skills` option) but with
- * DockerSandbox (which has dispose()) as the underlying sandbox.
- */
-export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
-  sandbox: DockerSandbox;
-};
-
-/**
  * Creates a bash tool that runs in a Docker container.
  *
  * This is a high-level wrapper that combines `createDockerSandbox()` and
@@ -213,7 +203,7 @@ export type ContainerToolResult = Omit<AgentSandbox, 'sandbox'> & {
  */
 export async function createContainerTool(
   options: ContainerToolOptions = {},
-): Promise<ContainerToolResult> {
+): Promise<AgentSandbox> {
   let sandboxOptions: DockerSandboxOptions;
   let bashOptions: Omit<CreateBashToolOptions, 'sandbox' | 'uploadDirectory'>;
   let skillInputs: SkillUploadInput[] = [];
@@ -251,18 +241,19 @@ export async function createContainerTool(
     skillInputs = skills;
   }
 
-  const sandbox = await createDockerSandbox(sandboxOptions);
+  const backend = await createDockerSandbox(sandboxOptions);
 
   const toolkit = await createBashTool({
     ...bashOptions,
-    sandbox,
+    sandbox: backend,
     skills: skillInputs,
   });
 
   return {
     bash: toolkit.bash,
     tools: toolkit.tools,
-    sandbox,
+    sandbox: toolkit.sandbox,
     skills: toolkit.skills,
+    drainFileEvents: toolkit.drainFileEvents,
   };
 }

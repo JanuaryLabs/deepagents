@@ -7,6 +7,7 @@ import {
   simulateReadableStream,
 } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
@@ -17,6 +18,7 @@ import {
   agent,
   chat,
   createBashTool,
+  createVirtualSandbox,
   errorRecoveryGuardrail,
 } from '@deepagents/context';
 import {
@@ -35,7 +37,9 @@ import {
   tables,
 } from '@deepagents/text2sql/sqlite';
 
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 
 function createMockModel(text = 'SELECT COUNT(*) FROM users') {
   return new MockLanguageModelV3({

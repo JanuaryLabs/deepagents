@@ -11,7 +11,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { createBashTool as createBashToolV2 } from '@deepagents/context';
+import {
+  createBashTool as createBashToolV2,
+  createVirtualSandbox,
+} from '@deepagents/context';
 
 /**
  * Integration tests for just-bash filesystem mounting with skills.
@@ -445,6 +448,7 @@ describe('createBashTool with skills option', () => {
     await writeSkill(skillsDir, 'deploy', 'Deploy skill');
 
     const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       skills: [{ host: skillsDir, sandbox: '/workspace/skills' }],
     });
 
@@ -472,6 +476,7 @@ describe('createBashTool with skills option', () => {
     await writeSkill(secondary, 'extra', 'Extra from secondary');
 
     const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       skills: [
         { host: primary, sandbox: '/skills/primary' },
         { host: secondary, sandbox: '/skills/secondary' },
@@ -491,6 +496,7 @@ describe('createBashTool with skills option', () => {
     await writeSkill(second, 'shared', 'From second');
 
     const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       skills: [
         { host: first, sandbox: '/skills/first' },
         { host: second, sandbox: '/skills/second' },
@@ -505,6 +511,7 @@ describe('createBashTool with skills option', () => {
 
   it('returns an empty skills array for a non-existent host directory', async () => {
     const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       skills: [
         {
           host: path.join(testRoot, 'does-not-exist'),
@@ -517,7 +524,9 @@ describe('createBashTool with skills option', () => {
   });
 
   it('defaults sandbox.skills to [] when no skills option is passed', async () => {
-    const sandbox = await createBashToolV2();
+    const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
     assert.deepStrictEqual(sandbox.skills, []);
   });
 
@@ -535,6 +544,7 @@ describe('createBashTool with skills option', () => {
     );
 
     const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       skills: [{ host: skillsDir, sandbox: '/skills' }],
     });
 
@@ -556,6 +566,7 @@ describe('createBashTool with skills option', () => {
     await fs.writeFile(path.join(skillDir, '.git', 'HEAD'), 'ref: whatever');
 
     const sandbox = await createBashToolV2({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       skills: [{ host: skillsDir, sandbox: '/skills' }],
     });
 

@@ -1,9 +1,10 @@
 import { generateText, stepCountIs } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { createBashTool } from '@deepagents/context';
+import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 
 const testUsage = {
   inputTokens: {
@@ -38,7 +39,10 @@ function createBashToolCallModel(input: string) {
 }
 
 async function runBashToolCall(input: string) {
-  const { tools } = await createBashTool({});
+  const { tools } = await createBashTool({
+    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    destination: '/',
+  });
 
   const result = await generateText({
     model: createBashToolCallModel(input),

@@ -192,7 +192,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
       try {
         await withTimeout(iterator.next(), 'initial tick');
 
-        let pending = iterator.next();
+        const pending = iterator.next();
         await store.appendChunks([createChunk(other.id, 0)]);
         await expectNoChange(pending, 'unrelated stream id should be ignored');
 

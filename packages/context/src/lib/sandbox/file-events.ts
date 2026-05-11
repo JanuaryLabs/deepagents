@@ -1,27 +1,4 @@
-import type {
-  BufferEncoding,
-  CpOptions,
-  FileContent,
-  FsStat,
-  IFileSystem,
-  MkdirOptions,
-  RmOptions,
-} from 'just-bash';
-
-interface ReadFileOptions {
-  encoding?: BufferEncoding | null;
-}
-
-interface WriteFileOptions {
-  encoding?: BufferEncoding;
-}
-
-interface DirentEntry {
-  name: string;
-  isFile: boolean;
-  isDirectory: boolean;
-  isSymbolicLink: boolean;
-}
+import type { DisposableSandbox } from './types.ts';
 
 export type FileEventOp = 'read' | 'write' | 'delete' | 'modify';
 
@@ -31,192 +8,137 @@ export interface FileEvent {
   timestamp: number;
 }
 
-export class ObservedFs implements IFileSystem {
-  readonly #base: IFileSystem;
-  #events: FileEvent[] = [];
-  readdirWithFileTypes?: (path: string) => Promise<DirentEntry[]>;
+export interface ObserveOptions {
+  destination: string;
+}
 
-  constructor(base: IFileSystem) {
-    this.#base = base;
-    if (base.readdirWithFileTypes) {
-      this.readdirWithFileTypes = (path) => base.readdirWithFileTypes!(path);
+export interface SandboxObserver {
+  sandbox: DisposableSandbox;
+  drain(): FileEvent[];
+}
+
+export class SnapshotFailedError extends Error {
+  readonly stderr: string;
+  constructor(message: string, stderr: string) {
+    super(message);
+    this.name = 'SnapshotFailedError';
+    this.stderr = stderr;
+  }
+}
+
+type Snapshot = Map<string, string>;
+type ExecuteCommand = DisposableSandbox['executeCommand'];
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+async function snapshot(
+  execute: ExecuteCommand,
+  destination: string,
+): Promise<Snapshot> {
+  const probe = await execute(`[ -d ${shellQuote(destination)} ]`);
+  if (probe.exitCode !== 0) return new Map();
+  const list = await execute(
+    `find ${shellQuote(destination)} -type f -print0 | while IFS= read -r -d '' p; do sha256sum "$p"; done`,
+  );
+  if (list.exitCode !== 0) {
+    throw new SnapshotFailedError(
+      `snapshot failed for ${destination}`,
+      list.stderr,
+    );
+  }
+  const snap: Snapshot = new Map();
+  if (!list.stdout) return snap;
+  for (const line of list.stdout.split('\n')) {
+    if (line.length < 66) continue;
+    snap.set(line.slice(66), line.slice(0, 64));
+  }
+  return snap;
+}
+
+function diff(before: Snapshot, after: Snapshot): FileEvent[] {
+  const events: FileEvent[] = [];
+  const ts = Date.now();
+  for (const [path, hash] of after) {
+    const prior = before.get(path);
+    if (prior === undefined) {
+      events.push({ path, op: 'write', timestamp: ts });
+    } else if (prior !== hash) {
+      events.push({ path, op: 'modify', timestamp: ts });
     }
   }
-
-  drain(): FileEvent[] {
-    const events = this.#events;
-    this.#events = [];
-    return events;
-  }
-
-  #record(op: FileEventOp, path: string): void {
-    this.#events.push({ path, op, timestamp: Date.now() });
-  }
-
-  async readFile(
-    path: string,
-    options?: ReadFileOptions | BufferEncoding,
-  ): Promise<string> {
-    const content = await this.#base.readFile(path, options);
-    this.#record('read', path);
-    return content;
-  }
-
-  async readFileBuffer(path: string): Promise<Uint8Array> {
-    const content = await this.#base.readFileBuffer(path);
-    this.#record('read', path);
-    return content;
-  }
-
-  async writeFile(
-    path: string,
-    content: FileContent,
-    options?: WriteFileOptions | BufferEncoding,
-  ): Promise<void> {
-    const existed = await this.#base.exists(path);
-    await this.#base.writeFile(path, content, options);
-    this.#record(existed ? 'modify' : 'write', path);
-  }
-
-  async appendFile(
-    path: string,
-    content: FileContent,
-    options?: WriteFileOptions | BufferEncoding,
-  ): Promise<void> {
-    const existed = await this.#base.exists(path);
-    await this.#base.appendFile(path, content, options);
-    this.#record(existed ? 'modify' : 'write', path);
-  }
-
-  async rm(path: string, options?: RmOptions): Promise<void> {
-    const toRecord = options?.recursive
-      ? await this.#walk(path, { includeRoot: true })
-      : (await this.#base.exists(path))
-        ? [path]
-        : [];
-    await this.#base.rm(path, options);
-    for (const p of toRecord) {
-      this.#record('delete', p);
+  for (const path of before.keys()) {
+    if (!after.has(path)) {
+      events.push({ path, op: 'delete', timestamp: ts });
     }
   }
+  return events;
+}
 
-  async cp(src: string, dest: string, options?: CpOptions): Promise<void> {
-    if (options?.recursive) {
-      const sources = await this.#walk(src, { includeRoot: false });
-      const destChecks = await Promise.all(
-        sources.map(async (srcFile) => {
-          const relative = srcFile.slice(src.length);
-          const destFile = this.#joinPath(dest, relative);
-          return {
-            srcFile,
-            destFile,
-            existed: await this.#base.exists(destFile),
-          };
-        }),
-      );
-      await this.#base.cp(src, dest, options);
-      for (const { srcFile, destFile, existed } of destChecks) {
-        this.#record('read', srcFile);
-        this.#record(existed ? 'modify' : 'write', destFile);
-      }
-      return;
-    }
-    const destExisted = await this.#base.exists(dest);
-    await this.#base.cp(src, dest, options);
-    this.#record('read', src);
-    this.#record(destExisted ? 'modify' : 'write', dest);
+/**
+ * Wraps a `Sandbox` with file-event observation rooted at `destination`.
+ *
+ * - `executeCommand` and `writeFiles` are bracketed by `find -print0` +
+ *   `sha256sum` snapshots; hash diff produces write/modify/delete events.
+ * - `readFile` records a `read` event on success.
+ * - If `destination` does not exist in the sandbox at snapshot time, the
+ *   snapshot is treated as empty (graceful — supports observation rooted at
+ *   paths that the sandbox will create later). Snapshot command failures
+ *   (e.g. permission denied, missing `find`) throw `SnapshotFailedError`.
+ * - Single-flight by convention. Concurrent `executeCommand` calls are not
+ *   serialized internally and will produce interleaved diffs.
+ */
+export function observeSandboxFileEvents(
+  sandbox: DisposableSandbox,
+  options: ObserveOptions,
+): SandboxObserver {
+  const { destination } = options;
+  if (!destination) {
+    throw new Error('observeSandboxFileEvents: destination is required');
   }
 
-  async #walk(
-    root: string,
-    { includeRoot }: { includeRoot: boolean },
-  ): Promise<string[]> {
-    if (!(await this.#base.exists(root))) return [];
-    const stat = await this.#base.stat(root);
-    if (!stat.isDirectory) return [root];
+  const innerExecute: ExecuteCommand = sandbox.executeCommand.bind(sandbox);
+  const innerReadFile = sandbox.readFile.bind(sandbox);
+  const innerWriteFiles = sandbox.writeFiles.bind(sandbox);
 
-    const out: string[] = [];
-    const visit = async (dir: string): Promise<void> => {
-      const entries = await this.#base.readdir(dir);
-      for (const name of entries) {
-        const child = this.#joinPath(dir, name);
-        const childStat = await this.#base.stat(child);
-        if (childStat.isDirectory) {
-          await visit(child);
-        } else {
-          out.push(child);
-        }
-      }
+  const buffer: FileEvent[] = [];
+
+  const observe = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const before = await snapshot(innerExecute, destination);
+    const takeAfter = async () => {
+      const after = await snapshot(innerExecute, destination);
+      buffer.push(...diff(before, after));
     };
-    await visit(root);
-    if (includeRoot) out.push(root);
-    return out;
-  }
+    try {
+      const result = await fn();
+      await takeAfter();
+      return result;
+    } catch (err) {
+      await takeAfter().catch(() => {});
+      throw err;
+    }
+  };
 
-  #joinPath(a: string, b: string): string {
-    if (!b) return a;
-    if (b.startsWith('/')) return `${a.replace(/\/$/, '')}${b}`;
-    return a.endsWith('/') ? `${a}${b}` : `${a}/${b}`;
-  }
+  const decorated: DisposableSandbox = {
+    async executeCommand(command, options) {
+      return observe(() => innerExecute(command, options));
+    },
+    async readFile(path) {
+      const content = await innerReadFile(path);
+      buffer.push({ path, op: 'read', timestamp: Date.now() });
+      return content;
+    },
+    async writeFiles(files) {
+      await observe(() => innerWriteFiles(files));
+    },
+    dispose: sandbox.dispose.bind(sandbox),
+  };
 
-  async mv(src: string, dest: string): Promise<void> {
-    const destExisted = await this.#base.exists(dest);
-    await this.#base.mv(src, dest);
-    this.#record('delete', src);
-    this.#record(destExisted ? 'modify' : 'write', dest);
-  }
-
-  async symlink(target: string, linkPath: string): Promise<void> {
-    await this.#base.symlink(target, linkPath);
-    this.#record('write', linkPath);
-  }
-
-  async link(existingPath: string, newPath: string): Promise<void> {
-    await this.#base.link(existingPath, newPath);
-    this.#record('write', newPath);
-  }
-
-  mkdir(path: string, options?: MkdirOptions): Promise<void> {
-    return this.#base.mkdir(path, options);
-  }
-
-  exists(path: string): Promise<boolean> {
-    return this.#base.exists(path);
-  }
-
-  stat(path: string): Promise<FsStat> {
-    return this.#base.stat(path);
-  }
-
-  lstat(path: string): Promise<FsStat> {
-    return this.#base.lstat(path);
-  }
-
-  readdir(path: string): Promise<string[]> {
-    return this.#base.readdir(path);
-  }
-
-  readlink(path: string): Promise<string> {
-    return this.#base.readlink(path);
-  }
-
-  realpath(path: string): Promise<string> {
-    return this.#base.realpath(path);
-  }
-
-  chmod(path: string, mode: number): Promise<void> {
-    return this.#base.chmod(path, mode);
-  }
-
-  utimes(path: string, atime: Date, mtime: Date): Promise<void> {
-    return this.#base.utimes(path, atime, mtime);
-  }
-
-  resolvePath(base: string, path: string): string {
-    return this.#base.resolvePath(base, path);
-  }
-
-  getAllPaths(): string[] {
-    return this.#base.getAllPaths();
-  }
+  return {
+    sandbox: decorated,
+    drain(): FileEvent[] {
+      return buffer.splice(0, buffer.length);
+    },
+  };
 }

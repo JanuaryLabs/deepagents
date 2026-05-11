@@ -1,8 +1,41 @@
 import type { Tool } from 'ai';
-import type { BashToolkit, CommandResult } from 'bash-tool';
+import type {
+  BashToolkit,
+  CommandResult,
+  Sandbox as UpstreamSandbox,
+} from 'bash-tool';
 
 import type { SkillPathMapping } from '../skills/types.ts';
 import type { FileEvent } from './file-events.ts';
+
+/**
+ * Options accepted by `DisposableSandbox.executeCommand`. Currently only
+ * `signal` (cooperative cancellation); shaped as an object so we can add
+ * more without breaking backends.
+ */
+export interface ExecuteCommandOptions {
+  signal?: AbortSignal;
+}
+
+/**
+ * Sandbox contract used throughout this package: upstream's three-method
+ * shape plus a lifecycle hook, with `executeCommand` widened to accept
+ * optional cancellation. Every backend (virtual, docker, agent-os)
+ * implements this so callers can dispose uniformly. Backends that honor
+ * `options.signal` forward it to their runner; others ignore. Pure
+ * backends with no external resources (e.g. virtual-sandbox) supply a
+ * no-op `dispose()`.
+ */
+export interface DisposableSandbox extends Omit<
+  UpstreamSandbox,
+  'executeCommand'
+> {
+  executeCommand(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult>;
+  dispose(): Promise<void>;
+}
 
 /**
  * Declarative skill upload: a host directory whose contents are copied into
@@ -34,15 +67,20 @@ export type WrappedBashTool = Tool<BashToolInput, CommandResult>;
  * the `skills()` fragment. The `bash` tool is widened to require a
  * `reasoning` input on every call.
  */
-export interface AgentSandbox extends Omit<BashToolkit, 'bash' | 'tools'> {
+export interface AgentSandbox extends Omit<
+  BashToolkit,
+  'bash' | 'tools' | 'sandbox'
+> {
   /** Discovered skills — empty array if none were configured. */
   skills: SkillPathMapping[];
   bash: WrappedBashTool;
   tools: Omit<BashToolkit['tools'], 'bash'> & { bash: WrappedBashTool };
+  sandbox: DisposableSandbox;
   /**
-   * Drain and return file events observed since the last call. Attached by
-   * callers who composed an `ObservedFs` into their backend; omitted
-   * otherwise. The chat pipeline reads this via optional chaining.
+   * Drain and return file events observed since the last `drain()`. The
+   * observation root is the `destination` passed to `createBashTool`; every
+   * `executeCommand` / `writeFiles` call is bracketed by a snapshot, and
+   * `readFile` records a `read` event.
    */
-  drainFileEvents?(): FileEvent[];
+  drainFileEvents(): FileEvent[];
 }

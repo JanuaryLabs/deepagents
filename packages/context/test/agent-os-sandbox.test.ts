@@ -4,8 +4,8 @@ import { after, before, describe, it } from 'node:test';
 import {
   AgentOsCreationError,
   AgentOsNotAvailableError,
-  type AgentOsSandbox,
   AgentOsSandboxError,
+  type DisposableSandbox,
   createAgentOsSandbox,
   useAgentOsSandbox,
 } from '@deepagents/context';
@@ -60,7 +60,7 @@ describe('Agent OS Sandbox', async () => {
     });
 
     describe('command execution', () => {
-      let sandbox: AgentOsSandbox;
+      let sandbox: DisposableSandbox;
 
       before(async () => {
         sandbox = await createAgentOsSandbox({
@@ -100,7 +100,7 @@ describe('Agent OS Sandbox', async () => {
     });
 
     describe('file operations', () => {
-      let sandbox: AgentOsSandbox;
+      let sandbox: DisposableSandbox;
 
       before(async () => {
         sandbox = await createAgentOsSandbox({
