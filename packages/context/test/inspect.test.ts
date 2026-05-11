@@ -1,4 +1,5 @@
 import { InMemoryFs } from 'just-bash';
+import nock from 'nock';
 import assert from 'node:assert';
 import { before, describe, it } from 'node:test';
 
@@ -23,9 +24,28 @@ async function createVirtualAgentSandbox() {
   });
 }
 
+const modelsDevResponse = {
+  openai: {
+    id: 'openai',
+    name: 'OpenAI',
+    models: {
+      'gpt-4o': {
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        family: 'gpt-4o',
+        cost: { input: 2.5, output: 10 },
+        limit: { context: 128_000, output: 16_384 },
+      },
+    },
+  },
+};
+
 describe('ContextEngine.inspect()', () => {
   before(async () => {
-    // Pre-load the models registry to avoid network calls in tests
+    nock('https://models.dev')
+      .persist()
+      .get('/api.json')
+      .reply(200, modelsDevResponse);
     await getModelsRegistry().load();
   });
 

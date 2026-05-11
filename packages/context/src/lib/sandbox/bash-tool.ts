@@ -2,8 +2,10 @@ import { tool } from 'ai';
 import {
   type CommandResult,
   type CreateBashToolOptions,
+  type Sandbox,
   createBashTool as externalCreateBashTool,
 } from 'bash-tool';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import z from 'zod';
 
 import { BashException } from './bash-exception.ts';
@@ -17,6 +19,60 @@ import { uploadSkills } from './upload-skills.ts';
 
 const REASONING_INSTRUCTION =
   'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
+
+const bashExecAbortSignal = new AsyncLocalStorage<AbortSignal | undefined>();
+
+interface AbortableJustBash {
+  exec(
+    command: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<CommandResult>;
+  fs: {
+    readFile(path: string): Promise<string>;
+    writeFile(path: string, content: string): Promise<void>;
+  };
+}
+
+function isAbortableJustBash(value: unknown): value is AbortableJustBash {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { exec?: unknown }).exec === 'function' &&
+    typeof (value as { fs?: { readFile?: unknown; writeFile?: unknown } }).fs
+      ?.readFile === 'function' &&
+    typeof (value as { fs?: { readFile?: unknown; writeFile?: unknown } }).fs
+      ?.writeFile === 'function'
+  );
+}
+
+function wrapAbortableJustBash(bash: AbortableJustBash): Sandbox {
+  return {
+    async executeCommand(command) {
+      const signal = bashExecAbortSignal.getStore();
+      const result = await bash.exec(command, signal ? { signal } : undefined);
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+      };
+    },
+
+    async readFile(path) {
+      return bash.fs.readFile(path);
+    },
+
+    async writeFiles(files) {
+      for (const file of files) {
+        await bash.fs.writeFile(
+          file.path,
+          typeof file.content === 'string'
+            ? file.content
+            : Buffer.from(file.content).toString('utf-8'),
+        );
+      }
+    },
+  };
+}
 
 export interface CreateBashToolWithSkillsOptions extends CreateBashToolOptions {
   /**
@@ -46,13 +102,19 @@ export async function createBashTool(
   options: CreateBashToolWithSkillsOptions = {},
 ): Promise<AgentSandbox> {
   const { skills: skillInputs = [], extraInstructions, ...rest } = options;
+  const externalOptions = {
+    ...rest,
+    ...(isAbortableJustBash(rest.sandbox)
+      ? { sandbox: wrapAbortableJustBash(rest.sandbox) }
+      : {}),
+  };
 
   const combinedInstructions = [extraInstructions, REASONING_INSTRUCTION]
     .filter(Boolean)
     .join('\n\n');
 
   const toolkit = await externalCreateBashTool({
-    ...rest,
+    ...externalOptions,
     extraInstructions: combinedInstructions,
   });
 
@@ -98,28 +160,37 @@ export async function createBashTool(
       if (!originalExecute) {
         throw new Error('bash tool execution is not available');
       }
-      return runWithBashMeta(async () => {
-        let result: CommandResult;
-        try {
-          result = await originalExecute({ command }, execOptions);
-        } catch (err) {
-          if (err instanceof BashException) {
-            result = err.format();
-          } else {
-            throw err;
+      const abortSignal =
+        typeof execOptions === 'object' &&
+        execOptions !== null &&
+        'abortSignal' in execOptions
+          ? (execOptions as { abortSignal?: AbortSignal }).abortSignal
+          : undefined;
+
+      return bashExecAbortSignal.run(abortSignal, () =>
+        runWithBashMeta(async () => {
+          let result: CommandResult;
+          try {
+            result = await originalExecute({ command }, execOptions);
+          } catch (err) {
+            if (err instanceof BashException) {
+              result = err.format();
+            } else {
+              throw err;
+            }
           }
-        }
-        const state = readBashMeta();
-        if (!state) return result;
-        const hasHidden = Object.keys(state.hidden).length > 0;
-        const hasReminder = state.reminder !== undefined;
-        if (!hasHidden && !hasReminder) return result;
-        return {
-          ...result,
-          ...(hasHidden ? { meta: state.hidden } : {}),
-          ...(hasReminder ? { reminder: state.reminder } : {}),
-        };
-      });
+          const state = readBashMeta();
+          if (!state) return result;
+          const hasHidden = Object.keys(state.hidden).length > 0;
+          const hasReminder = state.reminder !== undefined;
+          if (!hasHidden && !hasReminder) return result;
+          return {
+            ...result,
+            ...(hasHidden ? { meta: state.hidden } : {}),
+            ...(hasReminder ? { reminder: state.reminder } : {}),
+          };
+        }),
+      );
     },
     toModelOutput: ({ output }: { output: unknown }) => {
       if (typeof output !== 'object' || output === null) {

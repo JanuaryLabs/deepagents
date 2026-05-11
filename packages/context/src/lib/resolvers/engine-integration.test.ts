@@ -1,6 +1,7 @@
 import { InMemoryFs } from 'just-bash';
+import nock from 'nock';
 import assert from 'node:assert';
-import { describe, it, mock } from 'node:test';
+import { before, describe, it, mock } from 'node:test';
 
 import {
   ContextEngine,
@@ -26,7 +27,30 @@ const newEngine = () =>
     userId: 'user-1',
   });
 
+const modelsDevResponse = {
+  openai: {
+    id: 'openai',
+    name: 'OpenAI',
+    models: {
+      'gpt-4o': {
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        family: 'gpt-4o',
+        cost: { input: 2.5, output: 10 },
+        limit: { context: 128_000, output: 16_384 },
+      },
+    },
+  },
+};
+
 describe('engine + resolver chain integration', () => {
+  before(() => {
+    nock('https://models.dev')
+      .persist()
+      .get('/api.json')
+      .reply(200, modelsDevResponse);
+  });
+
   it('materializes async loaders in resolve()', async () => {
     const engine = newEngine();
     engine.set(

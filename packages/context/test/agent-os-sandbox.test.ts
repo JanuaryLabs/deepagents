@@ -190,16 +190,16 @@ describe('Agent OS Sandbox', async () => {
       const result = await useAgentOsSandbox(
         { software: [common] },
         async (sandbox) => {
-          const output = await sandbox.executeCommand('ls /');
+          const output = await sandbox.executeCommand('echo callback-value');
           return {
             exitCode: output.exitCode,
-            hasOutput: output.stdout.length > 0,
+            stdout: output.stdout.trim(),
           };
         },
       );
 
       assert.strictEqual(result.exitCode, 0);
-      assert.strictEqual(result.hasOutput, true);
+      assert.strictEqual(result.stdout, 'callback-value');
     });
   });
 

@@ -19,6 +19,21 @@ interface IngestBody {
   data: TraceItem[];
 }
 
+function traceMetadataValue<T = unknown>(
+  trace: OpenAITrace,
+  key: string,
+): T | undefined {
+  const value = trace.metadata?.[key];
+  if (typeof value !== 'string') {
+    return value as T | undefined;
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return value as T;
+  }
+}
+
 function captureIngestRequests() {
   const captured: IngestBody[] = [];
   nock('https://api.openai.com')
@@ -265,8 +280,8 @@ describe('OpenAI Traces Integration', () => {
       assert.strictEqual(trace.workflow_name, 'test-workflow');
       assert.strictEqual(trace.group_id, 'group-123');
       assert.ok(trace.id.startsWith('trace_'));
-      assert.ok(trace.metadata?.env === 'test');
-      assert.deepStrictEqual(trace.metadata?.total_usage, {
+      assert.strictEqual(traceMetadataValue(trace, 'env'), 'test');
+      assert.deepStrictEqual(traceMetadataValue(trace, 'total_usage'), {
         input_tokens: 10,
         output_tokens: 5,
         details: {
@@ -730,7 +745,7 @@ describe('OpenAI Traces Integration', () => {
       const trace = items.find(
         (item) => item.object === 'trace',
       ) as OpenAITrace;
-      assert.strictEqual(trace.metadata?.steps, 2);
+      assert.strictEqual(traceMetadataValue(trace, 'steps'), 2);
 
       const generationSpans = (
         items.filter((item) => item.object === 'trace.span') as OpenAISpan[]

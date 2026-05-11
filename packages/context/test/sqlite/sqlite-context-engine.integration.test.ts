@@ -27,6 +27,15 @@ async function createVirtualAgentSandbox() {
 
 const renderer = new XmlRenderer();
 
+class DiskImageUnavailableError extends Error {
+  constructor(cause: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`Unable to create macOS disk image for SQLITE_FULL test: ${message}`);
+    this.name = 'DiskImageUnavailableError';
+    this.cause = cause;
+  }
+}
+
 function sanitizeLabel(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
@@ -57,25 +66,33 @@ async function withDiskImage<T>(
   const imagePath = path.join(dir, 'disk.img');
   const mountPath = path.join(dir, 'mnt');
   try {
-    await execFileAsync('hdiutil', [
-      'create',
-      '-size',
-      `${sizeMegabytes}m`,
-      '-fs',
-      'APFS',
-      '-volname',
-      'ContextTest',
-      '-ov',
-      imagePath,
-    ]);
+    try {
+      await execFileAsync('hdiutil', [
+        'create',
+        '-size',
+        `${sizeMegabytes}m`,
+        '-fs',
+        'APFS',
+        '-volname',
+        'ContextTest',
+        '-ov',
+        imagePath,
+      ]);
+    } catch (error) {
+      throw new DiskImageUnavailableError(error);
+    }
     await mkdir(mountPath, { recursive: true });
-    await execFileAsync('hdiutil', [
-      'attach',
-      `${imagePath}.dmg`,
-      '-mountpoint',
-      mountPath,
-      '-nobrowse',
-    ]);
+    try {
+      await execFileAsync('hdiutil', [
+        'attach',
+        `${imagePath}.dmg`,
+        '-mountpoint',
+        mountPath,
+        '-nobrowse',
+      ]);
+    } catch (error) {
+      throw new DiskImageUnavailableError(error);
+    }
     return await fn(mountPath);
   } finally {
     try {
@@ -428,47 +445,55 @@ describe('Sqlite ContextEngine Integration', () => {
   it(
     'throws ERR_SQLITE_ERROR when disk image fills up',
     { timeout: 180000 },
-    async () => {
-      await withDiskImage('disk-image', 16, async (mountPath) => {
-        const dbPath = path.join(mountPath, 'context.sqlite');
-        const store = new SqliteContextStore(dbPath);
-        const engine = new ContextEngine({
-          store,
-          chatId: 'chat-disk-image',
-          userId: 'user-1',
-        });
+    async (t) => {
+      try {
+        await withDiskImage('disk-image', 16, async (mountPath) => {
+          const dbPath = path.join(mountPath, 'context.sqlite');
+          const store = new SqliteContextStore(dbPath);
+          const engine = new ContextEngine({
+            store,
+            chatId: 'chat-disk-image',
+            userId: 'user-1',
+          });
 
-        await engine.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        });
+          await engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          });
 
-        let failure: unknown;
+          let failure: unknown;
 
-        for (let index = 0; index < 5000; index += 1) {
-          const payload = 'x'.repeat(1024 * 1024);
-          engine.set(assistantText(payload, { id: `img-msg-${index}` }));
-          try {
-            await engine.save();
-          } catch (error) {
-            failure = error;
-            break;
+          for (let index = 0; index < 5000; index += 1) {
+            const payload = 'x'.repeat(1024 * 1024);
+            engine.set(assistantText(payload, { id: `img-msg-${index}` }));
+            try {
+              await engine.save();
+            } catch (error) {
+              failure = error;
+              break;
+            }
           }
-        }
 
-        if (!failure) {
-          throw new Error('Expected SQLITE_FULL, but no error occurred');
-        }
+          if (!failure) {
+            throw new Error('Expected SQLITE_FULL, but no error occurred');
+          }
 
-        const err = failure as {
-          code?: string;
-          errcode?: number;
-          errstr?: string;
-        };
-        assert.strictEqual(err.code, 'ERR_SQLITE_ERROR');
-        assert.strictEqual(err.errcode, 13);
-        assert.match(err.errstr ?? '', /database or disk is full/i);
-      });
+          const err = failure as {
+            code?: string;
+            errcode?: number;
+            errstr?: string;
+          };
+          assert.strictEqual(err.code, 'ERR_SQLITE_ERROR');
+          assert.strictEqual(err.errcode, 13);
+          assert.match(err.errstr ?? '', /database or disk is full/i);
+        });
+      } catch (error) {
+        if (error instanceof DiskImageUnavailableError) {
+          t.skip(error.message);
+          return;
+        }
+        throw error;
+      }
     },
   );
 
