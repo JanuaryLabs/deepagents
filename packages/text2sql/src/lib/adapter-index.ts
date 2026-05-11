@@ -246,7 +246,7 @@ export class AdapterIndexer {
     }
 
     if (this.#version) {
-      return `introspection-${this.#version}-${name}`;
+      return `index-${this.#version}-${name}`;
     }
 
     return undefined;

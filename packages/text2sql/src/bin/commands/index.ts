@@ -65,7 +65,10 @@ export class IndexCommand extends SqlCommand {
         encoding: 'utf-8',
       });
       try {
-        const indexer = new AdapterIndexer({ adapters: ctx.adapters });
+        const indexer = new AdapterIndexer({
+          adapters: ctx.adapters,
+          version: ctx.env.TEXT2SQL_INDEX_VERSION,
+        });
         const fragments = await indexer.index({
           adapterNames: names,
           onProgress: createProgressHandler(eventsStream, verbose, ctx.stderr),
