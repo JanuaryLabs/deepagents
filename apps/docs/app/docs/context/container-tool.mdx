@@ -99,6 +99,7 @@ import { createContainerTool, pkg, urlBinary } from '@deepagents/context';
 
 const sandbox = await createContainerTool({
   image: 'alpine:latest',     // default
+  name: 'analytics-indexer',  // optional stable container name
   env: {
     NODE_ENV: 'production',
     API_KEY: process.env.API_KEY || '',
@@ -156,6 +157,27 @@ const sandbox = await createContainerTool({
 
 </Tab>
 </Tabs>
+
+### Reusing a Named Container
+
+Runtime and Dockerfile strategies accept `name`:
+
+```typescript
+const sandbox = await createContainerTool({
+  name: 'analytics-indexer',
+  installers: [pkg(['curl'])],
+});
+```
+
+This uses the Docker name `sandbox-analytics-indexer`.
+
+- If that container already exists and is running, DeepAgents attaches to it.
+- If it exists but is stopped, DeepAgents starts it and attaches.
+- If it does not exist, DeepAgents creates it normally.
+
+On attach, installer execution, volume preparation, and env setup are skipped.
+`dispose()` still stops/removes the named container, so coordinate ownership if
+multiple callers share the same `name`.
 
 ## Bash Tool Hooks
 

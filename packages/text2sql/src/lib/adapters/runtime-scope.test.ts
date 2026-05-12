@@ -148,6 +148,7 @@ async function createRuntimeSqlite(options: RuntimeScopeOptions = {}) {
       includeDefinition: false,
     }),
   ];
+  // eslint-disable-next-line prefer-const
   let db: Awaited<ReturnType<typeof init_db>>['db'] | undefined;
   const initialized = await init_db(runtimeScopeSqliteDdl, {
     grounding,
@@ -795,10 +796,11 @@ for (const adapterCase of adapterCases) {
     it('blocks out-of-scope execute queries before hitting the db executor', async () => {
       const created = await createAdapter();
       if (!created || !runtime) return;
+      const rt = runtime;
       const { adapter, probes } = created;
 
       await assert.rejects(
-        () => adapter.execute(runtime.queries.outOfScopeSql),
+        () => adapter.execute(rt.queries.outOfScopeSql),
         (error: unknown) => {
           const payload = parseScopePayload(
             error instanceof Error ? error.message : String(error),
@@ -830,10 +832,11 @@ for (const adapterCase of adapterCases) {
     it('blocks base-entity execute queries when grounded scope resolves no entities', async () => {
       const created = await createEmptyScopeAdapter();
       if (!created || !runtime) return;
+      const rt = runtime;
       const { adapter, probes } = created;
 
       await assert.rejects(
-        () => adapter.execute(runtime.queries.inScopeSql),
+        () => adapter.execute(rt.queries.inScopeSql),
         (error: unknown) => {
           const payload = parseScopePayload(
             error instanceof Error ? error.message : String(error),

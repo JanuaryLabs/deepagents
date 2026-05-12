@@ -173,11 +173,25 @@ own domain fragments as needed.
 ## Advanced: SQL CLI in Sandboxes
 
 `sql validate <db> "..."` and `sql run <db> "..."` are real commands from the
-`@deepagents/text2sql` package. `sql index [adapter ...]` writes schema
-fragments plus progress events for chat setup. Install the package inside the
-sandbox and set `TEXT2SQL_ADAPTERS` to a module whose default export is
-`Record<string, Adapter>`. Missing `sql` means the sandbox was not prepared
-correctly.
+`@deepagents/text2sql` package. `sql index` writes schema fragments plus
+progress events for chat setup, indexing all configured adapters by default
+(same as `--all`) unless adapter names are provided.
+
+Install the package inside the sandbox and set `TEXT2SQL_ADAPTERS` to a module
+whose default export is `Record<string, Adapter>`. Missing `sql` means the
+sandbox was not prepared correctly.
+
+`sql index` output details:
+
+- `stdout`: JSON manifest with `fragmentsPath`, `eventsPath`, adapters, and
+  fragment count.
+- `--verbose pretty` or `--verbose json`: mirrors progress events to `stderr`
+  while keeping `stdout` as the manifest.
+- `--out-dir <path>`: writes artifacts under that path (default:
+  `$TEXT2SQL_OUT_DIR` or `./sql`).
+
+Set `TEXT2SQL_INDEX_VERSION` to manage cache invalidation across runs. Cache
+keys are `index-<version>-<adapter>`, so bump the version when schema changes.
 
 Spread `createSqlCommandHooks({ adapters })` into `createBashTool()` or
 `createContainerTool()` for model-driven bash calls. The before hook preserves

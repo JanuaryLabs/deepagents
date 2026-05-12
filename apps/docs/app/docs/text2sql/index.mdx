@@ -63,7 +63,7 @@ or `validateAdapterNames(names)`.
 | `Text2Sql#toSql(input, adapterName)`                   | Generate SQL without executing, routed to one adapter                                          |
 | `Text2Sql#toPairs(adapterName, factory)`               | Generate training pairs from one configured adapter                                            |
 | `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments, with optional progress events                 |
-| `sql index [adapter ...]`                              | Run adapter indexing inside a sandbox and write schema fragments plus progress events to files |
+| `sql index [adapter ...]`                              | Index all adapters by default (or named subset), then write schema fragments + progress artifacts |
 
 To run a streaming, multi-turn agent on top of `Text2Sql`, build the chat
 loop yourself with `agent` + `chat` from `@deepagents/context`. See

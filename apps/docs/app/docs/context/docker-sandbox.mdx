@@ -111,6 +111,37 @@ try {
 </Tab>
 </Tabs>
 
+## Stable Container Names
+
+Runtime and Dockerfile strategies accept an optional `name` to reuse the same
+container across calls:
+
+```typescript
+const sandbox = await createDockerSandbox({
+  image: 'node:lts-alpine',
+  name: 'analytics-indexer',
+  installers: [pkg(['curl'])],
+});
+```
+
+DeepAgents uses `sandbox-<name>` as the Docker container name. Reuse behavior:
+
+- If `sandbox-<name>` is already running, the sandbox attaches to it.
+- If it exists but is stopped, the sandbox starts it and attaches.
+- If it does not exist, a new container is created.
+
+When attaching to an existing named container, installer execution, volume
+preparation, and env setup are skipped because the container is assumed to
+already be configured.
+
+`name` must match `/^[A-Za-z0-9_.-]+$/`.
+
+<Callout type="warn">
+  `dispose()` still stops (and removes, because runtime and Dockerfile
+  containers use `--rm`) named containers even when this call attached to an
+  existing one. Coordinate lifecycle if multiple callers share the same `name`.
+</Callout>
+
 ## Volumes
 
 Attach bind paths or Docker-managed volumes to the container. Read-only by default for security.
