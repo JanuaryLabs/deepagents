@@ -30,6 +30,14 @@ interface BaseContainerToolOptions extends Omit<
    * contents are copied to `sandbox` and parsed into `sandbox.skills`.
    */
   skills?: SkillUploadInput[];
+  /**
+   * Stable container name suffix. When set, the container is named
+   * `sandbox-<name>`; subsequent calls with the same `name` attach to the
+   * running (or stopped) container instead of creating a new one — skipping
+   * installers, volume setup, and env. Otherwise a randomized
+   * `sandbox-<8hex>` name is used per call.
+   */
+  name?: string;
 }
 
 /**
@@ -220,10 +228,11 @@ export async function createContainerTool(
       volumes,
       resources,
       env,
+      name,
       skills = [],
       ...rest
     } = options;
-    sandboxOptions = { dockerfile, context, volumes, resources, env };
+    sandboxOptions = { dockerfile, context, volumes, resources, env, name };
     bashOptions = rest;
     skillInputs = skills;
   } else {
@@ -233,10 +242,11 @@ export async function createContainerTool(
       volumes,
       resources,
       env,
+      name,
       skills = [],
       ...rest
     } = options;
-    sandboxOptions = { image, installers, volumes, resources, env };
+    sandboxOptions = { image, installers, volumes, resources, env, name };
     bashOptions = rest;
     skillInputs = skills;
   }

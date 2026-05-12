@@ -679,6 +679,170 @@ describe('Docker Sandbox', async () => {
         await sandbox.dispose(); // Should not throw
       });
     });
+
+    describe('stable container name', () => {
+      function uniqueName(): string {
+        return `test-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      }
+
+      async function removeContainer(containerId: string): Promise<void> {
+        try {
+          await spawn('docker', ['rm', '-f', containerId]);
+        } catch {
+          // best-effort
+        }
+      }
+
+      it('names the container `sandbox-<name>`', async () => {
+        const name = uniqueName();
+        const sandbox = await createDockerSandbox({ name });
+
+        try {
+          const inspect = await spawn('docker', [
+            'container',
+            'inspect',
+            '--format',
+            '{{.Name}}',
+            `sandbox-${name}`,
+          ]);
+          assert.strictEqual(inspect.stdout.trim(), `/sandbox-${name}`);
+        } finally {
+          await sandbox.dispose();
+          await removeContainer(`sandbox-${name}`);
+        }
+      });
+
+      it('attaches to an existing running container and skips installers', async () => {
+        const name = uniqueName();
+        const first = await createDockerSandbox({
+          name,
+          installers: [pkg(['curl'])],
+        });
+
+        let second: DisposableSandbox | undefined;
+        try {
+          await first.executeCommand('echo first-run > /workspace/marker');
+
+          second = await createDockerSandbox({
+            name,
+            // Different installers would normally rerun; attach must skip them.
+            installers: [pkg(['nonexistent-package-should-not-install'])],
+          });
+
+          const marker = await second.executeCommand('cat /workspace/marker');
+          assert.strictEqual(marker.exitCode, 0);
+          assert.strictEqual(marker.stdout.trim(), 'first-run');
+
+          const curl = await second.executeCommand('curl --version');
+          assert.strictEqual(curl.exitCode, 0);
+        } finally {
+          // dispose() stops the shared container — either call works once,
+          // and the second is a no-op (errors swallowed in stopContainer).
+          await second?.dispose();
+          await first.dispose();
+          await removeContainer(`sandbox-${name}`);
+        }
+      });
+
+      it('starts a stopped container with the same name and attaches', async () => {
+        // Pre-create a container WITHOUT --rm so it stays around after stop;
+        // the factory always uses --rm, so factory-created containers can
+        // never naturally be in this state. This covers external/handoff
+        // scenarios where another process created the container.
+        const name = uniqueName();
+        const containerId = `sandbox-${name}`;
+
+        await spawn('docker', [
+          'run',
+          '-d',
+          '--name',
+          containerId,
+          'alpine:latest',
+          'tail',
+          '-f',
+          '/dev/null',
+        ]);
+        await spawn('docker', ['stop', containerId]);
+
+        try {
+          const sandbox = await createDockerSandbox({ name });
+          const result = await sandbox.executeCommand('echo back-online');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'back-online');
+
+          await sandbox.dispose();
+        } finally {
+          await removeContainer(containerId);
+        }
+      });
+
+      it('rejects names that are not Docker-legal', async () => {
+        await assert.rejects(
+          createDockerSandbox({ name: '' }),
+          /Invalid container name/,
+        );
+        await assert.rejects(
+          createDockerSandbox({ name: 'has spaces' }),
+          /Invalid container name/,
+        );
+        await assert.rejects(
+          createDockerSandbox({ name: 'has/slash' }),
+          /Invalid container name/,
+        );
+      });
+
+      it('tolerates concurrent calls with the same name', async () => {
+        // Two parallel callers must both end up with a usable handle to the
+        // SAME container, regardless of who wins the `docker run` race. The
+        // loser may take the plain "saw running" attach path or the
+        // race-recovery "got conflict, re-probe, attach" path depending on
+        // scheduling — both are acceptable; this test is a smoke check
+        // that no caller throws.
+        const name = uniqueName();
+        const containerId = `sandbox-${name}`;
+
+        try {
+          const [a, b] = await Promise.all([
+            createDockerSandbox({ name }),
+            createDockerSandbox({ name }),
+          ]);
+
+          const ra = await a.executeCommand('echo a');
+          const rb = await b.executeCommand('echo b');
+          assert.strictEqual(ra.stdout.trim(), 'a');
+          assert.strictEqual(rb.stdout.trim(), 'b');
+
+          const list = await spawn('docker', [
+            'ps',
+            '--filter',
+            `name=^${containerId}$`,
+            '--format',
+            '{{.Names}}',
+          ]);
+          const matches = list.stdout
+            .trim()
+            .split('\n')
+            .filter((n) => n === containerId);
+          assert.strictEqual(matches.length, 1);
+
+          await a.dispose();
+        } finally {
+          await removeContainer(containerId);
+        }
+      });
+
+      it('falls back to random naming when no name is provided', async () => {
+        const a = await createDockerSandbox();
+        const b = await createDockerSandbox();
+        try {
+          await a.executeCommand('echo a');
+          await b.executeCommand('echo b');
+        } finally {
+          await a.dispose();
+          await b.dispose();
+        }
+      });
+    });
   });
 
   describe('createContainerTool', () => {

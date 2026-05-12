@@ -73,6 +73,26 @@ export interface DockerResources {
   cpus?: number;
 }
 
+/**
+ * Stable identity suffix for the container. When provided, the container
+ * is named `sandbox-<name>` instead of getting a randomized
+ * `sandbox-<8hex>`. If a container with that name already exists on the
+ * host, the sandbox attaches to it: installers, volume preparation, and
+ * env are skipped (the pre-existing container is assumed already
+ * configured). If it exists but is stopped, it is started first.
+ * Otherwise the container is created fresh and installers run as usual.
+ *
+ * Must match `/^[A-Za-z0-9_.-]+$/`. The full Docker container name
+ * (`sandbox-<name>`) is always legal because the prefix begins with an
+ * alphanumeric character.
+ *
+ * Warning: `dispose()` stops (and `--rm` removes) the container regardless
+ * of whether it was created or attached to. If two callers in the same
+ * process share a name, the first `dispose()` destroys the container the
+ * other one is still using.
+ */
+type StableContainerName = string;
+
 export interface RuntimeSandboxOptions {
   /** Docker image to use (default: `'alpine:latest'`). */
   image?: string;
@@ -85,6 +105,7 @@ export interface RuntimeSandboxOptions {
   volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
+  name?: StableContainerName;
 }
 
 export interface DockerfileSandboxOptions {
@@ -95,6 +116,7 @@ export interface DockerfileSandboxOptions {
   volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
+  name?: StableContainerName;
 }
 
 export interface ComposeSandboxOptions {
@@ -125,10 +147,13 @@ interface StrategyContext {
   image: string;
 }
 
+const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
 export interface DockerSandboxStrategyArgs {
   volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
+  name?: StableContainerName;
 }
 
 /**
@@ -141,10 +166,11 @@ export abstract class DockerSandboxStrategy {
   protected volumes: DockerSandboxVolume[];
   protected resources: DockerResources;
   protected env: Record<string, string>;
+  protected name?: StableContainerName;
   private createdVolumes = new Set<string>();
 
   constructor(args: DockerSandboxStrategyArgs = {}) {
-    const { volumes = [], resources = {}, env = {} } = args;
+    const { volumes = [], resources = {}, env = {}, name } = args;
     for (const key of Object.keys(env)) {
       if (key.length === 0 || key.includes('=')) {
         throw new DockerSandboxError(
@@ -152,29 +178,137 @@ export abstract class DockerSandboxStrategy {
         );
       }
     }
+    if (name !== undefined && !CONTAINER_NAME_PATTERN.test(name)) {
+      throw new DockerSandboxError(
+        `Invalid container name: "${name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
+      );
+    }
     this.volumes = volumes;
     this.resources = resources;
     this.env = env;
+    this.name = name;
   }
 
   async create(): Promise<DisposableSandbox> {
     const image = await this.getImage();
-    let containerId: string | undefined;
+    let acquired: { containerId: string; attached: boolean } | undefined;
 
     try {
-      await this.prepareVolumes();
-      containerId = await this.startContainer(image);
-      this.context = { containerId, image };
-      await this.configure();
+      acquired = await this.acquireContainer(image);
+      this.context = { containerId: acquired.containerId, image };
+      if (!acquired.attached) {
+        await this.configure();
+      }
     } catch (error) {
-      if (containerId) {
-        await this.stopContainer(containerId);
+      if (acquired && !acquired.attached) {
+        await this.stopContainer(acquired.containerId);
       }
       await this.cleanupCreatedVolumesAfterFailure(error);
       throw error;
     }
 
     return this.createSandboxMethods();
+  }
+
+  private namedContainerId(): string {
+    return `sandbox-${this.name}`;
+  }
+
+  protected defaultContainerId(): string {
+    return `sandbox-${crypto.randomUUID().slice(0, 8)}`;
+  }
+
+  protected async acquireContainer(
+    image: string,
+  ): Promise<{ containerId: string; attached: boolean }> {
+    if (!this.name) {
+      const containerId = this.defaultContainerId();
+      await this.prepareVolumes();
+      await this.startContainer(image, containerId);
+      return { containerId, attached: false };
+    }
+
+    const containerId = this.namedContainerId();
+    const probe = await this.inspectContainer(containerId);
+    if (probe === 'running') {
+      return { containerId, attached: true };
+    }
+    if (probe === 'stopped') {
+      await this.startStoppedContainer(containerId, image);
+      return { containerId, attached: true };
+    }
+
+    await this.prepareVolumes();
+    try {
+      await this.startContainer(image, containerId);
+      return { containerId, attached: false };
+    } catch (error) {
+      if (
+        error instanceof ContainerCreationError &&
+        this.isNameConflictError(error.message)
+      ) {
+        await this.cleanupCreatedVolumes();
+        const raced = await this.inspectContainer(containerId);
+        if (raced === 'running') {
+          return { containerId, attached: true };
+        }
+        if (raced === 'stopped') {
+          await this.startStoppedContainer(containerId, image);
+          return { containerId, attached: true };
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async startStoppedContainer(
+    containerId: string,
+    image: string,
+  ): Promise<void> {
+    try {
+      await spawn('docker', ['start', containerId]);
+    } catch (error) {
+      const message = this.getDockerErrorMessage(error);
+      if (this.isDockerUnavailableError(message)) {
+        throw new DockerNotAvailableError();
+      }
+      throw new ContainerCreationError(message, image, error as Error);
+    }
+  }
+
+  protected async inspectContainer(
+    containerId: string,
+  ): Promise<'running' | 'stopped' | 'absent'> {
+    try {
+      const result = await spawn('docker', [
+        'container',
+        'inspect',
+        '--format',
+        '{{.State.Status}}',
+        containerId,
+      ]);
+      const status = result.stdout.trim();
+      return status === 'running' ? 'running' : 'stopped';
+    } catch (error) {
+      const message = this.getDockerErrorMessage(error);
+      if (this.isDockerUnavailableError(message)) {
+        throw new DockerNotAvailableError();
+      }
+      if (this.isMissingContainerError(message)) {
+        return 'absent';
+      }
+      throw new DockerSandboxError(
+        `Failed to inspect container "${containerId}": ${message}`,
+      );
+    }
+  }
+
+  private isMissingContainerError(message: string): boolean {
+    return message.toLowerCase().includes('no such container');
+  }
+
+  private isNameConflictError(message: string): boolean {
+    return message.toLowerCase().includes('is already in use by container');
   }
 
   protected async prepareVolumes(): Promise<void> {
@@ -421,8 +555,10 @@ export abstract class DockerSandboxStrategy {
     return message.toLowerCase().includes('no such volume');
   }
 
-  protected async startContainer(image: string): Promise<string> {
-    const containerId = `sandbox-${crypto.randomUUID().slice(0, 8)}`;
+  protected async startContainer(
+    image: string,
+    containerId: string,
+  ): Promise<void> {
     const args = this.buildDockerArgs(image, containerId);
 
     try {
@@ -436,10 +572,12 @@ export abstract class DockerSandboxStrategy {
       ) {
         throw new DockerNotAvailableError();
       }
-      throw new ContainerCreationError(err.message || String(err), image, err);
+      throw new ContainerCreationError(
+        this.getDockerErrorMessage(err),
+        image,
+        err,
+      );
     }
-
-    return containerId;
   }
 
   protected async stopContainer(containerId: string): Promise<void> {
@@ -555,7 +693,12 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
   private installers: Installer[];
 
   constructor(args: RuntimeStrategyArgs = {}) {
-    super({ volumes: args.volumes, resources: args.resources, env: args.env });
+    super({
+      volumes: args.volumes,
+      resources: args.resources,
+      env: args.env,
+      name: args.name,
+    });
     this.image = args.image ?? 'alpine:latest';
     this.installers = args.installers ?? [];
   }
@@ -587,7 +730,12 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   private dockerContext: string;
 
   constructor(args: DockerfileStrategyArgs) {
-    super({ volumes: args.volumes, resources: args.resources, env: args.env });
+    super({
+      volumes: args.volumes,
+      resources: args.resources,
+      env: args.env,
+      name: args.name,
+    });
     this.dockerfile = args.dockerfile;
     this.dockerContext = args.context ?? '.';
     this.imageTag = this.computeImageTag();
@@ -683,7 +831,10 @@ export class ComposeStrategy extends DockerSandboxStrategy {
     return '';
   }
 
-  protected override async startContainer(_image: string): Promise<string> {
+  protected override async startContainer(
+    _image: string,
+    _containerId: string,
+  ): Promise<void> {
     try {
       await spawn('docker', [
         'compose',
@@ -701,7 +852,9 @@ export class ComposeStrategy extends DockerSandboxStrategy {
       }
       throw new ComposeStartError(this.composeFile, err.stderr || err.message);
     }
+  }
 
+  protected override defaultContainerId(): string {
     return this.projectName;
   }
 
@@ -808,6 +961,7 @@ export async function createDockerSandbox(
       volumes: options.volumes,
       resources: options.resources,
       env: options.env,
+      name: options.name,
     });
   } else {
     strategy = new RuntimeStrategy({
@@ -816,6 +970,7 @@ export async function createDockerSandbox(
       volumes: options.volumes,
       resources: options.resources,
       env: options.env,
+      name: options.name,
     });
   }
 
