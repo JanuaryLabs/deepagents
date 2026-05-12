@@ -1,7 +1,9 @@
 import { type CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
+import { type ChildProcess, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { Readable } from 'node:stream';
 
 import {
   ComposeStartError,
@@ -18,7 +20,13 @@ import {
   type Installer,
   createInstallerContext,
 } from './installers/installer.ts';
-import type { DisposableSandbox } from './types.ts';
+import type {
+  DisposableSandbox,
+  ExecuteCommandOptions,
+  ExitInfo,
+  SandboxProcess,
+  SpawnOptions,
+} from './types.ts';
 
 export type { CommandResult as ExecResult, Sandbox } from 'bash-tool';
 export {
@@ -172,11 +180,7 @@ export abstract class DockerSandboxStrategy {
   constructor(args: DockerSandboxStrategyArgs = {}) {
     const { volumes = [], resources = {}, env = {}, name } = args;
     for (const key of Object.keys(env)) {
-      if (key.length === 0 || key.includes('=')) {
-        throw new DockerSandboxError(
-          `Invalid environment variable key: "${key}"`,
-        );
-      }
+      validateEnvKey(key);
     }
     if (name !== undefined && !CONTAINER_NAME_PATTERN.test(name)) {
       throw new DockerSandboxError(
@@ -588,15 +592,16 @@ export abstract class DockerSandboxStrategy {
     }
   }
 
-  protected async exec(command: string): Promise<CommandResult> {
+  protected async exec(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult> {
     try {
-      const result = await spawn('docker', [
-        'exec',
-        this.context.containerId,
-        'sh',
-        '-c',
-        command,
-      ]);
+      const result = await spawn(
+        'docker',
+        ['exec', this.context.containerId, 'sh', '-c', command],
+        { signal: options?.signal },
+      );
       return {
         stdout: result.stdout,
         stderr: result.stderr,
@@ -616,14 +621,27 @@ export abstract class DockerSandboxStrategy {
     }
   }
 
+  protected spawnProcess(
+    command: string,
+    options?: SpawnOptions,
+  ): SandboxProcess {
+    const child = childSpawn('docker', [
+      'exec',
+      ...buildDockerExecFlags(options),
+      this.context.containerId,
+      'sh',
+      '-c',
+      command,
+    ]);
+    return toSandboxProcess(child, options?.signal);
+  }
+
   protected createSandboxMethods(): DisposableSandbox {
     const { containerId } = this.context;
 
     const sandbox: DisposableSandbox = {
-      executeCommand: async (command: string): Promise<CommandResult> => {
-        // Docker exec cancellation is not yet wired; accept and ignore options.
-        return this.exec(command);
-      },
+      executeCommand: async (command, options) => this.exec(command, options),
+      spawn: (command, options) => this.spawnProcess(command, options),
 
       readFile: async (path: string): Promise<string> => {
         const result = await sandbox.executeCommand(`base64 "${path}"`);
@@ -666,6 +684,69 @@ export abstract class DockerSandboxStrategy {
 
   protected abstract getImage(): Promise<string>;
   protected abstract configure(): Promise<void>;
+}
+
+function validateEnvKey(key: string): void {
+  if (key.length === 0 || key.includes('=')) {
+    throw new DockerSandboxError(`Invalid environment variable key: "${key}"`);
+  }
+}
+
+function buildDockerExecFlags(options?: SpawnOptions): string[] {
+  const flags: string[] = [];
+  if (options?.cwd) {
+    flags.push('-w', options.cwd);
+  }
+  if (options?.env) {
+    for (const [key, value] of Object.entries(options.env)) {
+      validateEnvKey(key);
+      flags.push('-e', `${key}=${value}`);
+    }
+  }
+  return flags;
+}
+
+function toSandboxProcess(
+  child: ChildProcess,
+  abortSignal: AbortSignal | undefined,
+): SandboxProcess {
+  if (!child.stdout || !child.stderr) {
+    child.kill('SIGKILL');
+    throw new DockerSandboxError('docker exec child missing stdio streams');
+  }
+
+  const onAbort = abortSignal ? () => child.kill('SIGKILL') : undefined;
+  if (abortSignal && onAbort) {
+    if (abortSignal.aborted) onAbort();
+    else abortSignal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  return {
+    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+    stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+    exit: new Promise<ExitInfo>((resolve, reject) => {
+      const settle = () => {
+        child.removeListener('exit', onExitEvent);
+        child.removeListener('error', onError);
+        if (abortSignal && onAbort) {
+          abortSignal.removeEventListener('abort', onAbort);
+        }
+      };
+      const onError = (err: Error) => {
+        settle();
+        reject(err);
+      };
+      const onExitEvent = (
+        code: number | null,
+        exitSignal: NodeJS.Signals | null,
+      ) => {
+        settle();
+        resolve({ code, signal: exitSignal, success: code === 0 });
+      };
+      child.on('exit', onExitEvent);
+      child.on('error', onError);
+    }),
+  };
 }
 
 export interface RuntimeStrategyArgs extends DockerSandboxStrategyArgs {
@@ -862,21 +943,28 @@ export class ComposeStrategy extends DockerSandboxStrategy {
     // Compose file is the source of truth.
   }
 
-  protected override async exec(command: string): Promise<CommandResult> {
+  protected override async exec(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult> {
     try {
-      const result = await spawn('docker', [
-        'compose',
-        '-f',
-        this.composeFile,
-        '-p',
-        this.projectName,
-        'exec',
-        '-T',
-        this.service,
-        'sh',
-        '-c',
-        command,
-      ]);
+      const result = await spawn(
+        'docker',
+        [
+          'compose',
+          '-f',
+          this.composeFile,
+          '-p',
+          this.projectName,
+          'exec',
+          '-T',
+          this.service,
+          'sh',
+          '-c',
+          command,
+        ],
+        { signal: options?.signal },
+      );
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
       const err = error as Error & {
@@ -890,6 +978,27 @@ export class ComposeStrategy extends DockerSandboxStrategy {
         exitCode: err.exitCode ?? 1,
       };
     }
+  }
+
+  protected override spawnProcess(
+    command: string,
+    options?: SpawnOptions,
+  ): SandboxProcess {
+    const child = childSpawn('docker', [
+      'compose',
+      '-f',
+      this.composeFile,
+      '-p',
+      this.projectName,
+      'exec',
+      '-T',
+      ...buildDockerExecFlags(options),
+      this.service,
+      'sh',
+      '-c',
+      command,
+    ]);
+    return toSandboxProcess(child, options?.signal);
   }
 
   protected override async stopContainer(_containerId: string): Promise<void> {

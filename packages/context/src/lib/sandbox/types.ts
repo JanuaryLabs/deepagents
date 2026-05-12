@@ -17,6 +17,25 @@ export interface ExecuteCommandOptions {
   signal?: AbortSignal;
 }
 
+export interface SpawnOptions {
+  signal?: AbortSignal;
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
+export interface ExitInfo {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  /** Convenience for `code === 0`. */
+  success: boolean;
+}
+
+export interface SandboxProcess {
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly exit: Promise<ExitInfo>;
+}
+
 /**
  * Sandbox contract used throughout this package: upstream's three-method
  * shape plus a lifecycle hook, with `executeCommand` widened to accept
@@ -25,6 +44,11 @@ export interface ExecuteCommandOptions {
  * `options.signal` forward it to their runner; others ignore. Pure
  * backends with no external resources (e.g. virtual-sandbox) supply a
  * no-op `dispose()`.
+ *
+ * `spawn` is optional: only backends that can honestly expose unbuffered
+ * stdio (e.g. docker-sandbox) implement it. Callers feature-detect with
+ * `if (!sandbox.spawn) ...` — no silent fallback that aggregates output
+ * and flushes on completion.
  */
 export interface DisposableSandbox extends Omit<
   UpstreamSandbox,
@@ -34,6 +58,7 @@ export interface DisposableSandbox extends Omit<
     command: string,
     options?: ExecuteCommandOptions,
   ): Promise<CommandResult>;
+  spawn?(command: string, options?: SpawnOptions): SandboxProcess;
   dispose(): Promise<void>;
 }
 
