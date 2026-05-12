@@ -94,6 +94,22 @@ subtract the `timestampMs` on a `phase:start` event from the matching
 `elapsedMs`, because UIs may want to group timing by index, adapter, phase,
 table, or their own display model.
 
+When you run indexing via the sandbox CLI (`sql index`), `stdout` still returns
+the manifest JSON (`fragmentsPath`, `eventsPath`, adapter list). Add
+`--verbose pretty` or `--verbose json` to mirror live progress to `stderr`, and
+use `--out-dir <path>` (or `TEXT2SQL_OUT_DIR`) to control artifact location.
+By default, `sql index` covers all configured adapters; pass adapter names to
+scope it.
+
+For cross-run cache control, set `TEXT2SQL_INDEX_VERSION`. Cache keys are
+derived as `index-<version>-<adapter>`, so bump the version when the schema
+changes.
+
+To live-tail progress from another process, set `TEXT2SQL_INDEX_EVENTS_PATH`
+to a fixed path. See
+[Getting Started — `sql index` options](/docs/text2sql/getting-started#sql-index-options)
+for the `mkfifo` setup.
+
 ## Reusing the Same Thread
 
 Reuse the same store plus the same `chatId` and `userId` whenever you want a

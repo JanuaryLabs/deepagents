@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
+  createReadStream,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -35,6 +36,7 @@ interface RunOpts {
   cwd: string;
   adaptersPath?: string | null;
   outDirEnv?: string;
+  eventsPathEnv?: string;
 }
 
 interface IndexManifest {
@@ -44,22 +46,31 @@ interface IndexManifest {
   fragments: number;
 }
 
+function buildEnv(opts: RunOpts): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (opts.adaptersPath === null) {
+    delete env.TEXT2SQL_ADAPTERS;
+  } else {
+    env.TEXT2SQL_ADAPTERS = opts.adaptersPath ?? FIXTURE;
+  }
+  if (opts.outDirEnv !== undefined) {
+    env.TEXT2SQL_OUT_DIR = opts.outDirEnv;
+  } else {
+    delete env.TEXT2SQL_OUT_DIR;
+  }
+  if (opts.eventsPathEnv !== undefined) {
+    env.TEXT2SQL_INDEX_EVENTS_PATH = opts.eventsPathEnv;
+  } else {
+    delete env.TEXT2SQL_INDEX_EVENTS_PATH;
+  }
+  return env;
+}
+
 async function runBin(args: string[], opts: RunOpts): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    if (opts.adaptersPath === null) {
-      delete env.TEXT2SQL_ADAPTERS;
-    } else {
-      env.TEXT2SQL_ADAPTERS = opts.adaptersPath ?? FIXTURE;
-    }
-    if (opts.outDirEnv !== undefined) {
-      env.TEXT2SQL_OUT_DIR = opts.outDirEnv;
-    } else {
-      delete env.TEXT2SQL_OUT_DIR;
-    }
     const child = spawn('node', ['--no-warnings', BIN, ...args], {
       cwd: opts.cwd,
-      env,
+      env: buildEnv(opts),
     });
     let stdout = '';
     let stderr = '';
@@ -78,6 +89,37 @@ async function runBin(args: string[], opts: RunOpts): Promise<SpawnResult> {
 
 function makeTmpDir(): string {
   return mkdtempSync(path.join(tmpdir(), 'sql-cli-test-'));
+}
+
+const POSIX = process.platform !== 'win32';
+
+function mkfifo(p: string): void {
+  const result = spawnSync('mkfifo', [p]);
+  if (result.status !== 0) {
+    throw new Error(
+      `mkfifo ${p} failed: ${result.stderr?.toString() ?? 'unknown'}`,
+    );
+  }
+}
+
+function readFifo(p: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    const stream = createReadStream(p, { encoding: 'utf-8' });
+    stream.on('data', (chunk) => {
+      data += chunk;
+    });
+    stream.on('end', () => resolve(data));
+    stream.on('error', reject);
+  });
+}
+
+function ndjsonTypes(raw: string): string[] {
+  return raw
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => (JSON.parse(line) as { type: string }).type);
 }
 
 function escapeRegExp(s: string): string {
@@ -556,6 +598,152 @@ describe('sql binary', () => {
     assert.ok(types.includes('adapter:end'));
     assert.ok(types.includes('index:end'));
     assert.ok(events.every((event) => typeof event.timestampMs === 'number'));
+  });
+
+  it('index: TEXT2SQL_INDEX_EVENTS_PATH redirects the events stream to a chosen path', async () => {
+    const cwd = makeTmpDir();
+    const listenerDir = realpathSync(makeTmpDir());
+    const eventsPath = path.join(listenerDir, 'nested', 'live.ndjson');
+
+    const result = await runBin(['index'], { cwd, eventsPathEnv: eventsPath });
+    const manifest = parseIndexManifest(result);
+
+    assert.equal(manifest.eventsPath, eventsPath);
+    assert.ok(existsSync(eventsPath));
+
+    const raw = readFileSync(eventsPath, 'utf-8');
+    assert.ok(
+      raw.endsWith('\n'),
+      'events file should end with a newline — proves last event was flushed',
+    );
+
+    const events = readEvents(eventsPath);
+    const types = events.map((event) => event.type);
+    assert.ok(types.includes('index:start'));
+    assert.ok(types.includes('index:end'));
+
+    const sqlDir = path.join(realpathSync(cwd), 'sql');
+    const sqlDirEntries = readdirSync(sqlDir);
+    assert.ok(
+      sqlDirEntries.every((entry) => !entry.endsWith('.events.ndjson')),
+      `default sql dir should not contain an events file when TEXT2SQL_INDEX_EVENTS_PATH is set, got: ${sqlDirEntries.join(', ')}`,
+    );
+  });
+
+  it('index: TEXT2SQL_INDEX_EVENTS_PATH resolves relative paths against cwd', async () => {
+    const cwd = makeTmpDir();
+    const relative = path.join('live', 'events.ndjson');
+    const expected = path.join(realpathSync(cwd), relative);
+
+    const result = await runBin(['index'], { cwd, eventsPathEnv: relative });
+    const manifest = parseIndexManifest(result);
+
+    assert.equal(manifest.eventsPath, expected);
+    assert.ok(existsSync(expected));
+    assert.ok(readEvents(expected).some((event) => event.type === 'index:end'));
+  });
+
+  it('index: empty TEXT2SQL_INDEX_EVENTS_PATH falls back to the auto-generated path', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['index'], { cwd, eventsPathEnv: '' });
+    const manifest = parseIndexManifest(result);
+    assertManifestFiles(cwd, manifest);
+    assert.match(
+      path.basename(manifest.eventsPath),
+      /^index-[a-f0-9-]+\.events\.ndjson$/,
+    );
+  });
+
+  it('index: TEXT2SQL_INDEX_EVENTS_PATH appends to a pre-existing regular file without a FIFO warning', async () => {
+    const cwd = makeTmpDir();
+    const eventsPath = path.join(
+      realpathSync(makeTmpDir()),
+      'pre-existing.ndjson',
+    );
+    writeFileSync(eventsPath, '{"type":"prelude"}\n');
+
+    const result = await runBin(['index'], { cwd, eventsPathEnv: eventsPath });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /waiting for reader on FIFO/);
+
+    const types = ndjsonTypes(readFileSync(eventsPath, 'utf-8'));
+    assert.equal(types[0], 'prelude', 'append must preserve prior contents');
+    assert.ok(types.includes('index:start'));
+    assert.ok(types.includes('index:end'));
+  });
+
+  it('index: FIFO with reader attached streams events through with no warning', async (t) => {
+    if (!POSIX) {
+      t.skip('mkfifo is POSIX-only');
+      return;
+    }
+    const cwd = makeTmpDir();
+    const fifoPath = path.join(realpathSync(makeTmpDir()), 'live.ndjson');
+    mkfifo(fifoPath);
+
+    const readerPromise = readFifo(fifoPath);
+    const result = await runBin(['index'], { cwd, eventsPathEnv: fifoPath });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.doesNotMatch(
+      result.stderr,
+      /waiting for reader on FIFO/,
+      'no warning expected when reader is already attached',
+    );
+
+    const types = ndjsonTypes(await readerPromise);
+    assert.ok(types.includes('index:start'));
+    assert.ok(types.includes('index:end'));
+
+    const manifest = JSON.parse(result.stdout) as IndexManifest;
+    assert.equal(manifest.eventsPath, fifoPath);
+  });
+
+  it('index: FIFO with no reader warns on stderr, unblocks once a reader attaches', async (t) => {
+    if (!POSIX) {
+      t.skip('mkfifo is POSIX-only');
+      return;
+    }
+    const cwd = makeTmpDir();
+    const fifoPath = path.join(realpathSync(makeTmpDir()), 'live.ndjson');
+    mkfifo(fifoPath);
+
+    const child = spawn('node', ['--no-warnings', BIN, 'index'], {
+      cwd,
+      env: buildEnv({ cwd, eventsPathEnv: fifoPath }),
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    const sawWarning = new Promise<void>((resolve) => {
+      child.stderr.on('data', (d) => {
+        stderr += d.toString();
+        if (stderr.includes('waiting for reader on FIFO')) resolve();
+      });
+    });
+
+    await sawWarning;
+    const readerData = readFifo(fifoPath);
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', (code) => resolve(code ?? 0));
+    });
+
+    assert.equal(exitCode, 0, stderr);
+    assert.match(
+      stderr,
+      new RegExp(`waiting for reader on FIFO ${escapeRegExp(fifoPath)}`),
+    );
+
+    const types = ndjsonTypes(await readerData);
+    assert.ok(types.includes('index:start'));
+    assert.ok(types.includes('index:end'));
+
+    const manifest = JSON.parse(stdout) as IndexManifest;
+    assert.equal(manifest.eventsPath, fifoPath);
   });
 
   it('index: stderr is silent without --verbose', async () => {

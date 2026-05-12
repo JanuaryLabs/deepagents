@@ -293,6 +293,50 @@ messages, titles, or usage into your `ContextStore`. Use the `chat()` helper
 above when you want multi-turn persistence. See
 [Build Conversations](/docs/text2sql/build-conversations) for the full pattern.
 
+### `sql index` options
+
+`sql index` indexes all configured adapters by default (same behavior as
+`sql index --all`). Pass names to target a subset, for example:
+`sql index main analytics`.
+
+Use `--verbose` when you want index progress mirrored to `stderr` while keeping
+the JSON manifest on `stdout`:
+
+```typescript
+const indexResult = await sandbox.sandbox.executeCommand(
+  'sql index --verbose pretty --out-dir ./sql',
+);
+```
+
+- `--verbose pretty` prints human-readable progress.
+- `--verbose json` prints one JSON progress event per line.
+- `--out-dir <path>` writes artifacts under that path (default:
+  `$TEXT2SQL_OUT_DIR` or `./sql`).
+- The manifest always includes `fragmentsPath` and `eventsPath`.
+
+Set `TEXT2SQL_INDEX_VERSION` to control index-cache invalidation across runs.
+Cache keys are `index-<version>-<adapter>`, so bump the version when your
+schema changes.
+
+Set `TEXT2SQL_INDEX_EVENTS_PATH` to write the NDJSON progress stream to a
+fixed path instead of the auto-generated `index-<id>.events.ndjson`. The
+manifest still reports the resolved path as `eventsPath`. Relative paths
+resolve against the current working directory; an empty value falls back to
+the default. This is the simplest way to live-tail indexing from another
+process:
+
+```bash
+mkfifo /tmp/sql.events
+tail -f /tmp/sql.events & tail_pid=$!
+trap "kill $tail_pid 2>/dev/null; rm -f /tmp/sql.events" EXIT
+TEXT2SQL_INDEX_EVENTS_PATH=/tmp/sql.events sql index --all
+```
+
+When the path is a FIFO, opening the writer blocks until a reader attaches.
+If no reader is attached at startup, `sql index` prints
+`waiting for reader on FIFO <path>...` to `stderr` and then waits — so the
+symptom is recognizable rather than a silent hang.
+
 ## Understanding the Response
 
 When Text2SQL processes a query, it:

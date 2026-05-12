@@ -1,5 +1,11 @@
-import { createWriteStream } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { type WriteStream, constants, createWriteStream } from 'node:fs';
+import {
+  type FileHandle,
+  mkdir,
+  open,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import * as path from 'node:path';
 import { finished } from 'node:stream/promises';
 import { v7 } from 'uuid';
@@ -56,14 +62,20 @@ export class IndexCommand extends SqlCommand {
     const outputDir = resolveOutputDir(ctx, options);
     const id = v7();
     const fragmentsPath = path.join(outputDir, `index-${id}.json`);
-    const eventsPath = path.join(outputDir, `index-${id}.events.ndjson`);
+    const explicitEventsPath = resolveExplicitEventsPath(ctx);
+    const eventsPath =
+      explicitEventsPath ?? path.join(outputDir, `index-${id}.events.ndjson`);
 
     try {
       await mkdir(outputDir, { recursive: true });
-      const eventsStream = createWriteStream(eventsPath, {
-        flags: 'a',
-        encoding: 'utf-8',
-      });
+      if (explicitEventsPath) {
+        await mkdir(path.dirname(explicitEventsPath), { recursive: true });
+      }
+      const eventsStream = await openEventsWriter(
+        eventsPath,
+        explicitEventsPath,
+        ctx.stderr,
+      );
       try {
         const indexer = new AdapterIndexer({
           adapters: ctx.adapters,
@@ -132,6 +144,76 @@ function createProgressHandler(
     if (verbose === 'pretty') stderr.write(formatPretty(stamped) + '\n');
     else if (verbose === 'json') stderr.write(json);
   };
+}
+
+function resolveExplicitEventsPath(ctx: ExecutionContext): string | null {
+  const explicit = ctx.env.TEXT2SQL_INDEX_EVENTS_PATH?.trim();
+  return explicit ? path.resolve(ctx.cwd, explicit) : null;
+}
+
+async function openEventsWriter(
+  eventsPath: string,
+  explicitEventsPath: string | null,
+  stderr: NodeJS.WritableStream,
+): Promise<WriteStream> {
+  const probe = explicitEventsPath
+    ? await probeFifoWriter(explicitEventsPath, stderr)
+    : null;
+  const stream = createWriteStream(eventsPath, {
+    flags: 'a',
+    encoding: 'utf-8',
+  });
+  try {
+    await waitForOpen(stream);
+    return stream;
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  } finally {
+    await probe?.close().catch(() => {});
+  }
+}
+
+async function probeFifoWriter(
+  eventsPath: string,
+  stderr: NodeJS.WritableStream,
+): Promise<FileHandle | null> {
+  let stats;
+  try {
+    stats = await stat(eventsPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+  if (!stats.isFIFO()) return null;
+  try {
+    return await open(eventsPath, constants.O_WRONLY | constants.O_NONBLOCK);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENXIO') {
+      stderr.write(`sql index: waiting for reader on FIFO ${eventsPath}...\n`);
+      return null;
+    }
+    throw err;
+  }
+}
+
+function waitForOpen(stream: WriteStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!stream.pending) {
+      resolve();
+      return;
+    }
+    const onOpen = () => {
+      stream.off('error', onError);
+      resolve();
+    };
+    const onError = (err: Error) => {
+      stream.off('open', onOpen);
+      reject(err);
+    };
+    stream.once('open', onOpen);
+    stream.once('error', onError);
+  });
 }
 
 function countSchemaFragments(fragments: ContextFragment[]): number {
