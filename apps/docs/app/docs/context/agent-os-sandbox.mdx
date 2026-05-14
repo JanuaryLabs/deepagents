@@ -7,7 +7,12 @@ description: Execute commands in a WASM virtual machine with near-zero cold star
   Agent OS is a v0.1.0 preview. The API may change in future releases.
 </Callout>
 
-The Agent OS sandbox runs commands in an in-process WASM virtual machine. No Docker daemon required. Cold start is ~6ms. It implements the same `Sandbox` interface as Docker, so it's a drop-in replacement anywhere `createDockerSandbox` is used.
+The Agent OS sandbox runs commands in an in-process WASM virtual machine. No
+Docker daemon required. Cold start is ~6ms. It implements the same core
+buffered sandbox surface as Docker (`executeCommand`, `readFile`, `writeFiles`,
+`dispose`), so most command/file flows can switch backends without refactoring.
+Docker-only live-streaming via `sandbox.spawn(...)` is not implemented in Agent
+OS.
 
 ## Installation
 

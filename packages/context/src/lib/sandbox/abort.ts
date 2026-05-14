@@ -32,7 +32,7 @@ export function runWithAbortSignal<T>(
  * the inner sandbox.
  */
 export function withAbortSignal(sandbox: DisposableSandbox): DisposableSandbox {
-  return {
+  const decorated: DisposableSandbox = {
     ...sandbox,
     async executeCommand(command, options) {
       const signal = options?.signal ?? ambientAbortSignal.getStore();
@@ -42,4 +42,14 @@ export function withAbortSignal(sandbox: DisposableSandbox): DisposableSandbox {
       );
     },
   };
+
+  if (sandbox.spawn) {
+    const innerSpawn = sandbox.spawn.bind(sandbox);
+    decorated.spawn = (command, options) => {
+      const signal = options?.signal ?? ambientAbortSignal.getStore();
+      return innerSpawn(command, signal ? { ...options, signal } : options);
+    };
+  }
+
+  return decorated;
 }

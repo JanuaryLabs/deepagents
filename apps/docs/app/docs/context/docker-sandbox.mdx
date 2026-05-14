@@ -217,6 +217,48 @@ Supported on Runtime and Dockerfile strategies. For Compose, define environment 
 
 Keys are validated — empty keys and keys containing `=` throw a `DockerSandboxError`.
 
+## Command Execution APIs
+
+`executeCommand` is buffered and returns all output at process exit:
+
+```typescript
+const result = await sandbox.executeCommand('python3 --version');
+console.log(result.stdout, result.stderr, result.exitCode);
+```
+
+Pass `AbortSignal` to cancel a running command:
+
+```typescript
+const controller = new AbortController();
+const pending = sandbox.executeCommand('sleep 30', {
+  signal: controller.signal,
+});
+
+setTimeout(() => controller.abort(), 1_000);
+await pending;
+```
+
+For live byte streams, use `spawn`:
+
+```typescript
+const proc = sandbox.spawn('python3 long-task.py', {
+  cwd: '/workspace',
+  env: { MODE: 'stream' },
+});
+
+const decoder = new TextDecoder();
+
+for await (const chunk of proc.stdout) {
+  process.stdout.write(decoder.decode(chunk, { stream: true }));
+}
+
+const exit = await proc.exit;
+console.log(exit.code, exit.signal, exit.success);
+```
+
+`spawn` is Docker-only. Other sandbox backends intentionally omit it, so shared
+code should feature-detect with `if (!sandbox.spawn)`.
+
 ## Installers
 
 Installers are the polymorphic unit that puts a tool inside a running container. Mix and match them in the `installers:` array — they run in order and share an `InstallerContext` (memoised arch, idempotent tool ensures, resolved package manager).

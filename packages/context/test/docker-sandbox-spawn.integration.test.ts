@@ -3,8 +3,11 @@ import assert from 'node:assert';
 import { after, before, describe, it } from 'node:test';
 
 import {
+  type AgentSandbox,
   type DisposableSandbox,
+  createBashTool,
   createDockerSandbox,
+  runWithAbortSignal,
 } from '@deepagents/context';
 
 async function isDockerAvailable(): Promise<boolean> {
@@ -176,6 +179,107 @@ describe('Docker Sandbox — spawn', async () => {
         0,
         'aborted sleep must not return a 0 exit code',
       );
+    });
+  });
+
+  describe('through createBashTool', () => {
+    let agent: AgentSandbox;
+
+    before(async () => {
+      agent = await createBashTool({
+        sandbox: await createDockerSandbox(),
+        destination: '/workspace',
+      });
+      await agent.sandbox.executeCommand('mkdir -p /workspace');
+      agent.drainFileEvents();
+    });
+
+    after(async () => {
+      await agent.sandbox.dispose();
+    });
+
+    it('exposes spawn on the wrapped sandbox', () => {
+      assert.ok(
+        agent.sandbox.spawn,
+        'createBashTool must forward spawn from the backend',
+      );
+    });
+
+    it('streams live stdout through the wrapper', async () => {
+      assert.ok(agent.sandbox.spawn);
+      const child = agent.sandbox.spawn('printf hi; sleep 1; printf bye');
+
+      const winner = await Promise.race([
+        readFirstChunk(child.stdout).then(() => 'chunk' as const),
+        child.exit.then(() => 'exit' as const),
+      ]);
+      assert.strictEqual(
+        winner,
+        'chunk',
+        'first stdout chunk must arrive before exit through createBashTool',
+      );
+
+      const rest = await readAllText(child.stdout);
+      const info = await child.exit;
+      assert.strictEqual(rest, 'bye');
+      assert.strictEqual(info.success, true);
+    });
+
+    it('records a write FileEvent when spawn creates a file in destination', async () => {
+      assert.ok(agent.sandbox.spawn);
+      agent.drainFileEvents();
+
+      const child = agent.sandbox.spawn(
+        'echo "from spawn" > /workspace/spawned.txt',
+      );
+      await Promise.all([readAllText(child.stdout), readAllText(child.stderr)]);
+      const info = await child.exit;
+      assert.strictEqual(info.success, true);
+
+      const events = agent.drainFileEvents();
+      const forSpawned = events.filter(
+        (e) => e.path === '/workspace/spawned.txt',
+      );
+      assert.strictEqual(
+        forSpawned.length,
+        1,
+        `expected exactly one FileEvent for /workspace/spawned.txt, got ${JSON.stringify(events)}`,
+      );
+      assert.strictEqual(forSpawned[0].op, 'write');
+    });
+
+    it('honors ambient abort signal from runWithAbortSignal', async () => {
+      assert.ok(agent.sandbox.spawn);
+      const spawnFn = agent.sandbox.spawn;
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100);
+
+      const info = await runWithAbortSignal(controller.signal, async () => {
+        const child = spawnFn('printf hi; sleep 5; printf bye');
+        return child.exit;
+      });
+
+      assert.strictEqual(info.success, false);
+      assert.strictEqual(info.signal, 'SIGKILL');
+    });
+
+    it('explicit options.signal beats ambient', async () => {
+      assert.ok(agent.sandbox.spawn);
+      const spawnFn = agent.sandbox.spawn;
+      const ambient = new AbortController();
+      const explicit = new AbortController();
+      setTimeout(() => explicit.abort(), 100);
+
+      const info = await runWithAbortSignal(ambient.signal, async () => {
+        const child = spawnFn('printf hi; sleep 5; printf bye', {
+          signal: explicit.signal,
+        });
+        return child.exit;
+      });
+
+      assert.strictEqual(ambient.signal.aborted, false);
+      assert.strictEqual(explicit.signal.aborted, true);
+      assert.strictEqual(info.signal, 'SIGKILL');
     });
   });
 });

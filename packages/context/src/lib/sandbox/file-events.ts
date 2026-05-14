@@ -1,4 +1,4 @@
-import type { DisposableSandbox } from './types.ts';
+import type { DisposableSandbox, ExitInfo } from './types.ts';
 
 export type FileEventOp = 'read' | 'write' | 'delete' | 'modify';
 
@@ -57,6 +57,31 @@ async function snapshot(
   return snap;
 }
 
+function lazyReadable(
+  innerPromise: Promise<ReadableStream<Uint8Array>>,
+): ReadableStream<Uint8Array> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!reader) {
+        const inner = await innerPromise;
+        reader = inner.getReader();
+      }
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    async cancel(reason) {
+      if (reader) {
+        await reader.cancel(reason);
+      } else {
+        const inner = await innerPromise;
+        await inner.cancel(reason);
+      }
+    },
+  });
+}
+
 function diff(before: Snapshot, after: Snapshot): FileEvent[] {
   const events: FileEvent[] = [];
   const ts = Date.now();
@@ -82,10 +107,19 @@ function diff(before: Snapshot, after: Snapshot): FileEvent[] {
  * - `executeCommand` and `writeFiles` are bracketed by `find -print0` +
  *   `sha256sum` snapshots; hash diff produces write/modify/delete events.
  * - `readFile` records a `read` event on success.
+ * - `spawn` (when the backend exposes it) is bracketed similarly: the
+ *   before-snapshot resolves before the inner spawn starts (via a
+ *   lazy `ReadableStream`), and the returned `exit` Promise resolves only
+ *   after the after-snapshot is recorded. The after-snapshot runs when the
+ *   OS reports child exit; data still buffered in stdio after that point
+ *   is *not* observed — write events for files flushed only on stream
+ *   close may be missed.
  * - If `destination` does not exist in the sandbox at snapshot time, the
  *   snapshot is treated as empty (graceful — supports observation rooted at
  *   paths that the sandbox will create later). Snapshot command failures
- *   (e.g. permission denied, missing `find`) throw `SnapshotFailedError`.
+ *   (e.g. permission denied, missing `find`) throw `SnapshotFailedError`
+ *   from `executeCommand`/`writeFiles`, but are silently dropped on `spawn`
+ *   because the caller's signal already comes via `exit`.
  * - Single-flight by convention. Concurrent `executeCommand` calls are not
  *   serialized internally and will produce interleaved diffs.
  */
@@ -134,6 +168,47 @@ export function observeSandboxFileEvents(
     },
     dispose: sandbox.dispose.bind(sandbox),
   };
+
+  if (sandbox.spawn) {
+    const innerSpawn = sandbox.spawn.bind(sandbox);
+    decorated.spawn = (command, options) => {
+      const started = (async () => {
+        const before = await snapshot(innerExecute, destination).catch(
+          () => new Map<string, string>(),
+        );
+        const child = innerSpawn(command, options);
+        return { before, child };
+      })();
+
+      const exit = (async (): Promise<ExitInfo> => {
+        const { before, child } = await started;
+        try {
+          return await child.exit;
+        } finally {
+          try {
+            const after = await snapshot(innerExecute, destination);
+            buffer.push(...diff(before, after));
+          } catch {
+            // snapshot failures are non-fatal for spawn observation
+          }
+        }
+      })();
+
+      const stdoutPromise = started.then((s) => s.child.stdout);
+      const stderrPromise = started.then((s) => s.child.stderr);
+      // Failure paths surface through `exit`; eagerly attach no-op catches
+      // so a caller that spawns without reading either stream still
+      // produces a single unhandled-rejection on `exit`, not three.
+      stdoutPromise.catch(() => {});
+      stderrPromise.catch(() => {});
+
+      return {
+        stdout: lazyReadable(stdoutPromise),
+        stderr: lazyReadable(stderrPromise),
+        exit,
+      };
+    };
+  }
 
   return {
     sandbox: decorated,

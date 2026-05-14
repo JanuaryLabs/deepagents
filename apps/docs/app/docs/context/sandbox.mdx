@@ -19,6 +19,11 @@ bridges to combine approaches.
 | `createVirtualSandbox` | In-process bash with a virtual filesystem | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
 
+All backends expose the buffered command + file API (`executeCommand`,
+`readFile`, `writeFiles`, `dispose`). Docker sandboxes additionally expose an
+optional `spawn(command, options?)` for live streaming stdio. Feature-detect it
+with `if (!sandbox.spawn) { ... }` when writing backend-agnostic code.
+
 <Callout type="warn">
   Agent OS is a v0.1.0 preview. Requires optional peer dependencies `@rivet-dev/agent-os-core` and `@rivet-dev/agent-os-common`.
 </Callout>
