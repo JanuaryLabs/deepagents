@@ -139,7 +139,7 @@
     },
     "releaseTagPattern": "release/{version}",
     "version": {
-      "preVersionCommand": "npx nx run-many -t build --prod --verbose",
+      "preVersionCommand": "npm whoami >/dev/null && npx nx run-many -t build --prod --verbose",
       "conventionalCommits": true
     }
   },
