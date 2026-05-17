@@ -24,6 +24,20 @@ type ScopeVisitState = {
 const { Parser } = nodeSqlParser;
 const parser = new Parser();
 
+/** Parse SQL and return the top-level AST statement types. */
+export function parseStatementTypes(
+  sql: string,
+  dialect: RuntimeScopeDialect,
+): string[] {
+  const ast = parser.astify(sql, { database: dialect });
+  const statements = Array.isArray(ast) ? ast : [ast];
+  return statements.flatMap((statement) =>
+    isAstLike(statement) && typeof statement.type === 'string'
+      ? [statement.type]
+      : [],
+  );
+}
+
 /**
  * Parse SQL and return the base table/view references used by the query.
  * CTE aliases and derived table aliases are excluded from the result.

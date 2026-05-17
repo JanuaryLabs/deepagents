@@ -1151,6 +1151,15 @@ describe('sql binary', () => {
     assert.match(result.stderr, /only SELECT or WITH queries allowed/);
   });
 
+  it('run: allows a line comment before SELECT', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['run', 'mem', ' -- note\nSELECT 1 AS n'], {
+      cwd,
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /\ncolumns: n\nrows: 1\n$/);
+  });
+
   it('run: invalid SQL syntax exits non-zero', async () => {
     const cwd = makeTmpDir();
     const result = await runBin(['run', 'mem', 'SELECT FROM users WHERE'], {

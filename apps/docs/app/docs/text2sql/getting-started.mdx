@@ -46,6 +46,10 @@ Reuse `model` in the adapter-specific examples below. The adapter-map key
 `sql validate <db> "..."` / `sql run <db> "..."` when the package CLI is
 installed inside the sandbox.
 
+`sql validate` enforces read-only access: one `SELECT`/`WITH` statement is
+allowed (including leading whitespace or SQL comments), while writes,
+comment-only input, and multi-statement batches are rejected.
+
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you construct the
 adapter map dynamically, validate the keys first with
 `isValidAdapterName(name)` or `validateAdapterNames(names)`.

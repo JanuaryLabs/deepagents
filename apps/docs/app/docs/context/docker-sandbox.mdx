@@ -256,8 +256,12 @@ const exit = await proc.exit;
 console.log(exit.code, exit.signal, exit.success);
 ```
 
+`spawn` accepts `cwd`, `env`, and `signal`. Aborting a running process resolves
+`proc.exit` with a non-success status (for Docker backends, typically
+`{ code: null, signal: 'SIGKILL', success: false }`).
+
 `spawn` is Docker-only. Other sandbox backends intentionally omit it, so shared
-code should feature-detect with `if (!sandbox.spawn)`.
+code should feature-detect with `if (!sandbox.spawn) { ... }`.
 
 ## Installers
 

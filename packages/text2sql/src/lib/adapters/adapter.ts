@@ -27,6 +27,7 @@ import {
   buildOutOfScopePayload,
   buildScopeParseErrorPayload,
   extractBaseEntityReferences,
+  parseStatementTypes,
 } from './runtime-scope.ts';
 
 /**
@@ -36,6 +37,35 @@ import {
  * - function: predicate to filter view names
  */
 export type Filter = string[] | RegExp | ((viewName: string) => boolean);
+
+// Each formatter language maps to an ordered list of node-sql-parser dialects
+// tried in order until one parses successfully. Single-element lists are the
+// common case; sqlite cascades because node-sql-parser's sqlite grammar
+// (pegjs/sqlite.pegjs:2-99 reservedMap) over-reserves identifiers like COUNT
+// and PERSIST that real SQLite accepts as identifiers. mysql's reservedMap
+// omits both, so it serves as a lenient fallback. Verified against
+// better-sqlite3 and pinned by parser-quirks.test.ts in this directory.
+const PARSER_DIALECTS_BY_FORMATTER_LANGUAGE: Record<
+  string,
+  RuntimeScopeDialect[]
+> = {
+  sqlite: ['sqlite', 'mysql'],
+  postgresql: ['postgresql'],
+  bigquery: ['bigquery'],
+  transactsql: ['transactsql'],
+  mysql: ['mysql'],
+};
+
+function parserDialectsFor(formatterLanguage: SqlLanguage) {
+  const candidates =
+    PARSER_DIALECTS_BY_FORMATTER_LANGUAGE[formatterLanguage as string];
+  if (!candidates) {
+    throw new TypeError(
+      `No scope dialect mapping for formatter language "${formatterLanguage}". Add it to PARSER_DIALECTS_BY_FORMATTER_LANGUAGE in adapter.ts.`,
+    );
+  }
+  return candidates;
+}
 
 export interface Table {
   name: string;
@@ -457,10 +487,62 @@ export abstract class Adapter {
   }
 
   #checkReadOnly(sql: string): string | null {
-    const upper = sql.trimStart().toUpperCase();
-    if (!upper.startsWith('SELECT') && !upper.startsWith('WITH')) {
+    const statementTypes = this.#readParsedStatementTypes(sql);
+    if (statementTypes) {
+      if (statementTypes.length === 1 && statementTypes[0] === 'select') {
+        return null;
+      }
       return 'only SELECT or WITH queries allowed';
     }
+
+    const keyword = this.#firstStatementKeyword(sql);
+    if (keyword === 'SELECT' || keyword === 'WITH') return null;
+    return 'only SELECT or WITH queries allowed';
+  }
+
+  #readParsedStatementTypes(sql: string): string[] | null {
+    for (const dialect of parserDialectsFor(this.formatterLanguage)) {
+      try {
+        return parseStatementTypes(sql, dialect);
+      } catch {
+        // Parser coverage failures are handled by scope/adapter validation later.
+      }
+    }
+    return null;
+  }
+
+  #firstStatementKeyword(sql: string): string | null {
+    let offset = 0;
+
+    while (offset < sql.length) {
+      if (/\s/.test(sql[offset])) {
+        offset++;
+        continue;
+      }
+
+      if (sql.startsWith('--', offset)) {
+        offset += 2;
+        while (
+          offset < sql.length &&
+          sql[offset] !== '\n' &&
+          sql[offset] !== '\r'
+        ) {
+          offset++;
+        }
+        continue;
+      }
+
+      if (sql.startsWith('/*', offset)) {
+        const commentEnd = sql.indexOf('*/', offset + 2);
+        if (commentEnd === -1) return null;
+        offset = commentEnd + 2;
+        continue;
+      }
+
+      const keyword = /^[A-Za-z]+/.exec(sql.slice(offset));
+      return keyword ? keyword[0].toUpperCase() : null;
+    }
+
     return null;
   }
 
@@ -476,44 +558,21 @@ export abstract class Adapter {
     sql: string,
     allowedEntities: string[],
   ): Promise<SQLScopeErrorPayload | null> {
-    const dialect = this.formatterLanguage as string;
-    // Each formatter language maps to an ordered list of node-sql-parser dialects
-    // tried in order until one parses successfully. Single-element lists are the
-    // common case; sqlite cascades because node-sql-parser's sqlite grammar
-    // (pegjs/sqlite.pegjs:2-99 reservedMap) over-reserves identifiers like COUNT
-    // and PERSIST that real SQLite accepts as identifiers. mysql's reservedMap
-    // omits both, so it serves as a lenient fallback. Verified against
-    // better-sqlite3 and pinned by parser-quirks.test.ts in this directory.
-    const scopeDialects: Record<string, RuntimeScopeDialect[]> = {
-      sqlite: ['sqlite', 'mysql'],
-      postgresql: ['postgresql'],
-      bigquery: ['bigquery'],
-      transactsql: ['transactsql'],
-      mysql: ['mysql'],
-    };
-    const candidates = scopeDialects[dialect];
-    if (!candidates) {
-      throw new TypeError(
-        `No scope dialect mapping for formatter language "${dialect}". Add it to the scopeDialects map in Adapter.#checkScope.`,
-      );
-    }
-
+    const candidates = parserDialectsFor(this.formatterLanguage);
     let references: { db?: string | null; table: string }[] | null = null;
     let lastError: unknown;
+    let lastDialect = candidates[0]!;
     for (const candidate of candidates) {
       try {
         references = extractBaseEntityReferences(sql, candidate);
         break;
       } catch (error) {
+        lastDialect = candidate;
         lastError = error;
       }
     }
     if (references === null) {
-      return buildScopeParseErrorPayload(
-        sql,
-        dialect as RuntimeScopeDialect,
-        lastError,
-      );
+      return buildScopeParseErrorPayload(sql, lastDialect, lastError);
     }
 
     if (references.length === 0) return null;

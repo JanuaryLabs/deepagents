@@ -202,6 +202,10 @@ blocks raw database access so read-only and scope checks stay behind
 metadata from the host adapter map without putting that concern into the real
 CLI.
 
+Read-only enforcement accepts a single `SELECT`/`WITH` statement even when it
+starts with whitespace or SQL comments (`-- ...`, `/* ... */`). It still
+rejects comment-only input, multi-statement batches, and write operations.
+
 ## Fragments
 
 Inject domain knowledge by setting fragments on the `ContextEngine` you build

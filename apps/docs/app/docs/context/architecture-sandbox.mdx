@@ -142,6 +142,18 @@ streaming stdout/stderr. This is why Docker sandboxes can be plugged directly
 into the shared `createBashTool` from `@deepagents/context`, which in turn
 delegates to the upstream `bash-tool` package.
 
+### Decorator Chain Behavior
+
+`createBashTool` layers decorators over the backend sandbox. Both core
+decorators now preserve `spawn` when the backend exposes it:
+
+- `withAbortSignal` injects the ambient signal from `runWithAbortSignal(...)`
+  into both `executeCommand` and `spawn` unless the call already provides
+  `options.signal`.
+- `observeSandboxFileEvents` snapshots before and after `spawn` to record
+  write/modify/delete events under `destination`, and delays `exit` resolution
+  until the post-spawn snapshot is captured.
+
 ### File Operations: Base64 Encoding
 
 `readFile` and `writeFiles` use base64 encoding internally because buffered

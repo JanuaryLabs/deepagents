@@ -56,7 +56,7 @@ try {
 
 ## Return Value
 
-`createContainerTool` returns a `ContainerToolResult` (compatible with `AgentSandbox`):
+`createContainerTool` returns an `AgentSandbox`:
 
 ```typescript
 const sandbox = await createContainerTool({ ... });
@@ -66,7 +66,7 @@ const sandbox = await createContainerTool({ ... });
 |----------|------|---------|
 | `sandbox.bash` | `WrappedBashTool` | Single bash tool for direct use — schema requires `{ command, reasoning }` |
 | `sandbox.tools` | `{ bash, readFile, writeFile }` | Full toolkit — auto-registered when passed to `agent()` |
-| `sandbox.sandbox` | `DockerSandbox` | Container handle exposing `executeCommand`, `readFile`, `writeFiles`, and Docker-only `spawn` — call `sandbox.sandbox.dispose()` for cleanup |
+| `sandbox.sandbox` | `AgentSandbox['sandbox']` | Docker-backed sandbox handle exposing `executeCommand`, `readFile`, `writeFiles`, and optional `spawn` — call `sandbox.sandbox.dispose()` for cleanup |
 | `sandbox.skills` | `SkillPathMapping[]` | Discovered skills (empty if `skills` option omitted) — pass to `skills(sandbox)` fragment |
 
 Pass the entire result as the `sandbox` field to `agent()`. The agent merges `sandbox.tools` into its toolset automatically.
@@ -178,6 +178,35 @@ This uses the Docker name `sandbox-analytics-indexer`.
 On attach, installer execution, volume preparation, and env setup are skipped.
 `dispose()` still stops/removes the named container, so coordinate ownership if
 multiple callers share the same `name`.
+
+## Streaming Through Wrapped Sandbox
+
+`createContainerTool` returns an `AgentSandbox`, so the underlying Docker-backed
+handle is available at `sandbox.sandbox`. Live streaming remains available through
+`sandbox.sandbox.spawn(...)`:
+
+```typescript
+const sandbox = await createContainerTool({
+  installers: [pkg(['python3'])],
+});
+
+const child = sandbox.sandbox.spawn?.('printf hi; sleep 1; printf bye');
+if (!child) throw new Error('spawn is unavailable on this backend');
+
+const decoder = new TextDecoder();
+let out = '';
+for await (const chunk of child.stdout) {
+  out += decoder.decode(chunk, { stream: true });
+}
+out += decoder.decode();
+const exit = await child.exit;
+console.log(out, exit.success);
+```
+
+When file-event observation is configured with `destination`, spawn-driven
+writes are observed the same way as buffered commands. Ambient cancellation also
+applies: `runWithAbortSignal(...)` reaches spawned processes unless a call
+provides an explicit `options.signal`.
 
 ## Bash Tool Hooks
 

@@ -16,6 +16,101 @@ function isReadOnlyError(error: unknown): error is Error {
 }
 
 describe('Adapter read-only enforcement', () => {
+  it('validate allows line comments before SELECT', async () => {
+    let validatedSql: string | undefined;
+    const { adapter } = await init_db('', {
+      validate: (sql) => {
+        validatedSql = sql;
+      },
+    });
+    const sql = '-- note\nSELECT 1';
+    const error = await adapter.validate(sql);
+    assert.strictEqual(error, undefined);
+    assert.strictEqual(validatedSql, sql);
+  });
+
+  it('validate allows block comments before SELECT', async () => {
+    let validatedSql: string | undefined;
+    const { adapter } = await init_db('', {
+      validate: (sql) => {
+        validatedSql = sql;
+      },
+    });
+    const sql = '/* note */\nSELECT 1';
+    const error = await adapter.validate(sql);
+    assert.strictEqual(error, undefined);
+    assert.strictEqual(validatedSql, sql);
+  });
+
+  it('validate allows multiple leading comments before WITH', async () => {
+    let validatedSql: string | undefined;
+    const { adapter } = await init_db('', {
+      validate: (sql) => {
+        validatedSql = sql;
+      },
+    });
+    const sql =
+      '  -- line note\n\t/* block note */\nWITH t AS (SELECT 1 AS v) SELECT * FROM t';
+    const error = await adapter.validate(sql);
+    assert.strictEqual(error, undefined);
+    assert.strictEqual(validatedSql, sql);
+  });
+
+  it('validate allows shell-escaped newlines after a line comment', async () => {
+    let validatedSql: string | undefined;
+    const { adapter } = await init_db('', {
+      validate: (sql) => {
+        validatedSql = sql;
+      },
+    });
+    const error = await adapter.validate('-- note\\nSELECT 1');
+    assert.strictEqual(error, undefined);
+    assert.strictEqual(validatedSql, '-- note\nSELECT 1');
+  });
+
+  it('validate rejects line-comment-prefixed DELETE', async () => {
+    const { adapter } = await init_db('');
+    const error = await adapter.validate('-- note\nDELETE FROM users');
+    assert.strictEqual(error, READ_ONLY_MESSAGE);
+  });
+
+  it('validate rejects block-comment-prefixed INSERT', async () => {
+    const { adapter } = await init_db('');
+    const error = await adapter.validate(
+      '/* note */\nINSERT INTO users VALUES (1)',
+    );
+    assert.strictEqual(error, READ_ONLY_MESSAGE);
+  });
+
+  it('validate rejects comment-only queries', async () => {
+    const { adapter } = await init_db('');
+    const error = await adapter.validate('-- note\n/* still no statement */');
+    assert.strictEqual(error, READ_ONLY_MESSAGE);
+  });
+
+  it('validate rejects multi-statement batches containing writes', async () => {
+    const { adapter } = await init_db('');
+    const error = await adapter.validate('SELECT 1; DELETE FROM users');
+    assert.strictEqual(error, READ_ONLY_MESSAGE);
+  });
+
+  it('validate rejects multi-statement batches even when each statement is SELECT', async () => {
+    const { adapter } = await init_db('');
+    const error = await adapter.validate('SELECT 1; SELECT 2');
+    assert.strictEqual(error, READ_ONLY_MESSAGE);
+  });
+
+  it('validate returns consumer errors for comment-prefixed SELECT', async () => {
+    const { adapter } = await init_db('', {
+      validate: (sql) => {
+        if (sql.includes('--')) return 'SQL comments are not allowed';
+        return undefined;
+      },
+    });
+    const error = await adapter.validate('-- note\nSELECT 1');
+    assert.strictEqual(error, 'SQL comments are not allowed');
+  });
+
   it('validate returns error for DROP', async () => {
     const { adapter } = await init_db('');
     const error = await adapter.validate('DROP TABLE x');
