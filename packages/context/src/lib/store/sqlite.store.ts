@@ -342,7 +342,7 @@ export class SqliteContextStore extends ContextStore {
   // Message Operations (Graph Nodes)
   // ==========================================================================
 
-  async addMessage(message: MessageData): Promise<void> {
+  #insertMessage(message: MessageData): void {
     // Prevent circular reference - a message cannot be its own parent
     if (message.parentId === message.id) {
       throw new Error(`Message ${message.id} cannot be its own parent`);
@@ -378,6 +378,20 @@ export class SqliteContextStore extends ContextStore {
       `INSERT INTO messages_fts(messageId, chatId, name, content)
        VALUES (?, ?, ?, ?)`,
     ).run(message.id, message.chatId, message.name, content);
+  }
+
+  async addMessage(message: MessageData): Promise<void> {
+    this.#insertMessage(message);
+  }
+
+  override async addMessages(messages: MessageData[]): Promise<void> {
+    if (messages.length === 0) return;
+
+    this.#useTransaction(() => {
+      for (const message of messages) {
+        this.#insertMessage(message);
+      }
+    });
   }
 
   async getMessage(messageId: string): Promise<MessageData | undefined> {

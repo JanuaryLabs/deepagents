@@ -283,6 +283,19 @@ export abstract class ContextStore {
   abstract addMessage(message: MessageData): Promise<void>;
 
   /**
+   * Add multiple messages to the graph.
+   *
+   * Stores can override this for atomic/batched persistence. The default keeps
+   * the single-message contract for implementations that do not need a custom
+   * batch path.
+   */
+  async addMessages(messages: MessageData[]): Promise<void> {
+    for (const message of messages) {
+      await this.addMessage(message);
+    }
+  }
+
+  /**
    * Get a message by ID.
    */
   abstract getMessage(messageId: string): Promise<MessageData | undefined>;

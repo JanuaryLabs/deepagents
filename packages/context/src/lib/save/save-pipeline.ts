@@ -139,6 +139,8 @@ export class SavePipeline {
   async persist(): Promise<SaveResult> {
     let parentId: string | null = this.#engine.getActiveBranch().headMessageId;
     const now = Date.now();
+    const messages: MessageData[] = [];
+    const pendingMessagesById = new Map<string, MessageData>();
 
     for (const fragment of this.#pending) {
       if (!fragment.codec) {
@@ -149,7 +151,9 @@ export class SavePipeline {
 
       let msgParentId: string | null = parentId;
       if (!this.#shouldBranch && msgId === parentId) {
-        const existing = await this.#engine.store.getMessage(msgId);
+        const existing =
+          pendingMessagesById.get(msgId) ??
+          (await this.#engine.store.getMessage(msgId));
         if (existing) msgParentId = existing.parentId;
       }
 
@@ -163,7 +167,8 @@ export class SavePipeline {
         createdAt: now,
       };
 
-      await this.#engine.store.addMessage(messageData);
+      messages.push(messageData);
+      pendingMessagesById.set(messageData.id, messageData);
       parentId = messageData.id;
     }
 
@@ -172,6 +177,7 @@ export class SavePipeline {
         'Pipeline persisted no messages but pending was not empty',
       );
     }
+    await this.#engine.store.addMessages(messages);
     await this.#engine.commitHead(parentId);
     return { headMessageId: parentId };
   }
