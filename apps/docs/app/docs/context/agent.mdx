@@ -13,7 +13,8 @@ Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `
 |---|---|---|---|
 | `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
 | `createContainerTool()` | Real binaries in isolated Docker containers | Yes | Yes |
-| `createBashTool({ sandbox: e2bSandbox })` | Cloud sandboxes (E2B, Daytona) via adapter | No | Yes |
+| `createDaytonaTool()` | Managed Daytona cloud sandboxes | No | Yes |
+| `createBashTool({ sandbox: e2bSandbox })` | Other cloud sandboxes via adapter | No | Yes |
 
 Import `createBashTool` from `@deepagents/context` (not the raw `bash-tool` package). The `@deepagents/context` wrapper adds the `skills` option and always returns an `AgentSandbox`.
 
@@ -32,6 +33,47 @@ const sandbox = await createContainerTool({
   installers: [pkg(['curl', 'jq'])],
   skills: [{ host: './skills', sandbox: '/workspace/skills' }],
 });
+// Don't forget: await sandbox.sandbox.dispose() when done
+```
+
+### Exposing local binaries on PATH
+
+`bin()` symlinks a binary that already exists inside the container — typically reached via a bind-mounted workspace — onto `PATH`. The dev loop becomes `nx run <pkg>:build` → rerun the agent. No `docker build`, no esbuild bake-in, no re-published package.
+
+```typescript
+import { bin, createContainerTool } from '@deepagents/context';
+
+const sandbox = await createContainerTool({
+  image: 'node:lts-alpine',
+  installers: [bin('/workspace/packages/text2sql/dist/bin/sql.js')],
+  volumes: [
+    {
+      type: 'bind',
+      hostPath: process.cwd(),
+      containerPath: '/workspace',
+      readOnly: true,
+    },
+  ],
+});
+
+// `sql` is now on PATH inside the container.
+await sandbox.sandbox.executeCommand('sql --help');
+```
+
+The command name defaults to the binary basename without its extension (`sql.js` → `sql`). Override with `{ name }` or `{ target }`:
+
+```typescript
+bin('/opt/tools/cli.mjs', { name: 'tool' });
+bin('/opt/tools/cli.mjs', { target: '/opt/bin/tool' });
+```
+
+`bin()` requires the file to exist at install time — a missing path throws `InstallError` with `source: 'bin'` instead of silently creating a dangling symlink. The `chmod +x` step is skipped when the file is already executable, so read-only bind mounts of pre-built artifacts work without a writable mount.
+
+```typescript
+import { createDaytonaTool } from '@deepagents/context';
+
+// Daytona defaults to /home/daytona and reads DAYTONA_* env vars
+const sandbox = await createDaytonaTool();
 // Don't forget: await sandbox.sandbox.dispose() when done
 ```
 

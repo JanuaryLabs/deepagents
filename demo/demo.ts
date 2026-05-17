@@ -7,9 +7,8 @@ import {
   ContextEngine,
   type ContextFragment,
   InMemoryContextStore,
-  Installer,
-  type InstallerContext,
   agent,
+  bin,
   chat,
   createContainerTool,
   errorRecoveryGuardrail,
@@ -24,27 +23,10 @@ const containerWorkspace = '/workspace';
 const sqlBinaryContainer = `${containerWorkspace}/packages/text2sql/dist/bin/sql.js`;
 const adaptersContainer = `${containerWorkspace}/demo/demo-adapters.ts`;
 
-class SqlLinkInstaller extends Installer {
-  readonly kind = 'sql-link';
-  readonly #binary: string;
-  constructor(binary: string) {
-    super();
-    this.#binary = binary;
-  }
-  async install(ctx: InstallerContext): Promise<void> {
-    const result = await ctx.exec(
-      `chmod +x ${this.#binary} && ln -sf ${this.#binary} /usr/local/bin/sql`,
-    );
-    if (result.exitCode !== 0) {
-      throw new Error(`sql link install failed: ${result.stderr}`);
-    }
-  }
-}
-
 const model = openai('gpt-5.4-mini');
 const sandbox = await createContainerTool({
   image: 'node:lts-alpine',
-  installers: [new SqlLinkInstaller(sqlBinaryContainer)],
+  installers: [bin(sqlBinaryContainer)],
   volumes: [
     {
       type: 'bind',

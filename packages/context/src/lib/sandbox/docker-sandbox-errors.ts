@@ -53,13 +53,18 @@ export class PackageInstallError extends DockerSandboxError {
   }
 }
 
-export type InstallSource = 'url' | 'npm' | 'pypi' | 'github-release';
+/**
+ * Discriminator for `InstallError`. Most values are fetch sources (`'npm'`,
+ * `'pypi'`, `'url'`, `'github-release'`); `'bin'` covers the local-filesystem
+ * `BinInstaller` which has no remote source.
+ */
+export type InstallKind = 'url' | 'npm' | 'pypi' | 'github-release' | 'bin';
 
 export interface InstallErrorOptions {
   /** Logical name of the thing being installed (e.g. `'prettier'`, `'presenterm'`). */
   target: string;
-  /** Where it was being fetched from. */
-  source: InstallSource;
+  /** Installer kind (registry, URL, local binary, …). */
+  source: InstallKind;
   /** Underlying failure message (typically stderr). */
   reason: string;
   /** Resolved URL when applicable (URL binary / GitHub release). */
@@ -69,7 +74,7 @@ export interface InstallErrorOptions {
 
 export class InstallError extends DockerSandboxError {
   readonly target: string;
-  readonly source: InstallSource;
+  readonly source: InstallKind;
   readonly reason: string;
   readonly url?: string;
 

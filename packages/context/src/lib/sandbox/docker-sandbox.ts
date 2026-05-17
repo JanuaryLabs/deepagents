@@ -36,7 +36,7 @@ export {
   DockerSandboxError,
   DockerfileBuildError,
   type InstallErrorOptions,
-  type InstallSource,
+  type InstallKind,
   InstallError,
   MissingRuntimeError,
   PackageInstallError,
