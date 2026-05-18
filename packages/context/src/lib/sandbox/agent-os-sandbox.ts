@@ -1,19 +1,31 @@
 import { type CommandResult } from 'bash-tool';
+import { PassThrough, Readable } from 'node:stream';
 
-import type { DisposableSandbox } from './types.ts';
+import type {
+  DisposableSandbox,
+  ExecuteCommandOptions,
+  SandboxProcess,
+  SpawnOptions,
+} from './types.ts';
 
-const textDecoder = new TextDecoder();
+const decoder = new TextDecoder();
 
-/**
- * Local shape of the AgentOs instance we depend on.
- * Defined locally to avoid importing from optional peer dep at the type level.
- */
+interface KernelExecOptions {
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
 interface AgentOsInstance {
-  exec(
+  spawn(
     command: string,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+    args: string[],
+    options?: KernelExecOptions,
+  ): { pid: number };
+  onProcessStdout(pid: number, handler: (data: Uint8Array) => void): () => void;
+  onProcessStderr(pid: number, handler: (data: Uint8Array) => void): () => void;
+  waitProcess(pid: number): Promise<number>;
+  killProcess(pid: number): void;
   readFile(path: string): Promise<Uint8Array>;
-  writeFile(path: string, content: string | Uint8Array): Promise<void>;
   writeFiles(
     files: Array<{ path: string; content: string | Uint8Array }>,
   ): Promise<Array<{ path: string; success: boolean; error?: string }>>;
@@ -75,13 +87,93 @@ async function importAgentOs(): Promise<{ AgentOs: AgentOsStatic }> {
   }
 }
 
+const SIGKILL_EXIT_CODE = 9;
+
+interface KernelProcess {
+  pid: number;
+  stdout: Readable;
+  stderr: Readable;
+  exit: Promise<number>;
+  kill(): void;
+  /**
+   * True iff the process was both signalled via `kill()` AND the kernel
+   * reported the SIGKILL exit code. Guards against a race where `kill()`
+   * is called after the process had already exited naturally — in that
+   * case the natural exit code stands and this returns false.
+   */
+  wasKilled(exitCode: number): boolean;
+}
+
+function startKernelProcess(
+  os: AgentOsInstance,
+  command: string,
+  options: KernelExecOptions,
+): KernelProcess {
+  const { pid } = os.spawn('sh', ['-c', command], options);
+
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+
+  const unsubOut = os.onProcessStdout(pid, (chunk) => stdout.write(chunk));
+  const unsubErr = os.onProcessStderr(pid, (chunk) => stderr.write(chunk));
+
+  let killSignalled = false;
+  const exit = os.waitProcess(pid).finally(() => {
+    unsubOut();
+    unsubErr();
+    stdout.end();
+    stderr.end();
+  });
+
+  return {
+    pid,
+    stdout,
+    stderr,
+    exit,
+    kill: () => {
+      if (killSignalled) return;
+      killSignalled = true;
+      os.killProcess(pid);
+    },
+    wasKilled: (exitCode) => killSignalled && exitCode === SIGKILL_EXIT_CODE,
+  };
+}
+
+async function readAll(stream: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Wire an AbortSignal to a cancellation callback. Returns an unbind fn that
+ * removes the listener. If the signal is already aborted, fires `onAbort`
+ * synchronously and returns a no-op unbind.
+ */
+function bindAbort(
+  signal: AbortSignal | undefined,
+  onAbort: () => void,
+): () => void {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    onAbort();
+    return () => {};
+  }
+  signal.addEventListener('abort', onAbort, { once: true });
+  return () => signal.removeEventListener('abort', onAbort);
+}
+
 /**
  * Creates a WASM-based sandbox backed by Agent OS.
  *
  * Agent OS runs commands in an in-process WASM virtual machine — no Docker required.
  * Near-zero cold start (~6ms) with real WASM-compiled binaries (coreutils, grep, etc.).
  *
- * @experimental Agent OS is v0.1.0 preview. API may change.
+ * Internally, `executeCommand` lowers to `spawn('sh', ['-c', cmd])` so a single
+ * code path supports `AbortSignal` (the kernel's `exec(command)` does not return
+ * a pid and so cannot be cancelled).
+ *
+ * @experimental Agent OS is v0.1.1 preview. API may change.
  *
  * Requires optional peer dependencies:
  * - `@rivet-dev/agent-os-core`
@@ -122,32 +214,72 @@ export async function createAgentOsSandbox(
   }
 
   return {
-    async executeCommand(command: string): Promise<CommandResult> {
+    async executeCommand(
+      command: string,
+      { signal }: ExecuteCommandOptions = {},
+    ): Promise<CommandResult> {
+      if (signal?.aborted) {
+        return { stdout: '', stderr: '', exitCode: SIGKILL_EXIT_CODE };
+      }
+
+      const proc = startKernelProcess(os, command, {});
+      const unbind = bindAbort(signal, proc.kill);
+
       try {
-        const result = await os.exec(command);
+        const [stdout, stderr, exitCode] = await Promise.all([
+          readAll(proc.stdout),
+          readAll(proc.stderr),
+          proc.exit,
+        ]);
+        return { stdout, stderr, exitCode };
+      } finally {
+        unbind();
+      }
+    },
+
+    spawn(
+      command: string,
+      { signal, env, cwd }: SpawnOptions = {},
+    ): SandboxProcess {
+      if (signal?.aborted) {
+        const empty = (): ReadableStream<Uint8Array> =>
+          new ReadableStream({ start: (c) => c.close() });
         return {
-          stdout: result.stdout,
-          stderr: result.stderr,
-          exitCode: result.exitCode,
-        };
-      } catch (error) {
-        const err = error as Error & {
-          stdout?: string;
-          stderr?: string;
-          exitCode?: number;
-        };
-        return {
-          stdout: err.stdout || '',
-          stderr: err.stderr || err.message || '',
-          exitCode: err.exitCode ?? 1,
+          stdout: empty(),
+          stderr: empty(),
+          exit: Promise.resolve({
+            code: null,
+            signal: 'SIGKILL' as NodeJS.Signals,
+            success: false,
+          }),
         };
       }
+
+      const proc = startKernelProcess(os, command, { env, cwd });
+      const unbind = bindAbort(signal, proc.kill);
+
+      const exit = proc.exit
+        .then((code) => {
+          const killed = proc.wasKilled(code);
+          return {
+            code: killed ? null : code,
+            signal: killed ? ('SIGKILL' as NodeJS.Signals) : null,
+            success: !killed && code === 0,
+          };
+        })
+        .finally(unbind);
+
+      return {
+        stdout: Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>,
+        stderr: Readable.toWeb(proc.stderr) as ReadableStream<Uint8Array>,
+        exit,
+      };
     },
 
     async readFile(path: string): Promise<string> {
       try {
         const bytes = await os.readFile(path);
-        return textDecoder.decode(bytes);
+        return decoder.decode(bytes);
       } catch (error) {
         throw new Error(
           `Failed to read file "${path}": ${error instanceof Error ? error.message : String(error)}`,
