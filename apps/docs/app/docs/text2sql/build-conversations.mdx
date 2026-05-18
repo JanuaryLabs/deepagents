@@ -123,7 +123,8 @@ import {
   SqliteContextStore,
   agent,
   chat,
-  createContainerTool,
+  createBashTool,
+  createDockerSandbox,
   errorRecoveryGuardrail,
   npm,
   user,
@@ -133,11 +134,14 @@ import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 const store = new SqliteContextStore('./text2sql-chat.sqlite');
 const model = groq('openai/gpt-oss-20b');
 async function createThread(chatId: string, userId: string) {
-  const sandbox = await createContainerTool({
+  const backend = await createDockerSandbox({
     installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
     env: {
       TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
     },
+  });
+  const sandbox = await createBashTool({
+    sandbox: backend,
     ...createSqlCommandHooks({ adapters }),
   });
 

@@ -17,7 +17,8 @@ Add fragments to the `ContextEngine` you pass to your chat agent:
 import {
   ContextEngine,
   InMemoryContextStore,
-  createContainerTool,
+  createBashTool,
+  createDockerSandbox,
   example,
   guardrail,
   hint,
@@ -27,11 +28,14 @@ import {
 import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
 
 const store = new InMemoryContextStore();
-const sandbox = await createContainerTool({
+const backend = await createDockerSandbox({
   installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
   },
+});
+const sandbox = await createBashTool({
+  sandbox: backend,
   ...createSqlCommandHooks({ adapters: { main: adapter } }),
 });
 const engine = new ContextEngine({

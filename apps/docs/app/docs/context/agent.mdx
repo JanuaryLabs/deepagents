@@ -12,8 +12,8 @@ Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `
 | Approach | When to use | Docker? | Supports `skills` |
 |---|---|---|---|
 | `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
-| `createContainerTool()` | Real binaries in isolated Docker containers | Yes | Yes |
-| `createDaytonaTool()` | Managed Daytona cloud sandboxes | No | Yes |
+| `createDockerSandbox()` + `createBashTool()` | Real binaries in isolated Docker containers | Yes | Yes |
+| `createDaytonaSandbox()` + `createBashTool()` | Managed Daytona cloud sandboxes | No | Yes |
 | `createBashTool({ sandbox: e2bSandbox })` | Other cloud sandboxes via adapter | No | Yes |
 
 Import `createBashTool` from `@deepagents/context` (not the raw `bash-tool` package). The `@deepagents/context` wrapper adds the `skills` option and always returns an `AgentSandbox`.
@@ -26,11 +26,18 @@ const sandbox = await createBashTool();
 ```
 
 ```typescript
-import { createContainerTool, pkg } from '@deepagents/context';
+import {
+  createBashTool,
+  createDockerSandbox,
+  pkg,
+} from '@deepagents/context';
 
-// Docker with skills: files copied in, metadata parsed, all in one call
-const sandbox = await createContainerTool({
+// Docker with skills: pick the backend, then layer the bash tool.
+const backend = await createDockerSandbox({
   installers: [pkg(['curl', 'jq'])],
+});
+const sandbox = await createBashTool({
+  sandbox: backend,
   skills: [{ host: './skills', sandbox: '/workspace/skills' }],
 });
 // Don't forget: await sandbox.sandbox.dispose() when done
@@ -41,9 +48,13 @@ const sandbox = await createContainerTool({
 `bin()` symlinks a binary that already exists inside the container — typically reached via a bind-mounted workspace — onto `PATH`. The dev loop becomes `nx run <pkg>:build` → rerun the agent. No `docker build`, no esbuild bake-in, no re-published package.
 
 ```typescript
-import { bin, createContainerTool } from '@deepagents/context';
+import {
+  bin,
+  createBashTool,
+  createDockerSandbox,
+} from '@deepagents/context';
 
-const sandbox = await createContainerTool({
+const backend = await createDockerSandbox({
   image: 'node:lts-alpine',
   installers: [bin('/workspace/packages/text2sql/dist/bin/sql.js')],
   volumes: [
@@ -55,6 +66,7 @@ const sandbox = await createContainerTool({
     },
   ],
 });
+const sandbox = await createBashTool({ sandbox: backend });
 
 // `sql` is now on PATH inside the container.
 await sandbox.sandbox.executeCommand('sql --help');
@@ -70,10 +82,19 @@ bin('/opt/tools/cli.mjs', { target: '/opt/bin/tool' });
 `bin()` requires the file to exist at install time — a missing path throws `InstallError` with `source: 'bin'` instead of silently creating a dangling symlink. The `chmod +x` step is skipped when the file is already executable, so read-only bind mounts of pre-built artifacts work without a writable mount.
 
 ```typescript
-import { createDaytonaTool } from '@deepagents/context';
+import {
+  DAYTONA_DEFAULT_DESTINATION,
+  createBashTool,
+  createDaytonaSandbox,
+} from '@deepagents/context';
 
-// Daytona defaults to /home/daytona and reads DAYTONA_* env vars
-const sandbox = await createDaytonaTool();
+// Daytona reads DAYTONA_* env vars; mkdir the workspace before wiring the bash tool.
+const backend = await createDaytonaSandbox();
+await backend.executeCommand(`mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`);
+const sandbox = await createBashTool({
+  sandbox: backend,
+  destination: DAYTONA_DEFAULT_DESTINATION,
+});
 // Don't forget: await sandbox.sandbox.dispose() when done
 ```
 
@@ -112,7 +133,7 @@ const assistant = agent({
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | required | Identifier for logging and error messages |
-| `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` or `createContainerTool()` from `@deepagents/context` |
+| `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox()`) from `@deepagents/context` |
 | `context` | `ContextEngine` | `undefined` | Engine that resolves system prompt and messages |
 | `model` | `LanguageModelV3` | `undefined` | AI SDK model to use for generation |
 | `tools` | `ToolSet` | `{}` | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict) |

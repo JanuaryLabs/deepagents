@@ -13,11 +13,16 @@ bridges to combine approaches.
 
 | Approach | Use Case | Requires Docker? |
 |----------|----------|-------------------|
-| `createContainerTool` | Agent needs real binaries in isolated container | Yes |
+| `createDockerSandbox` + `createBashTool` | Agent needs real binaries in isolated container | Yes |
 | `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
 | `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
 | `createVirtualSandbox` | In-process bash with a virtual filesystem | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
+
+All AI-agent-facing surfaces compose the same way: pick a backend factory
+(`createDockerSandbox` / `createAgentOsSandbox` / `createVirtualSandbox`), then
+wrap it with `createBashTool({ sandbox })` to get the bash tool, file tools,
+skills upload, and file-event observation.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Docker sandboxes additionally expose an
@@ -28,7 +33,7 @@ with `if (!sandbox.spawn) { ... }` when writing backend-agnostic code.
   Agent OS is a v0.1.0 preview. Requires optional peer dependencies `@rivet-dev/agent-os-core` and `@rivet-dev/agent-os-common`.
 </Callout>
 
-## Quick Start: Container Tool
+## Quick Start: Docker + Bash Tool
 
 The fastest path for giving an AI agent a bash tool that runs in Docker:
 
@@ -39,15 +44,19 @@ import {
   ContextEngine,
   InMemoryContextStore,
   agent,
-  createContainerTool,
+  createBashTool,
+  createDockerSandbox,
   pkg,
   role,
   skills,
   user,
 } from '@deepagents/context';
 
-const sandbox = await createContainerTool({
+const backend = await createDockerSandbox({
   installers: [pkg(['curl', 'jq'])],
+});
+const sandbox = await createBashTool({
+  sandbox: backend,
   skills: [
     { host: './skills', sandbox: '/workspace/skills' },
   ],
@@ -345,6 +354,5 @@ await createBashTool({
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
 - [Agent OS Sandbox](/docs/context/agent-os-sandbox) - WASM-based execution without Docker
-- [Container Tool](/docs/context/container-tool) - High-level agent integration
 - [Subcommand Builders](/docs/context/subcommand) - Build just-bash command groups with dispatch and repair helpers
 - [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern and internals

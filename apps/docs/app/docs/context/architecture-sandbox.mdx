@@ -121,18 +121,15 @@ Each argument is tested individually against the regex. Any non-matching argumen
 
 ## Integration Pipeline
 
-`createContainerTool` composes two independent systems:
+To give an AI agent a bash tool that runs inside Docker, compose the two
+independent systems explicitly at the call site:
 
 ```
-createContainerTool(options)
-  │
-  ├─ 1. Split options into sandbox options + bash options
-  │
-  ├─ 2. createDockerSandbox(sandboxOptions)
-  │     └─ Returns: DockerSandbox { executeCommand, spawn, readFile, writeFiles, dispose }
-  │
-  └─ 3. createBashTool({ sandbox, skills, ...bashOptions })
-        └─ Returns: { bash, tools, sandbox, skills }
+1. createDockerSandbox(sandboxOptions)
+   └─ Returns: DockerSandbox { executeCommand, spawn, readFile, writeFiles, dispose }
+
+2. createBashTool({ sandbox, skills, ...bashOptions })
+   └─ Returns: { bash, tools, sandbox, skills }
 ```
 
 The `DockerSandbox` interface still matches what `createBashTool` expects from
