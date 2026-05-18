@@ -10,7 +10,8 @@ import {
   agent,
   bin,
   chat,
-  createContainerTool,
+  createBashTool,
+  createDockerSandbox,
   errorRecoveryGuardrail,
   user,
 } from '@deepagents/context';
@@ -24,7 +25,7 @@ const sqlBinaryContainer = `${containerWorkspace}/packages/text2sql/dist/bin/sql
 const adaptersContainer = `${containerWorkspace}/demo/demo-adapters.ts`;
 
 const model = openai('gpt-5.4-mini');
-const sandbox = await createContainerTool({
+const backend = await createDockerSandbox({
   image: 'node:lts-alpine',
   installers: [bin(sqlBinaryContainer)],
   volumes: [
@@ -54,6 +55,7 @@ const sandbox = await createContainerTool({
     TEXT2SQL_ADAPTERS: adaptersContainer,
   },
 });
+const sandbox = await createBashTool({ sandbox: backend });
 const store = new InMemoryContextStore();
 const context = new ContextEngine({
   chatId: 'text2sql-demo',

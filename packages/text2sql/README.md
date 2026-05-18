@@ -106,7 +106,8 @@ import {
   InMemoryContextStore,
   agent,
   chat,
-  createContainerTool,
+  createBashTool,
+  createDockerSandbox,
   errorRecoveryGuardrail,
   npm,
   user,
@@ -120,7 +121,7 @@ const context = new ContextEngine({
   userId: 'user-456',
 });
 
-const sandbox = await createContainerTool({
+const backend = await createDockerSandbox({
   installers: [npm('@deepagents/text2sql', { ensureRuntime: true })],
   volumes: [
     {
@@ -133,6 +134,9 @@ const sandbox = await createContainerTool({
   env: {
     TEXT2SQL_ADAPTERS: '/workspace/text2sql-adapters.ts',
   },
+});
+const sandbox = await createBashTool({
+  sandbox: backend,
   ...createSqlCommandHooks({ adapters: { main: adapter } }),
 });
 
@@ -193,8 +197,8 @@ sandbox was not prepared correctly.
 Set `TEXT2SQL_INDEX_VERSION` to manage cache invalidation across runs. Cache
 keys are `index-<version>-<adapter>`, so bump the version when schema changes.
 
-Spread `createSqlCommandHooks({ adapters })` into `createBashTool()` or
-`createContainerTool()` for model-driven bash calls. The before hook preserves
+Spread `createSqlCommandHooks({ adapters })` into `createBashTool()` for
+model-driven bash calls. The before hook preserves
 the old virtual-command tolerance for common LLM quote mistakes, rewrites SQL
 identifier backticks so bash does not run them as command substitutions, and
 blocks raw database access so read-only and scope checks stay behind

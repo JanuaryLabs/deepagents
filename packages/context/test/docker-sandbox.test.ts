@@ -16,7 +16,7 @@ import {
   VolumeCreateError,
   VolumeInspectError,
   VolumePathError,
-  createContainerTool,
+  createBashTool,
   createDockerSandbox,
   npm,
   pip,
@@ -845,10 +845,11 @@ describe('Docker Sandbox', async () => {
     });
   });
 
-  describe('createContainerTool', () => {
+  describe('createDockerSandbox + createBashTool', () => {
     it('returns bash tool and sandbox', async () => {
-      const { bash, tools, sandbox } = await createContainerTool({
-        installers: [],
+      const backend = await createDockerSandbox({ installers: [] });
+      const { bash, tools, sandbox } = await createBashTool({
+        sandbox: backend,
       });
 
       try {
@@ -865,10 +866,10 @@ describe('Docker Sandbox', async () => {
     });
 
     it('bash tool executes commands in container', async () => {
-      const { sandbox } = await createContainerTool();
+      const backend = await createDockerSandbox();
+      const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
-        // Execute via sandbox (the underlying bash tool uses this)
         const result = await sandbox.executeCommand('echo "from container"');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout.trim(), 'from container');
@@ -878,9 +879,10 @@ describe('Docker Sandbox', async () => {
     });
 
     it('respects installers option', async () => {
-      const { sandbox } = await createContainerTool({
+      const backend = await createDockerSandbox({
         installers: [pkg(['curl'])],
       });
+      const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
         const result = await sandbox.executeCommand('curl --version');
@@ -892,9 +894,10 @@ describe('Docker Sandbox', async () => {
     });
 
     it('passes env vars through to container', async () => {
-      const { sandbox } = await createContainerTool({
+      const backend = await createDockerSandbox({
         env: { TOOL_VAR: 'via-tool' },
       });
+      const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
         const result = await sandbox.executeCommand('echo "$TOOL_VAR"');
@@ -909,7 +912,7 @@ describe('Docker Sandbox', async () => {
       await mkdir(tempDir, { recursive: true });
       await writeFile(join(tempDir, 'test.txt'), 'mounted content');
 
-      const { sandbox } = await createContainerTool({
+      const backend = await createDockerSandbox({
         volumes: [
           {
             type: 'bind',
@@ -919,6 +922,7 @@ describe('Docker Sandbox', async () => {
           },
         ],
       });
+      const { sandbox } = await createBashTool({ sandbox: backend });
 
       try {
         const result = await sandbox.executeCommand('cat /mounted/test.txt');

@@ -17,7 +17,6 @@ import {
   chat,
   createAgentOsSandbox,
   createBashTool,
-  createContainerTool,
   createDockerSandbox,
   createVirtualSandbox,
   githubRelease,
@@ -654,7 +653,7 @@ async function createSkillAwareAgent() {
  *
  * Two approaches are shown:
  * 1. Low-level: createDockerSandbox() for direct container control
- * 2. High-level: createContainerTool() for AI agent integration
+ * 2. AI agent integration: chain createDockerSandbox + createBashTool
  */
 async function demonstrateDockerSandbox() {
   console.log('\n=== Docker Sandbox Demo ===');
@@ -706,27 +705,27 @@ async function demonstrateDockerSandbox() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Approach 2: High-level - Container tool for AI agents
+  // Approach 2: AI agent integration — chain createDockerSandbox + createBashTool
   // ─────────────────────────────────────────────────────────────────────────
-  console.log('\n--- High-level: createContainerTool() ---');
+  console.log('\n--- createDockerSandbox + createBashTool ---');
 
-  // createContainerTool combines createDockerSandbox + createBashTool
-  const {
-    bash,
-    tools,
-    sandbox: agentSandbox,
-  } = await createContainerTool({
+  const agentBackend = await createDockerSandbox({
     installers: [pkg(['python3', 'nodejs'])],
     volumes: [
       {
         type: 'bind',
         hostPath: process.cwd(),
         containerPath: '/project',
-        readOnly: false, // Allow writes for agent work
+        readOnly: false,
       },
     ],
-
-    // Bash tool hooks work as expected
+  });
+  const {
+    bash,
+    tools,
+    sandbox: agentSandbox,
+  } = await createBashTool({
+    sandbox: agentBackend,
     onBeforeBashCall: ({ command }) => {
       console.log(chalk.cyan(`[Container] Running: ${command}`));
       return { command };
@@ -769,7 +768,7 @@ async function createDockerSkillAgent() {
 
   // presenterm isn't in Alpine's apk repo, so we pull it from its GitHub release.
   // githubRelease auto-ensures curl, so we don't need to add it to pkg().
-  const dockerSandbox = await createContainerTool({
+  const dockerBackend = await createDockerSandbox({
     installers: [
       pkg(['jq']),
       githubRelease({
@@ -780,6 +779,9 @@ async function createDockerSkillAgent() {
         asset: (arch) => `presenterm-0.15.1-${arch}-unknown-linux-musl.tar.gz`,
       }),
     ],
+  });
+  const dockerSandbox = await createBashTool({
+    sandbox: dockerBackend,
     skills: [
       {
         host: 'packages/context/src/skills',

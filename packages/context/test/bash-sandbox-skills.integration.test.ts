@@ -415,12 +415,12 @@ description: Data analysis skill
 });
 
 /**
- * Integration tests for the v2 skills API: sandbox factories (`createBashTool`,
- * `createContainerTool`) accept `skills: [{ host, sandbox }]` and populate
- * `sandbox.skills`. These cover scenarios previously tested at the
- * `skills()` fragment level (before the fragment became a thin projection of
- * `sandbox.skills`): multi-path discovery, later-overrides-earlier, path
- * remapping, non-existent directories, and walk filtering.
+ * Integration tests for the v2 skills API: `createBashTool` accepts
+ * `skills: [{ host, sandbox }]` and populates `sandbox.skills`. These cover
+ * scenarios previously tested at the `skills()` fragment level (before the
+ * fragment became a thin projection of `sandbox.skills`): multi-path
+ * discovery, later-overrides-earlier, path remapping, non-existent
+ * directories, and walk filtering.
  */
 describe('createBashTool with skills option', () => {
   const testRoot = path.join(process.cwd(), '.test-sandbox-skills-v2');

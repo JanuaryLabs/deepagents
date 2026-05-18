@@ -27,14 +27,13 @@ like store implementations, sandbox tooling, and filesystem-based skill loading.
 
 The server-side package also ships the sandbox primitives used by
 `@deepagents/text2sql` and other tool-driven agents. Use `createBashTool()`
-with `createVirtualSandbox()`, `createContainerTool()`, `createDockerSandbox()`,
-or `createAgentOsSandbox()` depending on whether commands should run in memory,
+with `createVirtualSandbox()`, `createDockerSandbox()`, or
+`createAgentOsSandbox()` depending on whether commands should run in memory,
 Docker, or Agent OS.
 
 See the docs for the full API surface:
 
 - [Sandbox](https://januarylabs.github.io/deepagents/docs/context/sandbox)
-- [Container Tool](https://januarylabs.github.io/deepagents/docs/context/container-tool)
 - [Subcommand Builders](https://januarylabs.github.io/deepagents/docs/context/subcommand)
 
 ## Basic Usage

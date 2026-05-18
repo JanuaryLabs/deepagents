@@ -22,9 +22,9 @@ fragments with `instructions()` into the `ContextEngine`.
 
 The context package no longer exposes the older routing/OpenAPI sandbox
 extension layer. Use `createVirtualSandbox()` for just-bash custom commands,
-`createContainerTool()` or `createDockerSandbox()` for real binaries, and
-`createSqlCommandHooks()` from Text2SQL when model-driven bash calls need SQL
-quote repair, proxy blocking, and formatted-SQL metadata.
+`createDockerSandbox()` (chain with `createBashTool()` for the AI surface) for
+real binaries, and `createSqlCommandHooks()` from Text2SQL when model-driven
+bash calls need SQL quote repair, proxy blocking, and formatted-SQL metadata.
 
 ## Development
 

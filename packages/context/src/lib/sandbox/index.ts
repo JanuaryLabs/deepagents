@@ -5,7 +5,6 @@ export * from './bash-meta.ts';
 export * from './bash-tool.ts';
 export * from './file-events.ts';
 export * from './binary-bridges.ts';
-export * from './container-tool.ts';
 export * from './daytona-sandbox.ts';
 export * from './docker-sandbox.ts';
 export * from './installers/index.ts';

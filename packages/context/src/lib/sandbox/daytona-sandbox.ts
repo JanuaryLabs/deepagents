@@ -2,12 +2,7 @@ import { type CommandResult } from 'bash-tool';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 
-import {
-  type CreateBashToolWithSkillsOptions,
-  createBashTool,
-} from './bash-tool.ts';
 import type {
-  AgentSandbox,
   DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,
@@ -190,11 +185,6 @@ export interface DaytonaSandboxOptions {
   deleteOnDispose?: boolean;
 }
 
-export interface DaytonaToolOptions
-  extends
-    Omit<CreateBashToolWithSkillsOptions, 'sandbox'>,
-    DaytonaSandboxOptions {}
-
 export class DaytonaSandboxError extends Error {
   constructor(message: string, cause?: Error) {
     super(message);
@@ -266,98 +256,6 @@ export async function createDaytonaSandbox(
     commandTimeout: options.commandTimeout,
     deleteOnDispose,
     deleteTimeout: options.deleteTimeout,
-  });
-}
-
-export async function createDaytonaTool(
-  options: DaytonaToolOptions = {},
-): Promise<AgentSandbox> {
-  const {
-    apiKey,
-    jwtToken,
-    organizationId,
-    apiUrl,
-    target,
-    otelEnabled,
-    experimental,
-    sandboxId,
-    name,
-    user,
-    snapshot,
-    image,
-    language,
-    envVars,
-    labels,
-    public: isPublic,
-    resources,
-    volumes,
-    networkAllowList,
-    networkBlockAll,
-    autoStopInterval,
-    autoArchiveInterval,
-    autoDeleteInterval,
-    ephemeral,
-    createTimeout,
-    startTimeout,
-    deleteTimeout,
-    commandTimeout,
-    onSnapshotCreateLogs,
-    deleteOnDispose,
-    destination = DAYTONA_DEFAULT_DESTINATION,
-    ...bashOptions
-  } = options;
-
-  const backend = await createDaytonaSandbox({
-    apiKey,
-    jwtToken,
-    organizationId,
-    apiUrl,
-    target,
-    otelEnabled,
-    experimental,
-    sandboxId,
-    name,
-    user,
-    snapshot,
-    image,
-    language,
-    envVars,
-    labels,
-    public: isPublic,
-    resources,
-    volumes,
-    networkAllowList,
-    networkBlockAll,
-    autoStopInterval,
-    autoArchiveInterval,
-    autoDeleteInterval,
-    ephemeral,
-    createTimeout,
-    startTimeout,
-    deleteTimeout,
-    commandTimeout,
-    onSnapshotCreateLogs,
-    deleteOnDispose,
-  });
-
-  try {
-    const mkdir = await backend.executeCommand(
-      `mkdir -p ${shellQuote(destination)}`,
-    );
-    if (mkdir.exitCode !== 0) {
-      throw new DaytonaCommandError(
-        `Failed to create Daytona destination "${destination}": ${mkdir.stderr}`,
-      );
-    }
-  } catch (error) {
-    await backend.dispose().catch(() => {});
-    throw error;
-  }
-
-  return createBashTool({
-    ...bashOptions,
-    sandbox: backend,
-    destination,
   });
 }
 

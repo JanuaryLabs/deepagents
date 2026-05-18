@@ -8,20 +8,24 @@ import { chat } from './chat.ts';
 import { ContextEngine } from './engine.ts';
 import { user } from './fragments/message/user.ts';
 import { errorRecoveryGuardrail } from './guardrails/error-recovery.guardrail.ts';
-import { createContainerTool } from './sandbox/container-tool.ts';
+import { createBashTool } from './sandbox/bash-tool.ts';
+import { createDockerSandbox } from './sandbox/docker-sandbox.ts';
 import { pkg } from './sandbox/installers/index.ts';
 import { skills } from './skills/fragments.ts';
 import { soul } from './soul/fragments.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import { createOpenAITracesIntegration } from './tracing/index.ts';
 
-const sandbox = await createContainerTool({
+const backend = await createDockerSandbox({
   image: 'alpine:latest',
   installers: [pkg(['curl', 'jq', 'nodejs', 'npm'])],
   resources: {
     cpus: 0.5,
     memory: '512m',
   },
+});
+const sandbox = await createBashTool({
+  sandbox: backend,
   skills: [
     {
       host: join(process.cwd(), 'agent-sandbox-test/skills'),

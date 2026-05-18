@@ -4,10 +4,11 @@ import { after, before, describe, it } from 'node:test';
 
 import {
   type AgentSandbox,
+  DAYTONA_DEFAULT_DESTINATION,
   DaytonaNotAvailableError,
   type DisposableSandbox,
+  createBashTool,
   createDaytonaSandbox,
-  createDaytonaTool,
 } from '@deepagents/context';
 
 type DynamicImport = (specifier: string) => Promise<unknown>;
@@ -235,65 +236,80 @@ describe('Daytona Sandbox', async () => {
     });
   });
 
-  describe('createDaytonaTool', { skip: !liveAvailable }, () => {
-    let agent: AgentSandbox;
+  describe(
+    'createDaytonaSandbox + createBashTool',
+    { skip: !liveAvailable },
+    () => {
+      let agent: AgentSandbox;
 
-    before(async () => {
-      agent = await createDaytonaTool();
-      agent.drainFileEvents();
-    });
+      before(async () => {
+        const backend = await createDaytonaSandbox();
+        const mkdir = await backend.executeCommand(
+          `mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`,
+        );
+        assert.strictEqual(mkdir.exitCode, 0);
+        agent = await createBashTool({
+          sandbox: backend,
+          destination: DAYTONA_DEFAULT_DESTINATION,
+        });
+        agent.drainFileEvents();
+      });
 
-    after(async () => {
-      if (agent) await agent.sandbox.dispose();
-    });
+      after(async () => {
+        if (agent) await agent.sandbox.dispose();
+      });
 
-    it('exposes spawn on the wrapped sandbox', () => {
-      assert.ok(
-        agent.sandbox.spawn,
-        'createDaytonaTool must forward spawn from the backend',
-      );
-    });
+      it('exposes spawn on the wrapped sandbox', () => {
+        assert.ok(
+          agent.sandbox.spawn,
+          'createBashTool must forward spawn from the backend',
+        );
+      });
 
-    it('streams live stdout through the wrapper', async () => {
-      assert.ok(agent.sandbox.spawn);
-      const child = agent.sandbox.spawn(
-        'printf "hi\\n"; sleep 2; printf "bye\\n"',
-      );
+      it('streams live stdout through the wrapper', async () => {
+        assert.ok(agent.sandbox.spawn);
+        const child = agent.sandbox.spawn(
+          'printf "hi\\n"; sleep 2; printf "bye\\n"',
+        );
 
-      const winner = await Promise.race([
-        readFirstChunk(child.stdout).then(() => 'chunk' as const),
-        child.exit.then(() => 'exit' as const),
-      ]);
-      assert.strictEqual(
-        winner,
-        'chunk',
-        'first stdout chunk must arrive before exit through createDaytonaTool',
-      );
+        const winner = await Promise.race([
+          readFirstChunk(child.stdout).then(() => 'chunk' as const),
+          child.exit.then(() => 'exit' as const),
+        ]);
+        assert.strictEqual(
+          winner,
+          'chunk',
+          'first stdout chunk must arrive before exit through createBashTool',
+        );
 
-      const rest = await readAllText(child.stdout);
-      const info = await child.exit;
-      assert.match(rest, /bye/);
-      assert.strictEqual(info.success, true);
-    });
+        const rest = await readAllText(child.stdout);
+        const info = await child.exit;
+        assert.match(rest, /bye/);
+        assert.strictEqual(info.success, true);
+      });
 
-    it('records a write FileEvent when spawn creates a file in destination', async () => {
-      assert.ok(agent.sandbox.spawn);
-      agent.drainFileEvents();
+      it('records a write FileEvent when spawn creates a file in destination', async () => {
+        assert.ok(agent.sandbox.spawn);
+        agent.drainFileEvents();
 
-      const path = `/home/daytona/deepagents-daytona-spawned-${randomUUID()}.txt`;
-      const child = agent.sandbox.spawn(`echo "from spawn" > ${path}`);
-      await Promise.all([readAllText(child.stdout), readAllText(child.stderr)]);
-      const info = await child.exit;
-      assert.strictEqual(info.success, true);
+        const path = `/home/daytona/deepagents-daytona-spawned-${randomUUID()}.txt`;
+        const child = agent.sandbox.spawn(`echo "from spawn" > ${path}`);
+        await Promise.all([
+          readAllText(child.stdout),
+          readAllText(child.stderr),
+        ]);
+        const info = await child.exit;
+        assert.strictEqual(info.success, true);
 
-      const events = agent.drainFileEvents();
-      const forSpawned = events.filter((event) => event.path === path);
-      assert.strictEqual(
-        forSpawned.length,
-        1,
-        `expected exactly one FileEvent for ${path}, got ${JSON.stringify(events)}`,
-      );
-      assert.strictEqual(forSpawned[0].op, 'write');
-    });
-  });
+        const events = agent.drainFileEvents();
+        const forSpawned = events.filter((event) => event.path === path);
+        assert.strictEqual(
+          forSpawned.length,
+          1,
+          `expected exactly one FileEvent for ${path}, got ${JSON.stringify(events)}`,
+        );
+        assert.strictEqual(forSpawned[0].op, 'write');
+      });
+    },
+  );
 });

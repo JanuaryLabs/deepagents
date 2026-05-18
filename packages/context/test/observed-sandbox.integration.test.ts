@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 import {
   createBashTool,
-  createContainerTool,
+  createDockerSandbox,
   createVirtualSandbox,
   observeSandboxFileEvents,
 } from '@deepagents/context';
@@ -117,12 +117,10 @@ dockerSuite('observeSandboxFileEvents (docker backend)', () => {
   const FILE = `${ROOT}/file.txt`;
 
   async function withSandbox<T>(
-    fn: (s: Awaited<ReturnType<typeof createContainerTool>>) => Promise<T>,
+    fn: (s: Awaited<ReturnType<typeof createBashTool>>) => Promise<T>,
   ): Promise<T> {
-    const s = await createContainerTool({
-      image: 'alpine:latest',
-      destination: ROOT,
-    });
+    const backend = await createDockerSandbox({ image: 'alpine:latest' });
+    const s = await createBashTool({ sandbox: backend, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`);
       return await fn(s);

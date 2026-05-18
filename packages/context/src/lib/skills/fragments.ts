@@ -11,8 +11,8 @@ import type { AgentSandbox } from '../sandbox/types.ts';
  * - At startup: only skill metadata (name, description, path) is injected
  * - At runtime: LLM reads full SKILL.md using file tools when relevant
  *
- * @param sandbox - An AgentSandbox whose `.skills` has been populated by the
- * sandbox factory (`createBashTool` / `createContainerTool`).
+ * @param sandbox - An AgentSandbox whose `.skills` has been populated by
+ * `createBashTool`.
  *
  * @example
  * ```ts
