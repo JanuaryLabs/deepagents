@@ -1,0 +1,28 @@
+{
+  "query": "everything about Agno AI Knowledge — start from docs.agno.com/examples/agent-os/knowledge/overview, then the rest of the web",
+  "mode": "deep",
+  "date_started": "2026-05-19",
+  "out_dir": "/Users/ezzabuzaid/Desktop/January/deepagents/research/agno-knowledge-20260519",
+  "agno_release_at_research_time": "v2.6.7",
+  "providers_used": ["WebSearch", "WebFetch", "Agent(general-purpose)"],
+  "subagents_dispatched": 3,
+  "web_search_queries": 8,
+  "webfetch_calls": 5,
+  "assumptions": [
+    "Technical audience (parallel agent framework builder)",
+    "'Everything' = thorough report ≤ 18K words",
+    "Source code is authoritative when it disagrees with docs"
+  ],
+  "scope_in": [
+    "Knowledge subsystem",
+    "AgentOS Knowledge plane",
+    "Readers/chunkers/embedders/vector DBs",
+    "Agentic vs traditional RAG",
+    "Public bugs and gaps"
+  ],
+  "scope_out": [
+    "Pricing of hosted Agno products",
+    "Non-Knowledge Agno features (Tools, Memory, Reasoning) except where they interact"
+  ],
+  "credibility_floor": 55
+}
