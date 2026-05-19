@@ -1,0 +1,22 @@
+{
+  "query": "Research Daytona documentation and DeepAgents sandbox contracts before adding Daytona as a supported sandbox backend.",
+  "mode": "ultradeep",
+  "started_at": "2026-05-17T00:00:00+03:00",
+  "finished_at": "2026-05-17T00:00:00+03:00",
+  "current_date_verified_with": "date +%Y-%m-%d -> 2026-05-17",
+  "assumptions": [
+    "DeepAgents integration must preserve the current DisposableSandbox contract and the no fake streaming rule for spawn.",
+    "The first implementation target is TypeScript, because deepagents is a TypeScript Nx workspace and Daytona publishes @daytona/sdk.",
+    "This report is stored in the repository under research because the user requested research artifacts there."
+  ],
+  "provider_config": {
+    "web_sources": "Daytona official docs, API docs pages, npm package metadata",
+    "local_sources": "packages/context sandbox source and tests, memory registry"
+  },
+  "artifacts": {
+    "report": "research_report_20260517_daytona_sandbox.md",
+    "sources": "sources.jsonl",
+    "evidence": "evidence.jsonl",
+    "claims": "claims.jsonl"
+  }
+}

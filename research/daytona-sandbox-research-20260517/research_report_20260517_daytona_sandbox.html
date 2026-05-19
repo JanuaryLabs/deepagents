@@ -1,0 +1,962 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Daytona Sandbox Integration Research</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        line-height: 1.56;
+        max-width: 980px;
+        margin: 48px auto;
+        padding: 0 24px;
+        color: #111;
+      }
+      .header {
+        border-bottom: 1px solid #d8d8d8;
+        margin-bottom: 28px;
+        padding-bottom: 18px;
+      }
+      h1 {
+        font-size: 34px;
+        line-height: 1.15;
+        margin: 0 0 8px;
+      }
+      h2 {
+        margin-top: 36px;
+        border-top: 1px solid #e3e3e3;
+        padding-top: 22px;
+      }
+      h3 {
+        margin-top: 28px;
+      }
+      code {
+        background: #f3f3f3;
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+      pre {
+        background: #f7f7f7;
+        padding: 16px;
+        overflow: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 16px 0;
+      }
+      td,
+      th {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .bibliography {
+        font-size: 14px;
+        margin-top: 44px;
+      }
+      .bib-entry {
+        margin: 8px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Daytona Sandbox Integration Research for DeepAgents</h1>
+      <p>Ultradeep research package generated 2026-05-17.</p>
+    </div>
+    <div class="content">
+      <p># Daytona Sandbox Integration Research for DeepAgents</p>
+      <h2 class="section-title">Executive Summary</h2>
+      <p>
+        Daytona is a credible candidate for a first-class DeepAgents sandbox
+        backend because its documented surface overlaps strongly with
+        DeepAgents&#x27; current <code>DisposableSandbox</code>: isolated
+        lifecycle-managed compute, process execution, file operations, snapshot
+        or OCI image setup, environment variables, network policy, preview URLs,
+        and region targeting are all present in the official docs [1, 2, 3, 4,
+        5, 8, 9, 10, 13, 14]. The integration should not create a new runtime
+        abstraction. It should add a Daytona-backed implementation of the
+        existing <code>DisposableSandbox</code> and, separately, a
+        Daytona-specific convenience wrapper that supplies Daytona defaults such
+        as <code>/home/daytona</code> and lifecycle options [17, 19, 20].
+      </p>
+      <p>
+        The main implementation risk is <code>spawn</code>, not basic command
+        execution. DeepAgents intentionally treats <code>spawn</code> as
+        optional and only permits it when a backend can expose unbuffered stdout
+        and stderr rather than buffered post-exit output [19, 23, 24].
+        Daytona&#x27;s plain <code>process.executeCommand</code> is enough for
+        buffered <code>executeCommand</code>, but DeepAgents
+        <code>spawn</code> should be backed by Daytona process sessions with
+        <code>runAsync: true</code> and <code>getSessionCommandLogs</code>, or
+        by PTY only if the session log path cannot satisfy cancellation and exit
+        semantics [5, 6, 7, 17]. The official Daytona Codex guide already uses
+        async process sessions and streaming callbacks to run a sandboxed agent,
+        which is strong evidence that this is the right primitive to test first
+        [17].
+      </p>
+      <p>
+        The recommended first slice is a new
+        <code>createDaytonaSandbox()</code> in
+        <code>packages/context/src/lib/sandbox/daytona-sandbox.ts</code>,
+        exported next to Docker, virtual, and Agent OS backends [19, 22]. It
+        should implement <code>executeCommand</code>, <code>readFile</code>,
+        <code>writeFiles</code>, <code>dispose</code>, and
+        <code>spawn</code> behind a feature flag or runtime capability gate once
+        the real streaming contract is proven against a live Daytona sandbox [4,
+        5, 6, 19, 23]. The verification bar should mirror the existing Docker
+        spawn integration test: first stdout chunk before exit, independent
+        stderr, abort behavior, <code>cwd</code>, <code>env</code>, and
+        file-event observation through <code>createBashTool</code> [21, 23].
+      </p>
+      <h2 class="section-title">Introduction</h2>
+      <p>
+        This research answers a practical implementation question: what must
+        DeepAgents understand before adding Daytona as a supported sandbox
+        backend? The scope includes Daytona&#x27;s documented sandbox lifecycle,
+        TypeScript SDK configuration, file system APIs, command execution APIs,
+        streaming and PTY primitives, snapshots, network controls, preview URLs,
+        regions, deployment modes, limits, and API key scopes [1, 2, 3, 4, 5, 6,
+        7, 8, 9, 10, 11, 12, 13, 14, 15, 16]. It also includes the DeepAgents
+        local code paths that any new backend must satisfy:
+        <code>DisposableSandbox</code>, <code>createBashTool</code>, file-event
+        observation, Docker&#x27;s reference implementation, and the Docker
+        spawn tests [19, 20, 21, 22, 23].
+      </p>
+      <p>
+        The central assumption is that Daytona should be integrated as one
+        backend in the existing sandbox system, not as a replacement for Docker,
+        virtual, or Agent OS backends. That assumption follows the current code
+        shape: <code>createBashTool</code> explicitly takes a backend satisfying
+        <code>DisposableSandbox</code>, composes decorators around that backend,
+        and returns the same wrapped contract to callers [19, 20]. It also
+        follows prior project direction recorded in memory: DeepAgents sandbox
+        work has recently converged on explicit decorators,
+        <code>DisposableSandbox</code>, and a strict distinction between real
+        streaming and buffered command output [24].
+      </p>
+      <p>
+        The report is implementation-oriented. It does not try to describe every
+        Daytona product feature in isolation. It filters Daytona&#x27;s feature
+        set through the actual surfaces DeepAgents must provide to agents and
+        tests: command execution, live process streaming, filesystem mutation,
+        cancellation, lifecycle cleanup, configured working directory, skills
+        upload, file-event observation, network/security policy, and
+        reproducible environments [19, 20, 21, 22, 23]. Where the docs leave an
+        API-detail gap, the report marks that as an implementation-time
+        verification requirement rather than inventing behavior.
+      </p>
+      <h2 class="section-title">Main Analysis</h2>
+      <h3>Finding 1: Daytona maps cleanly to the DeepAgents backend model</h3>
+      <p>
+        Daytona&#x27;s core abstraction is close to DeepAgents&#x27; runtime
+        needs. Daytona describes sandboxes as isolated runtime environments with
+        a dedicated kernel, filesystem, network stack, and allocated CPU,
+        memory, and disk [3]. DeepAgents&#x27; backend contract is much smaller:
+        a <code>DisposableSandbox</code> must execute commands, read files,
+        write files, and dispose; it may also expose <code>spawn</code> only
+        when it can honestly stream unbuffered stdio [19]. This means Daytona
+        does not need a broad adapter layer to be useful. It needs a focused
+        backend adapter that translates Daytona&#x27;s SDK modules into the
+        existing <code>DisposableSandbox</code> shape.
+      </p>
+      <p>
+        The capability overlap is broad. Daytona documents filesystem operations
+        through <code>sandbox.fs</code>, including listing, file info, creating
+        directories, uploading, downloading, deleting, permissions, search,
+        replace, and move operations [4]. Daytona documents process and code
+        execution through <code>sandbox.process</code>, including code
+        execution, shell command execution, sessions, entrypoint sessions,
+        interactive commands, and error handling [5]. Daytona also documents
+        lifecycle states and transitions, including creation, start, stop,
+        archive, recover, resize, fork, snapshot creation, and delete [3].
+        DeepAgents does not need all of these on day one, but the extra surface
+        gives room for durable growth without compatibility shims.
+      </p>
+      <p>
+        The cleanest first integration path is
+        <code
+          >createDaytonaSandbox(options): Promise&lt;DisposableSandbox&gt;</code
+        >, not a Daytona-specific <code>AgentSandbox</code>. DeepAgents already
+        separates raw backend creation from
+        <code>createBashTool</code> composition [20]. Docker follows that
+        pattern: <code>createDockerSandbox()</code> produces a backend, and
+        <code>createContainerTool()</code> is a high-level wrapper that combines
+        backend and bash-tool setup [22]. Daytona should follow the same split.
+        A raw backend lets internal callers test the sandbox contract directly,
+        while a high-level Daytona tool can pick better defaults for workspace
+        path, lifecycle, and preview support.
+      </p>
+      <p>
+        The dependency risk is moderate but manageable. The current npm metadata
+        says <code>@daytona/sdk</code> latest is <code>0.175.0</code>, with dual
+        ESM/CJS exports and type declarations, and dependencies include
+        <code>@daytona/api-client</code>,
+        <code>@daytona/toolbox-api-client</code>, <code>axios</code>,
+        <code>isomorphic-ws</code>, <code>form-data</code>, and OpenTelemetry
+        packages [18]. That dependency set is acceptable for
+        <code>packages/context</code> only if the package is already expected to
+        own sandbox backends and SDK integrations. If dependency weight is a
+        concern, the implementation can initially import lazily or make Daytona
+        support an optional peer, but the repo rule against compatibility shims
+        means that should be a deliberate package-boundary decision, not a
+        half-wired fallback.
+      </p>
+      <h3>
+        Finding 2: <code>executeCommand</code> is straightforward, but
+        <code>spawn</code> requires a real streaming proof
+      </h3>
+      <p>
+        DeepAgents distinguishes two process modes.
+        <code>executeCommand</code> returns a buffered
+        <code>CommandResult</code> with <code>stdout</code>,
+        <code>stderr</code>, and <code>exitCode</code>;
+        <code>spawn</code> returns live
+        <code>ReadableStream&lt;Uint8Array&gt;</code> stdout and stderr plus an
+        <code>exit</code> promise [19]. The current Docker backend implements
+        <code>executeCommand</code> with <code>docker exec</code> via
+        <code>nano-spawn</code>, and implements <code>spawn</code> with Node
+        <code>child_process.spawn</code> so stdout and stderr are live streams
+        [22]. The Docker spawn test proves this by racing the first stdout chunk
+        against process exit and requiring the chunk to arrive first [23].
+      </p>
+      <p>
+        Daytona&#x27;s plain command execution can likely back
+        <code>executeCommand</code>, because the process docs show
+        <code>sandbox.process.executeCommand(...)</code> returning execution
+        results and errors [5]. That path should not be used to implement
+        <code>spawn</code> unless the SDK itself exposes streaming for that
+        exact call. DeepAgents has an explicit no-fake-streaming rule in the
+        local type comments and prior memory: an implementation must not
+        aggregate output and flush it after completion while presenting it as a
+        stream [19, 24]. A Daytona <code>spawn</code> built on buffered
+        <code>executeCommand</code> would violate that rule even if it passed
+        simple output tests.
+      </p>
+      <p>
+        Daytona provides better candidates for <code>spawn</code>. The log
+        streaming docs show an async session command with
+        <code>runAsync: true</code>, followed by
+        <code>getSessionCommandLogs(sessionId, cmdId, onStdout, onStderr)</code>
+        callbacks that process output while the command runs [6]. The process
+        docs also describe session commands that can receive input while
+        running, including TypeScript methods <code>createSession</code>,
+        <code>executeSessionCommand</code>, <code>getSessionCommandLogs</code>,
+        and <code>sendSessionCommandInput</code> [5]. The official Daytona Codex
+        guide uses exactly that pattern to run a sandboxed agent command
+        asynchronously and stream stdout and stderr back to the host [17].
+      </p>
+      <p>
+        The recommended <code>spawn</code> design is therefore session-backed.
+        On <code>spawn(command, { cwd, env, signal })</code>, create a unique
+        Daytona process session, start <code>executeSessionCommand</code> with
+        <code>runAsync: true</code>, encode <code>cwd</code> as
+        <code>cd &lt;quoted cwd&gt; &amp;&amp; &lt;command&gt;</code> if the SDK
+        does not accept cwd directly, encode <code>env</code> using a shell-safe
+        environment prefix if the SDK does not accept env directly, start
+        <code>getSessionCommandLogs</code>, and expose callback chunks through
+        <code>ReadableStream</code> controllers [5, 6, 17, 19]. The returned
+        <code>exit</code> promise should resolve only after the Daytona command
+        completes and the stream closes. If Daytona&#x27;s SDK does not expose
+        an exit status from the log stream, the wrapper should retrieve the
+        session command details or use a shell sentinel to capture the exit
+        code, then delete the session [5, 17].
+      </p>
+      <p>
+        PTY is the fallback for interactive cases, not the first
+        <code>spawn</code> backend. Daytona PTY supports terminal sessions,
+        output callbacks, sending input, waiting, killing, resizing, and
+        connection management [7]. That is useful for future terminal UX, but
+        PTY output may mix stdout and stderr depending on terminal behavior,
+        while DeepAgents <code>spawn</code> explicitly exposes separate stdout
+        and stderr streams [7, 19]. The process-session log path preserves
+        stdout/stderr separation in the docs, so it is a better first target
+        [6].
+      </p>
+      <h3>Finding 2A: Streaming surface inventory</h3>
+      <p>
+        The direct answer is yes: Daytona documents streaming. The most relevant
+        surface for DeepAgents is session command log streaming, where a command
+        is started asynchronously and logs are consumed through stdout and
+        stderr callbacks [6]. The official Daytona Codex guide uses this pattern
+        for an agent loop, creating a new process session per prompt, running
+        the agent command asynchronously, and streaming output back to the host
+        [17].
+      </p>
+      <p>
+        This should be separated from
+        <code>sandbox.process.executeCommand(...)</code>. The plain
+        execute-command path is useful for DeepAgents
+        <code>executeCommand</code>, but it should be treated as buffered until
+        the actual SDK type and runtime behavior prove otherwise [5, 19]. For
+        DeepAgents <code>spawn</code>, the adapter should use session log
+        streaming and convert callbacks into
+        <code>ReadableStream&lt;Uint8Array&gt;</code> for stdout and stderr [6,
+        19, 23].
+      </p>
+      <p>
+        Daytona also documents PTY streaming for interactive terminals, with
+        output callbacks, input, resize, wait, kill, and disconnect controls
+        [7]. PTY is a future-facing option for interactive terminal UX, but it
+        is not the first choice for DeepAgents <code>spawn</code> because
+        terminal streams can blur stdout and stderr semantics, while session
+        command logs are documented with separate stdout and stderr callbacks
+        [6, 7, 19].
+      </p>
+      <h3>
+        Finding 3: Workspace path and file semantics need Daytona-specific
+        defaults
+      </h3>
+      <p>
+        DeepAgents&#x27; generic <code>createBashTool</code> default destination
+        is <code>/workspace</code>, and the file-event observer uses that
+        destination as the root for snapshot diffing [20, 21]. Daytona&#x27;s
+        docs say file operations without a leading slash are interpreted under
+        the sandbox user&#x27;s home directory, and the official Codex guide
+        explicitly instructs agents to use <code>/home/daytona</code> instead of
+        <code>/workspace</code> [4, 17]. If a Daytona backend is passed to
+        <code>createBashTool</code> without a Daytona-aware destination,
+        commands may run from a path that does not exist or file observation may
+        silently observe an empty root [20, 21].
+      </p>
+      <p>
+        The fix should live in a high-level wrapper rather than in the core
+        <code>createBashTool</code> default. <code>createBashTool</code> should
+        stay backend-neutral. Add either <code>createDaytonaTool()</code> or a
+        Daytona branch in an existing high-level container factory that calls
+        <code
+          >createBashTool({ sandbox, destination: &quot;/home/daytona&quot;
+          })</code
+        >
+        and ensures the directory exists before handing the sandbox to agents
+        [17, 20]. If DeepAgents wants all sandboxes to share
+        <code>/workspace</code>, then the Daytona wrapper should create
+        <code>/workspace</code> at startup and document that it intentionally
+        deviates from Daytona&#x27;s guide. The more native default is
+        <code>/home/daytona</code>, because Daytona&#x27;s own Codex guide uses
+        it [17].
+      </p>
+      <p>
+        File reads and writes can use Daytona <code>fs</code> APIs directly.
+        DeepAgents <code>readFile(path)</code> returns a string-like content in
+        existing backends, and <code>writeFiles(files)</code> takes path/content
+        entries [19, 22]. Daytona has upload and download APIs in the
+        <code>fs</code> module and supports absolute paths when a leading slash
+        is supplied [4]. The adapter should normalize all DeepAgents paths as
+        absolute paths when possible. If <code>writeFiles</code> receives bytes
+        in the future, the adapter should use Buffer upload paths rather than
+        converting blindly to UTF-8, but the current
+        <code>DisposableSandbox</code> type inherits the upstream
+        <code>bash-tool</code> file content shape and local implementations
+        already mostly treat content as text [19, 22].
+      </p>
+      <p>
+        DeepAgents file-event observation can probably wrap Daytona unchanged,
+        but only if the sandbox image includes the Unix tools used by the
+        observer. The observer snapshots with <code>find -print0</code> and
+        <code>sha256sum</code> around command and file writes [21]. Daytona
+        snapshots are OCI/Docker-compatible and can be created from controlled
+        images [9]. The integration should either select a default
+        image/snapshot with <code>find</code> and <code>sha256sum</code>, or run
+        a startup capability check and return a clear error when file
+        observation is requested without those tools [9, 21]. Hiding this behind
+        a best-effort adapter would produce misleading
+        <code>drainFileEvents()</code> behavior.
+      </p>
+      <h3>
+        Finding 4: Images, snapshots, installers, and resources should be mapped
+        deliberately
+      </h3>
+      <p>
+        Daytona snapshots are the closest match to Dockerfile-based
+        repeatability in DeepAgents. Daytona documents snapshots as templates
+        created from Docker or OCI-compatible images, including public images,
+        local images, private registries, declarative builder, GPU snapshots,
+        and default snapshots [9]. Docker support in DeepAgents currently
+        includes runtime image starts, Dockerfile builds, compose stacks,
+        installers, volumes, env, names, and resource settings [22]. Daytona
+        cannot be a drop-in replacement for Docker Compose on day one, but it
+        can cover the common &quot;start a single sandbox from image or
+        snapshot&quot; path cleanly [3, 9, 22].
+      </p>
+      <p>
+        The first option set should be small and explicit. A Daytona backend
+        should accept Daytona client configuration (<code>apiKey</code>,
+        <code>apiUrl</code>, <code>target</code>), sandbox identity
+        (<code>id</code>, <code>name</code>, or &quot;create new&quot;),
+        environment (<code>envVars</code>), image or snapshot selection,
+        resources, lifecycle intervals, region/target, and network policy [3, 8,
+        9, 10, 14]. The docs show default sandbox resources of 1 vCPU, 1 GiB
+        RAM, and 3 GiB disk, with maximum per-sandbox limits of 4 vCPU, 8 GiB
+        RAM, and 10 GiB disk under the documented organization limits [3].
+        Exposing these as typed options lets callers make resource decisions
+        without shelling out to the Daytona CLI.
+      </p>
+      <p>
+        DeepAgents installers need a design choice. Docker installers currently
+        run after container start and install packages inside the sandbox image
+        [22]. Daytona supports configured snapshots, and snapshots are better
+        for repeated dependency-heavy environments because the image is built
+        once and reused [9]. For day one, do not port the Docker installer
+        abstraction into Daytona automatically. Instead, accept
+        <code>snapshot</code> or <code>image</code> and document that users
+        should build a Daytona snapshot for repeatable dependencies. A later
+        phase can add a Daytona &quot;configure then snapshot&quot; helper if
+        the SDK supports creating snapshots from a live sandbox with the needed
+        guarantees [3, 9].
+      </p>
+      <p>
+        GPU and Docker-in-Docker should be treated as advanced opt-in features.
+        Daytona documents GPU sandboxes as experimental and requiring access
+        approval, and it documents Docker and Kubernetes workloads inside
+        sandboxes through snapshots [3, 9]. DeepAgents should not expose those
+        in the initial supported backend unless there is a concrete consumer.
+        The durable path is to keep the option surface typed enough to pass
+        snapshot names and resources, then add higher-level GPU or DinD helpers
+        when tests prove the specific workflows.
+      </p>
+      <h3>
+        Finding 5: Security, credentials, network, and preview behavior are not
+        optional details
+      </h3>
+      <p>
+        Daytona authentication is environment-driven in the SDK. The SDK can
+        read <code>DAYTONA_API_KEY</code>, <code>DAYTONA_API_URL</code>, and
+        <code>DAYTONA_TARGET</code>, and the docs define configuration
+        precedence as code, environment variables, <code>.env</code>, then
+        defaults [8]. API keys authenticate SDK and CLI requests, can have
+        expiration, and have scopes such as <code>write:sandboxes</code>,
+        <code>delete:sandboxes</code>, <code>write:snapshots</code>, and volume,
+        region, runner, and audit scopes [11]. DeepAgents should not load
+        Daytona credentials into the sandbox by default. Host-side Daytona
+        credentials should remain host-side, while only explicit
+        <code>envVars</code> should be passed into the sandbox [8, 11].
+      </p>
+      <p>
+        Network controls should be part of the public option set. Daytona
+        supports <code>networkAllowList</code> and
+        <code>networkBlockAll</code> at sandbox creation, can update network
+        settings while a sandbox is running on eligible tiers, and requires IPv4
+        CIDR entries for allow lists [10]. The docs also say lower tiers can
+        have organization-level restrictions that sandbox-level settings cannot
+        override [10]. DeepAgents should surface these fields directly and
+        translate Daytona API errors into clear
+        <code>DaytonaSandboxError</code> messages. It should not silently relax
+        network policy or retry with broader access.
+      </p>
+      <p>
+        Rate limits affect reliability under agent workloads. Daytona documents
+        tiered request limits, sandbox creation limits, sandbox lifecycle
+        limits, rate-limit headers, SDK <code>DaytonaRateLimitError</code>, and
+        best practices such as exponential backoff, using
+        <code>Retry-After</code>, queuing, reusing sandboxes, and using webhooks
+        rather than polling when possible [12]. A DeepAgents adapter should
+        implement retry only for safe idempotent lifecycle reads or creates
+        where the call has not succeeded, and it should expose the underlying
+        rate limit headers on errors where possible. Broad hidden retries around
+        command execution would be risky because commands are not generally
+        idempotent.
+      </p>
+      <p>
+        Preview URLs are a useful optional integration but should not be part of
+        <code>DisposableSandbox</code>. Daytona can generate preview URLs for
+        HTTP services on ports 3000 through 9999, with standard token-header
+        URLs and signed URLs that embed a token and have a configurable
+        expiration [13]. DeepAgents&#x27; current sandbox contract does not
+        include preview URLs [19]. Add preview support as a Daytona-specific
+        method on an extended type, a helper function, or metadata returned by a
+        high-level Daytona wrapper. Do not pollute
+        <code>DisposableSandbox</code> with a product-specific preview method.
+      </p>
+      <h3>
+        Finding 6: Deployment modes affect what &quot;supported&quot; means
+      </h3>
+      <p>
+        Daytona can be used as hosted Daytona, open source self-hosted
+        deployment, or customer-managed compute with custom regions and runners
+        [1, 15, 16]. The TypeScript SDK configuration supports
+        <code>apiUrl</code> and <code>target</code>, and the regions docs
+        explain that sandboxes are scheduled onto runners within targeted
+        regions [8, 14]. A supported backend should not assume
+        <code>https://app.daytona.io/api</code> except as the SDK default. It
+        should accept <code>apiUrl</code> and <code>target</code> explicitly and
+        respect the SDK environment variables [8].
+      </p>
+      <p>
+        Self-hosting introduces operational constraints that can surface as
+        sandbox errors. The open source deployment docs describe API, proxy,
+        runner, SSH gateway, Caddy, wildcard TLS, firewall ports, Docker
+        Compose, and inter-sandbox network isolation configuration [15].
+        Customer-managed compute uses custom region URLs for proxy, SSH gateway,
+        and snapshot manager services, with generated credentials for those
+        services [16]. DeepAgents does not need to manage these systems, but
+        error messages should distinguish &quot;Daytona API failed&quot;,
+        &quot;sandbox process failed&quot;, &quot;preview proxy failed&quot;,
+        and &quot;network policy blocked access&quot; rather than collapsing all
+        failures into command stderr.
+      </p>
+      <p>
+        This matters for tests. Unit tests can validate option normalization and
+        shell quoting without a Daytona account, but live integration tests
+        require a configured Daytona environment. Tests should skip only when
+        <code>DAYTONA_API_KEY</code> is missing, and they should fail clearly
+        when credentials exist but the API, target, network, or rate limits are
+        wrong. That pattern matches existing Docker tests, which detect Docker
+        availability and skip only when Docker is not available [23]. It also
+        keeps &quot;supported&quot; honest: if credentials are present, the
+        backend should prove the real remote path.
+      </p>
+      <h3>
+        Finding 7: The initial implementation should be small, typed, and
+        test-led
+      </h3>
+      <p>
+        The first code slice should add a Daytona backend file, export it, and
+        add integration tests without changing existing Docker or virtual
+        behavior [19, 20, 22, 23]. The backend should implement
+        <code>executeCommand</code> through Daytona process command execution,
+        <code>readFile</code> and <code>writeFiles</code> through the
+        <code>fs</code> module, <code>dispose</code> through sandbox deletion or
+        an option-controlled stop/delete policy, and <code>spawn</code> through
+        sessions only after the live-streaming test proves
+        first-byte-before-exit behavior [4, 5, 6, 17, 19, 23]. If
+        <code>spawn</code> cannot satisfy the test in the first pass, leave
+        <code>spawn</code> undefined and document the missing exact capability
+        rather than adding a buffered fallback [19, 24].
+      </p>
+      <p>The first public API can be:</p>
+      <pre><code>
+export interface DaytonaSandboxOptions {
+  apiKey?: string;
+  apiUrl?: string;
+  target?: string;
+  sandboxId?: string;
+  name?: string;
+  snapshot?: string;
+  image?: string;
+  language?: &#x27;python&#x27; | &#x27;typescript&#x27; | &#x27;javascript&#x27;;
+  envVars?: Record&lt;string, string&gt;;
+  resources?: { cpu?: number; memory?: number; disk?: number };
+  networkAllowList?: string;
+  networkBlockAll?: boolean;
+  autoStopInterval?: number;
+  autoArchiveInterval?: number;
+  autoDeleteInterval?: number;
+  deleteOnDispose?: boolean;
+  destination?: string;
+}
+</code></pre>
+      <p>
+        That option set is intentionally close to Daytona docs rather than
+        Docker-specific abstractions [3, 8, 9, 10, 14].
+        <code>deleteOnDispose</code> should default to true for ephemeral
+        DeepAgents test sandboxes and should be explicit for attached sandboxes.
+        If <code>sandboxId</code> is provided, <code>dispose</code> should
+        probably not delete by default; attached sandboxes are often persistent
+        developer resources. This needs a test because lifecycle semantics are
+        expensive when wrong [3, 12].
+      </p>
+      <p>
+        The verification plan should mirror the existing Docker tests. Required
+        tests are: buffered command success and nonzero exit mapping; file write
+        and read round trip; <code>createBashTool</code> works with Daytona
+        destination; first stdout chunk arrives before exit for
+        <code>spawn</code>; stderr streams separately;
+        <code>spawn</code> forwards <code>env</code>;
+        <code>spawn</code> forwards or simulates <code>cwd</code>; abort signal
+        terminates a long-running command; and file-event observation records a
+        write created by a spawned process [21, 23]. The first five tests prove
+        compatibility; the last four prevent subtle regressions in the exact
+        areas DeepAgents previously tightened.
+      </p>
+      <h2 class="section-title">Synthesis &amp; Insights</h2>
+      <p>
+        The strongest pattern across sources is that Daytona is not just a
+        remote <code>exec</code> API. It is a managed sandbox platform with a
+        toolbox API, snapshots, filesystem operations, process sessions, PTY,
+        previews, network controls, and regions [1, 3, 4, 5, 6, 7, 9, 10, 13,
+        14]. DeepAgents should resist the temptation to expose all of that
+        immediately. The durable integration is a narrow
+        <code>DisposableSandbox</code> backend plus optional Daytona helpers for
+        Daytona-specific capabilities. That preserves the current architecture
+        while leaving room for preview URLs, snapshots, and custom regions.
+      </p>
+      <p>
+        The second pattern is that process streaming is the only load-bearing
+        uncertainty. Daytona clearly supports real-time log streaming for
+        session commands, and its Codex guide uses that path for an agent inside
+        a sandbox [6, 17]. However, the docs do not, by themselves, prove that
+        the TypeScript SDK exposes every detail DeepAgents needs for
+        <code>SandboxProcess.exit</code>, abort, cwd, env, and cleanup [5, 6,
+        17, 19]. The implementation must inspect the actual
+        <code>@daytona/sdk</code> type declarations and run a real Daytona
+        integration test before exporting <code>spawn</code> as supported.
+      </p>
+      <p>
+        The third pattern is that Daytona&#x27;s native path conventions differ
+        from the existing generic default. DeepAgents currently defaults to
+        <code>/workspace</code>, while Daytona&#x27;s official Codex guide uses
+        <code>/home/daytona</code> [17, 20]. That is not a cosmetic issue
+        because <code>createBashTool</code> uses destination for command working
+        directory and file-event observation root [20, 21]. The integration
+        should either create <code>/workspace</code> deliberately or default the
+        Daytona high-level wrapper to <code>/home/daytona</code>. The report
+        recommends the native default.
+      </p>
+      <h2 class="section-title">Counterevidence Register</h2>
+      <p>
+        Daytona process sessions are promising for <code>spawn</code>, but the
+        docs do not show a TypeScript API that directly returns a
+        <code>ReadableStream</code> and an exit object in the DeepAgents shape
+        [5, 6, 17, 19]. The adapter will need a small stream bridge and may need
+        to retrieve command status separately.
+      </p>
+      <p>
+        Daytona PTY supports richer interactivity than process sessions, but PTY
+        output is a terminal stream and may not preserve separate stdout and
+        stderr semantics in the same way DeepAgents expects [7, 19]. PTY is
+        therefore not the preferred first <code>spawn</code> implementation.
+      </p>
+      <p>
+        Daytona snapshots support OCI images and reproducible environments, but
+        they do not automatically match DeepAgents&#x27; Docker installer
+        abstraction [9, 22]. Porting installers directly would be premature
+        without a tested snapshot creation flow.
+      </p>
+      <p>
+        Daytona network allow lists are IPv4 CIDR based and tier constrained, so
+        a caller expecting domain-based allow lists or unrestricted egress may
+        fail even when the DeepAgents adapter is correct [10]. The adapter
+        should surface Daytona&#x27;s error rather than masking it.
+      </p>
+      <h2 class="section-title">Claims-Evidence Table</h2>
+      <table>
+        <tbody>
+          <tr>
+            <th>Claim</th>
+            <th>Status</th>
+            <th>Primary evidence</th>
+          </tr>
+          <tr>
+            <td>Daytona fits the backend capability model</td>
+            <td>Supported</td>
+            <td>Sandboxes, filesystem, and process docs [3, 4, 5]</td>
+          </tr>
+          <tr>
+            <td>
+              Daytona should use <code>DisposableSandbox</code> rather than a
+              new abstraction
+            </td>
+            <td>Supported</td>
+            <td>DeepAgents types and bash-tool composition [19, 20]</td>
+          </tr>
+          <tr>
+            <td>Daytona has documented streaming surfaces</td>
+            <td>Supported</td>
+            <td>
+              Session command log streaming, PTY, and Codex guide [6, 7, 17]
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Session log streaming is the best first candidate for
+              <code>spawn</code>
+            </td>
+            <td>Supported, needs live test</td>
+            <td>Log streaming docs and Codex guide [6, 17]</td>
+          </tr>
+          <tr>
+            <td>
+              <code>/home/daytona</code> should be the Daytona high-level
+              destination default
+            </td>
+            <td>Supported</td>
+            <td>
+              Codex guide and createBashTool destination behavior [17, 20]
+            </td>
+          </tr>
+          <tr>
+            <td>
+              File-event observation can be reused with tool availability checks
+            </td>
+            <td>Supported</td>
+            <td>
+              file-events implementation and snapshot/image support [9, 21]
+            </td>
+          </tr>
+          <tr>
+            <td>Rate limits must be handled explicitly</td>
+            <td>Supported</td>
+            <td>Daytona limits docs [12]</td>
+          </tr>
+        </tbody>
+      </table>
+      <h2 class="section-title">Limitations &amp; Caveats</h2>
+      <p>
+        This report is based on official Daytona docs retrieved on 2026-05-17,
+        npm package metadata retrieved on the same date, and the current local
+        DeepAgents checkout [1, 18, 19, 20, 21, 22, 23]. Daytona&#x27;s docs are
+        versioned around v0.176 in several pages, while npm reports
+        <code>@daytona/sdk</code> latest as <code>0.175.0</code>; that mismatch
+        means implementation should inspect the installed SDK type declarations
+        before coding against exact method signatures [1, 18].
+      </p>
+      <p>
+        No live Daytona sandbox was created during this research because the
+        task was research, not implementation, and no
+        <code>DAYTONA_API_KEY</code> was provided in the prompt [8, 11]. The
+        live-streaming, abort, cwd, env, and file-event claims for
+        <code>spawn</code> are therefore design conclusions backed by docs and
+        local DeepAgents tests, not live Daytona verification [6, 17, 23].
+      </p>
+      <p>
+        The report does not claim Daytona is a full replacement for Docker
+        Compose in DeepAgents. Daytona has snapshots, images, regions, and
+        custom compute, but the current Docker backend supports local Dockerfile
+        and Compose-specific development workflows that are not automatically
+        represented by Daytona&#x27;s SDK [9, 15, 16, 22].
+      </p>
+      <h2 class="section-title">Recommendations</h2>
+      <p>
+        Add
+        <code>packages/context/src/lib/sandbox/daytona-sandbox.ts</code> with a
+        Daytona-backed <code>DisposableSandbox</code>, export it from
+        <code>packages/context/src/lib/sandbox/index.ts</code>, and keep the
+        first public API focused on
+        <code>createDaytonaSandbox(options)</code> [19, 22]. Do not change
+        existing Docker, virtual, or Agent OS behavior in the same patch.
+      </p>
+      <p>
+        Implement <code>executeCommand</code>, <code>readFile</code>,
+        <code>writeFiles</code>, and <code>dispose</code> first. Use Daytona
+        <code>process.executeCommand</code> for buffered commands, Daytona
+        <code>fs</code> operations for file transfer, and an explicit lifecycle
+        policy for dispose, with attached sandboxes not deleted by default [4,
+        5, 19].
+      </p>
+      <p>
+        Implement <code>spawn</code> only through a real streaming primitive.
+        Start with Daytona process sessions using
+        <code>executeSessionCommand(..., { runAsync: true })</code> and
+        <code>getSessionCommandLogs(...)</code>; expose callback chunks through
+        <code>ReadableStream</code> and prove first-byte-before-exit behavior
+        with a live test [6, 17, 23]. If this cannot satisfy exit or abort
+        semantics, leave <code>spawn</code> undefined until a correct
+        implementation exists [19, 24].
+      </p>
+      <p>
+        Add a Daytona-specific high-level wrapper that calls
+        <code>createBashTool</code> with
+        <code>destination: &quot;/home/daytona&quot;</code> unless the caller
+        overrides it, creates the destination directory, and preserves skill
+        upload and file-event observation [17, 20, 21].
+      </p>
+      <p>
+        Add integration tests gated on <code>DAYTONA_API_KEY</code>. The test
+        suite should follow the Docker spawn test contract: buffered command,
+        file read/write, bash-tool composition, real streaming, stderr
+        separation, <code>env</code>, <code>cwd</code>, abort, and file-event
+        writes from <code>spawn</code> [21, 23].
+      </p>
+      <p>
+        Expose network policy, resources, snapshots/images, and region/target as
+        typed options. Do not hide Daytona tier, rate-limit, or network-policy
+        errors behind generic command failures [3, 8, 9, 10, 12, 14].
+      </p>
+    </div>
+    <div class="bibliography">
+      <h2 class="section-title">Bibliography</h2>
+      <div class="bib-entry">
+        <span class="bib-number">[1]</span> Daytona Platforms, Inc. (2026).
+        &quot;Daytona Documentation&quot;. Daytona. https://www.daytona.io/docs/
+        (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[2]</span> Daytona Platforms, Inc. (2026).
+        &quot;TypeScript SDK Reference&quot;. Daytona.
+        https://www.daytona.io/docs/en/typescript-sdk/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[3]</span> Daytona Platforms, Inc. (2026).
+        &quot;Sandboxes&quot;. Daytona.
+        https://www.daytona.io/docs/en/sandboxes/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[4]</span> Daytona Platforms, Inc. (2026).
+        &quot;File System Operations&quot;. Daytona.
+        https://www.daytona.io/docs/en/file-system-operations/ (Retrieved:
+        2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[5]</span> Daytona Platforms, Inc. (2026).
+        &quot;Process and Code Execution&quot;. Daytona.
+        https://www.daytona.io/docs/en/process-code-execution/ (Retrieved:
+        2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[6]</span> Daytona Platforms, Inc. (2026).
+        &quot;Log Streaming&quot;. Daytona.
+        https://www.daytona.io/docs/en/log-streaming/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[7]</span> Daytona Platforms, Inc. (2026).
+        &quot;Pseudo Terminal (PTY)&quot;. Daytona.
+        https://www.daytona.io/docs/en/pty/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[8]</span> Daytona Platforms, Inc. (2026).
+        &quot;Environment Configuration&quot;. Daytona.
+        https://www.daytona.io/docs/en/configuration/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[9]</span> Daytona Platforms, Inc. (2026).
+        &quot;Snapshots&quot;. Daytona.
+        https://www.daytona.io/docs/en/snapshots/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[10]</span> Daytona Platforms, Inc. (2026).
+        &quot;Network Limits&quot;. Daytona.
+        https://www.daytona.io/docs/en/network-limits/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[11]</span> Daytona Platforms, Inc. (2026).
+        &quot;API Keys&quot;. Daytona. https://www.daytona.io/docs/en/api-keys/
+        (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[12]</span> Daytona Platforms, Inc. (2026).
+        &quot;Limits&quot;. Daytona. https://www.daytona.io/docs/en/limits/
+        (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[13]</span> Daytona Platforms, Inc. (2026).
+        &quot;Preview&quot;. Daytona. https://www.daytona.io/docs/en/preview/
+        (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[14]</span> Daytona Platforms, Inc. (2026).
+        &quot;Regions&quot;. Daytona. https://www.daytona.io/docs/en/regions/
+        (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[15]</span> Daytona Platforms, Inc. (2026).
+        &quot;Open Source Deployment&quot;. Daytona.
+        https://www.daytona.io/docs/en/oss-deployment/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[16]</span> Daytona Platforms, Inc. (2026).
+        &quot;Customer Managed Compute&quot;. Daytona.
+        https://www.daytona.io/docs/en/runners/ (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[17]</span> Daytona Platforms, Inc. (2026).
+        &quot;Build a Coding Agent Using Codex SDK and Daytona&quot;. Daytona.
+        https://www.daytona.io/docs/en/guides/codex/codex-sdk-interactive-terminal-sandbox/
+        (Retrieved: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[18]</span> npm Registry (2026). &quot;Package
+        metadata for @daytona/sdk@0.175.0&quot;. npm.
+        https://www.npmjs.com/package/@daytona/sdk (Retrieved with npm view:
+        2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[19]</span> DeepAgents local source (2026).
+        &quot;Sandbox types&quot;. Local repository.
+        packages/context/src/lib/sandbox/types.ts (Read: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[20]</span> DeepAgents local source (2026).
+        &quot;createBashTool wrapper&quot;. Local repository.
+        packages/context/src/lib/sandbox/bash-tool.ts (Read: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[21]</span> DeepAgents local source (2026).
+        &quot;File-event observer&quot;. Local repository.
+        packages/context/src/lib/sandbox/file-events.ts (Read: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[22]</span> DeepAgents local source (2026).
+        &quot;Docker sandbox implementation&quot;. Local repository.
+        packages/context/src/lib/sandbox/docker-sandbox.ts (Read: 2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[23]</span> DeepAgents local test (2026).
+        &quot;Docker spawn integration test&quot;. Local repository.
+        packages/context/test/docker-sandbox-spawn.integration.test.ts (Read:
+        2026-05-17)
+      </div>
+      <div class="bib-entry">
+        <span class="bib-number">[24]</span> Codex memory registry (2026).
+        &quot;DeepAgents sandbox decorator and spawn primitive guidance&quot;.
+        Local memory. /Users/ezzabuzaid/.codex/memories/MEMORY.md (Read:
+        2026-05-17)
+      </div>
+      <h2 class="section-title">Methodology Appendix</h2>
+      <p>
+        Phase 1, Scope: The research decomposed the request into Daytona product
+        capabilities, Daytona TypeScript SDK and API implications, DeepAgents
+        backend contract requirements, and a test-driven implementation plan [1,
+        19, 23].
+      </p>
+      <p>
+        Phase 2, Plan: The retrieval plan prioritized official Daytona docs, the
+        current npm package surface, local DeepAgents source, and prior sandbox
+        design memory. Third-party commentary was intentionally deprioritized
+        because implementation correctness depends on primary docs and local
+        contracts [1, 18, 19, 24].
+      </p>
+      <p>
+        Phase 3, Retrieve: The research reviewed Daytona docs for sandboxes,
+        TypeScript SDK, filesystem, process execution, log streaming, PTY,
+        configuration, snapshots, network limits, API keys, limits, preview
+        URLs, regions, open source deployment, customer-managed compute, and the
+        official Codex guide [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17]. It also inspected local DeepAgents sandbox source and tests
+        [19, 20, 21, 22, 23].
+      </p>
+      <p>
+        Phase 4, Triangulate: Core claims were cross-checked between Daytona
+        docs and local DeepAgents code. For example, the
+        <code>spawn</code> recommendation uses Daytona log streaming docs, the
+        Daytona Codex guide, DeepAgents type comments, and Docker spawn tests
+        together rather than relying on one source [6, 17, 19, 23].
+      </p>
+      <p>
+        Phase 4.5, Outline refinement: The initial broad outline was narrowed
+        around implementation risk. The evidence showed basic lifecycle,
+        filesystem, and command execution were straightforward, while
+        <code>spawn</code>, workspace path, file-event observation, lifecycle
+        disposal, and rate limits deserved the most detail [6, 17, 20, 21, 23].
+      </p>
+      <p>
+        Phase 5, Synthesize: The report converts product facts into
+        implementation recommendations: add a backend, keep
+        <code>DisposableSandbox</code>, use session log streaming for
+        <code>spawn</code>, default high-level Daytona tooling to
+        <code>/home/daytona</code>, and verify with live integration tests [17,
+        19, 20, 23].
+      </p>
+      <p>
+        Phase 6, Critique: Counterevidence was tracked for SDK version mismatch,
+        missing live Daytona run, PTY stdout/stderr semantics, network tier
+        constraints, and Docker Compose non-equivalence [7, 10, 18, 22].
+      </p>
+      <p>
+        Phase 7, Refine: Recommendations were limited to the first durable slice
+        and avoid broad feature expansion. Advanced features such as GPU,
+        Docker-in-Docker, Kubernetes, preview helpers, and custom regions are
+        documented as later extensions unless an implementation consumer
+        requires them [9, 13, 14, 15, 16].
+      </p>
+      <p>
+        Phase 8, Package: The research package includes this Markdown report,
+        <code>sources.jsonl</code>, <code>evidence.jsonl</code>,
+        <code>claims.jsonl</code>, and <code>run_manifest.json</code> under
+        <code>research/daytona-sandbox-research-20260517/</code>.
+      </p>
+    </div>
+  </body>
+</html>
