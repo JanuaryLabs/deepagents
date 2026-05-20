@@ -1,6 +1,5 @@
 import { createUIMessageStream } from 'ai';
 
-import type { StreamPart } from '../guardrail.ts';
 import {
   type PersistedWriterOptions,
   persistedWriter,
@@ -12,6 +11,7 @@ import type {
   StreamStatus,
   StreamStore,
 } from './stream-store.ts';
+import type { StreamPart } from './types.ts';
 
 function isTerminal(status: StreamStatus) {
   return status !== 'queued' && status !== 'running';

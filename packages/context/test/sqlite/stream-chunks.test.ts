@@ -1,3 +1,4 @@
+import { type UIMessageChunk, simulateReadableStream } from 'ai';
 import assert from 'node:assert';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -66,10 +67,17 @@ function createStream(overrides?: Partial<StreamData>): StreamData {
   };
 }
 
+function textDeltaChunk(
+  seq: number,
+  delta = `chunk-${seq}`,
+): StreamChunkData['data'] {
+  return { type: 'text-delta', id: `part-${seq}`, delta };
+}
+
 function createChunk(
   streamId: string,
   seq: number,
-  data: unknown = { type: 'text-delta', delta: `chunk-${seq}` },
+  data: StreamChunkData['data'] = textDeltaChunk(seq),
 ): StreamChunkData {
   return {
     streamId,
@@ -142,6 +150,14 @@ class FlakyFlushStore extends StreamStore {
       throw new Error('flush failed once');
     }
     this.#chunks.push(...chunks);
+    for (const chunk of chunks) {
+      if (chunk.data.type === 'error') {
+        await this.updateStreamStatus(chunk.streamId, 'failed', {
+          error: chunk.data.errorText,
+        });
+        break;
+      }
+    }
   }
 
   async getChunks(
@@ -818,10 +834,10 @@ describe('Stream Chunks', () => {
         const stream = createStream();
         await store.createStream(stream);
 
-        const complexData = {
-          type: 'tool-call',
-          toolName: 'search',
-          args: { query: 'hello world', limit: 10 },
+        const complexData: StreamChunkData['data'] = {
+          type: 'tool-output-available',
+          toolCallId: 'tool-1',
+          output: { query: 'hello world', limit: 10 },
         };
         await store.appendChunks([createChunk(stream.id, 0, complexData)]);
 
@@ -862,6 +878,114 @@ describe('Stream Chunks', () => {
     it('should handle empty batch', async () => {
       await withStreamStore(async (store) => {
         await store.appendChunks([]);
+      });
+    });
+
+    it('should atomically append chunks and fail a stream', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+
+        const errorChunk: StreamChunkData['data'] = {
+          type: 'error',
+          errorText: 'direct failure',
+        };
+
+        await store.appendChunks([createChunk(stream.id, 0, errorChunk)]);
+
+        const updated = await store.getStream(stream.id);
+        assert.ok(updated);
+        assert.strictEqual(updated.status, 'failed');
+        assert.strictEqual(updated.error, 'direct failure');
+        assert.ok(typeof updated.finishedAt === 'number');
+
+        const chunks = await store.getChunks(stream.id);
+        assert.strictEqual(chunks.length, 1);
+        assert.deepStrictEqual(chunks[0].data, errorChunk);
+      });
+    });
+
+    it('should not fail a stream for tool error chunks', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+
+        const toolInputError: StreamChunkData['data'] = {
+          type: 'tool-input-error',
+          toolCallId: 'tool-1',
+          toolName: 'search',
+          input: { query: 'bad' },
+          errorText: 'invalid input',
+        };
+        const toolOutputError: StreamChunkData['data'] = {
+          type: 'tool-output-error',
+          toolCallId: 'tool-1',
+          errorText: 'tool failed',
+        };
+
+        await store.appendChunks([
+          createChunk(stream.id, 0, toolInputError),
+          createChunk(stream.id, 1, toolOutputError),
+        ]);
+
+        const updated = await store.getStream(stream.id);
+        assert.ok(updated);
+        assert.strictEqual(updated.status, 'running');
+        assert.strictEqual(updated.error, null);
+        assert.deepStrictEqual(
+          (await store.getChunks(stream.id)).map((chunk) => chunk.data),
+          [toolInputError, toolOutputError],
+        );
+      });
+    });
+
+    it('should reject missing-stream error chunks without storing chunks', async () => {
+      await withStreamStore(async (store) => {
+        await assert.rejects(
+          () =>
+            store.appendChunks([
+              createChunk('missing-stream', 0, {
+                type: 'error',
+                errorText: 'missing target',
+              }),
+            ]),
+          /foreign key|constraint|not found/i,
+        );
+
+        assert.deepStrictEqual(await store.getChunks('missing-stream'), []);
+      });
+    });
+
+    it('should roll back failed status when atomic append fails', async () => {
+      await withStreamStore(async (store) => {
+        const stream = createStream({
+          status: 'running',
+          startedAt: Date.now(),
+        });
+        await store.createStream(stream);
+        await store.appendChunks([createChunk(stream.id, 0)]);
+
+        await assert.rejects(
+          () =>
+            store.appendChunks([
+              createChunk(stream.id, 0, {
+                type: 'error',
+                errorText: 'should roll back',
+              }),
+            ]),
+          /UNIQUE|constraint/i,
+        );
+
+        const updated = await store.getStream(stream.id);
+        assert.ok(updated);
+        assert.strictEqual(updated.status, 'running');
+        assert.strictEqual(updated.error, null);
       });
     });
   });
@@ -919,7 +1043,7 @@ describe('Stream Chunks', () => {
         assert.ok(running);
         assert.strictEqual(running.status, 'running');
 
-        const chunkTypes = [
+        const chunkTypes: StreamChunkData['data'][] = [
           { type: 'text-start', id: 'part-1' },
           { type: 'text-delta', id: 'part-1', delta: 'Hello ' },
           { type: 'text-delta', id: 'part-1', delta: 'world' },
@@ -1083,14 +1207,8 @@ describe('Stream Chunks', () => {
         }
 
         assert.strictEqual(received.length, 5);
-        assert.deepStrictEqual(received[0], {
-          type: 'text-delta',
-          delta: 'chunk-0',
-        });
-        assert.deepStrictEqual(received[4], {
-          type: 'text-delta',
-          delta: 'chunk-4',
-        });
+        assert.deepStrictEqual(received[0], textDeltaChunk(0));
+        assert.deepStrictEqual(received[4], textDeltaChunk(4));
       });
     });
 
@@ -1120,14 +1238,8 @@ describe('Stream Chunks', () => {
         await consume;
 
         assert.strictEqual(received.length, 4);
-        assert.deepStrictEqual(received[0], {
-          type: 'text-delta',
-          delta: 'chunk-0',
-        });
-        assert.deepStrictEqual(received[3], {
-          type: 'text-delta',
-          delta: 'chunk-3',
-        });
+        assert.deepStrictEqual(received[0], textDeltaChunk(0));
+        assert.deepStrictEqual(received[3], textDeltaChunk(3));
       });
     });
 
@@ -1157,14 +1269,8 @@ describe('Stream Chunks', () => {
         await consume;
 
         assert.strictEqual(received.length, 3);
-        assert.deepStrictEqual(received[0], {
-          type: 'text-delta',
-          delta: 'chunk-0',
-        });
-        assert.deepStrictEqual(received[1], {
-          type: 'text-delta',
-          delta: 'chunk-1',
-        });
+        assert.deepStrictEqual(received[0], textDeltaChunk(0));
+        assert.deepStrictEqual(received[1], textDeltaChunk(1));
         assert.deepStrictEqual(received[2], {
           type: 'error',
           errorText: 'test error',
@@ -1280,14 +1386,8 @@ describe('Stream Chunks', () => {
         await consume;
 
         assert.strictEqual(received.length, 2);
-        assert.deepStrictEqual(received[0], {
-          type: 'text-delta',
-          delta: 'chunk-0',
-        });
-        assert.deepStrictEqual(received[1], {
-          type: 'text-delta',
-          delta: 'chunk-1',
-        });
+        assert.deepStrictEqual(received[0], textDeltaChunk(0));
+        assert.deepStrictEqual(received[1], textDeltaChunk(1));
       });
     });
 
@@ -1344,14 +1444,8 @@ describe('Stream Chunks', () => {
 
           await consume;
           assert.strictEqual(received.length, 3);
-          assert.deepStrictEqual(received[0], {
-            type: 'text-delta',
-            delta: 'chunk-0',
-          });
-          assert.deepStrictEqual(received[2], {
-            type: 'text-delta',
-            delta: 'chunk-2',
-          });
+          assert.deepStrictEqual(received[0], textDeltaChunk(0));
+          assert.deepStrictEqual(received[2], textDeltaChunk(2));
         } finally {
           (writerStore as { close?: () => void }).close?.();
           (watcherStore as { close?: () => void }).close?.();
@@ -1504,14 +1598,11 @@ describe('Stream Chunks', () => {
         }
 
         assert.strictEqual(received.length, totalChunks);
-        assert.deepStrictEqual(received[0], {
-          type: 'text-delta',
-          delta: 'chunk-0',
-        });
-        assert.deepStrictEqual(received[totalChunks - 1], {
-          type: 'text-delta',
-          delta: `chunk-${totalChunks - 1}`,
-        });
+        assert.deepStrictEqual(received[0], textDeltaChunk(0));
+        assert.deepStrictEqual(
+          received[totalChunks - 1],
+          textDeltaChunk(totalChunks - 1),
+        );
 
         const chunkBatches = watchEvents.filter(
           (event) => event.type === 'watch:chunks',
@@ -1827,6 +1918,106 @@ describe('Stream Chunks', () => {
         const stream = await store.getStream(streamId);
         assert.ok(stream);
         assert.strictEqual(stream.status, 'cancelled');
+      });
+    });
+  });
+
+  describe('StreamManager.persist() error chunks', () => {
+    it('should fail the stream when a top-level error chunk is persisted', async () => {
+      await withStreamStore(async (store) => {
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const errorText = 'model stream failed';
+        const source = simulateReadableStream<UIMessageChunk>({
+          chunks: [
+            { type: 'text-start', id: 'part-1' },
+            { type: 'text-delta', id: 'part-1', delta: 'before' },
+            { type: 'error', errorText },
+            { type: 'finish' },
+          ],
+          initialDelayInMs: null,
+          chunkDelayInMs: 25,
+        });
+
+        const persistPromise = streams.persist(source, streamId, {
+          strategy: 'immediate',
+        });
+
+        await waitForStatus(store, streamId, 'failed');
+        await persistPromise;
+
+        const updated = await store.getStream(streamId);
+        assert.ok(updated);
+        assert.strictEqual(updated.status, 'failed');
+        assert.strictEqual(updated.error, errorText);
+
+        const chunks = await store.getChunks(streamId);
+        assert.deepStrictEqual(
+          chunks.map((chunk) => chunk.data),
+          [
+            { type: 'text-start', id: 'part-1' },
+            { type: 'text-delta', id: 'part-1', delta: 'before' },
+            { type: 'error', errorText },
+            { type: 'finish' },
+          ],
+        );
+      });
+    });
+
+    it('should not fail the stream for tool error chunks', async () => {
+      await withStreamStore(async (store) => {
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const source = simulateReadableStream<UIMessageChunk>({
+          chunks: [
+            {
+              type: 'tool-input-error',
+              toolCallId: 'tool-1',
+              toolName: 'search',
+              input: { query: 'bad' },
+              errorText: 'invalid input',
+            },
+            {
+              type: 'tool-output-error',
+              toolCallId: 'tool-1',
+              errorText: 'tool failed',
+            },
+            { type: 'finish' },
+          ],
+          initialDelayInMs: null,
+          chunkDelayInMs: null,
+        });
+
+        await streams.persist(source, streamId, { strategy: 'immediate' });
+
+        const updated = await store.getStream(streamId);
+        assert.ok(updated);
+        assert.strictEqual(updated.status, 'completed');
+        assert.strictEqual(updated.error, null);
+
+        const chunks = await store.getChunks(streamId);
+        assert.deepStrictEqual(
+          chunks.map((chunk) => chunk.data),
+          [
+            {
+              type: 'tool-input-error',
+              toolCallId: 'tool-1',
+              toolName: 'search',
+              input: { query: 'bad' },
+              errorText: 'invalid input',
+            },
+            {
+              type: 'tool-output-error',
+              toolCallId: 'tool-1',
+              errorText: 'tool failed',
+            },
+            { type: 'finish' },
+          ],
+        );
       });
     });
   });

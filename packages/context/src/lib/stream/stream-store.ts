@@ -1,3 +1,7 @@
+import type { StreamPart } from './types.ts';
+
+export type { StreamPart } from './types.ts';
+
 export type StreamStatus =
   | 'queued'
   | 'running'
@@ -22,8 +26,26 @@ export interface StreamData {
 export interface StreamChunkData {
   streamId: string;
   seq: number;
-  data: unknown;
+  data: StreamPart;
   createdAt: number;
+}
+
+export interface StreamFailure {
+  streamId: string;
+  error: string;
+}
+
+export function collectStreamFailures(
+  chunks: StreamChunkData[],
+): StreamFailure[] {
+  const failures = new Map<string, string>();
+  for (const chunk of chunks) {
+    if (chunk.data.type === 'error' && !failures.has(chunk.streamId)) {
+      failures.set(chunk.streamId, chunk.data.errorText);
+    }
+  }
+
+  return [...failures].map(([streamId, error]) => ({ streamId, error }));
 }
 
 export abstract class StreamStore {

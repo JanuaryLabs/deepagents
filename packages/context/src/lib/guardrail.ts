@@ -34,17 +34,10 @@
  * });
  * ```
  */
-import type { InferUIMessageChunk, UIDataTypes, UIMessage } from 'ai';
-
 import type { SkillPathMapping } from './skills/types.ts';
+import type { StreamPart } from './stream/types.ts';
 
-/**
- * Type alias for stream parts from the AI SDK's UI message stream.
- * This is the full chunk type that includes text-delta, error, reasoning-delta, etc.
- */
-export type StreamPart = InferUIMessageChunk<
-  UIMessage<unknown, UIDataTypes, Record<string, never>>
->;
+export type { StreamPart } from './stream/types.ts';
 
 /**
  * Result of a guardrail check.

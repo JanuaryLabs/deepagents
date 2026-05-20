@@ -7,6 +7,7 @@ import type {
   StreamData,
   StreamStatus,
 } from './stream-store.ts';
+import { collectStreamFailures } from './stream-store.ts';
 import { StreamStore } from './stream-store.ts';
 
 export class SqliteStreamStore extends StreamStore {
@@ -195,6 +196,7 @@ export class SqliteStreamStore extends StreamStore {
 
   async appendChunks(chunks: StreamChunkData[]): Promise<void> {
     if (chunks.length === 0) return;
+    const failures = collectStreamFailures(chunks);
     this.#db.exec('BEGIN TRANSACTION');
     try {
       for (const chunk of chunks) {
@@ -207,6 +209,15 @@ export class SqliteStreamStore extends StreamStore {
           JSON.stringify(chunk.data),
           chunk.createdAt,
         );
+      }
+      const failedAt = Date.now();
+      for (const failure of failures) {
+        const result = this.#stmt(
+          'UPDATE streams SET status = ?, finishedAt = ?, error = ? WHERE id = ?',
+        ).run('failed', failedAt, failure.error, failure.streamId);
+        if (result.changes !== 1) {
+          throw new Error(`Stream "${failure.streamId}" not found`);
+        }
       }
       this.#db.exec('COMMIT');
     } catch (error) {
@@ -245,7 +256,7 @@ export class SqliteStreamStore extends StreamStore {
     return rows.map((row) => ({
       streamId: row.streamId,
       seq: row.seq,
-      data: JSON.parse(row.data),
+      data: JSON.parse(row.data) as StreamChunkData['data'],
       createdAt: row.createdAt,
     }));
   }

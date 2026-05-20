@@ -8,6 +8,7 @@ import type {
   StreamData,
   StreamStatus,
 } from './stream-store.ts';
+import { collectStreamFailures } from './stream-store.ts';
 import { StreamStore } from './stream-store.ts';
 
 export interface PostgresStreamStoreOptions {
@@ -28,7 +29,7 @@ type StreamRow = {
 type StreamChunkRow = {
   stream_id: string;
   seq: number;
-  data: unknown;
+  data: StreamChunkData['data'];
   created_at: string | number;
 };
 
@@ -241,14 +242,33 @@ export class PostgresStreamStore extends StreamStore {
       data: chunk.data,
       created_at: chunk.createdAt,
     }));
-
-    await this.#query(
-      `INSERT INTO ${this.#t('stream_chunks')} (stream_id, seq, data, created_at)
+    const params = [JSON.stringify(rows)];
+    const insertSql = `INSERT INTO ${this.#t('stream_chunks')} (stream_id, seq, data, created_at)
        SELECT stream_id, seq, data, created_at
        FROM jsonb_to_recordset($1::jsonb)
-         AS rows(stream_id TEXT, seq INTEGER, data JSONB, created_at BIGINT)`,
-      [JSON.stringify(rows)],
-    );
+         AS rows(stream_id TEXT, seq INTEGER, data JSONB, created_at BIGINT)`;
+
+    const failures = collectStreamFailures(chunks);
+    if (failures.length === 0) {
+      await this.#query(insertSql, params);
+      return;
+    }
+
+    await this.#useTransaction(async (client) => {
+      await client.query(insertSql, params);
+      const failedAt = Date.now();
+      for (const failure of failures) {
+        const result = await client.query(
+          `UPDATE ${this.#t('streams')}
+           SET status = $1, finished_at = $2, error = $3
+           WHERE id = $4`,
+          ['failed', failedAt, failure.error, failure.streamId],
+        );
+        if (result.rowCount !== 1) {
+          throw new Error(`Stream "${failure.streamId}" not found`);
+        }
+      }
+    });
   }
 
   async getChunks(

@@ -33,10 +33,17 @@ function createStream(overrides?: Partial<StreamData>): StreamData {
   };
 }
 
+function textDeltaChunk(
+  seq: number,
+  delta = `chunk-${seq}`,
+): StreamChunkData['data'] {
+  return { type: 'text-delta', id: `part-${seq}`, delta };
+}
+
 function createChunk(
   streamId: string,
   seq: number,
-  data: unknown = { type: 'text-delta', delta: `chunk-${seq}` },
+  data: StreamChunkData['data'] = textDeltaChunk(seq),
 ): StreamChunkData {
   return {
     streamId,
@@ -241,9 +248,7 @@ describe('PostgreSQL Notify StreamChangeSource Integration', () => {
         'initial tick stream drain',
       );
 
-      assert.deepStrictEqual(received, [
-        { type: 'text-delta', delta: 'chunk-0' },
-      ]);
+      assert.deepStrictEqual(received, [textDeltaChunk(0)]);
     }));
 
   it('should release the listener connection on abort and close', async () =>
