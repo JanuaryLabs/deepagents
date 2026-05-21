@@ -12,7 +12,7 @@ import {
   views,
 } from '@deepagents/text2sql/postgres';
 
-const pool = new pg.Pool({
+export const pool = new pg.Pool({
   host: process.env.PGHOST,
   port: Number(process.env.PGPORT ?? '5432'),
   user: process.env.PGUSER,

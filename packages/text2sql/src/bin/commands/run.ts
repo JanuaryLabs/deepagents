@@ -2,7 +2,6 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { v7 } from 'uuid';
 
-import type { Adapter } from '../../lib/adapters/adapter.ts';
 import {
   type ExecutionContext,
   OUT_DIR_OPTION,
@@ -18,24 +17,15 @@ export class RunCommand extends SqlQueryCommand {
   override readonly helpDisplay = '<db> "SELECT ..."';
   override readonly options = [OUT_DIR_OPTION];
 
-  protected async afterValidation(
+  protected async runQuery(
     ctx: ExecutionContext,
-    adapter: Adapter,
+    name: string,
     sql: string,
     options: Record<string, unknown>,
   ): Promise<number> {
     const outputDir = resolveOutputDir(ctx, options);
 
-    let rows: unknown;
-    try {
-      rows = await adapter.execute(sql);
-    } catch (error) {
-      this.fail(errorMessage(error));
-    }
-
-    if (!Array.isArray(rows)) {
-      this.fail('adapter.execute must return an array of rows');
-    }
+    const { rows, columns } = await ctx.text2Sql.run(name, sql);
 
     const outPath = path.join(outputDir, `${v7()}.json`);
     try {
@@ -45,7 +35,6 @@ export class RunCommand extends SqlQueryCommand {
       this.fail(errorMessage(error));
     }
 
-    const columns = rows.length > 0 ? Object.keys(rows[0] as object) : [];
     ctx.stdout.write(`results stored in ${outPath}\n`);
     ctx.stdout.write(`columns: ${columns.join(', ') || '(none)'}\n`);
     ctx.stdout.write(`rows: ${rows.length}\n`);

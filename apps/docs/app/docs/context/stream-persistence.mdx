@@ -21,9 +21,10 @@ Stream status lifecycle:
                    → cancelled
 ```
 
-Three layers handle this:
+Four layers handle this:
 
 - **StreamStore** — abstract storage interface for streams and chunks
+- **StreamChangeSource** — how `StreamManager` learns that chunks/status changed
 - **StreamManager** — high-level lifecycle: register, persist, watch, cancel, cleanup
 - **persistedWriter** — low-level writer wrapper that intercepts chunks and buffers them to the store
 
@@ -69,7 +70,7 @@ If you pass your own `DatabaseSync`, call `store.close()` only if this stream st
 |-------|------|-------------|
 | `streamId` | `string` | Parent stream ID |
 | `seq` | `number` | Monotonically increasing sequence number |
-| `data` | `unknown` | The stream part (serialized as JSON in SQLite) |
+| `data` | `StreamPart` | The AI SDK stream part (serialized as JSON in SQLite) |
 | `createdAt` | `number` | Timestamp when the chunk was persisted |
 
 ### Methods
@@ -91,8 +92,15 @@ If you pass your own `DatabaseSync`, call `store.close()` only if this stream st
 `SqliteStreamStore` exposes an explicit `close()` method to release the underlying SQLite connection and clear prepared statements. It is idempotent.
 
 ```typescript
+import {
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
+
 const store = new SqliteStreamStore('./streams.db');
-const manager = new StreamManager({ store });
+const changeSource = new PollingChangeSource({ reads: store });
+const manager = new StreamManager({ store, changeSource });
 
 // ... stream operations ...
 
@@ -105,25 +113,50 @@ store.close();
 Orchestrates the full stream lifecycle.
 
 ```typescript
-import { StreamManager, SqliteStreamStore } from '@deepagents/context';
+import {
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
 
-const manager = new StreamManager({
-  store: new SqliteStreamStore('./streams.db'),
-  watchPolling: {
+const store = new SqliteStreamStore('./streams.db');
+const changeSource = new PollingChangeSource({
+  reads: store,
+  config: {
     minMs: 25,
     maxMs: 500,
     multiplier: 2,
     jitterRatio: 0.15,
     statusCheckEvery: 3,
-    chunkPageSize: 128,
-  },
-  cancelPolling: {
-    minMs: 50,
-    maxMs: 500,
-    multiplier: 2,
-    jitterRatio: 0.15,
   },
 });
+
+const manager = new StreamManager({
+  store,
+  changeSource,
+  chunkPageSize: 128,
+});
+```
+
+Use `PollingChangeSource` for SQLite/local polling. For Postgres deployments
+that use LISTEN/NOTIFY, swap in `PostgresNotifyChangeSource`:
+
+```typescript
+import {
+  PostgresNotifyChangeSource,
+  PostgresStreamStore,
+  StreamManager,
+} from '@deepagents/context';
+
+const store = new PostgresStreamStore({ pool: process.env.DATABASE_URL! });
+await store.initialize();
+
+const changeSource = new PostgresNotifyChangeSource({
+  pool: process.env.DATABASE_URL!,
+});
+await changeSource.initialize();
+
+const manager = new StreamManager({ store, changeSource });
 ```
 
 ### register(streamId)
@@ -140,26 +173,26 @@ if (!created) {
 
 ### persist(stream, streamId, options?)
 
-Consumes a `ReadableStream`, persists every chunk to the store, and transitions status from `running` to `completed` (or `failed` on error). Polls for cancellation in the background.
+Consumes a `ReadableStream`, persists every chunk to the store, and transitions status from `running` to a terminal state. Streams fail in two ways:
+
+- `persist()` throws while draining the source stream
+- Any persisted chunk has `type: 'error'` (the store marks the stream as `failed` and records `errorText`)
 
 ```typescript
 import { createUIMessageStream } from 'ai';
 
 const uiStream = createUIMessageStream({
   execute: async ({ writer }) => {
-    writer.write({ type: 'text-delta', textDelta: 'Hello' });
-    writer.write({ type: 'text-delta', textDelta: ' world' });
+    writer.write({ type: 'text-delta', id: 'text-1', delta: 'Hello' });
+    writer.write({ type: 'text-delta', id: 'text-1', delta: ' world' });
   },
 });
 
 await manager.persist(uiStream, 'stream-abc', {
   strategy: 'buffered',
   flushSize: 20,
-  cancelPolling: {
-    minMs: 50,
-    maxMs: 500,
-    multiplier: 2,
-    jitterRatio: 0.15,
+  onCancelDetected: ({ streamId, latencyMs }) => {
+    console.log('cancel detected', streamId, latencyMs);
   },
 });
 ```
@@ -168,52 +201,48 @@ await manager.persist(uiStream, 'stream-abc', {
 |--------|------|---------|-------------|
 | `strategy` | `'buffered' \| 'immediate'` | `'buffered'` | `buffered` batches chunks for throughput; `immediate` persists each chunk before forwarding |
 | `flushSize` | `number` | `20` | For buffered strategy: flush after this many chunks |
-| `cancelPolling` | `{ minMs, maxMs, multiplier, jitterRatio }` | `{50, 500, 2, 0.15}` | Adaptive cancellation polling policy |
+| `onCancelDetected` | `({ streamId, latencyMs }) => void \| Promise<void>` | `undefined` | Optional callback when cancellation is detected |
 
 If the stream is already in a terminal status (`completed`, `failed`, `cancelled`), `persist` returns immediately without re-running.
 
-### watch(streamId, options?)
+### watch(streamId)
 
 Returns a `ReadableStream` that replays all persisted chunks, then live-tails new ones until the stream reaches a terminal status.
 
 ```typescript
-const replayStream = manager.watch('stream-abc', {
-  minMs: 25,
-  maxMs: 500,
-  multiplier: 2,
-  jitterRatio: 0.15,
-  statusCheckEvery: 3,
-  chunkPageSize: 128,
-});
+const replayStream = manager.watch('stream-abc');
 
 for await (const part of replayStream) {
   console.log(part);
 }
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `minMs` | `number` | `25` | Minimum poll interval |
-| `maxMs` | `number` | `500` | Maximum poll interval |
-| `multiplier` | `number` | `2` | Backoff multiplier when idle |
-| `jitterRatio` | `number` | `0.15` | Random jitter ratio applied per wait |
-| `statusCheckEvery` | `number` | `3` | Check stream status every N chunk polls while data is flowing |
-| `chunkPageSize` | `number` | `128` | Maximum chunks fetched per poll iteration |
+Polling/backoff behavior is configured on the `StreamChangeSource` (for polling, via `PollingChangeSource.config`). `chunkPageSize` is configured on `new StreamManager({ chunkPageSize })`.
 
 Throws if the stream ID does not exist.
 
 If a stream is deleted while being watched, the watcher closes gracefully.
 
-### Polling telemetry
+### StreamManager telemetry
 
-Use `onPollingEvent` to observe polling behavior for tuning and diagnostics:
+Use `onWatchEvent` to observe `watch()` and cancellation behavior:
 
 ```typescript
+import {
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
+
+const store = new SqliteStreamStore('./streams.db');
+const changeSource = new PollingChangeSource({ reads: store });
+
 const manager = new StreamManager({
-  store: new SqliteStreamStore('./streams.db'),
-  onPollingEvent: (event) => {
-    if (event.type === 'watch:empty') {
-      console.debug('idle delay', event.delayMs);
+  store,
+  changeSource,
+  onWatchEvent: (event) => {
+    if (event.type === 'watch:chunks') {
+      console.debug('delivered', event.delivered);
     }
   },
 });
@@ -221,12 +250,41 @@ const manager = new StreamManager({
 
 Event types:
 
-- `watch:poll`
-- `watch:empty`
 - `watch:chunks`
 - `watch:closed`
-- `persist:cancel-poll`
+- `watch:error-emitted`
 - `persist:cancel-detected`
+
+### PollingChangeSource telemetry
+
+Use `PollingChangeSource.onPoll` to tune poll cadence:
+
+```typescript
+import { PollingChangeSource, SqliteStreamStore } from '@deepagents/context';
+
+const store = new SqliteStreamStore('./streams.db');
+
+const changeSource = new PollingChangeSource({
+  reads: store,
+  config: {
+    minMs: 25,
+    maxMs: 500,
+    multiplier: 2,
+    jitterRatio: 0.15,
+    statusCheckEvery: 3,
+  },
+  onPoll: (event) => {
+    if (event.type === 'idle') {
+      console.debug('idle delay', event.delayMs);
+    }
+  },
+});
+```
+
+`onPoll` event types:
+
+- `poll`
+- `idle`
 
 ### cancel(streamId)
 
@@ -276,8 +334,8 @@ const uiStream = createUIMessageStream({
       flushSize: 20,
     });
 
-    pw.writer.write({ type: 'text-delta', textDelta: 'Hello' });
-    pw.writer.write({ type: 'text-delta', textDelta: ' world' });
+    pw.writer.write({ type: 'text-delta', id: 'text-1', delta: 'Hello' });
+    pw.writer.write({ type: 'text-delta', id: 'text-1', delta: ' world' });
 
     await pw.complete();
   },
@@ -299,8 +357,8 @@ const uiStream = createUIMessageStream({
 | Method | Description |
 |--------|-------------|
 | `flush()` | Force-flush the buffer to the store |
-| `complete()` | Flush remaining chunks and mark stream as `completed` |
-| `fail(error?)` | Flush remaining chunks and mark stream as `failed` with optional error message |
+| `complete()` | Flush remaining chunks and mark stream as `completed` (unless an `error` chunk already marked it `failed`) |
+| `fail(error?)` | Flush remaining chunks and mark stream as `failed` with optional error message (unless an `error` chunk already set failure state) |
 | `cleanup()` | Delete the stream and all chunks from the store |
 
 The returned `writer` property is a drop-in replacement for `UIMessageStreamWriter`. Both `write()` and `merge()` are intercepted: chunks are persisted before being forwarded to the original writer.
@@ -310,12 +368,20 @@ The returned `writer` property is a drop-in replacement for `UIMessageStreamWrit
 Register the stream, start persisting on the server, and serve `watch()` to any client that connects (or reconnects).
 
 ```typescript
-import { StreamManager, SqliteStreamStore } from '@deepagents/context';
+import {
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
 import { streamText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 
+const store = new SqliteStreamStore('./streams.db');
+const changeSource = new PollingChangeSource({ reads: store });
+
 const manager = new StreamManager({
-  store: new SqliteStreamStore('./streams.db'),
+  store,
+  changeSource,
 });
 
 async function startGeneration(streamId: string, prompt: string) {
@@ -420,10 +486,18 @@ Turn N: Same pattern...
 ### Server Example
 
 ```typescript
-import { StreamManager, SqliteStreamStore } from '@deepagents/context';
+import {
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
+
+const store = new SqliteStreamStore('./streams.db');
+const changeSource = new PollingChangeSource({ reads: store });
 
 const manager = new StreamManager({
-  store: new SqliteStreamStore('./streams.db'),
+  store,
+  changeSource,
 });
 
 async function handleChatTurn(
@@ -469,8 +543,9 @@ async function handleChatRequest(
 ## Best Practices
 
 - Use `buffered` strategy (the default) for throughput-sensitive workloads. Switch to `immediate` when you cannot tolerate any chunk loss on crash.
+- Treat `type: 'error'` chunks as terminal failure signals. Emit them only for unrecoverable stream failures.
 - Always call `cleanup()` after you no longer need a stream. Chunks accumulate and are not automatically garbage-collected.
-- Tune `watchPolling`/`cancelPolling` for your latency and DB-load budget. Lower intervals reduce latency but increase polling cost.
+- Tune `PollingChangeSource.config` and `StreamManager.chunkPageSize` for your latency and DB-load budget. Lower intervals reduce latency but increase polling cost.
 - Use a shared `SqliteStreamStore` instance across your application to benefit from prepared statement caching.
 - Call `SqliteStreamStore.close()` during shutdown to release SQLite resources cleanly.
 

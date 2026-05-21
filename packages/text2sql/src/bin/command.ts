@@ -1,10 +1,10 @@
 import * as path from 'node:path';
 import type { Writable } from 'node:stream';
 
-import type { Adapter } from '../lib/adapters/adapter.ts';
+import { Text2Sql, Text2SqlValidationError } from '../lib/sql.ts';
 
 export interface ExecutionContext {
-  adapters: Record<string, Adapter>;
+  text2Sql: Text2Sql;
   cwd: string;
   env: NodeJS.ProcessEnv;
   stdout: Writable;
@@ -70,21 +70,20 @@ export abstract class SqlCommand {
     throw new CommandError(this.name, message, exitCode);
   }
 
-  protected requireAdapter(
-    adapters: Record<string, Adapter>,
+  protected requireAdapterName(
+    text2Sql: Text2Sql,
     db: string | undefined,
-  ): Adapter {
-    const available = Object.keys(adapters).join(', ') || '(none configured)';
+  ): string {
+    const available = text2Sql.adapterNames().join(', ') || '(none configured)';
     if (!db) {
       this.fail(
         `missing database name. Usage: sql ${this.name} ${this.usage}. Available: ${available}`,
       );
     }
-    const adapter = adapters[db];
-    if (!adapter) {
+    if (!text2Sql.hasAdapter(db)) {
       this.fail(`unknown database "${db}". Available: ${available}`);
     }
-    return adapter;
+    return db;
   }
 }
 
@@ -97,35 +96,22 @@ export abstract class SqlQueryCommand extends SqlCommand {
     options: Record<string, unknown>,
   ): Promise<number> {
     const [db, sqlParts] = args as [string | undefined, string[] | undefined];
-    const adapter = this.requireAdapter(ctx.adapters, db);
+    const name = this.requireAdapterName(ctx.text2Sql, db);
     const sql = (sqlParts ?? []).join(' ').trim();
     if (!sql) this.fail('no query provided');
-    const formatted = await this.formatAndValidate(adapter, sql);
-    return this.afterValidation(ctx, adapter, formatted, options);
-  }
 
-  private async formatAndValidate(
-    adapter: Adapter,
-    sql: string,
-  ): Promise<string> {
-    let formatted: string;
     try {
-      formatted = adapter.format(sql);
+      return await this.runQuery(ctx, name, sql, options);
     } catch (error) {
+      if (error instanceof CommandError) throw error;
+      if (Text2SqlValidationError.isInstance(error)) this.fail(error.message);
       this.fail(errorMessage(error));
     }
-    try {
-      const syntaxError = await adapter.validate(formatted);
-      if (syntaxError) this.fail(syntaxError);
-    } catch (error) {
-      this.fail(errorMessage(error));
-    }
-    return formatted;
   }
 
-  protected abstract afterValidation(
+  protected abstract runQuery(
     ctx: ExecutionContext,
-    adapter: Adapter,
+    name: string,
     sql: string,
     options: Record<string, unknown>,
   ): Promise<number>;

@@ -6,7 +6,12 @@ export class ValidateCommand extends SqlQueryCommand {
   readonly usage = '<db> "SELECT ..."';
   override readonly helpDisplay = '<db> "SELECT ..."';
 
-  protected async afterValidation(ctx: ExecutionContext): Promise<number> {
+  protected async runQuery(
+    ctx: ExecutionContext,
+    name: string,
+    sql: string,
+  ): Promise<number> {
+    await ctx.text2Sql.validate(name, sql);
     ctx.stdout.write('valid\n');
     return 0;
   }

@@ -12,11 +12,8 @@ import { v7 } from 'uuid';
 
 import type { ContextFragment } from '@deepagents/context';
 
-import {
-  AdapterIndexer,
-  type Text2SqlIndexProgressHandler,
-} from '../../lib/adapter-index.ts';
-import type { Adapter } from '../../lib/adapters/adapter.ts';
+import { type Text2SqlIndexProgressHandler } from '../../lib/adapter-index.ts';
+import { type Text2Sql } from '../../lib/sql.ts';
 import {
   type ExecutionContext,
   OUT_DIR_OPTION,
@@ -56,7 +53,7 @@ export class IndexCommand extends SqlCommand {
   ): Promise<number> {
     const adapterNames = (args[0] as string[] | undefined) ?? [];
     const requested = options.all ? [] : adapterNames;
-    const names = this.resolveNames(ctx.adapters, requested);
+    const names = this.resolveNames(ctx.text2Sql, requested);
     const verbose = this.resolveVerbose(options.verbose);
 
     const outputDir = resolveOutputDir(ctx, options);
@@ -77,12 +74,8 @@ export class IndexCommand extends SqlCommand {
         ctx.stderr,
       );
       try {
-        const indexer = new AdapterIndexer({
-          adapters: ctx.adapters,
-          version: ctx.env.TEXT2SQL_INDEX_VERSION,
-        });
-        const fragments = await indexer.index({
-          adapterNames: names,
+        const fragments = await ctx.text2Sql.index({
+          names,
           onProgress: createProgressHandler(eventsStream, verbose, ctx.stderr),
         });
 
@@ -106,16 +99,13 @@ export class IndexCommand extends SqlCommand {
     }
   }
 
-  private resolveNames(
-    adapters: Record<string, Adapter>,
-    requested: string[],
-  ): string[] {
-    const availableNames = Object.keys(adapters);
+  private resolveNames(text2Sql: Text2Sql, requested: string[]): string[] {
+    const availableNames = text2Sql.adapterNames();
     const available = availableNames.join(', ') || '(none configured)';
     const names = requested.length === 0 ? availableNames : dedupe(requested);
 
     for (const name of names) {
-      if (!adapters[name]) {
+      if (!text2Sql.hasAdapter(name)) {
         this.fail(`unknown adapter "${name}". Available: ${available}`);
       }
     }

@@ -407,30 +407,35 @@ The package includes durable stream persistence utilities:
 - `persistedWriter` (low-level writer wrapper)
 
 ```typescript
-import { SqliteStreamStore, StreamManager } from '@deepagents/context';
+import {
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
 
 const store = new SqliteStreamStore('./streams.db');
-const manager = new StreamManager({
-  store,
-  watchPolling: {
+const changeSource = new PollingChangeSource({
+  reads: store,
+  config: {
     minMs: 25,
     maxMs: 500,
     multiplier: 2,
     jitterRatio: 0.15,
     statusCheckEvery: 3,
-    chunkPageSize: 128,
   },
-  cancelPolling: {
-    minMs: 50,
-    maxMs: 500,
-    multiplier: 2,
-    jitterRatio: 0.15,
-  },
+});
+const manager = new StreamManager({
+  store,
+  changeSource,
+  chunkPageSize: 128,
 });
 
 // Discover active streams without writing raw SQL.
 const runningStreamIds = await store.listStreamIds({ status: 'running' });
 const runningViaConvenienceMethod = await store.listRunningStreamIds();
+
+// Streams auto-fail if a persisted chunk has type: 'error'
+// (the stream's `error` field is populated from `errorText`).
 
 // Shutdown cleanup (idempotent)
 store.close();

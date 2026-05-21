@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { type CAC, cac } from 'cac';
 
+import { Text2Sql } from '../lib/sql.ts';
 import {
   CommandError,
   type ExecutionContext,
@@ -84,8 +85,12 @@ async function runCommand(
 ): Promise<number> {
   let ctx: ExecutionContext;
   try {
-    ctx = {
+    const text2Sql = new Text2Sql({
       adapters: await loadAdapters(),
+      version: process.env.TEXT2SQL_INDEX_VERSION,
+    });
+    ctx = {
+      text2Sql,
       cwd: process.cwd(),
       env: process.env,
       stdout: process.stdout,
