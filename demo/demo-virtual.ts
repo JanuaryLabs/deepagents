@@ -1,4 +1,4 @@
-import { openai } from '@ai-sdk/openai';
+import { groq } from '@ai-sdk/groq';
 import { InMemoryFs } from 'just-bash';
 
 import { input, printer } from '@deepagents/agent';
@@ -27,6 +27,8 @@ const backend = await createVirtualSandbox({
   customCommands: [sqlCommand],
 });
 
+await backend.executeCommand('mkdir -p /workspace /sql');
+
 const sandbox = await createBashTool({ sandbox: backend });
 
 const schemaFragments = await index(sandbox.sandbox);
@@ -35,7 +37,7 @@ context.set(...defaultFragments, ...schemaFragments);
 const demoAgent = agent({
   name: 'text2sql-virtual',
   sandbox,
-  model: openai('gpt-5.4-mini'),
+  model: groq('openai/gpt-oss-20b'),
   context,
   guardrails: [errorRecoveryGuardrail],
   maxGuardrailRetries: 3,
