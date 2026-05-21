@@ -1,16 +1,42 @@
-import { DatabaseSync } from 'node:sqlite';
+import pg from 'pg';
 
-import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
+import {
+  Postgres,
+  columnStats,
+  columnValues,
+  constraints,
+  indexes,
+  info,
+  rowCount,
+  tables,
+  views,
+} from '@deepagents/text2sql/postgres';
 
-function open(path: string) {
-  const db = new DatabaseSync(path, { readOnly: true });
-  return new Sqlite({
-    grounding: [tables(), info()],
-    execute: (sql: string) => db.prepare(sql).all(),
-  });
-}
+const pool = new pg.Pool({
+  host: process.env.PGHOST,
+  port: Number(process.env.PGPORT ?? '5432'),
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  database: process.env.PGDATABASE ?? 'pagila',
+});
+
+const pagila = new Postgres({
+  execute: async (sql: string) => {
+    const result = await pool.query(sql);
+    return result.rows;
+  },
+  grounding: [
+    tables(),
+    views(),
+    info(),
+    indexes(),
+    constraints(),
+    rowCount(),
+    columnStats(),
+    columnValues(),
+  ],
+});
 
 export default {
-  gameboard: open('/data/gameboard.sqlite'),
-  gpu_database: open('/data/gpu-database.sqlite'),
+  pagila,
 };
