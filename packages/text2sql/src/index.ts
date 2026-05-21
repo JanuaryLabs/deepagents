@@ -13,4 +13,9 @@ export * from './lib/fragments/schema.ts';
 export * from './lib/fs/index.ts';
 export * from './lib/instructions.ts';
 export * from './lib/sql-hooks.ts';
+export {
+  type CreateSqlCommandOptions,
+  type CreateSqlCommandResult,
+  createSqlCommand,
+} from './lib/sql-command.ts';
 export * from './lib/sql.ts';
