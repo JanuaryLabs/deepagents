@@ -1,9 +1,11 @@
+import type { CommandResult } from 'bash-tool';
 import type { Command, CommandContext, ExecResult } from 'just-bash';
 import { posix } from 'node:path';
 import { parseArgs } from 'node:util';
 import { v7 } from 'uuid';
 
 import {
+  BashException,
   buildSubcommandRepair,
   defineSubcommandGroup,
   repairQuotedArg,
@@ -19,19 +21,30 @@ import {
 const SQL_VALIDATE_REMINDER =
   'Always run `sql validate <db> "..."` before `sql run <db> "..."` to catch syntax errors early.';
 
-class SqlCommandError extends Error {
-  readonly exitCode: number;
-  constructor(message: string, exitCode = 1) {
+class SqlCommandError extends BashException {
+  readonly #subcommand: string;
+  readonly #exitCode: number;
+
+  constructor(subcommand: string, message: string, exitCode = 1) {
     super(message);
     this.name = 'SqlCommandError';
-    this.exitCode = exitCode;
+    this.#subcommand = subcommand;
+    this.#exitCode = exitCode;
+  }
+
+  format(): CommandResult {
+    return {
+      stdout: '',
+      stderr: `sql ${this.#subcommand}: ${this.message}\n`,
+      exitCode: this.#exitCode,
+    };
   }
 }
 
 export interface CreateSqlCommandOptions {
   /**
-   * Default directory for `sql run` / `sql index` artifacts when no `--out-dir`
-   * is passed and `$TEXT2SQL_OUT_DIR` is unset. Defaults to `/sql`.
+   * Default directory for `sql run` artifacts when no `--out-dir` is passed
+   * and `$TEXT2SQL_OUT_DIR` is unset. Defaults to `/sql`.
    */
   outputDir?: string;
 }
@@ -43,9 +56,13 @@ export interface CreateSqlCommandResult {
 
 /**
  * Wrap a {@link Text2Sql} instance as a just-bash custom command, exposing
- * `sql run`, `sql validate`, and `sql index` inside any sandbox that accepts
+ * `sql run` and `sql validate` inside any sandbox that accepts
  * `customCommands` (e.g. `createVirtualSandbox`). Argv matches the standalone
  * `sql` CLI exactly, so prompts written against one work against the other.
+ *
+ * Bootstrap (schema indexing) is intentionally **not** exposed as a
+ * subcommand here — callers running an in-process sandbox should invoke
+ * `text2Sql.index()` directly on the host before constructing the sandbox.
  *
  * @example
  * ```ts
@@ -78,12 +95,6 @@ export function createSqlCommand(
       repair: repairDbNameAndQuotedArg,
       handler: (args: string[]) => handleValidate(text2Sql, args),
     },
-    index: {
-      usage: 'index [adapter ...]',
-      description: 'Index adapter schemas and write context artifacts',
-      handler: (args: string[], ctx: CommandContext) =>
-        handleIndex(text2Sql, defaultOutputDir, args, ctx),
-    },
   };
 
   return {
@@ -95,39 +106,24 @@ export function createSqlCommand(
 interface ParsedFlags {
   positional: string[];
   outDir?: string;
-  all: boolean;
 }
 
-function parseFlags(args: string[]): ParsedFlags {
-  let parsed: ReturnType<
-    typeof parseArgs<{
-      options: {
-        'out-dir': { type: 'string' };
-        all: { type: 'boolean' };
-      };
-      args: string[];
-      allowPositionals: true;
-    }>
-  >;
+function parseFlags(subcommand: string, args: string[]): ParsedFlags {
   try {
-    parsed = parseArgs({
+    const parsed = parseArgs({
       args,
-      options: {
-        'out-dir': { type: 'string' },
-        all: { type: 'boolean' },
-      },
+      options: { 'out-dir': { type: 'string' } },
       allowPositionals: true,
       strict: true,
     });
+    return {
+      positional: parsed.positionals,
+      outDir: parsed.values['out-dir'],
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new SqlCommandError(message, 1);
+    throw new SqlCommandError(subcommand, message);
   }
-  return {
-    positional: parsed.positionals,
-    outDir: parsed.values['out-dir'],
-    all: parsed.values.all === true,
-  };
 }
 
 function resolveOutputDir(
@@ -149,11 +145,11 @@ async function handleRun(
   ctx: CommandContext,
 ): Promise<ExecResult> {
   return runHandler('run', async () => {
-    const flags = parseFlags(args);
+    const flags = parseFlags('run', args);
     const meta = useBashMeta();
     meta?.setReminder(SQL_VALIDATE_REMINDER);
 
-    const { name, sql } = takeDbAndSql(flags.positional, 'run', text2Sql);
+    const { name, sql } = takeDbAndSql('run', flags.positional, text2Sql);
     const outputDir = resolveOutputDir(ctx, flags, defaultOutputDir);
     const { rows, columns } = await text2Sql.run(name, sql);
 
@@ -177,113 +173,54 @@ async function handleValidate(
   args: string[],
 ): Promise<ExecResult> {
   return runHandler('validate', async () => {
-    const flags = parseFlags(args);
-    const { name, sql } = takeDbAndSql(flags.positional, 'validate', text2Sql);
+    const flags = parseFlags('validate', args);
+    const { name, sql } = takeDbAndSql('validate', flags.positional, text2Sql);
     await text2Sql.validate(name, sql);
     return { stdout: 'valid\n', stderr: '', exitCode: 0 };
   });
 }
 
-interface IndexManifest {
-  fragmentsPath: string;
-  eventsPath: string | null;
-  adapters: string[];
-  fragments: number;
-}
-
-async function handleIndex(
-  text2Sql: Text2Sql,
-  defaultOutputDir: string,
-  args: string[],
-  ctx: CommandContext,
-): Promise<ExecResult> {
-  return runHandler('index', async () => {
-    const flags = parseFlags(args);
-    const available = text2Sql.adapterNames();
-    const requested = flags.all ? [] : dedupe(flags.positional);
-    const names = requested.length === 0 ? available : requested;
-
-    for (const name of names) {
-      if (!text2Sql.hasAdapter(name)) {
-        throw new SqlCommandError(
-          `unknown adapter "${name}". Available: ${available.join(', ')}`,
-          1,
-        );
-      }
-    }
-
-    const outputDir = resolveOutputDir(ctx, flags, defaultOutputDir);
-    const fragments = await text2Sql.index({ names });
-
-    const fragmentsPath = posix.join(outputDir, `index-${v7()}.json`);
-    await ctx.fs.mkdir(outputDir, { recursive: true });
-    await ctx.fs.writeFile(fragmentsPath, JSON.stringify(fragments, null, 2));
-
-    const manifest: IndexManifest = {
-      fragmentsPath,
-      eventsPath: null,
-      adapters: names,
-      fragments: countSchemaFragments(fragments),
-    };
-    return {
-      stdout: JSON.stringify(manifest, null, 2) + '\n',
-      stderr: '',
-      exitCode: 0,
-    };
-  });
-}
-
 async function runHandler(
-  name: string,
+  subcommand: string,
   fn: () => Promise<ExecResult>,
 ): Promise<ExecResult> {
   try {
     return await fn();
   } catch (error) {
-    if (error instanceof SqlCommandError) {
-      return {
-        stdout: '',
-        stderr: `sql ${name}: ${error.message}\n`,
-        exitCode: error.exitCode,
-      };
-    }
+    if (error instanceof BashException) return error.format();
     if (
       Text2SqlValidationError.isInstance(error) ||
       Text2SqlUnknownAdapterError.isInstance(error)
     ) {
-      return {
-        stdout: '',
-        stderr: `sql ${name}: ${error.message}\n`,
-        exitCode: 1,
-      };
+      return new SqlCommandError(subcommand, error.message).format();
     }
     const message = error instanceof Error ? error.message : String(error);
-    return { stdout: '', stderr: `sql ${name}: ${message}\n`, exitCode: 1 };
+    return new SqlCommandError(subcommand, message).format();
   }
 }
 
 function takeDbAndSql(
+  subcommand: string,
   positional: string[],
-  cmd: string,
   text2Sql: Text2Sql,
 ): { name: string; sql: string } {
   const [db, ...rest] = positional;
   const available = text2Sql.adapterNames().join(', ');
   if (!db) {
     throw new SqlCommandError(
-      `missing database name. Usage: sql ${cmd} <db> "SELECT ...". Available: ${available}`,
-      1,
+      subcommand,
+      `missing database name. Usage: sql ${subcommand} <db> "SELECT ...". Available: ${available}`,
     );
   }
   if (!text2Sql.hasAdapter(db)) {
     throw new SqlCommandError(
+      subcommand,
       `unknown database "${db}". Available: ${available}`,
-      1,
     );
   }
   const sql = rest.join(' ').trim();
   if (!sql) {
-    throw new SqlCommandError('no query provided', 1);
+    throw new SqlCommandError(subcommand, 'no query provided');
   }
   return { name: db, sql };
 }
@@ -298,18 +235,4 @@ function repairDbNameAndQuotedArg(rawArgs: string): string | null {
   const repaired = repairQuotedArg(rest);
   if (repaired == null) return null;
   return `${dbName} ${repaired}`;
-}
-
-function dedupe(values: string[]): string[] {
-  return [...new Set(values)];
-}
-
-function countSchemaFragments(
-  fragments: ReadonlyArray<{ data?: unknown }>,
-): number {
-  return fragments.reduce((count, adapterFragment) => {
-    return Array.isArray(adapterFragment.data)
-      ? count + adapterFragment.data.length
-      : count + 1;
-  }, 0);
 }

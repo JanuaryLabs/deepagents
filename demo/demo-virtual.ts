@@ -13,7 +13,7 @@ import {
 import { Text2Sql, createSqlCommand } from '@deepagents/text2sql';
 
 import adapters from './demo-adapters.ts';
-import context, { defaultFragments, index } from './demo-context.ts';
+import context, { defaultFragments } from './demo-context.ts';
 
 const text2Sql = new Text2Sql({
   adapters,
@@ -31,7 +31,7 @@ await backend.executeCommand('mkdir -p /workspace /sql');
 
 const sandbox = await createBashTool({ sandbox: backend });
 
-const schemaFragments = await index(sandbox.sandbox);
+const schemaFragments = await text2Sql.index();
 context.set(...defaultFragments, ...schemaFragments);
 
 const demoAgent = agent({

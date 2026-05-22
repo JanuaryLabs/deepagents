@@ -130,56 +130,6 @@ describe('createSqlCommand + createVirtualSandbox', () => {
     assert.match(result.stdout, /^results stored in \/data\//);
   });
 
-  it('runs index, writes fragments JSON to ctx.fs, and prints manifest', async () => {
-    const { command } = buildSandbox();
-    const sandbox = await createVirtualSandbox({
-      fs: new InMemoryFs(),
-      customCommands: [command],
-    });
-
-    const result = await sandbox.executeCommand('sql index');
-
-    assert.equal(result.exitCode, 0, result.stderr);
-    const manifest = JSON.parse(result.stdout);
-    assert.equal(manifest.eventsPath, null);
-    assert.deepEqual(manifest.adapters, ['mem']);
-    assert.ok(manifest.fragments > 0);
-    assert.ok(manifest.fragmentsPath.startsWith('/sql/index-'));
-
-    const fragmentsJson = await sandbox.readFile(manifest.fragmentsPath);
-    const fragments = JSON.parse(fragmentsJson);
-    assert.ok(Array.isArray(fragments));
-    assert.ok(fragments.length > 0);
-  });
-
-  it('rejects unknown adapters passed to sql index', async () => {
-    const { command } = buildSandbox();
-    const sandbox = await createVirtualSandbox({
-      fs: new InMemoryFs(),
-      customCommands: [command],
-    });
-
-    const result = await sandbox.executeCommand('sql index nope');
-
-    assert.equal(result.exitCode, 1);
-    assert.match(result.stderr, /unknown adapter "nope"/);
-    assert.ok(result.stderr.endsWith('\n'));
-  });
-
-  it('treats --all as winning over positionals (matches bin contract)', async () => {
-    const { command } = buildSandbox();
-    const sandbox = await createVirtualSandbox({
-      fs: new InMemoryFs(),
-      customCommands: [command],
-    });
-
-    const result = await sandbox.executeCommand('sql index --all bogus');
-
-    assert.equal(result.exitCode, 0, result.stderr);
-    const manifest = JSON.parse(result.stdout);
-    assert.deepEqual(manifest.adapters, ['mem']);
-  });
-
   it('reports --out-dir without a value via parseArgs', async () => {
     const { command } = buildSandbox();
     const sandbox = await createVirtualSandbox({
@@ -187,10 +137,10 @@ describe('createSqlCommand + createVirtualSandbox', () => {
       customCommands: [command],
     });
 
-    const result = await sandbox.executeCommand('sql index --out-dir');
+    const result = await sandbox.executeCommand('sql run mem --out-dir');
 
     assert.equal(result.exitCode, 1);
-    assert.match(result.stderr, /^sql index: /);
+    assert.match(result.stderr, /^sql run: /);
     assert.match(result.stderr, /--out-dir/);
     assert.ok(result.stderr.endsWith('\n'));
   });
@@ -208,6 +158,6 @@ describe('createSqlCommand + createVirtualSandbox', () => {
     assert.match(result.stderr, /Usage:/);
     assert.match(result.stderr, /sql run/);
     assert.match(result.stderr, /sql validate/);
-    assert.match(result.stderr, /sql index/);
+    assert.doesNotMatch(result.stderr, /sql index/);
   });
 });
