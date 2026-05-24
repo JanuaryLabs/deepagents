@@ -197,6 +197,40 @@ sandbox was not prepared correctly.
 Set `TEXT2SQL_INDEX_VERSION` to manage cache invalidation across runs. Cache
 keys are `index-<version>-<adapter>`, so bump the version when schema changes.
 
+For in-process or virtual-sandbox usage (without installing the package CLI),
+wrap an existing `Text2Sql` instance as a just-bash custom command:
+
+```typescript
+import { InMemoryFs, createVirtualSandbox } from '@deepagents/context';
+import {
+  type CreateSqlCommandOptions,
+  type CreateSqlCommandResult,
+  Text2Sql,
+  createSqlCommand,
+} from '@deepagents/text2sql';
+
+const text2sql = new Text2Sql({ model, adapters: { main: adapter } });
+
+const commandOptions: CreateSqlCommandOptions = {
+  outputDir: '/sql-artifacts',
+};
+const sqlCommand: CreateSqlCommandResult = createSqlCommand(
+  text2sql,
+  commandOptions,
+);
+
+const sandbox = await createVirtualSandbox({
+  fs: new InMemoryFs(),
+  customCommands: [sqlCommand.command],
+});
+
+await sandbox.executeCommand('sql validate main "SELECT 1"');
+```
+
+`CreateSqlCommandOptions` configures command defaults (currently `outputDir`).
+`CreateSqlCommandResult` returns the command plus a `repair(raw)` helper for
+normalizing model-generated argv before execution.
+
 Spread `createSqlCommandHooks({ adapters })` into `createBashTool()` for
 model-driven bash calls. The before hook preserves
 the old virtual-command tolerance for common LLM quote mistakes, rewrites SQL

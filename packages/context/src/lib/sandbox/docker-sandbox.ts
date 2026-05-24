@@ -114,6 +114,17 @@ export interface RuntimeSandboxOptions {
   resources?: DockerResources;
   env?: Record<string, string>;
   name?: StableContainerName;
+  /**
+   * Args appended after the image at `docker run` time.
+   * - `undefined` (default): `['tail', '-f', '/dev/null']` — keeps a bare
+   *   image (e.g. `alpine:latest`) alive so installers and `executeCommand`
+   *   have something to attach to.
+   * - `[]` or `null`: nothing is appended; the image's own `CMD`/`ENTRYPOINT`
+   *   runs as declared (use this when your image already has a long-running
+   *   process, e.g. a daemon).
+   * - A non-empty array: appended verbatim, overriding the image `CMD`.
+   */
+  command?: readonly string[] | null;
 }
 
 export interface DockerfileSandboxOptions {
@@ -125,6 +136,15 @@ export interface DockerfileSandboxOptions {
   resources?: DockerResources;
   env?: Record<string, string>;
   name?: StableContainerName;
+  /**
+   * Args appended after the image at `docker run` time.
+   * - `undefined` (default): `['tail', '-f', '/dev/null']` — keep-alive.
+   * - `[]` or `null`: nothing is appended; the Dockerfile's `CMD`/`ENTRYPOINT`
+   *   runs as declared. Use this when your Dockerfile already declares a
+   *   long-running process (e.g. `CMD ["node", "server.js"]`).
+   * - A non-empty array: appended verbatim, overriding the image `CMD`.
+   */
+  command?: readonly string[] | null;
 }
 
 export interface ComposeSandboxOptions {
@@ -162,6 +182,8 @@ export interface DockerSandboxStrategyArgs {
   resources?: DockerResources;
   env?: Record<string, string>;
   name?: StableContainerName;
+  /** See {@link RuntimeSandboxOptions.command}. */
+  command?: readonly string[] | null;
 }
 
 /**
@@ -175,10 +197,11 @@ export abstract class DockerSandboxStrategy {
   protected resources: DockerResources;
   protected env: Record<string, string>;
   protected name?: StableContainerName;
+  protected command?: readonly string[] | null;
   private createdVolumes = new Set<string>();
 
   constructor(args: DockerSandboxStrategyArgs = {}) {
-    const { volumes = [], resources = {}, env = {}, name } = args;
+    const { volumes = [], resources = {}, env = {}, name, command } = args;
     for (const key of Object.keys(env)) {
       validateEnvKey(key);
     }
@@ -191,6 +214,7 @@ export abstract class DockerSandboxStrategy {
     this.resources = resources;
     this.env = env;
     this.name = name;
+    this.command = command;
   }
 
   async create(): Promise<DisposableSandbox> {
@@ -442,7 +466,12 @@ export abstract class DockerSandboxStrategy {
       args.push('--mount', this.buildVolumeMountArg(volume));
     }
 
-    args.push(image, 'tail', '-f', '/dev/null');
+    args.push(image);
+    if (this.command === undefined) {
+      args.push('tail', '-f', '/dev/null');
+    } else if (this.command !== null) {
+      args.push(...this.command);
+    }
 
     return args;
   }
@@ -779,6 +808,7 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
       resources: args.resources,
       env: args.env,
       name: args.name,
+      command: args.command,
     });
     this.image = args.image ?? 'alpine:latest';
     this.installers = args.installers ?? [];
@@ -816,6 +846,7 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
       resources: args.resources,
       env: args.env,
       name: args.name,
+      command: args.command,
     });
     this.dockerfile = args.dockerfile;
     this.dockerContext = args.context ?? '.';
@@ -1071,6 +1102,7 @@ export async function createDockerSandbox(
       resources: options.resources,
       env: options.env,
       name: options.name,
+      command: options.command,
     });
   } else {
     strategy = new RuntimeStrategy({
@@ -1080,6 +1112,7 @@ export async function createDockerSandbox(
       resources: options.resources,
       env: options.env,
       name: options.name,
+      command: options.command,
     });
   }
 
