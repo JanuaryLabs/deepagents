@@ -1,13 +1,13 @@
 {
   "name": "@evals-web-runner/backend",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "type": "module",
   "main": "dist/server.js",
   "dependencies": {
-    "@deepagents/agent": "2.2.0",
-    "@deepagents/evals": "2.2.0",
-    "@deepagents/text2sql": "2.2.0",
+    "@deepagents/agent": "2.3.0",
+    "@deepagents/evals": "2.3.0",
+    "@deepagents/text2sql": "2.3.0",
     "@hono/node-server": "^1.19.5",
     "hono": "^4.12.3",
     "mssql": "^12.5.2",
