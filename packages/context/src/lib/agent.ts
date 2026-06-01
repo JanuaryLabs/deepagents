@@ -116,6 +116,7 @@ class Agent<CIn, COut = CIn> {
       system: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
         ignoreIncompleteToolCalls: true,
+        tools: this.tools,
       }),
       stopWhen: stepCountIs(200),
       tools: this.tools,
@@ -211,6 +212,7 @@ class Agent<CIn, COut = CIn> {
       system: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
         ignoreIncompleteToolCalls: true,
+        tools: this.tools,
       }),
       experimental_repairToolCall: createRepairToolCall(
         model,
@@ -623,6 +625,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
         system: systemPrompt,
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
+          tools: options.tools,
         }),
         stopWhen: stepCountIs(200),
         experimental_repairToolCall: createRepairToolCall(
@@ -670,6 +673,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
         ),
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
+          tools: options.tools,
         }),
         stopWhen: stepCountIs(200),
         experimental_transform: config?.transform ?? smoothStream(),
