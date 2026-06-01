@@ -7,6 +7,7 @@
     "agent-integration",
     "text2sql-integration",
     "multi-session-context",
-    "error-recovery"
+    "error-recovery",
+    "gcs-cloud-storage"
   ]
 }

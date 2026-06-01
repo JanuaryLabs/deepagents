@@ -63,12 +63,14 @@ or `validateAdapterNames(names)`.
 | `Text2Sql#toSql(input, adapterName)`                   | Generate SQL without executing, routed to one adapter                                          |
 | `Text2Sql#toPairs(adapterName, factory)`               | Generate training pairs from one configured adapter                                            |
 | `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments, with optional progress events                 |
-| `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a just-bash command (`sql run`, `sql validate`, `sql index`) for virtual sandboxes |
+| `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes |
 | `sql index [adapter ...]`                              | Index all adapters by default (or named subset), then write schema fragments + progress artifacts |
 
 `CreateSqlCommandOptions` currently exposes `outputDir` (default `/sql`).
 `CreateSqlCommandResult` contains `command` (for `customCommands`) plus
 `repair(raw)` to normalize quoted SQL argv before execution.
+`createSqlCommand(...)` does not expose `index`; use `AdapterIndexer#index(...)`
+or the standalone `sql index` CLI flow when you need schema artifacts.
 
 To run a streaming, multi-turn agent on top of `Text2Sql`, build the chat
 loop yourself with `agent` + `chat` from `@deepagents/context`. See

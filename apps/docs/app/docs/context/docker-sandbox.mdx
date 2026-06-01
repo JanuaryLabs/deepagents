@@ -142,6 +142,27 @@ already be configured.
   existing one. Coordinate lifecycle if multiple callers share the same `name`.
 </Callout>
 
+## Container Command Overrides
+
+Runtime and Dockerfile strategies accept an optional `command` to control what
+is appended after the image in `docker run`:
+
+- Omit `command` (default) to append `tail -f /dev/null` as a keep-alive.
+- Set `command: null` or `command: []` to append nothing, so the image or
+  Dockerfile `CMD`/`ENTRYPOINT` runs as declared.
+- Set a non-empty array (for example, `command: ['sleep', 'infinity']`) to
+  append arguments verbatim and override image/Dockerfile `CMD`.
+
+```typescript
+const sandbox = await createDockerSandbox({
+  image: 'node:lts-alpine',
+  command: null, // run the image CMD/ENTRYPOINT directly
+});
+```
+
+Compose sandboxes do not use this option. Configure command behavior in the
+compose file (for example, `command:` or `entrypoint:` per service).
+
 ## Volumes
 
 Attach bind paths or Docker-managed volumes to the container. Read-only by default for security.
@@ -183,7 +204,7 @@ Bind paths are validated at creation time. A `VolumePathError` is thrown if a bi
 
 External Docker volumes are inspected before the container starts. Managed Docker volumes are created before the container starts and removed on `dispose()` unless `removeOnDispose: false` is set.
 
-Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. Do not pass cloud credentials through `driverOptions`.
+Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. Do not pass cloud credentials through `driverOptions`. See the [GCS Cloud Storage Volumes recipe](/docs/context/recipes/gcs-cloud-storage) for an end-to-end example backing a volume with a Google Cloud Storage bucket on a GCP VM.
 
 ## Resource Limits
 

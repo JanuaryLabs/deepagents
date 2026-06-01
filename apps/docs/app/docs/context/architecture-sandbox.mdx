@@ -53,10 +53,17 @@ docker run -d --rm \
   --memory=1g --cpus=2 \
   -w /workspace \
   --mount type=bind,src=/host/path,dst=/container/path,readonly \
-  alpine:latest tail -f /dev/null
+  <image> [command ...]
 ```
 
-`tail -f /dev/null` keeps the container alive. Commands execute via `docker exec <id> sh -c "<command>"`.
+Command resolution for Runtime and Dockerfile strategies:
+
+- `command` omitted (default): append `tail -f /dev/null` as a keep-alive.
+- `command: null` or `command: []`: append nothing; image/Dockerfile
+  `CMD`/`ENTRYPOINT` run as declared.
+- Non-empty `command`: append verbatim, overriding image/Dockerfile `CMD`.
+
+Commands then execute via `docker exec <id> sh -c "<command>"`.
 
 ### Dockerfile Image Caching
 

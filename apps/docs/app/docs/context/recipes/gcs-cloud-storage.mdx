@@ -1,0 +1,141 @@
+---
+title: GCS Cloud Storage Volumes
+description: Back a Docker sandbox volume with a Google Cloud Storage bucket on a GCP VM, using only existing volume primitives
+---
+
+This recipe persists sandbox files to a **Google Cloud Storage** bucket by backing a Docker volume with the [rclone](https://rclone.org/docker/) volume plugin on a GCP VM. The `@deepagents/context` side needs **no special code** — it attaches the volume with the standard `type: 'volume'` primitive and `lifecycle: 'external'`. All cloud wiring (plugin, credentials, IAM) lives on the host, exactly where [the sandbox docs](/docs/context/docker-sandbox#volumes) say it belongs.
+
+## Topology
+
+The recommended deployment runs the agent on one server and the Docker daemon on a GCP VM. Every `docker` call DeepAgents makes is routed to the VM, so the bucket mount, the FUSE process, and the containers all live on the VM:
+
+```
+┌──────────── App server ────────────┐        ┌─────────────── GCP VM ───────────────┐
+│ Node app → createDockerSandbox      │  ssh   │ Docker Engine (daemon)                │
+│ Docker CLI                          │ ─────▶ │  ├─ rclone plugin (env_auth = true)   │
+│ DOCKER_CONTEXT=gcp-vm               │        │  ├─ volume "agent-storage" → gcs:…    │
+│ (no daemon here)                    │        │  └─ sandbox containers mount it       │
+└─────────────────────────────────────┘        │ Attached service account ──▶ metadata │
+                                                │ server ──▶ Google Cloud Storage       │
+                                                └───────────────────────────────────────┘
+```
+
+> Named volumes (not bind mounts) are required for a remote daemon. A bind mount's `hostPath` is validated on the **app server** and resolved by the daemon on the **VM** — two different machines. A `type: 'volume'` with `lifecycle: 'external'` is inspected on the daemon, so it stays entirely VM-side.
+
+## On the VM
+
+### 1. Let the VM's service account reach the bucket
+
+GCE credentials are read automatically from the metadata server — no key files. Grant the VM's attached service account object access to the bucket:
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
+  --member="serviceAccount:VM_SERVICE_ACCOUNT_EMAIL" \
+  --role="roles/storage.objectAdmin" \
+  --project YOUR_PROJECT
+```
+
+The VM also needs an OAuth **access scope** that includes storage. `cloud-platform` is simplest:
+
+```bash
+# Changing scopes requires the VM to be stopped first.
+gcloud compute instances set-service-account YOUR_VM \
+  --service-account VM_SERVICE_ACCOUNT_EMAIL \
+  --scopes cloud-platform \
+  --zone YOUR_ZONE --project YOUR_PROJECT
+```
+
+### 2. Install the rclone volume plugin
+
+Use the tag matching the VM's architecture (`amd64` or `arm64`):
+
+```bash
+docker plugin install rclone/docker-volume-rclone:amd64 \
+  args="-v" --alias rclone --grant-all-permissions
+```
+
+### 3. Write the rclone config, then enable
+
+On a GCP VM, `env_auth = true` makes rclone use the attached service account via the metadata server — no credentials in the file. `bucket_policy_only = true` is required for buckets with uniform bucket-level access.
+
+```bash
+sudo mkdir -p /var/lib/docker-plugins/rclone/config
+sudo tee /var/lib/docker-plugins/rclone/config/rclone.conf >/dev/null <<'EOF'
+[gcs]
+type = google cloud storage
+env_auth = true
+bucket_policy_only = true
+EOF
+
+docker plugin enable rclone
+```
+
+> Enable the plugin **after** the config exists. A managed plugin only re-reads its config on `disable`/`enable`, and once a volume references it you can no longer disable it. Enabling against a missing or invalid config leaves a plugin whose background uploader is dead — reads work, writes silently stay in the local cache and never reach GCS.
+
+### 4. Create the volume(s)
+
+```bash
+docker volume create agent-storage -d rclone \
+  -o remote=gcs:YOUR_BUCKET \
+  -o vfs-cache-mode=writes
+```
+
+The bucket-to-volume mapping is decided here, so both isolation models fall out of how you create volumes — no DeepAgents change:
+
+```bash
+# Bucket per agent
+docker volume create agent-a -d rclone -o remote=gcs:bucket-a -o vfs-cache-mode=writes
+docker volume create agent-b -d rclone -o remote=gcs:bucket-b -o vfs-cache-mode=writes
+
+# One bucket, a prefix per agent
+docker volume create agent-a -d rclone -o remote=gcs:shared/agent-a -o vfs-cache-mode=writes
+docker volume create agent-b -d rclone -o remote=gcs:shared/agent-b -o vfs-cache-mode=writes
+```
+
+## On the app server
+
+### 5. Point the docker CLI at the VM
+
+A [docker context](https://docs.docker.com/engine/manage-resources/contexts/) is the cleanest way to target the remote daemon. SSH needs no exposed ports or TLS certs:
+
+```bash
+docker context create gcp-vm --docker "host=ssh://USER@VM_HOST"
+```
+
+Select it per-process via the environment that runs your app (preferred over `docker context use`, which mutates global state):
+
+```bash
+DOCKER_CONTEXT=gcp-vm node your-app.ts
+```
+
+DeepAgents shells out to the `docker` CLI without overriding the host, so it inherits this context automatically. Make sure `DOCKER_HOST` is **unset** — it would override the context.
+
+### 6. Attach the volume
+
+```typescript
+import { createDockerSandbox } from '@deepagents/context';
+
+const sandbox = await createDockerSandbox({
+  image: 'node:lts-alpine',
+  volumes: [
+    {
+      type: 'volume',
+      name: 'agent-storage',
+      containerPath: '/workspace/storage',
+      readOnly: false,
+      lifecycle: 'external', // the volume already exists on the VM; DeepAgents only inspects it
+    },
+  ],
+});
+
+await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
+```
+
+The file written at `/workspace/storage/output.txt` becomes an object in `gcs:YOUR_BUCKET`.
+
+## Things to know
+
+- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously (after `--vfs-write-back`, default `5s`, plus a flush on unmount). Don't assume an object is in the bucket the instant a file is closed. Lower `vfs-write-back` for faster uploads.
+- **One app process targets one daemon.** DeepAgents resolves the daemon globally per `docker` invocation, so a single app process sends all sandboxes to whichever VM the context points at. To spread sandboxes across multiple VMs, run one app instance per VM, each with its own `DOCKER_CONTEXT`.
+- **This is FUSE over object storage.** Tools that do in-place random writes can misbehave; whole-file create-and-close writes are the reliable pattern.
+- **No GCS coupling in the library.** `@deepagents/context` never learns about GCS, rclone, or credentials — it only attaches a named Docker volume. The same recipe works for any rclone backend (S3, Azure, SFTP) by changing the `remote`.
