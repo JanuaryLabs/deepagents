@@ -153,18 +153,53 @@ export function fragment(
  * context.set(assistant('Hi there!', { id: 'resp-1' })); // Custom ID
  * ```
  */
+/**
+ * A single OpenAI reasoning item can span a tool round-trip, so the streamed
+ * assistant message may carry several reasoning parts that share one
+ * `openai.itemId`. Sent back to the Responses API those become duplicate items
+ * ("Duplicate item found with id rs_..."), because `convertToModelMessages`
+ * splits the turn per step and `@ai-sdk/openai` only de-duplicates reasoning
+ * within a single message. Reasoning items are reference-only, so keeping the
+ * first occurrence and dropping later repeats is lossless.
+ *
+ * TEMPORARY workaround for an upstream gap: `@ai-sdk/openai`'s
+ * `convertToOpenAIResponsesInput` resets its reasoning de-dup map per assistant
+ * message, so it cannot collapse the same item id once `convertToModelMessages`
+ * has split the turn across messages. Remove this once `@ai-sdk/openai`
+ * de-duplicates reasoning items across the whole request. Related (closed on
+ * older versions, the across-steps variant still reproduces on 3.0.61):
+ * https://github.com/vercel/ai/issues/7883
+ */
+function withoutDuplicateReasoningParts(message: UIMessage): UIMessage {
+  const seenReasoningItemIds = new Set<string>();
+  let dropped = false;
+  const parts = message.parts.filter((part) => {
+    if (part.type !== 'reasoning') return true;
+    const itemId = part.providerMetadata?.openai?.itemId;
+    if (typeof itemId !== 'string') return true;
+    if (seenReasoningItemIds.has(itemId)) {
+      dropped = true;
+      return false;
+    }
+    seenReasoningItemIds.add(itemId);
+    return true;
+  });
+  return dropped ? { ...message, parts } : message;
+}
+
 export function assistant(message: UIMessage): MessageFragment {
+  const normalized = withoutDuplicateReasoningParts(message);
   return {
-    id: message.id,
+    id: normalized.id,
     name: 'assistant',
     type: 'message',
     persist: true,
     codec: {
       decode() {
-        return message;
+        return normalized;
       },
       encode() {
-        return message;
+        return normalized;
       },
     },
   };

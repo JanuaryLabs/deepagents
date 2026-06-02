@@ -39,8 +39,10 @@ async function snapshot(
 ): Promise<Snapshot> {
   const probe = await execute(`[ -d ${shellQuote(destination)} ]`);
   if (probe.exitCode !== 0) return new Map();
+  // The null-delimited `read -d ''` loop trips just-bash's dynamic-import
+  // guard; `-exec sha256sum {} +` is portable across backends and space-safe.
   const list = await execute(
-    `find ${shellQuote(destination)} -type f -print0 | while IFS= read -r -d '' p; do sha256sum "$p"; done`,
+    `find ${shellQuote(destination)} -type f -exec sha256sum {} +`,
   );
   if (list.exitCode !== 0) {
     throw new SnapshotFailedError(
