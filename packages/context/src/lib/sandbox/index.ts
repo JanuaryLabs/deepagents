@@ -7,6 +7,7 @@ export * from './file-events.ts';
 export * from './binary-bridges.ts';
 export * from './daytona-sandbox.ts';
 export * from './docker-sandbox.ts';
+export * from './gcs.ts';
 export * from './installers/index.ts';
 export * from './subcommand.ts';
 export * from './types.ts';

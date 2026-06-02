@@ -133,6 +133,48 @@ await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
 
 The file written at `/workspace/storage/output.txt` becomes an object in `gcs:YOUR_BUCKET`.
 
+## Same-host daemon: gcsfuse + `gcs()`
+
+When your app process and the Docker daemon run on the **same Linux host**, you can skip the rclone plugin: mount the bucket on the host with [gcsfuse](https://github.com/GoogleCloudPlatform/gcsfuse) and bind that mountpoint in with the `gcs()` helper. The host does all the FUSE work; the sandbox gets a plain bind mount with **no capabilities and no in-container FUSE**.
+
+> `gcs()` returns a **bind** volume, so its `hostPath` is validated on the machine running your app — which must therefore be the daemon host. For a **remote** daemon use the named-volume approach above instead, and on **macOS/Docker Desktop** neither host-side option works because the daemon host is a hidden VM.
+
+### On the daemon host
+
+```bash
+# 1. Install gcsfuse (Debian/Ubuntu shown; see the gcsfuse docs for other distros)
+export GCSFUSE_REPO=gcsfuse-$(lsb_release -c -s)
+echo "deb https://packages.cloud.google.com/apt $GCSFUSE_REPO main" \
+  | sudo tee /etc/apt/sources.list.d/gcsfuse.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+sudo apt-get update && sudo apt-get install -y gcsfuse
+
+# 2. Make credentials available to the host (ADC): a service account key, or on GCE the metadata server.
+gcloud auth application-default login   # dev; on GCE the attached SA is used automatically
+
+# 3. Mount the bucket as root so the container (any uid) can read it via allow_other.
+sudo mkdir -p /mnt/gcs
+sudo gcsfuse -o allow_other --implicit-dirs YOUR_BUCKET /mnt/gcs
+```
+
+> `allow_other` is what lets a container process — frequently not the mounting user — read the mount. As root (`sudo`) it works directly; if you mount as a non-root user you must first uncomment `user_allow_other` in `/etc/fuse.conf`. Docker bind mounts are recursive, so binding `/mnt/gcs` captures the gcsfuse mount that already lives there (mount the bucket **before** creating the sandbox).
+
+Unmounting is the host's job too: `fusermount -u /mnt/gcs`. The sandbox does not manage the host mount lifecycle. As with rclone, gcsfuse is FUSE over object storage — whole-file create-and-close writes are the reliable pattern, and a freshly written object may take a moment to appear.
+
+### In your app
+
+```typescript
+import { createDockerSandbox, gcs } from '@deepagents/context';
+
+const sandbox = await createDockerSandbox({
+  volumes: [gcs({ hostPath: '/mnt/gcs', mountPath: '/workspace/storage' })],
+});
+
+await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
+```
+
+`gcs()` is just a typed bind volume over the host mountpoint — the library never learns about GCS, gcsfuse, or credentials.
+
 ## Things to know
 
 - **Writes are eventually consistent.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously (after `--vfs-write-back`, default `5s`, plus a flush on unmount). Don't assume an object is in the bucket the instant a file is closed. Lower `vfs-write-back` for faster uploads.
