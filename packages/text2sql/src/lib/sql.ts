@@ -8,12 +8,15 @@ import {
 import { validateAdapterNames } from './adapter-name.ts';
 import { type Adapter } from './adapters/adapter.ts';
 import { toSql } from './agents/sql.agent.ts';
+import { type IndexCache } from './index-cache.ts';
+import { type IndexLock } from './index-lock.ts';
 import { type ExtractedPair, type PairProducer } from './synthesis/types.ts';
 
 export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
-  version?: string;
   model?: AgentModel;
+  cache?: IndexCache;
+  lock?: IndexLock;
 }
 
 export interface Text2SqlRunResult {
@@ -81,7 +84,8 @@ export class Text2Sql {
     this.#config = config;
     this.#indexer = new AdapterIndexer({
       adapters: config.adapters,
-      version: config.version,
+      cache: config.cache,
+      lock: config.lock,
     });
   }
 

@@ -40,7 +40,6 @@ const pool = await sql.connect({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new SqlServer({
@@ -74,7 +73,6 @@ import * as sqlserver from '@deepagents/text2sql/sqlserver';
 const connection = new Connection(config);
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new SqlServer({

@@ -67,7 +67,6 @@ const adapter = new Postgres({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1',
   model: groq('openai/gpt-oss-20b'),
   adapters: { main: adapter },
 });
@@ -194,8 +193,12 @@ sandbox was not prepared correctly.
 - `--out-dir <path>`: writes artifacts under that path (default:
   `$TEXT2SQL_OUT_DIR` or `./sql`).
 
-Set `TEXT2SQL_INDEX_VERSION` to manage cache invalidation across runs. Cache
-keys are `index-<version>-<adapter>`, so bump the version when schema changes.
+The `sql` CLI caches introspected schema only when you opt in via env: set
+`TEXT2SQL_INDEX_CACHE_DIR` (where cache files live) and/or
+`TEXT2SQL_INDEX_VERSION` (an invalidation token — bump it when the schema
+changes). With neither set, every `sql index` introspects fresh. See
+[Schema index caching & coordination](#schema-index-caching--coordination) for
+the underlying injectable primitives.
 
 For in-process or virtual-sandbox usage (without installing the package CLI),
 wrap an existing `Text2Sql` instance as a just-bash custom command:
@@ -328,6 +331,69 @@ for await (const chunk of followUp) {
 }
 ```
 
+## Schema index caching & coordination
+
+Schema introspection is the expensive part of indexing. `Text2Sql` and
+`AdapterIndexer` own no storage and no locking — you inject both as optional
+primitives, keyed per adapter:
+
+```typescript
+export interface IndexCache {
+  read(key: string): Promise<ContextFragment[] | null>;
+  write(key: string, fragments: ContextFragment[]): Promise<void>;
+}
+
+export interface IndexLock {
+  // Acquire (waiting if held elsewhere), run fn, release — even on throw.
+  // Reject if the lock can't be acquired (callers fail closed).
+  run<T>(key: string, fn: () => Promise<T>): Promise<T>;
+}
+```
+
+- **No `cache`** → every `index()` introspects fresh (no cache events).
+- **`cache` only** → warm reads skip introspection within whatever the cache
+  spans.
+- **`cache` + `lock`** → introspection is single-flight: concurrent callers for
+  the same adapter wait on the lock, then read the warm cache.
+
+A file-backed `IndexCache` ships as a composable primitive:
+
+```typescript
+import { FileIndexCache, Text2Sql } from '@deepagents/text2sql';
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: { main: adapter },
+  // Point `dir` at a shared volume to share one cache across processes.
+  cache: new FileIndexCache({ dir: '/var/cache/text2sql', namespace: 'v1' }),
+});
+```
+
+`FileIndexCache` writes atomically (temp + rename) and treats an unparseable
+file as a miss, so a torn read self-heals into a re-introspect.
+
+### Horizontally-scaled deployments
+
+Running many processes/containers against one database (e.g. a fleet of
+daemons)? Two coordination tiers:
+
+- The **lock alone** serializes introspection — never two concurrent
+  introspections of the same database (caps peak DB load). Back it with a
+  distributed lock you already operate (a Redis lock, a Postgres
+  `pg_advisory_lock`, etc.).
+- The **lock plus a shared cache directory** gives fleet-wide single-flight:
+  the lock holder writes the cache on the shared volume, and every waiter reads
+  it instead of re-introspecting.
+
+> On object-storage-backed volumes (GCS/S3 FUSE) `rename` is not atomic and
+> file locks are unreliable — that is exactly why the lock and cache are
+> injectable. Use a real distributed lock; the `FileIndexCache` parse-as-miss
+> behavior plus the post-lock recheck tolerate a non-atomic write.
+
+See `demo/text2sql-daemon` for a daemon that injects a `FileIndexCache`
+(`TEXT2SQL_INDEX_CACHE_DIR` / `TEXT2SQL_INDEX_VERSION`) and a `pg_advisory_lock`
+backed `IndexLock`.
+
 ## Streaming Index Progress
 
 `AdapterIndexer#index({ onProgress })` emits progress events while it warms or reads
@@ -343,7 +409,7 @@ import {
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
 
-const indexer = new AdapterIndexer({ adapters, version: 'v1' });
+const indexer = new AdapterIndexer({ adapters });
 
 await context.continue(user('Show me top 10 customers'));
 

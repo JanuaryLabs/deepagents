@@ -149,16 +149,10 @@ const sql = await text2sql.toSql(
 
 Query generation is fast:
 
-- **Cold start**: first call includes schema introspection
-- **Cached schema**: later calls reuse the on-disk cache for the configured `version`
+- **Introspection**: every call introspects the schema unless you inject a cache
 - **Retry attempts**: up to three attempts on validation errors
 
-The introspection cache is invalidated when you change the `version` parameter:
-
-```typescript
-const text2sql = new Text2Sql({
-  version: 'v2', // Bump this when schema changes
-  adapters: { main: adapter },
-  model,
-});
-```
+To skip repeated introspection, pass a `cache` (e.g. `FileIndexCache`) to
+`new Text2Sql({ ... })`; without one, schema indexing runs fresh on each call.
+See the package README's "Schema index caching & coordination" section for the
+injected `cache`/`lock` model and its invalidation namespace.

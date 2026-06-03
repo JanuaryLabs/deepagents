@@ -7,7 +7,8 @@ import {
   type IntrospectionProgress,
 } from './adapters/adapter.ts';
 import { createGroundingContext } from './adapters/groundings/context.ts';
-import { JsonCache } from './file-cache.ts';
+import { type IndexCache } from './index-cache.ts';
+import { type IndexLock } from './index-lock.ts';
 
 export const TEXT2SQL_INDEX_PROGRESS_CHUNK = 'data-text2sql-index-progress';
 
@@ -42,8 +43,8 @@ export type Text2SqlIndexProgressHandler = (
 
 export interface AdapterIndexerOptions {
   adapters: Record<string, Adapter>;
-  version?: string;
-  cacheKey?: (adapterName: string) => string | undefined;
+  cache?: IndexCache;
+  lock?: IndexLock;
 }
 
 export interface AdapterIndexerIndexOptions {
@@ -71,8 +72,8 @@ function timestampProgressHandler(
 
 export class AdapterIndexer {
   readonly #adapters: Record<string, Adapter>;
-  readonly #version: string | undefined;
-  readonly #cacheKey: ((adapterName: string) => string | undefined) | undefined;
+  readonly #cache: IndexCache | undefined;
+  readonly #lock: IndexLock | undefined;
 
   constructor(options: AdapterIndexerOptions) {
     const adapterNames = Object.keys(options.adapters);
@@ -82,8 +83,8 @@ export class AdapterIndexer {
 
     validateAdapterNames(adapterNames);
     this.#adapters = options.adapters;
-    this.#version = options.version;
-    this.#cacheKey = options.cacheKey;
+    this.#cache = options.cache;
+    this.#lock = options.lock;
   }
 
   async index(
@@ -163,20 +164,48 @@ export class AdapterIndexer {
       message: `Indexing adapter "${name}"...`,
     });
 
-    const cacheKey = this.#adapterCacheKey(name);
-    const cache = cacheKey
-      ? new JsonCache<ContextFragment[]>(cacheKey)
-      : undefined;
+    const cache = this.#cache;
+    const key = name;
+
+    const emitCacheHit = () =>
+      progress({
+        type: 'adapter:cache-hit',
+        adapter: name,
+        message: `Using cached index for adapter "${name}".`,
+        cached: true,
+      });
+    const emitCacheMiss = () =>
+      progress({
+        type: 'adapter:cache-miss',
+        adapter: name,
+        message: `No cached index for adapter "${name}".`,
+        cached: false,
+      });
+
+    const introspect = async () => {
+      const ctx = createGroundingContext({
+        onProgress: (event) => progress(adapterProgressEvent(name, event)),
+      });
+      const fragments = await adapter.introspect(ctx);
+      await cache?.write(key, fragments);
+      return fragments;
+    };
+
+    let servedFromCache = false;
+    const populate = async () => {
+      const recheck = await cache?.read(key);
+      if (recheck) {
+        servedFromCache = true;
+        return recheck;
+      }
+      if (cache) emitCacheMiss();
+      return introspect();
+    };
 
     try {
-      const cached = await cache?.read();
+      const cached = await cache?.read(key);
       if (cached) {
-        progress({
-          type: 'adapter:cache-hit',
-          adapter: name,
-          message: `Using cached index for adapter "${name}".`,
-          cached: true,
-        });
+        emitCacheHit();
         progress({
           type: 'adapter:end',
           adapter: name,
@@ -186,25 +215,16 @@ export class AdapterIndexer {
         return cached;
       }
 
-      if (cache) {
-        progress({
-          type: 'adapter:cache-miss',
-          adapter: name,
-          message: `No cached index for adapter "${name}".`,
-          cached: false,
-        });
-      }
+      const fragments = this.#lock
+        ? await this.#lock.run(key, populate)
+        : await populate();
 
-      const ctx = createGroundingContext({
-        onProgress: (event) => progress(adapterProgressEvent(name, event)),
-      });
-      const fragments = await adapter.introspect(ctx);
-      await cache?.write(fragments);
+      if (servedFromCache) emitCacheHit();
       progress({
         type: 'adapter:end',
         adapter: name,
         message: `Finished indexing adapter "${name}".`,
-        cached: false,
+        cached: servedFromCache,
       });
       return fragments;
     } catch (error) {
@@ -237,19 +257,6 @@ export class AdapterIndexer {
       }
       return [name, adapter];
     });
-  }
-
-  #adapterCacheKey(name: string): string | undefined {
-    const configured = this.#cacheKey?.(name);
-    if (configured !== undefined) {
-      return configured;
-    }
-
-    if (this.#version) {
-      return `index-${this.#version}-${name}`;
-    }
-
-    return undefined;
   }
 }
 

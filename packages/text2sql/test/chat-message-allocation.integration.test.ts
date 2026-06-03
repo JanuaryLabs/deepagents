@@ -23,6 +23,7 @@ import {
 } from '@deepagents/context';
 import {
   AdapterIndexer,
+  FileIndexCache,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   instructions,
 } from '@deepagents/text2sql';
@@ -118,7 +119,9 @@ describe('Text2Sql client message allocation', () => {
       });
       const model = createMockModel();
       const adapters = { main: adapter };
-      const version = `allocation-${generateId()}`;
+      const cache = new FileIndexCache({
+        namespace: `allocation-${generateId()}`,
+      });
 
       const transport: ChatTransport<UIMessage> = {
         sendMessages: async ({ messages }) => {
@@ -135,7 +138,7 @@ describe('Text2Sql client message allocation', () => {
               writer.write({ type: 'start', messageId: head.id });
               const fragments = await new AdapterIndexer({
                 adapters,
-                version,
+                cache,
               }).index({
                 onProgress: (event) =>
                   writer.write({

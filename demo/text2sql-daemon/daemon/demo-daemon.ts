@@ -9,19 +9,28 @@ import {
 } from 'json-rpc-2.0';
 
 import {
+  FileIndexCache,
   Text2Sql,
   Text2SqlUnknownAdapterError,
   Text2SqlValidationError,
 } from '@deepagents/text2sql';
 
 import adapters, { pool } from './demo-adapters.ts';
+import { PgAdvisoryIndexLock } from './pg-advisory-lock.ts';
 
 const PORT = Number(process.env.PORT ?? '4747');
 const VALIDATION_ERROR_CODE = -32000;
 
+const cacheDir = process.env.TEXT2SQL_INDEX_CACHE_DIR;
+const cacheNamespace = process.env.TEXT2SQL_INDEX_VERSION;
+
 const text2Sql = new Text2Sql({
   adapters,
-  version: process.env.TEXT2SQL_INDEX_VERSION,
+  cache:
+    cacheDir || cacheNamespace
+      ? new FileIndexCache({ dir: cacheDir, namespace: cacheNamespace })
+      : undefined,
+  lock: new PgAdvisoryIndexLock(pool),
 });
 
 const adapterNames = text2Sql.adapterNames();

@@ -25,7 +25,7 @@ import {
 import { AdapterIndexer, instructions } from '@deepagents/text2sql';
 
 const context = new ContextEngine({ store, chatId, userId });
-const indexer = new AdapterIndexer({ adapters, version: 'v1' });
+const indexer = new AdapterIndexer({ adapters });
 context.set(...instructions(), ...(await indexer.index()));
 
 const ai = agent({
@@ -65,7 +65,7 @@ import {
   instructions,
 } from '@deepagents/text2sql';
 
-const indexer = new AdapterIndexer({ adapters, version: 'v1' });
+const indexer = new AdapterIndexer({ adapters });
 
 const stream = createUIMessageStream({
   execute: async ({ writer }) => {
@@ -101,9 +101,16 @@ use `--out-dir <path>` (or `TEXT2SQL_OUT_DIR`) to control artifact location.
 By default, `sql index` covers all configured adapters; pass adapter names to
 scope it.
 
-For cross-run cache control, set `TEXT2SQL_INDEX_VERSION`. Cache keys are
-derived as `index-<version>-<adapter>`, so bump the version when the schema
-changes.
+For cross-run reuse, inject a cache into `new AdapterIndexer({ adapters, cache })`
+(or `new Text2Sql({ ..., cache })`). The shipped `FileIndexCache({ dir, namespace })`
+is file-backed; `namespace` is the invalidation token (bump it when the schema
+changes), and `dir` defaults to the OS temp dir. Without a cache, indexing
+introspects fresh on every call. When you scale horizontally, point every
+instance at a shared cache `dir` and pass a distributed `lock` so the fleet
+collapses concurrent introspection into a single flight. The package README's
+"Schema index caching & coordination" section documents the full `cache`/`lock`
+model. The sandbox CLI (`sql index`) wires a `FileIndexCache` from
+`TEXT2SQL_INDEX_CACHE_DIR` and the `TEXT2SQL_INDEX_VERSION` namespace.
 
 To live-tail progress from another process, set `TEXT2SQL_INDEX_EVENTS_PATH`
 to a fixed path. See

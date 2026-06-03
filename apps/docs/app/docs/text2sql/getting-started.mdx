@@ -25,12 +25,11 @@ SQLite uses the built-in `node:sqlite` module and requires no additional driver.
 
 ## Basic Setup
 
-Text2SQL requires four components:
+Text2SQL requires three components:
 
 1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, or BigQuery)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Model** - Any AI SDK model compatible with `@deepagents/agent`
-4. **Version** - A string used to manage cache invalidation (bump when schema changes)
 
 Start by creating the shared model:
 
@@ -72,7 +71,6 @@ const adapter = new Sqlite({
 
 // Create the Text2SQL instance
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: { main: adapter },
 });
@@ -98,7 +96,6 @@ const adapter = new Postgres({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: { main: adapter },
 });
@@ -128,7 +125,6 @@ const adapter = new SqlServer({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: { main: adapter },
 });
@@ -157,7 +153,6 @@ const adapter = new Mysql({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: { main: adapter },
 });
@@ -192,7 +187,6 @@ const adapter = new BigQuery({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: { main: adapter },
 });
@@ -322,9 +316,11 @@ const indexResult = await sandbox.sandbox.executeCommand(
   `$TEXT2SQL_OUT_DIR` or `./sql`).
 - The manifest always includes `fragmentsPath` and `eventsPath`.
 
-Set `TEXT2SQL_INDEX_VERSION` to control index-cache invalidation across runs.
-Cache keys are `index-<version>-<adapter>`, so bump the version when your
-schema changes.
+Set `TEXT2SQL_INDEX_CACHE_DIR` (and optionally `TEXT2SQL_INDEX_VERSION` as an
+invalidation namespace) to make the CLI back schema indexing with a
+`FileIndexCache`; without either, `sql index` introspects fresh every run. See
+the package README's "Schema index caching & coordination" section for the
+injected `cache`/`lock` model.
 
 Set `TEXT2SQL_INDEX_EVENTS_PATH` to write the NDJSON progress stream to a
 fixed path instead of the auto-generated `index-<id>.events.ndjson`. The

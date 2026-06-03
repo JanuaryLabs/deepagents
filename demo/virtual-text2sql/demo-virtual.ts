@@ -10,14 +10,21 @@ import {
   errorRecoveryGuardrail,
   user,
 } from '@deepagents/context';
-import { Text2Sql, createSqlCommand } from '@deepagents/text2sql';
+import {
+  FileIndexCache,
+  Text2Sql,
+  createSqlCommand,
+} from '@deepagents/text2sql';
 
 import adapters from './demo-adapters.ts';
 import context, { defaultFragments } from './demo-context.ts';
 
+const cacheNamespace = process.env.TEXT2SQL_INDEX_VERSION;
 const text2Sql = new Text2Sql({
   adapters,
-  version: process.env.TEXT2SQL_INDEX_VERSION,
+  cache: cacheNamespace
+    ? new FileIndexCache({ namespace: cacheNamespace })
+    : undefined,
 });
 const { command: sqlCommand } = createSqlCommand(text2Sql);
 

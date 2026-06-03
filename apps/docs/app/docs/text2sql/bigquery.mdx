@@ -29,7 +29,6 @@ const projectId = process.env.BQ_PROJECT_ID!;
 const client = new BigQueryClient({ projectId });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new BigQuery({

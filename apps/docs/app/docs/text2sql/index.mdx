@@ -33,7 +33,6 @@ const adapter = new Sqlite({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model: groq('openai/gpt-oss-20b'),
   adapters: { main: adapter },
 });

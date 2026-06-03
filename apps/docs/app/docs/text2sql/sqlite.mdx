@@ -22,7 +22,6 @@ import * as sqlite from '@deepagents/text2sql/sqlite';
 const db = new DatabaseSync('./your-database.db', { readOnly: true });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new Sqlite({
@@ -53,7 +52,6 @@ import * as sqlite from '@deepagents/text2sql/sqlite';
 const db = new Database('./database.db', { readonly: true });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new Sqlite({
@@ -85,7 +83,6 @@ const SQL = await initSqlJs();
 const db = new SQL.Database(data);
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new Sqlite({

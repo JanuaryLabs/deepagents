@@ -3,24 +3,30 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { getFragmentData } from '@deepagents/context';
-import { AdapterIndexer } from '@deepagents/text2sql';
+import {
+  AdapterIndexer,
+  FileIndexCache,
+  type IndexCache,
+} from '@deepagents/text2sql';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../src/tests/sqlite.ts';
 
 function indexTestAdapters(
-  version: string,
   adapters: Record<string, Awaited<ReturnType<typeof init_db>>['adapter']>,
+  cache?: IndexCache,
 ) {
   return new AdapterIndexer({
-    version,
     adapters,
+    cache,
   }).index();
 }
 
 describe('AdapterIndexer — cache isolation', () => {
   it('does not re-introspect an adapter when a second adapter is added under the same version', async () => {
-    const version = `cache-iso-${generateId()}`;
+    const cache = new FileIndexCache({
+      namespace: `cache-iso-${generateId()}`,
+    });
 
     const { adapter: mainAdapter } = await init_db(
       `CREATE TABLE users (id INTEGER);`,
@@ -34,7 +40,7 @@ describe('AdapterIndexer — cache isolation', () => {
       return originalIntrospect(...args);
     };
 
-    await indexTestAdapters(version, { main: mainAdapter });
+    await indexTestAdapters({ main: mainAdapter }, cache);
     assert.strictEqual(mainIntrospectCalls, 1, 'warmed main cache');
 
     const { adapter: analyticsAdapter } = await init_db(
@@ -42,10 +48,13 @@ describe('AdapterIndexer — cache isolation', () => {
       { grounding: [sqlite.tables()] },
     );
 
-    const fragments = await indexTestAdapters(version, {
-      main: mainAdapter,
-      analytics: analyticsAdapter,
-    });
+    const fragments = await indexTestAdapters(
+      {
+        main: mainAdapter,
+        analytics: analyticsAdapter,
+      },
+      cache,
+    );
 
     assert.strictEqual(
       mainIntrospectCalls,
@@ -62,9 +71,7 @@ describe('AdapterIndexer — cache isolation', () => {
       grounding: [sqlite.tables()],
     });
 
-    const fragments = await indexTestAdapters(`wrap-${generateId()}`, {
-      my_db: adapter,
-    });
+    const fragments = await indexTestAdapters({ my_db: adapter });
 
     assert.strictEqual(fragments.length, 1);
     assert.strictEqual(fragments[0].name, 'my_db');
@@ -95,7 +102,7 @@ describe('AdapterIndexer — error annotation', () => {
 
     await assert.rejects(
       () =>
-        indexTestAdapters(`err-${generateId()}`, {
+        indexTestAdapters({
           main: goodAdapter,
           broken: badAdapter,
         }),

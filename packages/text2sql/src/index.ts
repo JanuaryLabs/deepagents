@@ -9,6 +9,8 @@ export * from './lib/agents/suggestions.agents.ts';
 export * from './lib/adapter-index.ts';
 export * from './lib/checkpoint.ts';
 export * from './lib/file-cache.ts';
+export * from './lib/index-cache.ts';
+export * from './lib/index-lock.ts';
 export * from './lib/fragments/schema.ts';
 export * from './lib/fs/index.ts';
 export * from './lib/instructions.ts';

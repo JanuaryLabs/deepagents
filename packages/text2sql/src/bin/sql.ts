@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { type CAC, cac } from 'cac';
 
+import { FileIndexCache } from '../lib/index-cache.ts';
 import { Text2Sql } from '../lib/sql.ts';
 import {
   CommandError,
@@ -78,6 +79,15 @@ function registerCommand(cli: CAC, command: SqlCommand): void {
   });
 }
 
+function resolveIndexCache(): FileIndexCache | undefined {
+  const dir = process.env.TEXT2SQL_INDEX_CACHE_DIR;
+  const namespace = process.env.TEXT2SQL_INDEX_VERSION;
+  if (!dir && !namespace) {
+    return undefined;
+  }
+  return new FileIndexCache({ dir, namespace });
+}
+
 async function runCommand(
   command: SqlCommand,
   positional: unknown[],
@@ -87,7 +97,7 @@ async function runCommand(
   try {
     const text2Sql = new Text2Sql({
       adapters: await loadAdapters(),
-      version: process.env.TEXT2SQL_INDEX_VERSION,
+      cache: resolveIndexCache(),
     });
     ctx = {
       text2Sql,

@@ -30,7 +30,6 @@ const pool = new pg.Pool({
 });
 
 const text2sql = new Text2Sql({
-  version: 'v1', // Bump this when your schema changes
   model,
   adapters: {
     main: new Postgres({

@@ -1,6 +1,5 @@
 import { groq } from '@ai-sdk/groq';
 import { evalite } from 'evalite';
-import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
@@ -29,7 +28,6 @@ evalite('SQL Output Formatting', {
       execute: (sql) => db.prepare(sql).all(),
     });
     const text2sql = new Text2Sql({
-      version: randomUUID(),
       adapters: { main: adapter },
       model: groq('gpt-oss-20b'),
     });

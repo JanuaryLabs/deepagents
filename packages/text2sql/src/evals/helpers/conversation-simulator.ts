@@ -198,7 +198,6 @@ export async function simulateConversation(
   });
   const engine = new ContextEngine({ store, chatId, userId });
   const adapters = { main: config.adapter };
-  const version = `eval-simulator-${randomUUID()}`;
 
   const ai = agent({
     name: 'text2sql',
@@ -219,7 +218,7 @@ export async function simulateConversation(
 
     engine.set(
       ...instructions(),
-      ...(await new AdapterIndexer({ adapters, version }).index()),
+      ...(await new AdapterIndexer({ adapters }).index()),
     );
     await engine.continue(user(userMessage));
     const stream = await chat(ai);
