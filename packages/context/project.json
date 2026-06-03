@@ -18,7 +18,7 @@
     },
     "test": {
       "options": {
-        "command": "node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/context.xml"
+        "command": "node --test --no-warnings --experimental-test-module-mocks --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/context.xml"
       }
     }
   }

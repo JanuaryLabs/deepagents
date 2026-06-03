@@ -1,6 +1,12 @@
+import type {
+  CreateSandboxFromImageParams,
+  CreateSandboxFromSnapshotParams,
+  Daytona,
+  DaytonaConfig,
+  Sandbox,
+} from '@daytona/sdk';
 import { type CommandResult } from 'bash-tool';
 import { randomUUID } from 'node:crypto';
-import { createRequire } from 'node:module';
 
 import type {
   DisposableSandbox,
@@ -14,36 +20,7 @@ export const DAYTONA_DEFAULT_DESTINATION = '/home/daytona';
 const DAYTONA_EXIT_POLL_INTERVAL_MS = 250;
 const DAYTONA_EXIT_POLL_TIMEOUT_MS = 30_000;
 
-const requireOptional = createRequire(import.meta.url);
-
-interface DaytonaConfig {
-  apiKey?: string;
-  jwtToken?: string;
-  organizationId?: string;
-  apiUrl?: string;
-  target?: string;
-  otelEnabled?: boolean;
-  _experimental?: Record<string, unknown>;
-}
-
-interface DaytonaSdkModule {
-  Daytona: new (config?: DaytonaConfig) => DaytonaClient;
-}
-
-interface DaytonaClient {
-  create(
-    params?: DaytonaCreateParams,
-    options?: DaytonaCreateOptions,
-  ): Promise<DaytonaSandboxInstance>;
-  get(sandboxIdOrName: string): Promise<DaytonaSandboxInstance>;
-  delete?(sandbox: DaytonaSandboxInstance, timeout?: number): Promise<void>;
-  [Symbol.asyncDispose]?(): Promise<void>;
-}
-
-interface DaytonaCreateOptions {
-  timeout?: number;
-  onSnapshotCreateLogs?: (chunk: string) => void;
-}
+type DaytonaSdk = typeof import('@daytona/sdk');
 
 export interface DaytonaResources {
   cpu?: number;
@@ -56,96 +33,6 @@ export interface DaytonaVolumeMount {
   volumeId: string;
   mountPath: string;
   [key: string]: unknown;
-}
-
-interface DaytonaCreateParams {
-  name?: string;
-  user?: string;
-  language?: string;
-  envVars?: Record<string, string>;
-  labels?: Record<string, string>;
-  public?: boolean;
-  autoStopInterval?: number;
-  autoArchiveInterval?: number;
-  autoDeleteInterval?: number;
-  volumes?: DaytonaVolumeMount[];
-  networkBlockAll?: boolean;
-  networkAllowList?: string;
-  ephemeral?: boolean;
-  snapshot?: string;
-  image?: string;
-  resources?: DaytonaResources;
-}
-
-interface DaytonaSandboxInstance {
-  id: string;
-  name?: string;
-  state?: string;
-  fs: DaytonaFileSystem;
-  process: DaytonaProcess;
-  start?(timeout?: number): Promise<void>;
-  delete?(timeout?: number): Promise<void>;
-}
-
-interface DaytonaFileSystem {
-  downloadFile(
-    remotePath: string,
-    timeout?: number,
-  ): Promise<Buffer | Uint8Array>;
-  uploadFiles(
-    files: Array<{ source: Buffer; destination: string }>,
-    timeout?: number,
-  ): Promise<void>;
-}
-
-interface DaytonaProcess {
-  executeCommand(
-    command: string,
-    cwd?: string,
-    env?: Record<string, string>,
-    timeout?: number,
-  ): Promise<DaytonaExecuteResponse>;
-  createSession(sessionId: string): Promise<void>;
-  executeSessionCommand(
-    sessionId: string,
-    req: {
-      command: string;
-      runAsync?: boolean;
-      suppressInputEcho?: boolean;
-    },
-    timeout?: number,
-  ): Promise<DaytonaSessionExecuteResponse>;
-  getSessionCommand(
-    sessionId: string,
-    commandId: string,
-  ): Promise<DaytonaSessionCommand>;
-  getSessionCommandLogs(
-    sessionId: string,
-    commandId: string,
-    onStdout: (chunk: string) => void,
-    onStderr: (chunk: string) => void,
-  ): Promise<void>;
-  deleteSession(sessionId: string): Promise<void>;
-}
-
-interface DaytonaExecuteResponse {
-  exitCode?: number;
-  result?: string;
-  artifacts?: {
-    stdout?: string;
-  };
-}
-
-interface DaytonaSessionExecuteResponse {
-  cmdId?: string | null;
-  output?: string | null;
-  stdout?: string | null;
-  stderr?: string | null;
-  exitCode?: number | null;
-}
-
-interface DaytonaSessionCommand {
-  exitCode?: number | null;
 }
 
 export interface DaytonaSandboxOptions {
@@ -161,6 +48,15 @@ export interface DaytonaSandboxOptions {
    * preserved on dispose unless `deleteOnDispose` is explicitly true.
    */
   sandboxId?: string;
+  /**
+   * Stable sandbox name. When provided without `sandboxId`, creation uses
+   * get-or-create semantics: attach to the existing sandbox of this name if one
+   * is found (starting it if it is stopped), otherwise create it from the
+   * supplied image/snapshot, env vars, volumes, and lifecycle intervals. A named
+   * sandbox is treated as shared/persistent, so `deleteOnDispose` defaults to
+   * `false`; pass `deleteOnDispose: true` to override. Incompatible with
+   * `sandboxId`.
+   */
   name?: string;
   user?: string;
   snapshot?: string;
@@ -222,32 +118,31 @@ export async function createDaytonaSandbox(
 ): Promise<DisposableSandbox> {
   validateDaytonaOptions(options);
 
-  const { Daytona } = await importDaytonaSdk();
-  let client: DaytonaClient;
+  const sdk = await importDaytonaSdk();
+  let client: Daytona;
   try {
-    client = new Daytona(createDaytonaConfig(options));
+    client = new sdk.Daytona(createDaytonaConfig(options));
   } catch (error) {
-    const err = toError(error);
-    throw new DaytonaCreationError(err.message, err);
+    throw normalizeDaytonaError(error, sdk);
   }
 
   const attached = options.sandboxId !== undefined;
-  const deleteOnDispose = options.deleteOnDispose ?? !attached;
+  const reuseByName = !attached && options.name !== undefined;
+  const deleteOnDispose =
+    options.deleteOnDispose ?? (!attached && !reuseByName);
 
-  let sandbox: DaytonaSandboxInstance;
+  let sandbox: Sandbox;
   try {
-    sandbox = attached
-      ? await client.get(options.sandboxId as string)
-      : await client.create(createDaytonaParams(options), {
-          timeout: options.createTimeout,
-          onSnapshotCreateLogs: options.onSnapshotCreateLogs,
-        });
-    if (attached && sandbox.state && sandbox.state !== 'started') {
-      await sandbox.start?.(options.startTimeout ?? options.createTimeout);
+    if (reuseByName) {
+      sandbox = await acquireReusedSandbox(client, options, sdk);
+    } else if (attached) {
+      sandbox = await client.get(options.sandboxId as string);
+      await startIfStopped(sandbox, options);
+    } else {
+      sandbox = await createSandbox(client, options);
     }
   } catch (error) {
-    const err = toError(error);
-    throw new DaytonaCreationError(err.message, err);
+    throw normalizeDaytonaError(error, sdk);
   }
 
   return createDaytonaSandboxMethods({
@@ -259,15 +154,49 @@ export async function createDaytonaSandbox(
   });
 }
 
-async function importDaytonaSdk(): Promise<DaytonaSdkModule> {
+async function acquireReusedSandbox(
+  client: Daytona,
+  options: DaytonaSandboxOptions,
+  sdk: DaytonaSdk,
+): Promise<Sandbox> {
   try {
-    const mod = requireOptional('@daytona/sdk') as Partial<DaytonaSdkModule>;
+    const sandbox = await client.get(options.name as string);
+    await startIfStopped(sandbox, options);
+    return sandbox;
+  } catch (error) {
+    if (!(error instanceof sdk.DaytonaNotFoundError)) {
+      throw error;
+    }
+    return createSandbox(client, options);
+  }
+}
+
+async function startIfStopped(
+  sandbox: Sandbox,
+  options: DaytonaSandboxOptions,
+): Promise<void> {
+  if (sandbox.state && sandbox.state !== 'started') {
+    await sandbox.start?.(options.startTimeout ?? options.createTimeout);
+  }
+}
+
+function normalizeDaytonaError(error: unknown, sdk: DaytonaSdk): Error {
+  const err = toError(error);
+  if (err instanceof sdk.DaytonaError) {
+    return err;
+  }
+  return new DaytonaCreationError(err.message, err);
+}
+
+async function importDaytonaSdk(): Promise<DaytonaSdk> {
+  try {
+    const mod = await import('@daytona/sdk');
     if (typeof mod.Daytona !== 'function') {
       throw new DaytonaSandboxError(
         '@daytona/sdk did not export a Daytona constructor',
       );
     }
-    return { Daytona: mod.Daytona };
+    return mod;
   } catch (error) {
     if (error instanceof DaytonaSandboxError) {
       throw error;
@@ -292,9 +221,10 @@ function createDaytonaConfig(options: DaytonaSandboxOptions): DaytonaConfig {
   });
 }
 
-function createDaytonaParams(
+function createSandbox(
+  client: Daytona,
   options: DaytonaSandboxOptions,
-): DaytonaCreateParams | undefined {
+): Promise<Sandbox> {
   const base = compactObject({
     name: options.name,
     user: options.user,
@@ -311,20 +241,25 @@ function createDaytonaParams(
     ephemeral: options.ephemeral,
   });
 
-  if (options.image) {
-    return compactObject({
+  if (options.image !== undefined) {
+    const params: CreateSandboxFromImageParams = compactObject({
       ...base,
       image: options.image,
       resources: options.resources,
     });
+    return client.create(params, {
+      timeout: options.createTimeout,
+      onSnapshotCreateLogs: options.onSnapshotCreateLogs,
+    });
   }
 
-  const params = compactObject({
+  const params: CreateSandboxFromSnapshotParams = compactObject({
     ...base,
     snapshot: options.snapshot,
   });
-
-  return Object.keys(params).length > 0 ? params : undefined;
+  return client.create(Object.keys(params).length > 0 ? params : undefined, {
+    timeout: options.createTimeout,
+  });
 }
 
 function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
@@ -373,8 +308,8 @@ function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
 }
 
 function createDaytonaSandboxMethods(args: {
-  client: DaytonaClient;
-  sandbox: DaytonaSandboxInstance;
+  client: Daytona;
+  sandbox: Sandbox;
   commandTimeout?: number;
   deleteOnDispose: boolean;
   deleteTimeout?: number;
@@ -495,7 +430,7 @@ function createDaytonaSandboxMethods(args: {
 }
 
 function spawnDaytonaProcess(
-  sandbox: DaytonaSandboxInstance,
+  sandbox: Sandbox,
   command: string,
   options: SpawnOptions & { commandTimeout?: number } = {},
 ): SandboxProcess {
@@ -521,7 +456,7 @@ function spawnDaytonaProcess(
 }
 
 async function runSpawnedSession(args: {
-  sandbox: DaytonaSandboxInstance;
+  sandbox: Sandbox;
   sessionId: string;
   command: string;
   signal?: AbortSignal;
@@ -624,7 +559,7 @@ async function runSpawnedSession(args: {
 }
 
 async function waitForSessionCommandExitCode(args: {
-  sandbox: DaytonaSandboxInstance;
+  sandbox: Sandbox;
   sessionId: string;
   commandId: string;
   timeoutMs: number;
