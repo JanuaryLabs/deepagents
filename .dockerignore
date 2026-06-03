@@ -11,6 +11,10 @@
 **/.aws
 **/dist
 **/build
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
 **/.output
 **/output
 **/tmp

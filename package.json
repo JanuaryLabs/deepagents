@@ -85,7 +85,10 @@
     "apps/**",
     "applets/*",
     "benchmarks/*",
-    ".evals-sdk-it"
+    ".evals-sdk-it",
+    "demo/text2sql-daemon",
+    "demo/docker-text2sql",
+    "demo/daytona-text2sql"
   ],
   "nx": {
     "targets": {
