@@ -35,6 +35,11 @@ See the docs for the full API surface:
 
 - [Sandbox](https://januarylabs.github.io/deepagents/docs/context/sandbox)
 - [Subcommand Builders](https://januarylabs.github.io/deepagents/docs/context/subcommand)
+- [GCS Cloud Storage Volumes](https://januarylabs.github.io/deepagents/docs/context/recipes/gcs-cloud-storage)
+
+For same-host Linux Docker daemons, `gcs({ hostPath, mountPath })` provides a
+typed bind-volume helper over a host `gcsfuse` mount. For remote daemons, keep
+cloud wiring in the daemon/plugin layer and attach the resulting named volume.
 
 ## Basic Usage
 

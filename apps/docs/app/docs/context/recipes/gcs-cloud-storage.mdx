@@ -1,9 +1,16 @@
 ---
 title: GCS Cloud Storage Volumes
-description: Back a Docker sandbox volume with a Google Cloud Storage bucket on a GCP VM, using only existing volume primitives
+description: Persist sandbox files to Google Cloud Storage with either a remote Docker volume or a same-host gcsfuse mount
 ---
 
-This recipe persists sandbox files to a **Google Cloud Storage** bucket by backing a Docker volume with the [rclone](https://rclone.org/docker/) volume plugin on a GCP VM. The `@deepagents/context` side needs **no special code** — it attaches the volume with the standard `type: 'volume'` primitive and `lifecycle: 'external'`. All cloud wiring (plugin, credentials, IAM) lives on the host, exactly where [the sandbox docs](/docs/context/docker-sandbox#volumes) say it belongs.
+This recipe covers two production paths for persisting sandbox files to **Google Cloud Storage**:
+
+- A **remote Docker daemon** on a GCP VM, where an [rclone](https://rclone.org/docker/) volume plugin backs a named Docker volume. The `@deepagents/context` side uses the standard `type: 'volume'` primitive with `lifecycle: 'external'`.
+- A **same-host Linux daemon**, where [gcsfuse](https://github.com/GoogleCloudPlatform/gcsfuse) mounts the bucket on the host and `gcs()` exposes that mountpoint to the sandbox as a typed bind volume.
+
+In both cases, the cloud wiring (plugin, credentials, IAM, and host mounts) stays outside DeepAgents, exactly where [the sandbox docs](/docs/context/docker-sandbox#volumes) say it belongs.
+
+## Remote daemon on a GCP VM
 
 ## Topology
 

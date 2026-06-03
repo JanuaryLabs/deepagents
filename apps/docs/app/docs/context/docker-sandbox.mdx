@@ -204,7 +204,7 @@ Bind paths are validated at creation time. A `VolumePathError` is thrown if a bi
 
 External Docker volumes are inspected before the container starts. Managed Docker volumes are created before the container starts and removed on `dispose()` unless `removeOnDispose: false` is set.
 
-Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. Do not pass cloud credentials through `driverOptions`. See the [GCS Cloud Storage Volumes recipe](/docs/context/recipes/gcs-cloud-storage) for an end-to-end example backing a volume with a Google Cloud Storage bucket on a GCP VM.
+Cloud-backed storage should be configured outside DeepAgents through Docker volume drivers or host-mounted filesystems. For example, configure S3 or Azure Blob credentials in the host/daemon/plugin layer, then attach the resulting Docker volume with `type: 'volume'` or the host mount with `type: 'bind'`. For same-host gcsfuse mounts, `gcs({ hostPath, mountPath })` is a typed shortcut for the bind-volume form. Do not pass cloud credentials through `driverOptions`. See the [GCS Cloud Storage Volumes recipe](/docs/context/recipes/gcs-cloud-storage) for end-to-end Google Cloud Storage setups for both remote daemons and same-host Linux mounts.
 
 ## Resource Limits
 
