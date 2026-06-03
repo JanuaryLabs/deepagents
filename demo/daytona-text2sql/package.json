@@ -1,15 +1,15 @@
 {
   "name": "@deepagents/demo-daytona-text2sql",
-  "version": "2.4.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "description": "Host entrypoint for the text2sql demo on a Daytona sandbox. Boots the shared text2sql-daemon image.",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.49",
     "@daytona/sdk": "^0.175.0",
-    "@deepagents/agent": "2.4.0",
-    "@deepagents/context": "2.4.0",
-    "@deepagents/text2sql": "2.4.0",
+    "@deepagents/agent": "3.0.0",
+    "@deepagents/context": "3.0.0",
+    "@deepagents/text2sql": "3.0.0",
     "nano-spawn": "^1.0.3"
   }
 }
