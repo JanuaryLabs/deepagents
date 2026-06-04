@@ -13,7 +13,7 @@ Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `
 |---|---|---|---|
 | `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
 | `createDockerSandbox()` + `createBashTool()` | Real binaries in isolated Docker containers | Yes | Yes |
-| `createDaytonaSandbox()` + `createBashTool()` | Managed Daytona cloud sandboxes | No | Yes |
+| `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes | No | Yes |
 | `createBashTool({ sandbox: e2bSandbox })` | Other cloud sandboxes via adapter | No | Yes |
 
 Import `createBashTool` from `@deepagents/context` (not the raw `bash-tool` package). The `@deepagents/context` wrapper adds the `skills` option and always returns an `AgentSandbox`.
@@ -87,9 +87,18 @@ import {
   createBashTool,
   createDaytonaSandbox,
 } from '@deepagents/context';
+import { Daytona } from '@daytona/sdk';
 
-// Daytona reads DAYTONA_* env vars; mkdir the workspace before wiring the bash tool.
-const backend = await createDaytonaSandbox();
+const client = new Daytona({
+  apiKey: process.env.DAYTONA_API_KEY!,
+});
+
+// Pass an existing Daytona client plus either a stable `name` (get-or-create)
+// or `sandboxId` (attach). The sandbox lifecycle stays with that client.
+const backend = await createDaytonaSandbox(client, {
+  name: 'agent-backend',
+  image: 'your-registry/agent-image:latest',
+});
 await backend.executeCommand(`mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`);
 const sandbox = await createBashTool({
   sandbox: backend,
@@ -97,6 +106,10 @@ const sandbox = await createBashTool({
 });
 // Don't forget: await sandbox.sandbox.dispose() when done
 ```
+
+`dispose()` detaches local handles but does not delete a Daytona sandbox. Reuse
+stable `name` values when you want get-or-create semantics across runs, or pass
+`sandboxId` to attach to a specific sandbox directly.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict.
 

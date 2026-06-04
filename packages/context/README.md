@@ -28,8 +28,9 @@ like store implementations, sandbox tooling, and filesystem-based skill loading.
 The server-side package also ships the sandbox primitives used by
 `@deepagents/text2sql` and other tool-driven agents. Use `createBashTool()`
 with `createVirtualSandbox()`, `createDockerSandbox()`, or
-`createAgentOsSandbox()` depending on whether commands should run in memory,
-Docker, or Agent OS.
+`createDaytonaSandbox(client, options)`, or `createAgentOsSandbox()` depending
+on whether commands should run in memory, Docker, managed Daytona sandboxes, or
+Agent OS.
 
 See the docs for the full API surface:
 
@@ -40,6 +41,10 @@ See the docs for the full API surface:
 For same-host Linux Docker daemons, `gcs({ hostPath, mountPath })` provides a
 typed bind-volume helper over a host `gcsfuse` mount. For remote daemons, keep
 cloud wiring in the daemon/plugin layer and attach the resulting named volume.
+
+`createDaytonaSandbox()` takes a caller-owned Daytona client plus either a
+stable `name` (get-or-create) or `sandboxId` (attach). `dispose()` releases the
+local wrapper but does not delete the underlying Daytona sandbox.
 
 ## Basic Usage
 
