@@ -2,7 +2,6 @@ import type {
   CreateSandboxFromImageParams,
   CreateSandboxFromSnapshotParams,
   Daytona,
-  DaytonaConfig,
   Sandbox,
 } from '@daytona/sdk';
 import { type CommandResult } from 'bash-tool';
@@ -36,26 +35,17 @@ export interface DaytonaVolumeMount {
 }
 
 export interface DaytonaSandboxOptions {
-  apiKey?: string;
-  jwtToken?: string;
-  organizationId?: string;
-  apiUrl?: string;
-  target?: string;
-  otelEnabled?: boolean;
-  experimental?: Record<string, unknown>;
   /**
-   * Existing Daytona sandbox id or name to attach to. Attached sandboxes are
-   * preserved on dispose unless `deleteOnDispose` is explicitly true.
+   * Existing Daytona sandbox id or name to attach to.
    */
   sandboxId?: string;
   /**
    * Stable sandbox name. When provided without `sandboxId`, creation uses
    * get-or-create semantics: attach to the existing sandbox of this name if one
    * is found (starting it if it is stopped), otherwise create it from the
-   * supplied image/snapshot, env vars, volumes, and lifecycle intervals. A named
-   * sandbox is treated as shared/persistent, so `deleteOnDispose` defaults to
-   * `false`; pass `deleteOnDispose: true` to override. Incompatible with
-   * `sandboxId`.
+   * supplied image/snapshot, env vars, volumes, and lifecycle intervals.
+   * Incompatible with `sandboxId`. `dispose()` never deletes the sandbox — the
+   * caller owns its lifecycle through the supplied client.
    */
   name?: string;
   user?: string;
@@ -78,7 +68,6 @@ export interface DaytonaSandboxOptions {
   deleteTimeout?: number;
   commandTimeout?: number;
   onSnapshotCreateLogs?: (chunk: string) => void;
-  deleteOnDispose?: boolean;
 }
 
 export class DaytonaSandboxError extends Error {
@@ -86,16 +75,6 @@ export class DaytonaSandboxError extends Error {
     super(message);
     this.name = 'DaytonaSandboxError';
     this.cause = cause;
-  }
-}
-
-export class DaytonaNotAvailableError extends DaytonaSandboxError {
-  constructor(cause?: Error) {
-    super(
-      '@daytona/sdk is not installed. Install it with: npm install @daytona/sdk',
-      cause,
-    );
-    this.name = 'DaytonaNotAvailableError';
   }
 }
 
@@ -114,60 +93,75 @@ export class DaytonaCommandError extends DaytonaSandboxError {
 }
 
 export async function createDaytonaSandbox(
+  client: Daytona,
   options: DaytonaSandboxOptions = {},
 ): Promise<DisposableSandbox> {
   validateDaytonaOptions(options);
 
-  const sdk = await importDaytonaSdk();
-  let client: Daytona;
-  try {
-    client = new sdk.Daytona(createDaytonaConfig(options));
-  } catch (error) {
-    throw normalizeDaytonaError(error, sdk);
-  }
-
-  const attached = options.sandboxId !== undefined;
-  const reuseByName = !attached && options.name !== undefined;
-  const deleteOnDispose =
-    options.deleteOnDispose ?? (!attached && !reuseByName);
+  // The caller supplies a Daytona client, so @daytona/sdk is already installed;
+  // this dynamic import only surfaces the SDK error classes for instanceof
+  // checks, without forcing a hard dependency on consumers that never touch
+  // Daytona.
+  const sdk = await import('@daytona/sdk');
 
   let sandbox: Sandbox;
   try {
-    if (reuseByName) {
-      sandbox = await acquireReusedSandbox(client, options, sdk);
-    } else if (attached) {
-      sandbox = await client.get(options.sandboxId as string);
+    if (options.sandboxId !== undefined) {
+      sandbox = await client.get(options.sandboxId);
       await startIfStopped(sandbox, options);
     } else {
-      sandbox = await createSandbox(client, options);
+      sandbox = await acquireReusedSandbox(client, options, sdk);
     }
   } catch (error) {
     throw normalizeDaytonaError(error, sdk);
   }
 
   return createDaytonaSandboxMethods({
-    client,
     sandbox,
     commandTimeout: options.commandTimeout,
-    deleteOnDispose,
-    deleteTimeout: options.deleteTimeout,
   });
 }
+
+const UNRECOVERABLE_SANDBOX_STATES = new Set<string>([
+  'error',
+  'build_failed',
+  'destroyed',
+]);
 
 async function acquireReusedSandbox(
   client: Daytona,
   options: DaytonaSandboxOptions,
   sdk: DaytonaSdk,
 ): Promise<Sandbox> {
+  let existing: Sandbox;
   try {
-    const sandbox = await client.get(options.name as string);
-    await startIfStopped(sandbox, options);
-    return sandbox;
+    existing = await client.get(options.name as string);
   } catch (error) {
-    if (!(error instanceof sdk.DaytonaNotFoundError)) {
-      throw error;
+    if (error instanceof sdk.DaytonaNotFoundError) {
+      return createSandbox(client, options);
     }
+    throw error;
+  }
+
+  // A sandbox stuck in a terminal state can't be started (Daytona rejects it),
+  // so a reused name would stay poisoned after a failed build. Replace it.
+  if (existing.state && UNRECOVERABLE_SANDBOX_STATES.has(existing.state)) {
+    await deleteSandboxQuietly(existing, options);
     return createSandbox(client, options);
+  }
+
+  await startIfStopped(existing, options);
+  return existing;
+}
+
+async function deleteSandboxQuietly(
+  sandbox: Sandbox,
+  options: DaytonaSandboxOptions,
+): Promise<void> {
+  try {
+    await sandbox.delete(options.deleteTimeout);
+  } catch {
+    // Already gone or mid-deletion — fall through to recreate.
   }
 }
 
@@ -176,7 +170,7 @@ async function startIfStopped(
   options: DaytonaSandboxOptions,
 ): Promise<void> {
   if (sandbox.state && sandbox.state !== 'started') {
-    await sandbox.start?.(options.startTimeout ?? options.createTimeout);
+    await sandbox.start(options.startTimeout ?? options.createTimeout);
   }
 }
 
@@ -186,39 +180,6 @@ function normalizeDaytonaError(error: unknown, sdk: DaytonaSdk): Error {
     return err;
   }
   return new DaytonaCreationError(err.message, err);
-}
-
-async function importDaytonaSdk(): Promise<DaytonaSdk> {
-  try {
-    const mod = await import('@daytona/sdk');
-    if (typeof mod.Daytona !== 'function') {
-      throw new DaytonaSandboxError(
-        '@daytona/sdk did not export a Daytona constructor',
-      );
-    }
-    return mod;
-  } catch (error) {
-    if (error instanceof DaytonaSandboxError) {
-      throw error;
-    }
-    const err = toError(error);
-    if (isMissingDaytonaSdk(err)) {
-      throw new DaytonaNotAvailableError(err);
-    }
-    throw err;
-  }
-}
-
-function createDaytonaConfig(options: DaytonaSandboxOptions): DaytonaConfig {
-  return compactObject({
-    apiKey: options.apiKey,
-    jwtToken: options.jwtToken,
-    organizationId: options.organizationId,
-    apiUrl: options.apiUrl,
-    target: options.target,
-    otelEnabled: options.otelEnabled,
-    _experimental: options.experimental,
-  });
 }
 
 function createSandbox(
@@ -257,9 +218,7 @@ function createSandbox(
     ...base,
     snapshot: options.snapshot,
   });
-  return client.create(Object.keys(params).length > 0 ? params : undefined, {
-    timeout: options.createTimeout,
-  });
+  return client.create(params, { timeout: options.createTimeout });
 }
 
 function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
@@ -271,6 +230,12 @@ function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
   if (options.resources && !options.image) {
     throw new DaytonaSandboxError(
       'Daytona sandbox options can only include "resources" when creating from "image". The Daytona SDK does not apply resources during default or snapshot creation.',
+    );
+  }
+
+  if (options.sandboxId === undefined && options.name === undefined) {
+    throw new DaytonaSandboxError(
+      'Daytona sandbox options require "name" (get-or-create) or "sandboxId" (attach). An unnamed sandbox cannot be reclaimed, since dispose() does not delete it.',
     );
   }
 
@@ -308,15 +273,10 @@ function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
 }
 
 function createDaytonaSandboxMethods(args: {
-  client: Daytona;
   sandbox: Sandbox;
   commandTimeout?: number;
-  deleteOnDispose: boolean;
-  deleteTimeout?: number;
 }): DisposableSandbox {
-  const { client, sandbox, commandTimeout, deleteOnDispose, deleteTimeout } =
-    args;
-  let disposed = false;
+  const { sandbox, commandTimeout } = args;
 
   const executeCommand = async (
     command: string,
@@ -415,16 +375,8 @@ function createDaytonaSandboxMethods(args: {
     },
 
     async dispose(): Promise<void> {
-      if (disposed) return;
-      disposed = true;
-      try {
-        if (deleteOnDispose) {
-          if (sandbox.delete) await sandbox.delete(deleteTimeout);
-          else if (client.delete) await client.delete(sandbox, deleteTimeout);
-        }
-      } finally {
-        await client[Symbol.asyncDispose]?.().catch(() => {});
-      }
+      // The caller owns the Daytona client and the sandbox lifecycle, so there
+      // is nothing for this adapter to release.
     },
   };
 }
@@ -701,15 +653,6 @@ function compactObject<T extends Record<string, unknown>>(input: T): T {
     }
   }
   return output as T;
-}
-
-function isMissingDaytonaSdk(error: Error): boolean {
-  const maybeCode = (error as Error & { code?: string }).code;
-  return (
-    maybeCode === 'ERR_MODULE_NOT_FOUND' ||
-    maybeCode === 'MODULE_NOT_FOUND' ||
-    error.message.includes('@daytona/sdk')
-  );
 }
 
 function toError(error: unknown): Error {

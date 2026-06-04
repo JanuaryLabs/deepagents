@@ -7,6 +7,8 @@ import {
   createDaytonaSandbox,
 } from '@deepagents/context';
 
+type DaytonaClient = Parameters<typeof createDaytonaSandbox>[0];
+
 class DaytonaError extends Error {}
 class DaytonaNotFoundError extends DaytonaError {
   constructor(message = 'sandbox not found') {
@@ -48,7 +50,6 @@ function fakeSandbox(over: Partial<SandboxStub> = {}): SandboxStub {
 }
 
 interface Behavior {
-  construct?: () => void;
   get: (idOrName: string) => Promise<SandboxStub>;
   create: (params: unknown, options: unknown) => Promise<SandboxStub>;
 }
@@ -56,6 +57,7 @@ interface Behavior {
 const calls = {
   get: [] as string[],
   create: [] as Array<{ params: unknown; options: unknown }>,
+  asyncDispose: 0,
 };
 
 let behavior: Behavior;
@@ -64,7 +66,6 @@ class FakeDaytona {
   config: unknown;
   constructor(config: unknown) {
     this.config = config;
-    behavior.construct?.();
   }
   async get(idOrName: string): Promise<SandboxStub> {
     calls.get.push(idOrName);
@@ -73,6 +74,9 @@ class FakeDaytona {
   async create(params: unknown, options: unknown): Promise<SandboxStub> {
     calls.create.push({ params, options });
     return behavior.create(params, options);
+  }
+  async [Symbol.asyncDispose](): Promise<void> {
+    calls.asyncDispose++;
   }
 }
 
@@ -85,10 +89,19 @@ mock.module('@daytona/sdk', {
   },
 });
 
+function makeClient(): DaytonaClient {
+  return new FakeDaytona(undefined) as unknown as DaytonaClient;
+}
+
+function resetCalls(): void {
+  calls.get.length = 0;
+  calls.create.length = 0;
+  calls.asyncDispose = 0;
+}
+
 describe('createDaytonaSandbox typed-error propagation', () => {
   beforeEach(() => {
-    calls.get.length = 0;
-    calls.create.length = 0;
+    resetCalls();
     behavior = {
       get: async () => fakeSandbox(),
       create: async () => fakeSandbox(),
@@ -101,7 +114,7 @@ describe('createDaytonaSandbox typed-error propagation', () => {
     };
 
     await assert.rejects(
-      createDaytonaSandbox({ apiKey: 'k', sandboxId: 'sb-missing' }),
+      createDaytonaSandbox(makeClient(), { sandboxId: 'sb-missing' }),
       (error: unknown) => {
         assert.ok(
           error instanceof DaytonaNotFoundError,
@@ -116,34 +129,19 @@ describe('createDaytonaSandbox typed-error propagation', () => {
     );
   });
 
-  it('propagates a typed error thrown by the Daytona constructor unchanged', async () => {
-    behavior.construct = () => {
-      throw new DaytonaAuthenticationError('credentials not found');
+  it('wraps a non-SDK failure from the create path as DaytonaCreationError', async () => {
+    behavior.get = async () => {
+      throw new DaytonaNotFoundError('dai-chat-1 absent');
     };
-
-    await assert.rejects(
-      createDaytonaSandbox({ name: 'dai-chat-1' }),
-      (error: unknown) => {
-        assert.ok(
-          error instanceof DaytonaAuthenticationError,
-          `expected DaytonaAuthenticationError, got ${(error as Error).name}`,
-        );
-        assert.ok(
-          !(error instanceof DaytonaCreationError),
-          'constructor auth failure must not be masked as DaytonaCreationError',
-        );
-        return true;
-      },
-    );
-  });
-
-  it('wraps a non-SDK failure from the anonymous create path as DaytonaCreationError', async () => {
     behavior.create = async () => {
       throw new Error('socket hang up');
     };
 
     await assert.rejects(
-      createDaytonaSandbox({ apiKey: 'k', image: 'ubuntu' }),
+      createDaytonaSandbox(makeClient(), {
+        name: 'dai-chat-1',
+        image: 'ubuntu',
+      }),
       (error: unknown) => {
         assert.ok(
           error instanceof DaytonaCreationError,
@@ -154,12 +152,34 @@ describe('createDaytonaSandbox typed-error propagation', () => {
       },
     );
   });
+
+  it('rejects resources without an image', async () => {
+    await assert.rejects(
+      createDaytonaSandbox(makeClient(), { resources: { cpu: 2 } }),
+      /can only include "resources" when creating from "image"/,
+    );
+  });
+
+  it('requires a name or a sandboxId', async () => {
+    await assert.rejects(
+      createDaytonaSandbox(makeClient(), {}),
+      (error: unknown) => {
+        assert.ok(error instanceof DaytonaSandboxError);
+        assert.match(
+          (error as Error).message,
+          /require "name".*or "sandboxId"|name.*sandboxId/i,
+        );
+        return true;
+      },
+    );
+    assert.strictEqual(calls.get.length, 0);
+    assert.strictEqual(calls.create.length, 0);
+  });
 });
 
 describe('createDaytonaSandbox name implies get-or-create', () => {
   beforeEach(() => {
-    calls.get.length = 0;
-    calls.create.length = 0;
+    resetCalls();
     behavior = {
       get: async () => fakeSandbox(),
       create: async () => fakeSandbox(),
@@ -172,8 +192,7 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
       throw new Error('create must not be called when the sandbox exists');
     };
 
-    const sandbox = await createDaytonaSandbox({
-      apiKey: 'k',
+    const sandbox = await createDaytonaSandbox(makeClient(), {
       name: 'dai-chat-1',
     });
 
@@ -186,8 +205,7 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     const stub = fakeSandbox({ id: 'sb-existing', state: 'stopped' });
     behavior.get = async () => stub;
 
-    await createDaytonaSandbox({
-      apiKey: 'k',
+    await createDaytonaSandbox(makeClient(), {
       name: 'dai-chat-1',
       startTimeout: 5,
     });
@@ -202,8 +220,7 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     };
     behavior.create = async () => fakeSandbox({ id: 'sb-created' });
 
-    const sandbox = await createDaytonaSandbox({
-      apiKey: 'k',
+    const sandbox = await createDaytonaSandbox(makeClient(), {
       name: 'dai-chat-1',
       image: 'ubuntu',
       envVars: { FOO: 'bar' },
@@ -219,6 +236,25 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     });
   });
 
+  it('replaces a sandbox stuck in an unrecoverable state', async () => {
+    const poisoned = fakeSandbox({ id: 'sb-poisoned', state: 'error' });
+    let getCount = 0;
+    behavior.get = async () => {
+      getCount += 1;
+      if (getCount === 1) return poisoned;
+      throw new DaytonaNotFoundError('gone after delete');
+    };
+    behavior.create = async () => fakeSandbox({ id: 'sb-fresh' });
+
+    await createDaytonaSandbox(makeClient(), {
+      name: 'dai-chat-1',
+      image: 'ubuntu',
+    });
+
+    assert.strictEqual(poisoned.delete.mock.callCount(), 1);
+    assert.strictEqual(calls.create.length, 1);
+  });
+
   it('propagates a non-not-found typed error from the lookup without creating', async () => {
     behavior.get = async () => {
       throw new DaytonaAuthenticationError();
@@ -228,7 +264,7 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     };
 
     await assert.rejects(
-      createDaytonaSandbox({ apiKey: 'k', name: 'dai-chat-1' }),
+      createDaytonaSandbox(makeClient(), { name: 'dai-chat-1' }),
       (error: unknown) => {
         assert.ok(
           error instanceof DaytonaAuthenticationError,
@@ -241,37 +277,9 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
     assert.strictEqual(calls.create.length, 0);
   });
 
-  it('does not delete a named sandbox on dispose by default', async () => {
-    const stub = fakeSandbox({ id: 'sb-existing' });
-    behavior.get = async () => stub;
-
-    const sandbox = await createDaytonaSandbox({
-      apiKey: 'k',
-      name: 'dai-chat-1',
-    });
-    await sandbox.dispose();
-
-    assert.strictEqual(stub.delete.mock.callCount(), 0);
-  });
-
-  it('deletes a named sandbox on dispose when deleteOnDispose is overridden', async () => {
-    const stub = fakeSandbox({ id: 'sb-existing' });
-    behavior.get = async () => stub;
-
-    const sandbox = await createDaytonaSandbox({
-      apiKey: 'k',
-      name: 'dai-chat-1',
-      deleteOnDispose: true,
-    });
-    await sandbox.dispose();
-
-    assert.strictEqual(stub.delete.mock.callCount(), 1);
-  });
-
   it('rejects a name combined with sandboxId', async () => {
     await assert.rejects(
-      createDaytonaSandbox({
-        apiKey: 'k',
+      createDaytonaSandbox(makeClient(), {
         name: 'dai-chat-1',
         sandboxId: 'sb-1',
       }),
@@ -288,28 +296,33 @@ describe('createDaytonaSandbox name implies get-or-create', () => {
   });
 });
 
-describe('createDaytonaSandbox anonymous create lifecycle', () => {
+describe('createDaytonaSandbox borrows the client', () => {
   beforeEach(() => {
-    calls.get.length = 0;
-    calls.create.length = 0;
+    resetCalls();
     behavior = {
       get: async () => fakeSandbox(),
       create: async () => fakeSandbox(),
     };
   });
 
-  it('creates and deletes the sandbox on dispose by default when no name is given', async () => {
-    const stub = fakeSandbox({ id: 'sb-anon' });
-    behavior.create = async () => stub;
+  it('leaves both the sandbox and the client untouched on dispose', async () => {
+    const stub = fakeSandbox({ id: 'sb-existing' });
+    behavior.get = async () => stub;
 
-    const sandbox = await createDaytonaSandbox({
-      apiKey: 'k',
-      image: 'ubuntu',
+    const sandbox = await createDaytonaSandbox(makeClient(), {
+      name: 'dai-chat-1',
     });
     await sandbox.dispose();
 
-    assert.strictEqual(calls.get.length, 0);
-    assert.strictEqual(calls.create.length, 1);
-    assert.strictEqual(stub.delete.mock.callCount(), 1);
+    assert.strictEqual(
+      stub.delete.mock.callCount(),
+      0,
+      'dispose must not delete the sandbox — the caller owns its lifecycle',
+    );
+    assert.strictEqual(
+      calls.asyncDispose,
+      0,
+      'a borrowed client must outlive every sandbox built on it',
+    );
   });
 });

@@ -5,11 +5,12 @@ import { after, before, describe, it } from 'node:test';
 import {
   type AgentSandbox,
   DAYTONA_DEFAULT_DESTINATION,
-  DaytonaNotAvailableError,
   type DisposableSandbox,
   createBashTool,
   createDaytonaSandbox,
 } from '@deepagents/context';
+
+type DaytonaClient = Parameters<typeof createDaytonaSandbox>[0];
 
 type DynamicImport = (specifier: string) => Promise<unknown>;
 
@@ -52,6 +53,14 @@ async function readFirstChunk(
   }
 }
 
+async function deleteByName(
+  client: DaytonaClient | undefined,
+  name: string,
+): Promise<void> {
+  const created = await client?.get(name).catch(() => undefined);
+  await created?.delete?.();
+}
+
 describe('Daytona Sandbox', async () => {
   const sdkAvailable = await isDaytonaSdkAvailable();
   const apiKeyAvailable = Boolean(process.env.DAYTONA_API_KEY);
@@ -63,36 +72,24 @@ describe('Daytona Sandbox', async () => {
     console.log('Skipping Daytona live tests: @daytona/sdk not installed');
   }
 
-  describe('optional peer behavior', { skip: sdkAvailable }, () => {
-    it('throws a clear install error when @daytona/sdk is not installed', async () => {
-      await assert.rejects(
-        createDaytonaSandbox(),
-        (error) =>
-          error instanceof DaytonaNotAvailableError &&
-          error.message.includes('npm install @daytona/sdk'),
-      );
-    });
-  });
-
-  it('rejects resources when Daytona creation cannot apply them', async () => {
-    await assert.rejects(
-      createDaytonaSandbox({ resources: { cpu: 2 } }),
-      /can only include "resources" when creating from "image"/,
-    );
-  });
-
   describe('createDaytonaSandbox', { skip: !liveAvailable }, () => {
+    let client: DaytonaClient;
+    let sandboxName: string;
     let sandbox: DisposableSandbox;
     let daytonaSpawn: NonNullable<DisposableSandbox['spawn']>;
 
     before(async () => {
-      sandbox = await createDaytonaSandbox();
+      const { Daytona } = await import('@daytona/sdk');
+      client = new Daytona();
+      sandboxName = `deepagents-test-${randomUUID()}`;
+      sandbox = await createDaytonaSandbox(client, { name: sandboxName });
       assert.ok(sandbox.spawn, 'daytona sandbox must expose spawn');
       daytonaSpawn = sandbox.spawn;
     });
 
     after(async () => {
-      if (sandbox) await sandbox.dispose();
+      await sandbox?.dispose();
+      await deleteByName(client, sandboxName);
     });
 
     describe('command execution', () => {
@@ -241,9 +238,16 @@ describe('Daytona Sandbox', async () => {
     { skip: !liveAvailable },
     () => {
       let agent: AgentSandbox;
+      let client: DaytonaClient;
+      let sandboxName: string;
 
       before(async () => {
-        const backend = await createDaytonaSandbox();
+        const { Daytona } = await import('@daytona/sdk');
+        client = new Daytona();
+        sandboxName = `deepagents-test-${randomUUID()}`;
+        const backend = await createDaytonaSandbox(client, {
+          name: sandboxName,
+        });
         const mkdir = await backend.executeCommand(
           `mkdir -p ${DAYTONA_DEFAULT_DESTINATION}`,
         );
@@ -256,7 +260,8 @@ describe('Daytona Sandbox', async () => {
       });
 
       after(async () => {
-        if (agent) await agent.sandbox.dispose();
+        await agent?.sandbox.dispose();
+        await deleteByName(client, sandboxName);
       });
 
       it('exposes spawn on the wrapped sandbox', () => {

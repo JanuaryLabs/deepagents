@@ -1,4 +1,5 @@
 import { openai } from '@ai-sdk/openai';
+import { Daytona } from '@daytona/sdk';
 import { setTimeout } from 'node:timers/promises';
 
 import { input, printer } from '@deepagents/agent';
@@ -73,10 +74,16 @@ async function startDaemon(
   );
 }
 
-const backend = await createDaytonaSandbox({
+const client = new Daytona({
   apiKey:
     'dtn_05fc820697b48a2980b168711c218c1c945a5f591843e986d6b010d1043bb975',
   apiUrl: 'http://localhost:3000/api',
+});
+
+const backend = await createDaytonaSandbox(client, {
+  // Stable name → get-or-create: re-runs reuse this one sandbox instead of
+  // orphaning a fresh one each time (dispose() never deletes it).
+  name: 'deepagents-text2sql-demo',
   // Build + publish this image first: `node demo/daytona-text2sql/bootstrap.ts`.
   // createDaytonaSandbox({ image }) makes Daytona run a buildkit BUILD_SNAPSHOT
   // (FROM <image>) the first time — ~40s, then buildkit-cached (~1s). The
