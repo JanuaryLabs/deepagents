@@ -23,7 +23,8 @@ describe('PostgreSQL ContextStore Integration', () => {
         });
         await store.initialize();
         try {
-          const beforeCreate = Date.now();
+          // Lower bound tolerant of host (Date.now) vs DB-container clock skew.
+          const beforeCreate = Date.now() - 1000;
 
           await store.createChat({
             id: 'chat-create-1',

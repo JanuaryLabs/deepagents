@@ -93,8 +93,10 @@ const client = new Daytona({
   apiKey: process.env.DAYTONA_API_KEY!,
 });
 
-// Pass an existing Daytona client plus either a stable `name` (get-or-create)
-// or `sandboxId` (attach). The sandbox lifecycle stays with that client.
+// Pass a caller-owned Daytona client plus either a stable `name`
+// (get-or-create) or `sandboxId` (attach). Authentication, base URL, and
+// other Daytona config live on `new Daytona(...)`, not on
+// `createDaytonaSandbox(...)`. The sandbox lifecycle stays with that client.
 const backend = await createDaytonaSandbox(client, {
   name: 'agent-backend',
   image: 'your-registry/agent-image:latest',
@@ -109,7 +111,9 @@ const sandbox = await createBashTool({
 
 `dispose()` detaches local handles but does not delete a Daytona sandbox. Reuse
 stable `name` values when you want get-or-create semantics across runs, or pass
-`sandboxId` to attach to a specific sandbox directly.
+`sandboxId` to attach to a specific sandbox directly. An unnamed sandbox cannot
+be reclaimed, so `createDaytonaSandbox(...)` requires one of those two
+identifiers.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict.
 
@@ -146,7 +150,7 @@ const assistant = agent({
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | required | Identifier for logging and error messages |
-| `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox()`) from `@deepagents/context` |
+| `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
 | `context` | `ContextEngine` | `undefined` | Engine that resolves system prompt and messages |
 | `model` | `LanguageModelV3` | `undefined` | AI SDK model to use for generation |
 | `tools` | `ToolSet` | `{}` | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict) |

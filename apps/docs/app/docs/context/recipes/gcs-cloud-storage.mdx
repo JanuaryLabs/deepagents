@@ -12,7 +12,7 @@ In both cases, the cloud wiring (plugin, credentials, IAM, and host mounts) stay
 
 ## Remote daemon on a GCP VM
 
-## Topology
+### Topology
 
 The recommended deployment runs the agent on one server and the Docker daemon on a GCP VM. Every `docker` call DeepAgents makes is routed to the VM, so the bucket mount, the FUSE process, and the containers all live on the VM:
 
@@ -29,9 +29,9 @@ The recommended deployment runs the agent on one server and the Docker daemon on
 
 > Named volumes (not bind mounts) are required for a remote daemon. A bind mount's `hostPath` is validated on the **app server** and resolved by the daemon on the **VM** — two different machines. A `type: 'volume'` with `lifecycle: 'external'` is inspected on the daemon, so it stays entirely VM-side.
 
-## On the VM
+### VM setup
 
-### 1. Let the VM's service account reach the bucket
+#### 1. Let the VM's service account reach the bucket
 
 GCE credentials are read automatically from the metadata server — no key files. Grant the VM's attached service account object access to the bucket:
 
@@ -52,7 +52,7 @@ gcloud compute instances set-service-account YOUR_VM \
   --zone YOUR_ZONE --project YOUR_PROJECT
 ```
 
-### 2. Install the rclone volume plugin
+#### 2. Install the rclone volume plugin
 
 Use the tag matching the VM's architecture (`amd64` or `arm64`):
 
@@ -61,7 +61,7 @@ docker plugin install rclone/docker-volume-rclone:amd64 \
   args="-v" --alias rclone --grant-all-permissions
 ```
 
-### 3. Write the rclone config, then enable
+#### 3. Write the rclone config, then enable
 
 On a GCP VM, `env_auth = true` makes rclone use the attached service account via the metadata server — no credentials in the file. `bucket_policy_only = true` is required for buckets with uniform bucket-level access.
 
@@ -79,7 +79,7 @@ docker plugin enable rclone
 
 > Enable the plugin **after** the config exists. A managed plugin only re-reads its config on `disable`/`enable`, and once a volume references it you can no longer disable it. Enabling against a missing or invalid config leaves a plugin whose background uploader is dead — reads work, writes silently stay in the local cache and never reach GCS.
 
-### 4. Create the volume(s)
+#### 4. Create the volume(s)
 
 ```bash
 docker volume create agent-storage -d rclone \
@@ -99,9 +99,9 @@ docker volume create agent-a -d rclone -o remote=gcs:shared/agent-a -o vfs-cache
 docker volume create agent-b -d rclone -o remote=gcs:shared/agent-b -o vfs-cache-mode=writes
 ```
 
-## On the app server
+### App server setup
 
-### 5. Point the docker CLI at the VM
+#### 5. Point the docker CLI at the VM
 
 A [docker context](https://docs.docker.com/engine/manage-resources/contexts/) is the cleanest way to target the remote daemon. SSH needs no exposed ports or TLS certs:
 
@@ -117,7 +117,7 @@ DOCKER_CONTEXT=gcp-vm node your-app.ts
 
 DeepAgents shells out to the `docker` CLI without overriding the host, so it inherits this context automatically. Make sure `DOCKER_HOST` is **unset** — it would override the context.
 
-### 6. Attach the volume
+#### 6. Attach the volume
 
 ```typescript
 import { createDockerSandbox } from '@deepagents/context';
@@ -187,4 +187,4 @@ await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
 - **Writes are eventually consistent.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously (after `--vfs-write-back`, default `5s`, plus a flush on unmount). Don't assume an object is in the bucket the instant a file is closed. Lower `vfs-write-back` for faster uploads.
 - **One app process targets one daemon.** DeepAgents resolves the daemon globally per `docker` invocation, so a single app process sends all sandboxes to whichever VM the context points at. To spread sandboxes across multiple VMs, run one app instance per VM, each with its own `DOCKER_CONTEXT`.
 - **This is FUSE over object storage.** Tools that do in-place random writes can misbehave; whole-file create-and-close writes are the reliable pattern.
-- **No GCS coupling in the library.** `@deepagents/context` never learns about GCS, rclone, or credentials — it only attaches a named Docker volume. The same recipe works for any rclone backend (S3, Azure, SFTP) by changing the `remote`.
+- **No GCS coupling in the library.** `@deepagents/context` never learns about GCS, rclone, or credentials — it only attaches ordinary Docker storage primitives (named volumes or bind mounts). The same recipe works for any rclone backend (S3, Azure, SFTP) by changing the `remote`.

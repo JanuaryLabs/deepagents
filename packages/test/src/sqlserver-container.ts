@@ -1,7 +1,9 @@
 import sql from 'mssql';
+import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-import { checkDockerAvailable, createContainer } from './container.ts';
+import { checkDockerAvailable, startContainer } from './container.ts';
+import { timebox } from './timebox.ts';
 
 export const SQL_SERVER_FULL_IMAGE =
   'mcr.microsoft.com/mssql/server:2022-latest';
@@ -38,9 +40,11 @@ export interface SqlServerContainerConfig {
 /**
  * Running SQL Server container instance.
  */
-export interface SqlServerContainer {
+export interface SqlServerContainer extends AsyncDisposable {
   /** Full connection string for mssql ConnectionPool */
   connectionString: string;
+  /** Image the container runs (Azure SQL Edge or full SQL Server) */
+  image: string;
   /** Docker container ID */
   containerId: string;
   /** Host (always localhost for Docker) */
@@ -53,7 +57,7 @@ export interface SqlServerContainer {
   password: string;
   /** Database name */
   database: string;
-  /** Stop and remove the container */
+  /** Release this handle (drops the per-test database when pooled). */
   cleanup: () => Promise<void>;
 }
 
@@ -78,11 +82,19 @@ export async function waitForFtsReady(
     const start = Date.now();
 
     while (Date.now() - start < maxWaitMs) {
+      // The catalog name is schema-prefixed (e.g. `dbo_context_store_catalog`),
+      // so match by suffix instead of a hardcoded name. An empty result means
+      // there is no full-text catalog to wait for — e.g. on engines without FTS
+      // (Azure SQL Edge) or images lacking the full-text component, where
+      // searchMessages falls back to LIKE — so there is nothing to populate.
       const result = await pool.request().query(`
-        SELECT FULLTEXTCATALOGPROPERTY('context_store_catalog', 'PopulateStatus') as status
+        SELECT FULLTEXTCATALOGPROPERTY(name, 'PopulateStatus') AS status
+        FROM sys.fulltext_catalogs
+        WHERE name LIKE '%context_store_catalog'
       `);
-      // Status 0 = Idle (indexing complete)
-      if (result.recordset[0]?.status === 0) {
+      const catalogs = result.recordset;
+      // Status 0 = Idle (indexing complete); NULL = not populating.
+      if (catalogs.every((c) => c.status === 0 || c.status == null)) {
         return;
       }
       await new Promise((r) => setTimeout(r, pollIntervalMs));
@@ -104,34 +116,30 @@ function masterConnectionString(
     : base;
 }
 
-async function waitForSqlServer(
+function sqlServerConnectionString(
+  port: number,
+  password: string,
+  database: string,
+): string {
+  return `Server=localhost,${port};Database=${database};User Id=sa;Password=${password};TrustServerCertificate=true;Encrypt=false;`;
+}
+
+async function pingSqlServer(
   host: string,
   port: number,
   password: string,
-  maxRetries = 480,
-  retryDelayMs = 250,
 ): Promise<void> {
-  const connStr = masterConnectionString(host, port, password, 1000);
-  for (let i = 0; i < maxRetries; i++) {
-    const pool = new sql.ConnectionPool(connStr);
-    try {
-      await pool.connect();
-      await pool.request().query('SELECT 1');
-      await pool.close();
-      return;
-    } catch {
-      try {
-        await pool.close();
-      } catch {
-        // ignore close failure on already-failed pool
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-  }
-
-  throw new Error(
-    `SQL Server at ${host}:${port} failed to become ready after ${maxRetries} retries`,
+  const pool = new sql.ConnectionPool(
+    masterConnectionString(host, port, password, 1000),
   );
+  try {
+    await pool.connect();
+    await pool.request().query('SELECT 1');
+  } finally {
+    await pool.close().catch(() => {
+      // ignore close failure on an already-failed pool
+    });
+  }
 }
 
 async function createDatabase(
@@ -175,16 +183,165 @@ export async function withSqlServerContainer<T>(
   fn: (container: SqlServerContainer) => Promise<T>,
   config?: SqlServerContainerConfig,
 ): Promise<T | undefined> {
-  const container = await startSqlServerContainer(config);
-  if (!container) {
+  const shared = await resolveSharedSqlServer(config);
+  if (!shared) {
     return undefined;
   }
 
+  const database = `test_${randomUUID().replace(/-/g, '')}`;
+  await createDatabase(shared.host, shared.port, shared.password, database);
+
+  const handle: SqlServerContainer = {
+    ...shared,
+    connectionString: sqlServerConnectionString(
+      shared.port,
+      shared.password,
+      database,
+    ),
+    database,
+    cleanup: () => dropSqlServerDatabase(shared, database),
+    [Symbol.asyncDispose]: () => dropSqlServerDatabase(shared, database),
+  };
+
   try {
-    return await fn(container);
+    return await fn(handle);
   } finally {
-    await container.cleanup();
+    await dropSqlServerDatabase(shared, database);
   }
+}
+
+async function dropSqlServerDatabase(
+  container: SqlServerContainer,
+  database: string,
+): Promise<void> {
+  const pool = new sql.ConnectionPool(
+    masterConnectionString(container.host, container.port, container.password),
+  );
+  try {
+    await pool.connect();
+    await pool
+      .request()
+      .query(
+        `IF DB_ID('${database}') IS NOT NULL BEGIN ALTER DATABASE [${database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [${database}]; END`,
+      );
+  } catch {
+    // best-effort cleanup — a leaked test DB lives only until the container dies
+  } finally {
+    await pool.close().catch(() => {});
+  }
+}
+
+const SQLSERVER_ENV = {
+  host: 'TEST_SQLSERVER_HOST',
+  port: 'TEST_SQLSERVER_PORT',
+  password: 'TEST_SQLSERVER_PASSWORD',
+  database: 'TEST_SQLSERVER_DB',
+  image: 'TEST_SQLSERVER_IMAGE',
+  containerId: 'TEST_SQLSERVER_CONTAINER_ID',
+} as const;
+
+/**
+ * Publish a running container's coordinates to the environment so that
+ * {@link withSqlServerContainer} in child test processes reuses it instead of
+ * booting their own. Call from a `globalSetup`; see {@link sqlServerGlobalSetup}.
+ */
+export function publishSqlServerEnv(container: SqlServerContainer): void {
+  process.env[SQLSERVER_ENV.host] = container.host;
+  process.env[SQLSERVER_ENV.port] = String(container.port);
+  process.env[SQLSERVER_ENV.password] = container.password;
+  process.env[SQLSERVER_ENV.database] = container.database;
+  process.env[SQLSERVER_ENV.image] = container.image;
+  process.env[SQLSERVER_ENV.containerId] = container.containerId;
+}
+
+function sqlServerFromEnv(): SqlServerContainer | undefined {
+  const containerId = process.env[SQLSERVER_ENV.containerId];
+  const port = process.env[SQLSERVER_ENV.port];
+  if (!containerId || !port) {
+    return undefined;
+  }
+  const host = process.env[SQLSERVER_ENV.host] ?? 'localhost';
+  const password = process.env[SQLSERVER_ENV.password] ?? 'StrongP@ssw0rd123!';
+  const database = process.env[SQLSERVER_ENV.database] ?? 'testdb';
+  const image = process.env[SQLSERVER_ENV.image] ?? defaultSqlServerImage();
+  const ownedByGlobalTeardown = async () => {};
+  return {
+    connectionString: sqlServerConnectionString(
+      Number(port),
+      password,
+      database,
+    ),
+    image,
+    containerId,
+    host,
+    port: Number(port),
+    user: 'sa',
+    password,
+    database,
+    cleanup: ownedByGlobalTeardown,
+    [Symbol.asyncDispose]: ownedByGlobalTeardown,
+  };
+}
+
+function sqlServerConfigMatches(
+  container: SqlServerContainer,
+  config?: SqlServerContainerConfig,
+): boolean {
+  return (
+    (config?.image ?? container.image) === container.image &&
+    (config?.password ?? container.password) === container.password
+  );
+}
+
+function resolveSharedSqlServer(
+  config?: SqlServerContainerConfig,
+): Promise<SqlServerContainer | undefined> {
+  const provisioned = sqlServerFromEnv();
+  if (provisioned && sqlServerConfigMatches(provisioned, config)) {
+    return Promise.resolve(provisioned);
+  }
+  return sharedSqlServerContainer(config);
+}
+
+const sharedSqlServerContainers = new Map<
+  string,
+  Promise<SqlServerContainer | undefined>
+>();
+const sharedSqlServerContainerIds = new Set<string>();
+let sqlServerExitHookRegistered = false;
+
+function sharedSqlServerContainer(
+  config?: SqlServerContainerConfig,
+): Promise<SqlServerContainer | undefined> {
+  const key = JSON.stringify(config ?? {});
+  let pending = sharedSqlServerContainers.get(key);
+  if (!pending) {
+    pending = startSqlServerContainer(config).then((container) => {
+      if (container) {
+        sharedSqlServerContainerIds.add(container.containerId);
+        registerSqlServerExitCleanup();
+      }
+      return container;
+    });
+    sharedSqlServerContainers.set(key, pending);
+  }
+  return pending;
+}
+
+function registerSqlServerExitCleanup(): void {
+  if (sqlServerExitHookRegistered) {
+    return;
+  }
+  sqlServerExitHookRegistered = true;
+  process.on('exit', () => {
+    for (const id of sharedSqlServerContainerIds) {
+      try {
+        execSync(`docker kill ${id}`, { stdio: 'ignore' });
+      } catch {
+        // best-effort teardown — the process is exiting anyway
+      }
+    }
+  });
 }
 
 /**
@@ -204,8 +361,6 @@ export async function startSqlServerContainer(
   const database = config?.database ?? 'testdb';
   const user = 'sa';
 
-  const containerName = `sqlserver-test-${randomUUID()}`;
-
   const env: Record<string, string> = {
     ACCEPT_EULA: 'Y',
     MSSQL_SA_PASSWORD: password,
@@ -215,35 +370,40 @@ export async function startSqlServerContainer(
     env.MSSQL_PID = 'Express';
   }
 
-  const container = await createContainer({
+  const container = await startContainer({
     image,
-    name: containerName,
     env,
     internalPort: 1433,
     tmpfs: ['/var/opt/mssql:rw,size=2g,mode=1777'],
     ipcHost: true,
     memorySwappiness: 0,
+    healthy: ({ host, port }) =>
+      timebox(() => pingSqlServer(host, port, password), {
+        maxRetryTime: 180_000,
+      }),
   });
 
   try {
-    await waitForSqlServer(container.host, container.port, password);
     await createDatabase(container.host, container.port, password, database);
-
-    // Build connection string for mssql package
-    const connectionString = `Server=localhost,${container.port};Database=${database};User Id=${user};Password=${password};TrustServerCertificate=true;Encrypt=false;`;
-
-    return {
-      connectionString,
-      containerId: container.containerId,
-      host: container.host,
-      port: container.port,
-      user,
-      password,
-      database,
-      cleanup: container.cleanup,
-    };
   } catch (error) {
     await container.cleanup();
     throw error;
   }
+
+  return {
+    connectionString: sqlServerConnectionString(
+      container.port,
+      password,
+      database,
+    ),
+    image,
+    containerId: container.containerId,
+    host: container.host,
+    port: container.port,
+    user,
+    password,
+    database,
+    cleanup: container.cleanup,
+    [Symbol.asyncDispose]: container.cleanup,
+  };
 }
