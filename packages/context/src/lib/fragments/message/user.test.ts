@@ -5,10 +5,10 @@ import { describe, it } from 'node:test';
 import {
   type UserReminderMetadata,
   everyNTurns,
+  first,
   getReminderRanges,
   hint,
   isConditionalReminder,
-  once,
   reminder,
   stripReminders,
   stripTextByRanges,
@@ -565,37 +565,9 @@ describe('reminder range helpers', () => {
     assert.deepStrictEqual(stripped.metadata, { source: 'seed' });
   });
 
-  it('strips user reminders and tool-output reminders from string and envelope outputs', () => {
+  it('strips user reminders and unwraps tool-output envelopes without metadata records', () => {
     const userFragment = user('Deploy now.', reminder('user-reminder'));
     const userMessage = encodeMessage(userFragment);
-
-    const stringReminder = taggedReminder('string-tool-reminder');
-    const stringToolMessage: UIMessage = {
-      id: 'assistant-string-tool-reminder',
-      role: 'assistant',
-      parts: [
-        {
-          type: 'tool-bash',
-          toolCallId: 'tool-string',
-          state: 'output-available',
-          input: {},
-          output: `stdout${stringReminder}`,
-        },
-      ],
-      metadata: {
-        reminders: [
-          {
-            id: 'tool-string-reminder',
-            text: 'string-tool-reminder',
-            target: 'tool-output',
-            partIndex: 0,
-            start: 'stdout'.length,
-            end: 'stdout'.length + stringReminder.length,
-            mode: 'tool-output',
-          },
-        ],
-      },
-    };
 
     const envelopeToolMessage: UIMessage = {
       id: 'assistant-envelope-tool-reminder',
@@ -608,39 +580,49 @@ describe('reminder range helpers', () => {
           input: {},
           output: {
             result: { rows: [{ id: 1 }] },
-            systemReminder: 'object-tool-reminder',
+            systemReminder:
+              '<system-reminder>object-tool-reminder</system-reminder>',
           },
         },
       ],
-      metadata: {
-        reminders: [
-          {
-            id: 'tool-envelope-reminder',
-            text: 'object-tool-reminder',
-            target: 'tool-output',
-            partIndex: 0,
-            start: 0,
-            end: 0,
-            mode: 'tool-output',
-          },
-        ],
-      },
     };
 
     const strippedUser = stripReminders(userMessage);
-    const strippedStringTool = stripReminders(stringToolMessage);
     const strippedEnvelopeTool = stripReminders(envelopeToolMessage);
 
     assert.strictEqual(getTextPart(strippedUser), 'Deploy now.');
     assert.strictEqual(strippedUser.metadata, undefined);
 
-    assert.strictEqual(getToolOutput(strippedStringTool), 'stdout');
-    assert.strictEqual(strippedStringTool.metadata, undefined);
-
     assert.deepStrictEqual(getToolOutput(strippedEnvelopeTool), {
       rows: [{ id: 1 }],
     });
     assert.strictEqual(strippedEnvelopeTool.metadata, undefined);
+  });
+
+  it('does not mistake a real tool output with a systemReminder field for a reminder envelope', () => {
+    // A legitimate tool whose output happens to carry a `systemReminder` string
+    // (e.g. a notification tool) and no `result` key must pass through untouched.
+    const legitOutput = { messageId: 'abc', systemReminder: 'Check at 5pm' };
+    const toolMessage: UIMessage = {
+      id: 'assistant-legit-tool',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-notify',
+          toolCallId: 'tool-legit',
+          state: 'output-available',
+          input: {},
+          output: legitOutput,
+        },
+      ],
+    };
+
+    const stripped = stripReminders(toolMessage);
+    assert.deepStrictEqual(
+      getToolOutput(stripped),
+      legitOutput,
+      'a non-envelope object output must not be replaced with its (missing) .result',
+    );
   });
 
   it('treats old reminder metadata without target as a user reminder', () => {
@@ -708,14 +690,14 @@ describe('reminder scheduling', () => {
 
     it('stores callback text in fragment metadata when when is provided', () => {
       const cb = (ctx: { turn?: number }) => `turn ${ctx.turn}`;
-      const fragment = reminder(cb, { when: once() });
+      const fragment = reminder(cb, { when: first() });
       assert.ok(isConditionalReminder(fragment));
       assert.strictEqual(typeof fragment.metadata.reminder.text, 'function');
     });
 
     it('rejects empty string text even with when', () => {
       assert.throws(
-        () => reminder('', { when: once() }),
+        () => reminder('', { when: first() }),
         /Reminder text must not be empty/,
       );
     });

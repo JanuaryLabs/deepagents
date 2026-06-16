@@ -32,6 +32,9 @@ interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
+  streamStepNumber?: number;
+  streamToolCallCount?: number;
+  streamTotalTokens?: number;
 }
 ```
 
@@ -49,8 +52,11 @@ interface WhenContext {
 | `messageCount` | Total message count across all roles |
 | `lastAssistantMessage` | The last persisted assistant `UIMessage` |
 | `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()` |
+| `streamStepNumber` | Current streamed step number during `target: 'steer'` evaluation |
+| `streamToolCallCount` | Completed tool calls seen so far in the current streamed turn |
+| `streamTotalTokens` | Running token total for the current streamed turn |
 
-`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists.
+`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. The `stream*` fields are only populated for `target: 'steer'` reminders during an active streamed turn.
 
 ## Turn-Based Predicates
 
@@ -62,12 +68,12 @@ Fires when the turn count is divisible by `n`.
 everyNTurns(3); // fires on turns 3, 6, 9, 12, ...
 ```
 
-### once()
+### first()
 
 Fires only on the first turn.
 
 ```ts
-once(); // fires on turn 1 only
+first(); // fires on turn 1 only
 ```
 
 ### firstN(n)
@@ -265,6 +271,40 @@ import { elapsedExceeds } from '@deepagents/context';
 elapsedExceeds(60_000); // one minute
 ```
 
+## Stream-Step Predicates
+
+These predicates only become meaningful for `target: 'steer'` reminders during an active streamed turn.
+
+### streamStepsExceed(n)
+
+Fires when the current streamed step number is greater than or equal to `n`.
+
+```ts
+import { streamStepsExceed } from '@deepagents/context';
+
+streamStepsExceed(2);
+```
+
+### streamToolCallsExceed(n)
+
+Fires when the current streamed turn has seen at least `n` completed tool calls.
+
+```ts
+import { streamToolCallsExceed } from '@deepagents/context';
+
+streamToolCallsExceed(3);
+```
+
+### streamUsageExceeds(totalTokens)
+
+Fires when the running token usage for the current streamed turn reaches `totalTokens`.
+
+```ts
+import { streamUsageExceeds } from '@deepagents/context';
+
+streamUsageExceeds(8_000);
+```
+
 ## Temporal Predicates
 
 Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. All return `true` on the first turn (when `lastMessageAt` is `undefined`).
@@ -374,7 +414,7 @@ Combinators nest freely:
 ```ts
 and(
   or(dayChanged(), hourChanged()),
-  not(once()),
+  not(first()),
   afterTurn(2),
 );
 ```

@@ -1,20 +1,16 @@
-import type { UIMessage } from 'ai';
-
 import type { ChainSummary } from '../chain-summary.ts';
 import type { ContextFragment } from '../fragments.ts';
 import {
-  type ConditionalReminder,
-  type ReminderResolution,
-  type ReminderTarget,
+  type BaseWhenCtx,
+  type UserReminder,
+  type WhenContext,
   isConditionalReminder,
-  resolveReminderAsync,
+  user,
 } from '../fragments/message/user.ts';
 import type { ContextStore, MessageData } from '../store/store.ts';
+import { extractPlainText } from '../text.ts';
 import { requireUserUIMessage } from '../ui-message-guards.ts';
-import type {
-  BaseWhenCtx,
-  ReminderTargetHandler,
-} from './reminder-target-handler.ts';
+import { evaluateFiredReminders } from './reminder-eval.ts';
 
 export interface SavePipelineEngine {
   readonly store: ContextStore;
@@ -63,77 +59,57 @@ export class SavePipeline {
     return this;
   }
 
-  async evaluateReminders(handlers: ReminderTargetHandler[]): Promise<this> {
-    const conditional = this.#fragments.filter(isConditionalReminder);
-    if (conditional.length === 0) return this;
+  /**
+   * Fold any fired `target: 'user'` conditional reminders into the last pending
+   * user message. `steer` reminders fire mid-loop via the engine's prepareStep
+   * hook and `tool-output` reminders wrap at tool-execution time, so neither is
+   * handled here — the save pipeline only carries user-message reminders.
+   */
+  async evaluateUserReminders(): Promise<this> {
+    const configs = this.#fragments
+      .filter(isConditionalReminder)
+      .map((fragment) => fragment.metadata.reminder)
+      .filter((config) => config.target === 'user');
+    if (configs.length === 0) return this;
 
-    const configsByTarget = new Map<ReminderTarget, ConditionalReminder[]>();
-    for (const fragment of conditional) {
-      const config = fragment.metadata.reminder;
-      const target = config.target;
-      const list = configsByTarget.get(target) ?? [];
-      list.push(config);
-      configsByTarget.set(target, list);
-    }
-
-    const chain = await this.#engine.getChainSummary();
-    const base = this.#engine.buildBaseWhenCtx(chain);
-    const sharedUserMessage = this.#encodePendingUserMessage();
-
-    for (const handler of handlers) {
-      const configs = configsByTarget.get(handler.target);
-      if (!configs || configs.length === 0) continue;
-
-      const prepared = handler.prepare({
-        pending: this.#pending,
-        base,
-        chain,
-        sharedUserMessage,
-      });
-      if (!prepared) continue;
-
-      const whenResults = await Promise.all(
-        configs.map((config) => config.when(prepared.whenCtx)),
-      );
-      const fired = configs.filter((_, i) => whenResults[i]);
-      if (fired.length === 0) continue;
-
-      const resolvedOrNull = await Promise.all(
-        fired.map((config) => resolveReminderAsync(config, prepared.whenCtx)),
-      );
-      const matched: Array<{
-        config: ConditionalReminder;
-        resolved: ReminderResolution;
-      }> = [];
-      for (let i = 0; i < resolvedOrNull.length; i++) {
-        const resolution = resolvedOrNull[i];
-        if (resolution)
-          matched.push({ config: fired[i], resolved: resolution });
-      }
-      if (matched.length === 0) continue;
-
-      handler.apply({
-        pending: this.#pending,
-        carrier: prepared.carrier,
-        fired: matched.map((m) => m.config),
-        resolved: matched.map((m) => m.resolved),
-      });
-    }
-
-    return this;
-  }
-
-  #encodePendingUserMessage(): (UIMessage & { role: 'user' }) | undefined {
     const fragmentIndex = this.#pending.findLastIndex(
       (fragment) => fragment.name === 'user',
     );
-    if (fragmentIndex < 0) return undefined;
+    if (fragmentIndex < 0) return this;
     const fragment = this.#pending[fragmentIndex];
-    if (!fragment.codec) return undefined;
-    return requireUserUIMessage(
+    if (!fragment.codec) return this;
+    const message = requireUserUIMessage(
       fragment.codec.encode(),
       `Pending user fragment "${fragment.name}"`,
     );
+
+    const chain = await this.#engine.getChainSummary();
+    const whenCtx: WhenContext = {
+      ...this.#engine.buildBaseWhenCtx(chain),
+      content: extractPlainText(message),
+      currentMessage: message,
+      lastAssistantMessage: chain.lastAssistantMessage,
+      lastAssistantMessages: chain.lastAssistantMessages,
+    };
+
+    const matched = await evaluateFiredReminders(configs, whenCtx);
+    if (matched.length === 0) return this;
+
+    const reminders: UserReminder[] = matched.map((m) => ({
+      text: m.resolved.text,
+      asPart: m.config.asPart,
+      target: 'user',
+      metadata: m.resolved.metadata,
+    }));
+    const originalId = fragment.id;
+    const recreated = user(
+      originalId ? { ...message, id: originalId } : message,
+      ...reminders,
+    );
+    if (originalId) recreated.id = originalId;
+    this.#pending[fragmentIndex] = recreated;
+
+    return this;
   }
 
   async persist(): Promise<SaveResult> {

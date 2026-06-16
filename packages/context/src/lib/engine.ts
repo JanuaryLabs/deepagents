@@ -1,6 +1,10 @@
 import {
   type LanguageModelUsage,
+  type ModelMessage,
+  type PrepareStepFunction,
+  type Tool,
   type UIMessage,
+  convertToModelMessages,
   generateId,
   validateUIMessages,
 } from 'ai';
@@ -19,7 +23,15 @@ import {
   isMessageFragment,
   toMessageFragment,
 } from './fragments.ts';
-import { isConditionalReminder } from './fragments/message/user.ts';
+import {
+  type BaseWhenCtx,
+  type ConditionalReminder,
+  type WhenContext,
+  applyRemindersToToolOutput,
+  isConditionalReminder,
+  synthesizeSteerUserMessage,
+  user,
+} from './fragments/message/user.ts';
 import type { Models } from './models.generated.ts';
 import {
   type ContextRenderer,
@@ -31,13 +43,8 @@ import {
   defaultResolvers,
 } from './resolvers/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
-import type {
-  BaseWhenCtx,
-  ReminderTargetHandler,
-} from './save/reminder-target-handler.ts';
+import { evaluateFiredReminders } from './save/reminder-eval.ts';
 import { SavePipeline, type SaveResult } from './save/save-pipeline.ts';
-import { ToolOutputTargetHandler } from './save/tool-output-target-handler.ts';
-import { UserTargetHandler } from './save/user-target-handler.ts';
 import type { SkillPathMapping } from './skills/types.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import {
@@ -51,6 +58,7 @@ import {
   type MessageData,
   type StoredChatData,
 } from './store/store.ts';
+import { extractPlainText } from './text.ts';
 import { requireUIMessage } from './ui-message-guards.ts';
 
 export type { SaveResult } from './save/save-pipeline.ts';
@@ -175,6 +183,70 @@ function isSkillPathMapping(value: unknown): value is SkillPathMapping {
 
 function isEmptyAssistantPlaceholder(message: UIMessage): boolean {
   return message.role === 'assistant' && message.parts.length === 0;
+}
+
+interface SteerFire {
+  /** Step index the steer fired after (its segment boundary). */
+  afterStep: number;
+  /** Index in the model `messages` array where the synth was spliced at fire. */
+  spliceIndex: number;
+  synth: UIMessage & { role: 'user' };
+  synthModel: ModelMessage[];
+}
+
+interface SteerWhenBase {
+  base: BaseWhenCtx;
+  content: string;
+  currentMessage: UIMessage;
+  lastAssistantMessage?: UIMessage;
+  lastAssistantMessages?: UIMessage[];
+  chainFiredOnceIds: ReadonlySet<string>;
+}
+
+/**
+ * Per-stream steer state. The session OBJECT is closure-local to each
+ * createSteerPrepareStep() call; only the `#currentSteerSession` POINTER lives
+ * on the engine, so writeAssistantSegment can find the active session.
+ *
+ * A guardrail retry creates a new session and repoints `#currentSteerSession`,
+ * but the retry restart (`#createRawStream`) runs only AFTER the prior stream's
+ * writeAssistantSegment has persisted its fires — so the pointer reset never
+ * races a carve (covered by the steer+guardrail-retry integration test).
+ * Running two concurrent streams on ONE engine instance is unsupported.
+ */
+interface SteerSession {
+  /** Durable-once ids fired in THIS stream (∪ persisted ids = suppression set). */
+  firedOnceIds: Set<string>;
+  fired: SteerFire[];
+  whenBase?: SteerWhenBase;
+  /** Id of the open (still-growing) assistant segment. */
+  currentSegId?: string;
+  /** Part index in the cumulative response where the open segment starts. */
+  currentSegStart: number;
+  /** How many fired steers have been split into the chain. */
+  materialized: number;
+}
+
+function stepStartPartIndices(parts: UIMessage['parts']): number[] {
+  const indices: number[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].type === 'step-start') indices.push(i);
+  }
+  return indices;
+}
+
+function spliceSteerMessages(
+  messages: ModelMessage[],
+  fired: SteerFire[],
+): ModelMessage[] {
+  const ordered = [...fired].sort((a, b) => a.spliceIndex - b.spliceIndex);
+  const out = [...messages];
+  let offset = 0;
+  for (const fire of ordered) {
+    out.splice(fire.spliceIndex + offset, 0, ...fire.synthModel);
+    offset += fire.synthModel.length;
+  }
+  return out;
 }
 
 /**
@@ -652,17 +724,252 @@ export class ContextEngine {
       this.#fragments,
     );
     await pipeline.applyUpdateBranching(options?.branch ?? true);
-    await pipeline.evaluateReminders(this.#reminderHandlers);
+    await pipeline.evaluateUserReminders();
     const result = await pipeline.persist();
 
     this.#pendingMessages = [];
     return result;
   }
 
-  #reminderHandlers: ReminderTargetHandler[] = [
-    new UserTargetHandler(),
-    new ToolOutputTargetHandler(),
-  ];
+  #currentSteerSession: SteerSession | undefined;
+
+  /**
+   * Build the `prepareStep` hook that injects steer reminders mid-loop.
+   *
+   * Semantics are "inject once, persist": when a steer reminder's predicate
+   * fires (only after the model has produced ≥1 step with content — the mid-loop
+   * gate), its `<system-reminder>` user message is spliced into the model prompt
+   * at the step boundary where it fired AND re-spliced on every subsequent step,
+   * so the model keeps seeing it for the rest of the loop.
+   *
+   * Firing is edge-triggered with a post-fire re-sample: each fire resets the
+   * elapsed reference (`lastSyntheticAt`), then the config is immediately
+   * re-evaluated against the reset context — self-resetting predicates like
+   * `elapsedExceeds` read false and re-arm (so they recur every N within one
+   * stream), while constant predicates like `everyNTurns` read true and disarm
+   * (so they fire once per stream). Any later false sample re-arms a config.
+   * All state is closure-local (a fresh SteerSession per call), so overlapping
+   * streams / guardrail retries never share a cursor.
+   *
+   * The session is also consumed by writeAssistantSegment, which carves the
+   * streamed assistant message into the matching `[assistant, steer, assistant]`
+   * split — so the stored chain reproduces exactly the prompt the model saw
+   * (store/prompt parity).
+   */
+  public createSteerPrepareStep<
+    TOOLS extends Record<string, Tool> = Record<string, Tool>,
+  >(): PrepareStepFunction<TOOLS> {
+    const session: SteerSession = {
+      firedOnceIds: new Set(),
+      fired: [],
+      currentSegStart: 0,
+      materialized: 0,
+    };
+    this.#currentSteerSession = session;
+
+    return async ({ steps, stepNumber, messages }) => {
+      // Mid-loop only: never fire before the model has produced a step with
+      // content, so a synthetic steer user is always preceded by an assistant
+      // turn (valid user→assistant→steer→assistant alternation, no 400).
+      const priorStep = stepNumber >= 1 ? steps[stepNumber - 1] : undefined;
+      const canFire = (priorStep?.content?.length ?? 0) > 0;
+
+      if (canFire) {
+        const configs = this.#steerConfigs();
+        if (configs.length > 0) {
+          const whenCtx = await this.#steerWhenCtx(session);
+          const matched = await evaluateFiredReminders(configs, whenCtx);
+          if (matched.length > 0) {
+            const onceIds = [...new Set(matched.flatMap((m) => m.onceIds))];
+            for (const id of onceIds) session.firedOnceIds.add(id);
+            const synth = synthesizeSteerUserMessage(
+              matched.map((m) => m.resolved.text),
+              Date.now(),
+              onceIds,
+            );
+            const synthModel = await convertToModelMessages([synth] as never, {
+              ignoreIncompleteToolCalls: true,
+            });
+            session.fired.push({
+              afterStep: stepNumber - 1,
+              spliceIndex: messages.length,
+              synth,
+              synthModel,
+            });
+          }
+        }
+      }
+
+      if (session.fired.length === 0) return undefined;
+      return {
+        messages: spliceSteerMessages(
+          messages as ModelMessage[],
+          session.fired,
+        ),
+      };
+    };
+  }
+
+  /**
+   * Persist the streamed assistant message, carving it into the steer split when
+   * steer reminders fired this turn.
+   *
+   * Called from chat()'s onStepFinish/onFinish (and the guardrail path) with the
+   * cumulative response message. Segment boundaries come from the `step-start`
+   * markers in the message itself — no cross-track store read — so the carve is
+   * race-free. Idempotent: finalized segments keep stable ids; the open segment
+   * is updated in place. With no active steer it degrades to a plain in-place
+   * write of the whole message to the reserved head.
+   */
+  public async writeAssistantSegment(message: UIMessage): Promise<void> {
+    const head = await this.headMessage();
+    if (head?.name !== 'assistant') {
+      throw new Error(
+        'writeAssistantSegment: expected an assistant message at chain head.',
+      );
+    }
+
+    const session = this.#currentSteerSession;
+    if (!session || session.fired.length === 0) {
+      this.set(assistant({ ...message, id: head.id } as UIMessage));
+      await this.save({ branch: false });
+      return;
+    }
+
+    if (session.currentSegId === undefined) {
+      session.currentSegId = head.id;
+      session.currentSegStart = 0;
+    }
+
+    const stepStarts = stepStartPartIndices(message.parts);
+
+    while (session.materialized < session.fired.length) {
+      const fire = session.fired[session.materialized];
+      const boundary = stepStarts[fire.afterStep + 1];
+      if (boundary === undefined) break; // post-steer step hasn't streamed yet
+
+      this.set(
+        assistant({
+          id: session.currentSegId,
+          role: 'assistant',
+          parts: message.parts.slice(session.currentSegStart, boundary),
+        } as UIMessage),
+      );
+      this.set(user(fire.synth));
+      session.currentSegId = generateId();
+      session.currentSegStart = boundary;
+      session.materialized++;
+    }
+
+    this.set(
+      assistant({
+        ...message,
+        id: session.currentSegId,
+        parts: message.parts.slice(session.currentSegStart),
+      } as UIMessage),
+    );
+    await this.save({ branch: false });
+  }
+
+  #steerConfigs(): ConditionalReminder[] {
+    return this.#fragments
+      .filter(isConditionalReminder)
+      .map((fragment) => fragment.metadata.reminder)
+      .filter((config) => config.target === 'steer');
+  }
+
+  async #steerWhenCtx(session: SteerSession): Promise<WhenContext> {
+    await this.#ensureInitialized();
+    if (!session.whenBase) {
+      const chain = await this.#getChainContext();
+      const base = this.#asSavePipelineEngine().buildBaseWhenCtx(chain);
+      const currentMessage = chain.lastMessage;
+      if (!currentMessage) {
+        throw new Error(
+          'steer reminders require a user message earlier in the turn',
+        );
+      }
+      session.whenBase = {
+        base,
+        content: extractPlainText(currentMessage),
+        currentMessage,
+        lastAssistantMessage: chain.lastAssistantMessage,
+        lastAssistantMessages: chain.lastAssistantMessages,
+        chainFiredOnceIds: chain.firedOnceIds,
+      };
+    }
+
+    const {
+      base,
+      content,
+      currentMessage,
+      lastAssistantMessage,
+      lastAssistantMessages,
+      chainFiredOnceIds,
+    } = session.whenBase;
+
+    // elapsed measures from the last real user message; synthetic steer nudges
+    // do not advance it (chain-summary excludes them). Within a stream the
+    // reference is frozen at stream start, so a raw elapsedExceeds keeps firing
+    // every step once crossed — that is by design; compose once() for control.
+    const elapsed =
+      base.lastMessageAt !== undefined
+        ? Date.now() - base.lastMessageAt
+        : undefined;
+
+    return {
+      ...base,
+      elapsed,
+      content,
+      currentMessage,
+      lastAssistantMessage,
+      lastAssistantMessages,
+      firedOnceIds: new Set([...chainFiredOnceIds, ...session.firedOnceIds]),
+    };
+  }
+
+  /**
+   * Evaluate `target: 'tool-output'` reminders against a tool's raw result and
+   * return the (possibly wrapped) output.
+   *
+   * Called by the agent's tool wrapper right after each `execute()` resolves —
+   * upstream of both the model and the store, so the next model step and the
+   * persisted chain see the exact same wrapped value (store/prompt parity).
+   *
+   * Returns the output unchanged when no tool-output reminder fires. Without a
+   * persisted user message there is no turn context to evaluate against
+   * (e.g. asTool forks that set a pending user without saving), so the output
+   * passes through untouched.
+   */
+  public async applyToolOutputReminders(output: unknown): Promise<unknown> {
+    const configs = this.#fragments
+      .filter(isConditionalReminder)
+      .map((fragment) => fragment.metadata.reminder)
+      .filter((config) => config.target === 'tool-output');
+    if (configs.length === 0) return output;
+
+    await this.#ensureInitialized();
+    const chain = await this.#getChainContext();
+    const currentMessage = chain.lastMessage;
+    if (!currentMessage) return output;
+
+    const base = this.#asSavePipelineEngine().buildBaseWhenCtx(chain);
+    const whenCtx: WhenContext = {
+      ...base,
+      content: extractPlainText(currentMessage),
+      currentMessage,
+      lastAssistantMessage: chain.lastAssistantMessage,
+      lastAssistantMessages: chain.lastAssistantMessages,
+    };
+
+    const matched = await evaluateFiredReminders(configs, whenCtx);
+    if (matched.length === 0) return output;
+
+    return applyRemindersToToolOutput(
+      output,
+      matched.map((m) => m.resolved.text),
+    );
+  }
 
   #asSavePipelineEngine() {
     return {

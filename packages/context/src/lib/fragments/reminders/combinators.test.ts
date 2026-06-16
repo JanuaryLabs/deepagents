@@ -11,9 +11,9 @@ import {
   contentIncludes,
   everyNTurns,
   everyOfLastN,
+  first,
   firstN,
   not,
-  once,
   or,
   toolCalled,
   withinLastN,
@@ -47,7 +47,7 @@ describe('and', () => {
 
 describe('or', () => {
   it('combines with OR logic', async () => {
-    const pred = or(once(), everyNTurns(5));
+    const pred = or(first(), everyNTurns(5));
     assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), true);
     assert.strictEqual(await pred(wctx({ turn: 2, content: '' })), false);
     assert.strictEqual(await pred(wctx({ turn: 5, content: '' })), true);

@@ -4,7 +4,7 @@ export function everyNTurns(n: number): WhenPredicate {
   return ({ turn }) => turn % n === 0;
 }
 
-export function once(): WhenPredicate {
+export function first(): WhenPredicate {
   return ({ turn }) => turn === 1;
 }
 

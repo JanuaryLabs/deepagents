@@ -5,8 +5,8 @@ import {
   type WhenContext,
   afterTurn,
   everyNTurns,
+  first,
   firstN,
-  once,
 } from '@deepagents/context';
 
 function wctx(
@@ -36,9 +36,9 @@ describe('everyNTurns', () => {
   });
 });
 
-describe('once', () => {
+describe('first', () => {
   it('fires only on turn 1', () => {
-    const pred = once();
+    const pred = first();
     assert.strictEqual(pred(wctx({ turn: 1, content: '' })), true);
     assert.strictEqual(pred(wctx({ turn: 2, content: '' })), false);
     assert.strictEqual(pred(wctx({ turn: 10, content: '' })), false);

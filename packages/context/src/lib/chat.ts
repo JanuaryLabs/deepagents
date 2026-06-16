@@ -13,7 +13,6 @@ import {
 
 import type { AgentModel } from './advisor.ts';
 import type { ContextEngine } from './engine.ts';
-import { assistant } from './fragments.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
 
@@ -98,7 +97,7 @@ export async function chat<CIn>(
       'chat: expected an assistant message at head. Call context.continue(input) before chat().',
     );
   }
-  const assistantMsgId = head.id;
+  const initialAssistantMsgId = head.id;
   const uiMessages = await context.getMessages();
 
   const streamContextVariables =
@@ -126,51 +125,37 @@ export async function chat<CIn>(
     sendReasoning: true,
     sendSources: true,
     originalMessages: uiMessages,
-    generateMessageId: () => assistantMsgId,
+    generateMessageId: () => initialAssistantMsgId,
     messageMetadata: options.messageMetadata ?? defaultChatMessageMetadata,
   });
 
   return createUIMessageStream({
     originalMessages: uiMessages,
-    generateId: () => assistantMsgId,
+    generateId: () => initialAssistantMsgId,
     onStepFinish: async ({ responseMessage }) => {
-      const normalizedMessage = {
-        ...responseMessage,
-        id: assistantMsgId,
-      } as UIMessage;
-      context.set(assistant(normalizedMessage));
-      await context.save({ branch: false });
+      await context.writeAssistantSegment(responseMessage as UIMessage);
     },
     onFinish: async ({ responseMessage, isAborted }) => {
-      const normalizedMessage = {
-        ...responseMessage,
-        id: assistantMsgId,
-      } as UIMessage;
-
+      let message = responseMessage as UIMessage;
       if (isAborted) {
-        normalizedMessage.parts = sanitizeAbortedParts(normalizedMessage.parts);
+        message = { ...message, parts: sanitizeAbortedParts(message.parts) };
       }
 
       const drained = sandbox.drainFileEvents();
       const fileEvents = isAborted ? [] : drained;
-      const finalMetadata =
-        await options.finalAssistantMetadata?.(normalizedMessage);
+      const finalMetadata = await options.finalAssistantMetadata?.(message);
 
       const mergedMetadata = {
-        ...((normalizedMessage.metadata as object) ?? {}),
+        ...((message.metadata as object) ?? {}),
         ...(fileEvents.length > 0 ? { fileEvents } : {}),
         ...(finalMetadata ?? {}),
       };
-      const hasMetadata = Object.keys(mergedMetadata).length > 0;
-      const finalMessage = hasMetadata
-        ? ({ ...normalizedMessage, metadata: mergedMetadata } as UIMessage)
-        : normalizedMessage;
+      if (Object.keys(mergedMetadata).length > 0) {
+        message = { ...message, metadata: mergedMetadata } as UIMessage;
+      }
 
-      context.set(assistant(finalMessage));
-      await context.save({ branch: false });
-
-      const totalUsage = await result.totalUsage;
-      await context.trackUsage(totalUsage);
+      await context.writeAssistantSegment(message);
+      await context.trackUsage(await result.totalUsage);
     },
     execute: async ({ writer }) => {
       writer.merge(uiStream);

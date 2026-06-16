@@ -57,11 +57,42 @@ export interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
+  /**
+   * Ids that a fire-once latch has already fired for in this conversation
+   * (persisted synth onceIds ∪ this stream's fires). Populated only during
+   * steer evaluation; `once(id)` reads it to suppress a second fire.
+   */
+  firedOnceIds?: ReadonlySet<string>;
+  /**
+   * Per-evaluation buffer that `once(id)` appends to when consulted and not yet
+   * fired. The engine commits these ids — to the session and the synth — only
+   * if the whole reminder fires. One fresh collector per config evaluation.
+   */
+  onceCollector?: Set<string>;
 }
+
+/**
+ * The engine-level slice of `WhenContext` — everything that does not depend on a
+ * specific carrier message. Callers add `content`/`currentMessage`/the
+ * last-assistant fields once they have located the message being evaluated.
+ */
+export type BaseWhenCtx = Omit<
+  WhenContext,
+  | 'content'
+  | 'currentMessage'
+  | 'lastAssistantMessage'
+  | 'lastAssistantMessages'
+>;
 
 export type WhenPredicate = (ctx: WhenContext) => boolean | Promise<boolean>;
 
-export type ReminderTarget = 'user' | 'tool-output';
+export type ReminderTarget = 'user' | 'tool-output' | 'steer';
+
+export interface SyntheticSteerMetadata {
+  source: 'steer-reminder';
+  firedAt: number;
+  onceIds?: string[];
+}
 
 export interface UserReminderOptions {
   asPart?: boolean;
@@ -103,7 +134,7 @@ export interface UserReminderMetadata {
   partIndex: number;
   start: number;
   end: number;
-  mode: 'inline' | 'part' | 'tool-output';
+  mode: 'inline' | 'part';
 }
 
 export type ReminderRange = {
@@ -149,13 +180,10 @@ function getReminderMetadataRecords(
   );
 }
 
-function reminderTargetOf(record: ReminderMetadataRecord): ReminderTarget {
-  return record.target === 'tool-output' ? 'tool-output' : 'user';
-}
-
 function normalizeReminderTarget(target: unknown): ReminderTarget {
   if (target === undefined || target === 'user') return 'user';
   if (target === 'tool-output') return 'tool-output';
+  if (target === 'steer') return 'steer';
   throw new Error(`Unsupported reminder target: ${String(target)}`);
 }
 
@@ -211,7 +239,15 @@ function isOutputAvailableToolPart(
 function isToolOutputReminderEnvelope(
   value: unknown,
 ): value is { result: unknown; systemReminder: string } {
-  return isRecord(value) && typeof value.systemReminder === 'string';
+  // Match only the exact shape applyRemindersToToolOutput produces: a `result`
+  // key plus a `systemReminder` that carries the wrapping tag. A real tool
+  // output that merely has a `systemReminder` string is not an envelope.
+  return (
+    isRecord(value) &&
+    'result' in value &&
+    typeof value.systemReminder === 'string' &&
+    value.systemReminder.startsWith(SYSTEM_REMINDER_OPEN_TAG)
+  );
 }
 
 export function stripTextByRanges(
@@ -261,6 +297,10 @@ export function stripTextByRanges(
  * - `metadata.reminders` is removed from the returned message.
  */
 export function stripReminders(message: UIMessage): UIMessage {
+  if (isSyntheticSteerMessage(message)) {
+    return stripSyntheticSteerMessage(message);
+  }
+
   const reminderRecords = getReminderMetadataRecords(
     isRecord(message.metadata) ? message.metadata : undefined,
   );
@@ -268,16 +308,8 @@ export function stripReminders(message: UIMessage): UIMessage {
     number,
     Array<{ start: number; end: number }>
   >();
-  const toolRemindersByPartIndex = new Map<number, ReminderMetadataRecord[]>();
 
   for (const range of reminderRecords) {
-    if (reminderTargetOf(range) === 'tool-output') {
-      const records = toolRemindersByPartIndex.get(range.partIndex) ?? [];
-      records.push(range);
-      toolRemindersByPartIndex.set(range.partIndex, records);
-      continue;
-    }
-
     const partRanges = rangesByPartIndex.get(range.partIndex) ?? [];
     partRanges.push({ start: range.start, end: range.end });
     rangesByPartIndex.set(range.partIndex, partRanges);
@@ -285,30 +317,12 @@ export function stripReminders(message: UIMessage): UIMessage {
 
   const strippedParts = message.parts.flatMap((part, partIndex) => {
     const clonedPart = { ...part };
-    const toolReminderRecords = toolRemindersByPartIndex.get(partIndex);
 
     if (
-      toolReminderRecords !== undefined &&
-      isOutputAvailableToolPart(clonedPart)
+      isOutputAvailableToolPart(clonedPart) &&
+      isToolOutputReminderEnvelope(clonedPart.output)
     ) {
-      if (typeof clonedPart.output === 'string') {
-        return [
-          {
-            ...clonedPart,
-            output: stripTextByRanges(
-              clonedPart.output,
-              toolReminderRecords.map((record) => ({
-                start: record.start,
-                end: record.end,
-              })),
-            ),
-          },
-        ];
-      }
-
-      if (isToolOutputReminderEnvelope(clonedPart.output)) {
-        return [{ ...clonedPart, output: clonedPart.output.result }];
-      }
+      return [{ ...clonedPart, output: clonedPart.output.result }];
     }
 
     const ranges = rangesByPartIndex.get(partIndex);
@@ -521,79 +535,24 @@ export function applyReminderToMessage(
     : applyInlineReminder(message, resolved.text);
 }
 
-export function findSingleOutputAvailableToolPart(
-  message: UIMessage,
-): { partIndex: number; part: OutputAvailableToolPart } | null {
-  let match: { partIndex: number; part: OutputAvailableToolPart } | null = null;
-
-  for (let partIndex = 0; partIndex < message.parts.length; partIndex++) {
-    const part = message.parts[partIndex];
-    if (!isOutputAvailableToolPart(part)) continue;
-    if (match) return null;
-    match = { partIndex, part };
-  }
-
-  return match;
-}
-
-export function applyToolOutputRemindersToMessage(
-  message: UIMessage,
-  reminders: Array<{ text: string; metadata?: Record<string, unknown> }>,
-): UserReminderMetadata[] {
-  if (reminders.length === 0) return [];
-
-  const target = findSingleOutputAvailableToolPart(message);
-  if (!target) return [];
-
-  for (const reminder of reminders) {
-    if (reminder.metadata) {
-      mergeMessageMetadata(message, reminder.metadata);
-    }
-  }
-
-  const added: UserReminderMetadata[] = [];
-  if (typeof target.part.output === 'string') {
-    let output = target.part.output;
-
-    for (const reminder of reminders) {
-      const reminderText = formatTaggedReminder(reminder.text);
-      const start = output.length;
-      output = `${output}${reminderText}`;
-      added.push({
-        id: generateId(),
-        text: reminder.text,
-        target: 'tool-output',
-        partIndex: target.partIndex,
-        start,
-        end: start + reminderText.length,
-        mode: 'tool-output',
-      });
-    }
-
-    message.parts[target.partIndex] = {
-      ...target.part,
-      output,
-    };
-    return added;
-  }
-
-  message.parts[target.partIndex] = {
-    ...target.part,
-    output: {
-      result: target.part.output,
-      systemReminder: reminders.map((reminder) => reminder.text).join('\n'),
-    },
+/**
+ * Wrap a tool's raw `execute()` result with fired reminder texts.
+ *
+ * Applied at the tool-execution boundary — before the AI SDK hands the result
+ * back to the model — so the wrapped value flows identically into the next
+ * model step and the persisted chain. The envelope shape is uniform regardless
+ * of the output type, which lets `stripReminders` undo it structurally without
+ * metadata bookkeeping.
+ */
+export function applyRemindersToToolOutput(
+  output: unknown,
+  texts: string[],
+): unknown {
+  if (texts.length === 0) return output;
+  return {
+    result: output === undefined ? null : output,
+    systemReminder: formatTaggedReminder(texts.join('\n')),
   };
-
-  return reminders.map((reminder) => ({
-    id: generateId(),
-    text: reminder.text,
-    target: 'tool-output',
-    partIndex: target.partIndex,
-    start: 0,
-    end: 0,
-    mode: 'tool-output',
-  }));
 }
 
 export function mergeReminderMetadata(
@@ -712,7 +671,7 @@ export function reminder(
   }
 
   if (target !== 'user') {
-    throw new Error('Reminder target "tool-output" requires a when predicate');
+    throw new Error(`Reminder target "${target}" requires a when predicate`);
   }
 
   const text = normalizeImmediateReminderText(textOrFragment);
@@ -787,4 +746,71 @@ export function user(
       },
     },
   };
+}
+
+/**
+ * Build the hidden synthetic user message injected mid-loop for steer reminders.
+ *
+ * Multiple reminder texts that fire at the same step boundary are folded into a
+ * single user message (one `<system-reminder>` text part each) so the model
+ * never sees two consecutive user messages — which providers like Anthropic
+ * reject. The `metadata.synthetic` marker lets the chain summary, title
+ * generation, and `stripReminders` treat these as non-conversational.
+ */
+export function synthesizeSteerUserMessage(
+  text: string | string[],
+  firedAt: number,
+  onceIds: string[] = [],
+): UIMessage & { role: 'user' } {
+  const texts = Array.isArray(text) ? text : [text];
+  for (const value of texts) assertReminderText(value);
+  return {
+    id: generateId(),
+    role: 'user',
+    parts: texts.map((value) => ({
+      type: 'text',
+      text: formatTaggedReminder(value),
+    })),
+    metadata: {
+      synthetic: {
+        source: 'steer-reminder',
+        firedAt,
+        ...(onceIds.length > 0 ? { onceIds } : {}),
+      } satisfies SyntheticSteerMetadata,
+    },
+  };
+}
+
+export function isSyntheticSteerMessage(
+  message: UIMessage,
+): message is UIMessage & {
+  metadata: { synthetic: SyntheticSteerMetadata };
+} {
+  const meta = message.metadata;
+  if (!isRecord(meta)) return false;
+  const synthetic = meta.synthetic;
+  if (!isRecord(synthetic)) return false;
+  return synthetic.source === 'steer-reminder';
+}
+
+/**
+ * A synthetic steer message is entirely `<system-reminder>` payload, so
+ * stripping reminders drops its text parts wholesale and clears the synthetic
+ * marker — leaving nothing for title/strip consumers to leak.
+ */
+function stripSyntheticSteerMessage(message: UIMessage): UIMessage {
+  const next: UIMessage = {
+    ...message,
+    parts: message.parts.filter((part) => part.type !== 'text'),
+  };
+  if (isRecord(message.metadata)) {
+    const metadata = { ...message.metadata };
+    delete metadata.synthetic;
+    if (Object.keys(metadata).length > 0) {
+      next.metadata = metadata;
+    } else {
+      delete next.metadata;
+    }
+  }
+  return next;
 }

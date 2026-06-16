@@ -14,6 +14,7 @@ export * from './lib/fragments/reminders/classifier.ts';
 export * from './lib/fragments/reminders/combinators.ts';
 export * from './lib/fragments/reminders/content-predicates.ts';
 export * from './lib/fragments/reminders/message-predicates.ts';
+export * from './lib/fragments/reminders/once.ts';
 export * from './lib/fragments/reminders/temporal/index.ts';
 export * from './lib/fragments/reminders/tool-predicates.ts';
 export * from './lib/fragments/reminders/turn-predicates.ts';

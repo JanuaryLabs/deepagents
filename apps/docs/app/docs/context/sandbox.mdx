@@ -1,11 +1,12 @@
 ---
 title: Sandbox
-description: Execute real sandbox commands across Docker, WASM, virtual, and custom backends
+description: Execute real sandbox commands across Docker, Daytona, WASM, virtual, and custom backends
 ---
 
 The sandbox system lets AI agents execute real commands in isolated
-environments. Choose between Docker containers for full binary execution, WASM
-virtual machines for lightweight in-process execution, virtual file systems for
+environments. Choose between Docker containers for full binary execution,
+caller-owned Daytona sandboxes for managed remote workspaces, WASM virtual
+machines for lightweight in-process execution, virtual file systems for
 simulation, custom `Sandbox` implementations for specialized policy, or binary
 bridges to combine approaches.
 
@@ -15,14 +16,15 @@ bridges to combine approaches.
 |----------|----------|-------------------|
 | `createDockerSandbox` + `createBashTool` | Agent needs real binaries in isolated container | Yes |
 | `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
+| `createDaytonaSandbox(client, options)` + `createBashTool` | Managed remote sandbox with caller-owned Daytona client | No |
 | `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
 | `createVirtualSandbox` | In-process bash with a virtual filesystem | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
 
 All AI-agent-facing surfaces compose the same way: pick a backend factory
-(`createDockerSandbox` / `createAgentOsSandbox` / `createVirtualSandbox`), then
-wrap it with `createBashTool({ sandbox })` to get the bash tool, file tools,
-skills upload, and file-event observation.
+(`createDockerSandbox` / `createDaytonaSandbox` / `createAgentOsSandbox` /
+`createVirtualSandbox`), then wrap it with `createBashTool({ sandbox })` to
+get the bash tool, file tools, skills upload, and file-event observation.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Docker sandboxes additionally expose an

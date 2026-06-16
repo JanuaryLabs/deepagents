@@ -19,6 +19,7 @@ import {
   createVirtualSandbox,
   dayChanged,
   everyNTurns,
+  first,
   hint,
   hourChanged,
   isConditionalReminder,
@@ -199,6 +200,34 @@ async function useFakeTime<T>(
 }
 
 describe('ContextEngine conditional reminders', () => {
+  it('once() on a non-steer target does not silently fire every turn', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'once-misuse',
+      userId: 'u1',
+    });
+
+    // once() is a steer-only durable latch. On a user target there is no
+    // firedOnceIds infrastructure, so a naive implementation returns true
+    // forever and the reminder fires on every turn. It must NOT.
+    engine.set(
+      reminder('LATCH-TEXT', { when: once('u'), target: 'user' }),
+      user('turn 1'),
+    );
+    await engine.save();
+
+    const { messages } = await engine.resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
+    const text = getTextParts(messages[messages.length - 1]).join('');
+    assert.ok(
+      !text.includes('LATCH-TEXT'),
+      `once() must not fire on a non-steer target. Got: ${text}`,
+    );
+  });
+
   it('applies everyNTurns reminder on matching turn', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -270,7 +299,7 @@ describe('ContextEngine conditional reminders', () => {
       userId: 'u1',
     });
 
-    engine.set(reminder('welcome', { when: once() }), user('first message'));
+    engine.set(reminder('welcome', { when: first() }), user('first message'));
     await engine.save();
 
     const { messages } = await engine.resolve({
@@ -297,7 +326,7 @@ describe('ContextEngine conditional reminders', () => {
     engine.set(user('turn 1'), assistantText('reply'));
     await engine.save();
 
-    engine.set(reminder('welcome', { when: once() }), user('turn 2'));
+    engine.set(reminder('welcome', { when: first() }), user('turn 2'));
     await engine.save();
 
     const { messages } = await engine.resolve({
@@ -704,474 +733,6 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
-  it('target:tool-output appends reminder to a single string output-available tool output', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-string',
-      userId: 'u1',
-    });
-
-    engine.set(user('run bash'));
-    await engine.save();
-
-    engine.set(
-      reminder('inspect stdout before answering', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      assistant(
-        assistantWithToolParts('assistant-string-tool', [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'stdout',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-string'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(
-      part.state,
-      'output-available',
-      'Tool state should remain completed',
-    );
-    assert.strictEqual(
-      part.output,
-      'stdout<system-reminder>inspect stdout before answering</system-reminder>',
-    );
-    assert.strictEqual(
-      getReminderMetadata(assistantMessage)?.reminders?.length,
-      1,
-    );
-  });
-
-  it('target:tool-output persists reminders for codec-backed assistant fragments', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-codec-backed',
-      userId: 'u1',
-    });
-
-    engine.set(user('run bash'));
-    await engine.save();
-
-    engine.set(
-      reminder('inspect cloned stdout before answering', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      codecBackedAssistant(
-        assistantWithToolParts('assistant-codec-backed-tool', [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'stdout',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-codec-backed'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(
-      part.state === 'output-available' ? part.output : undefined,
-      'stdout<system-reminder>inspect cloned stdout before answering</system-reminder>',
-    );
-    assert.strictEqual(
-      getReminderMetadata(assistantMessage)?.reminders?.length,
-      1,
-    );
-  });
-
-  it('target:tool-output preserves branch IDs when updating an existing assistant', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-branch-id',
-      userId: 'u1',
-    });
-
-    const originalAssistantId = 'assistant-branch-tool';
-    engine.set(
-      user('run bash'),
-      assistant(
-        assistantWithToolParts(originalAssistantId, [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'stdout',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    engine.set(
-      reminder('inspect branched stdout before answering', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      codecBackedAssistant(
-        assistantWithToolParts(originalAssistantId, [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'updated stdout',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const activeMessages = await store.getMessages(
-      'cond-target-tool-branch-id',
-    );
-    const branchedAssistant = activeMessages.find((message) => {
-      if (message.name !== 'assistant') return false;
-      const storedMessage = requireUIMessage(message.data, message.id);
-      const output = getToolOutput(storedMessage);
-      return typeof output === 'string' && output.includes('updated stdout');
-    });
-
-    assert.ok(
-      branchedAssistant,
-      'Updated assistant message should exist on the new branch',
-    );
-    assert.notStrictEqual(
-      branchedAssistant.id,
-      originalAssistantId,
-      'Branched assistant should get a new graph message id',
-    );
-
-    const branchedMessage = requireUIMessage(
-      branchedAssistant.data,
-      branchedAssistant.id,
-    );
-    assert.strictEqual(
-      branchedMessage.id,
-      branchedAssistant.id,
-      'Branched stored assistant message should keep UIMessage.id aligned with the graph message id',
-    );
-    assert.strictEqual(
-      getToolOutput(branchedMessage),
-      'updated stdout<system-reminder>inspect branched stdout before answering</system-reminder>',
-    );
-
-    const originalAssistant = await store.getMessage(originalAssistantId);
-    assert.ok(
-      originalAssistant,
-      'Original assistant message should still exist on the old branch',
-    );
-    const originalMessage = requireUIMessage(
-      originalAssistant.data,
-      originalAssistant.id,
-    );
-    assert.strictEqual(getToolOutput(originalMessage), 'stdout');
-  });
-
-  it('target:tool-output wraps a single non-string output-available tool output', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-object',
-      userId: 'u1',
-    });
-
-    engine.set(user('query data'));
-    await engine.save();
-
-    engine.set(
-      reminder('validate rows before answering', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      assistant(
-        assistantWithToolParts('assistant-object-tool', [
-          toolPart({
-            name: 'sql',
-            state: 'output-available',
-            output: { rows: [{ id: 1 }] },
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-object'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(part.state, 'output-available');
-    assert.deepStrictEqual(part.output, {
-      result: { rows: [{ id: 1 }] },
-      systemReminder: 'validate rows before answering',
-    });
-    assert.strictEqual(
-      getReminderMetadata(assistantMessage)?.reminders?.length,
-      1,
-    );
-  });
-
-  it('target:tool-output no-ops when there is no eligible output-available tool output', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-none',
-      userId: 'u1',
-    });
-
-    engine.set(user('call a tool'));
-    await engine.save();
-
-    engine.set(
-      reminder('should not appear', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      assistant(
-        assistantWithToolParts('assistant-no-output-tool', [
-          toolPart({ name: 'bash', state: 'input-available' }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-none'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(part.state, 'input-available');
-    assert.strictEqual(
-      getReminderMetadata(assistantMessage)?.reminders,
-      undefined,
-    );
-  });
-
-  it('target:tool-output no-ops when multiple output-available tool outputs exist', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-parallel',
-      userId: 'u1',
-    });
-
-    engine.set(user('run parallel tools'));
-    await engine.save();
-
-    engine.set(
-      reminder('ambiguous target', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      assistant(
-        assistantWithToolParts('assistant-parallel-tool', [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'one',
-          }),
-          toolPart({
-            name: 'sql',
-            state: 'output-available',
-            output: 'two',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-parallel'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const outputs = assistantMessage.parts
-      .filter((part): part is ToolUIPart => part.type.startsWith('tool-'))
-      .map((part) => (part.state === 'output-available' ? part.output : null));
-
-    assert.deepStrictEqual(outputs, ['one', 'two']);
-    assert.strictEqual(
-      getReminderMetadata(assistantMessage)?.reminders,
-      undefined,
-    );
-  });
-
-  it('target:tool-output ignores asPart', async () => {
-    const partMode = true;
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-ignore-aspart',
-      userId: 'u1',
-    });
-
-    engine.set(user('run bash'));
-    await engine.save();
-
-    engine.set(
-      reminder('stay on output', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-        asPart: partMode,
-      }),
-      assistant(
-        assistantWithToolParts('assistant-ignore-aspart-tool', [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'stdout',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-ignore-aspart'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(assistantMessage.parts.length, 1);
-    assert.strictEqual(
-      part.state === 'output-available' ? part.output : undefined,
-      'stdout<system-reminder>stay on output</system-reminder>',
-    );
-  });
-
-  it('target:tool-output does not apply to output-error tool parts', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-error',
-      userId: 'u1',
-    });
-
-    engine.set(user('run bash'));
-    await engine.save();
-
-    engine.set(
-      reminder('should not apply to errors', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      }),
-      assistant(
-        assistantWithToolParts('assistant-error-tool', [
-          toolPart({
-            name: 'bash',
-            state: 'output-error',
-            errorText: 'boom',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-error'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(part.state, 'output-error');
-    assert.strictEqual(
-      part.state === 'output-error' ? part.errorText : undefined,
-      'boom',
-    );
-    assert.strictEqual(
-      getReminderMetadata(assistantMessage)?.reminders,
-      undefined,
-    );
-  });
-
-  it('target:tool-output sees pending user message in same turn (no user-target reminders configured)', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'cond-target-tool-pending-user',
-      userId: 'u1',
-    });
-
-    engine.set(
-      reminder('check this', {
-        when: contentIncludes(['flag']),
-        target: 'tool-output',
-      }),
-      user('flag is set'),
-      assistant(
-        assistantWithToolParts('a-pending-user', [
-          toolPart({
-            name: 'bash',
-            state: 'output-available',
-            output: 'stdout',
-          }),
-        ]),
-      ),
-    );
-    await engine.save();
-
-    const storedAssistant = findMessage(
-      await store.getMessages('cond-target-tool-pending-user'),
-      'assistant',
-    );
-    const assistantMessage = requireUIMessage(
-      storedAssistant.data,
-      storedAssistant.id,
-    );
-    const part = getOnlyToolPart(assistantMessage);
-
-    assert.strictEqual(
-      part.state === 'output-available' ? part.output : undefined,
-      'stdout<system-reminder>check this</system-reminder>',
-      'tool-output predicate must see pending user message even when no user-target reminders are configured',
-    );
-  });
-
   it('applies reminder regardless of set() order (reminder after user)', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -1405,7 +966,7 @@ describe('ContextEngine conditional reminders', () => {
           await new Promise((r) => setTimeout(r, 1));
           return 'fetched-from-api';
         },
-        { when: once() },
+        { when: first() },
       ),
       user('hello'),
     );
@@ -1437,7 +998,7 @@ describe('ContextEngine conditional reminders', () => {
 
     engine.set(
       reminder('mixed-combo', {
-        when: and(once(), asyncAlwaysTrue),
+        when: and(first(), asyncAlwaysTrue),
       }),
       user('hello'),
     );

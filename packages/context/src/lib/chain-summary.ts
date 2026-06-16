@@ -1,6 +1,7 @@
 import type { UIMessage } from 'ai';
 
 import type { ContextFragment } from './fragments.ts';
+import { isSyntheticSteerMessage } from './fragments/message/user.ts';
 import type { MessageData } from './store/store.ts';
 import { requireUIMessage } from './ui-message-guards.ts';
 
@@ -11,6 +12,7 @@ export interface ChainSummary {
   lastMessage?: UIMessage;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
+  firedOnceIds: Set<string>;
 }
 
 export class ChainSummaryBuilder {
@@ -20,6 +22,7 @@ export class ChainSummaryBuilder {
   #lastMessage?: UIMessage;
   #lastAssistantMessage?: UIMessage;
   #lastAssistantMessages: UIMessage[] = [];
+  #firedOnceIds = new Set<string>();
 
   ingestStored(msg: MessageData): void {
     this.#messageCount++;
@@ -38,17 +41,32 @@ export class ChainSummaryBuilder {
       return;
     }
 
-    this.#turn++;
-    this.#lastMessageAt = msg.createdAt;
-    this.#lastMessage = requireUIMessage(
+    const message = requireUIMessage(
       msg.data,
       `Stored user message "${msg.id}"`,
     );
+    // Synthetic steer users are mid-loop nudges, never conversation turns:
+    // they advance neither turn nor lastMessageAt (elapsed measures from the
+    // last real user message). Their persisted once-ids are the durable record
+    // that lets once() suppress a fire-once reminder across runs.
+    if (isSyntheticSteerMessage(message)) {
+      for (const id of message.metadata.synthetic.onceIds ?? []) {
+        this.#firedOnceIds.add(id);
+      }
+      return;
+    }
+
+    this.#turn++;
+    this.#lastMessageAt = msg.createdAt;
+    this.#lastMessage = message;
   }
 
   ingestPending(fragment: ContextFragment): void {
     this.#messageCount++;
-    if (fragment.name === 'user') this.#turn++;
+    if (fragment.name !== 'user') return;
+    const encoded = fragment.codec?.encode();
+    if (encoded && isSyntheticSteerMessage(encoded as UIMessage)) return;
+    this.#turn++;
   }
 
   build(): ChainSummary {
@@ -59,6 +77,7 @@ export class ChainSummaryBuilder {
       lastMessage: this.#lastMessage,
       lastAssistantMessage: this.#lastAssistantMessage,
       lastAssistantMessages: this.#lastAssistantMessages,
+      firedOnceIds: this.#firedOnceIds,
     };
   }
 }

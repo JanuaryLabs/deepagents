@@ -1,16 +1,17 @@
 ---
 title: Reminders
-description: Inject situational context into user messages so the LLM stays aware of hidden runtime facts, active skills, and recent conversation signals
+description: Inject situational context into model-visible carriers so the LLM stays aware of hidden runtime facts, active skills, and recent conversation signals
 ---
 
-Reminders inject hidden text into user messages to give the LLM situational awareness — current date, active skills, recent tool behavior, recurring instructions. The text is invisible to the user but visible to the model.
+Reminders inject hidden text into the model conversation to give the LLM situational awareness — current date, active skills, recent tool behavior, recurring instructions. Depending on the target, the text can merge into a user message, wrap a tool result, or splice a synthetic mid-loop steer message into a streaming turn. In every case the text is invisible to the end user but visible to the model.
 
 ## How Reminders Work
 
-Every reminder attaches text to a user message. Two decisions control when and how:
+Every reminder attaches hidden text to one model-visible carrier. Three decisions control when and how:
 
-1. **When** — immediate (at message creation) or conditional (at `engine.save()`, gated by a predicate)
-2. **How** — inline (appended as a `<system-reminder>` tag inside the last text part) or as a separate text part
+1. **When** — immediate (at message creation) or conditional (at `engine.save()` / stream evaluation, gated by a predicate)
+2. **Where** — `target: 'user'`, `target: 'tool-output'`, or `target: 'steer'`
+3. **How** — inline (appended as a `<system-reminder>` tag inside the last text part) or as a separate text part
 
 ## Immediate Reminders
 
@@ -79,7 +80,7 @@ engine.set(
 );
 ```
 
-The engine applies conditional reminders to the **last pending user message** during `save()`. It builds a `WhenContext` with the current turn count, message content, usage totals, message counts, and recent assistant history, then evaluates each predicate.
+For the default `user` target, the engine applies conditional reminders to the **last pending user message** during `save()`. It builds a `WhenContext` with the current turn count, message content, usage totals, message counts, and recent assistant history, then evaluates each predicate.
 
 ```ts
 import { reminder, contentIncludes, afterTurn, and, user } from '@deepagents/context';
@@ -94,6 +95,43 @@ engine.set(
 ```
 
 See [Predicates](/docs/context/predicates) for the full predicate catalog and composition rules.
+
+### Reminder Targets
+
+Conditional reminders can fire in three places:
+
+| Target | When it runs | What the model sees |
+| --- | --- | --- |
+| `user` | During `engine.save()` on the last pending user message | Reminder text merged into that user message |
+| `tool-output` | Right after a tool `execute()` resolves | Wrapped tool output on the next model step, with the same wrapped value persisted in the chain |
+| `steer` | Mid-loop between streaming steps, after the model has already emitted content | A synthetic hidden user message containing one or more `<system-reminder>` parts |
+
+`user` is the default target. `tool-output` and `steer` require a `when` predicate.
+
+```ts
+import {
+  afterTurn,
+  everyNTurns,
+  reminder,
+  streamStepsExceed,
+} from '@deepagents/context';
+
+engine.set(
+  reminder('Double-check filesystem side effects', {
+    when: afterTurn(0),
+    target: 'tool-output',
+  }),
+  reminder('Checkpoint before taking another tool step', {
+    when: streamStepsExceed(2),
+    target: 'steer',
+  }),
+  reminder('Cite sources every third turn', {
+    when: everyNTurns(3),
+  }),
+);
+```
+
+Use `tool-output` when the reminder should travel with a tool result. Use `steer` when the agent needs a hidden nudge during a multi-step streamed turn without waiting for the next user message. Steer reminders only fire after the model has produced at least one streamed step with content. When a steer reminder fires, the engine persists the same assistant/steer/assistant split that the model saw, and constant-true predicates fire once per stream instead of repeating on every later step.
 
 ## Built-in Reminders
 
@@ -121,10 +159,13 @@ interface ReminderContext {
   elapsed?: number;           // Milliseconds since last persisted user message
   messageCount?: number;      // Total message count across all roles
   lastAssistantMessage?: UIMessage; // Last persisted assistant message
+  streamStepNumber?: number;      // Current streamed step number during steer evaluation
+  streamToolCallCount?: number;   // Completed tool calls seen in the current streamed turn
+  streamTotalTokens?: number;     // Running token total for the current streamed turn
 }
 ```
 
-Conditional reminders populate these fields at `save()` time. Immediate reminders receive only `content`.
+Conditional reminders populate these fields at `save()` time. `target: 'steer'` reminders additionally receive the stream-scoped fields while a turn is in flight. Immediate reminders receive only `content`.
 
 ## Stripping Reminders
 

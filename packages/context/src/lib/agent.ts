@@ -79,7 +79,10 @@ class Agent<CIn, COut = CIn> {
   readonly sandbox: AgentSandbox;
   constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
-    this.tools = { ...options.sandbox.tools, ...(options.tools || {}) };
+    this.tools = wrapToolsWithOutputReminders(
+      { ...options.sandbox.tools, ...(options.tools || {}) },
+      options.context,
+    );
     this.context = options.context;
     this.model = options.model;
     this.sandbox = options.sandbox;
@@ -219,6 +222,7 @@ class Agent<CIn, COut = CIn> {
         config?.abortSignal,
       ),
       stopWhen: stepCountIs(200),
+      prepareStep: context.createSteerPrepareStep(),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
       experimental_context: contextVariables,
@@ -271,12 +275,20 @@ class Agent<CIn, COut = CIn> {
         onStepFinish: async ({ responseMessage }) => {
           if (!stepSaved) return;
 
-          const normalizedMessage = assistantMsgId
-            ? ({ ...responseMessage, id: assistantMsgId } as UIMessage)
-            : responseMessage;
-
-          context.set(assistant(normalizedMessage));
-          await context.save({ branch: false });
+          // When chat() reserved an assistant head (the steer-capable path),
+          // route through writeAssistantSegment so the steer split is honored and
+          // we stay idempotent with chat()'s own onStepFinish. For direct
+          // guardrail usage with no reserved placeholder, append a fresh assistant.
+          const head = await context.headMessage();
+          if (head?.name === 'assistant') {
+            await context.writeAssistantSegment(responseMessage as UIMessage);
+          } else {
+            const message = assistantMsgId
+              ? ({ ...responseMessage, id: assistantMsgId } as UIMessage)
+              : (responseMessage as UIMessage);
+            context.set(assistant(message));
+            await context.save({ branch: false });
+          }
 
           stepSaved.resolve();
           stepSaved = null;
@@ -527,6 +539,48 @@ class Agent<CIn, COut = CIn> {
       ...overrides,
     });
   }
+}
+
+/**
+ * Wrap every executable tool so `target: 'tool-output'` reminders are applied
+ * to the raw result at the execution boundary. The model sees the wrapped
+ * output in its very next step and the persisted chain stores the same value.
+ * Streaming results (async iterables) pass through untouched — wrapping them
+ * would break their consumption contract.
+ */
+function wrapToolsWithOutputReminders(
+  tools: ToolSet,
+  context: ContextEngine | undefined,
+): ToolSet {
+  if (!context) return tools;
+
+  const wrapped: ToolSet = {};
+  for (const [name, toolDef] of Object.entries(tools)) {
+    const execute = toolDef.execute;
+    if (typeof execute !== 'function') {
+      wrapped[name] = toolDef;
+      continue;
+    }
+    wrapped[name] = {
+      ...toolDef,
+      execute: async (input, options) => {
+        const result = await execute.call(toolDef, input, options);
+        if (isAsyncIterable(result)) return result;
+        return context.applyToolOutputReminders(result);
+      },
+    } as typeof toolDef;
+  }
+  return wrapped;
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
+      'function'
+  );
 }
 
 export function agent<CIn, COut = CIn>(
