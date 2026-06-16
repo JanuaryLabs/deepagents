@@ -84,7 +84,6 @@ export async function chat<CIn>(
   options: ChatOptions<CIn> = {},
 ) {
   const context = agent.context;
-  const sandbox = agent.sandbox;
   if (!context) {
     throw new Error(
       'Agent is missing a context. Provide context when creating the agent.',
@@ -141,13 +140,9 @@ export async function chat<CIn>(
         message = { ...message, parts: sanitizeAbortedParts(message.parts) };
       }
 
-      const drained = sandbox.drainFileEvents();
-      const fileEvents = isAborted ? [] : drained;
       const finalMetadata = await options.finalAssistantMetadata?.(message);
-
       const mergedMetadata = {
         ...((message.metadata as object) ?? {}),
-        ...(fileEvents.length > 0 ? { fileEvents } : {}),
         ...(finalMetadata ?? {}),
       };
       if (Object.keys(mergedMetadata).length > 0) {

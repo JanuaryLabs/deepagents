@@ -3,7 +3,7 @@ export * from './agent-os-sandbox.ts';
 export * from './bash-exception.ts';
 export * from './bash-meta.ts';
 export * from './bash-tool.ts';
-export * from './file-events.ts';
+export * from './file-changes.ts';
 export * from './binary-bridges.ts';
 export * from './daytona-sandbox.ts';
 export * from './docker-sandbox.ts';

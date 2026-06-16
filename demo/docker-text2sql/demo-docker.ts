@@ -54,8 +54,12 @@ async function waitForDaemon(
 }
 
 const backend = await createDockerSandbox({
+  name: 'text2sql-daemon',
   dockerfile,
   context: repo,
+  // The image build (npm ci + nx build) takes minutes; stream it so the first
+  // run shows progress instead of a blank screen.
+  showBuildLogs: true,
   command: null,
   env: {
     NODE_NO_WARNINGS: '1',
@@ -84,6 +88,18 @@ await waitForDaemon(backend);
 const sandbox = await createBashTool({
   sandbox: backend,
   destination: demoWorkspace,
+  // Per-tool-call filesystem-change tracking is always on via strace (baked into
+  // the image); onFileChanges fires after each command with that call's manifest.
+  onFileChanges: (changes) => {
+    for (const c of changes) {
+      throw new Error(
+        `Unexpected file change: ${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`,
+      );
+      // console.log(
+      //   `[files] ${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`,
+      // );
+    }
+  },
 });
 
 const schemaFragments = await index(sandbox.sandbox);

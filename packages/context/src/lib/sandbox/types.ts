@@ -6,7 +6,6 @@ import type {
 } from 'bash-tool';
 
 import type { SkillPathMapping } from '../skills/types.ts';
-import type { FileEvent } from './file-events.ts';
 
 /**
  * Options accepted by `DisposableSandbox.executeCommand`. Currently only
@@ -101,11 +100,4 @@ export interface AgentSandbox extends Omit<
   bash: WrappedBashTool;
   tools: Omit<BashToolkit['tools'], 'bash'> & { bash: WrappedBashTool };
   sandbox: DisposableSandbox;
-  /**
-   * Drain and return file events observed since the last `drain()`. The
-   * observation root is the `destination` passed to `createBashTool`; every
-   * `executeCommand` / `writeFiles` call is bracketed by a snapshot, and
-   * `readFile` records a `read` event.
-   */
-  drainFileEvents(): FileEvent[];
 }

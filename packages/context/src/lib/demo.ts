@@ -1,37 +1,25 @@
-import { groq } from '@ai-sdk/groq';
-import { join } from 'node:path';
+import { openai } from '@ai-sdk/openai';
 
 import { input, printer } from '@deepagents/agent';
 
 import { agent } from './agent.ts';
 import { chat } from './chat.ts';
 import { ContextEngine } from './engine.ts';
-import { user } from './fragments/message/user.ts';
-import { errorRecoveryGuardrail } from './guardrails/error-recovery.guardrail.ts';
+import { reminder, user } from './fragments/message/user.ts';
+import { afterTurn } from './fragments/reminders/turn-predicates.ts';
 import { createBashTool } from './sandbox/bash-tool.ts';
 import { createDockerSandbox } from './sandbox/docker-sandbox.ts';
-import { pkg } from './sandbox/installers/index.ts';
-import { skills } from './skills/fragments.ts';
-import { soul } from './soul/fragments.ts';
-import { InMemoryContextStore } from './store/memory.store.ts';
-import { createOpenAITracesIntegration } from './tracing/index.ts';
+import { SqliteContextStore } from './store/sqlite.store.ts';
 
-const backend = await createDockerSandbox({
-  image: 'alpine:latest',
-  installers: [pkg(['curl', 'jq', 'nodejs', 'npm'])],
-  resources: {
-    cpus: 0.5,
-    memory: '512m',
-  },
-});
 const sandbox = await createBashTool({
-  sandbox: backend,
-  skills: [
-    {
-      host: join(process.cwd(), 'agent-sandbox-test/skills'),
-      sandbox: '/workspace/skills',
+  sandbox: await createDockerSandbox({
+    name: 'demo-sandbox',
+    image: 'node:lts-alpine',
+    resources: {
+      cpus: 0.5,
+      memory: '64mb',
     },
-  ],
+  }),
 });
 
 let disposed = false;
@@ -57,31 +45,29 @@ function shutdown(fn: () => Promise<void>) {
 }
 shutdown(disposeSandbox);
 
-const store = new InMemoryContextStore();
+const store = new SqliteContextStore('./demo-context.sqlite');
 const context = new ContextEngine({
   chatId: 'demo-chat',
   userId: 'demo-user',
   store,
 });
-context.set(soul(), skills(sandbox));
-
-const tracingIntegration = createOpenAITracesIntegration();
+context.set(
+  reminder('make sure to list learn about available file system tools', {
+    when: afterTurn(1),
+    target: 'tool-output',
+  }),
+);
 
 const ai = agent({
   name: 'Assistant',
-  model: groq('openai/gpt-oss-20b'),
+  model: openai('gpt-5.4-nano'),
   context,
   sandbox,
-  guardrails: [errorRecoveryGuardrail],
-  experimental_telemetry: {
-    isEnabled: true,
-    integrations: [tracingIntegration],
-  },
 });
 
-let text = 'My name is adam, and you?';
-
+let text = 'List the files in /tmp using bash, then tell me your name.';
 while (true) {
+  console.log('Turn: ', await context.getTurnCount());
   await context.continue(user(text));
   const stream = await chat(ai);
   await printer.readableStream(stream);

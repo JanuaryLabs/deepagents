@@ -30,6 +30,10 @@ RUN npm prune --omit=dev
 FROM node:lts-alpine
 WORKDIR /repo
 ENV NODE_NO_WARNINGS=1
+# strace enables createBashTool({ trackFileChanges: true }) — per-tool-call
+# filesystem-change tracking. Needs a native-arch image + ptrace (both hold
+# under default Docker/Daytona). Placed before COPY so it caches independently.
+RUN apk add --no-cache strace
 COPY --from=builder /repo /repo
 RUN ln -sf /repo/demo/text2sql-daemon/daemon/sql-shim.ts /usr/local/bin/sql \
  && mkdir -p /tmp/deepagents-demo/sql

@@ -132,6 +132,12 @@ export interface DockerfileSandboxOptions {
   dockerfile: string;
   /** Build context directory (default: `'.'`). */
   context?: string;
+  /**
+   * Stream `docker build` output to the parent stdio instead of buffering it.
+   * A Dockerfile build (e.g. `npm ci` + a project build) can take minutes and
+   * otherwise runs silently. Default `false`.
+   */
+  showBuildLogs?: boolean;
   volumes?: DockerSandboxVolume[];
   resources?: DockerResources;
   env?: Record<string, string>;
@@ -829,6 +835,7 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
 export interface DockerfileStrategyArgs extends DockerSandboxStrategyArgs {
   dockerfile: string;
   context?: string;
+  showBuildLogs?: boolean;
 }
 
 /**
@@ -839,6 +846,7 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   private imageTag: string;
   private dockerfile: string;
   private dockerContext: string;
+  private showBuildLogs: boolean;
 
   constructor(args: DockerfileStrategyArgs) {
     super({
@@ -850,6 +858,7 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
     });
     this.dockerfile = args.dockerfile;
     this.dockerContext = args.context ?? '.';
+    this.showBuildLogs = args.showBuildLogs ?? false;
     this.imageTag = this.computeImageTag();
   }
 
@@ -893,21 +902,51 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
     try {
       if (this.isInlineDockerfile()) {
         const buildCmd = `echo '${this.dockerfile.replace(/'/g, "'\\''")}' | docker build -t ${this.imageTag} -f - ${this.dockerContext}`;
-        await spawn('sh', ['-c', buildCmd]);
+        if (this.showBuildLogs) {
+          await this.runStreamed('sh', ['-c', buildCmd]);
+        } else {
+          await spawn('sh', ['-c', buildCmd]);
+        }
       } else {
-        await spawn('docker', [
+        const args = [
           'build',
           '-t',
           this.imageTag,
           '-f',
           this.dockerfile,
           this.dockerContext,
-        ]);
+        ];
+        if (this.showBuildLogs) {
+          await this.runStreamed('docker', args);
+        } else {
+          await spawn('docker', args);
+        }
       }
     } catch (error) {
       const err = error as Error & { stderr?: string };
       throw new DockerfileBuildError(err.stderr || err.message);
     }
+  }
+
+  /**
+   * Run a build command with stdio inherited so its output streams live to the
+   * parent terminal. On failure the build error is already on screen; the
+   * rejection just carries the exit code.
+   */
+  private runStreamed(command: string, args: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = childSpawn(command, args, { stdio: 'inherit' });
+      child.once('error', reject);
+      child.once('exit', (code) =>
+        code === 0
+          ? resolve()
+          : reject(
+              new Error(
+                `docker build exited with code ${code} (see build output above)`,
+              ),
+            ),
+      );
+    });
   }
 }
 
@@ -1098,6 +1137,7 @@ export async function createDockerSandbox(
     strategy = new DockerfileStrategy({
       dockerfile: options.dockerfile,
       context: options.context,
+      showBuildLogs: options.showBuildLogs,
       volumes: options.volumes,
       resources: options.resources,
       env: options.env,

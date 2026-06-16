@@ -9,7 +9,11 @@ import z from 'zod';
 import { runWithAbortSignal, withAbortSignal } from './abort.ts';
 import { BashException } from './bash-exception.ts';
 import { readBashMeta, runWithBashMeta } from './bash-meta.ts';
-import { observeSandboxFileEvents } from './file-events.ts';
+import {
+  type FileChange,
+  selfTestStrace,
+  traceFileChanges,
+} from './file-changes.ts';
 import type {
   AgentSandbox,
   DisposableSandbox,
@@ -24,8 +28,8 @@ const REASONING_INSTRUCTION =
 /**
  * Decorator: converts `BashException` thrown from `executeCommand` into a
  * normal `CommandResult` via `BashException.format()`. Other errors pass
- * through unchanged. Stacks on top of the file-event observer so a thrown
- * BashException still produces a snapshot diff for the failed command.
+ * through unchanged. Stacks on top of `traceFileChanges` so a thrown
+ * BashException still lets the tracer collect that command's file changes.
  *
  * Backends must be plain object literals (not class instances) since the
  * spread below copies only own enumerable properties; prototype methods
@@ -63,17 +67,27 @@ export interface CreateBashToolWithSkillsOptions extends Omit<
    */
   skills?: SkillUploadInput[];
   /**
-   * Working directory + file-event observation root. Defaults to
-   * `/workspace` (matching upstream `bash-tool`). `drainFileEvents()`
-   * reports activity rooted here.
+   * Working directory + file-change observation root. Defaults to
+   * `/workspace` (matching upstream `bash-tool`). `onFileChanges` reports
+   * activity rooted here.
    */
   destination?: string;
+  /**
+   * Called once per tool-call command (and per `spawn`) with that call's
+   * `FileChange[]` — the reactive post-tool effect.
+   *
+   * File-change tracking is **always on** via `strace`: a self-test runs at
+   * startup and throws `StraceUnavailableError` if `strace` is missing, ptrace
+   * is blocked, or the trace is unparseable (e.g. emulated arch). The backend
+   * must therefore be strace-capable — the in-process virtual sandbox is not.
+   */
+  onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
 }
 
 /**
  * Composes an `AgentSandbox` from a backend by layering decorators:
  *
- *     backend → observeSandboxFileEvents → withBashExceptionCatch
+ *     backend → traceFileChanges → withBashExceptionCatch → withAbortSignal
  *
  * The composed sandbox is handed to upstream `bash-tool`; upstream's
  * internal `bash` / `readFile` / `writeFile` tools therefore close over
@@ -93,13 +107,20 @@ export async function createBashTool(
     extraInstructions,
     sandbox: backend,
     destination,
+    onFileChanges,
     ...rest
   } = options;
 
-  const observer = observeSandboxFileEvents(backend, {
-    destination: destination ?? '/workspace',
+  const observationRoot = destination ?? '/workspace';
+  // File-change tracking is always on via strace. The self-test hard-fails
+  // (StraceUnavailableError) on a backend that can't host strace — including the
+  // in-process virtual sandbox.
+  await selfTestStrace(backend);
+  const tracked = traceFileChanges(backend, {
+    destination: observationRoot,
+    onFileChanges,
   });
-  const sandbox = withAbortSignal(withBashExceptionCatch(observer.sandbox));
+  const sandbox = withAbortSignal(withBashExceptionCatch(tracked));
 
   const combinedInstructions = [extraInstructions, REASONING_INSTRUCTION]
     .filter(Boolean)
@@ -178,6 +199,5 @@ export async function createBashTool(
     bash,
     tools: { ...toolkit.tools, bash },
     skills,
-    drainFileEvents: () => observer.drain(),
   };
 }

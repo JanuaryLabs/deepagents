@@ -256,7 +256,6 @@ describe('Daytona Sandbox', async () => {
           sandbox: backend,
           destination: DAYTONA_DEFAULT_DESTINATION,
         });
-        agent.drainFileEvents();
       });
 
       after(async () => {
@@ -293,28 +292,8 @@ describe('Daytona Sandbox', async () => {
         assert.strictEqual(info.success, true);
       });
 
-      it('records a write FileEvent when spawn creates a file in destination', async () => {
-        assert.ok(agent.sandbox.spawn);
-        agent.drainFileEvents();
-
-        const path = `/home/daytona/deepagents-daytona-spawned-${randomUUID()}.txt`;
-        const child = agent.sandbox.spawn(`echo "from spawn" > ${path}`);
-        await Promise.all([
-          readAllText(child.stdout),
-          readAllText(child.stderr),
-        ]);
-        const info = await child.exit;
-        assert.strictEqual(info.success, true);
-
-        const events = agent.drainFileEvents();
-        const forSpawned = events.filter((event) => event.path === path);
-        assert.strictEqual(
-          forSpawned.length,
-          1,
-          `expected exactly one FileEvent for ${path}, got ${JSON.stringify(events)}`,
-        );
-        assert.strictEqual(forSpawned[0].op, 'write');
-      });
+      // Spawn file-change tracking is covered by file-changes.integration.test.ts;
+      // this suite focuses on the spawn streaming contract over Daytona.
     },
   );
 });

@@ -85,9 +85,10 @@ const backend = await createDaytonaSandbox(client, {
   // orphaning a fresh one each time (dispose() never deletes it).
   name: 'deepagents-text2sql-demo',
   // Build + publish this image first: `node demo/daytona-text2sql/bootstrap.ts`.
-  // createDaytonaSandbox({ image }) makes Daytona run a buildkit BUILD_SNAPSHOT
-  // (FROM <image>) the first time — ~40s, then buildkit-cached (~1s). The
-  // pinned single-arch tag (see bootstrap.ts) is what lets that build resolve.
+  // createDaytonaSandbox(client, { name, image }) makes Daytona run a buildkit
+  // BUILD_SNAPSHOT (FROM <image>) the first time — ~40s, then buildkit-cached
+  // (~1s). The pinned single-arch tag (see bootstrap.ts) is what lets that
+  // build resolve.
   image: runnerImage,
   createTimeout: 120,
   onSnapshotCreateLogs: (chunk) =>
@@ -125,6 +126,15 @@ await startDaemon(backend);
 const sandbox = await createBashTool({
   sandbox: backend,
   destination: demoWorkspace,
+  // Per-tool-call filesystem-change tracking is always on via strace. Requires the
+  // runner image to bake in strace — re-run bootstrap.ts after the Dockerfile change.
+  onFileChanges: (changes) => {
+    for (const c of changes) {
+      console.log(
+        `[files] ${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`,
+      );
+    }
+  },
 });
 
 const schemaFragments = await index(sandbox.sandbox);

@@ -422,41 +422,6 @@ describe('Text2Sql user-constructed chat', () => {
     );
   });
 
-  it('omits fileEvents metadata when no file ops occurred', async () => {
-    const { store, adapters, cache, engine, model } = await setup();
-    const msg = userMessage('Show users');
-
-    engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
-    const ai = agent({
-      name: 'text2sql',
-      sandbox,
-      model,
-      context: engine,
-      guardrails: [errorRecoveryGuardrail],
-      maxGuardrailRetries: 3,
-    });
-
-    await engine.continue(msg);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
-    await drain(stream);
-
-    const branch = await store.getActiveBranch('test-chat');
-    assert.ok(branch?.headMessageId);
-
-    const chain = await store.getMessageChain(branch.headMessageId);
-    const assistantMsg = chain.find((m) => m.name === 'assistant');
-    assert.ok(assistantMsg, 'assistant message should exist');
-
-    const data = assistantMsg.data as UIMessage & {
-      metadata?: Record<string, unknown>;
-    };
-    assert.strictEqual(
-      (data.metadata as { fileEvents?: unknown })?.fileEvents,
-      undefined,
-      'fileEvents should be absent when the turn wrote no files',
-    );
-  });
-
   it('forwards abortSignal to agent stream', async () => {
     const store = new InMemoryContextStore();
     const { adapter } = await init_db(

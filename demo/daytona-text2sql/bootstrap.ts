@@ -11,11 +11,11 @@ import { pushImage } from './image.ts';
 //   node demo/daytona-text2sql/bootstrap.ts
 //
 // WHY buildx with these exact flags (verified against the local Daytona stack):
-// createDaytonaSandbox({ image }) does NOT pull the image directly — the Daytona
-// SDK wraps a string image as a `FROM <image>` Dockerfile and runs a server-side
-// buildkit BUILD_SNAPSHOT job. buildkit's `FROM` resolution rejects a multi-arch
-// OCI index / attestation manifest ("no match for platform"), so the image must
-// be a PLAIN single-arch manifest:
+// createDaytonaSandbox(client, { name, image }) does NOT pull the image
+// directly. The Daytona SDK wraps a string image as a `FROM <image>` Dockerfile
+// and runs a server-side buildkit BUILD_SNAPSHOT job. buildkit's `FROM`
+// resolution rejects a multi-arch OCI index / attestation manifest ("no match
+// for platform"), so the image must be a PLAIN single-arch manifest:
 //   --provenance=false --sbom=false  -> no attestation manifest in the index
 //   --platform linux/<arch>          -> single arch matching the runner host
 //   pinned tag (NOT :latest)         -> Daytona rejects :latest for snapshots

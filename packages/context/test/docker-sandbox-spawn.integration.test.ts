@@ -191,7 +191,6 @@ describe('Docker Sandbox — spawn', async () => {
         destination: '/workspace',
       });
       await agent.sandbox.executeCommand('mkdir -p /workspace');
-      agent.drainFileEvents();
     });
 
     after(async () => {
@@ -225,28 +224,8 @@ describe('Docker Sandbox — spawn', async () => {
       assert.strictEqual(info.success, true);
     });
 
-    it('records a write FileEvent when spawn creates a file in destination', async () => {
-      assert.ok(agent.sandbox.spawn);
-      agent.drainFileEvents();
-
-      const child = agent.sandbox.spawn(
-        'echo "from spawn" > /workspace/spawned.txt',
-      );
-      await Promise.all([readAllText(child.stdout), readAllText(child.stderr)]);
-      const info = await child.exit;
-      assert.strictEqual(info.success, true);
-
-      const events = agent.drainFileEvents();
-      const forSpawned = events.filter(
-        (e) => e.path === '/workspace/spawned.txt',
-      );
-      assert.strictEqual(
-        forSpawned.length,
-        1,
-        `expected exactly one FileEvent for /workspace/spawned.txt, got ${JSON.stringify(events)}`,
-      );
-      assert.strictEqual(forSpawned[0].op, 'write');
-    });
+    // Spawn file-change tracking is covered by file-changes.integration.test.ts
+    // (real strace image); this suite focuses on the spawn streaming/abort contract.
 
     it('honors ambient abort signal from runWithAbortSignal', async () => {
       assert.ok(agent.sandbox.spawn);

@@ -5,7 +5,6 @@ import {
   createOverlayBackend,
 } from '@rivet-dev/agent-os-core';
 import chalk from 'chalk';
-import { InMemoryFs, OverlayFs } from 'just-bash';
 
 import { printer } from '@deepagents/agent';
 
@@ -18,7 +17,6 @@ import {
   createAgentOsSandbox,
   createBashTool,
   createDockerSandbox,
-  createVirtualSandbox,
   githubRelease,
   hint,
   pkg,
@@ -34,9 +32,13 @@ import { ContextEngine } from './lib/engine.ts';
 // Create a shared store for persistence
 const store = new InMemoryContextStore();
 
-async function createVirtualAgentSandbox() {
+async function createAgentSandbox() {
+  // File-change tracking is always on via strace, so the backend must host it —
+  // the in-process virtual sandbox can't. Use Docker + the `pkg` installer to
+  // add strace at container start (auto-detects apk/apt). Real code should
+  // `dispose()` the returned sandbox; these examples skip it for brevity.
   return createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
   });
 }
 
@@ -70,7 +72,7 @@ async function demonstrateContextEngine() {
 
   const { systemPrompt, messages } = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
 
   console.log('System Prompt:\n', systemPrompt);
@@ -92,7 +94,7 @@ async function demonstrateContextEngine() {
   // Resolve again - now includes previous conversation
   const result2 = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('\nSecond turn messages:', result2.messages.length);
 
@@ -103,7 +105,7 @@ async function demonstrateContextEngine() {
   const inspection = await context.inspect({
     modelId: 'groq:moonshotai/kimi-k2-instruct-0905',
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log(JSON.stringify(inspection, null, 2));
 
@@ -131,7 +133,7 @@ async function demonstrateSessionRestore() {
   // Resolve loads persisted messages from store
   const { messages } = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
 
   console.log('Restored messages from previous session:', messages.length);
@@ -228,7 +230,7 @@ async function demonstrateRewind() {
 
   const before = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('Before rewind - messages:', before.messages.length);
   console.log('Current branch:', context.branch);
@@ -240,7 +242,7 @@ async function demonstrateRewind() {
 
   const after = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('After rewind - messages:', after.messages.length);
   console.log('Kept message:', after.messages[0]);
@@ -251,7 +253,7 @@ async function demonstrateRewind() {
 
   const final = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('Final messages on new branch:', final.messages);
 
@@ -268,7 +270,7 @@ async function demonstrateRewind() {
   await context.switchBranch('main');
   const originalMessages = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log(
     '\nOriginal branch still has:',
@@ -314,7 +316,7 @@ async function demonstrateBranching() {
 
   const branchA = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('Branch A messages:', branchA.messages.length);
 
@@ -329,7 +331,7 @@ async function demonstrateBranching() {
 
   const branchB = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('Branch B messages:', branchB.messages.length);
   console.log('Last message in Branch B:', branchB.messages.at(-1));
@@ -384,7 +386,7 @@ async function demonstrateBranchSwitching() {
 
   const mainMessages = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('Main branch messages:', mainMessages.messages);
 
@@ -392,7 +394,7 @@ async function demonstrateBranchSwitching() {
   await context.switchBranch('main-v2');
   const altMessages = await context.resolve({
     renderer: new XmlRenderer(),
-    sandbox: await createVirtualAgentSandbox(),
+    sandbox: await createAgentSandbox(),
   });
   console.log('Alt branch messages:', altMessages.messages);
 }
@@ -520,7 +522,7 @@ async function demonstrateSearch() {
  */
 async function demonstrateSkills() {
   const skillSandbox = await createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
     skills: [
       {
         host: 'packages/context/src/skills',
@@ -586,7 +588,7 @@ const context = engine(
 );
 
 const greetingSandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+  sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
 });
 const grettingAgent = agent({
   name: 'greeting_agent',
@@ -600,9 +602,7 @@ async function createSkillAwareAgent() {
   console.log('\n=== Skill-Aware Agent Demo (using bash-tool) ===');
 
   const skillSandbox = await createBashTool({
-    sandbox: await createVirtualSandbox({
-      fs: new OverlayFs({ root: process.cwd() }),
-    }),
+    sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
     skills: [
       {
         host: 'packages/context/src/skills',
