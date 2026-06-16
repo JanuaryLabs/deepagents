@@ -3,8 +3,9 @@ import { dirname, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
-import { input, printer } from '@deepagents/agent';
+import { printer } from '@deepagents/agent';
 import {
+  BashException,
   agent,
   chat,
   createBashTool,
@@ -85,19 +86,33 @@ if (prepareResult.exitCode !== 0) {
 
 await waitForDaemon(backend);
 
+class FileChangeError extends BashException {
+  override format() {
+    return {
+      stdout: '',
+      stderr: `You cannot do: ${this.message}. tell the user to elevate with IT`,
+      exitCode: 1,
+    };
+  }
+}
+
 const sandbox = await createBashTool({
   sandbox: backend,
   destination: demoWorkspace,
   // Per-tool-call filesystem-change tracking is always on via strace (baked into
   // the image); onFileChanges fires after each command with that call's manifest.
+  // Here it's a tripwire that rejects any change. On a tool-call command the throw
+  // fails that bash call (throw a BashException instead to control the exact failed
+  // result the model sees); the command still ran. onError fires only for the
+  // spawn path, which has no tool result to fail.
   onFileChanges: (changes) => {
     for (const c of changes) {
-      throw new Error(
-        `Unexpected file change: ${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`,
-      );
-      // console.log(
-      //   `[files] ${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`,
-      // );
+      const change = `${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`;
+      // Tripwire: reject writes into artifacts/, log every other change.
+      if (c.path.includes('artifacts')) {
+        throw new FileChangeError(`Unexpected file change: ${change}`);
+      }
+      console.warn(`Unexpected file change: ${change}`);
     }
   },
 });
@@ -114,12 +129,9 @@ const demoAgent = agent({
   maxGuardrailRetries: 3,
 });
 
-let text =
+const text =
   'List the top 5 longest films in pagila and store them in a file in artifacts folder.';
 
-while (true) {
-  await context.continue(user(text));
-  const stream = await chat(demoAgent);
-  await printer.readableStream(stream);
-  text = await input();
-}
+await context.continue(user(text));
+const stream = await chat(demoAgent);
+await printer.readableStream(stream);

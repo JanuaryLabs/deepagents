@@ -1,10 +1,12 @@
 import { generateText, stepCountIs } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
+import type { CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  BashException,
   type FileChange,
   StraceUnavailableError,
   createBashTool,
@@ -36,6 +38,51 @@ const ops = (changes: FileChange[]) =>
     path: c.path,
     ...(c.from ? { from: c.from } : {}),
   }));
+
+const drainStream = async (
+  stream: ReadableStream<Uint8Array>,
+): Promise<void> => {
+  const reader = stream.getReader();
+  for (;;) {
+    const { done } = await reader.read();
+    if (done) break;
+  }
+};
+
+const toolCall = (
+  toolName: string,
+  toolCallId: string,
+  input: Record<string, unknown>,
+) => ({
+  type: 'tool-call' as const,
+  toolCallId,
+  toolName,
+  input: JSON.stringify(input),
+});
+
+const bashToolCall = (toolCallId: string, command: string) =>
+  toolCall('bash', toolCallId, { command, reasoning: 'r' });
+
+const writeFileToolCall = (toolCallId: string, path: string, content: string) =>
+  toolCall('writeFile', toolCallId, { path, content });
+
+// One assistant turn issuing the given tool calls, wrapped in the V3 usage /
+// finishReason envelope the mock model requires (an easy fixture to get wrong —
+// see the agent-testing notes on V3 shapes).
+const toolCallsResponse = (content: ReturnType<typeof toolCall>[]) => ({
+  finishReason: { unified: 'tool-calls' as const, raw: undefined },
+  usage: {
+    inputTokens: {
+      total: 1,
+      noCache: 1,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: { total: 1, text: 1, reasoning: undefined },
+  },
+  content,
+  warnings: [],
+});
 
 interface Recorder {
   /** Flatten + clear changes seen via onFileChanges since the last drain. */
@@ -88,6 +135,21 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
       const changes = rec.drain();
       assert.ok(
         changes.some((c) => c.op === 'write' && c.path === `${ROOT}/a.txt`),
+        JSON.stringify(changes),
+      );
+    });
+  });
+
+  it('reports write for a file written via writeFiles (not just bash)', async () => {
+    await withSandbox(async (s, rec) => {
+      await s.sandbox.writeFiles([
+        { path: `${ROOT}/via-write.txt`, content: 'hi' },
+      ]);
+      const changes = rec.drain();
+      assert.ok(
+        changes.some(
+          (c) => c.op === 'write' && c.path === `${ROOT}/via-write.txt`,
+        ),
         JSON.stringify(changes),
       );
     });
@@ -244,39 +306,11 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
       // One assistant turn issuing two bash tool calls; aggregating a message's
       // file changes = traversing its tool results and flattening output.meta.
       const model = new MockLanguageModelV3({
-        doGenerate: async () => ({
-          finishReason: { unified: 'tool-calls', raw: undefined },
-          usage: {
-            inputTokens: {
-              total: 1,
-              noCache: 1,
-              cacheRead: undefined,
-              cacheWrite: undefined,
-            },
-            outputTokens: { total: 1, text: 1, reasoning: undefined },
-          },
-          content: [
-            {
-              type: 'tool-call',
-              toolCallId: 'c1',
-              toolName: 'bash',
-              input: JSON.stringify({
-                command: `echo one > ${ROOT}/agg1.txt`,
-                reasoning: 'r',
-              }),
-            },
-            {
-              type: 'tool-call',
-              toolCallId: 'c2',
-              toolName: 'bash',
-              input: JSON.stringify({
-                command: `echo two > ${ROOT}/agg2.txt`,
-                reasoning: 'r',
-              }),
-            },
-          ],
-          warnings: [],
-        }),
+        doGenerate: async () =>
+          toolCallsResponse([
+            bashToolCall('c1', `echo one > ${ROOT}/agg1.txt`),
+            bashToolCall('c2', `echo two > ${ROOT}/agg2.txt`),
+          ]),
       });
 
       const res = await generateText({
@@ -313,13 +347,6 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
     await withSandbox(async (s, rec) => {
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
       const child = s.sandbox.spawn(`echo spawned > ${ROOT}/sp.txt`);
-      const drainStream = async (stream: ReadableStream<Uint8Array>) => {
-        const reader = stream.getReader();
-        for (;;) {
-          const { done } = await reader.read();
-          if (done) break;
-        }
-      };
       await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
       const info = await child.exit;
       assert.strictEqual(info.success, true);
@@ -329,6 +356,264 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
           .some((c) => c.op === 'write' && c.path === `${ROOT}/sp.txt`),
       );
     });
+  });
+});
+
+dockerSuite('onFileChanges failure handling (docker backend)', () => {
+  const ROOT = `/iso-${process.pid}`;
+
+  const throwBoom = () => {
+    throw new Error('boom');
+  };
+
+  // A caller-defined BashException with a distinctive format(); if it reaches the
+  // result, the caller controlled it (nothing else produces exitCode 42).
+  class RejectChange extends BashException {
+    format(): CommandResult {
+      return {
+        stdout: '',
+        stderr: `rejected: ${this.message}\n`,
+        exitCode: 42,
+      };
+    }
+  }
+
+  it('renders a thrown BashException via the caller’s own format(), and still runs the command', async () => {
+    const errors: unknown[] = [];
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: () => {
+        throw new RejectChange('no writes allowed');
+      },
+      onError: (error) => errors.push(error),
+    });
+    try {
+      // The setup mkdir trips the tripwire too — swallow its failed call.
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      const r = await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
+      // withBashExceptionCatch one level up used the caller's format() verbatim.
+      assert.deepStrictEqual(r, {
+        stdout: '',
+        stderr: 'rejected: no writes allowed\n',
+        exitCode: 42,
+      });
+      // onError is spawn-only — the command path never reaches it.
+      assert.strictEqual(errors.length, 0);
+
+      // The command itself still ran — reading a.txt (no write → no throw)
+      // confirms the side effect landed despite the failed tool result.
+      const read = await s.sandbox.executeCommand(`cat ${ROOT}/a.txt`);
+      assert.strictEqual(read.exitCode, 0, read.stderr);
+      assert.match(read.stdout, /hi/);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('fails the tool call when onFileChanges throws a plain Error (and does not reach onError)', async () => {
+    const errors: unknown[] = [];
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: throwBoom,
+      onError: (error) => errors.push(error),
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      // A non-BashException isn't caught up the chain, so the call rejects.
+      await assert.rejects(
+        () => s.sandbox.executeCommand(`echo hi > ${ROOT}/b.txt`),
+        /boom/,
+      );
+      assert.strictEqual(errors.length, 0);
+
+      const read = await s.sandbox.executeCommand(`cat ${ROOT}/b.txt`);
+      assert.strictEqual(read.exitCode, 0, read.stderr);
+      assert.match(read.stdout, /hi/);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('propagates a throwing onFileChanges out of sandbox.writeFiles (post-hoc gate)', async () => {
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: throwBoom,
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      // The sandbox method itself rejects; the writeFile TOOL wraps this (next
+      // test). A plain Error has no format(), so it simply propagates.
+      await assert.rejects(
+        () =>
+          s.sandbox.writeFiles([{ path: `${ROOT}/blocked.txt`, content: 'x' }]),
+        /boom/,
+      );
+      // Post-hoc gate, same as the bash path: the write already landed.
+      const read = await s.sandbox.executeCommand(`cat ${ROOT}/blocked.txt`);
+      assert.strictEqual(read.exitCode, 0, read.stderr);
+      assert.match(read.stdout, /x/);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('renders a thrown BashException as the writeFile tool RESULT (not a rejected call)', async () => {
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: () => {
+        throw new RejectChange('no writes allowed');
+      },
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      const model = new MockLanguageModelV3({
+        doGenerate: async () =>
+          toolCallsResponse([
+            writeFileToolCall('w1', `${ROOT}/blocked.json`, 'x'),
+          ]),
+      });
+
+      const res = await generateText({
+        model,
+        tools: s.tools,
+        prompt: 'go',
+        stopWhen: stepCountIs(1),
+      });
+
+      // The model sees a failed RESULT (the caller's format()), not a thrown
+      // tool call the agent/guardrail would swallow.
+      const output = res.toolResults[0].output as {
+        exitCode: number;
+        stderr: string;
+      };
+      assert.strictEqual(output.exitCode, 42);
+      assert.match(output.stderr, /rejected: no writes allowed/);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('surfaces the caller’s BashException format() to the model on its tool result', async () => {
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: () => {
+        throw new RejectChange('no writes allowed');
+      },
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      const model = new MockLanguageModelV3({
+        doGenerate: async () =>
+          toolCallsResponse([bashToolCall('c1', `echo hi > ${ROOT}/r.txt`)]),
+      });
+
+      const res = await generateText({
+        model,
+        tools: s.tools,
+        prompt: 'go',
+        stopWhen: stepCountIs(1),
+      });
+
+      const output = res.toolResults[0].output as {
+        exitCode: number;
+        stderr: string;
+      };
+      assert.strictEqual(output.exitCode, 42);
+      assert.match(output.stderr, /rejected: no writes allowed/);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('still removes the per-command trace file when onFileChanges throws', async () => {
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: throwBoom,
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      // ls runs under strace too, so its own in-flight trace file is always
+      // present (count 1). A leak from the throwing command would push this to
+      // ≥2. removeTrace is fire-and-forget, so poll to absorb the async rm.
+      const countTraces = async (): Promise<number> => {
+        const r = await s.sandbox.executeCommand(
+          `sh -c 'ls /tmp/dat-trace 2>/dev/null | grep -c "\\.strace$" || true'`,
+        );
+        return Number(r.stdout.trim());
+      };
+      // The plain-Error throw rejects this call; we only care that its trace
+      // was swept, so swallow the rejection.
+      await s.sandbox
+        .executeCommand(`echo hi > ${ROOT}/leak.txt`)
+        .catch(() => {});
+      let count = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < 20 && count > 1; i++) {
+        count = await countTraces();
+      }
+      assert.ok(count <= 1, `expected ≤1 trace file, saw ${count}`);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('isolates a throwing onFileChanges on the spawn path (exit still resolves)', async () => {
+    const errors: unknown[] = [];
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: throwBoom,
+      onError: (error) => errors.push(error),
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
+      const child = s.sandbox.spawn(`echo hi > ${ROOT}/sp.txt`);
+      await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
+      const info = await child.exit;
+      assert.strictEqual(info.success, true);
+      // Spawn is onError's only signal — the isolated throw landed here.
+      assert.strictEqual(errors.length, 1);
+      assert.match((errors[0] as Error).message, /boom/);
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
+
+  it('keeps the spawn exit resolving even when onError itself throws', async () => {
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const s = await createBashTool({
+      sandbox: backend,
+      destination: ROOT,
+      onFileChanges: throwBoom,
+      onError: () => {
+        throw new Error('onError exploded');
+      },
+    });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
+      const child = s.sandbox.spawn(`echo hi > ${ROOT}/sp-err.txt`);
+      await Promise.all([drainStream(child.stdout), drainStream(child.stderr)]);
+      // onError throws inside collectSpawn's catch; the isolation boundary must
+      // swallow it so the exit still resolves rather than reject.
+      const info = await child.exit;
+      assert.strictEqual(info.success, true);
+    } finally {
+      await s.sandbox.dispose();
+    }
   });
 });
 

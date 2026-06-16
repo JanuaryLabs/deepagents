@@ -331,8 +331,22 @@ export function parseStraceTrace(
 export interface TraceFileChangesOptions {
   destination: string;
   onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
+  /**
+   * Called when `onFileChanges` throws on the `spawn` path — its only failure
+   * signal, since spawn has no tool result and no exception catcher upstream. A
+   * throw on the tool-call path fails the command instead, so it never reaches
+   * here. Defaults to `console.warn`.
+   */
+  onError?: (error: unknown) => void;
   traceDir?: string;
 }
+
+const warnOnFileChangesError = (error: unknown): void => {
+  console.warn(
+    '[traceFileChanges] onFileChanges threw on spawn; isolated',
+    error,
+  );
+};
 
 /**
  * Decorates a sandbox so each `executeCommand` is traced and its filesystem
@@ -342,67 +356,125 @@ export interface TraceFileChangesOptions {
  * the tool result via the bash-meta channel (`meta.fileChanges`, hidden from the
  * model) and passed to `onFileChanges`. No buffer is retained.
  *
- * `readFile`/`writeFiles` pass through unchanged; `dispose` also sweeps the trace
+ * `readFile` passes through unchanged; `writeFiles` is observed directly (it
+ * mutates outside strace's view) — each written file under the observation root
+ * becomes a `write` change fed to onFileChanges. `dispose` also sweeps the trace
  * dir. `spawn` is traced the same way — its trace is read when the process exits
  * (strace is the top process, so the trace is fully flushed by then). `spawn`
  * carries no bash-meta scope, so its changes go to `onFileChanges` only.
+ *
+ * The trace file is always swept once parsed. A throwing `onFileChanges` on the
+ * tool-call path propagates to `withBashExceptionCatch` one level up: a caller's
+ * `BashException` becomes the tool result (via its `format()`), any other error
+ * fails the tool call. The `spawn` path has no exception catcher, so its throw is
+ * isolated and surfaced only via `onError` (exit result preserved).
  */
 export function traceFileChanges(
   sandbox: DisposableSandbox,
   options: TraceFileChangesOptions,
 ): DisposableSandbox {
   const { destination, onFileChanges } = options;
+  const onError = options.onError ?? warnOnFileChangesError;
   const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
   const innerExecute = sandbox.executeCommand.bind(sandbox);
   const innerReadFile = sandbox.readFile.bind(sandbox);
+  const innerWriteFiles = sandbox.writeFiles.bind(sandbox);
+  const dest = posix.normalize(destination);
+  const underDestination = (path: string): boolean =>
+    dest === '/' || path === dest || path.startsWith(`${dest}/`);
 
   // Delete the trace file with a fresh executeCommand (no caller signal) so an
   // aborted turn can't cancel the cleanup and leave the file behind.
   const removeTrace = (traceFile: string) =>
     void innerExecute(`rm -f ${shellQuote(traceFile)}`).catch(() => {});
 
-  // Read + parse the per-call trace, surface the changes, then delete the trace
-  // file. Shared by the executeCommand and spawn paths (`setMeta` is only true on
-  // the tool-call path, where a bash-meta scope exists).
-  const collect = async (
-    traceFile: string,
-    setMeta: boolean,
-  ): Promise<void> => {
-    let changes: FileChange[] = [];
+  // Parse one call's changes and sweep its trace file — the trace is consumed
+  // once parsed, so it's deleted here regardless of what the caller's callback
+  // does next. Returns [] on an empty or unparseable trace.
+  const readChanges = async (traceFile: string): Promise<FileChange[]> => {
     try {
-      changes = parseStraceTrace(await innerReadFile(traceFile), {
+      return parseStraceTrace(await innerReadFile(traceFile), {
         destination,
         traceFile,
         traceDir,
       });
     } catch {
-      changes = [];
+      return [];
+    } finally {
+      removeTrace(traceFile);
     }
-    if (changes.length) {
-      if (setMeta) useBashMeta()?.setHidden({ fileChanges: changes });
-      await onFileChanges?.(changes);
+  };
+
+  // Tool-call path: attach the hidden meta and run the callback. A throw is NOT
+  // caught — it propagates to `withBashExceptionCatch` one level up, which renders
+  // a caller's BashException via its `format()` or fails the tool call for any
+  // other error.
+  const collectCommand = async (traceFile: string): Promise<void> => {
+    const changes = await readChanges(traceFile);
+    if (!changes.length) return;
+    useBashMeta()?.setHidden({ fileChanges: changes });
+    await onFileChanges?.(changes);
+  };
+
+  // Spawn path: no tool result and no exception catcher upstream, so a callback
+  // throw is isolated here and surfaced only via `onError`.
+  const collectSpawn = async (traceFile: string): Promise<void> => {
+    const changes = await readChanges(traceFile);
+    if (!changes.length || !onFileChanges) return;
+    try {
+      await onFileChanges(changes);
+    } catch (error) {
+      onError(error);
     }
-    removeTrace(traceFile);
   };
 
   const decorated: DisposableSandbox = {
     async executeCommand(command, execOptions) {
       const traceFile = `${traceDir}/${randomUUID()}.strace`;
       const wrapped = buildStraceCommand(command, traceFile, traceDir);
+      let result: CommandResult;
       try {
-        const result = await innerExecute(wrapped, execOptions);
+        const raw = await innerExecute(wrapped, execOptions);
         // strace's own diagnostics (prefixed `strace: `) share the command's
         // stderr fd; strip them so the model sees only the command's stderr.
-        return { ...result, stderr: stripStraceDiagnostics(result.stderr) };
-      } finally {
-        // On abort the caller discards this command's changes, so don't buffer
-        // or fire `onFileChanges` for it — just clean up the trace file.
-        if (execOptions?.signal?.aborted) removeTrace(traceFile);
-        else await collect(traceFile, true);
+        result = { ...raw, stderr: stripStraceDiagnostics(raw.stderr) };
+      } catch (error) {
+        // The command failed at the sandbox level; clean the trace and surface
+        // the real error rather than running onFileChanges (which could mask it).
+        removeTrace(traceFile);
+        throw error;
       }
+      // On abort the caller discards this command's changes; skip onFileChanges.
+      if (execOptions?.signal?.aborted) {
+        removeTrace(traceFile);
+        return result;
+      }
+      // A throwing onFileChanges propagates here; the catcher one level up
+      // (withBashExceptionCatch) turns a BashException into the tool result, or
+      // fails the call for any other error.
+      await collectCommand(traceFile);
+      return result;
     },
     readFile: innerReadFile,
-    writeFiles: sandbox.writeFiles.bind(sandbox),
+    // The writeFile tool mutates the filesystem outside strace's view, so
+    // observe it directly: synthesize a `write` change per file (under the
+    // observation root) and run it through onFileChanges. A throw propagates to
+    // the writeFile tool's execute (which rejects), the same gate as the bash
+    // path — except there's no CommandResult here, so throw a plain Error to
+    // reject; BashException.format() is meaningful only for bash commands.
+    writeFiles: async (files) => {
+      await innerWriteFiles(files);
+      const now = Date.now();
+      const changes = files
+        .map((f) =>
+          posix.normalize(
+            f.path.startsWith('/') ? f.path : posix.join(dest, f.path),
+          ),
+        )
+        .filter(underDestination)
+        .map((path): FileChange => ({ op: 'write', path, timestamp: now }));
+      if (changes.length) await onFileChanges?.(changes);
+    },
     dispose: async () => {
       await innerExecute(`rm -rf ${shellQuote(traceDir)}`).catch(() => {});
       await sandbox.dispose();
@@ -421,7 +493,9 @@ export function traceFileChanges(
         try {
           return await child.exit;
         } finally {
-          await collect(traceFile, false);
+          // collectSpawn is the isolation boundary: never let it (e.g. a
+          // throwing onError) reject and mask the real exit result.
+          await collectSpawn(traceFile).catch(() => {});
         }
       })();
       return { stdout: child.stdout, stderr: child.stderr, exit };

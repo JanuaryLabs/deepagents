@@ -80,8 +80,21 @@ export interface CreateBashToolWithSkillsOptions extends Omit<
    * startup and throws `StraceUnavailableError` if `strace` is missing, ptrace
    * is blocked, or the trace is unparseable (e.g. emulated arch). The backend
    * must therefore be strace-capable — the in-process virtual sandbox is not.
+   *
+   * Throwing acts as a gate. On a tool-call command the throw fails the bash
+   * tool call: throw a `BashException` to control the exact failed `CommandResult`
+   * the model sees (rendered by `withBashExceptionCatch` via its `format()`); any
+   * other error fails the call generically. On `spawn` there is no tool result to
+   * fail, so the throw is isolated and surfaced via `onError`. The underlying
+   * command still ran in both cases.
    */
   onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
+  /**
+   * Called when `onFileChanges` throws on the `spawn` path — its only failure
+   * signal. Tool-call throws fail the command instead and never reach here.
+   * Defaults to `console.warn`.
+   */
+  onError?: (error: unknown) => void;
 }
 
 /**
@@ -108,6 +121,7 @@ export async function createBashTool(
     sandbox: backend,
     destination,
     onFileChanges,
+    onError,
     ...rest
   } = options;
 
@@ -119,6 +133,7 @@ export async function createBashTool(
   const tracked = traceFileChanges(backend, {
     destination: observationRoot,
     onFileChanges,
+    onError,
   });
   const sandbox = withAbortSignal(withBashExceptionCatch(tracked));
 
@@ -191,13 +206,43 @@ export async function createBashTool(
     },
   });
 
-  const skills = await uploadSkills(sandbox, skillInputs);
+  // Mirror the bash path for the writeFile tool. A write goes through the traced
+  // `writeFiles`, so a tripwire `onFileChanges` can throw — render a thrown
+  // BashException as the tool RESULT via its format() (the same contract as
+  // bash), so the model sees a failed result it can act on instead of a rejected
+  // tool call the agent/guardrail would swallow. Other errors propagate.
+  const upstreamWriteFile = toolkit.tools.writeFile as unknown as {
+    execute?: (input: unknown, options: unknown) => Promise<unknown>;
+  };
+  const originalWriteExecute = upstreamWriteFile.execute;
+  const writeFileBuilder = tool as unknown as (
+    config: unknown,
+  ) => typeof toolkit.tools.writeFile;
+  const writeFile = writeFileBuilder({
+    ...upstreamWriteFile,
+    execute: async (input: unknown, options: unknown) => {
+      if (!originalWriteExecute) {
+        throw new Error('writeFile tool execution is not available');
+      }
+      try {
+        return await originalWriteExecute(input, options);
+      } catch (err) {
+        if (err instanceof BashException) return err.format();
+        throw err;
+      }
+    },
+  });
+
+  // Write skill files through the raw backend, not the traced sandbox: skill
+  // upload is framework setup, not an agent tool call, so it must not fire
+  // onFileChanges (which would trip a tripwire before the agent even runs).
+  const skills = await uploadSkills(backend, skillInputs);
 
   return {
     ...toolkit,
     sandbox,
     bash,
-    tools: { ...toolkit.tools, bash },
+    tools: { ...toolkit.tools, bash, writeFile },
     skills,
   };
 }
