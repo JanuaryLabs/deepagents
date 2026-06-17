@@ -215,10 +215,23 @@ function openFlags(args: string): string {
   return args.match(/\bO_[A-Z_]+(?:\|O_[A-Z_]+)*/)?.[0] ?? '';
 }
 
-export interface ParseStraceOptions {
-  destination: string;
+interface ParseStraceOptions {
+  include: string[];
+  exclude?: string[];
   traceFile?: string;
   traceDir?: string;
+}
+
+/** A path is tracked when it matches an `include` glob and no `exclude` glob. */
+function matchesGlobs(
+  path: string,
+  include: string[],
+  exclude?: string[],
+): boolean {
+  return (
+    include.some((glob) => posix.matchesGlob(path, glob)) &&
+    !exclude?.some((glob) => posix.matchesGlob(path, glob))
+  );
 }
 
 /**
@@ -228,11 +241,11 @@ export interface ParseStraceOptions {
  * writes to one `write`; a path written then deleted within the command is
  * treated as transient and dropped.
  */
-export function parseStraceTrace(
+function parseStraceTrace(
   raw: string,
   options: ParseStraceOptions,
 ): FileChange[] {
-  const dest = posix.normalize(options.destination);
+  const { include, exclude } = options;
   const traceDir = options.traceDir;
   const traceFile = options.traceFile;
   const now = Date.now();
@@ -304,7 +317,7 @@ export function parseStraceTrace(
       return false;
     }
     if (/^\/(proc|sys|dev)(\/|$)/.test(path)) return false;
-    return dest === '/' ? true : path === dest || path.startsWith(`${dest}/`);
+    return matchesGlobs(path, include, exclude);
   };
 
   const changes: FileChange[] = [];
@@ -328,8 +341,20 @@ export function parseStraceTrace(
   return changes;
 }
 
-export interface TraceFileChangesOptions {
-  destination: string;
+export interface WithStraceFileChangesOptions {
+  /**
+   * Glob patterns (matched against absolute paths via Node's
+   * `path.matchesGlob`) selecting which file changes to report. Scope to a
+   * workspace with `[root, `${root}/**`]`. A path must match at least one
+   * pattern to be reported.
+   */
+  include: string[];
+  /**
+   * Glob patterns subtracted from `include` — a path matching any of these is
+   * dropped even if it also matches `include`. Use to keep framework-written
+   * files (e.g. an uploaded skills directory) out of the change stream.
+   */
+  exclude?: string[];
   onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
   /**
    * Called when `onFileChanges` throws on the `spawn` path — its only failure
@@ -343,22 +368,25 @@ export interface TraceFileChangesOptions {
 
 const warnOnFileChangesError = (error: unknown): void => {
   console.warn(
-    '[traceFileChanges] onFileChanges threw on spawn; isolated',
+    '[withStraceFileChanges] onFileChanges threw on spawn; isolated',
     error,
   );
 };
 
 /**
- * Decorates a sandbox so each `executeCommand` is traced and its filesystem
- * mutations parsed into a per-call `FileChange[]`. Per-call attribution is
- * structural — one trace file per `callId` — so it is safe under concurrent
- * tool calls. Each call's manifest is surfaced two stateless ways: attached to
+ * A `with*` decorator that runs the strace {@link selfTestStrace} probe once
+ * (throwing {@link StraceUnavailableError} if strace is unusable on this
+ * backend), then decorates the sandbox so each `executeCommand` is traced and
+ * its filesystem mutations parsed into a per-call `FileChange[]`. Per-call
+ * attribution is structural — one trace file per `callId` — so it is safe under
+ * concurrent tool calls. Each call's manifest is surfaced two stateless ways: attached to
  * the tool result via the bash-meta channel (`meta.fileChanges`, hidden from the
  * model) and passed to `onFileChanges`. No buffer is retained.
  *
  * `readFile` passes through unchanged; `writeFiles` is observed directly (it
- * mutates outside strace's view) — each written file under the observation root
- * becomes a `write` change fed to onFileChanges. `dispose` also sweeps the trace
+ * mutates outside strace's view) — each written file matching the
+ * `include`/`exclude` globs becomes a `write` change fed to onFileChanges.
+ * `dispose` also sweeps the trace
  * dir. `spawn` is traced the same way — its trace is read when the process exits
  * (strace is the top process, so the trace is fully flushed by then). `spawn`
  * carries no bash-meta scope, so its changes go to `onFileChanges` only.
@@ -369,19 +397,17 @@ const warnOnFileChangesError = (error: unknown): void => {
  * fails the tool call. The `spawn` path has no exception catcher, so its throw is
  * isolated and surfaced only via `onError` (exit result preserved).
  */
-export function traceFileChanges(
+export async function withStraceFileChanges(
   sandbox: DisposableSandbox,
-  options: TraceFileChangesOptions,
-): DisposableSandbox {
-  const { destination, onFileChanges } = options;
+  options: WithStraceFileChangesOptions,
+): Promise<DisposableSandbox> {
+  await selfTestStrace(sandbox);
+  const { include, exclude, onFileChanges } = options;
   const onError = options.onError ?? warnOnFileChangesError;
   const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
   const innerExecute = sandbox.executeCommand.bind(sandbox);
   const innerReadFile = sandbox.readFile.bind(sandbox);
   const innerWriteFiles = sandbox.writeFiles.bind(sandbox);
-  const dest = posix.normalize(destination);
-  const underDestination = (path: string): boolean =>
-    dest === '/' || path === dest || path.startsWith(`${dest}/`);
 
   // Delete the trace file with a fresh executeCommand (no caller signal) so an
   // aborted turn can't cancel the cleanup and leave the file behind.
@@ -394,7 +420,8 @@ export function traceFileChanges(
   const readChanges = async (traceFile: string): Promise<FileChange[]> => {
     try {
       return parseStraceTrace(await innerReadFile(traceFile), {
-        destination,
+        include,
+        exclude,
         traceFile,
         traceDir,
       });
@@ -465,13 +492,11 @@ export function traceFileChanges(
     writeFiles: async (files) => {
       await innerWriteFiles(files);
       const now = Date.now();
+      // Upstream bash-tool resolves writeFile paths to absolute before they
+      // reach here, so match the include/exclude globs against them directly.
       const changes = files
-        .map((f) =>
-          posix.normalize(
-            f.path.startsWith('/') ? f.path : posix.join(dest, f.path),
-          ),
-        )
-        .filter(underDestination)
+        .map((f) => posix.normalize(f.path))
+        .filter((path) => matchesGlobs(path, include, exclude))
         .map((path): FileChange => ({ op: 'write', path, timestamp: now }));
       if (changes.length) await onFileChanges?.(changes);
     },
@@ -518,9 +543,7 @@ const STRACE_MISSING = /strace:?\s+(?:command\s+)?not found/i;
  * {@link StraceUnavailableError} (hard-fail) when ptrace is blocked, strace is
  * absent, or the trace is garbled (e.g. amd64 under Rosetta).
  */
-export async function selfTestStrace(
-  sandbox: DisposableSandbox,
-): Promise<void> {
+async function selfTestStrace(sandbox: DisposableSandbox): Promise<void> {
   const probeDir = `/tmp/dat-strace-${randomUUID()}`;
   const traceFile = `/tmp/dat-strace-${randomUUID()}.trace`;
   const q = shellQuote;
@@ -549,10 +572,12 @@ export async function selfTestStrace(
       throw new StraceUnavailableError('strace-missing', diagnostics);
     }
 
-    // No `traceDir` here: the probe's `destination` lives under /tmp, so a
-    // `/tmp` exclusion would wrongly filter out the probe's own files. The
-    // exact-path `traceFile` exclusion is enough.
-    const changes = parseStraceTrace(raw, { destination: probeDir, traceFile });
+    // Scope to the probe dir; the exact-path `traceFile` exclusion drops the
+    // sibling trace file that lives under /tmp alongside it.
+    const changes = parseStraceTrace(raw, {
+      include: [probeDir, `${probeDir}/**`],
+      traceFile,
+    });
     const hasRealFdPath = raw.includes(`<${probeDir}/`);
     const hasRename = changes.some(
       (c) =>

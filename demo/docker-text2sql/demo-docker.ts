@@ -12,6 +12,7 @@ import {
   createDockerSandbox,
   errorRecoveryGuardrail,
   user,
+  withStraceFileChanges,
 } from '@deepagents/context';
 
 import context, { defaultFragments, index } from './demo-context.ts';
@@ -96,15 +97,14 @@ class FileChangeError extends BashException {
   }
 }
 
-const sandbox = await createBashTool({
-  sandbox: backend,
-  destination: demoWorkspace,
-  // Per-tool-call filesystem-change tracking is always on via strace (baked into
-  // the image); onFileChanges fires after each command with that call's manifest.
-  // Here it's a tripwire that rejects any change. On a tool-call command the throw
-  // fails that bash call (throw a BashException instead to control the exact failed
-  // result the model sees); the command still ran. onError fires only for the
-  // spawn path, which has no tool result to fail.
+// Per-tool-call filesystem-change tracking is composed onto the backend via
+// strace (baked into the image); onFileChanges fires after each command with
+// that call's manifest. Here it's a tripwire that rejects any change. On a
+// tool-call command the throw fails that bash call (throw a BashException
+// instead to control the exact failed result the model sees); the command still
+// ran. onError fires only for the spawn path, which has no tool result to fail.
+const tracked = await withStraceFileChanges(backend, {
+  include: [demoWorkspace, `${demoWorkspace}/**`],
   onFileChanges: (changes) => {
     for (const c of changes) {
       const change = `${c.op} ${c.path}${c.from ? ` (from ${c.from})` : ''}`;
@@ -115,6 +115,10 @@ const sandbox = await createBashTool({
       console.warn(`Unexpected file change: ${change}`);
     }
   },
+});
+const sandbox = await createBashTool({
+  sandbox: tracked,
+  destination: demoWorkspace,
 });
 
 const schemaFragments = await index(sandbox.sandbox);

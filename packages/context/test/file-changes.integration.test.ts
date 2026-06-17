@@ -11,6 +11,7 @@ import {
   StraceUnavailableError,
   createBashTool,
   createDockerSandbox,
+  withStraceFileChanges,
 } from '@deepagents/context';
 
 async function isDockerAvailable(): Promise<boolean> {
@@ -112,13 +113,13 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
       calls,
     };
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: (changes) => {
         calls.push([...changes]);
       },
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`);
       rec.drain();
@@ -357,6 +358,38 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
       );
     });
   });
+
+  it('drops changes matching an exclude glob (e.g. uploaded skills) but keeps siblings', async () => {
+    const seen: FileChange[] = [];
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
+      exclude: ['**/skills/**'],
+      onFileChanges: (changes) => {
+        seen.push(...changes);
+      },
+    });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
+    try {
+      await s.sandbox.executeCommand(`mkdir -p ${ROOT}/skills`);
+      seen.length = 0;
+      const r = await s.sandbox.executeCommand(
+        `sh -c 'echo a > ${ROOT}/skills/SKILL.md; echo b > ${ROOT}/keep.txt'`,
+      );
+      assert.strictEqual(r.exitCode, 0, r.stderr);
+      const paths = seen.map((c) => c.path);
+      assert.ok(
+        paths.includes(`${ROOT}/keep.txt`),
+        `included sibling must be reported: ${JSON.stringify(paths)}`,
+      );
+      assert.ok(
+        !paths.some((p) => p.includes('/skills/')),
+        `excluded skills writes must be dropped: ${JSON.stringify(paths)}`,
+      );
+    } finally {
+      await s.sandbox.dispose();
+    }
+  });
 });
 
 dockerSuite('onFileChanges failure handling (docker backend)', () => {
@@ -381,14 +414,14 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
   it('renders a thrown BashException via the caller’s own format(), and still runs the command', async () => {
     const errors: unknown[] = [];
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
         throw new RejectChange('no writes allowed');
       },
       onError: (error) => errors.push(error),
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       // The setup mkdir trips the tripwire too — swallow its failed call.
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
@@ -415,12 +448,12 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
   it('fails the tool call when onFileChanges throws a plain Error (and does not reach onError)', async () => {
     const errors: unknown[] = [];
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
       onError: (error) => errors.push(error),
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       // A non-BashException isn't caught up the chain, so the call rejects.
@@ -440,11 +473,11 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 
   it('propagates a throwing onFileChanges out of sandbox.writeFiles (post-hoc gate)', async () => {
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       // The sandbox method itself rejects; the writeFile TOOL wraps this (next
@@ -465,13 +498,13 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 
   it('renders a thrown BashException as the writeFile tool RESULT (not a rejected call)', async () => {
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
         throw new RejectChange('no writes allowed');
       },
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       const model = new MockLanguageModelV3({
@@ -503,13 +536,13 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 
   it('surfaces the caller’s BashException format() to the model on its tool result', async () => {
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: () => {
         throw new RejectChange('no writes allowed');
       },
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       const model = new MockLanguageModelV3({
@@ -537,11 +570,11 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 
   it('still removes the per-command trace file when onFileChanges throws', async () => {
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       // ls runs under strace too, so its own in-flight trace file is always
@@ -571,12 +604,12 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
   it('isolates a throwing onFileChanges on the spawn path (exit still resolves)', async () => {
     const errors: unknown[] = [];
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
       onError: (error) => errors.push(error),
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
@@ -594,14 +627,14 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 
   it('keeps the spawn exit resolving even when onError itself throws', async () => {
     const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
-    const s = await createBashTool({
-      sandbox: backend,
-      destination: ROOT,
+    const tracked = await withStraceFileChanges(backend, {
+      include: [ROOT, `${ROOT}/**`],
       onFileChanges: throwBoom,
       onError: () => {
         throw new Error('onError exploded');
       },
     });
+    const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       assert.ok(s.sandbox.spawn, 'docker sandbox should expose spawn');
@@ -622,7 +655,8 @@ dockerSuite('strace self-test hard-fail', () => {
     const backend = await createDockerSandbox({ image: 'alpine:latest' });
     try {
       await assert.rejects(
-        () => createBashTool({ sandbox: backend, destination: '/work' }),
+        () =>
+          withStraceFileChanges(backend, { include: ['/work', '/work/**'] }),
         (err: unknown) =>
           err instanceof StraceUnavailableError &&
           err.reason === 'strace-missing',

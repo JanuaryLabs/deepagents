@@ -9,11 +9,6 @@ import z from 'zod';
 import { runWithAbortSignal, withAbortSignal } from './abort.ts';
 import { BashException } from './bash-exception.ts';
 import { readBashMeta, runWithBashMeta } from './bash-meta.ts';
-import {
-  type FileChange,
-  selfTestStrace,
-  traceFileChanges,
-} from './file-changes.ts';
 import type {
   AgentSandbox,
   DisposableSandbox,
@@ -28,8 +23,9 @@ const REASONING_INSTRUCTION =
 /**
  * Decorator: converts `BashException` thrown from `executeCommand` into a
  * normal `CommandResult` via `BashException.format()`. Other errors pass
- * through unchanged. Stacks on top of `traceFileChanges` so a thrown
- * BashException still lets the tracer collect that command's file changes.
+ * through unchanged. Stacks outside any caller-composed tracker (e.g.
+ * `withStraceFileChanges`), so a `BashException` raised by that tracker's
+ * `onFileChanges` tripwire is still rendered via `format()`.
  *
  * Backends must be plain object literals (not class instances) since the
  * spread below copies only own enumerable properties; prototype methods
@@ -67,40 +63,22 @@ export interface CreateBashToolWithSkillsOptions extends Omit<
    */
   skills?: SkillUploadInput[];
   /**
-   * Working directory + file-change observation root. Defaults to
-   * `/workspace` (matching upstream `bash-tool`). `onFileChanges` reports
-   * activity rooted here.
+   * Working directory passed to upstream `bash-tool`. Defaults to `/workspace`.
+   * File-change tracking is no longer wired here — compose
+   * `withStraceFileChanges(backend, { destination, onFileChanges })` on the
+   * backend yourself and pass the result as `sandbox`.
    */
   destination?: string;
-  /**
-   * Called once per tool-call command (and per `spawn`) with that call's
-   * `FileChange[]` — the reactive post-tool effect.
-   *
-   * File-change tracking is **always on** via `strace`: a self-test runs at
-   * startup and throws `StraceUnavailableError` if `strace` is missing, ptrace
-   * is blocked, or the trace is unparseable (e.g. emulated arch). The backend
-   * must therefore be strace-capable — the in-process virtual sandbox is not.
-   *
-   * Throwing acts as a gate. On a tool-call command the throw fails the bash
-   * tool call: throw a `BashException` to control the exact failed `CommandResult`
-   * the model sees (rendered by `withBashExceptionCatch` via its `format()`); any
-   * other error fails the call generically. On `spawn` there is no tool result to
-   * fail, so the throw is isolated and surfaced via `onError`. The underlying
-   * command still ran in both cases.
-   */
-  onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
-  /**
-   * Called when `onFileChanges` throws on the `spawn` path — its only failure
-   * signal. Tool-call throws fail the command instead and never reach here.
-   * Defaults to `console.warn`.
-   */
-  onError?: (error: unknown) => void;
 }
 
 /**
  * Composes an `AgentSandbox` from a backend by layering decorators:
  *
- *     backend → traceFileChanges → withBashExceptionCatch → withAbortSignal
+ *     backend → withBashExceptionCatch → withAbortSignal
+ *
+ * File-change tracking is not composed here — a caller that wants it wraps the
+ * backend with `withStraceFileChanges` first, so the tracer sits innermost
+ * (backend → withStraceFileChanges → withBashExceptionCatch → withAbortSignal).
  *
  * The composed sandbox is handed to upstream `bash-tool`; upstream's
  * internal `bash` / `readFile` / `writeFile` tools therefore close over
@@ -120,22 +98,13 @@ export async function createBashTool(
     extraInstructions,
     sandbox: backend,
     destination,
-    onFileChanges,
-    onError,
     ...rest
   } = options;
 
-  const observationRoot = destination ?? '/workspace';
-  // File-change tracking is always on via strace. The self-test hard-fails
-  // (StraceUnavailableError) on a backend that can't host strace — including the
-  // in-process virtual sandbox.
-  await selfTestStrace(backend);
-  const tracked = traceFileChanges(backend, {
-    destination: observationRoot,
-    onFileChanges,
-    onError,
-  });
-  const sandbox = withAbortSignal(withBashExceptionCatch(tracked));
+  // File-change tracking is the caller's concern: wrap the backend with
+  // `withStraceFileChanges` before passing it in if you want it. createBashTool
+  // only adds the BashException catcher and ambient-abort decorators.
+  const sandbox = withAbortSignal(withBashExceptionCatch(backend));
 
   const combinedInstructions = [extraInstructions, REASONING_INSTRUCTION]
     .filter(Boolean)
@@ -206,11 +175,12 @@ export async function createBashTool(
     },
   });
 
-  // Mirror the bash path for the writeFile tool. A write goes through the traced
-  // `writeFiles`, so a tripwire `onFileChanges` can throw — render a thrown
-  // BashException as the tool RESULT via its format() (the same contract as
-  // bash), so the model sees a failed result it can act on instead of a rejected
-  // tool call the agent/guardrail would swallow. Other errors propagate.
+  // Mirror the bash path for the writeFile tool. If the caller composed a
+  // tracker, a write goes through its `writeFiles`, so a tripwire `onFileChanges`
+  // can throw — render a thrown BashException as the tool RESULT via its format()
+  // (the same contract as bash), so the model sees a failed result it can act on
+  // instead of a rejected tool call the agent/guardrail would swallow. Other
+  // errors propagate.
   const upstreamWriteFile = toolkit.tools.writeFile as unknown as {
     execute?: (input: unknown, options: unknown) => Promise<unknown>;
   };
@@ -233,9 +203,6 @@ export async function createBashTool(
     },
   });
 
-  // Write skill files through the raw backend, not the traced sandbox: skill
-  // upload is framework setup, not an agent tool call, so it must not fire
-  // onFileChanges (which would trip a tripwire before the agent even runs).
   const skills = await uploadSkills(backend, skillInputs);
 
   return {

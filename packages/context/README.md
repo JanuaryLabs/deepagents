@@ -49,26 +49,36 @@ deletes the underlying Daytona sandbox.
 
 ### File-change tracking
 
-`createBashTool` reports what each tool call mutated as a `FileChange[]`
+`withStraceFileChanges()` decorates a real sandbox backend so each command,
+spawn, or file write reports the mutations it caused as a `FileChange[]`
 (`{ op: 'write' | 'delete' | 'rename'; path; from?; timestamp }`).
-Consume it via the `onFileChanges` callback (fires per command — the reactive
-post-tool effect) or `tool-result.output.meta.fileChanges` (per call, hidden
-from the model).
+Consume changes via the `onFileChanges` callback (fires per command, spawn, or
+`writeFiles` call). Bash tool calls also receive
+`tool-result.output.meta.fileChanges` as hidden host-only metadata.
+
+Scope which paths are reported with `include` glob patterns (required — a path
+must match at least one); drop noise such as uploaded skills with optional
+`exclude` patterns. Both match absolute paths via Node's `path.matchesGlob`.
 
 ```ts
-const sandbox = await createBashTool({
-  sandbox: await createDockerSandbox({ image: 'my-image-with-strace' }),
+const backend = await createDockerSandbox({ image: 'my-image-with-strace' });
+const tracked = await withStraceFileChanges(backend, {
+  include: ['/workspace/**', '/workspace'],
   onFileChanges: (changes) => {
     for (const c of changes) console.log(`${c.op} ${c.path}`);
   },
 });
+const sandbox = await createBashTool({
+  sandbox: tracked,
+  destination: '/workspace',
+});
 ```
 
-Tracking is **always on** via `strace` (per `executeCommand` and per `spawn`) —
-there is no opt-in flag. A one-time self-test runs at `createBashTool` time and
-throws `StraceUnavailableError` (`reason: 'strace-missing' | 'ptrace-blocked' |
-'trace-unparseable'`) — there is no silent fallback. The backend must therefore
-satisfy, on any non-virtual backend (Docker, Daytona, e2b, …):
+Tracking uses `strace` (per `executeCommand` and per `spawn`) when you compose
+the `withStraceFileChanges()` decorator. A one-time self-test runs at decorator
+setup time and throws `StraceUnavailableError` (`reason: 'strace-missing' |
+'ptrace-blocked' | 'trace-unparseable'`) with no silent fallback. The backend
+must therefore satisfy, on any non-virtual backend (Docker, Daytona, e2b, ...):
 
 1. `strace` installed in the image — `apk add strace` (Alpine) /
    `apt-get install -y strace` (Debian), or `installers: [pkg(['strace'])]` for
@@ -78,8 +88,8 @@ satisfy, on any non-virtual backend (Docker, Daytona, e2b, …):
    garbles the trace, so build the image for the host arch.
 
 The **in-process virtual sandbox cannot host strace** (no real processes/ptrace),
-so it is unsupported by `createBashTool` — the self-test hard-fails. Use a
-container/VM backend.
+so it is unsupported by `withStraceFileChanges()` -- the self-test hard-fails.
+Use a container/VM backend.
 
 Ops are intentionally coarse: strace cannot distinguish a new file from an
 overwrite within one command (both are `O_CREAT|O_TRUNC`), so both report

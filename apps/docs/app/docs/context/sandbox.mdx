@@ -24,7 +24,9 @@ bridges to combine approaches.
 All AI-agent-facing surfaces compose the same way: pick a backend factory
 (`createDockerSandbox` / `createDaytonaSandbox` / `createAgentOsSandbox` /
 `createVirtualSandbox`), then wrap it with `createBashTool({ sandbox })` to
-get the bash tool, file tools, skills upload, and file-event observation.
+get the bash tool, file tools, and skills upload. For per-command file-change
+tracking, first decorate a real backend with `withStraceFileChanges(...)`, then
+pass that tracked backend into `createBashTool`.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Docker sandboxes additionally expose an

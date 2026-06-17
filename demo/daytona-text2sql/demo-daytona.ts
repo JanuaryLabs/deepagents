@@ -10,6 +10,7 @@ import {
   createDaytonaSandbox,
   errorRecoveryGuardrail,
   user,
+  withStraceFileChanges,
 } from '@deepagents/context';
 
 import context, { defaultFragments, index } from './demo-context.ts';
@@ -123,11 +124,11 @@ if (prepare.exitCode !== 0) {
 
 await startDaemon(backend);
 
-const sandbox = await createBashTool({
-  sandbox: backend,
-  destination: demoWorkspace,
-  // Per-tool-call filesystem-change tracking is always on via strace. Requires the
-  // runner image to bake in strace — re-run bootstrap.ts after the Dockerfile change.
+// Per-tool-call filesystem-change tracking is composed onto the backend via
+// strace. Requires the runner image to bake in strace — re-run bootstrap.ts
+// after the Dockerfile change.
+const tracked = await withStraceFileChanges(backend, {
+  include: [demoWorkspace, `${demoWorkspace}/**`],
   onFileChanges: (changes) => {
     for (const c of changes) {
       console.log(
@@ -135,6 +136,10 @@ const sandbox = await createBashTool({
       );
     }
   },
+});
+const sandbox = await createBashTool({
+  sandbox: tracked,
+  destination: demoWorkspace,
 });
 
 const schemaFragments = await index(sandbox.sandbox);
