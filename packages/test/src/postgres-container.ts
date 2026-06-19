@@ -262,10 +262,15 @@ export async function startPostgresContainer(
     ipcHost: true,
     memorySwappiness: 0,
     healthy: ({ exec }) =>
+      // Probe over TCP (`-h 127.0.0.1`), never the Unix socket. On first boot the
+      // image runs a temporary socket-only server (`listen_addresses=''`) to run
+      // init, then restarts the real server on TCP. A socket probe passes against
+      // that throwaway server and reports ready ~seconds before callers can
+      // actually connect; TCP is exclusive to the real server, so it can't.
       timebox(
         async () => {
-          await exec(['pg_isready', '-U', user]);
-          await exec(['psql', '-U', user, '-c', 'SELECT 1']);
+          await exec(['pg_isready', '-h', '127.0.0.1', '-U', user]);
+          await exec(['psql', '-h', '127.0.0.1', '-U', user, '-c', 'SELECT 1']);
         },
         { maxRetryTime: 60_000 },
       ),
