@@ -1,6 +1,9 @@
 import { type ContextFragment, fragment } from '@deepagents/context';
 
-import { validateAdapterNames } from './adapter-name.ts';
+import {
+  DATABASE_NAME_FRAGMENT,
+  validateAdapterNames,
+} from './adapter-name.ts';
 import {
   type Adapter,
   type IntrospectionPhase,
@@ -44,7 +47,7 @@ export type Text2SqlIndexProgressHandler = (
 export interface AdapterIndexerOptions {
   adapters: Record<string, Adapter>;
   cache?: IndexCache;
-  lock?: IndexLock;
+  lock: IndexLock;
 }
 
 export interface AdapterIndexerIndexOptions {
@@ -70,10 +73,27 @@ function timestampProgressHandler(
   };
 }
 
+/**
+ * Build a clean `<database>name</database>` leaf carrying the adapter's
+ * configured connection name (the exact `<db>` value for `sql run <db>`).
+ * Injected as the first child of each adapter fragment so the name the model
+ * must pass is a labeled value at the top of the schema block — not just the
+ * wrapper tag a small model overlooks.
+ *
+ * Constructed directly (not via `fragment()`, which wraps string children in an
+ * array and double-nests the tag): a plain `{ name, data }` like the
+ * introspected schema fragments, so it is JSON-safe and renders the name as the
+ * tag's text content. `DATABASE_NAME_FRAGMENT` is reserved as an adapter name
+ * (see adapter-name.ts) so the label tag can never collide with a wrapper tag.
+ */
+function databaseNameFragment(name: string): ContextFragment {
+  return { name: DATABASE_NAME_FRAGMENT, data: name };
+}
+
 export class AdapterIndexer {
   readonly #adapters: Record<string, Adapter>;
   readonly #cache: IndexCache | undefined;
-  readonly #lock: IndexLock | undefined;
+  readonly #lock: IndexLock;
 
   constructor(options: AdapterIndexerOptions) {
     const adapterNames = Object.keys(options.adapters);
@@ -103,7 +123,7 @@ export class AdapterIndexer {
     const settled = await Promise.allSettled(
       entries.map(async ([name, adapter]) => {
         const schema = await this.#indexAdapter(name, adapter, progress);
-        return fragment(name, ...schema);
+        return fragment(name, databaseNameFragment(name), ...schema);
       }),
     );
 
@@ -215,9 +235,7 @@ export class AdapterIndexer {
         return cached;
       }
 
-      const fragments = this.#lock
-        ? await this.#lock.run(key, populate)
-        : await populate();
+      const fragments = await this.#lock.run(key, populate);
 
       if (servedFromCache) emitCacheHit();
       progress({

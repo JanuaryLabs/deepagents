@@ -10,8 +10,6 @@ import * as path from 'node:path';
 import { finished } from 'node:stream/promises';
 import { v7 } from 'uuid';
 
-import type { ContextFragment } from '@deepagents/context';
-
 import { type Text2SqlIndexProgressHandler } from '../../lib/adapter-index.ts';
 import { type Text2Sql } from '../../lib/sql.ts';
 import {
@@ -27,7 +25,6 @@ interface IndexManifest {
   fragmentsPath: string;
   eventsPath: string;
   adapters: string[];
-  fragments: number;
 }
 
 export class IndexCommand extends SqlCommand {
@@ -85,7 +82,6 @@ export class IndexCommand extends SqlCommand {
           fragmentsPath,
           eventsPath,
           adapters: names,
-          fragments: countSchemaFragments(fragments),
         };
 
         ctx.stdout.write(JSON.stringify(manifest, null, 2) + '\n');
@@ -204,15 +200,6 @@ function waitForOpen(stream: WriteStream): Promise<void> {
     stream.once('open', onOpen);
     stream.once('error', onError);
   });
-}
-
-function countSchemaFragments(fragments: ContextFragment[]): number {
-  return fragments.reduce((count, adapterFragment) => {
-    if (Array.isArray(adapterFragment.data)) {
-      return count + adapterFragment.data.length;
-    }
-    return count + 1;
-  }, 0);
 }
 
 function dedupe(values: string[]): string[] {

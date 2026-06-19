@@ -12,11 +12,8 @@ import {
   useBashMeta,
 } from '@deepagents/context';
 
-import {
-  Text2Sql,
-  Text2SqlUnknownAdapterError,
-  Text2SqlValidationError,
-} from './sql.ts';
+import { resolveAdapter } from './resolve-adapter.ts';
+import { Text2Sql, Text2SqlValidationError } from './sql.ts';
 
 const SQL_VALIDATE_REMINDER =
   'Always run `sql validate <db> "..."` before `sql run <db> "..."` to catch syntax errors early.';
@@ -66,7 +63,10 @@ export interface CreateSqlCommandResult {
  *
  * @example
  * ```ts
- * const text2Sql = new Text2Sql({ adapters: { pagila } });
+ * const text2Sql = new Text2Sql({
+ *   adapters: { pagila },
+ *   lock: new FileIndexLock(),
+ * });
  * const { command } = createSqlCommand(text2Sql);
  * const sandbox = await createVirtualSandbox({
  *   fs: new InMemoryFs(),
@@ -188,10 +188,7 @@ async function runHandler(
     return await fn();
   } catch (error) {
     if (error instanceof BashException) return error.format();
-    if (
-      Text2SqlValidationError.isInstance(error) ||
-      Text2SqlUnknownAdapterError.isInstance(error)
-    ) {
+    if (Text2SqlValidationError.isInstance(error)) {
       return new SqlCommandError(subcommand, error.message).format();
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -205,24 +202,21 @@ function takeDbAndSql(
   text2Sql: Text2Sql,
 ): { name: string; sql: string } {
   const [db, ...rest] = positional;
-  const available = text2Sql.adapterNames().join(', ');
   if (!db) {
+    const available = text2Sql.adapterNames().join(', ');
     throw new SqlCommandError(
       subcommand,
       `missing database name. Usage: sql ${subcommand} <db> "SELECT ...". Available: ${available}`,
     );
   }
-  if (!text2Sql.hasAdapter(db)) {
-    throw new SqlCommandError(
-      subcommand,
-      `unknown database "${db}". Available: ${available}`,
-    );
-  }
+
+  const name = resolveAdapter(text2Sql, db);
+
   const sql = rest.join(' ').trim();
   if (!sql) {
     throw new SqlCommandError(subcommand, 'no query provided');
   }
-  return { name: db, sql };
+  return { name, sql };
 }
 
 function repairDbNameAndQuotedArg(rawArgs: string): string | null {

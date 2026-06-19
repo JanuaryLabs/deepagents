@@ -91,4 +91,14 @@ describe('validateAdapterNames: throws on first invalid name', () => {
     }
     assert.doesNotThrow(() => validateAdapterNames(gen()));
   });
+
+  it('rejects the reserved "database" name (the schema label tag)', () => {
+    assert.throws(
+      () => validateAdapterNames(['ok', 'database']),
+      (err: Error) => {
+        assert.match(err.message, /Adapter name "database" is reserved/);
+        return true;
+      },
+    );
+  });
 });

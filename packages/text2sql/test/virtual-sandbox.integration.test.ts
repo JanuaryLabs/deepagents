@@ -4,7 +4,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
 import { createVirtualSandbox } from '@deepagents/context';
-import { Text2Sql, createSqlCommand } from '@deepagents/text2sql';
+import {
+  FileIndexLock,
+  Text2Sql,
+  createSqlCommand,
+} from '@deepagents/text2sql';
 import { Sqlite, info, tables } from '@deepagents/text2sql/sqlite';
 
 function buildSandbox() {
@@ -17,7 +21,34 @@ function buildSandbox() {
     grounding: [tables(), info()],
   });
 
-  const text2Sql = new Text2Sql({ adapters: { mem } });
+  const text2Sql = new Text2Sql({
+    adapters: { mem },
+    lock: new FileIndexLock(),
+  });
+  const { command } = createSqlCommand(text2Sql);
+  return { command };
+}
+
+function buildMultiSandbox() {
+  const a = new DatabaseSync(':memory:');
+  a.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);`);
+  a.exec(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`);
+  const b = new DatabaseSync(':memory:');
+  b.exec(`CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL);`);
+
+  const mem = new Sqlite({
+    execute: (sql) => a.prepare(sql).all(),
+    grounding: [tables(), info()],
+  });
+  const other = new Sqlite({
+    execute: (sql) => b.prepare(sql).all(),
+    grounding: [tables(), info()],
+  });
+
+  const text2Sql = new Text2Sql({
+    adapters: { mem, other },
+    lock: new FileIndexLock(),
+  });
   const { command } = createSqlCommand(text2Sql);
   return { command };
 }
@@ -53,8 +84,8 @@ describe('createSqlCommand + createVirtualSandbox', () => {
     assert.match(result.stderr, /^sql validate: .+\n$/);
   });
 
-  it('reports unknown databases with the available list', async () => {
-    const { command } = buildSandbox();
+  it('reports unknown databases with the available list when multiple are configured', async () => {
+    const { command } = buildMultiSandbox();
     const sandbox = await createVirtualSandbox({
       fs: new InMemoryFs(),
       customCommands: [command],
@@ -64,8 +95,40 @@ describe('createSqlCommand + createVirtualSandbox', () => {
 
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /unknown database "wrong"/);
-    assert.match(result.stderr, /Available: mem/);
+    assert.match(result.stderr, /Available: mem, other/);
     assert.ok(result.stderr.endsWith('\n'));
+  });
+
+  it('routes a wrong db name to the sole configured database silently', async () => {
+    const { command } = buildSandbox();
+    const sandbox = await createVirtualSandbox({
+      fs: new InMemoryFs(),
+      customCommands: [command],
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql run main "SELECT id, name FROM users ORDER BY id"',
+    );
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /^results stored in /);
+    assert.match(result.stdout, /rows: 2\n/);
+    assert.doesNotMatch(result.stdout, /routed/);
+  });
+
+  it('routes a wrong db name on validate too, silently', async () => {
+    const { command } = buildSandbox();
+    const sandbox = await createVirtualSandbox({
+      fs: new InMemoryFs(),
+      customCommands: [command],
+    });
+
+    const result = await sandbox.executeCommand(
+      'sql validate sql_db "SELECT id FROM users"',
+    );
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.stdout, 'valid\n');
   });
 
   it('runs queries, writes results to ctx.fs, and prints summary', async () => {

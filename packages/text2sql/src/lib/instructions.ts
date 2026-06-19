@@ -277,7 +277,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
       workflow({
         task: 'Query execution',
         steps: [
-          'Pick the target database from the schema fragments (each parent fragment is named after a configured database).',
+          'Pick the target database by the <database> value shown at the top of each schema fragment — that is the exact connection name to pass as <db>. It is NOT the SQL-level database/schema name (e.g. SQLite\'s default "main").',
           'Execute SQL through bash tool: sql run <db> "SELECT ..."',
           'Read the output: file path, column names, and row count.',
           "Use column names to construct jq filters: cat <path> | jq '.[] | {col1, col2}'",
@@ -288,7 +288,7 @@ Action: Ask user: "Top by what metric—total revenue, number of orders, or most
         rule: 'Do not attempt SQL access through non-bash tools.',
         reason: 'SQL access is only available through the bash tool.',
         action:
-          'Use `sql run <db> "SELECT ..."` and `sql validate <db> "SELECT ..."` through bash, where `<db>` is the configured database name.',
+          'Use `sql run <db> "SELECT ..."` and `sql validate <db> "SELECT ..."` through bash, where `<db>` is the exact configured connection name (not the SQL-level database/schema name).',
       }),
       explain({
         concept: 'sql command output format',

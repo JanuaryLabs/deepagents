@@ -43,7 +43,6 @@ interface IndexManifest {
   fragmentsPath: string;
   eventsPath: string;
   adapters: string[];
-  fragments: number;
 }
 
 function buildEnv(opts: RunOpts): NodeJS.ProcessEnv {
@@ -134,6 +133,21 @@ function writeAdaptersModule(
   const adaptersPath = path.join(cwd, filename);
   writeFileSync(adaptersPath, source);
   return adaptersPath;
+}
+
+/** Two no-op adapters, so an unknown `<db>` errors instead of auto-routing. */
+function writeMultiAdapters(cwd: string): string {
+  return writeAdaptersModule(
+    cwd,
+    `const adapter = () => ({
+      format: (sql) => sql,
+      validate: async () => null,
+      execute: async () => [],
+      introspect: async () => [],
+    });
+    export default { alpha: adapter(), beta: adapter() };`,
+    'multi-adapters.ts',
+  );
 }
 
 function distFileUrl(...parts: string[]): string {
@@ -493,7 +507,6 @@ describe('sql binary', () => {
     const manifest = parseIndexManifest(await runBin(['index'], { cwd }));
 
     assert.deepEqual(manifest.adapters, ['mem']);
-    assert.ok(manifest.fragments > 0);
     assertManifestFiles(cwd, manifest);
 
     const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
@@ -512,7 +525,6 @@ describe('sql binary', () => {
     );
 
     assert.deepEqual(explicitManifest.adapters, defaultManifest.adapters);
-    assert.equal(explicitManifest.fragments, defaultManifest.fragments);
     assert.deepEqual(
       readJsonFile<ContextFragment[]>(explicitManifest.fragmentsPath),
       readJsonFile<ContextFragment[]>(defaultManifest.fragmentsPath),
@@ -567,7 +579,6 @@ describe('sql binary', () => {
     const fragments = readJsonFile<ContextFragment[]>(manifest.fragmentsPath);
 
     assert.deepEqual(manifest.adapters, ['alpha', 'beta']);
-    assert.equal(manifest.fragments, 2);
     assert.deepEqual(
       fragments.map((fragment) => fragment.name),
       ['alpha', 'beta'],
@@ -1054,14 +1065,23 @@ describe('sql binary', () => {
     assert.match(result.stderr, /sql validate: no query provided/);
   });
 
-  it('validate: unknown db name lists available adapters', async () => {
+  it('validate: unknown db name lists available adapters when multiple are configured', async () => {
     const cwd = makeTmpDir();
+    const adaptersPath = writeMultiAdapters(cwd);
     const result = await runBin(['validate', 'nonexistent', 'SELECT 1 as n'], {
       cwd,
+      adaptersPath,
     });
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /sql validate: unknown database "nonexistent"/);
-    assert.match(result.stderr, /Available: mem/);
+    assert.match(result.stderr, /Available: alpha, beta/);
+  });
+
+  it('validate: routes a wrong db name to the sole configured database silently', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['validate', 'main', 'SELECT 1 as n'], { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.stdout, 'valid\n');
   });
 
   it('validate: missing db arg is rejected by the parser', async () => {
@@ -1334,14 +1354,24 @@ describe('sql binary', () => {
     assert.match(result.stderr, /\[A-Za-z_\]\[A-Za-z0-9_\]/);
   });
 
-  it('errors: unknown db name lists available adapters', async () => {
+  it('errors: unknown db name lists available adapters when multiple are configured', async () => {
     const cwd = makeTmpDir();
+    const adaptersPath = writeMultiAdapters(cwd);
     const result = await runBin(['run', 'nonexistent', 'SELECT 1 as n'], {
       cwd,
+      adaptersPath,
     });
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /unknown database "nonexistent"/);
-    assert.match(result.stderr, /Available: mem/);
+    assert.match(result.stderr, /Available: alpha, beta/);
+  });
+
+  it('run: routes a wrong db name to the sole configured database silently', async () => {
+    const cwd = makeTmpDir();
+    const result = await runBin(['run', 'main', 'SELECT 1 as n'], { cwd });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /^results stored in /);
+    assert.doesNotMatch(result.stdout, /routed/);
   });
 
   it('errors: missing db arg', async () => {
