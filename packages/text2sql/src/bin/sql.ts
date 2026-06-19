@@ -2,6 +2,7 @@
 import { type CAC, cac } from 'cac';
 
 import { FileIndexCache } from '../lib/index-cache.ts';
+import { FileIndexLock } from '../lib/index-lock.ts';
 import { Text2Sql } from '../lib/sql.ts';
 import {
   CommandError,
@@ -88,6 +89,15 @@ function resolveIndexCache(): FileIndexCache | undefined {
   return new FileIndexCache({ dir, namespace });
 }
 
+function resolveIndexLock(): FileIndexLock {
+  return new FileIndexLock({
+    dir:
+      process.env.TEXT2SQL_INDEX_LOCK_DIR ??
+      process.env.TEXT2SQL_INDEX_CACHE_DIR,
+    namespace: process.env.TEXT2SQL_INDEX_VERSION,
+  });
+}
+
 async function runCommand(
   command: SqlCommand,
   positional: unknown[],
@@ -98,6 +108,7 @@ async function runCommand(
     const text2Sql = new Text2Sql({
       adapters: await loadAdapters(),
       cache: resolveIndexCache(),
+      lock: resolveIndexLock(),
     });
     ctx = {
       text2Sql,

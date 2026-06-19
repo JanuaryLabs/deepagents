@@ -154,5 +154,6 @@ Query generation is fast:
 
 To skip repeated introspection, pass a `cache` (e.g. `FileIndexCache`) to
 `new Text2Sql({ ... })`; without one, schema indexing runs fresh on each call.
-See the package README's "Schema index caching & coordination" section for the
-injected `cache`/`lock` model and its invalidation namespace.
+A `lock` is now required — pass `new FileIndexLock()`, or a distributed lock for
+a fleet. See the package README's "Schema index caching & coordination" section
+for the injected `cache`/`lock` model and its invalidation namespace.

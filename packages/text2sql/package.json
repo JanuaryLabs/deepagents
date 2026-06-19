@@ -102,6 +102,7 @@
     "openai": "5.12.2",
     "p-limit": "^6.2.0",
     "p-retry": "^7.1.1",
+    "proper-lockfile": "^4.1.2",
     "sql-formatter": "^15.7.3",
     "uuid": "^13.0.0",
     "xlsx": "^0.18.5",
@@ -110,6 +111,7 @@
   "devDependencies": {
     "@ai-sdk/react": "^3.0.176",
     "@google-cloud/bigquery": "^8.3.0",
+    "@types/proper-lockfile": "^4.1.4",
     "autoevals": "^0.0.132"
   },
   "peerDependencies": {

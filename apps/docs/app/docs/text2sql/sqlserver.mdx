@@ -24,7 +24,7 @@ Reuse the shared `model`, `sandbox`, and `engine` setup from
 ```typescript
 import sql from 'mssql';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -59,6 +59,7 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -66,7 +67,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { Connection, Request } from 'tedious';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -103,6 +104,7 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>

@@ -16,7 +16,7 @@ export interface Text2SqlConfig {
   adapters: Record<string, Adapter>;
   model?: AgentModel;
   cache?: IndexCache;
-  lock?: IndexLock;
+  lock: IndexLock;
 }
 
 export interface Text2SqlRunResult {

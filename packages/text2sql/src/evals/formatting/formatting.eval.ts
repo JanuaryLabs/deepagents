@@ -1,9 +1,10 @@
 import { groq } from '@ai-sdk/groq';
 import { evalite } from 'evalite';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import { parseRecordSelection, pickFromArray } from '@deepagents/evals';
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
 
 import TESTS from './formatting.json' with { type: 'json' };
@@ -30,6 +31,7 @@ evalite('SQL Output Formatting', {
     const text2sql = new Text2Sql({
       adapters: { main: adapter },
       model: groq('gpt-oss-20b'),
+      lock: new FileIndexLock({ namespace: randomUUID() }),
     });
 
     const result = await text2sql.toSql(question, 'main');

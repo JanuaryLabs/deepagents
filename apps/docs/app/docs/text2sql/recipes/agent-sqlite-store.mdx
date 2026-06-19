@@ -155,7 +155,7 @@ coordination" section.
 
 ```typescript
 import { ContextEngine } from '@deepagents/context';
-import { AdapterIndexer, instructions } from '@deepagents/text2sql';
+import { AdapterIndexer, FileIndexLock, instructions } from '@deepagents/text2sql';
 
 const context = new ContextEngine({
   store,
@@ -165,6 +165,7 @@ const context = new ContextEngine({
 
 const indexer = new AdapterIndexer({
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 
 context.set(...instructions(), ...(await indexer.index()));

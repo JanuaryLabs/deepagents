@@ -9,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   AdapterIndexer,
   FileIndexCache,
+  FileIndexLock,
   type IndexLock,
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
@@ -142,7 +143,7 @@ describe('AdapterIndexer with an injected cache and lock', () => {
   });
 });
 
-describe('AdapterIndexer with a cache but no lock', () => {
+describe('AdapterIndexer with a cache', () => {
   it('introspects on miss then serves a warm cache hit', async () => {
     const { adapter, db } = await init_db(
       'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
@@ -151,7 +152,11 @@ describe('AdapterIndexer with a cache but no lock', () => {
 
     const introspections = countIntrospections(adapter);
     const cache = new FileIndexCache({ dir: await tempCacheDir() });
-    const indexer = new AdapterIndexer({ adapters: { main: adapter }, cache });
+    const indexer = new AdapterIndexer({
+      adapters: { main: adapter },
+      cache,
+      lock: new KeyMutexLock(),
+    });
 
     const firstEvents: Text2SqlIndexProgressEvent[] = [];
     const first = await indexer.index({
@@ -176,7 +181,7 @@ describe('AdapterIndexer with a cache but no lock', () => {
   });
 });
 
-describe('AdapterIndexer with no cache', () => {
+describe('AdapterIndexer with a lock but no cache', () => {
   it('introspects every call and emits no cache events', async () => {
     const { adapter, db } = await init_db(
       'CREATE TABLE users (id INTEGER PRIMARY KEY);',
@@ -184,7 +189,10 @@ describe('AdapterIndexer with no cache', () => {
     after(() => db.close());
 
     const introspections = countIntrospections(adapter);
-    const indexer = new AdapterIndexer({ adapters: { main: adapter } });
+    const indexer = new AdapterIndexer({
+      adapters: { main: adapter },
+      lock: new KeyMutexLock(),
+    });
 
     const events: Text2SqlIndexProgressEvent[] = [];
     await indexer.index({ onProgress: (event) => events.push(event) });
@@ -267,6 +275,7 @@ describe('FileIndexCache corrupt-file resilience', () => {
     const indexer = new AdapterIndexer({
       adapters: { main: adapter },
       cache: new FileIndexCache({ dir }),
+      lock: new KeyMutexLock(),
     });
 
     await indexer.index();
@@ -288,5 +297,71 @@ describe('FileIndexCache corrupt-file resilience', () => {
     );
     assert.ok(eventTypes(events).includes('adapter:cache-miss'));
     assert.ok(Array.isArray(fragments));
+  });
+});
+
+describe('FileIndexLock serializes concurrent introspection', () => {
+  it('runs a single introspection for concurrent indexers sharing a dir + FileIndexLock', async () => {
+    const dir = await tempCacheDir();
+
+    const hostA = await init_db(
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
+    );
+    const hostB = await init_db(
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);',
+    );
+    after(() => {
+      hostA.db.close();
+      hostB.db.close();
+    });
+
+    const introA = countIntrospections(hostA.adapter);
+    const introB = countIntrospections(hostB.adapter);
+
+    const indexerA = new AdapterIndexer({
+      adapters: { main: hostA.adapter },
+      cache: new FileIndexCache({ dir }),
+      lock: new FileIndexLock({ dir }),
+    });
+    const indexerB = new AdapterIndexer({
+      adapters: { main: hostB.adapter },
+      cache: new FileIndexCache({ dir }),
+      lock: new FileIndexLock({ dir }),
+    });
+
+    const [a, b] = await Promise.all([indexerA.index(), indexerB.index()]);
+
+    assert.strictEqual(
+      introA.count() + introB.count(),
+      1,
+      'two FileIndexLock instances over one dir + shared cache collapse to a single introspection',
+    );
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(a)),
+      JSON.parse(JSON.stringify(b)),
+    );
+  });
+});
+
+describe('FileIndexLock run() contract', () => {
+  it('creates a missing lock dir and returns the critical section result', async () => {
+    const dir = path.join(await tempCacheDir(), 'nested', 'locks');
+    const lock = new FileIndexLock({ dir });
+
+    const result = await lock.run('adapter', async () => 'value');
+
+    assert.strictEqual(result, 'value');
+  });
+
+  it('releases the lock even when the critical section throws', async () => {
+    const lock = new FileIndexLock({ dir: await tempCacheDir() });
+
+    await assert.rejects(
+      () => lock.run('adapter', () => Promise.reject(new Error('boom'))),
+      /boom/,
+    );
+
+    const after = await lock.run('adapter', async () => 'ok');
+    assert.strictEqual(after, 'ok');
   });
 });

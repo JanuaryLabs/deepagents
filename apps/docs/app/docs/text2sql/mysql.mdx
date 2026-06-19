@@ -21,7 +21,7 @@ Reuse the shared `model`, `sandbox`, and `engine` setup from
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -52,6 +52,7 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 

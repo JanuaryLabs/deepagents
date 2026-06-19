@@ -6,6 +6,7 @@ import { getFragmentData } from '@deepagents/context';
 import {
   AdapterIndexer,
   FileIndexCache,
+  FileIndexLock,
   type IndexCache,
 } from '@deepagents/text2sql';
 import * as sqlite from '@deepagents/text2sql/sqlite';
@@ -19,6 +20,7 @@ function indexTestAdapters(
   return new AdapterIndexer({
     adapters,
     cache,
+    lock: new FileIndexLock({ namespace: generateId() }),
   }).index();
 }
 

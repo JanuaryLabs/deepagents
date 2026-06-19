@@ -24,7 +24,7 @@ Reuse the shared `model` setup from
 <Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="PostgreSQL">
 ```typescript
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
@@ -45,12 +45,13 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="SQLite">
 ```typescript
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -71,12 +72,13 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="SQL Server">
 ```typescript
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -100,12 +102,13 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
 <Tab value="MySQL/MariaDB">
 ```typescript
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -129,6 +132,7 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -136,7 +140,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -166,6 +170,7 @@ const text2sql = new Text2Sql({
       ],
     }),
   },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>

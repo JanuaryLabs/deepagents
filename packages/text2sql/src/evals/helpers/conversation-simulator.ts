@@ -23,6 +23,7 @@ import {
 
 import { AdapterIndexer } from '../../lib/adapter-index.ts';
 import type { Adapter } from '../../lib/adapters/adapter.ts';
+import { FileIndexLock } from '../../lib/index-lock.ts';
 import { instructions } from '../../lib/instructions.ts';
 
 export interface ConversationSimulatorConfig {
@@ -218,7 +219,10 @@ export async function simulateConversation(
 
     engine.set(
       ...instructions(),
-      ...(await new AdapterIndexer({ adapters }).index()),
+      ...(await new AdapterIndexer({
+        adapters,
+        lock: new FileIndexLock({ namespace: randomUUID() }),
+      }).index()),
     );
     await engine.continue(user(userMessage));
     const stream = await chat(ai);
