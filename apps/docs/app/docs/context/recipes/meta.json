@@ -8,6 +8,7 @@
     "text2sql-integration",
     "multi-session-context",
     "error-recovery",
-    "gcs-cloud-storage"
+    "gcs-cloud-storage",
+    "minio-cloud-storage"
   ]
 }
