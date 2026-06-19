@@ -30,6 +30,7 @@ import {
   type UserReminder,
   type WhenContext,
   applyRemindersToToolOutput,
+  applyUserRemindersToMessage,
   isConditionalReminder,
   synthesizeSteerUserMessage,
   user,
@@ -931,24 +932,32 @@ export class ContextEngine {
     );
 
     const chain = await this.#getChainContext();
-    const matched = await evaluateFiredReminders(
-      configs,
-      this.#buildWhenCtx(chain, message),
-    );
+    const matched = await evaluateFiredReminders(configs, {
+      ...this.#buildWhenCtx(chain, message),
+      firedOnceIds: chain.firedOnceIds,
+    });
     if (matched.length === 0) return;
 
+    const onceIds = [...new Set(matched.flatMap((m) => m.onceIds))];
     const reminders: UserReminder[] = matched.map((m) => ({
       text: m.resolved.text,
       asPart: m.config.asPart,
       target: 'user',
       metadata: m.resolved.metadata,
     }));
-    const originalId = fragment.id;
-    const recreated = user(
-      originalId ? { ...message, id: originalId } : message,
-      ...reminders,
-    );
-    pending[fragmentIndex] = recreated;
+    const carrier: UIMessage & { role: 'user' } = {
+      ...message,
+      id: fragment.id ?? message.id,
+      parts: [...message.parts],
+    };
+    if (onceIds.length > 0) {
+      carrier.metadata = {
+        ...(carrier.metadata as Record<string, unknown> | undefined),
+        onceIds,
+      };
+    }
+    applyUserRemindersToMessage(carrier, reminders);
+    pending[fragmentIndex] = user(carrier);
   }
 
   async #steerWhenCtx(session: SteerSession): Promise<WhenContext> {

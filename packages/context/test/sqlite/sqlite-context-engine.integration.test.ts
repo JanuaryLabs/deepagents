@@ -647,18 +647,17 @@ describe('Sqlite ContextEngine Integration', () => {
       });
 
       engine.set(
-        user(
-          'body',
-          reminder('inline'),
-          reminder('part-reminder', { asPart: partMode }),
-        ),
+        reminder('inline'),
+        reminder('part-reminder', { asPart: partMode }),
+        user('body'),
       );
+      await engine.save();
 
-      const beforeSave = await engine.resolve({
+      const afterSave = await engine.resolve({
         renderer,
         sandbox: await createVirtualAgentSandbox(),
       });
-      const messageBefore = beforeSave.messages[0] as {
+      const message = afterSave.messages[0] as {
         parts: Array<{ type: string; text?: string }>;
         metadata?: {
           reminders?: Array<{
@@ -673,32 +672,30 @@ describe('Sqlite ContextEngine Integration', () => {
       };
 
       assert.deepStrictEqual(
-        messageBefore.parts.map((part) =>
+        message.parts.map((part) =>
           part.type === 'text' ? part.text : part.type,
         ),
         [`body${taggedReminder('inline')}`, 'part-reminder'],
       );
-      assert.strictEqual(messageBefore.metadata?.reminders?.length, 2);
+      assert.strictEqual(message.metadata?.reminders?.length, 2);
 
-      await engine.save();
-
-      const afterSave = await engine.resolve({
+      const roundtrip = await engine.resolve({
         renderer,
         sandbox: await createVirtualAgentSandbox(),
       });
-      const messageAfter = afterSave.messages[0] as {
+      const messageAgain = roundtrip.messages[0] as {
         parts: Array<{ type: string; text?: string }>;
         metadata?: unknown;
       };
 
       assert.deepStrictEqual(
-        messageAfter.parts,
-        messageBefore.parts,
+        messageAgain.parts,
+        message.parts,
         'Reminder text parts should survive save/resolve',
       );
       assert.deepStrictEqual(
-        messageAfter.metadata,
-        messageBefore.metadata,
+        messageAgain.metadata,
+        message.metadata,
         'Reminder metadata should survive save/resolve',
       );
     });

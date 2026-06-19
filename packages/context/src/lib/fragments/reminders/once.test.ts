@@ -32,10 +32,10 @@ describe('once(id)', () => {
     );
   });
 
-  it('throws when used off a steer target (firedOnceIds absent)', async () => {
+  it('throws when firedOnceIds is absent (tool-output target)', async () => {
     await assert.rejects(
       async () => once('x')(ctx({ firedOnceIds: undefined })),
-      /only supported on target:'steer'/,
+      /not supported on target:'tool-output'/,
     );
   });
 

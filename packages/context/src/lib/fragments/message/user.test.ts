@@ -3,6 +3,8 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  ContextEngine,
+  InMemoryContextStore,
   type UserReminderMetadata,
   everyNTurns,
   first,
@@ -73,6 +75,15 @@ function getToolOutput(message: UIMessage, index = 0): unknown {
   return part.output;
 }
 
+function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
+  const message = fragment.codec?.decode();
+  assert.ok(
+    isUIMessage(message),
+    'Expected user fragment to decode to a UIMessage',
+  );
+  return message;
+}
+
 function encodeMessage(fragment: ReturnType<typeof user>): UIMessage {
   const message = fragment.codec?.encode();
   assert.ok(
@@ -82,13 +93,26 @@ function encodeMessage(fragment: ReturnType<typeof user>): UIMessage {
   return message;
 }
 
-function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
-  const message = fragment.codec?.decode();
-  assert.ok(
-    isUIMessage(message),
-    'Expected user fragment to decode to a UIMessage',
+/**
+ * Declare user-target reminders on the engine and return the persisted user
+ * message after the save fold bakes them in. This is the black-box equivalent of
+ * the old immediate `user(content, ...reminders)` path — reminders are now
+ * folded into the last pending user message at save() time.
+ */
+async function bakeUserReminders(
+  content: string | (UIMessage & { role: 'user' }),
+  ...reminders: ReturnType<typeof reminder>[]
+): Promise<UIMessage> {
+  const store = new InMemoryContextStore();
+  const engine = new ContextEngine({ store, chatId: 'bake', userId: 'u' });
+  engine.set(...reminders, user(content));
+  await engine.save();
+  const users = (await store.getMessages('bake')).filter(
+    (m) => m.name === 'user',
   );
-  return message;
+  const data = users[users.length - 1]?.data;
+  assert.ok(isUIMessage(data), 'Expected a persisted user message');
+  return data;
 }
 
 function getReminderMetadata(message: UIMessage): UserReminderMetadata[] {
@@ -111,9 +135,11 @@ function taggedReminder(text: string) {
 }
 
 describe('user reminders', () => {
-  it('adds inline tagged reminder metadata with expected ranges', () => {
-    const fragment = user('hello', reminder('keep responses concise'));
-    const message = encodeMessage(fragment);
+  it('adds inline tagged reminder metadata with expected ranges', async () => {
+    const message = await bakeUserReminders(
+      'hello',
+      reminder('keep responses concise'),
+    );
 
     const encodedReminder = taggedReminder('keep responses concise');
     assert.strictEqual(message.role, 'user');
@@ -142,14 +168,13 @@ describe('user reminders', () => {
     );
   });
 
-  it('applies multiple inline reminders in call order with append-only ranges', () => {
-    const fragment = user(
+  it('applies multiple inline reminders in declared order with append-only ranges', async () => {
+    const message = await bakeUserReminders(
       'x',
       reminder('first'),
       reminder('second'),
       reminder('third'),
     );
-    const message = encodeMessage(fragment);
 
     const first = taggedReminder('first');
     const second = taggedReminder('second');
@@ -192,14 +217,13 @@ describe('user reminders', () => {
     );
   });
 
-  it('supports asPart reminders and records part index ranges', () => {
+  it('supports asPart reminders and records part index ranges', async () => {
     const partMode = true;
-    const fragment = user(
+    const message = await bakeUserReminders(
       'body',
       reminder('before', { asPart: partMode }),
       reminder('after', { asPart: partMode }),
     );
-    const message = encodeMessage(fragment);
 
     assert.deepStrictEqual(
       message.parts.map((part) =>
@@ -237,8 +261,8 @@ describe('user reminders', () => {
     );
   });
 
-  it('appends inline reminders to the last text part in multi-part messages', () => {
-    const fragment = user(
+  it('appends inline reminders to the last text part in multi-part messages', async () => {
+    const message = await bakeUserReminders(
       {
         id: 'multi-text',
         role: 'user',
@@ -249,7 +273,6 @@ describe('user reminders', () => {
       },
       reminder('only-last-part'),
     );
-    const message = encodeMessage(fragment);
     const encodedReminder = taggedReminder('only-last-part');
 
     assert.strictEqual(getTextPart(message, 0), 'first');
@@ -273,7 +296,7 @@ describe('user reminders', () => {
     );
   });
 
-  it('merges reminder metadata with existing metadata and keeps user role', () => {
+  it('merges reminder metadata with existing metadata and keeps user role', async () => {
     const existingReminder: UserReminderMetadata = {
       id: 'existing-reminder',
       text: 'existing',
@@ -293,8 +316,7 @@ describe('user reminders', () => {
       parts: [{ type: 'text', text: 'payload' }],
     };
 
-    const fragment = user(content, reminder('new-reminder'));
-    const message = encodeMessage(fragment);
+    const message = await bakeUserReminders(content, reminder('new-reminder'));
     const metadata = getMetadata(message);
     const reminders = getReminderMetadata(message);
 
@@ -334,8 +356,8 @@ describe('user reminders', () => {
     assert.throws(() => reminder('   '), /Reminder text must not be empty/);
   });
 
-  it('merges metadata returned from reminder factories', () => {
-    const fragment = user(
+  it('merges metadata returned from reminder factories', async () => {
+    const message = await bakeUserReminders(
       'payload',
       reminder(() => ({
         text: 'structured-hint',
@@ -347,7 +369,6 @@ describe('user reminders', () => {
         },
       })),
     );
-    const message = encodeMessage(fragment);
     const metadata = getMetadata(message);
 
     assert.ok(
@@ -363,8 +384,8 @@ describe('user reminders', () => {
 });
 
 describe('user codec contract', () => {
-  it('decode and encode return the same message with inline reminders', () => {
-    const fragment = user('hello', reminder('secret'));
+  it('decode and encode return the same message reference', () => {
+    const fragment = user('hello');
     const decoded = decodeMessage(fragment);
     const encoded = encodeMessage(fragment);
 
@@ -373,18 +394,11 @@ describe('user codec contract', () => {
       encoded,
       'decode and encode should return the same reference',
     );
-    assert.ok(
-      getTextPart(decoded).includes('secret'),
-      'inline reminders should be baked into the message',
-    );
+    assert.strictEqual(getTextPart(decoded), 'hello');
   });
 
   it('multiple encode calls return the same reference', () => {
-    const fragment = user(
-      'hi',
-      reminder('r1'),
-      reminder('r2', { asPart: false }),
-    );
+    const fragment = user('hi');
     const first = encodeMessage(fragment);
     const second = encodeMessage(fragment);
 
@@ -395,28 +409,24 @@ describe('user codec contract', () => {
     );
   });
 
-  it('decode preserves inline reminders and metadata', () => {
-    const fragment = user('payload', reminder('injected'));
-    const decoded = decodeMessage(fragment);
+  it('baked user message preserves inline reminder text and metadata', async () => {
+    const message = await bakeUserReminders('payload', reminder('injected'));
 
-    const text = getTextPart(decoded);
+    const text = getTextPart(message);
     assert.ok(text.includes('payload'), 'original content should be present');
     assert.ok(
       text.includes(taggedReminder('injected')),
       'reminder should be baked in',
     );
 
-    const metadata = getReminderMetadata(decoded);
+    const metadata = getReminderMetadata(message);
     assert.strictEqual(metadata.length, 1);
     assert.strictEqual(metadata[0].text, 'injected');
   });
 
-  it('fragments created with the same content are independent', () => {
-    const a = user('msg', reminder('a'));
-    const b = user('msg', reminder('b'));
-
-    const aMsg = encodeMessage(a);
-    const bMsg = encodeMessage(b);
+  it('reminders declared on independent engines do not bleed across messages', async () => {
+    const aMsg = await bakeUserReminders('msg', reminder('a'));
+    const bMsg = await bakeUserReminders('msg', reminder('b'));
 
     assert.ok(getTextPart(aMsg).includes('a'));
     assert.ok(!getTextPart(aMsg).includes(taggedReminder('b')));
@@ -458,9 +468,9 @@ describe('reminder range helpers', () => {
     assert.strictEqual(result, 'bc');
   });
 
-  it('strips reminders from a message and removes reminder metadata', () => {
+  it('strips reminders from a message and removes reminder metadata', async () => {
     const partMode = true;
-    const fragment = user(
+    const message = await bakeUserReminders(
       {
         id: 'msg-1',
         role: 'user',
@@ -470,7 +480,6 @@ describe('reminder range helpers', () => {
       reminder('inline-reminder'),
       reminder('part-reminder', { asPart: partMode }),
     );
-    const message = encodeMessage(fragment);
     const encodedInlineReminder = taggedReminder('inline-reminder');
 
     assert.deepStrictEqual(
@@ -501,9 +510,9 @@ describe('reminder range helpers', () => {
     assert.ok(getMetadata(message).reminders);
   });
 
-  it('strips reminders across multiple text parts and keeps non-reminder text', () => {
+  it('strips reminders across multiple text parts and keeps non-reminder text', async () => {
     const partMode = true;
-    const fragment = user(
+    const message = await bakeUserReminders(
       {
         id: 'msg-multi-part-strip',
         role: 'user',
@@ -516,7 +525,6 @@ describe('reminder range helpers', () => {
       reminder('inline-tail'),
       reminder('standalone-part', { asPart: partMode }),
     );
-    const message = encodeMessage(fragment);
     const stripped = stripReminders(message);
 
     assert.deepStrictEqual(
@@ -565,9 +573,11 @@ describe('reminder range helpers', () => {
     assert.deepStrictEqual(stripped.metadata, { source: 'seed' });
   });
 
-  it('strips user reminders and unwraps tool-output envelopes without metadata records', () => {
-    const userFragment = user('Deploy now.', reminder('user-reminder'));
-    const userMessage = encodeMessage(userFragment);
+  it('strips user reminders and unwraps tool-output envelopes without metadata records', async () => {
+    const userMessage = await bakeUserReminders(
+      'Deploy now.',
+      reminder('user-reminder'),
+    );
 
     const envelopeToolMessage: UIMessage = {
       id: 'assistant-envelope-tool-reminder',
@@ -652,81 +662,94 @@ describe('reminder range helpers', () => {
   });
 });
 
-describe('reminder scheduling', () => {
-  describe('reminder() returns ContextFragment when when is provided', () => {
-    it('returns a ContextFragment with conditional reminder metadata', () => {
-      const fragment = reminder('every-third', { when: everyNTurns(3) });
-      assert.ok(isConditionalReminder(fragment));
-      assert.strictEqual(fragment.name, 'reminder');
-      assert.strictEqual(typeof fragment.metadata?.reminder, 'object');
-      assert.strictEqual(fragment.metadata?.reminder.target, 'user');
-    });
-
-    it('returns a UserReminder without when', () => {
-      const r = reminder('plain');
-      assert.ok(!('name' in r), 'Should be a UserReminder, not a fragment');
-      assert.strictEqual(r.text, 'plain');
-      assert.strictEqual(r.asPart, false);
-    });
-
-    it('stores asPart in fragment metadata when when is provided', () => {
-      const partMode = true;
-      const fragment = reminder('text', {
-        when: everyNTurns(3),
-        asPart: partMode,
-      });
-      assert.ok(isConditionalReminder(fragment));
-      assert.strictEqual(fragment.metadata.reminder.asPart, true);
-    });
-
-    it('stores explicit tool-output target in conditional reminder metadata', () => {
-      const fragment = reminder('text', {
-        when: everyNTurns(1),
-        target: 'tool-output',
-      });
-      assert.ok(isConditionalReminder(fragment));
-      assert.strictEqual(fragment.metadata.reminder.target, 'tool-output');
-    });
-
-    it('stores callback text in fragment metadata when when is provided', () => {
-      const cb = (ctx: { turn?: number }) => `turn ${ctx.turn}`;
-      const fragment = reminder(cb, { when: first() });
-      assert.ok(isConditionalReminder(fragment));
-      assert.strictEqual(typeof fragment.metadata.reminder.text, 'function');
-    });
-
-    it('rejects empty string text even with when', () => {
-      assert.throws(
-        () => reminder('', { when: first() }),
-        /Reminder text must not be empty/,
-      );
-    });
-
-    it('isConditionalReminder returns false for non-reminder fragments', () => {
-      assert.strictEqual(
-        isConditionalReminder({ name: 'role', data: 'helpful' }),
-        false,
-      );
-      assert.strictEqual(isConditionalReminder({ name: 'reminder' }), false);
-    });
+describe('reminder() factory', () => {
+  it('returns a ContextFragment with conditional reminder metadata when when is provided', () => {
+    const fragment = reminder('every-third', { when: everyNTurns(3) });
+    assert.ok(isConditionalReminder(fragment));
+    assert.strictEqual(fragment.name, 'reminder');
+    assert.strictEqual(typeof fragment.metadata?.reminder, 'object');
+    assert.strictEqual(fragment.metadata?.reminder.target, 'user');
   });
 
-  describe('reminder() asPart defaults (immediate path)', () => {
+  it('returns an always-firing user fragment when when is omitted', () => {
+    const fragment = reminder('plain');
+    assert.ok(
+      isConditionalReminder(fragment),
+      'reminder() now always returns a fragment',
+    );
+    assert.strictEqual(fragment.metadata.reminder.target, 'user');
+    assert.strictEqual(fragment.metadata.reminder.asPart, false);
+    assert.strictEqual(
+      typeof fragment.metadata.reminder.when,
+      'function',
+      'an omitted when defaults to an always-fire predicate',
+    );
+  });
+
+  it('stores asPart in fragment metadata when when is provided', () => {
+    const partMode = true;
+    const fragment = reminder('text', {
+      when: everyNTurns(3),
+      asPart: partMode,
+    });
+    assert.ok(isConditionalReminder(fragment));
+    assert.strictEqual(fragment.metadata.reminder.asPart, true);
+  });
+
+  it('stores explicit tool-output target in conditional reminder metadata', () => {
+    const fragment = reminder('text', {
+      when: everyNTurns(1),
+      target: 'tool-output',
+    });
+    assert.ok(isConditionalReminder(fragment));
+    assert.strictEqual(fragment.metadata.reminder.target, 'tool-output');
+  });
+
+  it('stores callback text in fragment metadata', () => {
+    const cb = (ctx: { turn?: number }) => `turn ${ctx.turn}`;
+    const fragment = reminder(cb, { when: first() });
+    assert.ok(isConditionalReminder(fragment));
+    assert.strictEqual(typeof fragment.metadata.reminder.text, 'function');
+  });
+
+  it('rejects empty string text even with when', () => {
+    assert.throws(
+      () => reminder('', { when: first() }),
+      /Reminder text must not be empty/,
+    );
+  });
+
+  it('requires a when predicate for non-user targets', () => {
+    assert.throws(
+      () => reminder('text', { target: 'steer' }),
+      /requires a when predicate/,
+    );
+  });
+
+  it('isConditionalReminder returns false for non-reminder fragments', () => {
+    assert.strictEqual(
+      isConditionalReminder({ name: 'role', data: 'helpful' }),
+      false,
+    );
+    assert.strictEqual(isConditionalReminder({ name: 'reminder' }), false);
+  });
+
+  describe('asPart defaults', () => {
     it('fragment input defaults asPart to false', () => {
-      const r = reminder(hint('Check indexes'));
-      assert.ok(!('name' in r), 'Should be a UserReminder, not a fragment');
+      const fragment = reminder(hint('Check indexes'));
+      assert.ok(isConditionalReminder(fragment));
       assert.strictEqual(
-        r.asPart,
+        fragment.metadata.reminder.asPart,
         false,
-        'Immediate fragment reminders should default inline',
+        'Fragment reminders should default inline',
       );
     });
 
     it('explicit asPart: false keeps fragment reminders inline', () => {
-      const r = reminder(hint('Inline hint'), { asPart: false });
-      assert.ok(!('name' in r));
+      const fragment = reminder(hint('Inline hint'), { asPart: false });
+      assert.ok(isConditionalReminder(fragment));
       assert.strictEqual(
-        r.asPart,
+        fragment.metadata.reminder.asPart,
         false,
         'Caller-provided asPart should be honored',
       );
@@ -734,10 +757,10 @@ describe('reminder scheduling', () => {
 
     it('explicit part mode overrides the string default', () => {
       const partMode = true;
-      const r = reminder('plain', { asPart: partMode });
-      assert.ok(!('name' in r));
+      const fragment = reminder('plain', { asPart: partMode });
+      assert.ok(isConditionalReminder(fragment));
       assert.strictEqual(
-        r.asPart,
+        fragment.metadata.reminder.asPart,
         true,
         'String input defaults to false but caller can override to part mode',
       );

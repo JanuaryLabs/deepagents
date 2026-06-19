@@ -4,10 +4,10 @@ import { describe, it } from 'node:test';
 
 import {
   XmlRenderer,
+  applyUserRemindersToMessage,
   fromFragment,
   getReminderRanges,
   identity,
-  reminder,
   render,
   stripReminders,
   stripTextByRanges,
@@ -30,15 +30,17 @@ describe('browser export path', () => {
   });
 
   it('supports reminder metadata helpers through browser entrypoint', () => {
-    const fragment = user(
-      'Deploy now.',
-      reminder('Ask for confirmation before destructive actions'),
-    );
-
-    const message = fragment.codec?.encode() as {
+    const message = user('Deploy now.').codec?.encode() as {
       parts: Array<{ type: string; text?: string }>;
       metadata?: Record<string, unknown>;
     };
+    applyUserRemindersToMessage(message as unknown as UIMessage, [
+      {
+        text: 'Ask for confirmation before destructive actions',
+        asPart: false,
+        target: 'user',
+      },
+    ]);
 
     const ranges = getReminderRanges(message.metadata);
     assert.strictEqual(ranges.length, 1);
@@ -54,13 +56,11 @@ describe('browser export path', () => {
 
   it('strips reminders from messages through browser entrypoint', () => {
     const partMode = true;
-    const fragment = user(
-      'Ship now.',
-      reminder('hidden-inline'),
-      reminder('hidden-part', { asPart: partMode }),
-    );
-
-    const message = fragment.codec?.encode() as UIMessage;
+    const message = user('Ship now.').codec?.encode() as UIMessage;
+    applyUserRemindersToMessage(message, [
+      { text: 'hidden-inline', asPart: false, target: 'user' },
+      { text: 'hidden-part', asPart: partMode, target: 'user' },
+    ]);
 
     const stripped = stripReminders(message);
 

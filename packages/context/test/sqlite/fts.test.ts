@@ -161,10 +161,8 @@ describe('Full-Text Search', () => {
         });
 
         engine.set(
-          user(
-            'User visible message',
-            reminder('remindersearchabletoken92743'),
-          ),
+          reminder('remindersearchabletoken92743'),
+          user('User visible message'),
         );
         await engine.save();
 
