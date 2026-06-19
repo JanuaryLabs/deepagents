@@ -378,6 +378,10 @@ function createDaytonaSandboxMethods(args: {
       // The caller owns the Daytona client and the sandbox lifecycle, so there
       // is nothing for this adapter to release.
     },
+
+    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+      return this.dispose();
+    },
   };
 }
 

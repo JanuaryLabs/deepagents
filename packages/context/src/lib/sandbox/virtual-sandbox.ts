@@ -48,5 +48,9 @@ export async function createVirtualSandbox(
     },
 
     async dispose() {},
+
+    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+      return this.dispose();
+    },
   };
 }

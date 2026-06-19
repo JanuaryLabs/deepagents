@@ -314,6 +314,10 @@ export async function createAgentOsSandbox(
         // Ignore disposal errors (VM may already be disposed)
       }
     },
+
+    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+      return this.dispose();
+    },
   };
 }
 

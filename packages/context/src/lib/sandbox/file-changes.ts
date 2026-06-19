@@ -504,6 +504,10 @@ export async function withStraceFileChanges(
       await innerExecute(`rm -rf ${shellQuote(traceDir)}`).catch(() => {});
       await sandbox.dispose();
     },
+
+    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+      return this.dispose();
+    },
   };
 
   if (sandbox.spawn) {

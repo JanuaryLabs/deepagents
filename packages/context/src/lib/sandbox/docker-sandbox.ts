@@ -712,6 +712,10 @@ export abstract class DockerSandboxStrategy {
         await this.stopContainer(containerId);
         await this.cleanupCreatedVolumes();
       },
+
+      [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
+        return this.dispose();
+      },
     };
 
     return sandbox;

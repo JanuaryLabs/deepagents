@@ -49,15 +49,18 @@ export interface SandboxProcess {
  * `if (!sandbox.spawn) ...` — no silent fallback that aggregates output
  * and flushes on completion.
  */
-export interface DisposableSandbox extends Omit<
-  UpstreamSandbox,
-  'executeCommand'
-> {
+export interface DisposableSandbox
+  extends Omit<UpstreamSandbox, 'executeCommand'>, AsyncDisposable {
   executeCommand(
     command: string,
     options?: ExecuteCommandOptions,
   ): Promise<CommandResult>;
   spawn?(command: string, options?: SpawnOptions): SandboxProcess;
+  /**
+   * Release the backend's external resources. Called explicitly, or
+   * automatically at scope exit via `await using` — every backend also
+   * implements `[Symbol.asyncDispose]`, which delegates here.
+   */
   dispose(): Promise<void>;
 }
 
