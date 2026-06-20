@@ -43,6 +43,11 @@ create()
 
 If `configure()` throws, the base class auto-stops the container before re-throwing.
 
+The methods object returned by `createSandboxMethods()` also implements
+`[Symbol.asyncDispose]`, which delegates to `dispose()`. Because
+`DisposableSandbox extends AsyncDisposable`, callers can bind any backend with
+`await using` and the container is torn down at scope exit.
+
 ### Container Startup
 
 All single-container strategies start containers with:

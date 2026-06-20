@@ -3,16 +3,26 @@ import { MockLanguageModelV3 } from 'ai/test';
 import type { CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   BashException,
   type FileChange,
-  StraceUnavailableError,
   createBashTool,
   createDockerSandbox,
   withStraceFileChanges,
 } from '@deepagents/context';
+// The probe and its error come from the lean leaf entry (neither is on the main
+// barrel). Import the error from the SAME entry as the probe: esbuild bundles
+// each entry independently, so catching a leaf-thrown error with another entry's
+// class would fail `instanceof`.
+import {
+  StraceUnavailableError,
+  selfTestStrace,
+} from '@deepagents/context/sandbox/strace';
 
 async function isDockerAvailable(): Promise<boolean> {
   try {
@@ -650,13 +660,31 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
   });
 });
 
-dockerSuite('strace self-test hard-fail', () => {
+// trace-unparseable only manifests when strace runs under a non-native
+// (emulated) arch. On an arm64 host `--platform linux/amd64` runs under
+// emulation and garbles the trace; on an amd64 host that platform is native and
+// the probe would pass, so the case is only reproducible — and only asserted —
+// on arm64.
+const emulatesAmd64 = process.arch === 'arm64';
+
+dockerSuite('selfTestStrace (real docker)', () => {
+  it('resolves on a real strace-capable container', async () => {
+    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+    try {
+      await selfTestStrace(backend);
+    } finally {
+      await backend.dispose();
+    }
+  });
+
   it('throws StraceUnavailableError(strace-missing) when strace is absent', async () => {
+    // A DisposableSandbox satisfies StraceHost structurally, so the real backend
+    // is passed to selfTestStrace unchanged (this also type-checks the
+    // structural-compat contract).
     const backend = await createDockerSandbox({ image: 'alpine:latest' });
     try {
       await assert.rejects(
-        () =>
-          withStraceFileChanges(backend, { include: ['/work', '/work/**'] }),
+        () => selfTestStrace(backend),
         (err: unknown) =>
           err instanceof StraceUnavailableError &&
           err.reason === 'strace-missing',
@@ -665,4 +693,57 @@ dockerSuite('strace self-test hard-fail', () => {
       await backend.dispose();
     }
   });
+
+  it('throws StraceUnavailableError(ptrace-blocked) when ptrace is denied', async () => {
+    // Real ptrace denial: a default-allow seccomp profile that errnos `ptrace`,
+    // so strace's PTRACE_TRACEME fails exactly as a hardened runtime would.
+    const dir = mkdtempSync(join(tmpdir(), 'strace-seccomp-'));
+    const seccomp = join(dir, 'deny-ptrace.json');
+    writeFileSync(
+      seccomp,
+      JSON.stringify({
+        defaultAction: 'SCMP_ACT_ALLOW',
+        syscalls: [
+          { names: ['ptrace'], action: 'SCMP_ACT_ERRNO', errnoRet: 1 },
+        ],
+      }),
+    );
+    const backend = await createDockerSandbox({
+      dockerfile: STRACE_IMAGE,
+      securityOpt: [`seccomp=${seccomp}`],
+    });
+    try {
+      await assert.rejects(
+        () => selfTestStrace(backend),
+        (err: unknown) =>
+          err instanceof StraceUnavailableError &&
+          err.reason === 'ptrace-blocked',
+      );
+    } finally {
+      await backend.dispose();
+    }
+  });
+
+  (emulatesAmd64 ? it : it.skip)(
+    'throws StraceUnavailableError(trace-unparseable) under an emulated arch',
+    async () => {
+      // amd64 under emulation on an arm64 host: strace runs but the trace is
+      // garbled (qemu renders syscalls as raw `syscall_0x…`), which the parser
+      // rejects.
+      const backend = await createDockerSandbox({
+        dockerfile: STRACE_IMAGE,
+        platform: 'linux/amd64',
+      });
+      try {
+        await assert.rejects(
+          () => selfTestStrace(backend),
+          (err: unknown) =>
+            err instanceof StraceUnavailableError &&
+            err.reason === 'trace-unparseable',
+        );
+      } finally {
+        await backend.dispose();
+      }
+    },
+  );
 });

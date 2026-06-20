@@ -169,6 +169,17 @@ try {
 }
 ```
 
+### Scope-Based Disposal with `await using`
+
+Every backend implements `[Symbol.asyncDispose]`, so an `await using` declaration
+disposes the sandbox automatically when the block exits — no `try/finally`:
+
+```typescript
+await using sandbox = await createAgentOsSandbox({ software: [common] });
+await sandbox.executeCommand('ls /');
+// disposed at scope exit, even if the block throws
+```
+
 ### Auto-Disposal with `useAgentOsSandbox`
 
 ```typescript

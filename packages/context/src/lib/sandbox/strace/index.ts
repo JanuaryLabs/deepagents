@@ -1,27 +1,10 @@
-import type { CommandResult } from 'bash-tool';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 
-import { useBashMeta } from './bash-meta.ts';
-import { shellQuote } from './installers/index.ts';
-import type { DisposableSandbox } from './types.ts';
+import { shellQuote } from '../shell-quote.ts';
+import type { FileChange } from './file-change.ts';
 
-/**
- * A single filesystem mutation observed for one tool call. Ops are
- * deliberately coarse: strace cannot distinguish a brand-new file from an
- * overwrite within a single command (both are `O_CREAT|O_TRUNC`), so
- * content-touching syscalls collapse to `write`. `delete` and `rename` are
- * unambiguous. Reads are not tracked — strace's syscall filter excludes them.
- */
-export type FileChangeOp = 'write' | 'delete' | 'rename';
-
-export interface FileChange {
-  op: FileChangeOp;
-  path: string;
-  /** Source path for a `rename`. */
-  from?: string;
-  timestamp: number;
-}
+export type { FileChange, FileChangeOp } from './file-change.ts';
 
 export type StraceUnavailableReason =
   | 'ptrace-blocked'
@@ -57,7 +40,6 @@ export class StraceUnavailableError extends Error {
   }
 }
 
-const DEFAULT_TRACE_DIR = '/tmp/dat-trace';
 const STRACE_FLAGS = '-f -y -qq -e trace=%file,write,pwrite64,writev';
 
 /**
@@ -69,7 +51,7 @@ const STRACE_FLAGS = '-f -y -qq -e trace=%file,write,pwrite64,writev';
  * command — if it ever disappears mid-session, the next command recreates it
  * rather than strace failing to open `-o` and skipping the command entirely.
  */
-function buildStraceCommand(
+export function buildStraceCommand(
   command: string,
   traceFile: string,
   traceDir: string,
@@ -80,13 +62,50 @@ function buildStraceCommand(
   );
 }
 
-/** Drop strace's own diagnostic lines (prefixed `strace: `) from captured stderr. */
-function stripStraceDiagnostics(stderr: string): string {
-  if (!stderr.includes('strace: ')) return stderr;
-  return stderr
-    .split('\n')
-    .filter((line) => !line.startsWith('strace: '))
-    .join('\n');
+/**
+ * Like {@link buildStraceCommand}, but dumps the (base64) trace inline on stdout
+ * after `sentinel`, then exits with the traced command's code. This lets one
+ * `executeCommand` round-trip carry both the command output and its trace — no
+ * second `readFile` exec to pull the trace out of the container. Pair with
+ * {@link splitTracedOutput}. `sentinel` must be unguessable (a UUID) so the
+ * command's own stdout cannot contain it. `base64` keeps the trace stream-safe
+ * and its stderr is dropped so a missing trace (strace failed) doesn't leak into
+ * the command's stderr.
+ */
+export function buildTracedCommand(
+  command: string,
+  traceFile: string,
+  traceDir: string,
+  sentinel: string,
+): string {
+  return (
+    `mkdir -p ${shellQuote(traceDir)} 2>/dev/null; ` +
+    `strace ${STRACE_FLAGS} -o ${shellQuote(traceFile)} -- sh -c ${shellQuote(command)}; ` +
+    `__dat_rc=$?; ` +
+    `printf '\\n%s\\n' ${shellQuote(sentinel)}; ` +
+    `base64 ${shellQuote(traceFile)} 2>/dev/null; ` +
+    `rm -f ${shellQuote(traceFile)} 2>/dev/null; ` +
+    `exit $__dat_rc`
+  );
+}
+
+/**
+ * Split {@link buildTracedCommand} output into the command's own stdout and its
+ * decoded strace trace. A missing sentinel (strace produced nothing) yields an
+ * empty trace so the caller degrades to "no changes".
+ */
+export function splitTracedOutput(
+  stdout: string,
+  sentinel: string,
+): { stdout: string; trace: string } {
+  const marker = `\n${sentinel}\n`;
+  const at = stdout.indexOf(marker);
+  if (at === -1) return { stdout, trace: '' };
+  const base64 = stdout.slice(at + marker.length);
+  return {
+    stdout: stdout.slice(0, at),
+    trace: base64 ? Buffer.from(base64, 'base64').toString('utf8') : '',
+  };
 }
 
 // An open is a definite write only when it creates or truncates. Bare
@@ -215,7 +234,7 @@ function openFlags(args: string): string {
   return args.match(/\bO_[A-Z_]+(?:\|O_[A-Z_]+)*/)?.[0] ?? '';
 }
 
-interface ParseStraceOptions {
+export interface ParseStraceOptions {
   include: string[];
   exclude?: string[];
   traceFile?: string;
@@ -223,7 +242,7 @@ interface ParseStraceOptions {
 }
 
 /** A path is tracked when it matches an `include` glob and no `exclude` glob. */
-function matchesGlobs(
+export function matchesGlobs(
   path: string,
   include: string[],
   exclude?: string[],
@@ -241,13 +260,11 @@ function matchesGlobs(
  * writes to one `write`; a path written then deleted within the command is
  * treated as transient and dropped.
  */
-function parseStraceTrace(
+export function parseStraceTrace(
   raw: string,
   options: ParseStraceOptions,
 ): FileChange[] {
-  const { include, exclude } = options;
-  const traceDir = options.traceDir;
-  const traceFile = options.traceFile;
+  const { include, exclude, traceDir, traceFile } = options;
   const now = Date.now();
 
   const state = new Map<string, 'write' | 'delete'>();
@@ -336,202 +353,13 @@ function parseStraceTrace(
     if (emittedRenameTargets.has(path)) continue;
     if (keep(path)) tail.push({ op, path, timestamp: now });
   }
-  tail.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  tail.sort((a, b) => {
+    if (a.path < b.path) return -1;
+    if (a.path > b.path) return 1;
+    return 0;
+  });
   changes.push(...tail);
   return changes;
-}
-
-export interface WithStraceFileChangesOptions {
-  /**
-   * Glob patterns (matched against absolute paths via Node's
-   * `path.matchesGlob`) selecting which file changes to report. Scope to a
-   * workspace with `[root, `${root}/**`]`. A path must match at least one
-   * pattern to be reported.
-   */
-  include: string[];
-  /**
-   * Glob patterns subtracted from `include` — a path matching any of these is
-   * dropped even if it also matches `include`. Use to keep framework-written
-   * files (e.g. an uploaded skills directory) out of the change stream.
-   */
-  exclude?: string[];
-  onFileChanges?: (changes: FileChange[]) => void | Promise<void>;
-  /**
-   * Called when `onFileChanges` throws on the `spawn` path — its only failure
-   * signal, since spawn has no tool result and no exception catcher upstream. A
-   * throw on the tool-call path fails the command instead, so it never reaches
-   * here. Defaults to `console.warn`.
-   */
-  onError?: (error: unknown) => void;
-  traceDir?: string;
-}
-
-const warnOnFileChangesError = (error: unknown): void => {
-  console.warn(
-    '[withStraceFileChanges] onFileChanges threw on spawn; isolated',
-    error,
-  );
-};
-
-/**
- * A `with*` decorator that runs the strace {@link selfTestStrace} probe once
- * (throwing {@link StraceUnavailableError} if strace is unusable on this
- * backend), then decorates the sandbox so each `executeCommand` is traced and
- * its filesystem mutations parsed into a per-call `FileChange[]`. Per-call
- * attribution is structural — one trace file per `callId` — so it is safe under
- * concurrent tool calls. Each call's manifest is surfaced two stateless ways: attached to
- * the tool result via the bash-meta channel (`meta.fileChanges`, hidden from the
- * model) and passed to `onFileChanges`. No buffer is retained.
- *
- * `readFile` passes through unchanged; `writeFiles` is observed directly (it
- * mutates outside strace's view) — each written file matching the
- * `include`/`exclude` globs becomes a `write` change fed to onFileChanges.
- * `dispose` also sweeps the trace
- * dir. `spawn` is traced the same way — its trace is read when the process exits
- * (strace is the top process, so the trace is fully flushed by then). `spawn`
- * carries no bash-meta scope, so its changes go to `onFileChanges` only.
- *
- * The trace file is always swept once parsed. A throwing `onFileChanges` on the
- * tool-call path propagates to `withBashExceptionCatch` one level up: a caller's
- * `BashException` becomes the tool result (via its `format()`), any other error
- * fails the tool call. The `spawn` path has no exception catcher, so its throw is
- * isolated and surfaced only via `onError` (exit result preserved).
- */
-export async function withStraceFileChanges(
-  sandbox: DisposableSandbox,
-  options: WithStraceFileChangesOptions,
-): Promise<DisposableSandbox> {
-  await selfTestStrace(sandbox);
-  const { include, exclude, onFileChanges } = options;
-  const onError = options.onError ?? warnOnFileChangesError;
-  const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
-  const innerExecute = sandbox.executeCommand.bind(sandbox);
-  const innerReadFile = sandbox.readFile.bind(sandbox);
-  const innerWriteFiles = sandbox.writeFiles.bind(sandbox);
-
-  // Delete the trace file with a fresh executeCommand (no caller signal) so an
-  // aborted turn can't cancel the cleanup and leave the file behind.
-  const removeTrace = (traceFile: string) =>
-    void innerExecute(`rm -f ${shellQuote(traceFile)}`).catch(() => {});
-
-  // Parse one call's changes and sweep its trace file — the trace is consumed
-  // once parsed, so it's deleted here regardless of what the caller's callback
-  // does next. Returns [] on an empty or unparseable trace.
-  const readChanges = async (traceFile: string): Promise<FileChange[]> => {
-    try {
-      return parseStraceTrace(await innerReadFile(traceFile), {
-        include,
-        exclude,
-        traceFile,
-        traceDir,
-      });
-    } catch {
-      return [];
-    } finally {
-      removeTrace(traceFile);
-    }
-  };
-
-  // Tool-call path: attach the hidden meta and run the callback. A throw is NOT
-  // caught — it propagates to `withBashExceptionCatch` one level up, which renders
-  // a caller's BashException via its `format()` or fails the tool call for any
-  // other error.
-  const collectCommand = async (traceFile: string): Promise<void> => {
-    const changes = await readChanges(traceFile);
-    if (!changes.length) return;
-    useBashMeta()?.setHidden({ fileChanges: changes });
-    await onFileChanges?.(changes);
-  };
-
-  // Spawn path: no tool result and no exception catcher upstream, so a callback
-  // throw is isolated here and surfaced only via `onError`.
-  const collectSpawn = async (traceFile: string): Promise<void> => {
-    const changes = await readChanges(traceFile);
-    if (!changes.length || !onFileChanges) return;
-    try {
-      await onFileChanges(changes);
-    } catch (error) {
-      onError(error);
-    }
-  };
-
-  const decorated: DisposableSandbox = {
-    async executeCommand(command, execOptions) {
-      const traceFile = `${traceDir}/${randomUUID()}.strace`;
-      const wrapped = buildStraceCommand(command, traceFile, traceDir);
-      let result: CommandResult;
-      try {
-        const raw = await innerExecute(wrapped, execOptions);
-        // strace's own diagnostics (prefixed `strace: `) share the command's
-        // stderr fd; strip them so the model sees only the command's stderr.
-        result = { ...raw, stderr: stripStraceDiagnostics(raw.stderr) };
-      } catch (error) {
-        // The command failed at the sandbox level; clean the trace and surface
-        // the real error rather than running onFileChanges (which could mask it).
-        removeTrace(traceFile);
-        throw error;
-      }
-      // On abort the caller discards this command's changes; skip onFileChanges.
-      if (execOptions?.signal?.aborted) {
-        removeTrace(traceFile);
-        return result;
-      }
-      // A throwing onFileChanges propagates here; the catcher one level up
-      // (withBashExceptionCatch) turns a BashException into the tool result, or
-      // fails the call for any other error.
-      await collectCommand(traceFile);
-      return result;
-    },
-    readFile: innerReadFile,
-    // The writeFile tool mutates the filesystem outside strace's view, so
-    // observe it directly: synthesize a `write` change per file (under the
-    // observation root) and run it through onFileChanges. A throw propagates to
-    // the writeFile tool's execute (which rejects), the same gate as the bash
-    // path — except there's no CommandResult here, so throw a plain Error to
-    // reject; BashException.format() is meaningful only for bash commands.
-    writeFiles: async (files) => {
-      await innerWriteFiles(files);
-      const now = Date.now();
-      // Upstream bash-tool resolves writeFile paths to absolute before they
-      // reach here, so match the include/exclude globs against them directly.
-      const changes = files
-        .map((f) => posix.normalize(f.path))
-        .filter((path) => matchesGlobs(path, include, exclude))
-        .map((path): FileChange => ({ op: 'write', path, timestamp: now }));
-      if (changes.length) await onFileChanges?.(changes);
-    },
-    dispose: async () => {
-      await innerExecute(`rm -rf ${shellQuote(traceDir)}`).catch(() => {});
-      await sandbox.dispose();
-    },
-
-    [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
-      return this.dispose();
-    },
-  };
-
-  if (sandbox.spawn) {
-    const innerSpawn = sandbox.spawn.bind(sandbox);
-    decorated.spawn = (command, spawnOptions) => {
-      const traceFile = `${traceDir}/${randomUUID()}.strace`;
-      const child = innerSpawn(
-        buildStraceCommand(command, traceFile, traceDir),
-        spawnOptions,
-      );
-      const exit = (async () => {
-        try {
-          return await child.exit;
-        } finally {
-          // collectSpawn is the isolation boundary: never let it (e.g. a
-          // throwing onError) reject and mask the real exit result.
-          await collectSpawn(traceFile).catch(() => {});
-        }
-      })();
-      return { stdout: child.stdout, stderr: child.stderr, exit };
-    };
-  }
-
-  return decorated;
 }
 
 // strace prints its own failures to stderr prefixed `strace: `. Anchor on that
@@ -542,12 +370,33 @@ const PTRACE_DENIED =
 const STRACE_MISSING = /strace:?\s+(?:command\s+)?not found/i;
 
 /**
+ * The minimal structural surface {@link selfTestStrace} needs from its host.
+ * Deliberately narrower than `DisposableSandbox` so the probe can run anywhere:
+ * a remote/docker caller passes its sandbox unchanged (it satisfies this shape
+ * structurally), and an in-process caller (e.g. a daemon running as PID 1
+ * inside the container) implements just these two methods over
+ * `node:child_process` + `node:fs`.
+ */
+export interface StraceHost {
+  executeCommand(
+    command: string,
+  ): Promise<{ exitCode: number; stderr: string }>;
+  readFile(path: string): Promise<string>;
+}
+
+/**
  * One-time probe at sandbox setup. Runs a known create/write/rename sequence
  * under strace and asserts the trace is clean and parseable. Throws
  * {@link StraceUnavailableError} (hard-fail) when ptrace is blocked, strace is
  * absent, or the trace is garbled (e.g. amd64 under Rosetta).
+ *
+ * "strace works in this sandbox" is an invariant of the (image + host kernel +
+ * seccomp/caps) — constant across every tool call and chat turn in a given
+ * container — so this is the consumer's once-per-container responsibility (e.g.
+ * a daemon boot gate), NOT a per-tool cost. `createBashTool` /
+ * `withStraceFileChanges` no longer call it.
  */
-async function selfTestStrace(sandbox: DisposableSandbox): Promise<void> {
+export async function selfTestStrace(host: StraceHost): Promise<void> {
   const probeDir = `/tmp/dat-strace-${randomUUID()}`;
   const traceFile = `/tmp/dat-strace-${randomUUID()}.trace`;
   const q = shellQuote;
@@ -558,11 +407,11 @@ async function selfTestStrace(sandbox: DisposableSandbox): Promise<void> {
     `echo more > ${q(`${probeDir}/c.txt`)}`;
   const wrapped = buildStraceCommand(sequence, traceFile, '/tmp');
 
-  let result: CommandResult | undefined;
+  let result: { exitCode: number; stderr: string } | undefined;
   let raw = '';
   try {
-    result = await sandbox.executeCommand(wrapped);
-    raw = await sandbox.readFile(traceFile).catch(() => '');
+    result = await host.executeCommand(wrapped);
+    raw = await host.readFile(traceFile).catch(() => '');
 
     const diagnostics = `exit=${result.exitCode}\nstderr=${result.stderr}\ntrace[0:600]=${raw.slice(0, 600)}`;
 
@@ -597,7 +446,7 @@ async function selfTestStrace(sandbox: DisposableSandbox): Promise<void> {
       throw new StraceUnavailableError('trace-unparseable', diagnostics);
     }
   } finally {
-    void sandbox
+    void host
       .executeCommand(`rm -rf ${q(probeDir)} ${q(traceFile)}`)
       .catch(() => {});
   }

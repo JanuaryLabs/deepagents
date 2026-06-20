@@ -34,7 +34,7 @@ Requires Node.js LTS
 import { groq } from '@ai-sdk/groq';
 import pg from 'pg';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import {
   Postgres,
   columnValues,
@@ -69,6 +69,7 @@ const adapter = new Postgres({
 const text2sql = new Text2Sql({
   model: groq('openai/gpt-oss-20b'),
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 
 // Generate SQL
@@ -82,6 +83,8 @@ console.log(sql);
 The adapter-map key (`main` here) is the adapter name. Reuse that same key in
 `text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
 `sql run <db> "..."` calls from a sandbox where the package CLI is installed.
+This is the configured connection name, not the SQL-level database or schema
+name (for example, SQLite's default `main` schema).
 
 Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you build adapter
 maps dynamically, use `isValidAdapterName(name)` to check one key or
@@ -170,15 +173,21 @@ or upload/write that module before you call `sql index` or `chat()`.
 
 `instructions()` returns the SQL-flavored system fragments (policies, workflows,
 clarifications, style guides) — spread them into `context.set()` alongside the
-schema fragments returned by `sql index`. Add or replace them with your
-own domain fragments as needed.
+schema fragments returned by `sql index`. The index output starts with an
+`available_databases` fragment that lists the exact configured adapter names the
+model must pass to `sql validate <db>` and `sql run <db>`. Add or replace the
+instructions with your own domain fragments as needed.
 
 ## Advanced: SQL CLI in Sandboxes
 
 `sql validate <db> "..."` and `sql run <db> "..."` are real commands from the
-`@deepagents/text2sql` package. `sql index` writes schema fragments plus
-progress events for chat setup, indexing all configured adapters by default
-(same as `--all`) unless adapter names are provided.
+`@deepagents/text2sql` package. `<db>` is the configured adapter name. With a
+single configured adapter, a mistaken database selector is routed to that sole
+adapter and the command prints a note; with multiple adapters, unknown names
+fail and print the available list. `sql index` writes an `available_databases`
+fragment, schema fragments, and progress events for chat setup, indexing all
+configured adapters by default (same as `--all`) unless adapter names are
+provided.
 
 Install the package inside the sandbox and set `TEXT2SQL_ADAPTERS` to a module
 whose default export is `Record<string, Adapter>`. Missing `sql` means the
@@ -208,11 +217,16 @@ import { InMemoryFs, createVirtualSandbox } from '@deepagents/context';
 import {
   type CreateSqlCommandOptions,
   type CreateSqlCommandResult,
+  FileIndexLock,
   Text2Sql,
   createSqlCommand,
 } from '@deepagents/text2sql';
 
-const text2sql = new Text2Sql({ model, adapters: { main: adapter } });
+const text2sql = new Text2Sql({
+  model,
+  adapters: { main: adapter },
+  lock: new FileIndexLock(),
+});
 
 const commandOptions: CreateSqlCommandOptions = {
   outputDir: '/sql-artifacts',
@@ -334,8 +348,8 @@ for await (const chunk of followUp) {
 ## Schema index caching & coordination
 
 Schema introspection is the expensive part of indexing. `Text2Sql` and
-`AdapterIndexer` own no storage and no locking — you inject both as optional
-primitives, keyed per adapter:
+`AdapterIndexer` own no storage and no locking — you inject them, keyed per
+adapter. A `lock` is **required**; a `cache` is optional:
 
 ```typescript
 export interface IndexCache {
@@ -350,27 +364,35 @@ export interface IndexLock {
 }
 ```
 
-- **No `cache`** → every `index()` introspects fresh (no cache events).
-- **`cache` only** → warm reads skip introspection within whatever the cache
-  spans.
-- **`cache` + `lock`** → introspection is single-flight: concurrent callers for
-  the same adapter wait on the lock, then read the warm cache.
+- **`lock` only** (no `cache`) → introspection is serialized but not
+  deduplicated: each waiter re-introspects, because the cache recheck under the
+  lock is what turns serialization into single-flight.
+- **`lock` + `cache`** → introspection is single-flight: concurrent callers for
+  the same adapter wait on the lock, then read the warm cache the holder wrote.
 
-A file-backed `IndexCache` ships as a composable primitive:
+File-backed `IndexCache` and `IndexLock` implementations ship as composable
+primitives:
 
 ```typescript
-import { FileIndexCache, Text2Sql } from '@deepagents/text2sql';
+import { FileIndexCache, FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 
 const text2sql = new Text2Sql({
   model,
   adapters: { main: adapter },
-  // Point `dir` at a shared volume to share one cache across processes.
+  // Point both `dir`s at a shared volume to share one cache + lock across
+  // processes on the same filesystem.
   cache: new FileIndexCache({ dir: '/var/cache/text2sql', namespace: 'v1' }),
+  lock: new FileIndexLock({ dir: '/var/cache/text2sql', namespace: 'v1' }),
 });
 ```
 
 `FileIndexCache` writes atomically (temp + rename) and treats an unparseable
-file as a miss, so a torn read self-heals into a re-introspect.
+file as a miss, so a torn read self-heals into a re-introspect. `FileIndexLock`
+(built on `proper-lockfile`, options `{ dir?, namespace?, stale?, retries? }`)
+serializes processes that share a POSIX filesystem; a held lock auto-refreshes
+its mtime so a slow introspection is not mistaken for a crash, and acquisition
+fails closed once retries are exhausted. Both `dir`s default to the OS temp
+directory.
 
 ### Horizontally-scaled deployments
 
@@ -378,8 +400,10 @@ Running many processes/containers against one database (e.g. a fleet of
 daemons)? Two coordination tiers:
 
 - The **lock alone** serializes introspection — never two concurrent
-  introspections of the same database (caps peak DB load). Back it with a
-  distributed lock you already operate (a Redis lock, a Postgres
+  introspections of the same database (caps peak DB load). The shipped
+  `FileIndexLock` covers processes that share a POSIX filesystem (one host, or a
+  shared volume — NFSv4 / EFS); for hosts without a shared filesystem, back it
+  with a distributed lock you already operate (a Redis lock, a Postgres
   `pg_advisory_lock`, etc.).
 - The **lock plus a shared cache directory** gives fleet-wide single-flight:
   the lock holder writes the cache on the shared volume, and every waiter reads
@@ -405,11 +429,12 @@ import { createUIMessageStream } from 'ai';
 
 import {
   AdapterIndexer,
+  FileIndexLock,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   type Text2SqlIndexProgressEvent,
 } from '@deepagents/text2sql';
 
-const indexer = new AdapterIndexer({ adapters });
+const indexer = new AdapterIndexer({ adapters, lock: new FileIndexLock() });
 
 await context.continue(user('Show me top 10 customers'));
 

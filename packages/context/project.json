@@ -11,7 +11,8 @@
       "options": {
         "additionalEntryPoints": [
           "packages/context/src/browser.ts",
-          "packages/context/src/lib/tracing/index.ts"
+          "packages/context/src/lib/tracing/index.ts",
+          "packages/context/src/lib/sandbox/strace/index.ts"
         ],
         "assets": []
       }

@@ -8,14 +8,11 @@ import { type LockOptions, lock as acquireLock } from 'proper-lockfile';
  * Coordinates schema indexing across processes so that, for a given cache key,
  * only one introspection runs at a time ("single-flight" indexing).
  *
- * The package defines this contract but ships no implementation and takes no
- * dependency on a lock store. Hosts that run many processes against the same
- * database (e.g. horizontally-scaled daemons) supply an implementation backed
- * by whatever they already operate — a Redis lock, a Postgres advisory lock, a
- * Zookeeper/etcd lease, or an in-process mutex for a single-process deployment.
- *
- * When no lock is provided, indexing behaves exactly as if this interface did
- * not exist.
+ * The package defines this contract and ships {@link FileIndexLock} for
+ * processes that share a POSIX filesystem. Hosts that run across machines
+ * without shared storage can supply an implementation backed by whatever they
+ * already operate — a Redis lock, a Postgres advisory lock, a Zookeeper/etcd
+ * lease, or an in-process mutex for a single-process deployment.
  */
 export interface IndexLock {
   /**

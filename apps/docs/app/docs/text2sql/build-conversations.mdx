@@ -22,10 +22,14 @@ import {
   errorRecoveryGuardrail,
   user,
 } from '@deepagents/context';
-import { AdapterIndexer, instructions } from '@deepagents/text2sql';
+import {
+  AdapterIndexer,
+  FileIndexLock,
+  instructions,
+} from '@deepagents/text2sql';
 
 const context = new ContextEngine({ store, chatId, userId });
-const indexer = new AdapterIndexer({ adapters });
+const indexer = new AdapterIndexer({ adapters, lock: new FileIndexLock() });
 context.set(...instructions(), ...(await indexer.index()));
 
 const ai = agent({
@@ -61,11 +65,12 @@ import { createUIMessageStream } from 'ai';
 import { chat, user } from '@deepagents/context';
 import {
   AdapterIndexer,
+  FileIndexLock,
   TEXT2SQL_INDEX_PROGRESS_CHUNK,
   instructions,
 } from '@deepagents/text2sql';
 
-const indexer = new AdapterIndexer({ adapters });
+const indexer = new AdapterIndexer({ adapters, lock: new FileIndexLock() });
 
 const stream = createUIMessageStream({
   execute: async ({ writer }) => {
@@ -99,10 +104,13 @@ the manifest JSON (`fragmentsPath`, `eventsPath`, adapter list). Add
 `--verbose pretty` or `--verbose json` to mirror live progress to `stderr`, and
 use `--out-dir <path>` (or `TEXT2SQL_OUT_DIR`) to control artifact location.
 By default, `sql index` covers all configured adapters; pass adapter names to
-scope it.
+scope it. Each written schema fragment starts with a `<database>` leaf naming
+that adapter's configured connection name — the exact value the model passes to
+`sql validate <db>` and `sql run <db>`.
 
-For cross-run reuse, inject a cache into `new AdapterIndexer({ adapters, cache })`
-(or `new Text2Sql({ ..., cache })`). The shipped `FileIndexCache({ dir, namespace })`
+For cross-run reuse, inject a cache alongside the required lock —
+`new AdapterIndexer({ adapters, cache, lock })` (or
+`new Text2Sql({ ..., cache, lock })`). The shipped `FileIndexCache({ dir, namespace })`
 is file-backed; `namespace` is the invalidation token (bump it when the schema
 changes), and `dir` defaults to the OS temp dir. Without a cache, indexing
 introspects fresh on every call. When you scale horizontally, point every

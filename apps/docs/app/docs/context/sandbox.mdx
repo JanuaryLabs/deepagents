@@ -33,6 +33,16 @@ All backends expose the buffered command + file API (`executeCommand`,
 optional `spawn(command, options?)` for live streaming stdio. Feature-detect it
 with `if (!sandbox.spawn) { ... }` when writing backend-agnostic code.
 
+Every backend is also `AsyncDisposable`: it implements `[Symbol.asyncDispose]`
+(which delegates to `dispose()`), so you can bind it with `await using` and let
+the sandbox release at scope exit instead of writing `try/finally`:
+
+```typescript
+await using backend = await createDockerSandbox({ installers: [pkg(['jq'])] });
+await backend.executeCommand('jq --version');
+// backend.dispose() runs automatically when this scope exits
+```
+
 <Callout type="warn">
   Agent OS is a v0.1.0 preview. Requires optional peer dependencies `@rivet-dev/agent-os-core` and `@rivet-dev/agent-os-common`.
 </Callout>

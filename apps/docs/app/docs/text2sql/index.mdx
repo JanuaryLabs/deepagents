@@ -22,7 +22,7 @@ can stream user-facing answers grounded in validated query results.
 import { groq } from '@ai-sdk/groq';
 import { DatabaseSync } from 'node:sqlite';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -35,6 +35,7 @@ const adapter = new Sqlite({
 const text2sql = new Text2Sql({
   model: groq('openai/gpt-oss-20b'),
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 
 // Generate SQL from natural language
@@ -50,10 +51,11 @@ const sql = await text2sql.toSql(
 `main` is the adapter-map key. Reuse that same name in
 `text2sql.toSql(..., 'main')` and in any `sql validate <db> "..."` /
 `sql run <db> "..."` calls from a sandbox where the package CLI is installed.
+It is the configured connection name, not the SQL-level database or schema name.
 
-Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you build adapter
-maps dynamically, validate the keys up front with `isValidAdapterName(name)`
-or `validateAdapterNames(names)`.
+Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`, and `database` is a
+reserved name. If you build adapter maps dynamically, validate the keys up
+front with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
 ## Core Methods
 
@@ -61,7 +63,7 @@ or `validateAdapterNames(names)`.
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
 | `Text2Sql#toSql(input, adapterName)`                   | Generate SQL without executing, routed to one adapter                                          |
 | `Text2Sql#toPairs(adapterName, factory)`               | Generate training pairs from one configured adapter                                            |
-| `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments, with optional progress events                 |
+| `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments — each prefixed with a `<database>` connection-name label — with optional progress events |
 | `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes |
 | `sql index [adapter ...]`                              | Index all adapters by default (or named subset), then write schema fragments + progress artifacts |
 

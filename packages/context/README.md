@@ -75,10 +75,33 @@ const sandbox = await createBashTool({
 ```
 
 Tracking uses `strace` (per `executeCommand` and per `spawn`) when you compose
-the `withStraceFileChanges()` decorator. A one-time self-test runs at decorator
-setup time and throws `StraceUnavailableError` (`reason: 'strace-missing' |
-'ptrace-blocked' | 'trace-unparseable'`) with no silent fallback. The backend
-must therefore satisfy, on any non-virtual backend (Docker, Daytona, e2b, ...):
+the `withStraceFileChanges()` decorator. The decorator itself does **no**
+self-test — it trusts that strace tracing works in the sandbox, because "strace
+works here" is an invariant of the (image + host kernel + seccomp/caps) that is
+constant for the container's lifetime. Re-proving it per composition would re-pay
+several host→container round-trips on every tool call for no new information.
+
+Verifying the invariant is the consumer's **once-per-container** responsibility.
+Run the probe once at startup (e.g. a daemon boot gate) via the lean leaf entry:
+
+```ts
+import { selfTestStrace } from '@deepagents/context/sandbox/strace';
+
+// Throws StraceUnavailableError (reason: 'strace-missing' | 'ptrace-blocked' |
+// 'trace-unparseable') with no silent fallback. A DisposableSandbox satisfies
+// the StraceHost shape structurally, so pass a real backend unchanged; an
+// in-process caller implements just { executeCommand, readFile }.
+await selfTestStrace(backend);
+```
+
+The `@deepagents/context/sandbox/strace` subpath is a node-builtins-only bundle
+(probe + parser + `StraceUnavailableError`) with no agent/context-framework
+imports, so a minimal daemon can import it without pulling the whole framework.
+Import `StraceUnavailableError` from this same subpath when catching the probe's
+error (each entry point is bundled independently, so `instanceof` requires the
+class from the same entry).
+
+The backend must satisfy, on any non-virtual backend (Docker, Daytona, e2b, ...):
 
 1. `strace` installed in the image — `apk add strace` (Alpine) /
    `apt-get install -y strace` (Debian), or `installers: [pkg(['strace'])]` for
@@ -88,8 +111,8 @@ must therefore satisfy, on any non-virtual backend (Docker, Daytona, e2b, ...):
    garbles the trace, so build the image for the host arch.
 
 The **in-process virtual sandbox cannot host strace** (no real processes/ptrace),
-so it is unsupported by `withStraceFileChanges()` -- the self-test hard-fails.
-Use a container/VM backend.
+so it is unsupported by `withStraceFileChanges()` — `selfTestStrace` hard-fails
+against it. Use a container/VM backend.
 
 Ops are intentionally coarse: strace cannot distinguish a new file from an
 overwrite within one command (both are `O_CREAT|O_TRUNC`), so both report

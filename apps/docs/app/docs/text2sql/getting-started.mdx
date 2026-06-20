@@ -43,22 +43,32 @@ Reuse `model` in the adapter-specific examples below. The adapter-map key
 (`main` in these examples) becomes the required second argument to
 `text2sql.toSql(..., 'main')` and the `<db>` selector in
 `sql validate <db> "..."` / `sql run <db> "..."` when the package CLI is
-installed inside the sandbox.
+installed inside the sandbox. This is the configured connection name, not the
+SQL-level database or schema name. When exactly one adapter is configured,
+`sql run`/`sql validate` route to it regardless of the `<db>` token you pass, so
+a single-database setup can use any name.
 
 `sql validate` enforces read-only access: one `SELECT`/`WITH` statement is
 allowed (including leading whitespace or SQL comments), while writes,
 comment-only input, and multi-statement batches are rejected.
 
-Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`. If you construct the
-adapter map dynamically, validate the keys first with
+Adapter names must match `/^[A-Za-z_][A-Za-z0-9_]*$/`, and `database` is
+reserved (it labels each fragment's connection name, below). If you construct
+the adapter map dynamically, validate the keys first with
 `isValidAdapterName(name)` or `validateAdapterNames(names)`.
+
+When you index adapters for a chat agent, each schema fragment begins with a
+`<database>` label carrying that adapter's configured connection name — the
+exact value the model passes to `sql validate <db>` and `sql run <db>`. The
+agent instructions point the model at that label, so it never has to infer the
+name from the wrapper tag.
 
 <Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Sqlite } from '@deepagents/text2sql/sqlite';
 import * as sqlite from '@deepagents/text2sql/sqlite';
 
@@ -73,6 +83,7 @@ const adapter = new Sqlite({
 const text2sql = new Text2Sql({
   model,
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -80,7 +91,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import pg from 'pg';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Postgres } from '@deepagents/text2sql/postgres';
 import * as postgres from '@deepagents/text2sql/postgres';
 
@@ -98,14 +109,16 @@ const adapter = new Postgres({
 const text2sql = new Text2Sql({
   model,
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 ```
+
 </Tab>
 <Tab value="SQL Server">
 ```typescript
 import sql from 'mssql';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { SqlServer } from '@deepagents/text2sql/sqlserver';
 import * as sqlserver from '@deepagents/text2sql/sqlserver';
 
@@ -127,6 +140,7 @@ const adapter = new SqlServer({
 const text2sql = new Text2Sql({
   model,
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -134,7 +148,7 @@ const text2sql = new Text2Sql({
 ```typescript
 import mysql from 'mysql2/promise';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { Mysql } from '@deepagents/text2sql/mysql';
 import * as mysqlGrounding from '@deepagents/text2sql/mysql';
 
@@ -155,14 +169,16 @@ const adapter = new Mysql({
 const text2sql = new Text2Sql({
   model,
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 ```
+
 </Tab>
 <Tab value="BigQuery">
 ```typescript
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 
-import { Text2Sql } from '@deepagents/text2sql';
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
 import { BigQuery } from '@deepagents/text2sql/bigquery';
 import * as bigquery from '@deepagents/text2sql/bigquery';
 
@@ -189,6 +205,7 @@ const adapter = new BigQuery({
 const text2sql = new Text2Sql({
   model,
   adapters: { main: adapter },
+  lock: new FileIndexLock(),
 });
 ```
 </Tab>
@@ -318,9 +335,11 @@ const indexResult = await sandbox.sandbox.executeCommand(
 
 Set `TEXT2SQL_INDEX_CACHE_DIR` (and optionally `TEXT2SQL_INDEX_VERSION` as an
 invalidation namespace) to make the CLI back schema indexing with a
-`FileIndexCache`; without either, `sql index` introspects fresh every run. See
-the package README's "Schema index caching & coordination" section for the
-injected `cache`/`lock` model.
+`FileIndexCache`; without either, `sql index` introspects fresh every run. The
+CLI always wires a `FileIndexLock` to serialize concurrent indexing — its
+directory comes from `TEXT2SQL_INDEX_LOCK_DIR`, falling back to
+`TEXT2SQL_INDEX_CACHE_DIR`. See the package README's "Schema index caching &
+coordination" section for the injected `cache`/`lock` model.
 
 Set `TEXT2SQL_INDEX_EVENTS_PATH` to write the NDJSON progress stream to a
 fixed path instead of the auto-generated `index-<id>.events.ndjson`. The
