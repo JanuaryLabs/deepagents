@@ -7,7 +7,7 @@ Skill reminders match user message content against a catalog of skills and injec
 
 ## skillsReminder
 
-Creates an immediate reminder that runs BM25 matching against the user's message content. Returns a `UserReminder` for use inside `user()`.
+Creates an always-on user reminder that runs BM25 matching against the user's message content. Returns a `ContextFragment` you declare on the engine with `engine.set()`. The engine folds it into the last user message at `save()` time, so it re-classifies the message every turn.
 
 ```ts
 import { user, skillsReminder } from '@deepagents/context';
@@ -27,9 +27,9 @@ const skills = [
   },
 ];
 
-engine.set(
-  user('deploy my app to production', skillsReminder(skills, { topN: 3 })),
-);
+engine.set(skillsReminder(skills, { topN: 3 }), user('deploy my app to production'));
+
+await engine.save();
 ```
 
 When the user's message matches skills, the reminder injects text like:
@@ -40,7 +40,7 @@ Relevant skills:
 - docker-expert (0.42): Docker containerization and multi-stage builds [/skills/docker-expert/SKILL.md]
 ```
 
-When no skills match (score below threshold or unrelated content), the reminder returns an empty string and skips injection.
+The reminder self-gates: when no skills match (score below threshold or unrelated content), its text resolver returns an empty string and the engine injects nothing.
 
 ### Parameters
 
@@ -81,7 +81,7 @@ const classifier: IClassifier<SkillMetadata> = {
   },
 };
 
-user('anything', skillsReminder(classifier, { topN: 5 }));
+engine.set(skillsReminder(classifier, { topN: 5 }), user('anything'));
 ```
 
 ### IClassifier Interface

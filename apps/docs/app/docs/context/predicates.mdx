@@ -32,9 +32,8 @@ interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
-  streamStepNumber?: number;
-  streamToolCallCount?: number;
-  streamTotalTokens?: number;
+  firedOnceIds?: ReadonlySet<string>;
+  onceCollector?: Set<string>;
 }
 ```
 
@@ -52,11 +51,10 @@ interface WhenContext {
 | `messageCount` | Total message count across all roles |
 | `lastAssistantMessage` | The last persisted assistant `UIMessage` |
 | `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()` |
-| `streamStepNumber` | Current streamed step number during `target: 'steer'` evaluation |
-| `streamToolCallCount` | Completed tool calls seen so far in the current streamed turn |
-| `streamTotalTokens` | Running token total for the current streamed turn |
+| `firedOnceIds` | Ids already latched by `once()` this conversation (steer + user); populated by the engine |
+| `onceCollector` | Per-evaluation buffer `once()` appends to; the engine commits it only if the reminder fires |
 
-`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. The `stream*` fields are only populated for `target: 'steer'` reminders during an active streamed turn.
+`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
 
 ## Turn-Based Predicates
 
@@ -271,40 +269,6 @@ import { elapsedExceeds } from '@deepagents/context';
 elapsedExceeds(60_000); // one minute
 ```
 
-## Stream-Step Predicates
-
-These predicates only become meaningful for `target: 'steer'` reminders during an active streamed turn.
-
-### streamStepsExceed(n)
-
-Fires when the current streamed step number is greater than or equal to `n`.
-
-```ts
-import { streamStepsExceed } from '@deepagents/context';
-
-streamStepsExceed(2);
-```
-
-### streamToolCallsExceed(n)
-
-Fires when the current streamed turn has seen at least `n` completed tool calls.
-
-```ts
-import { streamToolCallsExceed } from '@deepagents/context';
-
-streamToolCallsExceed(3);
-```
-
-### streamUsageExceeds(totalTokens)
-
-Fires when the running token usage for the current streamed turn reaches `totalTokens`.
-
-```ts
-import { streamUsageExceeds } from '@deepagents/context';
-
-streamUsageExceeds(8_000);
-```
-
 ## Temporal Predicates
 
 Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. All return `true` on the first turn (when `lastMessageAt` is `undefined`).
@@ -472,9 +436,11 @@ engine.set(
   user('this query is slow'),
 );
 
-// Immediate fragment reminders (no predicate)
+// Always-on fragment reminder (no `when`): a user-target reminder with no
+// predicate fires on every turn.
 engine.set(
-  user('hello', reminder(workflow({ task: 'Greet', steps: ['Say hi'] }))),
+  reminder(workflow({ task: 'Greet', steps: ['Say hi'] })),
+  user('hello'),
 );
 ```
 

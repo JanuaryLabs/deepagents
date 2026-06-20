@@ -7,85 +7,58 @@ Reminders inject hidden text into the model conversation to give the LLM situati
 
 ## How Reminders Work
 
-Every reminder attaches hidden text to one model-visible carrier. Three decisions control when and how:
+A reminder is always a context fragment. Create it with `reminder()` and declare it on the engine with `engine.set()`; the engine folds it into the model's view when its `when` predicate fires. Two decisions control where and how:
 
-1. **When** — immediate (at message creation) or conditional (at `engine.save()` / stream evaluation, gated by a predicate)
-2. **Where** — `target: 'user'`, `target: 'tool-output'`, or `target: 'steer'`
-3. **How** — inline (appended as a `<system-reminder>` tag inside the last text part) or as a separate text part
+1. **Where** — `target: 'user'` (the default), `target: 'tool-output'`, or `target: 'steer'`
+2. **How** — inline (appended as a `<system-reminder>` tag inside the last text part) or as a separate text part
 
-## Immediate Reminders
-
-Pass reminders directly to `user()`. They resolve at message creation time and receive the message content.
+The `when` predicate is optional for `target: 'user'` — omit it for an always-on instruction. For `tool-output` and `steer` a `when` predicate is required.
 
 ```ts
-import { user, reminder } from '@deepagents/context';
+import { reminder, once, everyNTurns } from '@deepagents/context';
 
-// Static text
-user('Hello', reminder('Keep responses under 100 words'));
-
-// Factory — receives message content
-user(
-  'Explain polymorphism',
-  reminder((ctx) => `User said: "${ctx.content}". Tailor to their level.`),
-);
+engine.set(reminder('Keep responses concise'));                // user, always on
+engine.set(reminder('Welcome!', { when: once('welcome') }));   // user, one-time
+engine.set(reminder('RECAP', { when: everyNTurns(3), target: 'steer' }));
 ```
 
-A factory that returns an empty string skips injection entirely — useful for conditional logic without the full predicate system.
+## User Reminders
+
+`target: 'user'` is the default. The engine folds the reminder text into the **last pending user message** during `engine.save()`, baking it as a `<system-reminder>` tag (or its own text part). The folded text is persisted in the chain, so reloading reproduces exactly what the model saw.
+
+### Always-On Reminders
+
+Omit `when` for a reminder that folds into every user message — a recurring instruction the model should always see.
 
 ```ts
-user(
-  'deploy to prod',
-  reminder((ctx) =>
-    ctx.content.includes('prod') ? 'Ask for confirmation before destructive actions' : ''
-  ),
-);
+import { reminder, user } from '@deepagents/context';
+
+engine.set(reminder('Keep responses under 100 words'), user('Hello'));
+await engine.save();
+// The saved user message carries: Hello<system-reminder>Keep responses under 100 words</system-reminder>
 ```
 
-### Inline vs Part Mode
-
-Reminders render in one of two modes:
-
-- **Inline** — appended as `<system-reminder>` tags to the last text part.
-- **Part** — added as a separate text part on the user message.
-
-The default depends on the input type:
-
-| Input | Default `asPart` |
-| --- | --- |
-| `reminder(text: string \| factory)` | `false` (inline) |
-| `reminder(fragment: ContextFragment)` | `false` (inline) |
-
-Reminders default inline so the model sees the context next to the user's words. Set `asPart` to true when structured content needs to stay in a standalone text part:
+The text may also be a `(ctx) => string` factory that receives the message content. A factory that returns an empty string skips injection entirely — useful for inline conditional logic without a predicate.
 
 ```ts
-const partMode = true;
-
-reminder('hint'); // inline
-reminder(workflow({ task: 'Deploy', steps: ['…'] })); // inline
-reminder(workflow({ task: 'Deploy', steps: ['…'] }), { asPart: partMode }); // forced part
-```
-
-Use part mode for structured data (dates, skill lists, fragments) to keep reminder text separate from the user's message.
-
-## Conditional Reminders
-
-Add a `when` predicate to create reminders that fire based on turn count, message content, assistant/tool history, token usage, or time. Pass them to `engine.set()`; the engine evaluates them at `save()` time.
-
-```ts
-import { reminder, everyNTurns, user } from '@deepagents/context';
-
 engine.set(
-  reminder('Remember to cite sources', { when: everyNTurns(3) }),
-  user('Tell me about quantum computing'),
+  reminder((ctx) =>
+    ctx.content.includes('prod')
+      ? 'Ask for confirmation before destructive actions'
+      : '',
+  ),
+  user('deploy to prod'),
 );
 ```
 
-For the default `user` target, the engine applies conditional reminders to the **last pending user message** during `save()`. It builds a `WhenContext` with the current turn count, message content, usage totals, message counts, and recent assistant history, then evaluates each predicate.
+### Conditional User Reminders
+
+Add a `when` predicate to fold the reminder only when it fires — gated by turn count, message content, assistant/tool history, token usage, or time. The engine builds a `WhenContext` at `save()` time and evaluates each predicate.
 
 ```ts
 import { reminder, contentIncludes, afterTurn, and, user } from '@deepagents/context';
 
-// Only fires when user mentions code AND after the first 2 turns
+// Only fires when the user mentions code AND after the first 2 turns
 engine.set(
   reminder('Include code examples in your response', {
     when: and(contentIncludes(['code', 'example', 'snippet']), afterTurn(2)),
@@ -94,26 +67,53 @@ engine.set(
 );
 ```
 
+Pass `once(id)` as the predicate for a one-time user reminder. The id is durably latched in the folded message's metadata, so a fresh engine re-reads it and the reminder never fires twice — even across restarts.
+
+```ts
+import { reminder, once, user } from '@deepagents/context';
+
+engine.set(reminder('Welcome! Type /help to see commands', { when: once('welcome') }), user('hi'));
+```
+
 See [Predicates](/docs/context/predicates) for the full predicate catalog and composition rules.
 
-### Reminder Targets
+### Inline vs Part Mode
 
-Conditional reminders can fire in three places:
+User reminders render in one of two modes:
+
+- **Inline** — appended as `<system-reminder>` tags to the last text part (default).
+- **Part** — added as a separate text part on the user message (`asPart: true`).
+
+Reminders default inline so the model sees the context next to the user's words. Set `asPart: true` when structured content needs to stay in a standalone text part:
+
+```ts
+import { reminder, workflow } from '@deepagents/context';
+
+engine.set(reminder('hint'));                                            // inline
+engine.set(reminder(workflow({ task: 'Deploy', steps: ['…'] })));       // inline
+engine.set(reminder(workflow({ task: 'Deploy', steps: ['…'] }), { asPart: true })); // forced part
+```
+
+Use part mode for structured data (dates, skill lists, fragments) to keep reminder text separate from the user's message. `asPart` only applies to `target: 'user'`; `tool-output` and `steer` ignore it.
+
+## Reminder Targets
+
+A reminder fires in one of three places, chosen by `target`:
 
 | Target | When it runs | What the model sees |
 | --- | --- | --- |
-| `user` | During `engine.save()` on the last pending user message | Reminder text merged into that user message |
+| `user` | During `engine.save()` on the last pending user message | Reminder text folded into that user message |
 | `tool-output` | Right after a tool `execute()` resolves | Wrapped tool output on the next model step, with the same wrapped value persisted in the chain |
 | `steer` | Mid-loop between streaming steps, after the model has already emitted content | A synthetic hidden user message containing one or more `<system-reminder>` parts |
 
-`user` is the default target. `tool-output` and `steer` require a `when` predicate.
+`user` is the default and may omit `when`. `tool-output` and `steer` require a `when` predicate — `reminder()` throws if it is missing.
 
 ```ts
 import {
   afterTurn,
   everyNTurns,
+  elapsedExceeds,
   reminder,
-  streamStepsExceed,
 } from '@deepagents/context';
 
 engine.set(
@@ -122,7 +122,7 @@ engine.set(
     target: 'tool-output',
   }),
   reminder('Checkpoint before taking another tool step', {
-    when: streamStepsExceed(2),
+    when: elapsedExceeds(40 * 60_000),
     target: 'steer',
   }),
   reminder('Cite sources every third turn', {
@@ -131,7 +131,9 @@ engine.set(
 );
 ```
 
-Use `tool-output` when the reminder should travel with a tool result. Use `steer` when the agent needs a hidden nudge during a multi-step streamed turn without waiting for the next user message. Steer reminders only fire after the model has produced at least one streamed step with content. When a steer reminder fires, the engine persists the same assistant/steer/assistant split that the model saw, and constant-true predicates fire once per stream instead of repeating on every later step.
+Use `tool-output` when the reminder should travel with a tool result. Use `steer` when the agent needs a hidden nudge during a multi-step streamed turn without waiting for the next user message. Steer reminders only fire after the model has produced at least one streamed step with content. When a steer reminder fires, the engine persists the same assistant/steer/assistant split that the model saw.
+
+`once(id)` works on `target: 'user'` and `target: 'steer'` for a durable one-time fire that survives restarts. It is **not** supported on `target: 'tool-output'`, where no persisted carrier records the fire — `reminder()` throws if you try.
 
 ## Built-in Reminders
 
@@ -144,7 +146,7 @@ The library ships with pre-built reminders for common needs:
 
 ## ReminderContext
 
-Both immediate and conditional reminder factories receive a context object:
+A reminder's text factory receives a context object:
 
 ```ts
 interface ReminderContext {
@@ -159,13 +161,10 @@ interface ReminderContext {
   elapsed?: number;           // Milliseconds since last persisted user message
   messageCount?: number;      // Total message count across all roles
   lastAssistantMessage?: UIMessage; // Last persisted assistant message
-  streamStepNumber?: number;      // Current streamed step number during steer evaluation
-  streamToolCallCount?: number;   // Completed tool calls seen in the current streamed turn
-  streamTotalTokens?: number;     // Running token total for the current streamed turn
 }
 ```
 
-Conditional reminders populate these fields at `save()` time. `target: 'steer'` reminders additionally receive the stream-scoped fields while a turn is in flight. Immediate reminders receive only `content`.
+The engine populates these fields when it resolves the reminder. A reminder gated by a `when` predicate receives the matching `WhenContext` (see [Predicates](/docs/context/predicates)); a plain `(ctx) => string` factory on a `user` reminder receives at least `content`.
 
 ## Stripping Reminders
 

@@ -224,8 +224,8 @@ const classifier = new BM25SkillClassifier(skills);
 
 const matches = classifier.match('deploy my docker container', { topN: 3 });
 // [
-//   { skill: { name: 'deploy-helper', ... }, score: 0.82 },
-//   { skill: { name: 'docker-expert', ... }, score: 0.71 },
+//   { item: { name: 'deploy-helper', ... }, score: 0.82 },
+//   { item: { name: 'docker-expert', ... }, score: 0.71 },
 // ]
 ```
 
@@ -267,7 +267,7 @@ interface ISkillClassifier {
 }
 
 interface SkillMatch {
-  skill: SkillMetadata;
+  item: SkillMetadata;
   score: number;
 }
 
