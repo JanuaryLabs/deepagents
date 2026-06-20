@@ -125,6 +125,17 @@ export interface RuntimeSandboxOptions {
    * - A non-empty array: appended verbatim, overriding the image `CMD`.
    */
   command?: readonly string[] | null;
+  /**
+   * Extra `--security-opt` values for `docker run`. Each entry becomes one
+   * `--security-opt <value>` — e.g. `['seccomp=/path/profile.json']` to apply a
+   * custom seccomp profile (denying a syscall), or `['no-new-privileges']`.
+   */
+  securityOpt?: string[];
+  /**
+   * `--platform` for `docker run` (e.g. `'linux/amd64'`). Runs the container
+   * under that platform — emulated when it differs from the host arch.
+   */
+  platform?: string;
 }
 
 export interface DockerfileSandboxOptions {
@@ -151,6 +162,18 @@ export interface DockerfileSandboxOptions {
    * - A non-empty array: appended verbatim, overriding the image `CMD`.
    */
   command?: readonly string[] | null;
+  /**
+   * Extra `--security-opt` values for `docker run`. Each entry becomes one
+   * `--security-opt <value>` — e.g. `['seccomp=/path/profile.json']` to apply a
+   * custom seccomp profile (denying a syscall), or `['no-new-privileges']`.
+   */
+  securityOpt?: string[];
+  /**
+   * `--platform` for `docker build` and `docker run` (e.g. `'linux/amd64'`).
+   * Builds and runs under that platform — emulated when it differs from the
+   * host arch. Folded into the image-build cache key.
+   */
+  platform?: string;
 }
 
 export interface ComposeSandboxOptions {
@@ -190,6 +213,10 @@ export interface DockerSandboxStrategyArgs {
   name?: StableContainerName;
   /** See {@link RuntimeSandboxOptions.command}. */
   command?: readonly string[] | null;
+  /** See {@link RuntimeSandboxOptions.securityOpt}. */
+  securityOpt?: string[];
+  /** See {@link RuntimeSandboxOptions.platform}. */
+  platform?: string;
 }
 
 /**
@@ -204,10 +231,20 @@ export abstract class DockerSandboxStrategy {
   protected env: Record<string, string>;
   protected name?: StableContainerName;
   protected command?: readonly string[] | null;
+  protected securityOpt: string[];
+  protected platform?: string;
   private createdVolumes = new Set<string>();
 
   constructor(args: DockerSandboxStrategyArgs = {}) {
-    const { volumes = [], resources = {}, env = {}, name, command } = args;
+    const {
+      volumes = [],
+      resources = {},
+      env = {},
+      name,
+      command,
+      securityOpt = [],
+      platform,
+    } = args;
     for (const key of Object.keys(env)) {
       validateEnvKey(key);
     }
@@ -221,6 +258,8 @@ export abstract class DockerSandboxStrategy {
     this.env = env;
     this.name = name;
     this.command = command;
+    this.securityOpt = securityOpt;
+    this.platform = platform;
   }
 
   async create(): Promise<DisposableSandbox> {
@@ -463,6 +502,13 @@ export abstract class DockerSandboxStrategy {
       '-w',
       '/workspace',
     ];
+
+    if (this.platform) {
+      args.push('--platform', this.platform);
+    }
+    for (const opt of this.securityOpt) {
+      args.push('--security-opt', opt);
+    }
 
     for (const [key, value] of Object.entries(this.env)) {
       args.push('-e', `${key}=${value}`);
@@ -819,6 +865,8 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
       env: args.env,
       name: args.name,
       command: args.command,
+      securityOpt: args.securityOpt,
+      platform: args.platform,
     });
     this.image = args.image ?? 'alpine:latest';
     this.installers = args.installers ?? [];
@@ -859,6 +907,8 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
       env: args.env,
       name: args.name,
       command: args.command,
+      securityOpt: args.securityOpt,
+      platform: args.platform,
     });
     this.dockerfile = args.dockerfile;
     this.dockerContext = args.context ?? '.';
@@ -870,8 +920,11 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
     const content = this.isInlineDockerfile()
       ? this.dockerfile
       : readFileSync(this.dockerfile, 'utf-8');
+    // Fold the platform into the cache key so a native build and an emulated
+    // cross-arch build of the same Dockerfile don't collide on one tag.
     const hash = createHash('sha256')
       .update(content)
+      .update(this.platform ?? '')
       .digest('hex')
       .slice(0, 12);
     return `sandbox-${hash}`;
@@ -904,8 +957,9 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
 
   private async buildImage(): Promise<void> {
     try {
+      const platformFlag = this.platform ? `--platform ${this.platform} ` : '';
       if (this.isInlineDockerfile()) {
-        const buildCmd = `echo '${this.dockerfile.replace(/'/g, "'\\''")}' | docker build -t ${this.imageTag} -f - ${this.dockerContext}`;
+        const buildCmd = `echo '${this.dockerfile.replace(/'/g, "'\\''")}' | docker build ${platformFlag}-t ${this.imageTag} -f - ${this.dockerContext}`;
         if (this.showBuildLogs) {
           await this.runStreamed('sh', ['-c', buildCmd]);
         } else {
@@ -914,6 +968,7 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
       } else {
         const args = [
           'build',
+          ...(this.platform ? ['--platform', this.platform] : []),
           '-t',
           this.imageTag,
           '-f',
@@ -1147,6 +1202,8 @@ export async function createDockerSandbox(
       env: options.env,
       name: options.name,
       command: options.command,
+      securityOpt: options.securityOpt,
+      platform: options.platform,
     });
   } else {
     strategy = new RuntimeStrategy({
@@ -1157,6 +1214,8 @@ export async function createDockerSandbox(
       env: options.env,
       name: options.name,
       command: options.command,
+      securityOpt: options.securityOpt,
+      platform: options.platform,
     });
   }
 
