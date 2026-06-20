@@ -1,34 +1,72 @@
 ---
 title: MinIO / S3 Cloud Storage Volumes
-description: Persist sandbox files to MinIO (or any S3-compatible store) with an rclone-backed Docker volume — no library coupling
+description: Persist sandbox files to MinIO or any S3-compatible store via an rclone-backed Docker volume — config inline, no rclone.conf
 ---
 
-This recipe persists sandbox files to **MinIO** — or any S3-compatible store (AWS S3, Wasabi, Cloudflare R2) — through an [rclone](https://rclone.org/docker/) Docker volume plugin. MinIO is just rclone's `s3` backend with `provider = Minio`, so the `@deepagents/context` side uses the standard `type: 'volume'` primitive: the library never learns about MinIO, rclone, or credentials.
+Persist sandbox files to **MinIO** — or any S3-compatible store (AWS S3, Cloudflare R2, Backblaze B2, GCS via HMAC) — through the [rclone](https://rclone.org/docker/) Docker volume plugin. The library never learns about rclone or credentials; it just attaches an ordinary Docker volume.
 
-It is the S3 counterpart of the [GCS Cloud Storage recipe](/docs/context/recipes/gcs-cloud-storage) — same plugin, same volume primitive, a different `rclone.conf` stanza. The walkthrough targets **local development on Docker Desktop** (the common case: a MinIO container you spin up yourself), then notes the changes for a real/remote MinIO endpoint.
+There are only two steps: install the plugin once, then hand `createDockerSandbox` a volume whose `driverOptions` carry an rclone **connection string**. No `rclone.conf`, no daemon to run, nothing to maintain.
 
-## Topology (local dev on Docker Desktop)
+## 1. Install the rclone volume plugin (once per machine)
 
-On Docker Desktop the daemon — and therefore the rclone plugin, the MinIO container, and the sandbox — all live inside a hidden Linux VM. The plugin shares the VM's host networking, so it reaches the MinIO container through its **published host port** at `host.docker.internal:9000` (not the compose service name):
-
-```
-┌──────────────── Docker Desktop VM ─────────────────┐
-│ Docker Engine (daemon)                              │
-│  ├─ rclone plugin  ── remote "minio" (provider=Minio)│
-│  │        │  S3 over http://host.docker.internal:9000 │
-│  ├─ minio container  ── -p 9000:9000 (S3 API)        │
-│  │        └─ bucket "agent-storage"                  │
-│  └─ sandbox container                                │
-│        mounts volume → /workspace/storage  ──────────┘
-│        (writes become objects in the bucket)
-└─────────────────────────────────────────────────────┘
+```bash
+# arm64 on Apple Silicon, amd64 on Intel / most Linux
+docker plugin install rclone/docker-volume-rclone:arm64 \
+  args="-v" --alias rclone --grant-all-permissions
 ```
 
-> A bind mount can't reach MinIO here: `gcs()`-style bind volumes resolve their `hostPath` on the daemon host, which on Docker Desktop is the hidden VM. The rclone **volume plugin** does the S3 I/O *inside* that VM, so it's the one filesystem-style path that works on macOS/Windows. On a Linux daemon host both options work.
+`docker plugin ls` should now show `rclone:latest` enabled. That is the entire host-level setup — rclone is now a volume driver Docker knows about, like the built-in `local` driver but backed by your bucket.
 
-## 1. Run MinIO locally and create the bucket
+## 2. Attach a bucket as a volume
 
-`docker-compose.minio.yml`:
+Put the whole backend config inline as a connection string. With `lifecycle: 'managed'` the sandbox creates the volume on start and removes it on dispose:
+
+```typescript
+import { createDockerSandbox } from '@deepagents/context';
+
+const e = process.env; // your bucket's endpoint + credentials
+
+await using sandbox = await createDockerSandbox({
+  image: 'alpine:latest',
+  volumes: [
+    {
+      type: 'volume',
+      name: 'agent-storage',
+      containerPath: '/workspace/storage',
+      readOnly: false,
+      lifecycle: 'managed',
+      driver: 'rclone',
+      driverOptions: {
+        remote: `:s3,provider=Minio,access_key_id=${e.MINIO_KEY},secret_access_key=${e.MINIO_SECRET},endpoint="${e.MINIO_ENDPOINT}":${e.MINIO_BUCKET}`,
+        'vfs-cache-mode': 'writes',
+      },
+    },
+  ],
+});
+
+await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
+```
+
+A file written to `/workspace/storage/output.txt` becomes the object `output.txt` in your bucket.
+
+> **Quote the endpoint.** The `://` must be quoted (`endpoint="https://…"`), or rclone splits on the colon and fails with `Custom endpoint 'http' was not a valid URI`.
+
+### Same volume, any backend — just change the connection string
+
+The provider preset and endpoint are the only differences:
+
+```
+# MinIO:  :s3,provider=Minio,access_key_id=…,secret_access_key=…,endpoint="https://minio-api.you.com":BUCKET
+# AWS S3: :s3,provider=AWS,access_key_id=…,secret_access_key=…,region=us-east-1:BUCKET
+# GCS:    :s3,provider=GCS,access_key_id=GOOG…,secret_access_key=…,endpoint="https://storage.googleapis.com":BUCKET
+# R2:     :s3,provider=Cloudflare,access_key_id=…,secret_access_key=…,endpoint="https://<acct>.r2.cloudflarestorage.com":BUCKET
+```
+
+GCS works here because Google Cloud Storage exposes the S3 API with [HMAC keys](https://cloud.google.com/storage/docs/authentication/hmackeys) — `provider=GCS`. (The _native_ GCS rclone backend can't go in a connection string; for that, use a named remote — see below.)
+
+## Try it locally (optional)
+
+Spin up a local MinIO, then use `endpoint="http://host.docker.internal:9000"` in the connection string — the plugin runs inside Docker Desktop's VM and reaches the published port that way:
 
 ```yaml
 services:
@@ -38,69 +76,42 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000" # S3 API — published so the rclone plugin can reach it
-      - "9001:9001" # web console at http://localhost:9001
-    volumes:
-      - minio-data:/data
+    ports: ['9000:9000', '9001:9001']
+    volumes: ['minio-data:/data']
   createbucket:
     image: minio/mc
     depends_on: [minio]
     entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
-      mc mb -p local/agent-storage;
-      exit 0;
-      "
+      /bin/sh -c "until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done; mc mb -p local/agent-storage; exit 0;"
 volumes:
   minio-data:
 ```
 
 ```bash
-docker compose -f docker-compose.minio.yml up -d
+docker compose up -d
 ```
 
-The `createbucket` one-shot waits for MinIO, creates `agent-storage`, and exits. MinIO's S3 API is now published on the host at `localhost:9000`; the console is at `localhost:9001`.
+## Things to know
 
-## 2. Install the rclone volume plugin
+- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, a write lands in a local cache and uploads after `--vfs-write-back` (default `5s`) plus a flush on unmount — don't assume an object exists the instant a file closes.
+- **It's FUSE over object storage.** Whole-file create-and-close is the reliable write pattern; in-place random writes can misbehave.
+- **Credentials in the connection string show up in `docker volume inspect`.** Fine for local dev. To keep them out of volume metadata, use a named remote (below).
+- **No coupling in the library.** `@deepagents/context` only attaches an ordinary Docker volume; switching providers is a one-line connection-string change.
 
-Use the tag matching your daemon's architecture (`arm64` on Apple Silicon, `amd64` on Intel/most Linux):
+## Keeping credentials out of volume metadata
 
-```bash
-docker plugin install rclone/docker-volume-rclone:arm64 \
-  args="-v" --alias rclone --grant-all-permissions
-```
-
-## 3. Configure the `[minio]` remote, then enable
-
-The plugin reads its config from `rclone.conf` inside its config mount. **Write the config before enabling** — see the gotcha below.
-
-`provider = Minio` selects path-style addressing (required for MinIO). For local dev the endpoint is the published host port as seen from inside the VM:
+If you don't want the access key visible in `docker volume inspect`, define a named remote in the plugin's `rclone.conf` and reference it by name. The config lives at `/var/lib/docker-plugins/rclone/config/rclone.conf` on the **daemon host**.
 
 ```ini
 [minio]
 type = s3
 provider = Minio
-access_key_id = minioadmin
-secret_access_key = minioadmin
-endpoint = http://host.docker.internal:9000
+access_key_id = YOUR_KEY
+secret_access_key = YOUR_SECRET
+endpoint = https://minio-api.you.com
 ```
 
-**On a Linux daemon host**, that file lives on the host — write it directly:
-
-```bash
-sudo mkdir -p /var/lib/docker-plugins/rclone/config
-sudo tee /var/lib/docker-plugins/rclone/config/rclone.conf >/dev/null <<'EOF'
-[minio]
-type = s3
-provider = Minio
-access_key_id = minioadmin
-secret_access_key = minioadmin
-endpoint = http://host.docker.internal:9000
-EOF
-```
-
-**On Docker Desktop (macOS/Windows)**, that path is inside the VM, not on your machine. Write it through a one-shot privileged helper that enters the VM's namespace:
+On a Linux daemon, write it with `sudo tee`. On Docker Desktop the path is inside the VM, so write it through a one-shot helper:
 
 ```bash
 docker run --rm --privileged --pid=host justincormack/nsenter1 /bin/sh -c '
@@ -108,96 +119,17 @@ cat > /var/lib/docker-plugins/rclone/config/rclone.conf <<EOF
 [minio]
 type = s3
 provider = Minio
-access_key_id = minioadmin
-secret_access_key = minioadmin
-endpoint = http://host.docker.internal:9000
+access_key_id = YOUR_KEY
+secret_access_key = YOUR_SECRET
+endpoint = https://minio-api.you.com
 EOF'
+docker plugin disable rclone && docker plugin enable rclone # reload config
 ```
 
-Then enable (or, if the plugin was already enabled, `disable` then `enable` to reload):
-
-```bash
-docker plugin enable rclone
-```
-
-> **Gotcha — a bad remote stops the plugin from starting at all.** `rclone serve docker` parses the *entire* config on startup; a stale or unreachable remote (e.g. an expired OAuth token left over from another backend) can make it hang before it ever creates its socket, so **every** `docker plugin enable` fails with `dial unix …/rclone.sock: connect: no such file or directory` — even for an unrelated volume. If you hit this, inspect `/var/lib/docker-plugins/rclone/config/rclone.conf` and remove the broken stanza. A managed plugin only re-reads its config on `disable`/`enable`.
-
-## 4. Attach the volume to a sandbox
-
-For local development, let the sandbox create and clean up the volume with `lifecycle: 'managed'`. The `driver`/`driverOptions` map straight onto `docker volume create --driver rclone --opt …`:
+Then reference the named remote instead of a connection string:
 
 ```typescript
-import { createDockerSandbox } from '@deepagents/context';
-
-await using sandbox = await createDockerSandbox({
-  image: 'alpine:latest',
-  volumes: [
-    {
-      type: 'volume',
-      name: 'minio-agent-storage',
-      containerPath: '/workspace/storage',
-      readOnly: false,
-      lifecycle: 'managed', // sandbox runs `docker volume create` and removes it on dispose
-      driver: 'rclone',
-      driverOptions: {
-        remote: 'minio:agent-storage', // "<remote name>:<bucket>"
-        'vfs-cache-mode': 'writes',
-      },
-    },
-  ],
-});
-
-await sandbox.executeCommand(
-  'echo "result" > /workspace/storage/output.txt',
-);
+driverOptions: { remote: 'minio:agent-storage', 'vfs-cache-mode': 'writes' }
 ```
 
-`remote: 'minio:agent-storage'` is two parts: `minio` is the remote from your `rclone.conf`; `agent-storage` is the bucket. The S3 credentials and endpoint stay in the plugin's config — never in your TypeScript. The file written at `/workspace/storage/output.txt` becomes the object `agent-storage/output.txt` in MinIO (visible in the console at `localhost:9001`).
-
-> Pass the **named remote** via `remote=`, not an inline backend config. The plugin rejects `-o type=s3 -o provider=…` (`unsupported backend option`), and an on-the-fly `:s3:` remote with separate `-o s3-*` options silently falls back to AWS instead of your endpoint. Define the remote in `rclone.conf` and reference it by name.
-
-### Alternative: a pre-created (`external`) volume
-
-To share one volume across runs or pre-provision it, create it yourself and reference it with `lifecycle: 'external'` (the form the GCS recipe uses):
-
-```bash
-docker volume create minio-agent-storage -d rclone \
-  -o remote=minio:agent-storage \
-  -o vfs-cache-mode=writes
-```
-
-```typescript
-volumes: [
-  {
-    type: 'volume',
-    name: 'minio-agent-storage',
-    containerPath: '/workspace/storage',
-    readOnly: false,
-    lifecycle: 'external', // already exists; DeepAgents only inspects it
-  },
-],
-```
-
-The bucket-to-volume mapping lives entirely in how you create the volume, so per-agent isolation (a bucket each, or a prefix each via `remote=minio:shared/agent-a`) needs no DeepAgents change.
-
-## Real or remote MinIO
-
-For a MinIO server that isn't a local container, only the `rclone.conf` stanza changes — swap the endpoint and credentials, and use HTTPS in production:
-
-```ini
-[minio]
-type = s3
-provider = Minio
-access_key_id = YOUR_ACCESS_KEY
-secret_access_key = YOUR_SECRET_KEY
-endpoint = https://minio.internal.example.com
-```
-
-If the daemon runs on a remote host (e.g. a VM you target with `DOCKER_CONTEXT`), use a named `external` volume — a bind mount's `hostPath` would be validated on the app server but resolved on the VM. See the [GCS recipe's remote-daemon section](/docs/context/recipes/gcs-cloud-storage#remote-daemon-on-a-gcp-vm) for the docker-context setup; everything there applies, with the `[minio]` stanza in place of `[gcs]`.
-
-## Things to know
-
-- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, a write lands in the plugin's local cache and uploads asynchronously (after `--vfs-write-back`, default `5s`, plus a flush on unmount). Don't assert an object exists the instant a file closes; a long-lived sandbox flushes within a few seconds, while a container that exits immediately may upload a moment later. Lower `--vfs-write-back` for snappier uploads.
-- **This is FUSE over object storage.** Whole-file create-and-close writes are the reliable pattern; tools doing in-place random writes can misbehave.
-- **`provider = Minio` is what makes it work.** It switches rclone to path-style addressing; without it, requests target `bucket.host…` virtual-host style and fail against MinIO.
-- **No MinIO coupling in the library.** `@deepagents/context` only attaches an ordinary Docker named volume. Switching backend (S3, R2, Wasabi, Azure) is a one-stanza `rclone.conf` change — `type`, `provider`, `endpoint` — with no code change.
+> **Gotcha:** a bad or stale remote in `rclone.conf` makes the plugin hang on startup, so `docker plugin enable` fails with `dial unix …/rclone.sock: connect: no such file or directory`. Remove the broken stanza and re-enable. The connection-string method sidesteps this entirely — there is no config file to break.
