@@ -1,10 +1,10 @@
 {
   "name": "@deepagents/demo-minio",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "description": "Self-contained MinIO + rclone-backed Docker volume. One compose file wires MinIO and an rclone volume with config inline (no rclone.conf); run.ts mounts the same bucket from a deepagents sandbox.",
   "dependencies": {
-    "@deepagents/context": "3.1.0"
+    "@deepagents/context": "4.0.0"
   }
 }
