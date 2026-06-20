@@ -200,34 +200,6 @@ async function useFakeTime<T>(
 }
 
 describe('ContextEngine conditional reminders', () => {
-  it('once() on a non-steer target does not silently fire every turn', async () => {
-    const store = new InMemoryContextStore();
-    const engine = new ContextEngine({
-      store,
-      chatId: 'once-misuse',
-      userId: 'u1',
-    });
-
-    // once() is a steer-only durable latch. On a user target there is no
-    // firedOnceIds infrastructure, so a naive implementation returns true
-    // forever and the reminder fires on every turn. It must NOT.
-    engine.set(
-      reminder('LATCH-TEXT', { when: once('u'), target: 'user' }),
-      user('turn 1'),
-    );
-    await engine.save();
-
-    const { messages } = await engine.resolve({
-      renderer: new XmlRenderer(),
-      sandbox: await createVirtualAgentSandbox(),
-    });
-    const text = getTextParts(messages[messages.length - 1]).join('');
-    assert.ok(
-      !text.includes('LATCH-TEXT'),
-      `once() must not fire on a non-steer target. Got: ${text}`,
-    );
-  });
-
   it('applies everyNTurns reminder on matching turn', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -436,7 +408,8 @@ describe('ContextEngine conditional reminders', () => {
 
     engine.set(
       reminder('conditional', { when: everyNTurns(3) }),
-      user('turn 3', reminder('always-here')),
+      reminder('always-here'),
+      user('turn 3'),
     );
     await engine.save();
 
@@ -449,7 +422,7 @@ describe('ContextEngine conditional reminders', () => {
 
     assert.ok(
       text.includes('always-here'),
-      'Immediate reminder should be present',
+      'Always-on user reminder should be present',
     );
     assert.ok(
       text.includes('conditional'),
@@ -892,6 +865,60 @@ describe('ContextEngine conditional reminders', () => {
     );
   });
 
+  it('once() on a user-target reminder fires on the first save only', async () => {
+    const store = new InMemoryContextStore();
+    const engine = new ContextEngine({
+      store,
+      chatId: 'once-user',
+      userId: 'u1',
+    });
+    engine.set(reminder('one-time', { target: 'user', when: once('welcome') }));
+
+    engine.set(user('first'));
+    await engine.save();
+    engine.set(user('second'));
+    await engine.save();
+
+    const users = (await store.getMessages('once-user')).filter(
+      (m) => m.name === 'user',
+    );
+    assert.ok(
+      getStoredMessageText(users[0]).includes('one-time'),
+      'first user message should carry the once() reminder',
+    );
+    assert.ok(
+      !getStoredMessageText(users[1]).includes('one-time'),
+      'second user message should NOT carry the latched once() reminder',
+    );
+  });
+
+  it('once() on a user-target reminder stays latched across engine restarts', async () => {
+    const store = new InMemoryContextStore();
+    const chatId = 'once-user-restart';
+
+    const c1 = new ContextEngine({ store, chatId, userId: 'u1' });
+    c1.set(reminder('one-time', { target: 'user', when: once('welcome') }));
+    c1.set(user('first'));
+    await c1.save();
+
+    const c2 = new ContextEngine({ store, chatId, userId: 'u1' });
+    c2.set(reminder('one-time', { target: 'user', when: once('welcome') }));
+    c2.set(user('second'));
+    await c2.save();
+
+    const users = (await store.getMessages(chatId)).filter(
+      (m) => m.name === 'user',
+    );
+    assert.ok(
+      getStoredMessageText(users[0]).includes('one-time'),
+      'first user message should carry the once() reminder',
+    );
+    assert.ok(
+      !getStoredMessageText(users[1]).includes('one-time'),
+      'a fresh engine must still suppress the latched once() reminder',
+    );
+  });
+
   it('applies async when predicate that resolves to true', async () => {
     const store = new InMemoryContextStore();
     const engine = new ContextEngine({
@@ -1274,7 +1301,7 @@ describe('ContextEngine conditional reminders', () => {
       );
     });
 
-    it('applies immediate fragment reminder inside user()', async () => {
+    it('folds an always-on fragment reminder into the user message', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1283,15 +1310,13 @@ describe('ContextEngine conditional reminders', () => {
       });
 
       engine.set(
-        user(
-          'hello',
-          reminder(
-            workflow({
-              task: 'Greet user',
-              steps: ['Say hi', 'Ask how they are'],
-            }),
-          ),
+        reminder(
+          workflow({
+            task: 'Greet user',
+            steps: ['Say hi', 'Ask how they are'],
+          }),
         ),
+        user('hello'),
       );
       await engine.save();
 
@@ -1415,7 +1440,7 @@ describe('ContextEngine conditional reminders', () => {
       );
     });
 
-    it('stripReminders works on immediate fragment reminders inside user()', async () => {
+    it('stripReminders works on folded fragment reminders', async () => {
       const store = new InMemoryContextStore();
       const engine = new ContextEngine({
         store,
@@ -1424,7 +1449,8 @@ describe('ContextEngine conditional reminders', () => {
       });
 
       engine.set(
-        user('hello', reminder(workflow({ task: 'Immediate', steps: ['s1'] }))),
+        reminder(workflow({ task: 'Immediate', steps: ['s1'] })),
+        user('hello'),
       );
       await engine.save();
 

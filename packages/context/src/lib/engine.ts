@@ -26,8 +26,11 @@ import {
 import {
   type BaseWhenCtx,
   type ConditionalReminder,
+  type ReminderTarget,
+  type UserReminder,
   type WhenContext,
   applyRemindersToToolOutput,
+  applyUserRemindersToMessage,
   isConditionalReminder,
   synthesizeSteerUserMessage,
   user,
@@ -59,7 +62,7 @@ import {
   type StoredChatData,
 } from './store/store.ts';
 import { extractPlainText } from './text.ts';
-import { requireUIMessage } from './ui-message-guards.ts';
+import { requireUIMessage, requireUserUIMessage } from './ui-message-guards.ts';
 
 export type { SaveResult } from './save/save-pipeline.ts';
 
@@ -718,13 +721,10 @@ export class ContextEngine {
       return { headMessageId: this.#branch?.headMessageId ?? undefined };
     }
 
-    const pipeline = new SavePipeline(
-      this.#asSavePipelineEngine(),
-      this.#pendingMessages,
-      this.#fragments,
-    );
+    const pending = this.#pendingMessages;
+    const pipeline = new SavePipeline(this.#asSavePipelineEngine(), pending);
     await pipeline.applyUpdateBranching(options?.branch ?? true);
-    await pipeline.evaluateUserReminders();
+    await this.#foldUserReminders(pending);
     const result = await pipeline.persist();
 
     this.#pendingMessages = [];
@@ -775,7 +775,7 @@ export class ContextEngine {
       const canFire = (priorStep?.content?.length ?? 0) > 0;
 
       if (canFire) {
-        const configs = this.#steerConfigs();
+        const configs = this.#remindersFor('steer');
         if (configs.length > 0) {
           const whenCtx = await this.#steerWhenCtx(session);
           const matched = await evaluateFiredReminders(configs, whenCtx);
@@ -871,18 +871,100 @@ export class ContextEngine {
     await this.save({ branch: false });
   }
 
-  #steerConfigs(): ConditionalReminder[] {
+  #remindersFor(target: ReminderTarget): ConditionalReminder[] {
     return this.#fragments
       .filter(isConditionalReminder)
       .map((fragment) => fragment.metadata.reminder)
-      .filter((config) => config.target === 'steer');
+      .filter((config) => config.target === target);
+  }
+
+  #buildBaseWhenCtx(chain: ChainSummary): BaseWhenCtx {
+    const rawUsage = this.#chatData?.metadata?.usage;
+    const usage = isLanguageModelUsage(rawUsage) ? rawUsage : undefined;
+    const elapsed =
+      chain.lastMessageAt !== undefined
+        ? Date.now() - chain.lastMessageAt
+        : undefined;
+    const chatData = this.#chatData;
+    if (!chatData) {
+      throw new Error('ContextEngine must be initialized before reminders run');
+    }
+    return {
+      turn: chain.turn,
+      messageCount: chain.messageCount,
+      lastMessageAt: chain.lastMessageAt,
+      lastMessage: chain.lastMessage,
+      chat: chatData,
+      usage,
+      branch: this.#branchName,
+      elapsed,
+    };
+  }
+
+  #buildWhenCtx(chain: ChainSummary, currentMessage: UIMessage): WhenContext {
+    return {
+      ...this.#buildBaseWhenCtx(chain),
+      content: extractPlainText(currentMessage),
+      currentMessage,
+      lastAssistantMessage: chain.lastAssistantMessage,
+      lastAssistantMessages: chain.lastAssistantMessages,
+    };
+  }
+
+  /**
+   * `steer` reminders fire mid-loop via prepareStep and `tool-output` reminders
+   * wrap at tool-execution time, so by the time save() runs only user-target
+   * reminders remain to fold into the last pending user message.
+   */
+  async #foldUserReminders(pending: ContextFragment[]): Promise<void> {
+    const configs = this.#remindersFor('user');
+    if (configs.length === 0) return;
+
+    const fragmentIndex = pending.findLastIndex(
+      (fragment) => fragment.name === 'user',
+    );
+    if (fragmentIndex < 0) return;
+    const fragment = pending[fragmentIndex];
+    if (!fragment.codec) return;
+    const message = requireUserUIMessage(
+      fragment.codec.encode(),
+      `Pending user fragment "${fragment.name}"`,
+    );
+
+    const chain = await this.#getChainContext();
+    const matched = await evaluateFiredReminders(configs, {
+      ...this.#buildWhenCtx(chain, message),
+      firedOnceIds: chain.firedOnceIds,
+    });
+    if (matched.length === 0) return;
+
+    const onceIds = [...new Set(matched.flatMap((m) => m.onceIds))];
+    const reminders: UserReminder[] = matched.map((m) => ({
+      text: m.resolved.text,
+      asPart: m.config.asPart,
+      target: 'user',
+      metadata: m.resolved.metadata,
+    }));
+    const carrier: UIMessage & { role: 'user' } = {
+      ...message,
+      id: fragment.id ?? message.id,
+      parts: [...message.parts],
+    };
+    if (onceIds.length > 0) {
+      carrier.metadata = {
+        ...(carrier.metadata as Record<string, unknown> | undefined),
+        onceIds,
+      };
+    }
+    applyUserRemindersToMessage(carrier, reminders);
+    pending[fragmentIndex] = user(carrier);
   }
 
   async #steerWhenCtx(session: SteerSession): Promise<WhenContext> {
     await this.#ensureInitialized();
     if (!session.whenBase) {
       const chain = await this.#getChainContext();
-      const base = this.#asSavePipelineEngine().buildBaseWhenCtx(chain);
+      const base = this.#buildBaseWhenCtx(chain);
       const currentMessage = chain.lastMessage;
       if (!currentMessage) {
         throw new Error(
@@ -942,10 +1024,7 @@ export class ContextEngine {
    * passes through untouched.
    */
   public async applyToolOutputReminders(output: unknown): Promise<unknown> {
-    const configs = this.#fragments
-      .filter(isConditionalReminder)
-      .map((fragment) => fragment.metadata.reminder)
-      .filter((config) => config.target === 'tool-output');
+    const configs = this.#remindersFor('tool-output');
     if (configs.length === 0) return output;
 
     await this.#ensureInitialized();
@@ -953,16 +1032,10 @@ export class ContextEngine {
     const currentMessage = chain.lastMessage;
     if (!currentMessage) return output;
 
-    const base = this.#asSavePipelineEngine().buildBaseWhenCtx(chain);
-    const whenCtx: WhenContext = {
-      ...base,
-      content: extractPlainText(currentMessage),
-      currentMessage,
-      lastAssistantMessage: chain.lastAssistantMessage,
-      lastAssistantMessages: chain.lastAssistantMessages,
-    };
-
-    const matched = await evaluateFiredReminders(configs, whenCtx);
+    const matched = await evaluateFiredReminders(
+      configs,
+      this.#buildWhenCtx(chain, currentMessage),
+    );
     if (matched.length === 0) return output;
 
     return applyRemindersToToolOutput(
@@ -975,7 +1048,6 @@ export class ContextEngine {
     return {
       store: this.#store,
       chatId: this.#chatId,
-      branchName: this.#branchName,
       getActiveBranch: () => ({
         id: this.#activeBranch.id,
         headMessageId: this.#activeBranch.headMessageId,
@@ -988,31 +1060,6 @@ export class ContextEngine {
         this.#activeBranch.headMessageId = headMessageId;
       },
       rewindForUpdate: (parentId: string) => this.#rewindForUpdate(parentId),
-      getChainSummary: () => this.#getChainContext(),
-      buildBaseWhenCtx: (chain: ChainSummary): BaseWhenCtx => {
-        const rawUsage = this.#chatData?.metadata?.usage;
-        const usage = isLanguageModelUsage(rawUsage) ? rawUsage : undefined;
-        const elapsed =
-          chain.lastMessageAt !== undefined
-            ? Date.now() - chain.lastMessageAt
-            : undefined;
-        const chatData = this.#chatData;
-        if (!chatData) {
-          throw new Error(
-            'ContextEngine must be initialized before reminders run',
-          );
-        }
-        return {
-          turn: chain.turn,
-          messageCount: chain.messageCount,
-          lastMessageAt: chain.lastMessageAt,
-          lastMessage: chain.lastMessage,
-          chat: chatData,
-          usage,
-          branch: this.#branchName,
-          elapsed,
-        };
-      },
     };
   }
 

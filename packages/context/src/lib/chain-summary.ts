@@ -1,7 +1,10 @@
 import type { UIMessage } from 'ai';
 
 import type { ContextFragment } from './fragments.ts';
-import { isSyntheticSteerMessage } from './fragments/message/user.ts';
+import {
+  getReminderOnceIds,
+  isSyntheticSteerMessage,
+} from './fragments/message/user.ts';
 import type { MessageData } from './store/store.ts';
 import { requireUIMessage } from './ui-message-guards.ts';
 
@@ -55,6 +58,10 @@ export class ChainSummaryBuilder {
       }
       return;
     }
+
+    // Real user turns carry the once-ids of any user-target reminder folded
+    // into them, so a fresh engine re-collects them and once() stays latched.
+    for (const id of getReminderOnceIds(message)) this.#firedOnceIds.add(id);
 
     this.#turn++;
     this.#lastMessageAt = msg.createdAt;

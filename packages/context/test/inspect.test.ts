@@ -179,14 +179,12 @@ describe('ContextEngine.inspect()', () => {
     });
 
     engine.set(
-      user(
-        {
-          parts: [{ type: 'text', text: 'payload' }],
-          id: 'user-reminder-msg',
-          role: 'user',
-        },
-        reminder('tooltip-reminder', { asPart: partMode }),
-      ),
+      reminder('tooltip-reminder', { asPart: partMode }),
+      user({
+        parts: [{ type: 'text', text: 'payload' }],
+        id: 'user-reminder-msg',
+        role: 'user',
+      }),
     );
     await engine.save();
 
