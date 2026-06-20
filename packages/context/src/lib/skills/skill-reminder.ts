@@ -1,5 +1,8 @@
-import type { ContextFragment } from '../fragments.ts';
-import { type ReminderContext, reminder } from '../fragments/message/user.ts';
+import {
+  type ReminderContext,
+  type UserReminder,
+  reminder,
+} from '../fragments/message/user.ts';
 import {
   BM25Classifier,
   type ClassifierMatch,
@@ -21,17 +24,14 @@ function formatSkillReminder(
 export function skillsReminder(
   skillsOrClassifier: SkillMetadata[] | IClassifier<SkillMetadata>,
   options?: ClassifierOptions,
-): ContextFragment {
+): UserReminder {
   const classifier = Array.isArray(skillsOrClassifier)
     ? new BM25Classifier(skillsOrClassifier)
     : skillsOrClassifier;
 
-  return reminder(
-    (ctx: ReminderContext) => {
-      const matches = classifier.match(ctx.content, options);
-      if (matches.length === 0) return '';
-      return formatSkillReminder(matches);
-    },
-    { target: 'user' },
-  );
+  return reminder((ctx: ReminderContext) => {
+    const matches = classifier.match(ctx.content, options);
+    if (matches.length === 0) return '';
+    return formatSkillReminder(matches);
+  });
 }

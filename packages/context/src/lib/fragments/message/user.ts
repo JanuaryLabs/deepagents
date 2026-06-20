@@ -94,26 +94,22 @@ export interface SyntheticSteerMetadata {
   onceIds?: string[];
 }
 
-export interface ReminderOptions {
-  /**
-   * Predicate gating when the reminder fires. Optional for `target: 'user'`
-   * (omit ⇒ always fires; pair with `once(id)` for one-time); required for
-   * `steer` / `tool-output`, where a trigger-less reminder is meaningless.
-   */
-  when?: WhenPredicate;
+export interface UserReminderOptions {
   asPart?: boolean;
-  target?: ReminderTarget;
+  target?: 'user';
 }
 
-/**
- * A resolved reminder ready to bake into a user message. Internal to the save
- * fold — callers declare reminders with {@link reminder} + `engine.set()`.
- */
 export interface UserReminder {
   text: SyncReminderText;
   asPart: boolean;
   target: 'user';
   metadata?: Record<string, unknown>;
+}
+
+export interface ConditionalReminderOptions {
+  when: WhenPredicate;
+  asPart?: boolean;
+  target?: ReminderTarget;
 }
 
 export interface ConditionalReminder {
@@ -170,17 +166,6 @@ export function getReminderRanges(
   }));
 }
 
-/**
- * Once-ids latched by `once()`-gated reminders folded into this user message.
- * Persisted so a fresh engine re-reads them (the durable suppression record for
- * user-target `once()`, mirroring synthetic steer messages).
- */
-export function getReminderOnceIds(message: UIMessage): string[] {
-  const meta = message.metadata;
-  if (!isRecord(meta) || !Array.isArray(meta.onceIds)) return [];
-  return meta.onceIds.filter((id): id is string => typeof id === 'string');
-}
-
 function getReminderMetadataRecords(
   metadata: Record<string, unknown> | undefined,
 ): ReminderMetadataRecord[] {
@@ -200,6 +185,41 @@ function normalizeReminderTarget(target: unknown): ReminderTarget {
   if (target === 'tool-output') return 'tool-output';
   if (target === 'steer') return 'steer';
   throw new Error(`Unsupported reminder target: ${String(target)}`);
+}
+
+function isConditionalReminderOptions(
+  options: UserReminderOptions | ConditionalReminderOptions | undefined,
+): options is ConditionalReminderOptions {
+  return options !== undefined && 'when' in options;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === 'object' || typeof value === 'function') &&
+    value !== null &&
+    'then' in value &&
+    typeof value.then === 'function'
+  );
+}
+
+function normalizeImmediateReminderText(
+  textOrFragment: ReminderText | ContextFragment,
+): SyncReminderText {
+  if (isFragment(textOrFragment)) {
+    return new XmlRenderer().render([textOrFragment]);
+  }
+
+  if (typeof textOrFragment === 'string') {
+    return textOrFragment;
+  }
+
+  return (ctx) => {
+    const resolved = textOrFragment(ctx);
+    if (isPromiseLike(resolved)) {
+      throw new Error('Async reminder text requires a when predicate');
+    }
+    return resolved;
+  };
 }
 
 function normalizeConditionalReminderText(
@@ -547,61 +567,149 @@ export function mergeReminderMetadata(
 }
 
 /**
- * Create a reminder fragment, set on the engine via `engine.set()`. The engine
- * folds it into the model's view when its `when` fires: `user` reminders bake a
- * `<system-reminder>` into the last user message at save; `steer` injects mid-
- * loop; `tool-output` wraps the tool result. Text may be a string, a `(ctx) =>
- * string` factory (self-gates by returning `''`), or a context fragment.
+ * Create an immediate reminder for use inside `user()`.
  *
- * For `target: 'user'`, `when` is optional — omit it for an always-on
- * instruction, or pass `once(id)` for a one-time reminder. `steer` and
- * `tool-output` require a `when` trigger.
+ * Injects reminder text inline as `<system-reminder>...</system-reminder>`.
+ *
+ * @param text - Reminder text (must not be empty)
+ * @param options - Reminder representation options
+ */
+export function reminder(
+  text: SyncReminderText,
+  options?: UserReminderOptions,
+): UserReminder;
+/**
+ * Create a conditional reminder fragment for use with `engine.set()`.
+ *
+ * Evaluated at `save()` time against the current turn context.
+ * Only included in the last user message when the predicate returns true.
+ *
+ * @param text - Reminder text (must not be empty). Can be async.
+ * @param options - Must include a `when` predicate
  *
  * @example
  * ```ts
- * engine.set(reminder('Keep responses concise'));                // user, always
- * engine.set(reminder('Welcome!', { when: once('welcome') }));   // user, one-time
- * engine.set(reminder('RECAP', { when: everyNTurns(3), target: 'steer' }));
+ * engine.set(
+ *   reminder('Keep responses concise', { when: everyNTurns(3) }),
+ *   user('Hello'),
+ * );
  * ```
  */
 export function reminder(
+  text: ReminderText,
+  options: ConditionalReminderOptions,
+): ContextFragment;
+/**
+ * Create an immediate reminder from a context fragment.
+ *
+ * The fragment is pre-rendered to XML and injected as reminder text.
+ * Defaults to inline reminder text.
+ *
+ * @param fragment - A context fragment to render as reminder text
+ * @param options - Reminder representation options
+ *
+ * @example
+ * ```ts
+ * context.set(
+ *   user('hello', reminder(workflow({ task: 'Error recovery', steps: ['Check logs'] }))),
+ * );
+ * ```
+ */
+export function reminder(
+  fragment: ContextFragment,
+  options?: UserReminderOptions,
+): UserReminder;
+/**
+ * Create a conditional reminder from a context fragment.
+ *
+ * The fragment is pre-rendered to XML and injected as reminder text
+ * when the predicate fires. Defaults to inline reminder text.
+ *
+ * @param fragment - A context fragment to render as reminder text
+ * @param options - Must include a `when` predicate
+ *
+ * @example
+ * ```ts
+ * engine.set(
+ *   reminder(
+ *     workflow({ task: 'Error recovery', steps: ['Check logs', 'Fix query'] }),
+ *     { when: contentIncludes(['error', 'fail']) },
+ *   ),
+ *   user('my query failed'),
+ * );
+ * ```
+ */
+export function reminder(
+  fragment: ContextFragment,
+  options: ConditionalReminderOptions,
+): ContextFragment;
+export function reminder(
   textOrFragment: ReminderText | ContextFragment,
-  options?: ReminderOptions,
-): ContextFragment {
+  options?: UserReminderOptions | ConditionalReminderOptions,
+): UserReminder | ContextFragment {
   const target = normalizeReminderTarget(options?.target);
   const asPart = target === 'user' ? (options?.asPart ?? false) : false;
 
-  if (options?.when === undefined && target !== 'user') {
+  if (isConditionalReminderOptions(options)) {
+    const text = normalizeConditionalReminderText(textOrFragment);
+    if (typeof text === 'string') {
+      assertReminderText(text);
+    }
+
+    return {
+      name: 'reminder',
+      data: null,
+      metadata: {
+        reminder: {
+          text,
+          when: options.when,
+          asPart,
+          target,
+        } satisfies ConditionalReminder,
+      },
+    };
+  }
+
+  if (target !== 'user') {
     throw new Error(`Reminder target "${target}" requires a when predicate`);
   }
 
-  const text = normalizeConditionalReminderText(textOrFragment);
+  const text = normalizeImmediateReminderText(textOrFragment);
   if (typeof text === 'string') {
     assertReminderText(text);
   }
 
   return {
-    name: 'reminder',
-    data: null,
-    metadata: {
-      reminder: {
-        text,
-        when: options?.when ?? (() => true),
-        asPart,
-        target,
-      } satisfies ConditionalReminder,
-    },
+    text,
+    asPart,
+    target,
   };
 }
 
 /**
- * Create a user message fragment. Message fragments are separated from regular
- * fragments during resolve(). Reminders are NOT attached here — declare them
- * with `reminder(..., { target: 'user' })` and `engine.set()`; the engine folds
- * them into the last user message at save time.
+ * Create a user message fragment.
+ * Message fragments are separated from regular fragments during resolve().
+ *
+ * Reminders are baked into the message at creation time as
+ * `<system-reminder>...</system-reminder>` tags.
+ *
+ * For conditional reminders that fire based on turn count, use
+ * `reminder(text, { when })` directly with `engine.set()` instead.
+ *
+ * @param content - The message content
+ * @param reminders - Optional hidden/system reminders
+ *
+ * @example
+ * ```ts
+ * context.set(user('Hello')); // Plain user message
+ * context.set(
+ *   user('Deploy this', reminder('Ask for confirmation before destructive actions')),
+ * );
+ * ```
  */
 export function user(
   content: string | (UIMessage & { role: 'user' }),
+  ...reminders: UserReminder[]
 ): MessageFragment {
   const message: UIMessage =
     typeof content === 'string'
@@ -611,6 +719,18 @@ export function user(
           parts: [{ type: 'text', text: content }],
         }
       : { ...content, role: 'user', parts: [...content.parts] };
+
+  if (reminders.length > 0) {
+    const plainText = extractPlainText(message);
+    const added: UserReminderMetadata[] = [];
+    for (const item of reminders) {
+      const meta = applyReminderToMessage(message, item, {
+        content: plainText,
+      });
+      if (meta) added.push(meta);
+    }
+    mergeReminderMetadata(message, added);
+  }
 
   return {
     id: message.id,
@@ -626,26 +746,6 @@ export function user(
       },
     },
   };
-}
-
-/**
- * Bake resolved user reminders into a message in place: append each as a
- * `<system-reminder>` (inline or as its own part) and record the ranges in
- * `metadata.reminders` so `stripReminders` can reverse it. The save fold is the
- * only caller — user reminders are declared on the engine, not on `user()`.
- */
-export function applyUserRemindersToMessage(
-  message: UIMessage,
-  reminders: UserReminder[],
-): void {
-  if (reminders.length === 0) return;
-  const plainText = extractPlainText(message);
-  const added: UserReminderMetadata[] = [];
-  for (const item of reminders) {
-    const meta = applyReminderToMessage(message, item, { content: plainText });
-    if (meta) added.push(meta);
-  }
-  mergeReminderMetadata(message, added);
 }
 
 /**

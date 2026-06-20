@@ -5,9 +5,7 @@ import { describe, it } from 'node:test';
 import {
   type ClassifierMatch,
   type ClassifierOptions,
-  ContextEngine,
   type IClassifier,
-  InMemoryContextStore,
   reminder,
   skillsReminder,
   user,
@@ -45,38 +43,23 @@ const testSkills: SkillMetadata[] = [
   makeSkill('code-review', 'Review code for bugs and quality issues'),
 ];
 
-/**
- * Declare user-target reminders (including skillsReminder) on the engine and
- * return the persisted user message after the save fold bakes them in.
- */
-async function bakeUserMessage(
-  content: string | (UIMessage & { role: 'user' }),
-  ...reminders: ReturnType<typeof reminder>[]
-): Promise<UIMessage> {
-  const store = new InMemoryContextStore();
-  const engine = new ContextEngine({ store, chatId: 'skills', userId: 'u' });
-  engine.set(...reminders, user(content));
-  await engine.save();
-  const users = (await store.getMessages('skills')).filter(
-    (m) => m.name === 'user',
-  );
-  return users[users.length - 1].data as UIMessage;
-}
-
-function textOf(message: UIMessage): string {
-  return message.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('');
+function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
+  const message = fragment.codec?.encode();
+  assert.ok(message);
+  return message as UIMessage;
 }
 
 describe('skillsReminder', () => {
-  it('creates a factory reminder that resolves with skill matches', async () => {
-    const message = await bakeUserMessage(
+  it('creates a factory reminder that resolves with skill matches', () => {
+    const fragment = user(
       'deploy my app to production',
       skillsReminder(testSkills, { topN: 3 }),
     );
-    const textParts = textOf(message);
+    const message = decodeMessage(fragment);
+    const textParts = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     assert.ok(
       textParts.includes('Relevant skills:'),
@@ -88,12 +71,16 @@ describe('skillsReminder', () => {
     );
   });
 
-  it('includes scores and paths in the formatted output', async () => {
-    const message = await bakeUserMessage(
+  it('includes scores and paths in the formatted output', () => {
+    const fragment = user(
       'optimize my SQL queries',
       skillsReminder(testSkills, { topN: 2 }),
     );
-    const textParts = textOf(message);
+    const message = decodeMessage(fragment);
+    const textParts = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     const reminderMatch = textParts.match(
       /<system-reminder>([\s\S]*?)<\/system-reminder>/,
@@ -110,12 +97,16 @@ describe('skillsReminder', () => {
     assert.ok(reminderContent.includes('['), 'Should contain path brackets');
   });
 
-  it('skips injection when no skills match', async () => {
-    const message = await bakeUserMessage(
+  it('skips injection when no skills match', () => {
+    const fragment = user(
       'xyzzyplugh zorkbleep',
       skillsReminder(testSkills, { topN: 3 }),
     );
-    const textParts = textOf(message);
+    const message = decodeMessage(fragment);
+    const textParts = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     assert.ok(
       !textParts.includes('Relevant skills:'),
@@ -128,7 +119,7 @@ describe('skillsReminder', () => {
     );
   });
 
-  it('accepts a custom classifier implementing IClassifier', async () => {
+  it('accepts a custom classifier implementing IClassifier', () => {
     const customClassifier: IClassifier<SkillMetadata> = {
       match(
         _query: string,
@@ -143,11 +134,15 @@ describe('skillsReminder', () => {
       },
     };
 
-    const message = await bakeUserMessage(
+    const fragment = user(
       'anything',
       skillsReminder(customClassifier, { topN: 5 }),
     );
-    const textParts = textOf(message);
+    const message = decodeMessage(fragment);
+    const textParts = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     assert.ok(
       textParts.includes('custom-skill'),
@@ -157,11 +152,15 @@ describe('skillsReminder', () => {
   });
 });
 
-describe('factory reminders folded into the user message', () => {
-  it('resolves factory reminders with message content', async () => {
+describe('factory reminders in user()', () => {
+  it('resolves factory reminders with message content', () => {
     const factory = (ctx: { content: string }) => `Echo: ${ctx.content}`;
-    const message = await bakeUserMessage('hello world', reminder(factory));
-    const text = textOf(message);
+    const fragment = user('hello world', reminder(factory));
+    const message = decodeMessage(fragment);
+    const text = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     assert.ok(
       text.includes('<system-reminder>Echo: hello world</system-reminder>'),
@@ -169,25 +168,34 @@ describe('factory reminders folded into the user message', () => {
     );
   });
 
-  it('skips factory reminders that return empty string', async () => {
-    const message = await bakeUserMessage(
+  it('skips factory reminders that return empty string', () => {
+    const fragment = user(
       'hello',
       reminder(() => ''),
     );
+    const message = decodeMessage(fragment);
 
     assert.strictEqual(message.parts.length, 1);
-    assert.strictEqual(textOf(message), 'hello');
+    const text = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
+    assert.strictEqual(text, 'hello');
     assert.strictEqual(message.metadata, undefined);
   });
 
-  it('mixes static and factory reminders', async () => {
-    const message = await bakeUserMessage(
+  it('mixes static and factory reminders', () => {
+    const fragment = user(
       'test',
       reminder('static hint'),
       reminder((ctx) => `dynamic: ${ctx.content}`),
       reminder(() => ''),
     );
-    const text = textOf(message);
+    const message = decodeMessage(fragment);
+    const text = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     assert.ok(text.includes('static hint'), 'Should contain static reminder');
     assert.ok(
@@ -203,8 +211,8 @@ describe('factory reminders folded into the user message', () => {
     );
   });
 
-  it('extracts text from UIMessage content for factory', async () => {
-    const message = await bakeUserMessage(
+  it('extracts text from UIMessage content for factory', () => {
+    const fragment = user(
       {
         id: 'multi-part',
         role: 'user',
@@ -215,7 +223,11 @@ describe('factory reminders folded into the user message', () => {
       },
       reminder((ctx) => `Got: ${ctx.content}`),
     );
-    const allText = textOf(message);
+    const message = decodeMessage(fragment);
+    const allText = message.parts
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
 
     assert.ok(
       allText.includes('Got: first part second part'),

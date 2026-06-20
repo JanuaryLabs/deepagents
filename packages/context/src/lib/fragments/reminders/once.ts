@@ -24,13 +24,13 @@ export function once(id: string): WhenPredicate {
     throw new Error('once(id) requires a non-empty id');
   }
   return (ctx) => {
-    // firedOnceIds is wired for steer and user evaluation; its absence means
-    // once() was used on a tool-output target where it cannot durably latch
-    // (no persisted carrier records the fire). Throw rather than silently fire
-    // every turn (the eval pipeline isolates this into "did not fire" + warning).
+    // firedOnceIds is wired only for steer evaluation; its absence means once()
+    // was used on a user/tool-output target where it cannot durably latch.
+    // Throw rather than silently fire every turn (the eval pipeline isolates
+    // this into "did not fire" + a logged warning).
     if (ctx.firedOnceIds === undefined) {
       throw new Error(
-        `once('${id}') is not supported on target:'tool-output' reminders`,
+        `once('${id}') is only supported on target:'steer' reminders`,
       );
     }
     if (ctx.firedOnceIds.has(id)) return false;
