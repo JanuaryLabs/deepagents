@@ -1,0 +1,57 @@
+name: deepagents-minio
+
+# Self-contained MinIO + rclone-backed Docker volume. The rclone volume carries
+# its FULL backend config inline (driver_opts) — no rclone.conf, no nsenter1.
+#
+# Prerequisite (once per host — a Docker volume plugin cannot be installed from
+# a compose file):
+#   docker plugin install rclone/docker-volume-rclone:arm64 \
+#     --alias rclone --grant-all-permissions
+# (use :amd64 on Intel / most Linux).
+
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET:-minioadmin}
+    ports:
+      - '9000:9000' # S3 API — the rclone plugin reaches this via host.docker.internal
+      - '9001:9001' # console: http://localhost:9001
+    volumes:
+      - minio-data:/data
+
+  createbucket:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 ${MINIO_KEY:-minioadmin} ${MINIO_SECRET:-minioadmin}; do sleep 1; done; mc mb -p local/${MINIO_BUCKET:-agent-storage}; exit 0;"
+
+  # Writes a plain file through the rclone-backed volume; it lands in MinIO as an
+  # object. Mounting the volume is also what makes compose actually create it —
+  # compose skips a volume no service references.
+  writer:
+    image: alpine
+    depends_on:
+      createbucket:
+        condition: service_completed_successfully
+    command: sh -c "echo 'written through the rclone volume' > /workspace/storage/hello.txt && echo '[writer] wrote /workspace/storage/hello.txt -> object in MinIO' && sleep infinity"
+    volumes:
+      - agent-storage:/workspace/storage
+
+volumes:
+  minio-data:
+  agent-storage:
+    name: agent-storage # pinned (not project-prefixed) so run.ts can attach by name
+    driver: rclone
+    driver_opts:
+      type: s3
+      s3_provider: Minio
+      s3_access_key_id: ${MINIO_KEY:-minioadmin}
+      s3_secret_access_key: ${MINIO_SECRET:-minioadmin}
+      s3_endpoint: '${MINIO_ENDPOINT:-http://host.docker.internal:9000}'
+      path: ${MINIO_BUCKET:-agent-storage}
+      vfs_cache_mode: writes
