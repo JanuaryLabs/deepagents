@@ -5,6 +5,7 @@ import {
   DockerSandboxError,
   PackageInstallError,
 } from '../docker-sandbox-errors.ts';
+import { shellQuote } from '../shell-quote.ts';
 
 export type PackageManager = 'apk' | 'apt-get';
 
@@ -49,14 +50,6 @@ export function isDebianBased(image: string): boolean {
   if (lower.includes('alpine')) return false;
   const debianPatterns = ['debian', 'ubuntu', 'node', 'python'];
   return debianPatterns.some((pattern) => lower.includes(pattern));
-}
-
-/**
- * POSIX shell single-quote escape: wrap in `'...'`, replace any embedded
- * `'` with `'\''`. Safe for arbitrary content inside `sh -c`.
- */
-export function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 export function createInstallerContext(

@@ -1,5 +1,6 @@
 import { InstallError } from '../docker-sandbox-errors.ts';
-import { Installer, type InstallerContext, shellQuote } from './installer.ts';
+import { shellQuote } from '../shell-quote.ts';
+import { Installer, type InstallerContext } from './installer.ts';
 
 export interface ArchitectureUrls {
   x86_64?: string;

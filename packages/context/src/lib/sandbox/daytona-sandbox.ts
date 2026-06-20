@@ -7,6 +7,7 @@ import type {
 import { type CommandResult } from 'bash-tool';
 import { randomUUID } from 'node:crypto';
 
+import { shellQuote } from './shell-quote.ts';
 import type {
   DisposableSandbox,
   ExecuteCommandOptions,
@@ -632,10 +633,6 @@ function abortedExitInfo(): ExitInfo {
     signal: 'SIGKILL',
     success: false,
   };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function uniqueParentDirectories(paths: string[]): string[] {
