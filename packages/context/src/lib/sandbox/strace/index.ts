@@ -1,4 +1,6 @@
+import spawn, { type SubprocessError } from 'nano-spawn';
 import { randomUUID } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
 import { posix } from 'node:path';
 
 import { shellQuote } from '../shell-quote.ts';
@@ -370,33 +372,38 @@ const PTRACE_DENIED =
 const STRACE_MISSING = /strace:?\s+(?:command\s+)?not found/i;
 
 /**
- * The minimal structural surface {@link selfTestStrace} needs from its host.
- * Deliberately narrower than `DisposableSandbox` so the probe can run anywhere:
- * a remote/docker caller passes its sandbox unchanged (it satisfies this shape
- * structurally), and an in-process caller (e.g. a daemon running as PID 1
- * inside the container) implements just these two methods over
- * `node:child_process` + `node:fs`.
+ * Run `command` on the host via `sh -c`, flattening nano-spawn's
+ * throw-on-nonzero contract into `{ exitCode, stderr }`. The probe must read
+ * both even on failure — a missing strace exits 127, a blocked ptrace exits
+ * non-zero with its diagnosis on stderr — which nano-spawn surfaces by rejecting
+ * with a {@link SubprocessError} (its `exitCode` is undefined only when the
+ * process never started or a signal killed it, hence the `?? 1`).
  */
-export interface StraceHost {
-  executeCommand(
-    command: string,
-  ): Promise<{ exitCode: number; stderr: string }>;
-  readFile(path: string): Promise<string>;
+async function runOnHost(
+  command: string,
+): Promise<{ exitCode: number; stderr: string }> {
+  try {
+    const { stderr } = await spawn('sh', ['-c', command]);
+    return { exitCode: 0, stderr };
+  } catch (error) {
+    const e = error as SubprocessError;
+    return { exitCode: e.exitCode ?? 1, stderr: e.stderr };
+  }
 }
 
 /**
  * One-time probe at sandbox setup. Runs a known create/write/rename sequence
- * under strace and asserts the trace is clean and parseable. Throws
+ * under strace on the host and asserts the trace is clean and parseable. Throws
  * {@link StraceUnavailableError} (hard-fail) when ptrace is blocked, strace is
  * absent, or the trace is garbled (e.g. amd64 under Rosetta).
  *
- * "strace works in this sandbox" is an invariant of the (image + host kernel +
- * seccomp/caps) — constant across every tool call and chat turn in a given
- * container — so this is the consumer's once-per-container responsibility (e.g.
- * a daemon boot gate), NOT a per-tool cost. `createBashTool` /
+ * "strace works here" is an invariant of the (image + host kernel + seccomp/caps)
+ * — constant across every tool call and chat turn in a given container — so this
+ * is the consumer's once-per-container responsibility (e.g. a daemon boot gate
+ * running as PID 1 inside the container), NOT a per-tool cost. `createBashTool` /
  * `withStraceFileChanges` no longer call it.
  */
-export async function selfTestStrace(host: StraceHost): Promise<void> {
+export async function selfTestStrace(): Promise<void> {
   const probeDir = `/tmp/dat-strace-${randomUUID()}`;
   const traceFile = `/tmp/dat-strace-${randomUUID()}.trace`;
   const q = shellQuote;
@@ -407,11 +414,9 @@ export async function selfTestStrace(host: StraceHost): Promise<void> {
     `echo more > ${q(`${probeDir}/c.txt`)}`;
   const wrapped = buildStraceCommand(sequence, traceFile, '/tmp');
 
-  let result: { exitCode: number; stderr: string } | undefined;
-  let raw = '';
   try {
-    result = await host.executeCommand(wrapped);
-    raw = await host.readFile(traceFile).catch(() => '');
+    const result = await runOnHost(wrapped);
+    const raw = await readFile(traceFile, 'utf8').catch(() => '');
 
     const diagnostics = `exit=${result.exitCode}\nstderr=${result.stderr}\ntrace[0:600]=${raw.slice(0, 600)}`;
 
@@ -446,8 +451,9 @@ export async function selfTestStrace(host: StraceHost): Promise<void> {
       throw new StraceUnavailableError('trace-unparseable', diagnostics);
     }
   } finally {
-    void host
-      .executeCommand(`rm -rf ${q(probeDir)} ${q(traceFile)}`)
-      .catch(() => {});
+    await Promise.allSettled([
+      rm(probeDir, { recursive: true, force: true }),
+      rm(traceFile, { force: true }),
+    ]);
   }
 }

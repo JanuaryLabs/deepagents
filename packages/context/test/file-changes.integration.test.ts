@@ -1,6 +1,7 @@
 import { generateText, stepCountIs } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import type { CommandResult } from 'bash-tool';
+import { build } from 'esbuild';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -15,14 +16,6 @@ import {
   createDockerSandbox,
   withStraceFileChanges,
 } from '@deepagents/context';
-// The probe and its error come from the lean leaf entry (neither is on the main
-// barrel). Import the error from the SAME entry as the probe: esbuild bundles
-// each entry independently, so catching a leaf-thrown error with another entry's
-// class would fail `instanceof`.
-import {
-  StraceUnavailableError,
-  selfTestStrace,
-} from '@deepagents/context/sandbox/strace';
 
 async function isDockerAvailable(): Promise<boolean> {
   try {
@@ -42,6 +35,54 @@ const STRACE_IMAGE =
 
 const dockerAvailable = await isDockerAvailable();
 const dockerSuite = dockerAvailable ? describe : describe.skip;
+
+// `selfTestStrace` runs in-process (nano-spawn + node:fs), so the probe tests
+// exercise it the way the real consumer does: a node process inside the
+// container. That needs node AND the probe code in the image. `node:24-slim` is
+// debian-based, so apt adds strace; the strace-less variant reuses the same base
+// minus that layer.
+const NODE_BASE = 'node:24-slim';
+const NODE_STRACE_IMAGE =
+  `FROM ${NODE_BASE}\n` +
+  'RUN apt-get update && apt-get install -y --no-install-recommends strace ' +
+  '&& rm -rf /var/lib/apt/lists/*\n';
+
+// The probe imports a workspace package + nano-spawn, neither of which exists
+// inside the container, so we esbuild it (plus a thin driver) into one
+// self-contained ESM file, drop it in via `writeFiles`, and run it with `node`.
+// The driver maps the probe's outcome onto stdout: `OK` on success, or
+// `REASON:<reason>` when it throws StraceUnavailableError — the same
+// classification the host-side assertions used to read off the thrown error.
+async function buildProbeBundle(): Promise<string> {
+  const driver = [
+    `import { selfTestStrace, StraceUnavailableError } from '@deepagents/context/sandbox/strace';`,
+    'try {',
+    '  await selfTestStrace();',
+    `  process.stdout.write('OK');`,
+    '} catch (err) {',
+    '  if (err instanceof StraceUnavailableError) process.stdout.write(`REASON:${err.reason}`);',
+    '  else throw err;',
+    '}',
+  ].join('\n');
+  const result = await build({
+    stdin: { contents: driver, resolveDir: import.meta.dirname, loader: 'ts' },
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    write: false,
+  });
+  return result.outputFiles[0].text;
+}
+
+const probeBundle = dockerAvailable ? await buildProbeBundle() : '';
+
+type DockerBackend = Awaited<ReturnType<typeof createDockerSandbox>>;
+
+async function runProbe(backend: DockerBackend): Promise<CommandResult> {
+  await backend.writeFiles([{ path: '/probe.mjs', content: probeBundle }]);
+  return backend.executeCommand('node /probe.mjs');
+}
 
 const ops = (changes: FileChange[]) =>
   changes.map((c) => ({
@@ -667,34 +708,34 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 // on arm64.
 const emulatesAmd64 = process.arch === 'arm64';
 
-dockerSuite('selfTestStrace (real docker)', () => {
-  it('resolves on a real strace-capable container', async () => {
-    const backend = await createDockerSandbox({ dockerfile: STRACE_IMAGE });
+dockerSuite('selfTestStrace (in-container)', () => {
+  it('reports OK on a real strace-capable container', async () => {
+    const backend = await createDockerSandbox({
+      dockerfile: NODE_STRACE_IMAGE,
+    });
     try {
-      await selfTestStrace(backend);
+      const result = await runProbe(backend);
+      assert.equal(result.stdout.trim(), 'OK', result.stderr);
     } finally {
       await backend.dispose();
     }
   });
 
-  it('throws StraceUnavailableError(strace-missing) when strace is absent', async () => {
-    // A DisposableSandbox satisfies StraceHost structurally, so the real backend
-    // is passed to selfTestStrace unchanged (this also type-checks the
-    // structural-compat contract).
-    const backend = await createDockerSandbox({ image: 'alpine:latest' });
+  it('reports strace-missing when strace is absent', async () => {
+    const backend = await createDockerSandbox({ image: NODE_BASE });
     try {
-      await assert.rejects(
-        () => selfTestStrace(backend),
-        (err: unknown) =>
-          err instanceof StraceUnavailableError &&
-          err.reason === 'strace-missing',
+      const result = await runProbe(backend);
+      assert.equal(
+        result.stdout.trim(),
+        'REASON:strace-missing',
+        result.stderr,
       );
     } finally {
       await backend.dispose();
     }
   });
 
-  it('throws StraceUnavailableError(ptrace-blocked) when ptrace is denied', async () => {
+  it('reports ptrace-blocked when ptrace is denied', async () => {
     // Real ptrace denial: a default-allow seccomp profile that errnos `ptrace`,
     // so strace's PTRACE_TRACEME fails exactly as a hardened runtime would.
     const dir = mkdtempSync(join(tmpdir(), 'strace-seccomp-'));
@@ -709,15 +750,15 @@ dockerSuite('selfTestStrace (real docker)', () => {
       }),
     );
     const backend = await createDockerSandbox({
-      dockerfile: STRACE_IMAGE,
+      dockerfile: NODE_STRACE_IMAGE,
       securityOpt: [`seccomp=${seccomp}`],
     });
     try {
-      await assert.rejects(
-        () => selfTestStrace(backend),
-        (err: unknown) =>
-          err instanceof StraceUnavailableError &&
-          err.reason === 'ptrace-blocked',
+      const result = await runProbe(backend);
+      assert.equal(
+        result.stdout.trim(),
+        'REASON:ptrace-blocked',
+        result.stderr,
       );
     } finally {
       await backend.dispose();
@@ -725,21 +766,21 @@ dockerSuite('selfTestStrace (real docker)', () => {
   });
 
   (emulatesAmd64 ? it : it.skip)(
-    'throws StraceUnavailableError(trace-unparseable) under an emulated arch',
+    'reports trace-unparseable under an emulated arch',
     async () => {
       // amd64 under emulation on an arm64 host: strace runs but the trace is
       // garbled (qemu renders syscalls as raw `syscall_0x…`), which the parser
       // rejects.
       const backend = await createDockerSandbox({
-        dockerfile: STRACE_IMAGE,
+        dockerfile: NODE_STRACE_IMAGE,
         platform: 'linux/amd64',
       });
       try {
-        await assert.rejects(
-          () => selfTestStrace(backend),
-          (err: unknown) =>
-            err instanceof StraceUnavailableError &&
-            err.reason === 'trace-unparseable',
+        const result = await runProbe(backend);
+        assert.equal(
+          result.stdout.trim(),
+          'REASON:trace-unparseable',
+          result.stderr,
         );
       } finally {
         await backend.dispose();
