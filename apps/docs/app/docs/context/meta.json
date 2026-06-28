@@ -43,6 +43,7 @@
     "---Sandbox---",
     "sandbox",
     "docker-sandbox",
+    "apple-container-sandbox",
     "agent-os-sandbox",
     "subcommand",
     "architecture-sandbox",

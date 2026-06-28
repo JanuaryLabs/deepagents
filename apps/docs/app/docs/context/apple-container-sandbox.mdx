@@ -1,0 +1,287 @@
+---
+title: Apple Container Sandbox
+description: Execute real binaries in per-container lightweight VMs on Apple silicon via Apple's container CLI
+---
+
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
+
+The Apple Container sandbox runs commands inside Linux containers backed by Apple's [`container`](https://github.com/apple/container) CLI. Unlike the Docker sandbox (shared host kernel via `runc`), each container is its own **lightweight virtual machine** with its own guest kernel — stronger isolation by default. It implements the same `DisposableSandbox` contract as the other backends, so `executeCommand`, `spawn`, `readFile`, `writeFiles`, and `dispose` behave identically.
+
+<Callout type="warn">
+  Apple silicon, **macOS 26+** only. The `container` service must be running and
+  a guest kernel configured:
+
+  ```bash
+  container system start
+  container system kernel set --recommended
+  ```
+
+  If the service is down, the sandbox throws `ContainerServiceNotRunningError`.
+</Callout>
+
+## Strategies
+
+<Tabs groupId="strategy" items={['Runtime', 'Dockerfile']}>
+<Tab value="Runtime">
+
+Starts a vanilla image and runs an ordered list of installers at startup. Best for quick experiments and when dependencies change frequently.
+
+```typescript
+import { createAppleContainerSandbox, pkg } from '@deepagents/context';
+
+await using sandbox = await createAppleContainerSandbox({
+  image: 'docker.io/library/alpine:latest',
+  installers: [pkg(['curl', 'jq', 'python3'])],
+  resources: { memory: '512M', cpus: 1 },
+});
+
+const { stdout } = await sandbox.executeCommand('python3 --version');
+```
+
+**Default image:** `docker.io/library/alpine:latest`. Prefer fully-qualified refs — `container` resolves short names against configured registries.
+
+**Installers** are the same building blocks as the Docker sandbox — `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`, `githubRelease({...})` — running in array order against a shared `InstallerContext`. See [Installers](#installers).
+
+</Tab>
+<Tab value="Dockerfile">
+
+Builds a custom image with `container build`, using content-based hashing for automatic caching — same Dockerfile content means same image tag, so the build is skipped on subsequent runs.
+
+```typescript
+import { createAppleContainerSandbox } from '@deepagents/context';
+
+// Inline Dockerfile
+await using sandbox = await createAppleContainerSandbox({
+  dockerfile: `
+    FROM docker.io/library/python:3.11-slim
+    RUN pip install pandas numpy
+  `,
+});
+
+// Or reference a Dockerfile path
+await using sandbox2 = await createAppleContainerSandbox({
+  dockerfile: './Dockerfile.sandbox',
+  context: '.',
+});
+```
+
+**Caching:** the image tag is `sandbox-<sha256-first-12-chars>` (the `arch` is folded in). **Detection:** inline vs path is decided by whether the string contains `\n`.
+
+<Callout type="info">
+  Inline Dockerfiles are written to a temporary directory before building —
+  `container build` has no stdin (`-f -`) mode and rejects symlinked contexts.
+  The build runs in a separate builder VM that `container` starts on demand.
+</Callout>
+
+</Tab>
+</Tabs>
+
+There is no Compose strategy — `container` has no Compose primitive.
+
+## Stable container names
+
+Both strategies accept an optional `name` to reuse the same container across calls:
+
+```typescript
+await using sandbox = await createAppleContainerSandbox({
+  image: 'docker.io/library/node:lts-alpine',
+  name: 'analytics-indexer',
+});
+```
+
+The container is named `sandbox-<name>`. Reuse behavior:
+
+- If `sandbox-<name>` is already running, the sandbox attaches to it.
+- If it exists but is stopped, the sandbox starts it and attaches.
+- If it does not exist, a new container is created.
+
+When attaching, installer execution, volume preparation, and env setup are skipped — the container is assumed already configured. `name` must match `/^[A-Za-z0-9_.-]+$/`.
+
+<Callout type="warn">
+  This is get-or-create for **sequential** callers. Creating the same name from
+  two callers concurrently is not supported — the `container` runtime races on
+  duplicate-name `run`. Serialize creation of a given name. Also note `dispose()`
+  stops and removes the container (containers use `--rm`) even when this call
+  attached to an existing one.
+</Callout>
+
+## Architecture selection
+
+Use `arch` to pick the image architecture — `'arm64'` (native) or `'amd64'` (emulated via Rosetta). This replaces the Docker sandbox's `platform` option.
+
+```typescript
+await using sandbox = await createAppleContainerSandbox({
+  image: 'docker.io/library/alpine:latest',
+  arch: 'amd64',
+});
+```
+
+## Container command overrides
+
+`command` controls what is appended after the image at `container run` time:
+
+- Omit `command` (default) to append `tail -f /dev/null` as a keep-alive.
+- Set `command: null` or `command: []` to run the image `CMD`/`ENTRYPOINT` as declared.
+- Set a non-empty array to override the image command verbatim.
+
+## Volumes
+
+Attach host bind paths or named volumes. Read-only by default for security.
+
+```typescript
+await using sandbox = await createAppleContainerSandbox({
+  volumes: [
+    {
+      type: 'bind',
+      hostPath: '/absolute/path/on/host',
+      containerPath: '/workspace',
+      readOnly: true, // default
+    },
+    {
+      type: 'volume',
+      name: 'existing-dataset',
+      containerPath: '/data',
+      // lifecycle defaults to 'external': the volume must already exist.
+    },
+    {
+      type: 'volume',
+      name: 'sandbox-output',
+      containerPath: '/output',
+      lifecycle: 'managed',
+      readOnly: false,
+      // managed volumes are created before start and removed on dispose.
+    },
+  ],
+});
+```
+
+Bind paths are validated at creation time (`AppleContainerVolumePathError` if a `hostPath` doesn't exist). Managed volumes are created before start and removed on `dispose()` unless `removeOnDispose: false`.
+
+<Callout type="info">
+  `container` volumes are always local `ext4` disk images — there is no
+  pluggable driver model. To back storage with a remote (GCS, S3, …), mount a
+  host directory with `type: 'bind'` rather than a volume driver.
+</Callout>
+
+## Resource limits
+
+```typescript
+await using sandbox = await createAppleContainerSandbox({
+  resources: {
+    memory: '512M', // default: '1024M'
+    cpus: 1, // default: 2
+  },
+});
+```
+
+## Environment variables
+
+Set env vars at creation time; they are available to every command. Keys are validated — empty keys or keys containing `=` throw `AppleContainerSandboxError`.
+
+```typescript
+await using sandbox = await createAppleContainerSandbox({
+  env: { NODE_ENV: 'production', API_KEY: 'secret-123' },
+});
+
+const result = await sandbox.executeCommand('echo $NODE_ENV'); // "production"
+```
+
+## Command execution APIs
+
+`executeCommand` is buffered and runs from `/workspace`; pass an `AbortSignal` to cancel:
+
+```typescript
+const result = await sandbox.executeCommand('python3 --version');
+console.log(result.stdout, result.stderr, result.exitCode);
+
+const controller = new AbortController();
+const pending = sandbox.executeCommand('sleep 30', { signal: controller.signal });
+setTimeout(() => controller.abort(), 1_000);
+await pending;
+```
+
+For live byte streams, use `spawn` (accepts `cwd`, `env`, `signal`):
+
+```typescript
+const proc = sandbox.spawn('python3 long-task.py', { cwd: '/workspace' });
+const decoder = new TextDecoder();
+for await (const chunk of proc.stdout) {
+  process.stdout.write(decoder.decode(chunk, { stream: true }));
+}
+const exit = await proc.exit; // { code, signal, success }
+```
+
+Aborting a running process kills it with `SIGKILL`, so `proc.exit` reports a non-success outcome instead of treating cancellation as a clean exit.
+
+## Installers
+
+The installer suite is shared with the Docker sandbox — `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`, `githubRelease({...})`, and custom `Installer` subclasses all work unchanged, driven through `container exec`. See the [Docker sandbox installer reference](/docs/context/docker-sandbox#installers) for the full API; the only difference is the factory you pass them to.
+
+```typescript
+import { createAppleContainerSandbox, pkg, npm } from '@deepagents/context';
+
+await using sandbox = await createAppleContainerSandbox({
+  image: 'docker.io/library/node:lts-alpine',
+  installers: [pkg(['curl', 'jq']), npm('prettier')],
+});
+```
+
+## File I/O
+
+```typescript
+await sandbox.writeFiles([
+  { path: '/workspace/data.json', content: '{"key": "value"}' },
+]);
+const content = await sandbox.readFile('/workspace/data.json');
+```
+
+Parent directories are created automatically. Content is base64-encoded for binary safety.
+
+## Container lifecycle
+
+```typescript
+import { useAppleContainerSandbox, pkg } from '@deepagents/context';
+
+const version = await useAppleContainerSandbox(
+  { installers: [pkg(['curl'])] },
+  async (sandbox) => {
+    const result = await sandbox.executeCommand('curl --version');
+    return result.stdout.split('\n')[0];
+  },
+);
+```
+
+`createAppleContainerSandbox` also returns an `AsyncDisposable`, so `await using` disposes it at scope exit. Containers run with `--rm`, so they are removed when stopped; `dispose()` runs `container stop`.
+
+## Differences from the Docker sandbox
+
+| Capability | Docker sandbox | Apple Container sandbox |
+| --- | --- | --- |
+| Isolation | Shared host kernel (`runc`) | Per-container lightweight VM |
+| Compose / multi-service | `compose` strategy | Not supported |
+| Architecture | `platform: 'linux/amd64'` | `arch: 'amd64'` |
+| Security knobs | Grouped `security`, `network`, `resources`, and `runtime` options | Per-VM isolation; no `--security-opt` |
+| Volume drivers | `driver` / `driverOptions` | Local `ext4` only; bind-mount for remotes |
+| Host requirement | Docker daemon | `container` service + guest kernel (macOS 26+) |
+
+## Error handling
+
+All errors extend `AppleContainerSandboxError`:
+
+| Error | When |
+| --- | --- |
+| `ContainerServiceNotRunningError` | The `container` service is not running |
+| `AppleContainerCreationError` | Container fails to start |
+| `AppleContainerImageBuildError` | `container build` fails (includes stderr) |
+| `AppleContainerVolumePathError` | Invalid bind or volume path configuration |
+| `AppleContainerVolumeInspectError` | External volume does not exist or cannot be inspected |
+| `AppleContainerVolumeCreateError` | Managed volume cannot be created |
+| `AppleContainerVolumeRemoveError` | Managed volume cannot be removed during cleanup |
+
+Installer failures reuse `PackageInstallError` / `InstallError` from the shared installer suite.
+
+## Next steps
+
+- [Docker Sandbox](/docs/context/docker-sandbox) - Shared-kernel containers and the full installer reference
+- [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach
+- [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern internals
