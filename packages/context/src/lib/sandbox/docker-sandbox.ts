@@ -1,10 +1,14 @@
 import { type CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
-import { type ChildProcess, spawn as childSpawn } from 'node:child_process';
+import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { Readable } from 'node:stream';
 
+import {
+  base64ReadCommand,
+  base64WriteCommands,
+  toSandboxProcess,
+} from './cli-process.ts';
 import {
   ComposeStartError,
   ContainerCreationError,
@@ -20,10 +24,10 @@ import {
   type Installer,
   createInstallerContext,
 } from './installers/installer.ts';
+import { shellQuote } from './shell-quote.ts';
 import type {
   DisposableSandbox,
   ExecuteCommandOptions,
-  ExitInfo,
   SandboxProcess,
   SpawnOptions,
 } from './types.ts';
@@ -75,10 +79,81 @@ export interface DockerNamedVolume {
 export type DockerSandboxVolume = DockerBindVolume | DockerNamedVolume;
 
 export interface DockerResources {
-  /** e.g. `'1g'`, `'512m'`. */
+  /** `--memory` — e.g. `'1g'`, `'512m'`. */
   memory?: string;
-  /** Number of CPUs. */
+  /** `--cpus` — number of CPUs. */
   cpus?: number;
+  /**
+   * `--memory-swap` — total memory + swap (e.g. `'1g'`). Without it Docker
+   * allows swap up to 2× `memory`; set it equal to `memory` to forbid swap
+   * entirely. Must be ≥ `memory`.
+   */
+  memorySwap?: string;
+  /** `--shm-size` — size of `/dev/shm` (e.g. `'64m'`). Raise for Chromium/ML workloads. */
+  shmSize?: string;
+  /** `--pids-limit` — cap the container's process count (fork-bomb protection). */
+  pidsLimit?: number;
+  /** `--ulimit` per entry — e.g. `['nofile=1024:2048']`. */
+  ulimits?: string[];
+  /** `--cpuset-cpus` — CPUs the container may run on, e.g. `'0-1'`. */
+  cpusetCpus?: string;
+  /** `--cpu-shares` — relative CPU weight under contention. */
+  cpuShares?: number;
+}
+
+/**
+ * Container hardening for `docker run`. All optional — omit for the daemon's
+ * defaults (shared kernel, root user, writable root filesystem).
+ */
+export interface DockerSecurity {
+  /**
+   * `--cap-drop` per entry. `['ALL']` drops every Linux capability — the
+   * baseline for running untrusted code; re-grant via {@link capAdd}.
+   */
+  capDrop?: string[];
+  /** `--cap-add` per entry. Re-grant only what's needed after dropping `ALL`. */
+  capAdd?: string[];
+  /**
+   * `--read-only` — mount the container root filesystem read-only. Writes then
+   * only land in `tmpfs`/volume mounts; pair with a writable `/workspace`
+   * (a {@link tmpfs} entry or volume) or the sandbox's `writeFiles` and the
+   * installer phase will fail.
+   */
+  readOnly?: boolean;
+  /**
+   * `--user` (`uid[:gid]`) — run as a non-root user. The installer phase
+   * (`apk`/`apt`/`npm -g`/`pip`) needs root, so non-root suits a pre-baked
+   * Dockerfile image rather than the runtime-image + installers path.
+   */
+  user?: string;
+  /**
+   * `--tmpfs` per entry (e.g. `'/tmp'`, `'/workspace:size=64m'`) — ephemeral,
+   * in-memory writable directories. The companion to {@link readOnly}.
+   */
+  tmpfs?: string[];
+  /**
+   * `--security-opt` per entry — e.g. `['seccomp=/path/profile.json']` to apply
+   * a custom seccomp profile, or `['no-new-privileges']`.
+   */
+  securityOpt?: string[];
+}
+
+/** Networking for `docker run`. */
+export interface DockerNetwork {
+  /**
+   * `--network` — e.g. `'none'` (no network at all; strong isolation for
+   * untrusted code, but breaks network installers), a custom network name, or
+   * `'host'` (shares the host network stack — defeats isolation).
+   */
+  mode?: string;
+  /** `--publish` per entry — e.g. `['8080:80']` to expose a container port. */
+  publish?: string[];
+  /** `--dns` per entry — custom DNS servers. */
+  dns?: string[];
+  /** `--add-host` per entry — e.g. `['db:10.0.0.5']` host-to-IP mappings. */
+  addHost?: string[];
+  /** `--hostname` — the container hostname. */
+  hostname?: string;
 }
 
 /**
@@ -101,7 +176,69 @@ export interface DockerResources {
  */
 type StableContainerName = string;
 
-export interface RuntimeSandboxOptions {
+/**
+ * Run-configuration shared by the runtime-image and Dockerfile sandbox
+ * strategies. Every field maps to one or more `docker run` flags.
+ */
+export interface DockerCommonOptions {
+  volumes?: DockerSandboxVolume[];
+  resources?: DockerResources;
+  env?: Record<string, string>;
+  name?: StableContainerName;
+  /**
+   * Args appended after the image at `docker run` time.
+   * - `undefined` (default): `['tail', '-f', '/dev/null']` — keep-alive so a
+   *   bare image (e.g. `alpine:latest`) stays up for installers and
+   *   `executeCommand`.
+   * - `[]` or `null`: nothing is appended; the image's own `CMD`/`ENTRYPOINT`
+   *   runs as declared (use this when the image already has a long-running
+   *   process, e.g. a daemon).
+   * - A non-empty array: appended verbatim, overriding the image `CMD`.
+   */
+  command?: readonly string[] | null;
+  /**
+   * `--platform` (e.g. `'linux/amd64'`) — emulated when it differs from the host
+   * arch. For the Dockerfile strategy it also applies to `docker build` and is
+   * folded into the image-build cache key.
+   */
+  platform?: string;
+  /**
+   * `--runtime` for `docker run` — selects the OCI runtime that backs the
+   * container (default: the daemon's default, usually `runc`). Set to a
+   * registered runtime such as `'kata-runtime'` (or `'io.containerd.kata.v2'`)
+   * to run the container inside a lightweight VM with its own guest kernel
+   * instead of sharing the host kernel. The runtime must already be installed on
+   * the host and registered in the Docker daemon — and the host must have
+   * hardware virtualization (`/dev/kvm`); it is not provisioned here.
+   */
+  runtime?: string;
+  /** Container hardening: capabilities, read-only rootfs, user, tmpfs, security-opt. */
+  security?: DockerSecurity;
+  /** Networking: network mode, published ports, DNS, host mappings, hostname. */
+  network?: DockerNetwork;
+  /**
+   * `--gpus` — e.g. `'all'`. Requires the nvidia container runtime on the host
+   * and is incompatible with a `runtime` such as `'kata-runtime'`.
+   */
+  gpus?: string;
+  /**
+   * `--device` per entry — expose a host device, e.g. `['/dev/fuse']`. Passed
+   * through verbatim; the library never injects a device implicitly.
+   */
+  devices?: string[];
+  /** `--init` — run an init process as PID 1 that reaps zombie subprocesses. */
+  init?: boolean;
+  /** `--label` — container metadata, emitted as `key=value` per entry. */
+  labels?: Record<string, string>;
+  /** `--sysctl` — kernel parameters, emitted as `key=value` per entry. */
+  sysctls?: Record<string, string>;
+  /** `--entrypoint` — override the image `ENTRYPOINT`. */
+  entrypoint?: string;
+  /** `--workdir` — working directory inside the container (default `'/workspace'`). */
+  workdir?: string;
+}
+
+export interface RuntimeSandboxOptions extends DockerCommonOptions {
   /** Docker image to use (default: `'alpine:latest'`). */
   image?: string;
   /**
@@ -110,35 +247,9 @@ export interface RuntimeSandboxOptions {
    * `githubRelease({...})`, or any custom `Installer` subclass.
    */
   installers?: Installer[];
-  volumes?: DockerSandboxVolume[];
-  resources?: DockerResources;
-  env?: Record<string, string>;
-  name?: StableContainerName;
-  /**
-   * Args appended after the image at `docker run` time.
-   * - `undefined` (default): `['tail', '-f', '/dev/null']` — keeps a bare
-   *   image (e.g. `alpine:latest`) alive so installers and `executeCommand`
-   *   have something to attach to.
-   * - `[]` or `null`: nothing is appended; the image's own `CMD`/`ENTRYPOINT`
-   *   runs as declared (use this when your image already has a long-running
-   *   process, e.g. a daemon).
-   * - A non-empty array: appended verbatim, overriding the image `CMD`.
-   */
-  command?: readonly string[] | null;
-  /**
-   * Extra `--security-opt` values for `docker run`. Each entry becomes one
-   * `--security-opt <value>` — e.g. `['seccomp=/path/profile.json']` to apply a
-   * custom seccomp profile (denying a syscall), or `['no-new-privileges']`.
-   */
-  securityOpt?: string[];
-  /**
-   * `--platform` for `docker run` (e.g. `'linux/amd64'`). Runs the container
-   * under that platform — emulated when it differs from the host arch.
-   */
-  platform?: string;
 }
 
-export interface DockerfileSandboxOptions {
+export interface DockerfileSandboxOptions extends DockerCommonOptions {
   /** Inline Dockerfile content (contains `\n`) or a path. */
   dockerfile: string;
   /** Build context directory (default: `'.'`). */
@@ -149,31 +260,6 @@ export interface DockerfileSandboxOptions {
    * otherwise runs silently. Default `false`.
    */
   showBuildLogs?: boolean;
-  volumes?: DockerSandboxVolume[];
-  resources?: DockerResources;
-  env?: Record<string, string>;
-  name?: StableContainerName;
-  /**
-   * Args appended after the image at `docker run` time.
-   * - `undefined` (default): `['tail', '-f', '/dev/null']` — keep-alive.
-   * - `[]` or `null`: nothing is appended; the Dockerfile's `CMD`/`ENTRYPOINT`
-   *   runs as declared. Use this when your Dockerfile already declares a
-   *   long-running process (e.g. `CMD ["node", "server.js"]`).
-   * - A non-empty array: appended verbatim, overriding the image `CMD`.
-   */
-  command?: readonly string[] | null;
-  /**
-   * Extra `--security-opt` values for `docker run`. Each entry becomes one
-   * `--security-opt <value>` — e.g. `['seccomp=/path/profile.json']` to apply a
-   * custom seccomp profile (denying a syscall), or `['no-new-privileges']`.
-   */
-  securityOpt?: string[];
-  /**
-   * `--platform` for `docker build` and `docker run` (e.g. `'linux/amd64'`).
-   * Builds and runs under that platform — emulated when it differs from the
-   * host arch. Folded into the image-build cache key.
-   */
-  platform?: string;
 }
 
 export interface ComposeSandboxOptions {
@@ -206,19 +292,6 @@ interface StrategyContext {
 
 const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
-export interface DockerSandboxStrategyArgs {
-  volumes?: DockerSandboxVolume[];
-  resources?: DockerResources;
-  env?: Record<string, string>;
-  name?: StableContainerName;
-  /** See {@link RuntimeSandboxOptions.command}. */
-  command?: readonly string[] | null;
-  /** See {@link RuntimeSandboxOptions.securityOpt}. */
-  securityOpt?: string[];
-  /** See {@link RuntimeSandboxOptions.platform}. */
-  platform?: string;
-}
-
 /**
  * Template Method base for sandbox creation strategies. Subclasses choose
  * the image and define post-start configuration; the base owns container
@@ -231,19 +304,37 @@ export abstract class DockerSandboxStrategy {
   protected env: Record<string, string>;
   protected name?: StableContainerName;
   protected command?: readonly string[] | null;
-  protected securityOpt: string[];
+  protected security: DockerSecurity;
+  protected network: DockerNetwork;
+  protected gpus?: string;
+  protected devices: string[];
+  protected init: boolean;
+  protected labels: Record<string, string>;
+  protected sysctls: Record<string, string>;
+  protected entrypoint?: string;
+  protected workdir: string;
   protected platform?: string;
+  protected runtime?: string;
   private createdVolumes = new Set<string>();
 
-  constructor(args: DockerSandboxStrategyArgs = {}) {
+  constructor(args: DockerCommonOptions = {}) {
     const {
       volumes = [],
       resources = {},
       env = {},
       name,
       command,
-      securityOpt = [],
+      security = {},
+      network = {},
       platform,
+      runtime,
+      gpus,
+      devices = [],
+      init = false,
+      labels = {},
+      sysctls = {},
+      entrypoint,
+      workdir = '/workspace',
     } = args;
     for (const key of Object.keys(env)) {
       validateEnvKey(key);
@@ -258,8 +349,17 @@ export abstract class DockerSandboxStrategy {
     this.env = env;
     this.name = name;
     this.command = command;
-    this.securityOpt = securityOpt;
+    this.security = security;
+    this.network = network;
+    this.gpus = gpus;
+    this.devices = devices;
+    this.init = init;
+    this.labels = labels;
+    this.sysctls = sysctls;
+    this.entrypoint = entrypoint;
+    this.workdir = workdir;
     this.platform = platform;
+    this.runtime = runtime;
   }
 
   async create(): Promise<DisposableSandbox> {
@@ -489,7 +589,16 @@ export abstract class DockerSandboxStrategy {
   }
 
   protected buildDockerArgs(image: string, containerId: string): string[] {
-    const { memory = '1g', cpus = 2 } = this.resources;
+    const {
+      memory = '1g',
+      cpus = 2,
+      memorySwap,
+      shmSize,
+      pidsLimit,
+      ulimits = [],
+      cpusetCpus,
+      cpuShares,
+    } = this.resources;
 
     const args: string[] = [
       'run',
@@ -497,17 +606,94 @@ export abstract class DockerSandboxStrategy {
       '--rm',
       '--name',
       containerId,
-      `--memory=${memory}`,
-      `--cpus=${cpus}`,
+      '--memory',
+      memory,
+      '--cpus',
+      String(cpus),
       '-w',
-      '/workspace',
+      this.workdir,
     ];
+
+    if (memorySwap) {
+      args.push('--memory-swap', memorySwap);
+    }
+    if (shmSize) {
+      args.push('--shm-size', shmSize);
+    }
+    if (pidsLimit !== undefined) {
+      args.push('--pids-limit', String(pidsLimit));
+    }
+    for (const ulimit of ulimits) {
+      args.push('--ulimit', ulimit);
+    }
+    if (cpusetCpus) {
+      args.push('--cpuset-cpus', cpusetCpus);
+    }
+    if (cpuShares !== undefined) {
+      args.push('--cpu-shares', String(cpuShares));
+    }
 
     if (this.platform) {
       args.push('--platform', this.platform);
     }
-    for (const opt of this.securityOpt) {
+    if (this.runtime) {
+      args.push('--runtime', this.runtime);
+    }
+
+    const security = this.security;
+    for (const cap of security.capDrop ?? []) {
+      args.push('--cap-drop', cap);
+    }
+    for (const cap of security.capAdd ?? []) {
+      args.push('--cap-add', cap);
+    }
+    if (security.readOnly) {
+      args.push('--read-only');
+    }
+    if (security.user) {
+      args.push('--user', security.user);
+    }
+    for (const mount of security.tmpfs ?? []) {
+      args.push('--tmpfs', mount);
+    }
+    for (const opt of security.securityOpt ?? []) {
       args.push('--security-opt', opt);
+    }
+
+    const network = this.network;
+    if (network.mode) {
+      args.push('--network', network.mode);
+    }
+    for (const port of network.publish ?? []) {
+      args.push('--publish', port);
+    }
+    for (const server of network.dns ?? []) {
+      args.push('--dns', server);
+    }
+    for (const host of network.addHost ?? []) {
+      args.push('--add-host', host);
+    }
+    if (network.hostname) {
+      args.push('--hostname', network.hostname);
+    }
+
+    if (this.gpus) {
+      args.push('--gpus', this.gpus);
+    }
+    for (const device of this.devices) {
+      args.push('--device', device);
+    }
+    if (this.init) {
+      args.push('--init');
+    }
+    for (const [key, value] of Object.entries(this.labels)) {
+      args.push('--label', `${key}=${value}`);
+    }
+    for (const [key, value] of Object.entries(this.sysctls)) {
+      args.push('--sysctl', `${key}=${value}`);
+    }
+    if (this.entrypoint) {
+      args.push('--entrypoint', this.entrypoint);
     }
 
     for (const [key, value] of Object.entries(this.env)) {
@@ -725,7 +911,7 @@ export abstract class DockerSandboxStrategy {
       spawn: (command, options) => this.spawnProcess(command, options),
 
       readFile: async (path: string): Promise<string> => {
-        const result = await sandbox.executeCommand(`base64 "${path}"`);
+        const result = await sandbox.executeCommand(base64ReadCommand(path));
         if (result.exitCode !== 0) {
           throw new Error(`Failed to read file "${path}": ${result.stderr}`);
         }
@@ -733,23 +919,21 @@ export abstract class DockerSandboxStrategy {
       },
 
       writeFiles: async (
-        files: Array<{ path: string; content: string }>,
+        files: Array<{ path: string; content: string | Buffer }>,
       ): Promise<void> => {
         for (const file of files) {
           const dir = file.path.substring(0, file.path.lastIndexOf('/'));
           if (dir) {
-            await sandbox.executeCommand(`mkdir -p "${dir}"`);
+            await sandbox.executeCommand(`mkdir -p ${shellQuote(dir)}`);
           }
 
-          const base64Content = Buffer.from(file.content).toString('base64');
-          const result = await sandbox.executeCommand(
-            `echo "${base64Content}" | base64 -d > "${file.path}"`,
-          );
-
-          if (result.exitCode !== 0) {
-            throw new Error(
-              `Failed to write file "${file.path}": ${result.stderr}`,
-            );
+          for (const command of base64WriteCommands(file.path, file.content)) {
+            const result = await sandbox.executeCommand(command);
+            if (result.exitCode !== 0) {
+              throw new Error(
+                `Failed to write file "${file.path}": ${result.stderr}`,
+              );
+            }
           }
         }
       },
@@ -791,50 +975,7 @@ function buildDockerExecFlags(options?: SpawnOptions): string[] {
   return flags;
 }
 
-function toSandboxProcess(
-  child: ChildProcess,
-  abortSignal: AbortSignal | undefined,
-): SandboxProcess {
-  if (!child.stdout || !child.stderr) {
-    child.kill('SIGKILL');
-    throw new DockerSandboxError('docker exec child missing stdio streams');
-  }
-
-  const onAbort = abortSignal ? () => child.kill('SIGKILL') : undefined;
-  if (abortSignal && onAbort) {
-    if (abortSignal.aborted) onAbort();
-    else abortSignal.addEventListener('abort', onAbort, { once: true });
-  }
-
-  return {
-    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
-    exit: new Promise<ExitInfo>((resolve, reject) => {
-      const settle = () => {
-        child.removeListener('exit', onExitEvent);
-        child.removeListener('error', onError);
-        if (abortSignal && onAbort) {
-          abortSignal.removeEventListener('abort', onAbort);
-        }
-      };
-      const onError = (err: Error) => {
-        settle();
-        reject(err);
-      };
-      const onExitEvent = (
-        code: number | null,
-        exitSignal: NodeJS.Signals | null,
-      ) => {
-        settle();
-        resolve({ code, signal: exitSignal, success: code === 0 });
-      };
-      child.on('exit', onExitEvent);
-      child.on('error', onError);
-    }),
-  };
-}
-
-export interface RuntimeStrategyArgs extends DockerSandboxStrategyArgs {
+export interface RuntimeStrategyArgs extends DockerCommonOptions {
   image?: string;
   installers?: Installer[];
 }
@@ -859,15 +1000,7 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
   private installers: Installer[];
 
   constructor(args: RuntimeStrategyArgs = {}) {
-    super({
-      volumes: args.volumes,
-      resources: args.resources,
-      env: args.env,
-      name: args.name,
-      command: args.command,
-      securityOpt: args.securityOpt,
-      platform: args.platform,
-    });
+    super(args);
     this.image = args.image ?? 'alpine:latest';
     this.installers = args.installers ?? [];
   }
@@ -884,7 +1017,7 @@ export class RuntimeStrategy extends DockerSandboxStrategy {
   }
 }
 
-export interface DockerfileStrategyArgs extends DockerSandboxStrategyArgs {
+export interface DockerfileStrategyArgs extends DockerCommonOptions {
   dockerfile: string;
   context?: string;
   showBuildLogs?: boolean;
@@ -901,15 +1034,7 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   private showBuildLogs: boolean;
 
   constructor(args: DockerfileStrategyArgs) {
-    super({
-      volumes: args.volumes,
-      resources: args.resources,
-      env: args.env,
-      name: args.name,
-      command: args.command,
-      securityOpt: args.securityOpt,
-      platform: args.platform,
-    });
+    super(args);
     this.dockerfile = args.dockerfile;
     this.dockerContext = args.context ?? '.';
     this.showBuildLogs = args.showBuildLogs ?? false;
@@ -956,55 +1081,62 @@ export class DockerfileStrategy extends DockerSandboxStrategy {
   }
 
   private async buildImage(): Promise<void> {
-    try {
-      const platformFlag = this.platform ? `--platform ${this.platform} ` : '';
-      if (this.isInlineDockerfile()) {
-        const buildCmd = `echo '${this.dockerfile.replace(/'/g, "'\\''")}' | docker build ${platformFlag}-t ${this.imageTag} -f - ${this.dockerContext}`;
-        if (this.showBuildLogs) {
-          await this.runStreamed('sh', ['-c', buildCmd]);
-        } else {
-          await spawn('sh', ['-c', buildCmd]);
-        }
-      } else {
-        const args = [
-          'build',
-          ...(this.platform ? ['--platform', this.platform] : []),
-          '-t',
-          this.imageTag,
-          '-f',
-          this.dockerfile,
-          this.dockerContext,
-        ];
-        if (this.showBuildLogs) {
-          await this.runStreamed('docker', args);
-        } else {
-          await spawn('docker', args);
-        }
-      }
-    } catch (error) {
-      const err = error as Error & { stderr?: string };
-      throw new DockerfileBuildError(err.stderr || err.message);
-    }
+    const inline = this.isInlineDockerfile();
+    const args = [
+      'build',
+      ...(this.platform ? ['--platform', this.platform] : []),
+      '-t',
+      this.imageTag,
+      '-f',
+      inline ? '-' : this.dockerfile,
+      this.dockerContext,
+    ];
+    await this.runDockerBuild(args, inline ? this.dockerfile : undefined);
   }
 
   /**
-   * Run a build command with stdio inherited so its output streams live to the
-   * parent terminal. On failure the build error is already on screen; the
-   * rejection just carries the exit code.
+   * Runs `docker build`. An inline Dockerfile is piped to `docker build -f -`
+   * over stdin (no shell, no quoting). With `showBuildLogs`, build output
+   * streams live to the parent terminal; otherwise it is buffered so the
+   * failure stderr can be surfaced in a {@link DockerfileBuildError}.
    */
-  private runStreamed(command: string, args: string[]): Promise<void> {
+  private runDockerBuild(args: string[], stdin?: string): Promise<void> {
+    const streamed = this.showBuildLogs;
+    const stdio: StdioOptions = [
+      stdin === undefined ? 'inherit' : 'pipe',
+      streamed ? 'inherit' : 'ignore',
+      streamed ? 'inherit' : 'pipe',
+    ];
+
     return new Promise((resolve, reject) => {
-      const child = childSpawn(command, args, { stdio: 'inherit' });
-      child.once('error', reject);
-      child.once('exit', (code) =>
-        code === 0
-          ? resolve()
-          : reject(
-              new Error(
-                `docker build exited with code ${code} (see build output above)`,
-              ),
-            ),
+      const child = childSpawn('docker', args, { stdio });
+
+      let stderr = '';
+      child.stderr?.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      child.once('error', (error) =>
+        reject(new DockerfileBuildError(error.message)),
       );
+      child.once('exit', (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(
+          new DockerfileBuildError(
+            streamed
+              ? `docker build exited with code ${code} (see build output above)`
+              : stderr || `docker build exited with code ${code}`,
+          ),
+        );
+      });
+
+      if (stdin !== undefined && child.stdin) {
+        child.stdin.on('error', () => {});
+        child.stdin.end(stdin);
+      }
     });
   }
 }
@@ -1193,30 +1325,9 @@ export async function createDockerSandbox(
       resources: options.resources,
     });
   } else if (isDockerfileOptions(options)) {
-    strategy = new DockerfileStrategy({
-      dockerfile: options.dockerfile,
-      context: options.context,
-      showBuildLogs: options.showBuildLogs,
-      volumes: options.volumes,
-      resources: options.resources,
-      env: options.env,
-      name: options.name,
-      command: options.command,
-      securityOpt: options.securityOpt,
-      platform: options.platform,
-    });
+    strategy = new DockerfileStrategy(options);
   } else {
-    strategy = new RuntimeStrategy({
-      image: options.image,
-      installers: options.installers,
-      volumes: options.volumes,
-      resources: options.resources,
-      env: options.env,
-      name: options.name,
-      command: options.command,
-      securityOpt: options.securityOpt,
-      platform: options.platform,
-    });
+    strategy = new RuntimeStrategy(options);
   }
 
   return strategy.create();

@@ -751,7 +751,7 @@ dockerSuite('selfTestStrace (in-container)', () => {
     );
     const backend = await createDockerSandbox({
       dockerfile: NODE_STRACE_IMAGE,
-      securityOpt: [`seccomp=${seccomp}`],
+      security: { securityOpt: [`seccomp=${seccomp}`] },
     });
     try {
       const result = await runProbe(backend);

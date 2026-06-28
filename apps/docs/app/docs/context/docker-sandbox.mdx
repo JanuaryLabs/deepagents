@@ -163,6 +163,91 @@ const sandbox = await createDockerSandbox({
 Compose sandboxes do not use this option. Configure command behavior in the
 compose file (for example, `command:` or `entrypoint:` per service).
 
+## Runtime Flags
+
+Runtime and Dockerfile strategies accept pass-through `docker run` controls,
+grouped by concern. Every field is optional; omit a group for the daemon's
+defaults (shared kernel, root user, writable root filesystem, default network).
+Compose sandboxes do not use these — configure equivalent settings per service in
+the compose file.
+
+### Security and isolation — `security`
+
+The sandbox runs untrusted code, so hardening lives in one place:
+
+- `capDrop` / `capAdd` — drop and re-grant Linux capabilities. `capDrop: ['ALL']`
+  is the baseline for untrusted code; add back only what a workload needs.
+- `readOnly` — mount the root filesystem read-only. Writes then only land in
+  `tmpfs` or volume mounts, so pair it with a writable `/workspace` (a `tmpfs`
+  entry or a volume) or `writeFiles` and the installer phase will fail.
+- `tmpfs` — ephemeral, in-memory writable directories, e.g. `['/workspace', '/tmp']`.
+- `user` — run as a non-root `uid[:gid]`. The installer phase (`apk`/`apt`/`npm`/
+  `pip`) needs root, so non-root suits a pre-baked Dockerfile image rather than the
+  runtime-image + installers path.
+- `securityOpt` — one `--security-opt` per entry, e.g. `['no-new-privileges']` or
+  `['seccomp=/absolute/path/profile.json']`.
+
+```typescript
+const sandbox = await createDockerSandbox({
+  image: 'alpine:latest',
+  security: {
+    capDrop: ['ALL'],
+    readOnly: true,
+    tmpfs: ['/workspace', '/tmp'],
+    user: '1000:1000',
+  },
+});
+```
+
+### Resource limits — `resources`
+
+Cap what a container can consume — important when many agents share a host:
+
+- `memory`, `cpus` — the common limits.
+- `memorySwap` — total memory plus swap; set it equal to `memory` to forbid swap
+  entirely (otherwise Docker allows up to 2× `memory`).
+- `shmSize` — size of `/dev/shm`; raise it for Chromium or ML workloads.
+- `pidsLimit` — cap the process count (fork-bomb protection).
+- `ulimits` — e.g. `['nofile=1024:2048']`.
+- `cpusetCpus`, `cpuShares` — pin or weight CPUs for finer sharing than `cpus`.
+
+### Networking — `network`
+
+- `mode` — `--network`. Use `'none'` for no network at all (strong isolation, but
+  it breaks installers that fetch over the network), a custom network name, or
+  `'host'` (shares the host stack — defeats isolation).
+- `publish` — publish container ports, e.g. `['8080:80']`.
+- `dns`, `addHost`, `hostname` — DNS servers, extra `/etc/hosts` entries, and the
+  container hostname.
+
+```typescript
+const sandbox = await createDockerSandbox({
+  network: { mode: 'none' }, // no egress
+});
+```
+
+### OCI runtime and platform
+
+- `runtime` — `--runtime`. Set a registered runtime such as `'kata-runtime'` to
+  back the container with a lightweight VM (its own guest kernel) instead of
+  sharing the host kernel. The runtime must be installed and registered in the
+  Docker daemon, and the host must have hardware virtualization (`/dev/kvm`); the
+  library does not provision it.
+- `platform` — `--platform`, e.g. `'linux/amd64'`. Dockerfile sandboxes also pass
+  it to `docker build` and fold it into the image-cache key. Docker may emulate
+  when it differs from the host architecture.
+
+### Process and devices
+
+- `init` — run an init process as PID 1 that reaps zombie subprocesses.
+- `workdir` — working directory inside the container (default `/workspace`).
+- `entrypoint` — override the image `ENTRYPOINT`.
+- `gpus` — `--gpus`, e.g. `'all'`. Requires the nvidia container runtime on the
+  host and is incompatible with a `runtime` such as `'kata-runtime'`.
+- `devices` — expose host devices, e.g. `['/dev/fuse']`. Passed through verbatim;
+  the library never injects a device implicitly.
+- `labels`, `sysctls` — container metadata and kernel parameters as `key=value`.
+
 ## Volumes
 
 Attach bind paths or Docker-managed volumes to the container. Read-only by default for security.

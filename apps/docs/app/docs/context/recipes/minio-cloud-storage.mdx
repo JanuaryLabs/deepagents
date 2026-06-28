@@ -10,7 +10,7 @@ There are only two steps: install the plugin once, then hand `createDockerSandbo
 ## 1. Install the rclone volume plugin (once per machine)
 
 ```bash
-# arm64 on Apple Silicon, amd64 on Intel / most Linux
+# arm64 on Apple silicon, amd64 on Intel / most Linux
 docker plugin install rclone/docker-volume-rclone:arm64 \
   args="-v" --alias rclone --grant-all-permissions
 ```

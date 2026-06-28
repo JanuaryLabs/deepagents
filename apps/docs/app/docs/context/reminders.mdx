@@ -103,7 +103,7 @@ A reminder fires in one of three places, chosen by `target`:
 | Target | When it runs | What the model sees |
 | --- | --- | --- |
 | `user` | During `engine.save()` on the last pending user message | Reminder text folded into that user message |
-| `tool-output` | Right after a tool `execute()` resolves | Wrapped tool output on the next model step, with the same wrapped value persisted in the chain |
+| `tool-output` | Right after a tool `execute()` resolves | Wrapped tool output on the next model step; the persisted chain also keeps a host-only metadata marker so reminder envelopes can be unwrapped safely |
 | `steer` | Mid-loop between streaming steps, after the model has already emitted content | A synthetic hidden user message containing one or more `<system-reminder>` parts |
 
 `user` is the default and may omit `when`. `tool-output` and `steer` require a `when` predicate — `reminder()` throws if it is missing.

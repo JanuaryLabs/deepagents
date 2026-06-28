@@ -27,14 +27,15 @@ like store implementations, sandbox tooling, and filesystem-based skill loading.
 
 The server-side package also ships the sandbox primitives used by
 `@deepagents/text2sql` and other tool-driven agents. Use `createBashTool()`
-with `createVirtualSandbox()`, `createDockerSandbox()`, or
-`createDaytonaSandbox(client, options)`, or `createAgentOsSandbox()` depending
-on whether commands should run in memory, Docker, managed Daytona sandboxes, or
-Agent OS.
+with `createVirtualSandbox()`, `createDockerSandbox()`,
+`createAppleContainerSandbox()`, `createDaytonaSandbox(client, options)`, or
+`createAgentOsSandbox()` depending on whether commands should run in memory,
+Docker, Apple Container lightweight VMs, managed Daytona sandboxes, or Agent OS.
 
 See the docs for the full API surface:
 
 - [Sandbox](https://januarylabs.github.io/deepagents/docs/context/sandbox)
+- [Apple Container Sandbox](https://januarylabs.github.io/deepagents/docs/context/apple-container-sandbox)
 - [Subcommand Builders](https://januarylabs.github.io/deepagents/docs/context/subcommand)
 - [GCS Cloud Storage Volumes](https://januarylabs.github.io/deepagents/docs/context/recipes/gcs-cloud-storage)
 
@@ -82,32 +83,36 @@ constant for the container's lifetime. Re-proving it per composition would re-pa
 several host→container round-trips on every tool call for no new information.
 
 Verifying the invariant is the consumer's **once-per-container** responsibility.
-Run the probe once at startup (e.g. a daemon boot gate) via the lean leaf entry:
+Run the probe once inside the sandbox at startup (e.g. a daemon boot gate) via
+the lean leaf entry:
 
 ```ts
 import { selfTestStrace } from '@deepagents/context/sandbox/strace';
 
 // Throws StraceUnavailableError (reason: 'strace-missing' | 'ptrace-blocked' |
-// 'trace-unparseable') with no silent fallback. A DisposableSandbox satisfies
-// the StraceHost shape structurally, so pass a real backend unchanged; an
-// in-process caller implements just { executeCommand, readFile }.
-await selfTestStrace(backend);
+// 'trace-unparseable') with no silent fallback.
+await selfTestStrace();
 ```
 
-The `@deepagents/context/sandbox/strace` subpath is a node-builtins-only bundle
+The `@deepagents/context/sandbox/strace` subpath is a small Node-runtime leaf
 (probe + parser + `StraceUnavailableError`) with no agent/context-framework
-imports, so a minimal daemon can import it without pulling the whole framework.
+imports, so a minimal daemon or bundled probe can import it without pulling the
+whole framework. If the host process owns only a remote `DisposableSandbox`,
+bundle this leaf entry with a tiny driver, write it into the sandbox, and run it
+there with `node`.
 Import `StraceUnavailableError` from this same subpath when catching the probe's
 error (each entry point is bundled independently, so `instanceof` requires the
 class from the same entry).
 
-The backend must satisfy, on any non-virtual backend (Docker, Daytona, e2b, ...):
+The backend must satisfy, on any non-virtual backend (Docker, Apple Container,
+Daytona, e2b, ...):
 
 1. `strace` installed in the image — `apk add strace` (Alpine) /
    `apt-get install -y strace` (Debian), or `installers: [pkg(['strace'])]` for
    `createDockerSandbox`;
-2. `ptrace` permitted by the runtime — the default on Docker and Daytona;
-3. a **native-architecture** sandbox — amd64-under-Rosetta on Apple Silicon
+2. `ptrace` permitted by the runtime — the default on Docker, Apple Container,
+   and Daytona;
+3. a **native-architecture** sandbox — amd64-under-Rosetta on Apple silicon
    garbles the trace, so build the image for the host arch.
 
 The **in-process virtual sandbox cannot host strace** (no real processes/ptrace),

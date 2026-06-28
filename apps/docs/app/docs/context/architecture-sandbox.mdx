@@ -7,18 +7,27 @@ This page explains the internal architecture of the sandbox system. Read this if
 
 ## Strategy Pattern
 
-The Docker sandbox uses the Strategy pattern with a Template Method base class. Three concrete strategies handle different container creation approaches:
+The container-backed sandboxes use the Strategy pattern with Template Method
+base classes. Docker and Apple Container have separate strategy families because
+their CLIs differ, but both families share the same high-level lifecycle:
+resolve an image, prepare volumes, start a long-running container, configure it,
+then return the common sandbox methods.
 
 ```
 DockerSandboxStrategy (abstract)
 ├── RuntimeStrategy      — install packages/binaries at runtime
 ├── DockerfileStrategy   — build image from Dockerfile (cached)
 └── ComposeStrategy      — multi-container via docker compose
+
+AppleContainerSandboxStrategy (abstract)
+├── AppleContainerRuntimeStrategy       — install packages/binaries at runtime
+└── AppleContainerfileStrategy          — build image with container build (cached)
 ```
 
 ### Template Method Flow
 
-The base class defines the creation algorithm. Subclasses override `getImage()` and `configure()`:
+The base class defines the creation algorithm. Subclasses override `getImage()`
+and `configure()`:
 
 ```
 create()
@@ -28,9 +37,9 @@ create()
   │     ├─ Dockerfile: build image, return cached tag
   │     └─ Compose:    return '' (compose manages images)
   │
-  ├─ 2. prepareVolumes()     ← common: validate bind paths, inspect/create Docker volumes
+  ├─ 2. prepareVolumes()     ← common: validate bind paths, inspect/create volumes
   │
-  ├─ 3. startContainer()     ← common: docker run -d --rm
+  ├─ 3. startContainer()     ← common: run a long-lived container with --rm
   │     └─ Compose override:  docker compose up -d
   │
   ├─ 4. configure()          ← strategy-specific
@@ -50,7 +59,10 @@ The methods object returned by `createSandboxMethods()` also implements
 
 ### Container Startup
 
-All single-container strategies start containers with:
+All single-container strategies start a long-running container and then execute
+commands inside it. Docker uses `docker run`; Apple Container uses
+`container run` with equivalent name, resource, volume, environment, arch, and
+command controls where the Apple CLI supports them.
 
 ```
 docker run -d --rm \
@@ -70,15 +82,25 @@ Command resolution for Runtime and Dockerfile strategies:
 
 Commands then execute via `docker exec <id> sh -c "<command>"`.
 
+Apple Container follows the same shape with `container run --detach --rm ...`
+and executes commands via `container exec <id> sh -c "<command>"`. It does not
+support Compose, Docker volume drivers, or Docker security/network flags;
+instead each container runs inside its own lightweight VM and exposes a smaller
+set of resource, arch, bind-mount, named-volume, and environment controls.
+
 ### Dockerfile Image Caching
 
-The `DockerfileStrategy` generates deterministic image tags from Dockerfile content:
+The Dockerfile strategies generate deterministic image tags from Dockerfile
+content:
 
 ```
 Dockerfile content → SHA-256 → first 12 chars → "sandbox-a1b2c3d4e5f6"
 ```
 
-Same Dockerfile produces the same tag. Docker's layer cache handles the rest — if the image exists locally, the build is skipped entirely.
+Same Dockerfile produces the same tag. Docker folds `platform` into the cache
+key; Apple Container folds `arch` into the cache key. Docker's layer cache
+handles Docker builds, while Apple Container skips `container build` when the
+tag already exists locally.
 
 ### Compose Overrides
 
@@ -133,23 +155,24 @@ Each argument is tested individually against the regex. Any non-matching argumen
 
 ## Integration Pipeline
 
-To give an AI agent a bash tool that runs inside Docker, compose the two
+To give an AI agent a bash tool that runs inside a sandbox, compose the two
 independent systems explicitly at the call site:
 
 ```
 1. createDockerSandbox(sandboxOptions)
-   └─ Returns: DockerSandbox { executeCommand, spawn, readFile, writeFiles, dispose }
+   └─ Returns: DisposableSandbox { executeCommand, spawn, readFile, writeFiles, dispose }
 
 2. createBashTool({ sandbox, skills, ...bashOptions })
    └─ Returns: { bash, tools, sandbox, skills }
 ```
 
-The `DockerSandbox` interface still matches what `createBashTool` expects from
-its `sandbox` parameter (`executeCommand(command, options?) → { stdout, stderr,
-exitCode }`), while also exposing Docker-only `spawn(command, options?)` for
-streaming stdout/stderr. This is why Docker sandboxes can be plugged directly
-into the shared `createBashTool` from `@deepagents/context`, which in turn
-delegates to the upstream `bash-tool` package.
+Any `DisposableSandbox` matches what `createBashTool` expects from its
+`sandbox` parameter (`executeCommand(command, options?) → { stdout, stderr,
+exitCode }`). Backends that can expose unbuffered process streams, including
+Docker and Apple Container, also implement optional `spawn(command, options?)`
+for streaming stdout/stderr. This is why container sandboxes can be plugged
+directly into the shared `createBashTool` from `@deepagents/context`, which in
+turn delegates to the upstream `bash-tool` package.
 
 ### Decorator Chain Behavior
 
@@ -166,10 +189,11 @@ decorators now preserve `spawn` when the backend exposes it:
 ### File Operations: Base64 Encoding
 
 `readFile` and `writeFiles` use base64 encoding internally because buffered
-`executeCommand` uses `nano-spawn`, which strips trailing newlines from stdout:
+`executeCommand` uses CLI process helpers that must preserve binary-safe content
+across host/container boundaries:
 
 ```
-readFile:   docker exec <id> sh -c 'base64 "/path/to/file"'  → decode on host
+readFile:   <backend> exec <id> sh -c 'base64 "/path/to/file"'  → decode on host
 writeFiles: echo "<base64>" | base64 -d > "/path/to/file"    → decode in container
 ```
 
@@ -199,5 +223,6 @@ class KubernetesStrategy extends DockerSandboxStrategy {
 ## Next Steps
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Usage guide for all three strategies
+- [Apple Container Sandbox](/docs/context/apple-container-sandbox) - VM-backed local containers on Apple silicon
 - [Agent Wrapper](/docs/context/agent) - Agent integration
 - [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach

@@ -1,11 +1,19 @@
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import {
+  ContainerCreationError,
   type DisposableSandbox,
   DockerSandboxError,
   InstallError,
@@ -645,6 +653,338 @@ describe('Docker Sandbox', async () => {
           assert.strictEqual(result.stdout.trim(), 'limited');
         } finally {
           await sandbox.dispose();
+        }
+      });
+
+      it('sizes /dev/shm via shmSize', async () => {
+        const sandbox = await createDockerSandbox({
+          resources: { shmSize: '64m' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('df -k /dev/shm');
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /65536/);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('applies a file-descriptor ulimit to PID 1', async () => {
+        const sandbox = await createDockerSandbox({
+          resources: { ulimits: ['nofile=512:512'] },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('cat /proc/1/limits');
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /Max open files\s+512\s+512/);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('caps the process count via pidsLimit', async () => {
+        const sandbox = await createDockerSandbox({
+          resources: { pidsLimit: 42 },
+        });
+
+        try {
+          const result = await sandbox.executeCommand(
+            'cat /sys/fs/cgroup/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids/pids.max',
+          );
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), '42');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('container runtime', () => {
+      it('runs the container under the default runtime when runtime is omitted', async () => {
+        const sandbox = await createDockerSandbox({
+          runtime: 'runc',
+        });
+
+        try {
+          const result = await sandbox.executeCommand('echo runc');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'runc');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('passes runtime through to `docker run --runtime`', async () => {
+        const bogusRuntime = 'sandbox-nonexistent-runtime';
+
+        await assert.rejects(
+          createDockerSandbox({ runtime: bogusRuntime }),
+          (error: unknown) => {
+            assert.ok(error instanceof ContainerCreationError);
+            assert.match(error.message, new RegExp(bogusRuntime));
+            return true;
+          },
+        );
+      });
+    });
+
+    describe('networking', () => {
+      it('isolates the container with network mode none', async () => {
+        const sandbox = await createDockerSandbox({
+          network: { mode: 'none' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('ls /sys/class/net');
+          assert.strictEqual(result.exitCode, 0);
+          const interfaces = result.stdout.trim().split(/\s+/);
+          assert.ok(interfaces.includes('lo'));
+          assert.ok(
+            !interfaces.includes('eth0'),
+            `expected no eth0 under network mode none, got: ${result.stdout}`,
+          );
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('sets a custom hostname', async () => {
+        const sandbox = await createDockerSandbox({
+          network: { hostname: 'sandbox-host' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('hostname');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'sandbox-host');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('sets custom DNS servers', async () => {
+        const sandbox = await createDockerSandbox({
+          network: { dns: ['1.2.3.4'] },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('cat /etc/resolv.conf');
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /nameserver\s+1\.2\.3\.4/);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('adds host-to-IP mappings with addHost', async () => {
+        const sandbox = await createDockerSandbox({
+          network: { addHost: ['myhost:10.1.2.3'] },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('cat /etc/hosts');
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /10\.1\.2\.3\s+myhost/);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('process and workspace', () => {
+      it('runs an init process as PID 1 with init:true', async () => {
+        const sandbox = await createDockerSandbox({ init: true });
+
+        try {
+          const result = await sandbox.executeCommand('cat /proc/1/comm');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'docker-init');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('uses a custom workdir', async () => {
+        const sandbox = await createDockerSandbox({ workdir: '/srv' });
+
+        try {
+          const result = await sandbox.executeCommand('pwd');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), '/srv');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('overrides the image entrypoint', async () => {
+        const sandbox = await createDockerSandbox({
+          entrypoint: '/bin/sleep',
+          command: ['infinity'],
+        });
+
+        try {
+          const result = await sandbox.executeCommand('cat /proc/1/comm');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'sleep');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('sets kernel parameters via sysctls', async () => {
+        const sandbox = await createDockerSandbox({
+          sysctls: { 'net.ipv4.ip_forward': '1' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand(
+            'cat /proc/sys/net/ipv4/ip_forward',
+          );
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), '1');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('attaches container labels', async () => {
+        const name = `label-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const sandbox = await createDockerSandbox({
+          name,
+          labels: { 'com.example.role': 'sandbox-test' },
+        });
+
+        try {
+          const inspect = await spawn('docker', [
+            'inspect',
+            '--format',
+            '{{index .Config.Labels "com.example.role"}}',
+            `sandbox-${name}`,
+          ]);
+          assert.strictEqual(inspect.stdout.trim(), 'sandbox-test');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      // gpus, devices, cpuShares, cpusetCpus, and memorySwap are emitted the same
+      // way as the flags above, but are not asserted here: observing them needs
+      // GPU/host-device hardware or CPU/memory contention that a single isolated
+      // container cannot reliably create.
+    });
+
+    describe('security hardening', () => {
+      it('runs as a non-root user', async () => {
+        const sandbox = await createDockerSandbox({
+          security: { user: '1000:1000' },
+        });
+
+        try {
+          const result = await sandbox.executeCommand('id -u');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), '1000');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('mounts a read-only rootfs with a writable tmpfs workspace', async () => {
+        const sandbox = await createDockerSandbox({
+          security: { readOnly: true, tmpfs: ['/workspace', '/tmp'] },
+        });
+
+        try {
+          await sandbox.writeFiles([
+            { path: '/workspace/ok.txt', content: 'written' },
+          ]);
+          assert.strictEqual(
+            (await sandbox.readFile('/workspace/ok.txt')).trim(),
+            'written',
+          );
+
+          const rootWrite = await sandbox.executeCommand(
+            'echo nope > /etc/blocked.txt',
+          );
+          assert.notStrictEqual(rootWrite.exitCode, 0);
+          assert.match(rootWrite.stderr, /read-only file system/i);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('drops Linux capabilities', async () => {
+        const sandbox = await createDockerSandbox({
+          security: { capDrop: ['ALL'] },
+        });
+
+        try {
+          await sandbox.executeCommand('touch /tmp/cap-probe');
+          const chown = await sandbox.executeCommand(
+            'chown 1000 /tmp/cap-probe',
+          );
+          assert.notStrictEqual(chown.exitCode, 0);
+          assert.match(chown.stderr, /not permitted|operation not permitted/i);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('re-grants a capability with capAdd', async () => {
+        const sandbox = await createDockerSandbox({
+          security: { capDrop: ['ALL'], capAdd: ['CHOWN'] },
+        });
+
+        try {
+          await sandbox.executeCommand('touch /tmp/cap-probe');
+          const chown = await sandbox.executeCommand(
+            'chown 1000 /tmp/cap-probe',
+          );
+          assert.strictEqual(chown.exitCode, 0, chown.stderr);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
+    describe('Dockerfile strategy', () => {
+      it('builds an image from an inline Dockerfile', async () => {
+        const sandbox = await createDockerSandbox({
+          dockerfile:
+            'FROM alpine:latest\nRUN echo inline-build > /built-marker\n',
+        });
+
+        try {
+          const result = await sandbox.executeCommand('cat /built-marker');
+          assert.strictEqual(result.exitCode, 0);
+          assert.strictEqual(result.stdout.trim(), 'inline-build');
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('builds an image from a Dockerfile path', async () => {
+        const dir = await mkdtemp(join(tmpdir(), 'sandbox-dockerfile-'));
+        await writeFile(
+          join(dir, 'Dockerfile'),
+          'FROM alpine:latest\nRUN echo file-build > /built-marker\n',
+        );
+
+        try {
+          const sandbox = await createDockerSandbox({
+            dockerfile: join(dir, 'Dockerfile'),
+            context: dir,
+          });
+          try {
+            const result = await sandbox.executeCommand('cat /built-marker');
+            assert.strictEqual(result.exitCode, 0);
+            assert.strictEqual(result.stdout.trim(), 'file-build');
+          } finally {
+            await sandbox.dispose();
+          }
+        } finally {
+          await rm(dir, { recursive: true, force: true });
         }
       });
     });
