@@ -105,17 +105,6 @@ export interface ReminderOptions {
   target?: ReminderTarget;
 }
 
-/**
- * A resolved reminder ready to bake into a user message. Internal to the save
- * fold — callers declare reminders with {@link reminder} + `engine.set()`.
- */
-export interface UserReminder {
-  text: SyncReminderText;
-  asPart: boolean;
-  target: 'user';
-  metadata?: Record<string, unknown>;
-}
-
 export interface ConditionalReminder {
   text: ReminderText;
   when: WhenPredicate;
@@ -219,14 +208,15 @@ function isOutputAvailableToolPart(
 function isToolOutputReminderEnvelope(
   value: unknown,
 ): value is { result: unknown; systemReminder: string } {
-  // Match only the exact shape applyRemindersToToolOutput produces: a `result`
-  // key plus a `systemReminder` that carries the wrapping tag. A real tool
-  // output that merely has a `systemReminder` string is not an envelope.
+  // Detect via the host-only `meta` marker, not the reminder tag text, so
+  // detection survives a future change to the tag format. A real tool output
+  // never sets meta.reminder, so there are no false positives.
   return (
     isRecord(value) &&
+    isRecord(value.meta) &&
+    value.meta.reminder === true &&
     'result' in value &&
-    typeof value.systemReminder === 'string' &&
-    value.systemReminder.startsWith(SYSTEM_REMINDER_OPEN_TAG)
+    typeof value.systemReminder === 'string'
   );
 }
 
@@ -406,7 +396,8 @@ export function applyPartReminder(
   message: UIMessage,
   value: string,
 ): UserReminderMetadata {
-  const part: UIMessage['parts'][number] = { type: 'text', text: value };
+  const reminderText = formatTaggedReminder(value);
+  const part: UIMessage['parts'][number] = { type: 'text', text: reminderText };
   message.parts.push(part);
   const partIndex = message.parts.length - 1;
 
@@ -416,16 +407,9 @@ export function applyPartReminder(
     target: 'user',
     partIndex,
     start: 0,
-    end: value.length,
+    end: reminderText.length,
     mode: 'part',
   };
-}
-
-export function resolveReminderText(
-  item: { text: SyncReminderText },
-  ctx: ReminderContext,
-): string {
-  return resolveReminder(item, ctx)?.text ?? '';
 }
 
 function normalizeReminderResolution(
@@ -532,6 +516,29 @@ export function applyRemindersToToolOutput(
   return {
     result: output === undefined ? null : output,
     systemReminder: formatTaggedReminder(texts.join('\n')),
+    meta: { reminder: true },
+  };
+}
+
+/**
+ * Project a tool-output reminder envelope to its model-facing form: run the
+ * wrapped tool's own projection over the inner `result` (so a tool's host-only
+ * `meta` channel is still stripped), then re-attach the `systemReminder`. The
+ * envelope's own host-only `meta` marker is dropped. Returns null for anything
+ * that is not one of our envelopes, so the caller can project the raw output.
+ */
+export function toToolReminderModelOutput(
+  output: unknown,
+  projectResult: (result: unknown) => unknown,
+): { type: 'json'; value: unknown } | null {
+  if (!isToolOutputReminderEnvelope(output)) return null;
+  const projected = projectResult(output.result);
+  return {
+    type: 'json',
+    value: {
+      result: isRecord(projected) ? projected.value : projected,
+      systemReminder: output.systemReminder,
+    },
   };
 }
 
@@ -636,7 +643,11 @@ export function user(
  */
 export function applyUserRemindersToMessage(
   message: UIMessage,
-  reminders: UserReminder[],
+  reminders: Array<{
+    text: SyncReminderText;
+    asPart: boolean;
+    metadata?: Record<string, unknown>;
+  }>,
 ): void {
   if (reminders.length === 0) return;
   const plainText = extractPlainText(message);

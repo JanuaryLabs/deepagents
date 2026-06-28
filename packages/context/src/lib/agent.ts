@@ -34,7 +34,7 @@ import {
   nullUsage,
 } from './advisor.ts';
 import { assistant } from './fragments.ts';
-import { user } from './fragments/message/user.ts';
+import { toToolReminderModelOutput, user } from './fragments/message/user.ts';
 import {
   type Guardrail,
   type GuardrailContext,
@@ -543,8 +543,9 @@ class Agent<CIn, COut = CIn> {
 
 /**
  * Wrap every executable tool so `target: 'tool-output'` reminders are applied
- * to the raw result at the execution boundary. The model sees the wrapped
- * output in its very next step and the persisted chain stores the same value.
+ * to the raw result at the execution boundary. The store keeps the host-marked
+ * envelope; the model-facing projection strips the host-only marker while
+ * preserving the result and reminder text.
  * Streaming results (async iterables) pass through untouched — wrapping them
  * would break their consumption contract.
  */
@@ -561,12 +562,30 @@ function wrapToolsWithOutputReminders(
       wrapped[name] = toolDef;
       continue;
     }
+    const originalToModelOutput = toolDef.toModelOutput;
     wrapped[name] = {
       ...toolDef,
       execute: async (input, options) => {
         const result = await execute.call(toolDef, input, options);
         if (isAsyncIterable(result)) return result;
         return context.applyToolOutputReminders(result);
+      },
+      toModelOutput: (args: {
+        toolCallId: string;
+        input: unknown;
+        output: unknown;
+      }) => {
+        const project = (output: unknown) =>
+          originalToModelOutput
+            ? originalToModelOutput({
+                ...args,
+                output,
+              } as Parameters<typeof originalToModelOutput>[0])
+            : defaultToolModelOutput(output);
+        return (
+          toToolReminderModelOutput(args.output, project) ??
+          project(args.output)
+        );
       },
     } as typeof toolDef;
   }
@@ -581,6 +600,14 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
     typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
       'function'
   );
+}
+
+// Mirrors the AI SDK's default tool-output projection for tools that have no
+// `toModelOutput` of their own; the wrapper must supply one to hide envelope meta.
+function defaultToolModelOutput(output: unknown) {
+  return typeof output === 'string'
+    ? { type: 'text' as const, value: output }
+    : { type: 'json' as const, value: output ?? null };
 }
 
 export function agent<CIn, COut = CIn>(

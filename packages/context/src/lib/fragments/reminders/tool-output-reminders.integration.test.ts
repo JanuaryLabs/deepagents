@@ -1,4 +1,5 @@
 import {
+  type ToolSet,
   type UIMessage,
   generateId,
   isToolUIPart,
@@ -76,15 +77,27 @@ const noopTool = tool({
   execute: async () => ({ ok: true }),
 });
 
+const metaTool = tool({
+  description:
+    'A tool whose output carries host-only meta its own toModelOutput strips.',
+  inputSchema: z.object({}),
+  execute: async () => ({ value: 42, meta: { hidden: 'SECRET' } }),
+  toModelOutput: ({ output }) => {
+    const { meta: _meta, ...visible } = output as { meta?: unknown };
+    return { type: 'json', value: visible };
+  },
+});
+
 async function makeAgent(
   context: ContextEngine,
   model: MockLanguageModelV3,
   name: string,
+  tools: ToolSet = { noop: noopTool },
 ) {
   const sandbox = await createBashTool({
     sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
   });
-  return agent({ sandbox, name, context, model, tools: { noop: noopTool } });
+  return agent({ sandbox, name, context, model, tools });
 }
 
 function userMessage(text: string): UIMessage {
@@ -134,7 +147,12 @@ function toolResultValuesIn(prompt: unknown[]): unknown[] {
   return values;
 }
 
-const WRAPPED = {
+const WRAPPED_STORED = {
+  result: { ok: true },
+  systemReminder: '<system-reminder>CHECK THE FS TOOLS</system-reminder>',
+  meta: { reminder: true },
+};
+const WRAPPED_VISIBLE = {
   result: { ok: true },
   systemReminder: '<system-reminder>CHECK THE FS TOOLS</system-reminder>',
 };
@@ -158,13 +176,13 @@ describe('tool-output reminders (execute-time wrapping)', () => {
     await drain(await chat(chatAgent));
 
     const assistantMsg = await storedAssistant(store, 'wrap');
-    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [WRAPPED]);
+    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [WRAPPED_STORED]);
 
     const lastPrompt = prompts[prompts.length - 1];
     assert.deepStrictEqual(
       toolResultValuesIn(lastPrompt),
-      [WRAPPED],
-      'the model must see the wrapped output in the step after the tool ran',
+      [WRAPPED_VISIBLE],
+      'the model sees result+reminder but not the host-only meta marker',
     );
   });
 
@@ -189,7 +207,10 @@ describe('tool-output reminders (execute-time wrapping)', () => {
     await drain(await chat(chatAgent));
 
     const assistantMsg = await storedAssistant(store, 'multi');
-    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [WRAPPED, WRAPPED]);
+    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [
+      WRAPPED_STORED,
+      WRAPPED_STORED,
+    ]);
   });
 
   it('leaves the output untouched when the predicate does not fire', async () => {
@@ -234,9 +255,39 @@ describe('tool-output reminders (execute-time wrapping)', () => {
     await drain(await chat(chatAgent));
 
     const assistantMsg = await storedAssistant(store, 'strip');
-    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [WRAPPED]);
+    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [WRAPPED_STORED]);
 
     const stripped = stripReminders(assistantMsg);
     assert.deepStrictEqual(toolOutputsOf(stripped), [{ ok: true }]);
+  });
+
+  it("applies the wrapped tool's own toModelOutput to the inner result when a reminder fires", async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({ store, chatId: 'meta', userId: 'u1' });
+    const prompts: unknown[][] = [];
+    const model = scriptedModel(
+      [{ tool: 'metaTool' }, { text: 'done' }],
+      prompts,
+    );
+    const chatAgent = await makeAgent(context, model, 'meta', { metaTool });
+
+    context.set(
+      reminder('CHECK', { when: afterTurn(0), target: 'tool-output' }),
+    );
+
+    await context.continue(userMessage('run the task'));
+    await drain(await chat(chatAgent));
+
+    const lastPrompt = prompts[prompts.length - 1];
+    assert.deepStrictEqual(
+      toolResultValuesIn(lastPrompt),
+      [
+        {
+          result: { value: 42 },
+          systemReminder: '<system-reminder>CHECK</system-reminder>',
+        },
+      ],
+      "the tool's host-only meta must be stripped from the inner result even when a reminder fires",
+    );
   });
 });

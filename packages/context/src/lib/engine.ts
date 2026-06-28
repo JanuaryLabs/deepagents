@@ -27,7 +27,6 @@ import {
   type BaseWhenCtx,
   type ConditionalReminder,
   type ReminderTarget,
-  type UserReminder,
   type WhenContext,
   applyRemindersToToolOutput,
   applyUserRemindersToMessage,
@@ -939,10 +938,9 @@ export class ContextEngine {
     if (matched.length === 0) return;
 
     const onceIds = [...new Set(matched.flatMap((m) => m.onceIds))];
-    const reminders: UserReminder[] = matched.map((m) => ({
+    const reminders = matched.map((m) => ({
       text: m.resolved.text,
       asPart: m.config.asPart,
-      target: 'user',
       metadata: m.resolved.metadata,
     }));
     const carrier: UIMessage & { role: 'user' } = {
@@ -1014,9 +1012,9 @@ export class ContextEngine {
    * Evaluate `target: 'tool-output'` reminders against a tool's raw result and
    * return the (possibly wrapped) output.
    *
-   * Called by the agent's tool wrapper right after each `execute()` resolves —
-   * upstream of both the model and the store, so the next model step and the
-   * persisted chain see the exact same wrapped value (store/prompt parity).
+   * Called by the agent's tool wrapper right after each `execute()` resolves.
+   * The store keeps the wrapped value with a host-only marker; the model-facing
+   * projection strips that marker while preserving `result` + `systemReminder`.
    *
    * Returns the output unchanged when no tool-output reminder fires. Without a
    * persisted user message there is no turn context to evaluate against

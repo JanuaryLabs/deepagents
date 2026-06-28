@@ -6,6 +6,7 @@ import {
   ContextEngine,
   InMemoryContextStore,
   type UserReminderMetadata,
+  applyRemindersToToolOutput,
   everyNTurns,
   first,
   getReminderRanges,
@@ -229,7 +230,7 @@ describe('user reminders', () => {
       message.parts.map((part) =>
         part.type === 'text' ? part.text : part.type,
       ),
-      ['body', 'before', 'after'],
+      ['body', taggedReminder('before'), taggedReminder('after')],
     );
 
     const metadata = getReminderMetadata(message);
@@ -247,14 +248,14 @@ describe('user reminders', () => {
           text: 'before',
           partIndex: 1,
           start: 0,
-          end: 'before'.length,
+          end: taggedReminder('before').length,
           mode: 'part',
         },
         {
           text: 'after',
           partIndex: 2,
           start: 0,
-          end: 'after'.length,
+          end: taggedReminder('after').length,
           mode: 'part',
         },
       ],
@@ -486,7 +487,7 @@ describe('reminder range helpers', () => {
       message.parts.map((part) =>
         part.type === 'text' ? part.text : part.type,
       ),
-      [`Deploy now.${encodedInlineReminder}`, 'part-reminder'],
+      [`Deploy now.${encodedInlineReminder}`, taggedReminder('part-reminder')],
     );
 
     const stripped = stripReminders(message);
@@ -505,7 +506,7 @@ describe('reminder range helpers', () => {
       message.parts.map((part) =>
         part.type === 'text' ? part.text : part.type,
       ),
-      [`Deploy now.${encodedInlineReminder}`, 'part-reminder'],
+      [`Deploy now.${encodedInlineReminder}`, taggedReminder('part-reminder')],
     );
     assert.ok(getMetadata(message).reminders);
   });
@@ -588,11 +589,9 @@ describe('reminder range helpers', () => {
           toolCallId: 'tool-envelope',
           state: 'output-available',
           input: {},
-          output: {
-            result: { rows: [{ id: 1 }] },
-            systemReminder:
-              '<system-reminder>object-tool-reminder</system-reminder>',
-          },
+          output: applyRemindersToToolOutput({ rows: [{ id: 1 }] }, [
+            'object-tool-reminder',
+          ]),
         },
       ],
     };

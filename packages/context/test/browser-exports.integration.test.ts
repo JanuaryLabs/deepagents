@@ -38,7 +38,6 @@ describe('browser export path', () => {
       {
         text: 'Ask for confirmation before destructive actions',
         asPart: false,
-        target: 'user',
       },
     ]);
 
@@ -58,8 +57,8 @@ describe('browser export path', () => {
     const partMode = true;
     const message = user('Ship now.').codec?.encode() as UIMessage;
     applyUserRemindersToMessage(message, [
-      { text: 'hidden-inline', asPart: false, target: 'user' },
-      { text: 'hidden-part', asPart: partMode, target: 'user' },
+      { text: 'hidden-inline', asPart: false },
+      { text: 'hidden-part', asPart: partMode },
     ]);
 
     const stripped = stripReminders(message);
