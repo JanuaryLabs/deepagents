@@ -366,8 +366,9 @@ console.log(exit.code, exit.signal, exit.success);
 `proc.exit` with a non-success status (for Docker backends, typically
 `{ code: null, signal: 'SIGKILL', success: false }`).
 
-`spawn` is Docker-only. Other sandbox backends intentionally omit it, so shared
-code should feature-detect with `if (!sandbox.spawn) { ... }`.
+Docker exposes `spawn` for unbuffered process streams. Other backends may expose
+the same optional method when they can provide live stdout/stderr; shared code
+should feature-detect with `if (!sandbox.spawn) { ... }`.
 
 ## Installers
 

@@ -1,8 +1,6 @@
 import { type CommandResult } from 'bash-tool';
-import spawn from 'nano-spawn';
+import spawn, { type SubprocessError } from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,14 +15,13 @@ import {
   AppleContainerVolumeRemoveError,
   ContainerServiceNotRunningError,
 } from './apple-container-sandbox-errors.ts';
-import type { ContainerEngine } from './container-engine.ts';
+import type {
+  ContainerEngine,
+  ImageBuildSpec,
+  SandboxVolume,
+} from './container-engine.ts';
+import { ContainerfileStrategy, RuntimeStrategy } from './container-sandbox.ts';
 import { PackageInstallError } from './docker-sandbox-errors.ts';
-import {
-  type DockerCommonOptions,
-  type DockerNamedVolume,
-  DockerSandboxStrategy,
-  type DockerSandboxVolume,
-} from './docker-sandbox.ts';
 import {
   type Installer,
   type InstallerContext,
@@ -152,7 +149,7 @@ export function isAppleContainerfileOptions(
   return 'dockerfile' in opts;
 }
 
-function buildMountArg(volume: DockerSandboxVolume): string {
+function buildMountArg(volume: SandboxVolume): string {
   const readOnly = volume.readOnly !== false;
   const parts =
     volume.type === 'bind'
@@ -174,7 +171,7 @@ function buildMountArg(volume: DockerSandboxVolume): string {
 }
 
 function getCliErrorMessage(error: unknown): string {
-  const err = error as Error & { stderr?: string; stdout?: string };
+  const err = error as SubprocessError;
   return (
     err.stderr?.trim() || err.stdout?.trim() || err.message || String(error)
   );
@@ -205,12 +202,50 @@ function readContainerStatus(entry: unknown): 'running' | 'stopped' {
 
 /**
  * The Apple `container` CLI dialect, plugged into the shared
- * `DockerSandboxStrategy` skeleton. Mirrors `dockerEngine` but for the
+ * `ContainerSandboxStrategy` skeleton. Mirrors `dockerEngine` but for the
  * micro-VM runtime: `--cwd`/`--env` exec flags, JSON `inspect` parsing,
  * virtiofs mounts, `apiserver`-down detection, and Apple error classes.
  */
-const appleEngine: ContainerEngine = {
+const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
   cli: CLI,
+
+  runArgs(
+    image: string,
+    containerId: string,
+    opts: AppleContainerCommonOptions,
+  ): string[] {
+    const { memory = '1024M', cpus = 2 } = opts.resources ?? {};
+    const args: string[] = [
+      'run',
+      '--detach',
+      '--rm',
+      '--name',
+      containerId,
+      '--memory',
+      memory,
+      '--cpus',
+      String(cpus),
+    ];
+
+    if (opts.arch) {
+      args.push('--arch', opts.arch);
+    }
+    for (const [key, value] of Object.entries(opts.env ?? {})) {
+      args.push('--env', `${key}=${value}`);
+    }
+    for (const volume of opts.volumes ?? []) {
+      args.push('--mount', buildMountArg(volume));
+    }
+
+    args.push(image);
+    if (opts.command === undefined) {
+      args.push('tail', '-f', '/dev/null');
+    } else if (opts.command !== null) {
+      args.push(...opts.command);
+    }
+
+    return args;
+  },
 
   execArgs(containerId, command, options) {
     const flags: string[] = ['--cwd', options?.cwd || WORKDIR];
@@ -263,6 +298,59 @@ const appleEngine: ContainerEngine = {
     return /already exists/i.test(message);
   },
 
+  async ensureWorkdir(containerId: string, workdir: string): Promise<void> {
+    // `container exec --cwd <dir>` fails if <dir> is absent, so the workdir
+    // can't be created from inside itself — bootstrap it from the image's
+    // default cwd with a plain (no `--cwd`) exec.
+    await spawn(CLI, ['exec', containerId, 'sh', '-c', `mkdir -p ${workdir}`]);
+  },
+
+  defaultImage: 'docker.io/library/alpine:latest',
+
+  createInstallerContext: createAppleInstallerContext,
+
+  async imageExists(tag: string): Promise<boolean> {
+    try {
+      await spawn(CLI, ['image', 'inspect', tag]);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async buildImage(spec: ImageBuildSpec): Promise<void> {
+    const archFlag = spec.identity ? ['--arch', spec.identity] : [];
+    // `container build` has no `-f -` (stdin) mode, so an inline Dockerfile is
+    // written to a fresh temp dir that doubles as a minimal build context
+    // (a real directory — `container build` rejects the `/tmp` symlink).
+    if (spec.dockerfile.includes('\n')) {
+      const tempDir = await mkdtemp(join(tmpdir(), 'sandbox-containerfile-'));
+      const dockerfilePath = join(tempDir, 'Dockerfile');
+      await writeFile(dockerfilePath, spec.dockerfile);
+      try {
+        await runAppleBuild(
+          ['build', ...archFlag, '-t', spec.tag, '-f', dockerfilePath, tempDir],
+          spec.showBuildLogs,
+        );
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+      return;
+    }
+    await runAppleBuild(
+      [
+        'build',
+        ...archFlag,
+        '-t',
+        spec.tag,
+        '-f',
+        spec.dockerfile,
+        spec.context,
+      ],
+      spec.showBuildLogs,
+    );
+  },
+
   errors: {
     serviceNotAvailable: () => new ContainerServiceNotRunningError(),
     creation: (message, image, cause) =>
@@ -310,11 +398,7 @@ function createAppleInstallerContext(
       ]);
       return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
     } catch (error) {
-      const err = error as Error & {
-        stdout?: string;
-        stderr?: string;
-        exitCode?: number;
-      };
+      const err = error as SubprocessError;
       return {
         stdout: err.stdout ?? '',
         stderr: err.stderr ?? err.message ?? '',
@@ -397,215 +481,18 @@ function createAppleInstallerContext(
   };
 }
 
-/**
- * Apple-container layer over the shared `DockerSandboxStrategy` skeleton: wires
- * the `appleEngine` dialect and overrides the handful of run-time divergences
- * (the `container run` argv, and the `mkdir /workspace` bootstrap that the
- * `--cwd`-per-exec model needs).
- */
-abstract class AppleSandboxStrategy extends DockerSandboxStrategy {
-  protected arch?: 'arm64' | 'amd64';
-
-  constructor(args: AppleContainerCommonOptions = {}) {
-    super(
-      {
-        volumes: args.volumes,
-        resources: args.resources,
-        env: args.env,
-        name: args.name,
-        command: args.command,
-      } satisfies DockerCommonOptions,
-      appleEngine,
-    );
-    this.arch = args.arch;
-  }
-
-  protected override buildDockerArgs(
-    image: string,
-    containerId: string,
-  ): string[] {
-    const { memory = '1024M', cpus = 2 } = this.resources;
-    const args: string[] = [
-      'run',
-      '--detach',
-      '--rm',
-      '--name',
-      containerId,
-      '--memory',
-      memory,
-      '--cpus',
-      String(cpus),
-    ];
-
-    if (this.arch) {
-      args.push('--arch', this.arch);
+async function runAppleBuild(
+  args: string[],
+  showBuildLogs: boolean,
+): Promise<void> {
+  try {
+    if (showBuildLogs) {
+      await runStreamed(CLI, args);
+    } else {
+      await spawn(CLI, args);
     }
-    for (const [key, value] of Object.entries(this.env)) {
-      args.push('--env', `${key}=${value}`);
-    }
-    for (const volume of this.volumes) {
-      args.push('--mount', this.engine.mountArg(volume));
-    }
-
-    args.push(image);
-    if (this.command === undefined) {
-      args.push('tail', '-f', '/dev/null');
-    } else if (this.command !== null) {
-      args.push(...this.command);
-    }
-
-    return args;
-  }
-
-  protected override async ensureWorkspace(): Promise<void> {
-    // `container exec --cwd <dir>` fails if <dir> is absent, so WORKDIR can't be
-    // created from inside itself — bootstrap it from the image's default cwd.
-    await spawn(this.engine.cli, [
-      'exec',
-      this.context.containerId,
-      'sh',
-      '-c',
-      `mkdir -p ${WORKDIR}`,
-    ]);
-  }
-}
-
-export interface AppleContainerRuntimeStrategyArgs extends AppleContainerCommonOptions {
-  image?: string;
-  installers?: Installer[];
-}
-
-/** Starts a vanilla image and runs the supplied installers in order. */
-export class AppleContainerRuntimeStrategy extends AppleSandboxStrategy {
-  private image: string;
-  private installers: Installer[];
-
-  constructor(args: AppleContainerRuntimeStrategyArgs = {}) {
-    super(args);
-    this.image = args.image ?? 'docker.io/library/alpine:latest';
-    this.installers = args.installers ?? [];
-  }
-
-  protected async getImage(): Promise<string> {
-    return this.image;
-  }
-
-  protected async configure(): Promise<void> {
-    const ctx = createAppleInstallerContext(
-      this.context.containerId,
-      this.image,
-    );
-    for (const installer of this.installers) {
-      await installer.install(ctx);
-    }
-  }
-}
-
-export interface AppleContainerfileStrategyArgs extends AppleContainerCommonOptions {
-  dockerfile: string;
-  context?: string;
-  showBuildLogs?: boolean;
-}
-
-/**
- * Builds a custom image from a Dockerfile with `container build`
- * (content-hash caching). Runs no post-start configuration.
- */
-export class AppleContainerfileStrategy extends AppleSandboxStrategy {
-  private imageTag: string;
-  private dockerfile: string;
-  private buildContext: string;
-  private showBuildLogs: boolean;
-
-  constructor(args: AppleContainerfileStrategyArgs) {
-    super(args);
-    this.dockerfile = args.dockerfile;
-    this.buildContext = args.context ?? '.';
-    this.showBuildLogs = args.showBuildLogs ?? false;
-    this.imageTag = this.computeImageTag();
-  }
-
-  private computeImageTag(): string {
-    const content = this.isInlineDockerfile()
-      ? this.dockerfile
-      : readFileSync(this.dockerfile, 'utf-8');
-    const hash = createHash('sha256')
-      .update(content)
-      .update(this.arch ?? '')
-      .digest('hex')
-      .slice(0, 12);
-    return `sandbox-${hash}`;
-  }
-
-  private isInlineDockerfile(): boolean {
-    return this.dockerfile.includes('\n');
-  }
-
-  protected async getImage(): Promise<string> {
-    if (!(await this.imageExists())) {
-      await this.buildImage();
-    }
-    return this.imageTag;
-  }
-
-  protected async configure(): Promise<void> {}
-
-  private async imageExists(): Promise<boolean> {
-    try {
-      await spawn(CLI, ['image', 'inspect', this.imageTag]);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async buildImage(): Promise<void> {
-    const archFlag = this.arch ? ['--arch', this.arch] : [];
-
-    // `container build` has no `-f -` (stdin) mode, so an inline Dockerfile is
-    // written to a fresh temp dir that doubles as a minimal build context
-    // (a real directory — `container build` rejects the `/tmp` symlink).
-    if (this.isInlineDockerfile()) {
-      const tempDir = await mkdtemp(join(tmpdir(), 'sandbox-containerfile-'));
-      const dockerfilePath = join(tempDir, 'Dockerfile');
-      await writeFile(dockerfilePath, this.dockerfile);
-      try {
-        await this.runBuild([
-          'build',
-          ...archFlag,
-          '-t',
-          this.imageTag,
-          '-f',
-          dockerfilePath,
-          tempDir,
-        ]);
-      } finally {
-        await rm(tempDir, { recursive: true, force: true });
-      }
-      return;
-    }
-
-    await this.runBuild([
-      'build',
-      ...archFlag,
-      '-t',
-      this.imageTag,
-      '-f',
-      this.dockerfile,
-      this.buildContext,
-    ]);
-  }
-
-  private async runBuild(args: string[]): Promise<void> {
-    try {
-      if (this.showBuildLogs) {
-        await runStreamed(CLI, args);
-      } else {
-        await spawn(CLI, args);
-      }
-    } catch (error) {
-      throw new AppleContainerImageBuildError(getCliErrorMessage(error));
-    }
+  } catch (error) {
+    throw new AppleContainerImageBuildError(getCliErrorMessage(error));
   }
 }
 
@@ -656,30 +543,18 @@ function runStreamed(command: string, args: string[]): Promise<void> {
 export async function createAppleContainerSandbox(
   options: AppleContainerSandboxOptions = {},
 ): Promise<DisposableSandbox> {
-  const strategy = isAppleContainerfileOptions(options)
-    ? new AppleContainerfileStrategy({
-        dockerfile: options.dockerfile,
-        context: options.context,
-        showBuildLogs: options.showBuildLogs,
-        volumes: options.volumes,
-        resources: options.resources,
-        env: options.env,
-        name: options.name,
-        command: options.command,
-        arch: options.arch,
-      })
-    : new AppleContainerRuntimeStrategy({
-        image: options.image,
-        installers: options.installers,
-        volumes: options.volumes,
-        resources: options.resources,
-        env: options.env,
-        name: options.name,
-        command: options.command,
-        arch: options.arch,
-      });
-
-  return strategy.create();
+  if (isAppleContainerfileOptions(options)) {
+    return new ContainerfileStrategy(options, appleEngine, {
+      dockerfile: options.dockerfile,
+      context: options.context ?? '.',
+      showBuildLogs: options.showBuildLogs ?? false,
+      identity: options.arch,
+    }).create();
+  }
+  return new RuntimeStrategy(options, appleEngine, {
+    image: options.image ?? appleEngine.defaultImage,
+    installers: options.installers ?? [],
+  }).create();
 }
 
 /**

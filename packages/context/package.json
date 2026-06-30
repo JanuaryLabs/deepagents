@@ -61,7 +61,8 @@
     "stringcase": "^4.3.1",
     "tiny-tfidf": "^1.0.0",
     "yaml": "^2.8.0",
-    "zod": "^3.25.76 || ^4.0.0"
+    "zod": "^3.25.76 || ^4.0.0",
+    "@ai-sdk/openai": "^3.0.54"
   },
   "devDependencies": {
     "@daytona/sdk": "^0.175.0",

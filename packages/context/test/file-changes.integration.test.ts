@@ -26,7 +26,7 @@ async function isDockerAvailable(): Promise<boolean> {
   }
 }
 
-// Native-arch image with strace + python3 baked in. DockerfileStrategy
+// Native-arch image with strace + python3 baked in. ContainerfileStrategy
 // content-hash-caches the build, so the apt install runs once per machine.
 const STRACE_IMAGE =
   'FROM debian:stable-slim\n' +

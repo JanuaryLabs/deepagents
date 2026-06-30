@@ -5,7 +5,12 @@ description: Execute real binaries in per-container lightweight VMs on Apple sil
 
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
-The Apple Container sandbox runs commands inside Linux containers backed by Apple's [`container`](https://github.com/apple/container) CLI. Unlike the Docker sandbox (shared host kernel via `runc`), each container is its own **lightweight virtual machine** with its own guest kernel — stronger isolation by default. It implements the same `DisposableSandbox` contract as the other backends, so `executeCommand`, `spawn`, `readFile`, `writeFiles`, and `dispose` behave identically.
+The Apple Container sandbox runs commands inside Linux containers backed by
+Apple's [`container`](https://github.com/apple/container) CLI. Unlike the Docker
+sandbox (shared host kernel via `runc`), each container is its own
+**lightweight virtual machine** with its own guest kernel. It implements the same
+`DisposableSandbox` contract as the other backends: `executeCommand`, `spawn`,
+`readFile`, `writeFiles`, and `dispose`.
 
 <Callout type="warn">
   Apple silicon, **macOS 26+** only. The `container` service must be running and
@@ -78,7 +83,7 @@ await using sandbox2 = await createAppleContainerSandbox({
 
 There is no Compose strategy — `container` has no Compose primitive.
 
-## Stable container names
+## Stable Container Names
 
 Both strategies accept an optional `name` to reuse the same container across calls:
 
@@ -105,7 +110,7 @@ When attaching, installer execution, volume preparation, and env setup are skipp
   attached to an existing one.
 </Callout>
 
-## Architecture selection
+## Architecture Selection
 
 Use `arch` to pick the image architecture — `'arm64'` (native) or `'amd64'` (emulated via Rosetta). This replaces the Docker sandbox's `platform` option.
 
@@ -116,7 +121,7 @@ await using sandbox = await createAppleContainerSandbox({
 });
 ```
 
-## Container command overrides
+## Container Command Overrides
 
 `command` controls what is appended after the image at `container run` time:
 
@@ -163,7 +168,7 @@ Bind paths are validated at creation time (`AppleContainerVolumePathError` if a 
   host directory with `type: 'bind'` rather than a volume driver.
 </Callout>
 
-## Resource limits
+## Resource Limits
 
 ```typescript
 await using sandbox = await createAppleContainerSandbox({
@@ -174,7 +179,7 @@ await using sandbox = await createAppleContainerSandbox({
 });
 ```
 
-## Environment variables
+## Environment Variables
 
 Set env vars at creation time; they are available to every command. Keys are validated — empty keys or keys containing `=` throw `AppleContainerSandboxError`.
 
@@ -186,7 +191,7 @@ await using sandbox = await createAppleContainerSandbox({
 const result = await sandbox.executeCommand('echo $NODE_ENV'); // "production"
 ```
 
-## Command execution APIs
+## Command Execution APIs
 
 `executeCommand` is buffered and runs from `/workspace`; pass an `AbortSignal` to cancel:
 
@@ -237,7 +242,7 @@ const content = await sandbox.readFile('/workspace/data.json');
 
 Parent directories are created automatically. Content is base64-encoded for binary safety.
 
-## Container lifecycle
+## Container Lifecycle
 
 ```typescript
 import { useAppleContainerSandbox, pkg } from '@deepagents/context';
@@ -253,7 +258,7 @@ const version = await useAppleContainerSandbox(
 
 `createAppleContainerSandbox` also returns an `AsyncDisposable`, so `await using` disposes it at scope exit. Containers run with `--rm`, so they are removed when stopped; `dispose()` runs `container stop`.
 
-## Differences from the Docker sandbox
+## Differences from the Docker Sandbox
 
 | Capability | Docker sandbox | Apple Container sandbox |
 | --- | --- | --- |
@@ -264,7 +269,7 @@ const version = await useAppleContainerSandbox(
 | Volume drivers | `driver` / `driverOptions` | Local `ext4` only; bind-mount for remotes |
 | Host requirement | Docker daemon | `container` service + guest kernel (macOS 26+) |
 
-## Error handling
+## Error Handling
 
 All errors extend `AppleContainerSandboxError`:
 
@@ -280,7 +285,7 @@ All errors extend `AppleContainerSandboxError`:
 
 Installer failures reuse `PackageInstallError` / `InstallError` from the shared installer suite.
 
-## Next steps
+## Next Steps
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Shared-kernel containers and the full installer reference
 - [Sandbox Overview](/docs/context/sandbox) - Choosing the right approach

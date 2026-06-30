@@ -1084,6 +1084,50 @@ describe('Docker Sandbox', async () => {
         }
       });
 
+      it('converges two concurrent same-named creations onto one container', async () => {
+        // Both calls inspect 'absent', then race to `docker run`. The daemon
+        // serializes the create, so one wins and the loser's run fails with a
+        // name conflict. The loser must recover — reprobe and attach to the
+        // winner's container — instead of throwing, so BOTH handles end up on
+        // the same container. (This is the only path that exercises the
+        // name-collision recovery branch; every sequential case attaches via
+        // the inspect-first branch above.)
+        const name = uniqueName();
+
+        let a: DisposableSandbox | undefined;
+        let b: DisposableSandbox | undefined;
+        try {
+          // If recovery were broken, the losing create would reject and this
+          // Promise.all would reject — failing the test.
+          [a, b] = await Promise.all([
+            createDockerSandbox({ name }),
+            createDockerSandbox({ name }),
+          ]);
+
+          // One handle writes; the other must read it back — proving both
+          // resolved to the same underlying container.
+          await a.executeCommand('echo converged > /workspace/marker');
+          const read = await b.executeCommand('cat /workspace/marker');
+          assert.strictEqual(read.exitCode, 0);
+          assert.strictEqual(read.stdout.trim(), 'converged');
+
+          // Exactly one container exists with that name.
+          const ls = await spawn('docker', [
+            'ps',
+            '-a',
+            '--filter',
+            `name=^/sandbox-${name}$`,
+            '--format',
+            '{{.Names}}',
+          ]);
+          assert.strictEqual(ls.stdout.trim(), `sandbox-${name}`);
+        } finally {
+          await a?.dispose();
+          await b?.dispose();
+          await removeContainer(`sandbox-${name}`);
+        }
+      });
+
       it('starts a stopped container with the same name and attaches', async () => {
         // Pre-create a container WITHOUT --rm so it stays around after stop;
         // the factory always uses --rm, so factory-created containers can

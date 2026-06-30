@@ -45,9 +45,9 @@ export interface SandboxProcess {
  * no-op `dispose()`.
  *
  * `spawn` is optional: only backends that can honestly expose unbuffered
- * stdio (e.g. docker-sandbox) implement it. Callers feature-detect with
- * `if (!sandbox.spawn) ...` — no silent fallback that aggregates output
- * and flushes on completion.
+ * stdio (e.g. Docker or Apple Container sandboxes) implement it. Callers
+ * feature-detect with `if (!sandbox.spawn) ...` — no silent fallback that
+ * aggregates output and flushes on completion.
  */
 export interface DisposableSandbox
   extends Omit<UpstreamSandbox, 'executeCommand'>, AsyncDisposable {

@@ -34,9 +34,10 @@ backend with `withStraceFileChanges(...)`, then pass that tracked backend into
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
-including Docker and Apple Container sandboxes, additionally expose an optional
-`spawn(command, options?)` for live streaming stdio. Feature-detect it with
-`if (!sandbox.spawn) { ... }` when writing backend-agnostic code.
+including Docker, Apple Container, Agent OS, and Daytona sandboxes, additionally
+expose an optional `spawn(command, options?)` for live streaming stdio.
+Feature-detect it with `if (!sandbox.spawn) { ... }` when writing
+backend-agnostic code.
 
 Every backend is also `AsyncDisposable`: it implements `[Symbol.asyncDispose]`
 (which delegates to `dispose()`), so you can bind it with `await using` and let

@@ -1,53 +1,65 @@
 ---
 title: "Architecture: Sandbox"
-description: Strategy pattern, binary bridges internals, and the integration pipeline
+description: Engine bridge, binary bridges internals, and the integration pipeline
 ---
 
-This page explains the internal architecture of the sandbox system. Read this if you want to understand how the pieces fit together, extend the system with custom strategies, or debug issues.
+This page explains the internal architecture of the sandbox system. Read this if you want to understand how the pieces fit together, extend the system with a custom engine or strategy, or debug issues.
 
-## Strategy Pattern
+## Engine Bridge + Strategies
 
-The container-backed sandboxes use the Strategy pattern with Template Method
-base classes. Docker and Apple Container have separate strategy families because
-their CLIs differ, but both families share the same high-level lifecycle:
-resolve an image, prepare volumes, start a long-running container, configure it,
-then return the common sandbox methods.
+The container-backed sandboxes combine two patterns on orthogonal axes, so Docker
+and Apple Container share one strategy family — only the dialect differs:
+
+- **Bridge (dialect axis).** A `ContainerEngine<TOpts>` captures everything that
+  differs between container runtimes — the CLI binary, the `run`/`exec`/`build`/
+  `inspect` argv, volume-mount syntax, status parsing, error detection, workdir
+  bootstrap, name-collision recovery, and the installer context. There is one
+  engine per backend (`dockerEngine`, `appleEngine`).
+- **Template Method (mode axis).** A single `ContainerSandboxStrategy<TOpts>`
+  owns the shared lifecycle (resolve an image, prepare volumes, start a
+  long-running container, configure it, then return the common sandbox methods)
+  and delegates every CLI dialect to its injected engine. It is typed to
+  `CommonSandboxOptions`, so the skeleton can never read an engine-only knob
+  (Docker's security/network; Apple's `arch`). Subclasses pick the *mode*.
 
 ```
-DockerSandboxStrategy (abstract)
-├── RuntimeStrategy      — install packages/binaries at runtime
-├── DockerfileStrategy   — build image from Dockerfile (cached)
-└── ComposeStrategy      — multi-container via docker compose
+ContainerEngine<TOpts>            ← dialect seam (one impl per backend)
+├── dockerEngine                  — docker CLI
+└── appleEngine                   — container CLI (per-container VMs, virtiofs)
 
-AppleContainerSandboxStrategy (abstract)
-├── AppleContainerRuntimeStrategy       — install packages/binaries at runtime
-└── AppleContainerfileStrategy          — build image with container build (cached)
+ContainerSandboxStrategy<TOpts>   ← shared skeleton, engine-injected
+├── RuntimeStrategy               — install packages/binaries at runtime
+└── ContainerfileStrategy         — build image from a Dockerfile (cached)
+
+ComposeStrategy                   — Docker-only; not part of the bridge
 ```
 
 ### Template Method Flow
 
-The base class defines the creation algorithm. Subclasses override `getImage()`
-and `configure()`:
+The base strategy defines the creation algorithm and delegates each CLI dialect
+to `engine.*`. Subclasses override only `getImage()` and `configure()`:
 
 ```
 create()
   │
-  ├─ 1. getImage()           ← strategy-specific
-  │     ├─ Runtime:    return image name (e.g., 'alpine:latest')
-  │     ├─ Dockerfile: build image, return cached tag
-  │     └─ Compose:    return '' (compose manages images)
+  ├─ 1. getImage()           ← mode-specific
+  │     ├─ Runtime:       return image name (or engine.defaultImage)
+  │     ├─ Containerfile:  engine.buildImage(...) if needed, return cached tag
+  │     └─ Compose:       return '' (compose manages images)
   │
   ├─ 2. prepareVolumes()     ← common: validate bind paths, inspect/create volumes
   │
-  ├─ 3. startContainer()     ← common: run a long-lived container with --rm
+  ├─ 3. startContainer()     ← common: spawn engine.runArgs(...) with --rm
   │     └─ Compose override:  docker compose up -d
   │
-  ├─ 4. configure()          ← strategy-specific
-  │     ├─ Runtime:    install packages (apk/apt), install binaries (curl)
-  │     ├─ Dockerfile: no-op (image already configured)
-  │     └─ Compose:    no-op (compose file defines everything)
+  ├─ 4. engine.ensureWorkdir()  ← engine: no-op on Docker; `mkdir -p` on Apple
   │
-  └─ 5. createSandboxMethods()  ← common: return { executeCommand, spawn, readFile, writeFiles, dispose }
+  ├─ 5. configure()          ← mode-specific
+  │     ├─ Runtime:       run installers via engine.createInstallerContext()
+  │     ├─ Containerfile:  no-op (image already configured)
+  │     └─ Compose:       no-op (compose file defines everything)
+  │
+  └─ 6. createSandboxMethods()  ← common: return { executeCommand, spawn, readFile, writeFiles, dispose }
 ```
 
 If `configure()` throws, the base class auto-stops the container before re-throwing.
@@ -90,17 +102,18 @@ set of resource, arch, bind-mount, named-volume, and environment controls.
 
 ### Dockerfile Image Caching
 
-The Dockerfile strategies generate deterministic image tags from Dockerfile
-content:
+The shared `ContainerfileStrategy` generates a deterministic image tag from the
+Dockerfile content plus the build `identity` (Docker's `platform` / Apple's
+`arch`), then asks the engine to build only on a cache miss:
 
 ```
-Dockerfile content → SHA-256 → first 12 chars → "sandbox-a1b2c3d4e5f6"
+Dockerfile content + identity → SHA-256 → first 12 chars → "sandbox-a1b2c3d4e5f6"
 ```
 
-Same Dockerfile produces the same tag. Docker folds `platform` into the cache
-key; Apple Container folds `arch` into the cache key. Docker's layer cache
-handles Docker builds, while Apple Container skips `container build` when the
-tag already exists locally.
+Same Dockerfile + identity produces the same tag. The strategy checks
+`engine.imageExists(tag)` and calls `engine.buildImage(...)` only when it is
+missing; Docker's layer cache handles `docker build`, and Apple Container skips
+`container build` when the tag already exists locally.
 
 ### Compose Overrides
 
@@ -200,25 +213,41 @@ writeFiles: echo "<base64>" | base64 -d > "/path/to/file"    → decode in conta
 `spawn` bypasses `nano-spawn` and uses raw child-process streams so callers get
 byte-accurate live output and structured exit metadata.
 
-## Extending with Custom Strategies
+## Extending
 
-Subclass `DockerSandboxStrategy` to add new container creation approaches:
+There are two extension points, one per axis:
+
+**Add a backend → implement `ContainerEngine`.** Provide the CLI dialect (run/
+exec/build args, status parsing, error detection, installer context) plus a
+factory that wires the engine into the shared strategies. No strategy subclassing
+needed — this is how `appleEngine` works.
 
 ```typescript
-import { DockerSandboxStrategy, type DockerSandbox } from '@deepagents/context';
+import {
+  ContainerfileStrategy,
+  RuntimeStrategy,
+  type ContainerEngine,
+  type CommonSandboxOptions,
+} from '@deepagents/context';
 
-class KubernetesStrategy extends DockerSandboxStrategy {
-  protected async getImage(): Promise<string> {
-    return 'my-registry/my-image:latest';
-  }
+const podmanEngine: ContainerEngine = {
+  cli: 'podman',
+  runArgs: (image, id, opts, workdir) => [/* podman run argv */],
+  // execArgs, inspectArgs, mountArg, parseStatus, buildImage,
+  // createInstallerContext, errors, ... (the full dialect seam)
+};
 
-  protected async configure(): Promise<void> {
-    // Post-creation configuration
-  }
-
-  // Override exec/startContainer/stopContainer for k8s
+export function createPodmanSandbox(options: CommonSandboxOptions = {}) {
+  return new RuntimeStrategy(options, podmanEngine, {
+    image: options.image ?? podmanEngine.defaultImage,
+    installers: options.installers ?? [],
+  }).create();
 }
 ```
+
+**Add a creation mode → subclass `ContainerSandboxStrategy`.** Override
+`getImage()` / `configure()` (and any lifecycle method, as `ComposeStrategy`
+does) while still delegating the CLI dialect to the injected engine.
 
 ## Next Steps
 

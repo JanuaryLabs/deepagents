@@ -1,52 +1,6 @@
 import type { ContainerSandboxError } from './container-sandbox-errors.ts';
-import {
-  ContainerCreationError,
-  DockerNotAvailableError,
-  DockerSandboxError,
-  VolumeCreateError,
-  VolumeInspectError,
-  VolumePathError,
-  VolumeRemoveError,
-} from './docker-sandbox-errors.ts';
-import type {
-  DockerNamedVolume,
-  DockerNetwork,
-  DockerResources,
-  DockerSandboxVolume,
-  DockerSecurity,
-} from './docker-sandbox.ts';
+import type { InstallerContext } from './installers/installer.ts';
 
-/**
- * Resolved per-run configuration handed to an engine's {@link ContainerEngine.runArgs}.
- * Fields mirror the strategy's resolved state so the engine stays a pure
- * arg-builder with no dependency on strategy internals.
- */
-export interface DockerRunSpec {
-  image: string;
-  containerId: string;
-  workdir: string;
-  resources: DockerResources;
-  security: DockerSecurity;
-  network: DockerNetwork;
-  env: Record<string, string>;
-  volumes: DockerSandboxVolume[];
-  command?: readonly string[] | null;
-  platform?: string;
-  runtime?: string;
-  gpus?: string;
-  devices: string[];
-  init: boolean;
-  labels: Record<string, string>;
-  sysctls: Record<string, string>;
-  entrypoint?: string;
-}
-
-/**
- * The CLI dialect seam. Captures everything that differs between container
- * runtimes (binary, arg flags, status parsing, error-string detection) so the
- * shared strategy can orchestrate any engine. The Apple `container` engine will
- * implement the same surface in a later phase.
- */
 export interface ContainerErrorFactory {
   serviceNotAvailable(): ContainerSandboxError;
   creation(
@@ -65,262 +19,154 @@ export interface ContainerErrorFactory {
   volumeRemove(name: string, reason: string): ContainerSandboxError;
 }
 
-export interface ContainerEngine {
+/** Resolved build request handed to {@link ContainerEngine.buildImage}. */
+export interface ImageBuildSpec {
+  /** Precomputed content-hash image tag the engine must build. */
+  tag: string;
+  /** Inline Dockerfile content (contains `\n`) or a path to one. */
+  dockerfile: string;
+  /** Build context directory. */
+  context: string;
+  /** Stream build output to the parent stdio instead of buffering it. */
+  showBuildLogs: boolean;
+  /**
+   * Platform (Docker `--platform`) / arch (Apple `--arch`). Already folded into
+   * `tag` by the strategy; the engine re-reads it for the build flag.
+   */
+  identity?: string;
+}
+
+export interface SandboxBindVolume {
+  type: 'bind';
+  hostPath: string;
+  containerPath: string;
+  /** Default: `true`. */
+  readOnly?: boolean;
+}
+
+/**
+ * A named volume mount. The superset shape across engines — `driver`/
+ * `driverOptions`/`subPath`/`noCopy` are read only by engines that support them
+ * (Docker); engines without a pluggable driver model (Apple) ignore them.
+ */
+export interface SandboxNamedVolume {
+  type: 'volume';
+  name: string;
+  containerPath: string;
+  /** Default: `true`. */
+  readOnly?: boolean;
+  /** Default: `'external'`. */
+  lifecycle?: 'external' | 'managed';
+  /** Volume driver used when `lifecycle` is `'managed'` (Docker `--driver`). */
+  driver?: string;
+  /** Volume driver options used when `lifecycle` is `'managed'`. */
+  driverOptions?: Record<string, string>;
+  subPath?: string;
+  noCopy?: boolean;
+  /** Default: `true` for managed volumes created by this sandbox. */
+  removeOnDispose?: boolean;
+}
+
+export type SandboxVolume = SandboxBindVolume | SandboxNamedVolume;
+
+/** Resource limits common to every engine. Engines extend with their own knobs. */
+export interface SandboxResources {
+  /** `--memory` — e.g. `'1g'`, `'1024M'`. */
+  memory?: string;
+  /** `--cpus` — number of CPUs. */
+  cpus?: number;
+}
+
+/**
+ * The options the shared skeleton is allowed to read. Each engine extends this
+ * with its own dialect knobs (Docker's security/network/…; Apple's `arch`),
+ * which only its own engine methods see — the skeleton is typed to this common
+ * subset and physically cannot read them.
+ */
+export interface CommonSandboxOptions {
+  volumes?: SandboxVolume[];
+  resources?: SandboxResources;
+  env?: Record<string, string>;
+  /**
+   * Stable identity suffix. When provided, the container is named
+   * `sandbox-<name>` instead of a randomized `sandbox-<8hex>`. If a container
+   * with that name already exists, the sandbox attaches to it (installers,
+   * volume preparation, and env are skipped); if it exists but is stopped, it is
+   * started first; otherwise it is created fresh. Must match `/^[A-Za-z0-9_.-]+$/`.
+   *
+   * Warning: `dispose()` stops (and `--rm` removes) the container regardless of
+   * whether it was created or attached to. If two callers in the same process
+   * share a name, the first `dispose()` destroys the container the other is
+   * still using.
+   */
+  name?: string;
+  /**
+   * Args appended after the image at run time.
+   * - `undefined` (default): `['tail', '-f', '/dev/null']` keep-alive so a bare
+   *   image stays up for installers and `executeCommand`.
+   * - `[]` or `null`: nothing is appended; the image's own `CMD`/`ENTRYPOINT`
+   *   runs as declared.
+   * - A non-empty array: appended verbatim, overriding the image `CMD`.
+   */
+  command?: readonly string[] | null;
+  /** Working directory inside the container (default `'/workspace'`). */
+  workdir?: string;
+}
+
+/**
+ * The CLI dialect seam. Captures everything that differs between container
+ * runtimes (binary, run/exec arg flags, status parsing, error-string detection,
+ * workdir bootstrap, image build) so one shared strategy can orchestrate any
+ * engine. Generic over `TOpts` so each engine reads its own dialect-specific run
+ * knobs off the resolved options while the skeleton only ever supplies the
+ * common subset. Implemented by `dockerEngine` (docker-sandbox.ts) and
+ * `appleEngine` (apple-container-sandbox.ts).
+ */
+export interface ContainerEngine<
+  TOpts extends CommonSandboxOptions = CommonSandboxOptions,
+> {
   readonly cli: string;
+  /**
+   * Build the `<cli> run` argv from resolved options. The shared skeleton
+   * supplies `image`, `containerId`, and `workdir`; every other flag is the
+   * engine's own dialect read off `opts`.
+   */
+  runArgs(
+    image: string,
+    containerId: string,
+    opts: TOpts,
+    workdir: string,
+  ): string[];
   execArgs(
     containerId: string,
     command: string,
     options?: { cwd?: string; env?: Record<string, string> },
   ): string[];
   inspectArgs(containerId: string): string[];
-  mountArg(volume: DockerSandboxVolume): string;
+  mountArg(volume: SandboxVolume): string;
   parseStatus(status: string): 'running' | 'stopped' | 'absent';
-  volumeCreateArgs(volume: DockerNamedVolume): string[];
+  volumeCreateArgs(volume: SandboxNamedVolume): string[];
   errorMessage(error: unknown): string;
   isServiceDown(message: string): boolean;
   isMissingContainer(message: string): boolean;
   isMissingVolume(message: string): boolean;
   isNameConflict(message: string): boolean;
+  /**
+   * Ensure `workdir` exists before any `exec` runs in it. Docker's `run -w`
+   * auto-creates the workdir (no-op here); Apple's per-exec `--cwd` fails on a
+   * missing dir, so its engine bootstraps it with `mkdir -p`.
+   */
+  ensureWorkdir(containerId: string, workdir: string): Promise<void>;
+  /** Image used when no `image` option is given. */
+  readonly defaultImage: string;
+  /**
+   * Build the installer context that drives this engine's post-start installer
+   * phase (`pkg`/`npm`/`pip`/…) over the engine's own `exec`.
+   */
+  createInstallerContext(containerId: string, image: string): InstallerContext;
+  /** Whether image `tag` already exists locally (so the build can be skipped). */
+  imageExists(tag: string): Promise<boolean>;
+  /** Build the image described by `spec`. The engine owns the build dialect. */
+  buildImage(spec: ImageBuildSpec): Promise<void>;
   readonly errors: ContainerErrorFactory;
 }
-
-/** Docker's engine adds `runArgs` (its `docker run` spec is Docker-specific). */
-export interface DockerEngine extends ContainerEngine {
-  runArgs(spec: DockerRunSpec): string[];
-}
-
-function dockerMountArg(volume: DockerSandboxVolume): string {
-  const readOnly = volume.readOnly !== false;
-  const parts =
-    volume.type === 'bind'
-      ? ['type=bind', `src=${volume.hostPath}`, `dst=${volume.containerPath}`]
-      : [
-          'type=volume',
-          `src=${volume.name}`,
-          `dst=${volume.containerPath}`,
-          ...(volume.subPath ? [`volume-subpath=${volume.subPath}`] : []),
-          ...(volume.noCopy ? ['volume-nocopy'] : []),
-        ];
-
-  if (readOnly) {
-    parts.push('readonly');
-  }
-
-  return parts.join(',');
-}
-
-export const dockerEngine: DockerEngine = {
-  cli: 'docker',
-
-  runArgs(spec: DockerRunSpec): string[] {
-    const {
-      memory = '1g',
-      cpus = 2,
-      memorySwap,
-      shmSize,
-      pidsLimit,
-      ulimits = [],
-      cpusetCpus,
-      cpuShares,
-    } = spec.resources;
-
-    const args: string[] = [
-      'run',
-      '-d',
-      '--rm',
-      '--name',
-      spec.containerId,
-      '--memory',
-      memory,
-      '--cpus',
-      String(cpus),
-      '-w',
-      spec.workdir,
-    ];
-
-    if (memorySwap) {
-      args.push('--memory-swap', memorySwap);
-    }
-    if (shmSize) {
-      args.push('--shm-size', shmSize);
-    }
-    if (pidsLimit !== undefined) {
-      args.push('--pids-limit', String(pidsLimit));
-    }
-    for (const ulimit of ulimits) {
-      args.push('--ulimit', ulimit);
-    }
-    if (cpusetCpus) {
-      args.push('--cpuset-cpus', cpusetCpus);
-    }
-    if (cpuShares !== undefined) {
-      args.push('--cpu-shares', String(cpuShares));
-    }
-
-    if (spec.platform) {
-      args.push('--platform', spec.platform);
-    }
-    if (spec.runtime) {
-      args.push('--runtime', spec.runtime);
-    }
-
-    const security = spec.security;
-    for (const cap of security.capDrop ?? []) {
-      args.push('--cap-drop', cap);
-    }
-    for (const cap of security.capAdd ?? []) {
-      args.push('--cap-add', cap);
-    }
-    if (security.readOnly) {
-      args.push('--read-only');
-    }
-    if (security.user) {
-      args.push('--user', security.user);
-    }
-    for (const mount of security.tmpfs ?? []) {
-      args.push('--tmpfs', mount);
-    }
-    for (const opt of security.securityOpt ?? []) {
-      args.push('--security-opt', opt);
-    }
-
-    const network = spec.network;
-    if (network.mode) {
-      args.push('--network', network.mode);
-    }
-    for (const port of network.publish ?? []) {
-      args.push('--publish', port);
-    }
-    for (const server of network.dns ?? []) {
-      args.push('--dns', server);
-    }
-    for (const host of network.addHost ?? []) {
-      args.push('--add-host', host);
-    }
-    if (network.hostname) {
-      args.push('--hostname', network.hostname);
-    }
-
-    if (spec.gpus) {
-      args.push('--gpus', spec.gpus);
-    }
-    for (const device of spec.devices) {
-      args.push('--device', device);
-    }
-    if (spec.init) {
-      args.push('--init');
-    }
-    for (const [key, value] of Object.entries(spec.labels)) {
-      args.push('--label', `${key}=${value}`);
-    }
-    for (const [key, value] of Object.entries(spec.sysctls)) {
-      args.push('--sysctl', `${key}=${value}`);
-    }
-    if (spec.entrypoint) {
-      args.push('--entrypoint', spec.entrypoint);
-    }
-
-    for (const [key, value] of Object.entries(spec.env)) {
-      args.push('-e', `${key}=${value}`);
-    }
-
-    for (const volume of spec.volumes) {
-      args.push('--mount', dockerMountArg(volume));
-    }
-
-    args.push(spec.image);
-    if (spec.command === undefined) {
-      args.push('tail', '-f', '/dev/null');
-    } else if (spec.command !== null) {
-      args.push(...spec.command);
-    }
-
-    return args;
-  },
-
-  execArgs(
-    containerId: string,
-    command: string,
-    options?: { cwd?: string; env?: Record<string, string> },
-  ): string[] {
-    const flags: string[] = [];
-    if (options?.cwd) {
-      flags.push('-w', options.cwd);
-    }
-    if (options?.env) {
-      for (const [key, value] of Object.entries(options.env)) {
-        if (key.length === 0 || key.includes('=')) {
-          throw new DockerSandboxError(
-            `Invalid environment variable key: "${key}"`,
-          );
-        }
-        flags.push('-e', `${key}=${value}`);
-      }
-    }
-    return ['exec', ...flags, containerId, 'sh', '-c', command];
-  },
-
-  inspectArgs(containerId: string): string[] {
-    return [
-      'container',
-      'inspect',
-      '--format',
-      '{{.State.Status}}',
-      containerId,
-    ];
-  },
-
-  mountArg: dockerMountArg,
-
-  parseStatus(status: string): 'running' | 'stopped' | 'absent' {
-    return status === 'running' ? 'running' : 'stopped';
-  },
-
-  volumeCreateArgs(volume: DockerNamedVolume): string[] {
-    const args = ['volume', 'create'];
-    if (volume.driver) {
-      args.push('--driver', volume.driver);
-    }
-    for (const [key, value] of Object.entries(volume.driverOptions ?? {})) {
-      args.push('--opt', `${key}=${value}`);
-    }
-    args.push(volume.name);
-    return args;
-  },
-
-  errorMessage(error: unknown): string {
-    const err = error as Error & { stderr?: string; stdout?: string };
-    return err.stderr || err.stdout || err.message || String(error);
-  },
-
-  isServiceDown(message: string): boolean {
-    return (
-      message.includes('Cannot connect') || message.includes('docker daemon')
-    );
-  },
-
-  isMissingContainer(message: string): boolean {
-    return message.toLowerCase().includes('no such container');
-  },
-
-  isMissingVolume(message: string): boolean {
-    return message.toLowerCase().includes('no such volume');
-  },
-
-  isNameConflict(message: string): boolean {
-    return message.toLowerCase().includes('is already in use by container');
-  },
-
-  errors: {
-    serviceNotAvailable: () => new DockerNotAvailableError(),
-    creation: (message, image, cause) =>
-      new ContainerCreationError(message, image, cause),
-    generic: (message, containerId) =>
-      new DockerSandboxError(message, containerId),
-    volumePath: (source, containerPath, reason) =>
-      new VolumePathError(source, containerPath, reason),
-    volumeInspect: (name, reason) => new VolumeInspectError(name, reason),
-    volumeCreate: (name, reason) => new VolumeCreateError(name, reason),
-    volumeRemove: (name, reason) => new VolumeRemoveError(name, reason),
-  },
-};
