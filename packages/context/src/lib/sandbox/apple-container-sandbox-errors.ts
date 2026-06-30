@@ -1,10 +1,9 @@
-export class AppleContainerSandboxError extends Error {
-  readonly containerId?: string;
+import { ContainerSandboxError } from './container-sandbox-errors.ts';
 
+export class AppleContainerSandboxError extends ContainerSandboxError {
   constructor(message: string, containerId?: string) {
-    super(message);
+    super(message, containerId);
     this.name = 'AppleContainerSandboxError';
-    this.containerId = containerId;
   }
 }
 

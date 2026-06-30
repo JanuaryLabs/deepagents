@@ -9,16 +9,12 @@ import {
   base64WriteCommands,
   toSandboxProcess,
 } from './cli-process.ts';
+import { type ContainerEngine, dockerEngine } from './container-engine.ts';
+import { ContainerSandboxError } from './container-sandbox-errors.ts';
 import {
   ComposeStartError,
-  ContainerCreationError,
-  DockerNotAvailableError,
   DockerSandboxError,
   DockerfileBuildError,
-  VolumeCreateError,
-  VolumeInspectError,
-  VolumePathError,
-  VolumeRemoveError,
 } from './docker-sandbox-errors.ts';
 import {
   type Installer,
@@ -299,6 +295,7 @@ const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
  */
 export abstract class DockerSandboxStrategy {
   protected context!: StrategyContext;
+  protected engine: ContainerEngine;
   protected volumes: DockerSandboxVolume[];
   protected resources: DockerResources;
   protected env: Record<string, string>;
@@ -317,7 +314,11 @@ export abstract class DockerSandboxStrategy {
   protected runtime?: string;
   private createdVolumes = new Set<string>();
 
-  constructor(args: DockerCommonOptions = {}) {
+  constructor(
+    args: DockerCommonOptions = {},
+    engine: ContainerEngine = dockerEngine,
+  ) {
+    this.engine = engine;
     const {
       volumes = [],
       resources = {},
@@ -337,10 +338,14 @@ export abstract class DockerSandboxStrategy {
       workdir = '/workspace',
     } = args;
     for (const key of Object.keys(env)) {
-      validateEnvKey(key);
+      if (key.length === 0 || key.includes('=')) {
+        throw this.engine.errors.generic(
+          `Invalid environment variable key: "${key}"`,
+        );
+      }
     }
     if (name !== undefined && !CONTAINER_NAME_PATTERN.test(name)) {
-      throw new DockerSandboxError(
+      throw this.engine.errors.generic(
         `Invalid container name: "${name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
       );
     }
@@ -370,6 +375,7 @@ export abstract class DockerSandboxStrategy {
       acquired = await this.acquireContainer(image);
       this.context = { containerId: acquired.containerId, image };
       if (!acquired.attached) {
+        await this.ensureWorkspace();
         await this.configure();
       }
     } catch (error) {
@@ -417,7 +423,7 @@ export abstract class DockerSandboxStrategy {
       return { containerId, attached: false };
     } catch (error) {
       if (
-        error instanceof ContainerCreationError &&
+        error instanceof ContainerSandboxError &&
         this.isNameConflictError(error.message)
       ) {
         await this.cleanupCreatedVolumes();
@@ -439,13 +445,13 @@ export abstract class DockerSandboxStrategy {
     image: string,
   ): Promise<void> {
     try {
-      await spawn('docker', ['start', containerId]);
+      await spawn(this.engine.cli, ['start', containerId]);
     } catch (error) {
       const message = this.getDockerErrorMessage(error);
       if (this.isDockerUnavailableError(message)) {
-        throw new DockerNotAvailableError();
+        throw this.engine.errors.serviceNotAvailable();
       }
-      throw new ContainerCreationError(message, image, error as Error);
+      throw this.engine.errors.creation(message, image, error as Error);
     }
   }
 
@@ -453,35 +459,31 @@ export abstract class DockerSandboxStrategy {
     containerId: string,
   ): Promise<'running' | 'stopped' | 'absent'> {
     try {
-      const result = await spawn('docker', [
-        'container',
-        'inspect',
-        '--format',
-        '{{.State.Status}}',
-        containerId,
-      ]);
-      const status = result.stdout.trim();
-      return status === 'running' ? 'running' : 'stopped';
+      const result = await spawn(
+        this.engine.cli,
+        this.engine.inspectArgs(containerId),
+      );
+      return this.engine.parseStatus(result.stdout.trim());
     } catch (error) {
       const message = this.getDockerErrorMessage(error);
       if (this.isDockerUnavailableError(message)) {
-        throw new DockerNotAvailableError();
+        throw this.engine.errors.serviceNotAvailable();
       }
       if (this.isMissingContainerError(message)) {
         return 'absent';
       }
-      throw new DockerSandboxError(
+      throw this.engine.errors.generic(
         `Failed to inspect container "${containerId}": ${message}`,
       );
     }
   }
 
   private isMissingContainerError(message: string): boolean {
-    return message.toLowerCase().includes('no such container');
+    return this.engine.isMissingContainer(message);
   }
 
   private isNameConflictError(message: string): boolean {
-    return message.toLowerCase().includes('is already in use by container');
+    return this.engine.isNameConflict(message);
   }
 
   protected async prepareVolumes(): Promise<void> {
@@ -500,7 +502,7 @@ export abstract class DockerSandboxStrategy {
 
       const exists = await this.volumeExists(volume.name);
       if (exists) {
-        throw new VolumeCreateError(
+        throw this.engine.errors.volumeCreate(
           volume.name,
           'managed volume already exists',
         );
@@ -520,7 +522,7 @@ export abstract class DockerSandboxStrategy {
       const source = volume.type === 'bind' ? volume.hostPath : volume.name;
 
       if (!volume.containerPath.startsWith('/')) {
-        throw new VolumePathError(
+        throw this.engine.errors.volumePath(
           source,
           volume.containerPath,
           'containerPath must be absolute',
@@ -529,7 +531,7 @@ export abstract class DockerSandboxStrategy {
       this.validateMountValue('containerPath', volume.containerPath, volume);
 
       if (containerPaths.has(volume.containerPath)) {
-        throw new VolumePathError(
+        throw this.engine.errors.volumePath(
           source,
           volume.containerPath,
           'containerPath must be unique',
@@ -540,7 +542,7 @@ export abstract class DockerSandboxStrategy {
       if (volume.type === 'bind') {
         this.validateMountValue('hostPath', volume.hostPath, volume);
         if (!existsSync(volume.hostPath)) {
-          throw new VolumePathError(
+          throw this.engine.errors.volumePath(
             volume.hostPath,
             volume.containerPath,
             'hostPath does not exist on host',
@@ -550,7 +552,7 @@ export abstract class DockerSandboxStrategy {
       }
 
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(volume.name)) {
-        throw new VolumePathError(
+        throw this.engine.errors.volumePath(
           volume.name,
           volume.containerPath,
           'volume name must start with an alphanumeric character and contain only letters, numbers, underscore, period, or hyphen',
@@ -562,7 +564,7 @@ export abstract class DockerSandboxStrategy {
 
       if ((volume.lifecycle ?? 'external') === 'external') {
         if (volume.driver || volume.driverOptions) {
-          throw new VolumePathError(
+          throw this.engine.errors.volumePath(
             volume.name,
             volume.containerPath,
             'driver and driverOptions require lifecycle "managed"',
@@ -581,7 +583,7 @@ export abstract class DockerSandboxStrategy {
       return;
     }
     const source = volume.type === 'bind' ? volume.hostPath : volume.name;
-    throw new VolumePathError(
+    throw this.engine.errors.volumePath(
       source,
       volume.containerPath,
       `${field} must not contain commas`,
@@ -589,160 +591,40 @@ export abstract class DockerSandboxStrategy {
   }
 
   protected buildDockerArgs(image: string, containerId: string): string[] {
-    const {
-      memory = '1g',
-      cpus = 2,
-      memorySwap,
-      shmSize,
-      pidsLimit,
-      ulimits = [],
-      cpusetCpus,
-      cpuShares,
-    } = this.resources;
-
-    const args: string[] = [
-      'run',
-      '-d',
-      '--rm',
-      '--name',
+    return dockerEngine.runArgs({
+      image,
       containerId,
-      '--memory',
-      memory,
-      '--cpus',
-      String(cpus),
-      '-w',
-      this.workdir,
-    ];
-
-    if (memorySwap) {
-      args.push('--memory-swap', memorySwap);
-    }
-    if (shmSize) {
-      args.push('--shm-size', shmSize);
-    }
-    if (pidsLimit !== undefined) {
-      args.push('--pids-limit', String(pidsLimit));
-    }
-    for (const ulimit of ulimits) {
-      args.push('--ulimit', ulimit);
-    }
-    if (cpusetCpus) {
-      args.push('--cpuset-cpus', cpusetCpus);
-    }
-    if (cpuShares !== undefined) {
-      args.push('--cpu-shares', String(cpuShares));
-    }
-
-    if (this.platform) {
-      args.push('--platform', this.platform);
-    }
-    if (this.runtime) {
-      args.push('--runtime', this.runtime);
-    }
-
-    const security = this.security;
-    for (const cap of security.capDrop ?? []) {
-      args.push('--cap-drop', cap);
-    }
-    for (const cap of security.capAdd ?? []) {
-      args.push('--cap-add', cap);
-    }
-    if (security.readOnly) {
-      args.push('--read-only');
-    }
-    if (security.user) {
-      args.push('--user', security.user);
-    }
-    for (const mount of security.tmpfs ?? []) {
-      args.push('--tmpfs', mount);
-    }
-    for (const opt of security.securityOpt ?? []) {
-      args.push('--security-opt', opt);
-    }
-
-    const network = this.network;
-    if (network.mode) {
-      args.push('--network', network.mode);
-    }
-    for (const port of network.publish ?? []) {
-      args.push('--publish', port);
-    }
-    for (const server of network.dns ?? []) {
-      args.push('--dns', server);
-    }
-    for (const host of network.addHost ?? []) {
-      args.push('--add-host', host);
-    }
-    if (network.hostname) {
-      args.push('--hostname', network.hostname);
-    }
-
-    if (this.gpus) {
-      args.push('--gpus', this.gpus);
-    }
-    for (const device of this.devices) {
-      args.push('--device', device);
-    }
-    if (this.init) {
-      args.push('--init');
-    }
-    for (const [key, value] of Object.entries(this.labels)) {
-      args.push('--label', `${key}=${value}`);
-    }
-    for (const [key, value] of Object.entries(this.sysctls)) {
-      args.push('--sysctl', `${key}=${value}`);
-    }
-    if (this.entrypoint) {
-      args.push('--entrypoint', this.entrypoint);
-    }
-
-    for (const [key, value] of Object.entries(this.env)) {
-      args.push('-e', `${key}=${value}`);
-    }
-
-    for (const volume of this.volumes) {
-      args.push('--mount', this.buildVolumeMountArg(volume));
-    }
-
-    args.push(image);
-    if (this.command === undefined) {
-      args.push('tail', '-f', '/dev/null');
-    } else if (this.command !== null) {
-      args.push(...this.command);
-    }
-
-    return args;
+      workdir: this.workdir,
+      resources: this.resources,
+      security: this.security,
+      network: this.network,
+      env: this.env,
+      volumes: this.volumes,
+      command: this.command,
+      platform: this.platform,
+      runtime: this.runtime,
+      gpus: this.gpus,
+      devices: this.devices,
+      init: this.init,
+      labels: this.labels,
+      sysctls: this.sysctls,
+      entrypoint: this.entrypoint,
+    });
   }
 
   protected buildVolumeMountArg(volume: DockerSandboxVolume): string {
-    const readOnly = volume.readOnly !== false;
-    const parts =
-      volume.type === 'bind'
-        ? ['type=bind', `src=${volume.hostPath}`, `dst=${volume.containerPath}`]
-        : [
-            'type=volume',
-            `src=${volume.name}`,
-            `dst=${volume.containerPath}`,
-            ...(volume.subPath ? [`volume-subpath=${volume.subPath}`] : []),
-            ...(volume.noCopy ? ['volume-nocopy'] : []),
-          ];
-
-    if (readOnly) {
-      parts.push('readonly');
-    }
-
-    return parts.join(',');
+    return this.engine.mountArg(volume);
   }
 
   private async inspectVolume(name: string): Promise<void> {
     try {
-      await spawn('docker', ['volume', 'inspect', name]);
+      await spawn(this.engine.cli, ['volume', 'inspect', name]);
     } catch (error) {
       const reason = this.getDockerErrorMessage(error);
       if (this.isDockerUnavailableError(reason)) {
-        throw new DockerNotAvailableError();
+        throw this.engine.errors.serviceNotAvailable();
       }
-      throw new VolumeInspectError(name, reason);
+      throw this.engine.errors.volumeInspect(name, reason);
     }
   }
 
@@ -751,34 +633,27 @@ export abstract class DockerSandboxStrategy {
       await this.inspectVolume(name);
       return true;
     } catch (error) {
-      if (error instanceof VolumeInspectError) {
-        if (this.isMissingVolumeInspectError(error.reason)) {
-          return false;
-        }
-        throw error;
+      if (
+        error instanceof ContainerSandboxError &&
+        this.engine.isMissingVolume(error.message)
+      ) {
+        return false;
       }
       throw error;
     }
   }
 
   private async createVolume(volume: DockerNamedVolume): Promise<void> {
-    const args = ['volume', 'create'];
-    if (volume.driver) {
-      args.push('--driver', volume.driver);
-    }
-    for (const [key, value] of Object.entries(volume.driverOptions ?? {})) {
-      args.push('--opt', `${key}=${value}`);
-    }
-    args.push(volume.name);
+    const args = this.engine.volumeCreateArgs(volume);
 
     try {
-      await spawn('docker', args);
+      await spawn(this.engine.cli, args);
     } catch (error) {
       const reason = this.getDockerErrorMessage(error);
       if (this.isDockerUnavailableError(reason)) {
-        throw new DockerNotAvailableError();
+        throw this.engine.errors.serviceNotAvailable();
       }
-      throw new VolumeCreateError(volume.name, reason);
+      throw this.engine.errors.volumeCreate(volume.name, reason);
     }
   }
 
@@ -786,14 +661,14 @@ export abstract class DockerSandboxStrategy {
     const volumes = [...this.createdVolumes].reverse();
     for (const volume of volumes) {
       try {
-        await spawn('docker', ['volume', 'rm', volume]);
+        await spawn(this.engine.cli, ['volume', 'rm', volume]);
         this.createdVolumes.delete(volume);
       } catch (error) {
         const reason = this.getDockerErrorMessage(error);
         if (this.isDockerUnavailableError(reason)) {
-          throw new DockerNotAvailableError();
+          throw this.engine.errors.serviceNotAvailable();
         }
-        throw new VolumeRemoveError(volume, reason);
+        throw this.engine.errors.volumeRemove(volume, reason);
       }
     }
   }
@@ -812,18 +687,11 @@ export abstract class DockerSandboxStrategy {
   }
 
   private getDockerErrorMessage(error: unknown): string {
-    const err = error as Error & { stderr?: string; stdout?: string };
-    return err.stderr || err.stdout || err.message || String(error);
+    return this.engine.errorMessage(error);
   }
 
   private isDockerUnavailableError(message: string): boolean {
-    return (
-      message.includes('Cannot connect') || message.includes('docker daemon')
-    );
-  }
-
-  private isMissingVolumeInspectError(message: string): boolean {
-    return message.toLowerCase().includes('no such volume');
+    return this.engine.isServiceDown(message);
   }
 
   protected async startContainer(
@@ -833,7 +701,7 @@ export abstract class DockerSandboxStrategy {
     const args = this.buildDockerArgs(image, containerId);
 
     try {
-      await spawn('docker', args);
+      await spawn(this.engine.cli, args);
     } catch (error) {
       const err = error as Error & { stderr?: string };
       if (
@@ -841,9 +709,9 @@ export abstract class DockerSandboxStrategy {
         err.message?.includes('docker daemon') ||
         err.stderr?.includes('Cannot connect')
       ) {
-        throw new DockerNotAvailableError();
+        throw this.engine.errors.serviceNotAvailable();
       }
-      throw new ContainerCreationError(
+      throw this.engine.errors.creation(
         this.getDockerErrorMessage(err),
         image,
         err,
@@ -853,7 +721,7 @@ export abstract class DockerSandboxStrategy {
 
   protected async stopContainer(containerId: string): Promise<void> {
     try {
-      await spawn('docker', ['stop', containerId]);
+      await spawn(this.engine.cli, ['stop', containerId]);
     } catch {
       // already stopped
     }
@@ -865,8 +733,8 @@ export abstract class DockerSandboxStrategy {
   ): Promise<CommandResult> {
     try {
       const result = await spawn(
-        'docker',
-        ['exec', this.context.containerId, 'sh', '-c', command],
+        this.engine.cli,
+        this.engine.execArgs(this.context.containerId, command),
         { signal: options?.signal },
       );
       return {
@@ -892,14 +760,10 @@ export abstract class DockerSandboxStrategy {
     command: string,
     options?: SpawnOptions,
   ): SandboxProcess {
-    const child = childSpawn('docker', [
-      'exec',
-      ...buildDockerExecFlags(options),
-      this.context.containerId,
-      'sh',
-      '-c',
-      command,
-    ]);
+    const child = childSpawn(
+      this.engine.cli,
+      this.engine.execArgs(this.context.containerId, command, options),
+    );
     return toSandboxProcess(child, options?.signal);
   }
 
@@ -953,6 +817,9 @@ export abstract class DockerSandboxStrategy {
 
   protected abstract getImage(): Promise<string>;
   protected abstract configure(): Promise<void>;
+
+  /** Hook: backends whose exec requires a pre-existing workdir override this. */
+  protected async ensureWorkspace(): Promise<void> {}
 }
 
 function validateEnvKey(key: string): void {
@@ -1190,7 +1057,7 @@ export class ComposeStrategy extends DockerSandboxStrategy {
     } catch (error) {
       const err = error as Error & { stderr?: string };
       if (err.stderr?.includes('Cannot connect')) {
-        throw new DockerNotAvailableError();
+        throw this.engine.errors.serviceNotAvailable();
       }
       throw new ComposeStartError(this.composeFile, err.stderr || err.message);
     }

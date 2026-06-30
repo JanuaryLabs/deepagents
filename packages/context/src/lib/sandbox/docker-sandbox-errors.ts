@@ -1,10 +1,9 @@
-export class DockerSandboxError extends Error {
-  readonly containerId?: string;
+import { ContainerSandboxError } from './container-sandbox-errors.ts';
 
+export class DockerSandboxError extends ContainerSandboxError {
   constructor(message: string, containerId?: string) {
-    super(message);
+    super(message, containerId);
     this.name = 'DockerSandboxError';
-    this.containerId = containerId;
   }
 }
 

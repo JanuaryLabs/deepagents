@@ -2,11 +2,10 @@ import { type CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   AppleContainerCreationError,
@@ -18,12 +17,14 @@ import {
   AppleContainerVolumeRemoveError,
   ContainerServiceNotRunningError,
 } from './apple-container-sandbox-errors.ts';
-import {
-  base64ReadCommand,
-  base64WriteCommands,
-  toSandboxProcess,
-} from './cli-process.ts';
+import type { ContainerEngine } from './container-engine.ts';
 import { PackageInstallError } from './docker-sandbox-errors.ts';
+import {
+  type DockerCommonOptions,
+  type DockerNamedVolume,
+  DockerSandboxStrategy,
+  type DockerSandboxVolume,
+} from './docker-sandbox.ts';
 import {
   type Installer,
   type InstallerContext,
@@ -31,12 +32,7 @@ import {
   isDebianBased,
 } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
-import type {
-  DisposableSandbox,
-  ExecuteCommandOptions,
-  SandboxProcess,
-  SpawnOptions,
-} from './types.ts';
+import type { DisposableSandbox } from './types.ts';
 
 export {
   AppleContainerCreationError,
@@ -53,8 +49,6 @@ const CLI = 'container';
 
 /** Working directory every sandbox command runs in, mirroring the Docker backend. */
 const WORKDIR = '/workspace';
-
-const CONTAINER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
 export interface AppleContainerBindVolume {
   type: 'bind';
@@ -158,488 +152,7 @@ export function isAppleContainerfileOptions(
   return 'dockerfile' in opts;
 }
 
-interface StrategyContext {
-  containerId: string;
-  image: string;
-}
-
-/**
- * Template-Method base for Apple `container` sandbox strategies. Subclasses
- * choose the image and define post-start configuration; the base owns the
- * container lifecycle, exec, and file I/O — mirroring `DockerSandboxStrategy`.
- */
-export abstract class AppleContainerSandboxStrategy {
-  protected context!: StrategyContext;
-  protected volumes: AppleContainerVolume[];
-  protected resources: AppleContainerResources;
-  protected env: Record<string, string>;
-  protected name?: StableContainerName;
-  protected command?: readonly string[] | null;
-  protected arch?: 'arm64' | 'amd64';
-  private createdVolumes = new Set<string>();
-
-  constructor(args: AppleContainerCommonOptions = {}) {
-    const {
-      volumes = [],
-      resources = {},
-      env = {},
-      name,
-      command,
-      arch,
-    } = args;
-    for (const key of Object.keys(env)) {
-      validateEnvKey(key);
-    }
-    if (name !== undefined && !CONTAINER_NAME_PATTERN.test(name)) {
-      throw new AppleContainerSandboxError(
-        `Invalid container name: "${name}". Use only letters, numbers, underscore, period, or hyphen. The "sandbox-" prefix is added automatically.`,
-      );
-    }
-    this.volumes = volumes;
-    this.resources = resources;
-    this.env = env;
-    this.name = name;
-    this.command = command;
-    this.arch = arch;
-  }
-
-  async create(): Promise<DisposableSandbox> {
-    const image = await this.getImage();
-    let acquired: { containerId: string; attached: boolean } | undefined;
-
-    try {
-      acquired = await this.acquireContainer(image);
-      this.context = { containerId: acquired.containerId, image };
-      if (!acquired.attached) {
-        await this.ensureWorkspace();
-        await this.configure();
-      }
-    } catch (error) {
-      if (acquired && !acquired.attached) {
-        await this.stopContainer(acquired.containerId);
-      }
-      await this.cleanupCreatedVolumesAfterFailure(error);
-      throw error;
-    }
-
-    return this.createSandboxMethods();
-  }
-
-  private namedContainerId(): string {
-    return `sandbox-${this.name}`;
-  }
-
-  protected defaultContainerId(): string {
-    return `sandbox-${crypto.randomUUID().slice(0, 8)}`;
-  }
-
-  protected async acquireContainer(
-    image: string,
-  ): Promise<{ containerId: string; attached: boolean }> {
-    if (!this.name) {
-      const containerId = this.defaultContainerId();
-      await this.prepareVolumes();
-      await this.startContainer(image, containerId);
-      return { containerId, attached: false };
-    }
-
-    const containerId = this.namedContainerId();
-    const probe = await this.inspectContainer(containerId);
-    if (probe === 'running') {
-      return { containerId, attached: true };
-    }
-    if (probe === 'stopped') {
-      await this.startStoppedContainer(containerId, image);
-      return { containerId, attached: true };
-    }
-
-    await this.prepareVolumes();
-    await this.startContainer(image, containerId);
-    return { containerId, attached: false };
-  }
-
-  private async startStoppedContainer(
-    containerId: string,
-    image: string,
-  ): Promise<void> {
-    try {
-      await spawn(CLI, ['start', containerId]);
-    } catch (error) {
-      const message = getCliErrorMessage(error);
-      if (isServiceDownMessage(message)) {
-        throw new ContainerServiceNotRunningError();
-      }
-      throw new AppleContainerCreationError(message, image, error as Error);
-    }
-  }
-
-  protected async inspectContainer(
-    containerId: string,
-  ): Promise<'running' | 'stopped' | 'absent'> {
-    let stdout: string;
-    try {
-      const result = await spawn(CLI, ['inspect', containerId]);
-      stdout = result.stdout;
-    } catch (error) {
-      const message = getCliErrorMessage(error);
-      if (isServiceDownMessage(message)) {
-        throw new ContainerServiceNotRunningError();
-      }
-      if (/not found|no such/i.test(message)) {
-        return 'absent';
-      }
-      throw new AppleContainerSandboxError(
-        `Failed to inspect container "${containerId}": ${message}`,
-      );
-    }
-
-    const entries = safeParseArray(stdout);
-    if (entries.length === 0) {
-      return 'absent';
-    }
-    return readContainerStatus(entries[0]);
-  }
-
-  protected async ensureWorkspace(): Promise<void> {
-    // No --cwd: `container exec --cwd <dir>` fails when <dir> is absent, so
-    // WORKDIR can't be created from inside itself. Bootstrap from the default cwd.
-    await this.execWithCwd(null, `mkdir -p ${WORKDIR}`);
-  }
-
-  protected async prepareVolumes(): Promise<void> {
-    this.validateVolumes();
-
-    for (const volume of this.volumes) {
-      if (volume.type !== 'volume') {
-        continue;
-      }
-
-      const lifecycle = volume.lifecycle ?? 'external';
-      if (lifecycle === 'external') {
-        await this.inspectVolume(volume.name);
-        continue;
-      }
-
-      if (await this.volumeExists(volume.name)) {
-        throw new AppleContainerVolumeCreateError(
-          volume.name,
-          'managed volume already exists',
-        );
-      }
-
-      await this.createVolume(volume);
-      if (volume.removeOnDispose !== false) {
-        this.createdVolumes.add(volume.name);
-      }
-    }
-  }
-
-  protected validateVolumes(): void {
-    const containerPaths = new Set<string>();
-
-    for (const volume of this.volumes) {
-      const source = volume.type === 'bind' ? volume.hostPath : volume.name;
-
-      if (!volume.containerPath.startsWith('/')) {
-        throw new AppleContainerVolumePathError(
-          source,
-          volume.containerPath,
-          'containerPath must be absolute',
-        );
-      }
-      assertNoComma('containerPath', volume.containerPath, volume);
-
-      if (containerPaths.has(volume.containerPath)) {
-        throw new AppleContainerVolumePathError(
-          source,
-          volume.containerPath,
-          'containerPath must be unique',
-        );
-      }
-      containerPaths.add(volume.containerPath);
-
-      if (volume.type === 'bind') {
-        assertNoComma('hostPath', volume.hostPath, volume);
-        if (!existsSync(volume.hostPath)) {
-          throw new AppleContainerVolumePathError(
-            volume.hostPath,
-            volume.containerPath,
-            'hostPath does not exist on host',
-          );
-        }
-        continue;
-      }
-
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(volume.name)) {
-        throw new AppleContainerVolumePathError(
-          volume.name,
-          volume.containerPath,
-          'volume name must start with an alphanumeric character and contain only letters, numbers, underscore, period, or hyphen',
-        );
-      }
-    }
-  }
-
-  protected buildRunArgs(image: string, containerId: string): string[] {
-    const { memory = '1024M', cpus = 2 } = this.resources;
-
-    const args: string[] = [
-      'run',
-      '--detach',
-      '--rm',
-      '--name',
-      containerId,
-      '--memory',
-      memory,
-      '--cpus',
-      String(cpus),
-    ];
-
-    if (this.arch) {
-      args.push('--arch', this.arch);
-    }
-
-    for (const [key, value] of Object.entries(this.env)) {
-      args.push('--env', `${key}=${value}`);
-    }
-
-    for (const volume of this.volumes) {
-      args.push('--mount', buildMountArg(volume));
-    }
-
-    args.push(image);
-    if (this.command === undefined) {
-      args.push('tail', '-f', '/dev/null');
-    } else if (this.command !== null) {
-      args.push(...this.command);
-    }
-
-    return args;
-  }
-
-  private async inspectVolume(name: string): Promise<void> {
-    try {
-      await spawn(CLI, ['volume', 'inspect', name]);
-    } catch (error) {
-      const reason = getCliErrorMessage(error);
-      if (isServiceDownMessage(reason)) {
-        throw new ContainerServiceNotRunningError();
-      }
-      throw new AppleContainerVolumeInspectError(name, reason);
-    }
-  }
-
-  private async volumeExists(name: string): Promise<boolean> {
-    try {
-      await this.inspectVolume(name);
-      return true;
-    } catch (error) {
-      // inspectVolume re-throws ContainerServiceNotRunningError separately, so
-      // any remaining inspect failure means the volume isn't there to inspect.
-      if (error instanceof AppleContainerVolumeInspectError) {
-        return false;
-      }
-      throw error;
-    }
-  }
-
-  private async createVolume(volume: AppleContainerNamedVolume): Promise<void> {
-    try {
-      await spawn(CLI, ['volume', 'create', volume.name]);
-    } catch (error) {
-      const reason = getCliErrorMessage(error);
-      if (isServiceDownMessage(reason)) {
-        throw new ContainerServiceNotRunningError();
-      }
-      throw new AppleContainerVolumeCreateError(volume.name, reason);
-    }
-  }
-
-  private async cleanupCreatedVolumes(): Promise<void> {
-    for (const volume of [...this.createdVolumes].reverse()) {
-      await this.removeCreatedVolume(volume);
-      this.createdVolumes.delete(volume);
-    }
-  }
-
-  private async removeCreatedVolume(volume: string): Promise<void> {
-    // `--rm` tears the container down asynchronously, so a just-stopped
-    // container can still hold a managed volume mounted for a moment. Retry the
-    // removal a few times before surfacing the failure.
-    let lastReason = '';
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await spawn(CLI, ['volume', 'rm', volume]);
-        return;
-      } catch (error) {
-        const reason = getCliErrorMessage(error);
-        if (isServiceDownMessage(reason)) {
-          throw new ContainerServiceNotRunningError();
-        }
-        lastReason = reason;
-        await delay(200);
-      }
-    }
-    throw new AppleContainerVolumeRemoveError(volume, lastReason);
-  }
-
-  private async cleanupCreatedVolumesAfterFailure(
-    originalError: unknown,
-  ): Promise<void> {
-    try {
-      await this.cleanupCreatedVolumes();
-    } catch (cleanupError) {
-      if (originalError instanceof Error) {
-        const original = originalError as Error & { suppressed?: unknown[] };
-        original.suppressed = [...(original.suppressed ?? []), cleanupError];
-      }
-    }
-  }
-
-  protected async startContainer(
-    image: string,
-    containerId: string,
-  ): Promise<void> {
-    try {
-      await spawn(CLI, this.buildRunArgs(image, containerId));
-    } catch (error) {
-      const message = getCliErrorMessage(error);
-      if (isServiceDownMessage(message)) {
-        throw new ContainerServiceNotRunningError();
-      }
-      throw new AppleContainerCreationError(message, image, error as Error);
-    }
-  }
-
-  protected async stopContainer(containerId: string): Promise<void> {
-    try {
-      await spawn(CLI, ['stop', containerId]);
-    } catch {
-      // already stopped / removed
-    }
-  }
-
-  protected async exec(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult> {
-    return this.execWithCwd(WORKDIR, command, options?.signal);
-  }
-
-  private async execWithCwd(
-    cwd: string | null,
-    command: string,
-    signal?: AbortSignal,
-  ): Promise<CommandResult> {
-    const cwdArgs = cwd ? ['--cwd', cwd] : [];
-    try {
-      const result = await spawn(
-        CLI,
-        ['exec', ...cwdArgs, this.context.containerId, 'sh', '-c', command],
-        { signal },
-      );
-      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-    } catch (error) {
-      const err = error as Error & {
-        stdout?: string;
-        stderr?: string;
-        exitCode?: number;
-      };
-      return {
-        stdout: err.stdout ?? '',
-        stderr: err.stderr ?? err.message ?? '',
-        exitCode: err.exitCode ?? 1,
-      };
-    }
-  }
-
-  protected spawnProcess(
-    command: string,
-    options?: SpawnOptions,
-  ): SandboxProcess {
-    const child = childSpawn(CLI, [
-      'exec',
-      ...buildExecFlags(options),
-      this.context.containerId,
-      'sh',
-      '-c',
-      command,
-    ]);
-    return toSandboxProcess(child, options?.signal);
-  }
-
-  protected createSandboxMethods(): DisposableSandbox {
-    const { containerId } = this.context;
-
-    const sandbox: DisposableSandbox = {
-      executeCommand: async (command, options) => this.exec(command, options),
-      spawn: (command, options) => this.spawnProcess(command, options),
-
-      readFile: async (path: string): Promise<string> => {
-        const result = await sandbox.executeCommand(base64ReadCommand(path));
-        if (result.exitCode !== 0) {
-          throw new Error(`Failed to read file "${path}": ${result.stderr}`);
-        }
-        return Buffer.from(result.stdout, 'base64').toString('utf-8');
-      },
-
-      writeFiles: async (
-        files: Array<{ path: string; content: string | Buffer }>,
-      ): Promise<void> => {
-        for (const file of files) {
-          const dir = file.path.substring(0, file.path.lastIndexOf('/'));
-          if (dir) {
-            await sandbox.executeCommand(`mkdir -p ${shellQuote(dir)}`);
-          }
-
-          for (const command of base64WriteCommands(file.path, file.content)) {
-            const result = await sandbox.executeCommand(command);
-            if (result.exitCode !== 0) {
-              throw new Error(
-                `Failed to write file "${file.path}": ${result.stderr}`,
-              );
-            }
-          }
-        }
-      },
-
-      dispose: async (): Promise<void> => {
-        await this.stopContainer(containerId);
-        await this.cleanupCreatedVolumes();
-      },
-
-      [Symbol.asyncDispose](this: DisposableSandbox): Promise<void> {
-        return this.dispose();
-      },
-    };
-
-    return sandbox;
-  }
-
-  protected abstract getImage(): Promise<string>;
-  protected abstract configure(): Promise<void>;
-}
-
-function validateEnvKey(key: string): void {
-  if (key.length === 0 || key.includes('=')) {
-    throw new AppleContainerSandboxError(
-      `Invalid environment variable key: "${key}"`,
-    );
-  }
-}
-
-function buildExecFlags(options?: SpawnOptions): string[] {
-  const flags: string[] = ['--cwd', options?.cwd || WORKDIR];
-  if (options?.env) {
-    for (const [key, value] of Object.entries(options.env)) {
-      validateEnvKey(key);
-      flags.push('--env', `${key}=${value}`);
-    }
-  }
-  return flags;
-}
-
-function buildMountArg(volume: AppleContainerVolume): string {
+function buildMountArg(volume: DockerSandboxVolume): string {
   const readOnly = volume.readOnly !== false;
   const parts =
     volume.type === 'bind'
@@ -660,32 +173,10 @@ function buildMountArg(volume: AppleContainerVolume): string {
   return parts.join(',');
 }
 
-function assertNoComma(
-  field: 'hostPath' | 'containerPath',
-  value: string,
-  volume: AppleContainerVolume,
-): void {
-  if (!value.includes(',')) {
-    return;
-  }
-  const source = volume.type === 'bind' ? volume.hostPath : volume.name;
-  throw new AppleContainerVolumePathError(
-    source,
-    volume.containerPath,
-    `${field} must not contain commas`,
-  );
-}
-
 function getCliErrorMessage(error: unknown): string {
   const err = error as Error & { stderr?: string; stdout?: string };
   return (
     err.stderr?.trim() || err.stdout?.trim() || err.message || String(error)
-  );
-}
-
-function isServiceDownMessage(message: string): boolean {
-  return /apiserver|not running|connection refused|could not connect|xpc/i.test(
-    message,
   );
 }
 
@@ -711,6 +202,83 @@ function readContainerStatus(entry: unknown): 'running' | 'stopped' {
     `Container is in an unexpected state "${status}"`,
   );
 }
+
+/**
+ * The Apple `container` CLI dialect, plugged into the shared
+ * `DockerSandboxStrategy` skeleton. Mirrors `dockerEngine` but for the
+ * micro-VM runtime: `--cwd`/`--env` exec flags, JSON `inspect` parsing,
+ * virtiofs mounts, `apiserver`-down detection, and Apple error classes.
+ */
+const appleEngine: ContainerEngine = {
+  cli: CLI,
+
+  execArgs(containerId, command, options) {
+    const flags: string[] = ['--cwd', options?.cwd || WORKDIR];
+    if (options?.env) {
+      for (const [key, value] of Object.entries(options.env)) {
+        if (key.length === 0 || key.includes('=')) {
+          throw new AppleContainerSandboxError(
+            `Invalid environment variable key: "${key}"`,
+          );
+        }
+        flags.push('--env', `${key}=${value}`);
+      }
+    }
+    return ['exec', ...flags, containerId, 'sh', '-c', command];
+  },
+
+  inspectArgs(containerId) {
+    return ['inspect', containerId];
+  },
+
+  mountArg: buildMountArg,
+
+  parseStatus(stdout) {
+    const entries = safeParseArray(stdout);
+    if (entries.length === 0) return 'absent';
+    return readContainerStatus(entries[0]);
+  },
+
+  volumeCreateArgs(volume) {
+    return ['volume', 'create', volume.name];
+  },
+
+  errorMessage: getCliErrorMessage,
+
+  isServiceDown(message) {
+    return /apiserver|not running|connection refused|could not connect|xpc/i.test(
+      message,
+    );
+  },
+
+  isMissingContainer(message) {
+    return /not found|no such/i.test(message);
+  },
+
+  isMissingVolume(message) {
+    return /not found|no such/i.test(message);
+  },
+
+  isNameConflict(message) {
+    return /already exists/i.test(message);
+  },
+
+  errors: {
+    serviceNotAvailable: () => new ContainerServiceNotRunningError(),
+    creation: (message, image, cause) =>
+      new AppleContainerCreationError(message, image, cause),
+    generic: (message, containerId) =>
+      new AppleContainerSandboxError(message, containerId),
+    volumePath: (source, containerPath, reason) =>
+      new AppleContainerVolumePathError(source, containerPath, reason),
+    volumeInspect: (name, reason) =>
+      new AppleContainerVolumeInspectError(name, reason),
+    volumeCreate: (name, reason) =>
+      new AppleContainerVolumeCreateError(name, reason),
+    volumeRemove: (name, reason) =>
+      new AppleContainerVolumeRemoveError(name, reason),
+  },
+};
 
 /**
  * Apple-container installer context: the Docker installer suite (`pkg`, `npm`,
@@ -829,13 +397,86 @@ function createAppleInstallerContext(
   };
 }
 
+/**
+ * Apple-container layer over the shared `DockerSandboxStrategy` skeleton: wires
+ * the `appleEngine` dialect and overrides the handful of run-time divergences
+ * (the `container run` argv, and the `mkdir /workspace` bootstrap that the
+ * `--cwd`-per-exec model needs).
+ */
+abstract class AppleSandboxStrategy extends DockerSandboxStrategy {
+  protected arch?: 'arm64' | 'amd64';
+
+  constructor(args: AppleContainerCommonOptions = {}) {
+    super(
+      {
+        volumes: args.volumes,
+        resources: args.resources,
+        env: args.env,
+        name: args.name,
+        command: args.command,
+      } satisfies DockerCommonOptions,
+      appleEngine,
+    );
+    this.arch = args.arch;
+  }
+
+  protected override buildDockerArgs(
+    image: string,
+    containerId: string,
+  ): string[] {
+    const { memory = '1024M', cpus = 2 } = this.resources;
+    const args: string[] = [
+      'run',
+      '--detach',
+      '--rm',
+      '--name',
+      containerId,
+      '--memory',
+      memory,
+      '--cpus',
+      String(cpus),
+    ];
+
+    if (this.arch) {
+      args.push('--arch', this.arch);
+    }
+    for (const [key, value] of Object.entries(this.env)) {
+      args.push('--env', `${key}=${value}`);
+    }
+    for (const volume of this.volumes) {
+      args.push('--mount', this.engine.mountArg(volume));
+    }
+
+    args.push(image);
+    if (this.command === undefined) {
+      args.push('tail', '-f', '/dev/null');
+    } else if (this.command !== null) {
+      args.push(...this.command);
+    }
+
+    return args;
+  }
+
+  protected override async ensureWorkspace(): Promise<void> {
+    // `container exec --cwd <dir>` fails if <dir> is absent, so WORKDIR can't be
+    // created from inside itself — bootstrap it from the image's default cwd.
+    await spawn(this.engine.cli, [
+      'exec',
+      this.context.containerId,
+      'sh',
+      '-c',
+      `mkdir -p ${WORKDIR}`,
+    ]);
+  }
+}
+
 export interface AppleContainerRuntimeStrategyArgs extends AppleContainerCommonOptions {
   image?: string;
   installers?: Installer[];
 }
 
 /** Starts a vanilla image and runs the supplied installers in order. */
-export class AppleContainerRuntimeStrategy extends AppleContainerSandboxStrategy {
+export class AppleContainerRuntimeStrategy extends AppleSandboxStrategy {
   private image: string;
   private installers: Installer[];
 
@@ -870,7 +511,7 @@ export interface AppleContainerfileStrategyArgs extends AppleContainerCommonOpti
  * Builds a custom image from a Dockerfile with `container build`
  * (content-hash caching). Runs no post-start configuration.
  */
-export class AppleContainerfileStrategy extends AppleContainerSandboxStrategy {
+export class AppleContainerfileStrategy extends AppleSandboxStrategy {
   private imageTag: string;
   private dockerfile: string;
   private buildContext: string;

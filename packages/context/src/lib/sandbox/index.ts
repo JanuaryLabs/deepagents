@@ -5,6 +5,7 @@ export * from './bash-exception.ts';
 export * from './bash-meta.ts';
 export * from './bash-tool.ts';
 export * from './binary-bridges.ts';
+export * from './container-sandbox-errors.ts';
 export * from './daytona-sandbox.ts';
 export * from './docker-sandbox.ts';
 export * from './strace/file-changes.ts';
