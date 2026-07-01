@@ -71,6 +71,40 @@ export class Text2SqlUnknownAdapterError extends Error {
   }
 }
 
+const text2SqlUnknownDatabaseMarker = Symbol('Text2SqlUnknownDatabaseError');
+
+/**
+ * Thrown by {@link Text2Sql.resolveAdapterName} when a user-supplied `<db>`
+ * token cannot be routed to an adapter (unknown name, or none given when more
+ * than one is configured). Carries the requested token and the available names
+ * so each port (CLI, sandbox command, JSON-RPC, MCP) can render it its own way.
+ */
+export class Text2SqlUnknownDatabaseError extends Error {
+  [text2SqlUnknownDatabaseMarker]: true;
+  readonly requested: string | undefined;
+  readonly available: readonly string[];
+
+  constructor(requested: string | undefined, available: readonly string[]) {
+    const list = available.join(', ') || '(none configured)';
+    super(
+      requested
+        ? `unknown database "${requested}". Available: ${list}`
+        : `no database specified. Available: ${list}`,
+    );
+    this.name = 'Text2SqlUnknownDatabaseError';
+    this.requested = requested;
+    this.available = available;
+    this[text2SqlUnknownDatabaseMarker] = true;
+  }
+
+  static isInstance(error: unknown): error is Text2SqlUnknownDatabaseError {
+    return (
+      error instanceof Text2SqlUnknownDatabaseError &&
+      error[text2SqlUnknownDatabaseMarker] === true
+    );
+  }
+}
+
 export class Text2Sql {
   #config: Text2SqlConfig;
   #indexer: AdapterIndexer;
@@ -111,6 +145,30 @@ export class Text2Sql {
 
   hasAdapter(name: string): boolean {
     return name in this.#config.adapters;
+  }
+
+  /**
+   * Resolve a user-supplied `<db>` token to a configured adapter name for the
+   * surfaces that accept one (CLI, sandbox `sql` command, JSON-RPC daemon, MCP):
+   * - exact match → that name
+   * - no match (or omitted) but exactly one adapter configured → route to it
+   * - otherwise → throw with the user-facing "unknown database" message
+   *
+   * Internal execution paths keep using the strict {@link Text2Sql.run}/
+   * {@link Text2Sql.validate}, which reject an unknown name outright.
+   */
+  resolveAdapterName(db: string): string {
+    if (!db || db.trim() === '') {
+      const names = this.adapterNames();
+      if (names.length === 1) return names[0];
+      throw new Text2SqlUnknownDatabaseError(db, names);
+    }
+    if (this.hasAdapter(db)) {
+      return db;
+    }
+    const names = this.adapterNames();
+    if (names.length === 1) return names[0];
+    throw new Text2SqlUnknownDatabaseError(db, names);
   }
 
   async validate(name: string, sql: string): Promise<string> {

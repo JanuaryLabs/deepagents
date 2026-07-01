@@ -12,7 +12,6 @@ import {
   useBashMeta,
 } from '@deepagents/context';
 
-import { resolveAdapter } from './resolve-adapter.ts';
 import { Text2Sql, Text2SqlValidationError } from './sql.ts';
 
 const SQL_VALIDATE_REMINDER =
@@ -202,15 +201,7 @@ function takeDbAndSql(
   text2Sql: Text2Sql,
 ): { name: string; sql: string } {
   const [db, ...rest] = positional;
-  if (!db) {
-    const available = text2Sql.adapterNames().join(', ');
-    throw new SqlCommandError(
-      subcommand,
-      `missing database name. Usage: sql ${subcommand} <db> "SELECT ...". Available: ${available}`,
-    );
-  }
-
-  const name = resolveAdapter(text2Sql, db);
+  const name = text2Sql.resolveAdapterName(db);
 
   const sql = rest.join(' ').trim();
   if (!sql) {

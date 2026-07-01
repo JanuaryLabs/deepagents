@@ -1,7 +1,6 @@
 import * as path from 'node:path';
 import type { Writable } from 'node:stream';
 
-import { resolveAdapter } from '../lib/resolve-adapter.ts';
 import { Text2Sql, Text2SqlValidationError } from '../lib/sql.ts';
 
 export interface ExecutionContext {
@@ -71,19 +70,9 @@ export abstract class SqlCommand {
     throw new CommandError(this.name, message, exitCode);
   }
 
-  protected resolveAdapterName(
-    text2Sql: Text2Sql,
-    db: string | undefined,
-  ): string {
-    if (!db) {
-      const available =
-        text2Sql.adapterNames().join(', ') || '(none configured)';
-      this.fail(
-        `missing database name. Usage: sql ${this.name} ${this.usage}. Available: ${available}`,
-      );
-    }
+  protected resolveAdapterName(text2Sql: Text2Sql, db: string): string {
     try {
-      return resolveAdapter(text2Sql, db);
+      return text2Sql.resolveAdapterName(db);
     } catch (error) {
       this.fail(errorMessage(error));
     }
@@ -98,7 +87,7 @@ export abstract class SqlQueryCommand extends SqlCommand {
     args: unknown[],
     options: Record<string, unknown>,
   ): Promise<number> {
-    const [db, sqlParts] = args as [string | undefined, string[] | undefined];
+    const [db, sqlParts] = args as [string, string[] | undefined];
     const name = this.resolveAdapterName(ctx.text2Sql, db);
     const sql = (sqlParts ?? []).join(' ').trim();
     if (!sql) this.fail('no query provided');
