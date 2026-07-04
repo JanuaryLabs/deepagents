@@ -20,4 +20,8 @@ export {
   type CreateSqlCommandResult,
   createSqlCommand,
 } from './lib/sql-command.ts';
+export {
+  SQL_VALIDATE_REMINDER,
+  sqlValidateReminder,
+} from './lib/sql-validate-reminder.ts';
 export * from './lib/sql.ts';

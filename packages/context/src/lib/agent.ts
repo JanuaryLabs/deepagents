@@ -568,7 +568,10 @@ function wrapToolsWithOutputReminders(
       execute: async (input, options) => {
         const result = await execute.call(toolDef, input, options);
         if (isAsyncIterable(result)) return result;
-        return context.applyToolOutputReminders(result);
+        return context.applyToolOutputReminders(result, {
+          toolName: name,
+          input,
+        });
       },
       toModelOutput: (args: {
         toolCallId: string;

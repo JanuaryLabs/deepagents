@@ -9,13 +9,9 @@ import {
   buildSubcommandRepair,
   defineSubcommandGroup,
   repairQuotedArg,
-  useBashMeta,
 } from '@deepagents/context';
 
 import { Text2Sql, Text2SqlValidationError } from './sql.ts';
-
-const SQL_VALIDATE_REMINDER =
-  'Always run `sql validate <db> "..."` before `sql run <db> "..."` to catch syntax errors early.';
 
 class SqlCommandError extends BashException {
   readonly #subcommand: string;
@@ -145,9 +141,6 @@ async function handleRun(
 ): Promise<ExecResult> {
   return runHandler('run', async () => {
     const flags = parseFlags('run', args);
-    const meta = useBashMeta();
-    meta?.setReminder(SQL_VALIDATE_REMINDER);
-
     const { name, sql } = takeDbAndSql('run', flags.positional, text2Sql);
     const outputDir = resolveOutputDir(ctx, flags, defaultOutputDir);
     const { rows, columns } = await text2Sql.run(name, sql);

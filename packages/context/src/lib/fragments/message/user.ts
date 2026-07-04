@@ -58,6 +58,14 @@ export interface WhenContext {
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
   /**
+   * The tool call whose result is being wrapped, populated only during
+   * `target: 'tool-output'` evaluation — the live call in flight, which the
+   * finalized message chain cannot yet contain (`lastAssistantMessage` holds
+   * prior, already-completed calls). Read it directly in a predicate to gate on
+   * the executing tool's name/input/result. Undefined for `user` / `steer`.
+   */
+  executingTool?: { name: string; input: unknown; output: unknown };
+  /**
    * Ids that a fire-once latch has already fired for in this conversation
    * (persisted synth onceIds ∪ this stream's fires). Populated only during
    * steer evaluation; `once(id)` reads it to suppress a second fire.

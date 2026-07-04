@@ -1013,6 +1013,10 @@ export class ContextEngine {
    * return the (possibly wrapped) output.
    *
    * Called by the agent's tool wrapper right after each `execute()` resolves.
+   * The wrapper passes the executing `call`, surfaced as
+   * {@link WhenContext.executingTool}, so a predicate can gate on the live
+   * tool's name/input/result — the only point at which the call being wrapped
+   * is observable.
    * The store keeps the wrapped value with a host-only marker; the model-facing
    * projection strips that marker while preserving `result` + `systemReminder`.
    *
@@ -1021,7 +1025,10 @@ export class ContextEngine {
    * (e.g. asTool forks that set a pending user without saving), so the output
    * passes through untouched.
    */
-  public async applyToolOutputReminders(output: unknown): Promise<unknown> {
+  public async applyToolOutputReminders(
+    output: unknown,
+    call?: { toolName: string; input: unknown },
+  ): Promise<unknown> {
     const configs = this.#remindersFor('tool-output');
     if (configs.length === 0) return output;
 
@@ -1030,10 +1037,16 @@ export class ContextEngine {
     const currentMessage = chain.lastMessage;
     if (!currentMessage) return output;
 
-    const matched = await evaluateFiredReminders(
-      configs,
-      this.#buildWhenCtx(chain, currentMessage),
-    );
+    const whenCtx = this.#buildWhenCtx(chain, currentMessage);
+    if (call) {
+      whenCtx.executingTool = {
+        name: call.toolName,
+        input: call.input,
+        output,
+      };
+    }
+
+    const matched = await evaluateFiredReminders(configs, whenCtx);
     if (matched.length === 0) return output;
 
     return applyRemindersToToolOutput(

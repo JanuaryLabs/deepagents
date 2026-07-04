@@ -85,9 +85,9 @@ export interface CreateBashToolWithSkillsOptions extends Omit<
  * the decorated methods. The outer `bash` tool adds:
  *
  *   - `reasoning` input on the schema.
- *   - Generic meta channel (`useBashMeta()`): `setHidden(patch)` attaches
- *     host-only metadata; `setReminder(text)` surfaces a model-visible
- *     nudge. `meta` is stripped from model output via `toModelOutput`.
+ *   - Host-only meta channel (`useBashMeta().setHidden(patch)`): attaches
+ *     metadata that `toModelOutput` strips from the model-facing result.
+ *     Model-visible nudges are declared as `target: 'tool-output'` reminders.
  *   - Single-shot `skills` upload populating `sandbox.skills`.
  */
 export async function createBashTool(
@@ -155,14 +155,8 @@ export async function createBashTool(
           const result = await originalExecute({ command }, execOptions);
           const state = readBashMeta();
           if (!state) return result;
-          const hasHidden = Object.keys(state.hidden).length > 0;
-          const hasReminder = state.reminder !== undefined;
-          if (!hasHidden && !hasReminder) return result;
-          return {
-            ...result,
-            ...(hasHidden ? { meta: state.hidden } : {}),
-            ...(hasReminder ? { reminder: state.reminder } : {}),
-          };
+          if (Object.keys(state.hidden).length === 0) return result;
+          return { ...result, meta: state.hidden };
         }),
       );
     },

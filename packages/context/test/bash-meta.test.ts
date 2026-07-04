@@ -19,14 +19,6 @@ const markerSubcommands = {
       return { stdout: `hidden:${args[0]}\n`, stderr: '', exitCode: 0 };
     },
   },
-  remind: {
-    usage: 'remind <text>',
-    description: 'Set a model-visible reminder',
-    handler: (args) => {
-      useBashMeta()?.setReminder(args.join(' '));
-      return { stdout: 'reminded\n', stderr: '', exitCode: 0 };
-    },
-  },
 } satisfies Record<string, SubcommandDefinition>;
 
 function createMarkerSandbox() {
@@ -37,7 +29,7 @@ function createMarkerSandbox() {
 }
 
 describe('bash-meta wiring through createBashTool', () => {
-  it('toModelOutput strips meta but preserves reminder and stdout', async () => {
+  it('toModelOutput strips host-only meta but preserves stdout', async () => {
     const { tools } = await createBashTool({
       sandbox: await createMarkerSandbox(),
       destination: '/',
@@ -58,18 +50,16 @@ describe('bash-meta wiring through createBashTool', () => {
         stdout: 'hi\n',
         stderr: '',
         exitCode: 0,
-        reminder: 'visible',
         meta: { sql: 'SELECT 1' },
       },
     });
 
     assert.strictEqual(modelOutput.type, 'json');
     assert.strictEqual(modelOutput.value.meta, undefined);
-    assert.strictEqual(modelOutput.value.reminder, 'visible');
     assert.strictEqual(modelOutput.value.stdout, 'hi\n');
   });
 
-  it('plain commands attach no meta and no reminder', async () => {
+  it('plain commands attach no meta', async () => {
     const { tools } = await createBashTool({
       sandbox: await createMarkerSandbox(),
       destination: '/',
@@ -82,7 +72,6 @@ describe('bash-meta wiring through createBashTool', () => {
     )) as unknown as Record<string, unknown>;
 
     assert.strictEqual(result.meta, undefined);
-    assert.strictEqual(result.reminder, undefined);
   });
 
   it('parallel tool calls each see their own meta frame', async () => {
@@ -106,31 +95,6 @@ describe('bash-meta wiring through createBashTool', () => {
     });
     assert.strictEqual(
       (plain as unknown as Record<string, unknown>).meta,
-      undefined,
-    );
-  });
-
-  it('reminder set by one parallel call does not leak into another', async () => {
-    const { tools } = await createBashTool({
-      sandbox: await createMarkerSandbox(),
-      destination: '/',
-    });
-    const execute = tools.bash.execute!;
-
-    const [withReminder, without] = await Promise.all([
-      execute(
-        { command: 'marker remind stay-focused', reasoning: 'r1' },
-        {} as never,
-      ),
-      execute({ command: 'echo other', reasoning: 'r2' }, {} as never),
-    ]);
-
-    assert.strictEqual(
-      (withReminder as unknown as Record<string, unknown>).reminder,
-      'stay-focused',
-    );
-    assert.strictEqual(
-      (without as unknown as Record<string, unknown>).reminder,
       undefined,
     );
   });

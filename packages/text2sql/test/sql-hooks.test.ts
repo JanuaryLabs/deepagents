@@ -12,7 +12,6 @@ interface CapturedSqlInvocation {
 
 type BashCommandResult = CommandResult & {
   meta?: Record<string, unknown>;
-  reminder?: string;
 };
 
 type SqlCommandHooks = Pick<
@@ -203,7 +202,6 @@ describe('createSqlCommandHooks integration', () => {
     assert.deepEqual(result.meta, {
       formattedSql: "SELECT *\nFROM users\nWHERE name = 'Bob'",
     });
-    assert.match(result.reminder ?? '', /Always run `sql validate/);
   });
 
   it('blocks raw SQL commands so queries stay behind CLI validation', async () => {
