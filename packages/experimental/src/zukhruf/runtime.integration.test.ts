@@ -1,3 +1,4 @@
+import type { LanguageModelV3StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import {
   type ToolSet,
@@ -191,7 +192,7 @@ function approvalSetup() {
       const raw = JSON.stringify(prompt);
       const priorCallsForAsk = track.calls.filter((c) => c === text).length;
 
-      let chunks;
+      let chunks: LanguageModelV3StreamPart[];
       if (!text.includes('send') || priorCallsForAsk === 1) {
         chunks = text.includes('send')
           ? [

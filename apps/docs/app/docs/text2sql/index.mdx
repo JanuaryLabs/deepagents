@@ -65,6 +65,7 @@ front with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 | `Text2Sql#toPairs(adapterName, factory)`               | Generate training pairs from one configured adapter                                            |
 | `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments — each prefixed with a `<database>` connection-name label — with optional progress events |
 | `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes |
+| `sqlValidateReminder()` / `SQL_VALIDATE_REMINDER` | Context reminder fragment that nudges the model to run `sql validate <db> "..."` before `sql run <db> "..."`; it is suppressed after a matching validate call |
 | `sql index [adapter ...]`                              | Index all adapters by default (or named subset), then write schema fragments + progress artifacts |
 
 `CreateSqlCommandOptions` currently exposes `outputDir` (default `/sql`).

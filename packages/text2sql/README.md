@@ -114,7 +114,11 @@ import {
   npm,
   user,
 } from '@deepagents/context';
-import { createSqlCommandHooks, instructions } from '@deepagents/text2sql';
+import {
+  createSqlCommandHooks,
+  instructions,
+  sqlValidateReminder,
+} from '@deepagents/text2sql';
 
 const store = new InMemoryContextStore();
 const context = new ContextEngine({
@@ -149,6 +153,7 @@ const fragments = JSON.parse(
   await sandbox.sandbox.readFile(manifest.fragmentsPath),
 ) as ContextFragment[];
 context.set(...instructions(), ...fragments);
+context.set(sqlValidateReminder());
 
 const ai = agent({
   name: 'sql-assistant',
@@ -177,6 +182,11 @@ schema fragments returned by `sql index`. The index output starts with an
 `available_databases` fragment that lists the exact configured adapter names the
 model must pass to `sql validate <db>` and `sql run <db>`. Add or replace the
 instructions with your own domain fragments as needed.
+
+`sqlValidateReminder()` returns a context reminder fragment backed by
+`SQL_VALIDATE_REMINDER`. It adds a tool-output system reminder when the current
+assistant turn calls `sql run <db> "..."` without a prior `sql validate <db>
+"..."` for the same configured adapter name and exact SQL text.
 
 ## Advanced: SQL CLI in Sandboxes
 

@@ -1,4 +1,4 @@
-import type { PgBoss } from 'pg-boss';
+import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
 
 import {
@@ -69,7 +69,6 @@ export class PgBossTurnQueue extends TurnQueue {
     }
     if (!(await this.#boss.getQueue(this.#queue))) {
       await this.#boss.createQueue(this.#queue, {
-        name: this.#queue,
         policy: 'key_strict_fifo',
         retryLimit: 0,
         expireInSeconds: this.#expireInSeconds,
@@ -134,13 +133,13 @@ export class PgBossTurnQueue extends TurnQueue {
       },
     );
 
-    const deadWorkerId = await this.#boss.work<TurnRef>(
+    const deadWorkerId = await this.#boss.work(
       this.deadLetterQueue,
       {
         includeMetadata: true,
         pollingIntervalSeconds: this.#pollingIntervalSeconds,
       },
-      async ([job]) => {
+      async ([job]: JobWithMetadata<TurnRef>[]) => {
         await options.onOrphaned(job.data, orphanError(job.output));
         if (job.sourceId) {
           await this.#boss.deleteJob(this.#queue, job.sourceId);

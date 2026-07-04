@@ -1,6 +1,5 @@
 import { role } from '@deepagents/context';
-
-import { defineInstructions } from './.framework/instructions.ts';
+import { defineInstructions } from '@deepagents/experimental/zukhruf';
 
 export default defineInstructions(
   role(

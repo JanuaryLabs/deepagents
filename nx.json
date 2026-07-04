@@ -92,7 +92,8 @@
           "@deepagents/retrieval",
           "@deepagents/orchestrator",
           "@deepagents/context",
-          "@deepagents/evals"
+          "@deepagents/evals",
+          "@deepagents/experimental"
         ]
       },
       "cache": true,

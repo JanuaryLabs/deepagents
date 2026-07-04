@@ -39,8 +39,17 @@ async function waitFor(
   throw new Error(`timed out waiting for: ${what}`);
 }
 
+type AskRef = Extract<TurnRef, { kind: 'ask' }>;
+
+function inputOf(turn: TurnRef): string {
+  if (turn.kind !== 'ask') {
+    throw new Error('contract test only pushes ask turns');
+  }
+  return turn.input;
+}
+
 /** Deliberately NOT a UUID — ids are opaque strings as far as the port goes. */
-function ref(chat: string, n: number): TurnRef {
+function ref(chat: string, n: number): AskRef {
   return {
     kind: 'ask',
     streamId: `turn/${chat}#${n}:${crypto.randomUUID()}`,
@@ -119,9 +128,9 @@ export function turnQueueContract(
       const events: string[] = [];
       await using _consumer = await h.queue.consume(
         async (turn) => {
-          events.push(`start ${turn.input}`);
+          events.push(`start ${inputOf(turn)}`);
           await sleep(250);
-          events.push(`end ${turn.input}`);
+          events.push(`end ${inputOf(turn)}`);
         },
         { ...noOrphans, concurrency: 4 },
       );
@@ -206,7 +215,7 @@ export function turnQueueContract(
       const orphans: Array<{ streamId: string; error: string }> = [];
       await using _consumer = await h.queue.consume(
         async (turn) => {
-          invocations.push(turn.input);
+          invocations.push(inputOf(turn));
           if (turn.streamId === boom.streamId) throw new Error('kaput');
         },
         {

@@ -1,6 +1,5 @@
 import { createDockerSandbox } from '@deepagents/context';
-
-import { defineSandbox } from './.framework/sandbox/define.ts';
+import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 export default defineSandbox(({ chatId }) =>
   createDockerSandbox({ name: chatId }),

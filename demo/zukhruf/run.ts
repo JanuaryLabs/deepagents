@@ -3,9 +3,11 @@ import { PgBoss, fromPglite } from 'pg-boss';
 
 import { printer } from '@deepagents/agent';
 import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
+import {
+  PgBossTurnQueue,
+  createRuntime,
+} from '@deepagents/experimental/zukhruf';
 
-import { PgBossTurnQueue } from './.framework/queue/pg-boss.turn-queue.ts';
-import { createRuntime } from './.framework/runtime.ts';
 import declaration from './agent.ts';
 
 const input =

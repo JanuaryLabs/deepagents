@@ -142,7 +142,6 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     // A control queue whose terminal jobs DO expire, on a 1-second clock.
     const control = 'control-retention';
     await h.boss.createQueue(control, {
-      name: control,
       policy: 'key_strict_fifo',
       retryLimit: 0,
       deleteAfterSeconds: 1,

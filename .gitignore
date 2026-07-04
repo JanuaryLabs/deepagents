@@ -77,6 +77,13 @@ local_cache/
 
 **/.vitepress/cache/
 deepsearch.sqlite*
+zukhruf.sqlite*
+zukhruf.streams.sqlite*
+zukhruf.queue/
+animated-svg.sqlite*
+animated-svg.streams.sqlite*
+animated-svg.queue/
+animated_svg_output.svg
 store.db*
 .source
 

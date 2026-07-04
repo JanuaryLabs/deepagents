@@ -1,0 +1,22 @@
+{
+  "name": "@deepagents/experimental",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/experimental/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "additionalEntryPoints": ["packages/experimental/src/zukhruf/index.ts"],
+        "assets": []
+      }
+    },
+    "test": {
+      "options": {
+        "command": "node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/experimental.xml"
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { openai } from '@ai-sdk/openai';
 
-import { defineAgent } from './.framework/agent.ts';
+import { defineAgent } from '@deepagents/experimental/zukhruf';
+
 import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
 

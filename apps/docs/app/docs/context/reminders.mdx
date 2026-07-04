@@ -108,9 +108,10 @@ A reminder fires in one of three places, chosen by `target`:
 
 `user` is the default and may omit `when`. `tool-output` and `steer` require a `when` predicate — `reminder()` throws if it is missing.
 
+During `tool-output` evaluation, the predicate context includes `ctx.executingTool` with the live tool name, input, and raw output being wrapped. Use it when a reminder should fire only for a specific tool call; `lastAssistantMessage` and `lastAssistantMessages` only describe already-persisted assistant history.
+
 ```ts
 import {
-  afterTurn,
   everyNTurns,
   elapsedExceeds,
   reminder,
@@ -118,7 +119,12 @@ import {
 
 engine.set(
   reminder('Double-check filesystem side effects', {
-    when: afterTurn(0),
+    when: (ctx) =>
+      ctx.executingTool?.name === 'bash' &&
+      typeof ctx.executingTool.input === 'object' &&
+      ctx.executingTool.input !== null &&
+      'command' in ctx.executingTool.input &&
+      String(ctx.executingTool.input.command).startsWith('rm '),
     target: 'tool-output',
   }),
   reminder('Checkpoint before taking another tool step', {
@@ -161,6 +167,12 @@ interface ReminderContext {
   elapsed?: number;           // Milliseconds since last persisted user message
   messageCount?: number;      // Total message count across all roles
   lastAssistantMessage?: UIMessage; // Last persisted assistant message
+  lastAssistantMessages?: UIMessage[]; // Recent persisted assistant messages
+  executingTool?: {           // Only for target: 'tool-output'
+    name: string;
+    input: unknown;
+    output: unknown;
+  };
 }
 ```
 

@@ -12,6 +12,7 @@ import {
   FileIndexCache,
   Text2Sql,
   Text2SqlUnknownAdapterError,
+  Text2SqlUnknownDatabaseError,
   Text2SqlValidationError,
 } from '@deepagents/text2sql';
 
@@ -78,14 +79,16 @@ server.addMethod('text2sql.validate', async (params) => {
   const obj = asObject(params, 'text2sql.validate');
   const db = requireString(obj, 'db', 'text2sql.validate');
   const sql = requireString(obj, 'sql', 'text2sql.validate');
-  return { sql: await text2Sql.validate(db, sql) };
+  const name = text2Sql.resolveAdapterName(db);
+  return { sql: await text2Sql.validate(name, sql) };
 });
 
 server.addMethod('text2sql.run', async (params) => {
   const obj = asObject(params, 'text2sql.run');
   const db = requireString(obj, 'db', 'text2sql.run');
   const sql = requireString(obj, 'sql', 'text2sql.run');
-  return text2Sql.run(db, sql);
+  const name = text2Sql.resolveAdapterName(db);
+  return text2Sql.run(name, sql);
 });
 
 server.addMethod('text2sql.index', async (params) => {
@@ -132,6 +135,13 @@ server.applyMiddleware(async (next, request, context) => {
     if (error instanceof JSONRPCErrorException) throw error;
     if (Text2SqlValidationError.isInstance(error)) {
       throw new JSONRPCErrorException(error.message, VALIDATION_ERROR_CODE);
+    }
+    if (Text2SqlUnknownDatabaseError.isInstance(error)) {
+      throw new JSONRPCErrorException(
+        error.message,
+        JSONRPCErrorCode.InvalidParams,
+        { requested: error.requested, available: error.available },
+      );
     }
     if (Text2SqlUnknownAdapterError.isInstance(error)) {
       throw new JSONRPCErrorException(

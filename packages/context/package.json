@@ -69,8 +69,7 @@
     "@types/debug": "^4.1.12",
     "@types/mssql": "^12.3.0",
     "@types/pg": "^8.20.0",
-    "nock": "^14.0.14",
-    "pg-boss": "^12.18.2"
+    "nock": "^14.0.14"
   },
   "peerDependencies": {
     "@daytona/sdk": "^0.175.0",

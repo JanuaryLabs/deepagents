@@ -1,0 +1,52 @@
+{
+  "name": "@deepagents/experimental",
+  "version": "4.1.1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JanuaryLabs/deepagents",
+    "directory": "packages/experimental"
+  },
+  "bugs": {
+    "url": "https://github.com/JanuaryLabs/deepagents/issues"
+  },
+  "homepage": "https://github.com/JanuaryLabs/deepagents#readme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./zukhruf": {
+      "types": "./dist/zukhruf/index.d.ts",
+      "import": "./dist/zukhruf/index.js",
+      "default": "./dist/zukhruf/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo",
+    "!**/*.test.*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@deepagents/context": "4.1.1",
+    "ai": "^6.0.218",
+    "pg-boss": "^12.24.1",
+    "uuid": "^13.0.2"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^3.0.13",
+    "@deepagents/test": "0.15.0",
+    "@electric-sql/pglite": "^0.5.3",
+    "just-bash": "^3.0.1",
+    "zod": "^3.25.76 || ^4.0.0"
+  }
+}
