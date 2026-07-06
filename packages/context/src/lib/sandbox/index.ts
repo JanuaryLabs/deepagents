@@ -13,6 +13,7 @@ export * from './docker-sandbox.ts';
 export * from './strace/file-changes.ts';
 export * from './gcs.ts';
 export * from './installers/index.ts';
+export * from './microsandbox-sandbox.ts';
 export * from './shell-quote.ts';
 export * from './subcommand.ts';
 export * from './types.ts';

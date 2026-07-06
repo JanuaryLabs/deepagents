@@ -62,24 +62,30 @@
     "tiny-tfidf": "^1.0.0",
     "yaml": "^2.8.0",
     "zod": "^3.25.76 || ^4.0.0",
-    "@ai-sdk/openai": "^3.0.80"
+    "@ai-sdk/openai": "^3.0.80",
+    "@deepagents/test": "0.15.0"
   },
   "devDependencies": {
     "@daytona/sdk": "^0.175.0",
     "@types/debug": "^4.1.12",
     "@types/mssql": "^12.3.0",
     "@types/pg": "^8.20.0",
+    "microsandbox": "^0.6.4",
     "nock": "^14.0.14"
   },
   "peerDependencies": {
     "@daytona/sdk": "^0.175.0",
     "@rivet-dev/agent-os-common": "^0.0.260331072558",
     "@rivet-dev/agent-os-core": ">=0.1.0",
+    "microsandbox": "^0.6.4",
     "mssql": "^12.5.2",
     "pg": "^8.20.0"
   },
   "peerDependenciesMeta": {
     "@daytona/sdk": {
+      "optional": true
+    },
+    "microsandbox": {
       "optional": true
     },
     "mssql": {
