@@ -65,6 +65,26 @@ export interface DisposableSandbox
 }
 
 /**
+ * Readiness option accepted by every sandbox factory. Readiness is workload
+ * policy supplied by the caller — the hook runs once after boot and gates the
+ * factory's return; on failure the sandbox is disposed and the error
+ * propagates, so callers either receive a sandbox that satisfies their
+ * readiness condition or no sandbox at all. Recurring health monitoring stays
+ * the caller's responsibility.
+ *
+ * @example
+ * ```typescript
+ * const sandbox = await createMicrosandboxSandbox({
+ *   name: 'demo',
+ *   readiness: (sandbox) => startDaemon(sandbox),
+ * });
+ * ```
+ */
+export interface SandboxReadinessOptions {
+  readiness?: (sandbox: DisposableSandbox) => void | Promise<void>;
+}
+
+/**
  * Declarative skill upload: a host directory whose contents are copied into
  * the sandbox at startup. The factory also parses each skill's frontmatter
  * and exposes the result on `sandbox.skills`.

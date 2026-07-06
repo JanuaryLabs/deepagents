@@ -36,4 +36,29 @@ describe('createVirtualSandbox', () => {
     assert.strictEqual(result.exitCode, 0, result.stderr);
     assert.strictEqual(result.stdout, '/workspace\nok\n');
   });
+
+  it('runs the readiness hook against the sandbox before returning it', async () => {
+    const sandbox = await createVirtualSandbox({
+      fs: new InMemoryFs(),
+      readiness: async (booting) => {
+        await booting.writeFiles([
+          { path: '/tmp/readiness-ran.txt', content: 'ok' },
+        ]);
+      },
+    });
+
+    assert.strictEqual(await sandbox.readFile('/tmp/readiness-ran.txt'), 'ok');
+  });
+
+  it('rejects with the readiness error when the hook fails', async () => {
+    await assert.rejects(
+      createVirtualSandbox({
+        fs: new InMemoryFs(),
+        readiness: () => {
+          throw new Error('service never came up');
+        },
+      }),
+      /service never came up/,
+    );
+  });
 });

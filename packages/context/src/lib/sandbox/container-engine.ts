@@ -1,5 +1,6 @@
 import type { ContainerSandboxError } from './container-sandbox-errors.ts';
 import type { InstallerContext } from './installers/installer.ts';
+import type { SandboxReadinessOptions } from './types.ts';
 
 export interface ContainerErrorFactory {
   serviceNotAvailable(): ContainerSandboxError;
@@ -83,7 +84,7 @@ export interface SandboxResources {
  * which only its own engine methods see — the skeleton is typed to this common
  * subset and physically cannot read them.
  */
-export interface CommonSandboxOptions {
+export interface CommonSandboxOptions extends SandboxReadinessOptions {
   volumes?: SandboxVolume[];
   resources?: SandboxResources;
   env?: Record<string, string>;

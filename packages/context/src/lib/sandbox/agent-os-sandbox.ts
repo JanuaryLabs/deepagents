@@ -5,6 +5,7 @@ import type {
   DisposableSandbox,
   ExecuteCommandOptions,
   SandboxProcess,
+  SandboxReadinessOptions,
   SpawnOptions,
 } from './types.ts';
 
@@ -61,7 +62,7 @@ export class AgentOsCreationError extends AgentOsSandboxError {
   }
 }
 
-export interface AgentOsSandboxOptions {
+export interface AgentOsSandboxOptions extends SandboxReadinessOptions {
   /** WASM software packages (e.g., @rivet-dev/agent-os-common) */
   software?: unknown[];
   /** Filesystem mounts inside the VM */
@@ -205,15 +206,17 @@ export async function createAgentOsSandbox(
 ): Promise<DisposableSandbox> {
   const { AgentOs } = await importAgentOs();
 
+  const { readiness, ...kernelOptions } = options;
+
   let os: AgentOsInstance;
   try {
-    os = await AgentOs.create(options as Record<string, unknown>);
+    os = await AgentOs.create(kernelOptions as Record<string, unknown>);
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     throw new AgentOsCreationError(err.message, err);
   }
 
-  return {
+  const sandbox: DisposableSandbox = {
     async executeCommand(
       command: string,
       { signal }: ExecuteCommandOptions = {},
@@ -319,6 +322,16 @@ export async function createAgentOsSandbox(
       return this.dispose();
     },
   };
+
+  if (readiness) {
+    try {
+      await readiness(sandbox);
+    } catch (error) {
+      await sandbox.dispose().catch(() => {});
+      throw error;
+    }
+  }
+  return sandbox;
 }
 
 /**

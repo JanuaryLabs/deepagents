@@ -90,7 +90,16 @@ export abstract class ContainerSandboxStrategy<
       throw error;
     }
 
-    return this.createSandboxMethods();
+    const sandbox = this.createSandboxMethods();
+    if (this.opts.readiness) {
+      try {
+        await this.opts.readiness(sandbox);
+      } catch (error) {
+        await sandbox.dispose().catch(() => {});
+        throw error;
+      }
+    }
+    return sandbox;
   }
 
   private namedContainerId(): string {

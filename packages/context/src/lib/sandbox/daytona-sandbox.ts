@@ -13,6 +13,7 @@ import type {
   ExecuteCommandOptions,
   ExitInfo,
   SandboxProcess,
+  SandboxReadinessOptions,
   SpawnOptions,
 } from './types.ts';
 
@@ -35,7 +36,7 @@ export interface DaytonaVolumeMount {
   [key: string]: unknown;
 }
 
-export interface DaytonaSandboxOptions {
+export interface DaytonaSandboxOptions extends SandboxReadinessOptions {
   /**
    * Existing Daytona sandbox id or name to attach to.
    */
@@ -117,10 +118,23 @@ export async function createDaytonaSandbox(
     throw normalizeDaytonaError(error, sdk);
   }
 
-  return createDaytonaSandboxMethods({
+  const backend = createDaytonaSandboxMethods({
     sandbox,
     commandTimeout: options.commandTimeout,
   });
+
+  // Note the interaction with this adapter's caller-owns-lifecycle policy:
+  // dispose() is a no-op here, so a failing readiness hook rejects without
+  // stopping the remote sandbox — the caller's client still owns it.
+  if (options.readiness) {
+    try {
+      await options.readiness(backend);
+    } catch (error) {
+      await backend.dispose().catch(() => {});
+      throw error;
+    }
+  }
+  return backend;
 }
 
 const UNRECOVERABLE_SANDBOX_STATES = new Set<string>([
