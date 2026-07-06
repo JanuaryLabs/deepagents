@@ -3,13 +3,18 @@
   "version": "4.1.1",
   "private": true,
   "type": "module",
-  "description": "Image-only text2sql daemon + sql shim baked into the demo sandbox image. Referenced by path, never imported by the host demos.",
+  "description": "Text2sql daemon + sql shim baked into the demo sandbox image (image-only, referenced by path), plus ./host — the host-side supervision entry the backend demos import.",
+  "exports": {
+    "./host": "./host.ts"
+  },
   "dependencies": {
+    "@deepagents/context": "4.1.1",
     "@deepagents/text2sql": "4.1.1",
     "@hono/node-server": "^1.19.5",
     "cac": "^6.7.14",
     "hono": "^4.12.3",
     "json-rpc-2.0": "^1.7.1",
+    "p-retry": "^7.1.1",
     "pg": "^8.20.0",
     "uuid": "^13.0.0"
   }

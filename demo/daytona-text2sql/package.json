@@ -9,6 +9,7 @@
     "@daytona/sdk": "^0.175.0",
     "@deepagents/agent": "4.1.1",
     "@deepagents/context": "4.1.1",
+    "@deepagents/demo-text2sql-daemon": "4.1.1",
     "@deepagents/text2sql": "4.1.1",
     "nano-spawn": "^1.0.3"
   }

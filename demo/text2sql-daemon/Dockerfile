@@ -1,13 +1,16 @@
-# Self-contained image for the text2sql demo daemon. Shared by both backend
+# Self-contained image for the text2sql demo daemon. Shared by the backend
 # demos: the plain-Docker demo builds it on the fly (createDockerSandbox passes
-# this Dockerfile + the repo root as context), and the Daytona demo boots a
-# prebuilt tag of it. Build standalone from the repo root with:
+# this Dockerfile + the repo root as context), the Daytona demo boots a
+# prebuilt registry tag of it, and the microsandbox demo loads a `docker save`
+# archive of it. Build standalone from the repo root with:
 #
 #   docker build -f demo/text2sql-daemon/Dockerfile -t deepagents-text2sql .
 #
-# This package is image-only — the daemon, shim, and adapters run INSIDE the
-# sandbox and are referenced by the host demos purely by path (the baked
-# /repo/demo/text2sql-daemon/daemon location), never imported as a module.
+# The daemon, shim, and adapters are image-only — they run INSIDE the sandbox
+# and are referenced by the host demos purely by path (the baked
+# /repo/demo/text2sql-daemon/daemon location), never imported as a module. The
+# package's one host-side module is ./host.ts (daemon supervision + shared
+# constants), imported as `@deepagents/demo-text2sql-daemon/host`.
 #
 # Build context is the REPO ROOT so the whole npm workspace is available to
 # `npm ci` + `nx build`. The repo's root .dockerignore already excludes

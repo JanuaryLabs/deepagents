@@ -1,6 +1,5 @@
 import { openai } from '@ai-sdk/openai';
 import { Daytona } from '@daytona/sdk';
-import { setTimeout } from 'node:timers/promises';
 
 import { input, printer } from '@deepagents/agent';
 import {
@@ -12,68 +11,16 @@ import {
   user,
   withStraceFileChanges,
 } from '@deepagents/context';
+import {
+  daemonPort,
+  daemonUrl,
+  demoWorkspace,
+  startDaemon,
+  text2SqlOutDir,
+} from '@deepagents/demo-text2sql-daemon/host';
 
 import context, { defaultFragments, index } from './demo-context.ts';
 import { runnerImage } from './image.ts';
-
-const daemonDir = '/repo/demo/text2sql-daemon/daemon';
-const daemonScript = `${daemonDir}/demo-daemon.ts`;
-
-const demoWorkspace = '/tmp/deepagents-demo';
-const text2SqlOutDir = `${demoWorkspace}/sql`;
-
-const daemonPort = 4747;
-const daemonUrl = `http://127.0.0.1:${daemonPort}/rpc`;
-const daemonLogPath = '/tmp/text2sql-daemon.log';
-
-// Daytona boots the sandbox with its own init rather than the image CMD, so the
-// daemon is started explicitly here: spawn it detached, confirm the process is
-// alive, then poll /health until the Hono server is accepting requests.
-async function startDaemon(
-  sandbox: Awaited<ReturnType<typeof createDaytonaSandbox>>,
-): Promise<void> {
-  // Daytona's exec shell is POSIX sh (alpine), so no `disown` bash-ism — nohup
-  // + redirected stdio already detaches the daemon so it survives this exec.
-  const spawnResult = await sandbox.executeCommand(
-    `nohup node ${daemonScript} > ${daemonLogPath} 2>&1 < /dev/null & echo $!`,
-  );
-  const daemonPid = spawnResult.stdout.trim();
-  if (spawnResult.exitCode !== 0 || !/^\d+$/.test(daemonPid)) {
-    throw new Error(
-      `failed to spawn daemon: ${spawnResult.stderr || spawnResult.stdout}`,
-    );
-  }
-
-  const liveness = await sandbox.executeCommand(`kill -0 ${daemonPid}`);
-  if (liveness.exitCode !== 0) {
-    const log = await sandbox.executeCommand(`tail -50 ${daemonLogPath}`);
-    throw new Error(
-      `daemon process ${daemonPid} died immediately. Log tail:\n${log.stdout}`,
-    );
-  }
-
-  const healthProbe =
-    `node -e "fetch('http://127.0.0.1:${daemonPort}/health')` +
-    `.then(r => r.ok ? r.text().then(t => { process.stdout.write(t); process.exit(0); }) : process.exit(1))` +
-    `.catch(() => process.exit(1))"`;
-
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    const health = await sandbox.executeCommand(healthProbe);
-    if (health.exitCode === 0) {
-      console.log(`[demo] daemon ready: ${health.stdout.trim()}`);
-      return;
-    }
-    await setTimeout(250);
-  }
-
-  const log = await sandbox.executeCommand(`tail -50 ${daemonLogPath}`);
-  throw new Error(
-    `daemon did not become ready within 15s. Check that Postgres at ` +
-      `${process.env.PGHOST ?? 'host.docker.internal'}:${process.env.PGPORT ?? '5432'} ` +
-      `is reachable from the Daytona sandbox. Log tail:\n${log.stdout}`,
-  );
-}
 
 const client = new Daytona({
   apiKey:
@@ -104,6 +51,10 @@ const backend = await createDaytonaSandbox(client, {
     PGUSER: process.env.PGUSER ?? 'postgres',
     PGPASSWORD: process.env.PGPASSWORD ?? 'postgres',
   },
+  // Daytona boots the sandbox with its own init rather than the image CMD, so
+  // the daemon must be started explicitly; the factory returns only once it's
+  // ready.
+  readiness: startDaemon,
 });
 
 process.once(
@@ -121,8 +72,6 @@ if (prepare.exitCode !== 0) {
     prepare.stderr || `mkdir failed with exit code ${prepare.exitCode}`,
   );
 }
-
-await startDaemon(backend);
 
 // Per-tool-call filesystem-change tracking is composed onto the backend via
 // strace. Requires the runner image to bake in strace — re-run bootstrap.ts
