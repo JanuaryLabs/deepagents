@@ -90,8 +90,10 @@
     "demo/text2sql-daemon",
     "demo/docker-text2sql",
     "demo/daytona-text2sql",
+    "demo/microsandbox-text2sql",
     "demo/mcp",
-    "demo/zukhruf"
+    "demo/zukhruf-durable-turns",
+    "demo/zukhruf-research-bot"
   ],
   "nx": {
     "targets": {
