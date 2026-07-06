@@ -12,6 +12,8 @@
 
 - Always ask more questions using AskUserQuestionTool until you have enough context to give an accurate & confident answer.
 
+- **Reproduce first.** For any bug fix — even with a pre-diagnosed root cause — reproduce the failure live (a throwaway scratchpad script against the real CLI/API/library) before writing the red test or the fix. Reproduction confirms the diagnosis, yields real fixture payloads for tests, and surfaces adjacent breaks the diagnosis missed.
+
 ## Testing
 
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.

@@ -9,6 +9,7 @@ import {
   AppleContainerSandboxError,
   AppleContainerVolumePathError,
   type DisposableSandbox,
+  appleEngine,
   createAppleContainerSandbox,
   pkg,
   useAppleContainerSandbox,
@@ -112,6 +113,79 @@ describe('createAppleContainerSandbox validation', () => {
         ],
       }),
       AppleContainerVolumePathError,
+    );
+  });
+});
+
+/**
+ * `container inspect` output parsing — pure, runs everywhere. Fixtures are
+ * real captured stdout from the CLI: 1.0.0 (build ee848e3) nests the state
+ * inside a `status` object, while pre-1.0 returned a bare string.
+ */
+describe('appleEngine.parseStatus', () => {
+  const cli100Inspect = (state: string) =>
+    JSON.stringify([
+      {
+        configuration: { id: 'sandbox-abc12345' },
+        status: {
+          networks:
+            state === 'running'
+              ? [
+                  {
+                    hostname: 'sandbox-abc12345',
+                    ipv4Address: '192.168.64.33/24',
+                  },
+                ]
+              : [],
+          startedDate: '2026-07-06T13:57:44Z',
+          state,
+        },
+      },
+    ]);
+
+  it('parses a CLI 1.0.0 running container', () => {
+    assert.strictEqual(
+      appleEngine.parseStatus(cli100Inspect('running')),
+      'running',
+    );
+  });
+
+  it('parses a CLI 1.0.0 stopped container', () => {
+    assert.strictEqual(
+      appleEngine.parseStatus(cli100Inspect('stopped')),
+      'stopped',
+    );
+  });
+
+  it('parses the legacy pre-1.0 bare-string status', () => {
+    assert.strictEqual(
+      appleEngine.parseStatus('[{"status": "running"}]'),
+      'running',
+    );
+    assert.strictEqual(
+      appleEngine.parseStatus('[{"status": "booted"}]'),
+      'running',
+    );
+    assert.strictEqual(
+      appleEngine.parseStatus('[{"status": "stopped"}]'),
+      'stopped',
+    );
+  });
+
+  it('treats an empty inspect result as absent', () => {
+    assert.strictEqual(appleEngine.parseStatus('[]'), 'absent');
+    assert.strictEqual(appleEngine.parseStatus(''), 'absent');
+  });
+
+  it('fails loud on an unknown state, naming the actual state', () => {
+    assert.throws(
+      () => appleEngine.parseStatus(cli100Inspect('error')),
+      (thrown: unknown) => {
+        assert.ok(thrown instanceof AppleContainerSandboxError);
+        assert.match(thrown.message, /"error"/);
+        assert.doesNotMatch(thrown.message, /object object/i);
+        return true;
+      },
     );
   });
 });

@@ -187,12 +187,15 @@ function safeParseArray(stdout: string): unknown[] {
 }
 
 function readContainerStatus(entry: unknown): 'running' | 'stopped' {
+  // CLI 1.0.0 nests the state in a `status` object; pre-1.0 returned a bare
+  // string ("booted" was a pre-1.0 transient right after `run --detach`).
+  const raw = (entry as { status?: string | { state?: string } })?.status;
   const status = String(
-    (entry as Record<string, unknown>)?.status ?? '',
+    (typeof raw === 'object' && raw !== null ? raw.state : raw) ?? '',
   ).toLowerCase();
-  // "running" and the transient "booted" (right after `run --detach`) are up →
-  // attach. "stopped" is the only state `container start` accepts. Fail loud on
-  // anything else (error/exited/…) rather than attaching to a broken container.
+  // "running"/"booted" are up → attach. "stopped" is the only state
+  // `container start` accepts. Fail loud on anything else (error/exited/…)
+  // rather than attaching to a broken container.
   if (status === 'running' || status === 'booted') return 'running';
   if (status === 'stopped') return 'stopped';
   throw new AppleContainerSandboxError(
@@ -206,7 +209,7 @@ function readContainerStatus(entry: unknown): 'running' | 'stopped' {
  * micro-VM runtime: `--cwd`/`--env` exec flags, JSON `inspect` parsing,
  * virtiofs mounts, `apiserver`-down detection, and Apple error classes.
  */
-const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
+export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
   cli: CLI,
 
   runArgs(
