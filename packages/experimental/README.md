@@ -26,4 +26,8 @@ touches engines, sandboxes, and durability. See
 [`TODO.md`](./src/zukhruf/TODO.md) for the convergence plan, and
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
 
-A runnable end-to-end showcase lives in [`demo/zukhruf`](../../demo/zukhruf).
+Runnable end-to-end showcases live in
+[`demo/zukhruf-durable-turns`](../../demo/zukhruf-durable-turns) (the durable
+executor: enqueue, detach, resume, strict per-chat FIFO) and
+[`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (an agentic
+research bot: plan → web-search subagent → streamed report).

@@ -80,6 +80,9 @@ deepsearch.sqlite*
 zukhruf.sqlite*
 zukhruf.streams.sqlite*
 zukhruf.queue/
+zukhruf-research.sqlite*
+zukhruf-research.streams.sqlite*
+zukhruf-research.queue/
 animated-svg.sqlite*
 animated-svg.streams.sqlite*
 animated-svg.queue/

@@ -130,6 +130,7 @@ class Agent<CIn, COut = CIn> {
       ),
       toolChoice: this.#options.toolChoice,
       onStepFinish: (step) => {
+        if (!this.#options.logging) return;
         const toolCall = step.toolCalls.at(-1);
         if (toolCall) {
           console.log(
@@ -228,6 +229,7 @@ class Agent<CIn, COut = CIn> {
       experimental_context: contextVariables,
       toolChoice: this.#options.toolChoice,
       onStepFinish: (step) => {
+        if (!this.#options.logging) return;
         const toolCall = step.toolCalls.at(-1);
         if (toolCall) {
           console.log(

@@ -1,5 +1,5 @@
 {
-  "name": "@deepagents/demo-zukhruf",
+  "name": "@deepagents/demo-zukhruf-durable-turns",
   "version": "4.1.1",
   "private": true,
   "type": "module",

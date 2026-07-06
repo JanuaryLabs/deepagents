@@ -1,6 +1,6 @@
-# demo-zukhruf
+# demo-zukhruf-durable-turns
 
-A self-contained deployable unit for the `zukhruf` harness
+The **durable-turns** showcase for the `zukhruf` harness
 (`@deepagents/experimental/zukhruf`). The file layout _is_ the configuration:
 
 - `agent.ts` — the agent declaration (model + sandbox + instructions).
@@ -21,7 +21,7 @@ deployable unit; the runtime does not wire them yet.
 ## Run
 
 ```sh
-node demo/zukhruf/run.ts "List the numbers 1 through 5, one per line."
+node demo/zukhruf-durable-turns/run.ts "List the numbers 1 through 5, one per line."
 ```
 
 Requires Docker (the sandbox is a per-chat container) and `OPENAI_API_KEY`.

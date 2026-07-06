@@ -32,6 +32,7 @@ export async function streamWrite(response: StreamTextResult<ToolSet, never>) {
 function printChunk(
   chunk: InferUIMessageChunk<UIMessage<unknown, UIDataTypes, UITools>>,
   options: { reasoning: boolean; wrapInTags: boolean; text: boolean },
+  state: { reasoningOpen: boolean },
 ) {
   const {
     reasoning: includeReasoning,
@@ -39,14 +40,19 @@ function printChunk(
     text: includeText,
   } = options;
   if (includeReasoning) {
-    if (chunk.type === 'reasoning-start') {
-      process.stdout.write(`\n${wrapInTags ? '<reasoning>' : ''}\n`);
-    }
-    if (chunk.type === 'reasoning-delta') {
+    // Open the reasoning block lazily on the first non-empty delta, so models
+    // that emit an empty reasoning part (reasoning-start/end with no summary)
+    // don't print a hollow <reasoning></reasoning>.
+    if (chunk.type === 'reasoning-delta' && chunk.delta) {
+      if (!state.reasoningOpen) {
+        process.stdout.write(`\n${wrapInTags ? '<reasoning>' : ''}\n`);
+        state.reasoningOpen = true;
+      }
       process.stdout.write(chunk.delta);
     }
-    if (chunk.type === 'reasoning-end') {
+    if (chunk.type === 'reasoning-end' && state.reasoningOpen) {
       process.stdout.write(`\n${wrapInTags ? '</reasoning>' : ''}\n`);
+      state.reasoningOpen = false;
     }
   }
   if (includeText) {
@@ -72,12 +78,13 @@ export const printer = {
     const includeReasoning = options?.reasoning ?? true;
     const wrapInTags = options?.wrapInTags ?? true;
     const includeText = options?.text ?? true;
+    const state = { reasoningOpen: false };
     for await (const chunk of stream as any) {
-      printChunk(chunk, {
-        reasoning: includeReasoning,
-        wrapInTags,
-        text: includeText,
-      });
+      printChunk(
+        chunk,
+        { reasoning: includeReasoning, wrapInTags, text: includeText },
+        state,
+      );
     }
   },
   stdout: async (
@@ -87,12 +94,13 @@ export const printer = {
     const includeReasoning = options?.reasoning ?? true;
     const includeText = options?.text ?? true;
     const wrapInTags = options?.wrapInTags ?? true;
+    const state = { reasoningOpen: false };
     for await (const chunk of response.toUIMessageStream()) {
-      printChunk(chunk, {
-        reasoning: includeReasoning,
-        text: includeText,
-        wrapInTags,
-      });
+      printChunk(
+        chunk,
+        { reasoning: includeReasoning, text: includeText, wrapInTags },
+        state,
+      );
     }
     console.log(await response.totalUsage);
   },
