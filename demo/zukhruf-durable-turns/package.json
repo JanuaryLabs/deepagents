@@ -1,14 +1,14 @@
 {
   "name": "@deepagents/demo-zukhruf-durable-turns",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "private": true,
   "type": "module",
   "description": "Runnable showcase for the zukhruf durable background-agent harness (@deepagents/experimental/zukhruf): enqueue a turn, detach mid-stream, resume, and watch strict per-chat FIFO.",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.80",
-    "@deepagents/agent": "4.1.1",
-    "@deepagents/context": "4.1.1",
-    "@deepagents/experimental": "4.1.1",
+    "@deepagents/agent": "4.2.0",
+    "@deepagents/context": "4.2.0",
+    "@deepagents/experimental": "4.2.0",
     "@electric-sql/pglite": "^0.5.3",
     "pg-boss": "^12.24.1"
   }

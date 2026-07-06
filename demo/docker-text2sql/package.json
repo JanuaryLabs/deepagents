@@ -1,14 +1,14 @@
 {
   "name": "@deepagents/demo-docker-text2sql",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "private": true,
   "type": "module",
   "description": "Host entrypoint for the text2sql demo on a Docker sandbox. Boots the shared text2sql-daemon image.",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.80",
-    "@deepagents/agent": "4.1.1",
-    "@deepagents/context": "4.1.1",
-    "@deepagents/demo-text2sql-daemon": "4.1.1",
-    "@deepagents/text2sql": "4.1.1"
+    "@deepagents/agent": "4.2.0",
+    "@deepagents/context": "4.2.0",
+    "@deepagents/demo-text2sql-daemon": "4.2.0",
+    "@deepagents/text2sql": "4.2.0"
   }
 }
