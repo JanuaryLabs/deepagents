@@ -151,19 +151,18 @@ export function isAppleContainerfileOptions(
 
 function buildMountArg(volume: SandboxVolume): string {
   const readOnly = volume.readOnly !== false;
-  const parts =
-    volume.type === 'bind'
-      ? [
-          'type=bind',
-          `source=${volume.hostPath}`,
-          `target=${volume.containerPath}`,
-        ]
-      : [
-          // Named volumes mount as virtiofs; `container` has no `type=volume`.
-          'type=virtiofs',
-          `source=${volume.name}`,
-          `target=${volume.containerPath}`,
-        ];
+  if (volume.type === 'volume') {
+    // Named volumes use `-v name:path[:ro]` — the one syntax every CLI version
+    // accepts: pre-1.0 rejects `--mount type=volume` ("unknown mount type")
+    // and 1.0.0 rejects `type=virtiofs,source=<name>` (source became a host
+    // path). Pair with the `-v/--volume` flag, not `--mount`.
+    return `${volume.name}:${volume.containerPath}${readOnly ? ':ro' : ''}`;
+  }
+  const parts = [
+    'type=bind',
+    `source=${volume.hostPath}`,
+    `target=${volume.containerPath}`,
+  ];
   if (readOnly) {
     parts.push('readonly');
   }
@@ -237,7 +236,10 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
       args.push('--env', `${key}=${value}`);
     }
     for (const volume of opts.volumes ?? []) {
-      args.push('--mount', buildMountArg(volume));
+      args.push(
+        volume.type === 'volume' ? '--volume' : '--mount',
+        buildMountArg(volume),
+      );
     }
 
     args.push(image);
