@@ -70,7 +70,11 @@ describe('Full-Text Search', () => {
               lastMsgId = msg.id;
             }
 
-            await store.updateBranchHead(branch!.id, lastMsgId);
+            await store.updateBranchHead(
+              branch!.id,
+              lastMsgId,
+              branch!.headMessageId,
+            );
 
             // Wait for full-text index to populate (SQL Server FTS is async)
             await waitForFtsReady(container.connectionString);

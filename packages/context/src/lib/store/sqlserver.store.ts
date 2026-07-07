@@ -513,6 +513,24 @@ export class SqlServerContextStore extends ContextStore {
     });
   }
 
+  async setMessageParent(
+    messageId: string,
+    parentId: string | null,
+  ): Promise<void> {
+    if (parentId === messageId) {
+      throw new Error(`Message ${messageId} cannot be its own parent`);
+    }
+    const rows = await this.#query(
+      `UPDATE ${this.#t('messages')} SET parentId = @p0
+       OUTPUT INSERTED.id
+       WHERE id = @p1`,
+      [parentId, messageId],
+    );
+    if (rows.length === 0) {
+      throw new Error(`Message ${messageId} not found`);
+    }
+  }
+
   async getMessage(messageId: string): Promise<MessageData | undefined> {
     const rows = await this.#query<{
       id: string;
@@ -701,11 +719,16 @@ export class SqlServerContextStore extends ContextStore {
   async updateBranchHead(
     branchId: string,
     messageId: string | null,
-  ): Promise<void> {
-    await this.#query(
-      `UPDATE ${this.#t('branches')} SET headMessageId = @p0 WHERE id = @p1`,
-      [messageId, branchId],
+    expectedHeadMessageId: string | null,
+  ): Promise<boolean> {
+    const rows = await this.#query(
+      `UPDATE ${this.#t('branches')} SET headMessageId = @p0
+       OUTPUT INSERTED.id
+       WHERE id = @p1
+         AND (headMessageId = @p2 OR (headMessageId IS NULL AND @p2 IS NULL))`,
+      [messageId, branchId, expectedHeadMessageId],
     );
+    return rows.length > 0;
   }
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {

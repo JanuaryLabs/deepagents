@@ -437,7 +437,11 @@ describe('SQL Server ContextStore Integration', () => {
             createdAt: Date.now(),
           });
 
-          await store.updateBranchHead(branch.id, 'branch-msg-1');
+          await store.updateBranchHead(
+            branch.id,
+            'branch-msg-1',
+            branch.headMessageId,
+          );
 
           const messages = await store.getMessages('chat-active-branch');
           assert.strictEqual(messages.length, 1);
@@ -604,7 +608,11 @@ describe('SQL Server ContextStore Integration', () => {
           const branch = await store.getActiveBranch('chat-head-update');
           assert.ok(branch);
 
-          await store.updateBranchHead(branch.id, 'head-msg-1');
+          await store.updateBranchHead(
+            branch.id,
+            'head-msg-1',
+            branch.headMessageId,
+          );
 
           const updatedBranch = await store.getActiveBranch('chat-head-update');
           assert.strictEqual(updatedBranch?.headMessageId, 'head-msg-1');
@@ -646,7 +654,11 @@ describe('SQL Server ContextStore Integration', () => {
 
           const mainBranch = await store.getActiveBranch('chat-list-branches');
           assert.ok(mainBranch);
-          await store.updateBranchHead(mainBranch.id, 'list-msg-2');
+          await store.updateBranchHead(
+            mainBranch.id,
+            'list-msg-2',
+            mainBranch.headMessageId,
+          );
 
           // Create another branch with no messages
           await store.createBranch({
@@ -952,7 +964,11 @@ describe('SQL Server ContextStore Integration', () => {
             lastMsgId = msg.id;
           }
 
-          await store.updateBranchHead(branch!.id, lastMsgId);
+          await store.updateBranchHead(
+            branch!.id,
+            lastMsgId,
+            branch!.headMessageId,
+          );
 
           // Wait for full-text index to populate (SQL Server FTS is async)
           await waitForFtsReady(container.connectionString);
@@ -1196,7 +1212,11 @@ describe('SQL Server ContextStore Integration', () => {
 
           // Update branch head
           const branch = await store.getActiveBranch('chat-graph');
-          await store.updateBranchHead(branch!.id, 'graph-msg-2');
+          await store.updateBranchHead(
+            branch!.id,
+            'graph-msg-2',
+            branch!.headMessageId,
+          );
 
           // Add checkpoint
           await store.createCheckpoint({

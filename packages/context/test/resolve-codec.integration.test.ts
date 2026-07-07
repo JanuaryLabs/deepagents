@@ -122,7 +122,11 @@ describe('ContextEngine resolve/save with codec-backed messages', () => {
       data: { not: 'a-ui-message' },
       createdAt: Date.now(),
     });
-    await store.updateBranchHead(branch.id, 'invalid-msg-1');
+    await store.updateBranchHead(
+      branch.id,
+      'invalid-msg-1',
+      branch.headMessageId,
+    );
 
     const reader = new ContextEngine({
       store,

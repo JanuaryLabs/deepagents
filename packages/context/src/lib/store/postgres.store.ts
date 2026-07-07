@@ -429,6 +429,22 @@ export class PostgresContextStore extends ContextStore {
     });
   }
 
+  async setMessageParent(
+    messageId: string,
+    parentId: string | null,
+  ): Promise<void> {
+    if (parentId === messageId) {
+      throw new Error(`Message ${messageId} cannot be its own parent`);
+    }
+    const rows = await this.#query(
+      `UPDATE ${this.#t('messages')} SET parentId = $1 WHERE id = $2 RETURNING id`,
+      [parentId, messageId],
+    );
+    if (rows.length === 0) {
+      throw new Error(`Message ${messageId} not found`);
+    }
+  }
+
   async getMessage(messageId: string): Promise<MessageData | undefined> {
     const rows = await this.#query<{
       id: string;
@@ -607,11 +623,15 @@ export class PostgresContextStore extends ContextStore {
   async updateBranchHead(
     branchId: string,
     messageId: string | null,
-  ): Promise<void> {
-    await this.#query(
-      `UPDATE ${this.#t('branches')} SET headMessageId = $1 WHERE id = $2`,
-      [messageId, branchId],
+    expectedHeadMessageId: string | null,
+  ): Promise<boolean> {
+    const rows = await this.#query(
+      `UPDATE ${this.#t('branches')} SET headMessageId = $1
+       WHERE id = $2 AND headMessageId IS NOT DISTINCT FROM $3
+       RETURNING id`,
+      [messageId, branchId, expectedHeadMessageId],
     );
+    return rows.length > 0;
   }
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {

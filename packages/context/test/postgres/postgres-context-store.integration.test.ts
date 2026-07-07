@@ -436,7 +436,11 @@ describe('PostgreSQL ContextStore Integration', () => {
             createdAt: Date.now(),
           });
 
-          await store.updateBranchHead(branch.id, 'branch-msg-1');
+          await store.updateBranchHead(
+            branch.id,
+            'branch-msg-1',
+            branch.headMessageId,
+          );
 
           const messages = await store.getMessages('chat-active-branch');
           assert.strictEqual(messages.length, 1);
@@ -603,7 +607,11 @@ describe('PostgreSQL ContextStore Integration', () => {
           const branch = await store.getActiveBranch('chat-head-update');
           assert.ok(branch);
 
-          await store.updateBranchHead(branch.id, 'head-msg-1');
+          await store.updateBranchHead(
+            branch.id,
+            'head-msg-1',
+            branch.headMessageId,
+          );
 
           const updatedBranch = await store.getActiveBranch('chat-head-update');
           assert.strictEqual(updatedBranch?.headMessageId, 'head-msg-1');
@@ -645,7 +653,11 @@ describe('PostgreSQL ContextStore Integration', () => {
 
           const mainBranch = await store.getActiveBranch('chat-list-branches');
           assert.ok(mainBranch);
-          await store.updateBranchHead(mainBranch.id, 'list-msg-2');
+          await store.updateBranchHead(
+            mainBranch.id,
+            'list-msg-2',
+            mainBranch.headMessageId,
+          );
 
           // Create another branch with no messages
           await store.createBranch({
@@ -935,7 +947,11 @@ describe('PostgreSQL ContextStore Integration', () => {
           });
 
           const branch = await store.getActiveBranch('chat-graph');
-          await store.updateBranchHead(branch!.id, 'graph-msg-2');
+          await store.updateBranchHead(
+            branch!.id,
+            'graph-msg-2',
+            branch!.headMessageId,
+          );
 
           await store.createCheckpoint({
             id: 'graph-cp-1',

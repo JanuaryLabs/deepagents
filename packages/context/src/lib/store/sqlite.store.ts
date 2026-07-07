@@ -394,6 +394,21 @@ export class SqliteContextStore extends ContextStore {
     });
   }
 
+  async setMessageParent(
+    messageId: string,
+    parentId: string | null,
+  ): Promise<void> {
+    if (parentId === messageId) {
+      throw new Error(`Message ${messageId} cannot be its own parent`);
+    }
+    const result = this.#stmt(
+      'UPDATE messages SET parentId = ? WHERE id = ?',
+    ).run(parentId, messageId);
+    if (result.changes === 0) {
+      throw new Error(`Message ${messageId} not found`);
+    }
+  }
+
   async getMessage(messageId: string): Promise<MessageData | undefined> {
     const row = this.#stmt('SELECT * FROM messages WHERE id = ?').get(
       messageId,
@@ -577,11 +592,12 @@ export class SqliteContextStore extends ContextStore {
   async updateBranchHead(
     branchId: string,
     messageId: string | null,
-  ): Promise<void> {
-    this.#stmt('UPDATE branches SET headMessageId = ? WHERE id = ?').run(
-      messageId,
-      branchId,
-    );
+    expectedHeadMessageId: string | null,
+  ): Promise<boolean> {
+    const result = this.#stmt(
+      'UPDATE branches SET headMessageId = ? WHERE id = ? AND headMessageId IS ?',
+    ).run(messageId, branchId, expectedHeadMessageId);
+    return result.changes > 0;
   }
 
   async listBranches(chatId: string): Promise<BranchInfo[]> {

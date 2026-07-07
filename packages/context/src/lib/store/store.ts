@@ -320,6 +320,18 @@ export abstract class ContextStore {
    */
   abstract hasChildren(messageId: string): Promise<boolean>;
 
+  /**
+   * Re-parent a message onto a new parent. Used by the save pipeline to graft
+   * a turn that lost a head race onto the winning head — message upserts
+   * deliberately never touch `parentId`, so this is the only mutation path.
+   *
+   * @throws Error if the message doesn't exist
+   */
+  abstract setMessageParent(
+    messageId: string,
+    parentId: string | null,
+  ): Promise<void>;
+
   // ==========================================================================
   // Branch Operations
   // ==========================================================================
@@ -348,12 +360,20 @@ export abstract class ContextStore {
   abstract setActiveBranch(chatId: string, branchId: string): Promise<void>;
 
   /**
-   * Update a branch's head message.
+   * Atomically advance a branch's head message, but only if the branch's
+   * current head still equals `expectedHeadMessageId` (compare-and-swap).
+   *
+   * Concurrent writers each commit through this CAS so a stale writer can
+   * never rewind the head and silently orphan another writer's turn. Callers
+   * that lose the race re-read the branch and reconcile (see SavePipeline).
+   *
+   * @returns true if the head was updated, false if the expectation failed
    */
   abstract updateBranchHead(
     branchId: string,
     messageId: string | null,
-  ): Promise<void>;
+    expectedHeadMessageId: string | null,
+  ): Promise<boolean>;
 
   /**
    * List all branches for a chat.

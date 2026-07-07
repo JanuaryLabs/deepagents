@@ -55,7 +55,11 @@ describe('Full-Text Search', () => {
             lastMsgId = msg.id;
           }
 
-          await store.updateBranchHead(branch!.id, lastMsgId);
+          await store.updateBranchHead(
+            branch!.id,
+            lastMsgId,
+            branch!.headMessageId,
+          );
 
           const results = await store.searchMessages(
             'chat-search',

@@ -64,6 +64,7 @@ import { extractPlainText } from './text.ts';
 import { requireUIMessage, requireUserUIMessage } from './ui-message-guards.ts';
 
 export type { SaveResult } from './save/save-pipeline.ts';
+export { HeadConflictError } from './save/save-pipeline.ts';
 
 /**
  * Result of resolving context - ready for AI SDK consumption.
@@ -1063,12 +1064,32 @@ export class ContextEngine {
         id: this.#activeBranch.id,
         headMessageId: this.#activeBranch.headMessageId,
       }),
-      commitHead: async (headMessageId: string) => {
-        await this.#store.updateBranchHead(
+      commitHead: async (
+        headMessageId: string,
+        expectedHeadMessageId: string | null,
+      ) => {
+        const committed = await this.#store.updateBranchHead(
           this.#activeBranch.id,
           headMessageId,
+          expectedHeadMessageId,
         );
-        this.#activeBranch.headMessageId = headMessageId;
+        if (committed) {
+          this.#activeBranch.headMessageId = headMessageId;
+        }
+        return committed;
+      },
+      refreshBranch: async () => {
+        const fresh = await this.#store.getBranch(
+          this.#chatId,
+          this.#activeBranch.name,
+        );
+        if (!fresh) {
+          throw new Error(
+            `Branch "${this.#activeBranch.name}" not found for chat "${this.#chatId}"`,
+          );
+        }
+        this.#branch = fresh;
+        return { id: fresh.id, headMessageId: fresh.headMessageId };
       },
       rewindForUpdate: (parentId: string) => this.#rewindForUpdate(parentId),
     };
@@ -1190,8 +1211,14 @@ export class ContextEngine {
    *
    * @example
    * ```ts
-   * context.set(user('What is 2 + 2?', { id: 'q1' }));
-   * context.set(assistant('The answer is 5.', { id: 'wrong' })); // Oops!
+   * context.set(
+   *   user({
+   *     id: 'q1',
+   *     role: 'user',
+   *     parts: [{ type: 'text', text: 'What is 2 + 2?' }],
+   *   }),
+   * );
+   * context.set(assistantText('The answer is 5.', { id: 'wrong' })); // Oops!
    * await context.save();
    *
    * // Rewind to the question, creates new branch
