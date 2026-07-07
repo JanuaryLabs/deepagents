@@ -84,7 +84,8 @@ docker plugin enable rclone
 ```bash
 docker volume create agent-storage -d rclone \
   -o remote=gcs:YOUR_BUCKET \
-  -o vfs-cache-mode=writes
+  -o vfs-cache-mode=writes \
+  -o vfs-write-back=1s
 ```
 
 The bucket-to-volume mapping is decided here, so both isolation models fall out of how you create volumes — no DeepAgents change:
@@ -184,7 +185,7 @@ await sandbox.executeCommand('echo "result" > /workspace/storage/output.txt');
 
 ## Things to know
 
-- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously (after `--vfs-write-back`, default `5s`, plus a flush on unmount). Don't assume an object is in the bucket the instant a file is closed. Lower `vfs-write-back` for faster uploads.
+- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, writes land in a local cache and upload asynchronously — only after the file is closed, plus `--vfs-write-back` (rclone default `5s`; the volume above uses `1s`), with a final flush on unmount. The upload is async even at `0s`, so a reader on the GCS side must poll for the object or read through the mount. A low `vfs-write-back` costs extra uploads when the same file is re-written rapidly (no coalescing) — fine for whole-file create-and-close writes.
 - **One app process targets one daemon.** DeepAgents resolves the daemon globally per `docker` invocation, so a single app process sends all sandboxes to whichever VM the context points at. To spread sandboxes across multiple VMs, run one app instance per VM, each with its own `DOCKER_CONTEXT`.
 - **This is FUSE over object storage.** Tools that do in-place random writes can misbehave; whole-file create-and-close writes are the reliable pattern.
 - **No GCS coupling in the library.** `@deepagents/context` never learns about GCS, rclone, or credentials — it only attaches ordinary Docker storage primitives (named volumes or bind mounts). The same recipe works for any rclone backend (S3, Azure, SFTP) by changing the `remote`.

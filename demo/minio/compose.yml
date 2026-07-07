@@ -55,3 +55,4 @@ volumes:
       s3_endpoint: '${MINIO_ENDPOINT:-http://host.docker.internal:9000}'
       path: ${MINIO_BUCKET:-agent-storage}
       vfs_cache_mode: writes
+      vfs_write_back: 1s
