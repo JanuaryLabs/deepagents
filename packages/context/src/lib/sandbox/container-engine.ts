@@ -144,7 +144,6 @@ export interface ContainerEngine<
     options?: { cwd?: string; env?: Record<string, string> },
   ): string[];
   inspectArgs(containerId: string): string[];
-  mountArg(volume: SandboxVolume): string;
   parseStatus(status: string): 'running' | 'stopped' | 'absent';
   volumeCreateArgs(volume: SandboxNamedVolume): string[];
   errorMessage(error: unknown): string;

@@ -467,8 +467,6 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
     ];
   },
 
-  mountArg: dockerMountArg,
-
   parseStatus(status: string): 'running' | 'stopped' | 'absent' {
     return status === 'running' ? 'running' : 'stopped';
   },

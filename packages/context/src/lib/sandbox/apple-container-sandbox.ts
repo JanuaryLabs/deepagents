@@ -271,8 +271,6 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
     return ['inspect', containerId];
   },
 
-  mountArg: buildMountArg,
-
   parseStatus(stdout) {
     const entries = safeParseArray(stdout);
     if (entries.length === 0) return 'absent';
