@@ -551,7 +551,10 @@ describe('ContextEngine conditional reminders', () => {
 
     assert.strictEqual(parts.length, 2, 'Expected 2 text parts');
     assert.strictEqual(parts[0], 'hello');
-    assert.strictEqual(parts[1], 'part-hint');
+    assert.strictEqual(
+      parts[1],
+      '<system-reminder>part-hint</system-reminder>',
+    );
   });
 
   it('skips conditional reminder when callback returns empty string', async () => {

@@ -494,12 +494,13 @@ describe('Text2Sql user-constructed chat', () => {
 
   it('accepts MessageFragment with reminders and persists reminder metadata', async () => {
     const { store, adapters, cache, engine, model } = await setup();
-    const fragment = user(
-      'How many users are there?',
-      reminder('Always explain your SQL before writing it'),
-    );
+    const fragment = user('How many users are there?');
 
-    engine.set(...instructions(), ...(await indexFragments(adapters, cache)));
+    engine.set(
+      reminder('Always explain your SQL before writing it'),
+      ...instructions(),
+      ...(await indexFragments(adapters, cache)),
+    );
     const ai = agent({
       name: 'text2sql',
       sandbox,

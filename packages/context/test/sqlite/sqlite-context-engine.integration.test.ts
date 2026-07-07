@@ -675,7 +675,7 @@ describe('Sqlite ContextEngine Integration', () => {
         message.parts.map((part) =>
           part.type === 'text' ? part.text : part.type,
         ),
-        [`body${taggedReminder('inline')}`, 'part-reminder'],
+        [`body${taggedReminder('inline')}`, taggedReminder('part-reminder')],
       );
       assert.strictEqual(message.metadata?.reminders?.length, 2);
 

@@ -206,7 +206,10 @@ describe('ContextEngine.inspect()', () => {
       };
     };
     assert.strictEqual(persistedData.parts?.[0]?.text, 'payload');
-    assert.strictEqual(persistedData.parts?.[1]?.text, 'tooltip-reminder');
+    assert.strictEqual(
+      persistedData.parts?.[1]?.text,
+      '<system-reminder>tooltip-reminder</system-reminder>',
+    );
     assert.strictEqual(
       persistedData.metadata?.reminders?.[0]?.text,
       'tooltip-reminder',
