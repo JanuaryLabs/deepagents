@@ -365,6 +365,72 @@ describe('chat() title generation', () => {
       { type: 'data-chat-title', data: 'Stream Title' },
     );
   });
+
+  it('does not leak a title-only assistant into the prompt when the first turn fails', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'failed-first-turn-chat',
+      userId: 'test-user',
+    });
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [
+          { type: 'text' as const, text: JSON.stringify({ title: 'Doomed' }) },
+        ],
+        finishReason: { unified: 'stop' as const, raw: '' },
+        usage: testUsage,
+        warnings: [],
+      }),
+      doStream: async () => {
+        throw new Error('model unavailable');
+      },
+    });
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+
+    await context.continue(userMessage('hello?'));
+    const stream = await chat(chatAgent, { generateTitle: true });
+    await drain(stream).catch(() => {});
+
+    const messages = await context.getMessages();
+    assert.deepStrictEqual(
+      messages.map((message) => message.role),
+      ['user'],
+      `failed turn must not leak an assistant into the prompt: ${JSON.stringify(messages)}`,
+    );
+  });
+
+  it('delivers the title only on the stream, never into the persisted chain', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'transient-title-chat',
+      userId: 'test-user',
+    });
+    const model = createMockModelWithTitle('Response', 'Transient Title');
+    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+
+    await context.continue(userMessage('test'));
+    const stream = await chat(chatAgent, { generateTitle: true });
+    await drain(stream);
+
+    const branch = await store.getActiveBranch('transient-title-chat');
+    assert.ok(branch?.headMessageId);
+    const chain = await store.getMessageChain(branch.headMessageId);
+    const persistedAssistant = chain.find(
+      (entry: { name: string }) => entry.name === 'assistant',
+    );
+    assert.ok(persistedAssistant);
+    const { parts } = persistedAssistant.data as UIMessage;
+    assert.deepStrictEqual(
+      parts.filter((part) => part.type === 'data-chat-title'),
+      [],
+      `title must not persist into the chain: ${JSON.stringify(parts)}`,
+    );
+
+    const conversation = await store.getChat('transient-title-chat');
+    assert.strictEqual(conversation?.title, 'Transient Title');
+  });
 });
 
 function createChunkedStream(chunks: UIMessageChunk[]): ReadableStream {

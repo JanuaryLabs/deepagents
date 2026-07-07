@@ -155,7 +155,7 @@ export async function chat<CIn>(
     execute: async ({ writer }) => {
       writer.merge(uiStream);
       if (title) {
-        writer.write({ type: 'data-chat-title', data: title });
+        writer.write({ type: 'data-chat-title', data: title, transient: true });
       }
     },
   });
