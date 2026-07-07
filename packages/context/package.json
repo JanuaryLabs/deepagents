@@ -62,8 +62,7 @@
     "tiny-tfidf": "^1.0.0",
     "yaml": "^2.8.0",
     "zod": "^3.25.76 || ^4.0.0",
-    "@ai-sdk/openai": "^3.0.80",
-    "@deepagents/test": "0.15.0"
+    "@ai-sdk/openai": "^3.0.80"
   },
   "devDependencies": {
     "@daytona/sdk": "^0.175.0",

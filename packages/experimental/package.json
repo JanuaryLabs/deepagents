@@ -40,11 +40,11 @@
     "@deepagents/context": "4.2.0",
     "ai": "^6.0.218",
     "pg-boss": "^12.24.1",
-    "uuid": "^13.0.2"
+    "uuid": "^13.0.2",
+    "just-bash": "^3.0.1"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.13",
-    "@deepagents/test": "0.15.0",
     "@electric-sql/pglite": "^0.5.3",
     "just-bash": "^3.0.1",
     "zod": "^3.25.76 || ^4.0.0"
