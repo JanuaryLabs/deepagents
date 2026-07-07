@@ -8,7 +8,11 @@
       "!{projectRoot}/eslint.config.mjs",
       "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
       "!{projectRoot}/tsconfig.spec.json",
-      "!{projectRoot}/src/test-setup.[jt]s"
+      "!{projectRoot}/src/test-setup.[jt]s",
+      "!{projectRoot}/test/**",
+      "!{projectRoot}/tests/**",
+      "!{projectRoot}/**/*.eval.[jt]s?(x)",
+      "!{projectRoot}/src/evals/**"
     ],
     "sharedGlobals": []
   },
@@ -101,7 +105,8 @@
       "inputs": ["production", "^production"]
     },
     "build": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"]
     },
     "dev": {
       "dependsOn": ["^build"]

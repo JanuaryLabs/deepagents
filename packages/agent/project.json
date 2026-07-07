@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/agent/src",
   "projectType": "library",
-  "tags": [],
+  "tags": ["scope:public"],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",

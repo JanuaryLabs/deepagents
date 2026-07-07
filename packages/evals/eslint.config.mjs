@@ -11,6 +11,12 @@ export default [
           ignoredFiles: [
             '{projectRoot}/eslint.config.{js,cjs,mjs}',
             '{projectRoot}/esbuild.config.{js,ts,mjs,mts}',
+            '{projectRoot}/**/*.eval.{js,jsx,ts,tsx}',
+            '{projectRoot}/**/*.test.{js,jsx,ts,tsx}',
+            '{projectRoot}/**/*.spec.{js,jsx,ts,tsx}',
+            '{projectRoot}/src/evals/**/*.{js,jsx,ts,tsx}',
+            '{projectRoot}/test/**/*.{js,jsx,ts,tsx}',
+            '{projectRoot}/tests/**/*.{js,jsx,ts,tsx}',
           ],
         },
       ],

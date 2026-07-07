@@ -1,4 +1,48 @@
 import nx from '@nx/eslint-plugin';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const packagesDir = join(import.meta.dirname, 'packages');
+const privatePackages = [];
+for (const dir of readdirSync(packagesDir)) {
+  const packageJsonPath = join(packagesDir, dir, 'package.json');
+  if (!existsSync(packageJsonPath)) continue;
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  if (packageJson.private) privatePackages.push(packageJson.name);
+
+  const projectJsonPath = join(packagesDir, dir, 'project.json');
+  const tags = existsSync(projectJsonPath)
+    ? (JSON.parse(readFileSync(projectJsonPath, 'utf8')).tags ?? [])
+    : (packageJson.nx?.tags ?? []);
+  const expectedTag = packageJson.private ? 'scope:private' : 'scope:public';
+  if (!tags.includes(expectedTag)) {
+    throw new Error(
+      `packages/${dir} must be tagged "${expectedTag}" to match the "private" flag in its package.json (module-boundary constraints depend on it).`,
+    );
+  }
+}
+
+/**
+ * Shared package.json dependency validation for publishable packages.
+ * The checked file set is the build target's `production` inputs (nx.json),
+ * which already excludes test and eval files. Private workspace packages
+ * (resolved via workspace symlinks) must never be written into a
+ * package.json, so the fixer is told to ignore them.
+ */
+export const packageJsonDependencyChecks = {
+  files: ['**/*.json'],
+  rules: {
+    '@nx/dependency-checks': [
+      'error',
+      {
+        ignoredDependencies: privatePackages,
+      },
+    ],
+  },
+  languageOptions: {
+    parser: await import('jsonc-eslint-parser'),
+  },
+};
 
 export default [
   ...nx.configs['flat/base'],
@@ -27,6 +71,10 @@ export default [
             {
               sourceTag: '*',
               onlyDependOnLibsWithTags: ['*'],
+            },
+            {
+              sourceTag: 'scope:public',
+              onlyDependOnLibsWithTags: ['scope:public'],
             },
           ],
         },
