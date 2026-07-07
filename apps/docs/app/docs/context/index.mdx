@@ -10,8 +10,8 @@ costs. It is the foundation layer that other DeepAgents packages build upon.
 
 It also ships the sandbox layer used by the rest of the repo: direct virtual
 execution, Docker containers, Apple Container lightweight VMs, Agent OS
-backends, per-command file-change tracking, and the shared bash tool wrapper for
-agents.
+backends, Microsandbox microVMs, per-command file-change tracking, and the
+shared bash tool wrapper for agents.
 
 ## The Problem with Ad-Hoc Context
 
@@ -67,7 +67,7 @@ The `resolve()` method automatically:
 | Fragment Serialization | `fromFragment()`, `toFragment()`, `encodeSerializedValue()` for storing non-message fragments as JSON |
 | Multiple Renderers          | XML, Markdown, TOML, TOON formats for different models and use cases                            |
 | Persistence                 | SQLite and in-memory stores for conversation history                                            |
-| Sandbox Tooling             | `createBashTool()`, `createVirtualSandbox()`, `createDockerSandbox()`, `createAppleContainerSandbox()`, and real command execution backends |
+| Sandbox Tooling             | `createBashTool()`, `createVirtualSandbox()`, `createDockerSandbox()`, `createAppleContainerSandbox()`, `createMicrosandboxSandbox()`, and real command execution backends |
 | Cost Estimation             | Token counting and pricing via models.dev for 1000+ models                                      |
 | AI SDK Integration          | `resolve()` returns `systemPrompt` + `messages` ready for `generateText()`                      |
 
@@ -138,6 +138,6 @@ const domainContext = new ContextEngine({ store }).set(
 - [Architecture](/docs/context/architecture-core-concepts) - Deep-dive into package design
 - [Fragments](/docs/context/fragments) - Fragment types and composition
 - [Fragment Serialization](/docs/context/fragment-serialization) - Store non-message fragments in your own database
-- [Sandbox](/docs/context/sandbox) - Execute commands through virtual, Docker, Apple Container, or Agent OS backends
+- [Sandbox](/docs/context/sandbox) - Execute commands through virtual, Docker, Apple Container, Microsandbox, or Agent OS backends
 - [Renderers Overview](/docs/context/renderers-overview) - Choosing the right output format
 - [Recipes](/docs/context/recipes) - Real-world integration patterns

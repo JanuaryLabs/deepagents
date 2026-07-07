@@ -1,15 +1,16 @@
 ---
 title: Sandbox
-description: Execute real sandbox commands across Docker, Apple Container, Daytona, WASM, virtual, and custom backends
+description: Execute real sandbox commands across Docker, Apple Container, Microsandbox, Daytona, WASM, virtual, and custom backends
 ---
 
 The sandbox system lets AI agents execute real commands in isolated
 environments. Choose between Docker containers for portable full binary
 execution, Apple Container lightweight VMs for stronger local isolation on
-Apple silicon, caller-owned Daytona sandboxes for managed remote workspaces,
-WASM virtual machines for lightweight in-process execution, virtual file
-systems for simulation, custom `Sandbox` implementations for specialized
-policy, or binary bridges to combine approaches.
+Apple silicon, Microsandbox microVMs for local hardware-isolated OCI images,
+caller-owned Daytona sandboxes for managed remote workspaces, WASM virtual
+machines for lightweight in-process execution, virtual file systems for
+simulation, custom `Sandbox` implementations for specialized policy, or binary
+bridges to combine approaches.
 
 ## When to Use What
 
@@ -19,6 +20,8 @@ policy, or binary bridges to combine approaches.
 | `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
 | `createAppleContainerSandbox` + `createBashTool` | Agent needs real binaries in Apple Container lightweight VMs | No |
 | `createAppleContainerSandbox` | Direct VM-backed container control on Apple silicon/macOS 26+ | No |
+| `createMicrosandboxSandbox` + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output | No |
+| `createMicrosandboxSandbox` | Direct local microVM control with get-or-create named sandboxes | No |
 | `createDaytonaSandbox(client, options)` + `createBashTool` | Managed remote sandbox with caller-owned Daytona client | No |
 | `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
 | `createVirtualSandbox` | In-process bash with a virtual filesystem | No |
@@ -26,16 +29,18 @@ policy, or binary bridges to combine approaches.
 
 All AI-agent-facing surfaces compose the same way: pick a backend factory
 (`createDockerSandbox` / `createAppleContainerSandbox` /
-`createDaytonaSandbox` / `createAgentOsSandbox` / `createVirtualSandbox`), then
-wrap it with `createBashTool({ sandbox })` to get the bash tool, file tools, and
-skills upload. For per-command file-change tracking, first decorate a real
-backend with `withStraceFileChanges(...)`, then pass that tracked backend into
+`createMicrosandboxSandbox` / `createDaytonaSandbox` /
+`createAgentOsSandbox` / `createVirtualSandbox`), then wrap it with
+`createBashTool({ sandbox })` to get the bash tool, file tools, and skills
+upload. For per-command file-change tracking, first decorate a real backend
+with `withStraceFileChanges(...)`, then pass that tracked backend into
 `createBashTool`.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
-including Docker, Apple Container, Agent OS, and Daytona sandboxes, additionally
-expose an optional `spawn(command, options?)` for live streaming stdio.
+including Docker, Apple Container, Microsandbox, Agent OS, and Daytona
+sandboxes, additionally expose an optional `spawn(command, options?)` for live
+streaming stdio.
 Feature-detect it with `if (!sandbox.spawn) { ... }` when writing
 backend-agnostic code.
 

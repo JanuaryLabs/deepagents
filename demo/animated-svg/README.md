@@ -22,16 +22,17 @@ Because it now runs on the runtime, the turn is durable and resumable for free
 that.
 
 The one deviation from the original is the model: it uses
-`groq('openai/gpt-oss-20b')` instead of the original's `qwen/qwen3-32b`, which is
-a reasoning model that tends to spend the whole turn reasoning and never emit the
-`save_svg` tool call. The model is just a declaration input — swap it freely.
+`openrouter('deepseek/deepseek-v4-flash')` instead of the original's
+`qwen/qwen3-32b`, which is a reasoning model that tends to spend the whole turn
+reasoning and never emit the `save_svg` tool call. The model is just a
+declaration input — swap it freely.
 
 ## Run
 
 ```sh
-GROQ_API_KEY=… node demo/animated-svg/run.ts
+OPENROUTER_API_KEY=... node demo/animated-svg/run.ts
 # or with your own prompt:
-GROQ_API_KEY=… node demo/animated-svg/run.ts "an animated loading spinner in blue"
+OPENROUTER_API_KEY=... node demo/animated-svg/run.ts "an animated loading spinner in blue"
 ```
 
 The agent calls `save_svg`, which writes `animated_svg_output.svg` to the

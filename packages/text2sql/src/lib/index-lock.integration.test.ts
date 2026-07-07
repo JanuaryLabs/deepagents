@@ -7,6 +7,7 @@ import { after, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
+  type Adapter,
   AdapterIndexer,
   FileIndexCache,
   FileIndexLock,
@@ -45,12 +46,12 @@ class KeyMutexLock implements IndexLock {
   }
 }
 
-function countIntrospections(adapter: { introspect: Function }): {
+function countIntrospections(adapter: Pick<Adapter, 'introspect'>): {
   count: () => number;
 } {
   let count = 0;
   const original = adapter.introspect.bind(adapter);
-  adapter.introspect = async (ctx?: unknown) => {
+  adapter.introspect = async (ctx) => {
     count += 1;
     await sleep(50);
     return original(ctx);
