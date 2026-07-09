@@ -1,14 +1,14 @@
 {
   "name": "@deepagents/demo-zukhruf-research-bot",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "private": true,
   "type": "module",
   "description": "Agentic research bot on the zukhruf durable background-agent harness: a root agent plans web searches, fans out to a research subagent (OpenAI web_search), and streams a detailed report — surviving a mid-stream detach and resume.",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.80",
-    "@deepagents/agent": "4.2.1",
-    "@deepagents/context": "4.2.1",
-    "@deepagents/experimental": "4.2.1",
+    "@deepagents/agent": "4.3.0",
+    "@deepagents/context": "4.3.0",
+    "@deepagents/experimental": "4.3.0",
     "@electric-sql/pglite": "^0.5.3",
     "ai": "^6.0.218",
     "just-bash": "^3.0.1",

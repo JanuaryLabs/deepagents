@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/demo-text2sql-daemon",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "private": true,
   "type": "module",
   "description": "Text2sql daemon + sql shim baked into the demo sandbox image (image-only, referenced by path), plus ./host — the host-side supervision entry the backend demos import.",
@@ -8,8 +8,8 @@
     "./host": "./host.ts"
   },
   "dependencies": {
-    "@deepagents/context": "4.2.1",
-    "@deepagents/text2sql": "4.2.1",
+    "@deepagents/context": "4.3.0",
+    "@deepagents/text2sql": "4.3.0",
     "@hono/node-server": "^1.19.5",
     "cac": "^6.7.14",
     "hono": "^4.12.3",
