@@ -32,6 +32,7 @@ interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
+  executingTool?: { name: string; input: unknown; output: unknown };
   firedOnceIds?: ReadonlySet<string>;
   onceCollector?: Set<string>;
 }
@@ -51,10 +52,11 @@ interface WhenContext {
 | `messageCount` | Total message count across all roles |
 | `lastAssistantMessage` | The last persisted assistant `UIMessage` |
 | `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()` |
+| `executingTool` | The live tool call being wrapped during `target: 'tool-output'` evaluation; undefined for user and steer reminders |
 | `firedOnceIds` | Ids already latched by `once()` this conversation (steer + user); populated by the engine |
 | `onceCollector` | Per-evaluation buffer `once()` appends to; the engine commits it only if the reminder fires |
 
-`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
+`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. `executingTool` is the only field that describes a tool call still in flight; `lastAssistantMessage` and `lastAssistantMessages` only describe already-persisted assistant history. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
 
 ## Turn-Based Predicates
 
@@ -181,7 +183,7 @@ Use either `eq` or a `gte`/`lte` range. `eq` cannot be combined with range bound
 
 ## Tool-Based Predicates
 
-These predicates inspect tool parts on `lastAssistantMessage`.
+These predicates inspect tool parts on `lastAssistantMessage`, so they describe completed tool calls that are already in the conversation history. For `target: 'tool-output'` reminders that need to gate on the live tool call being wrapped, read `ctx.executingTool` directly in a custom predicate.
 
 ### toolCalled(name)
 

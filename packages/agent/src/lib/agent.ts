@@ -265,10 +265,17 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
           if (props?.outputExtractor) {
             return await props.outputExtractor(result);
           }
-          return result.steps.map((it) => it.toolResults).flat();
+          return result.text;
         } catch (error) {
+          // Cancellation is control flow, not a tool failure: surfacing it as a
+          // tool result would let the parent model keep reasoning past an abort.
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw error;
+          }
           console.error(error);
-          return `An error thrown from a tool call. \n<ErrorDetails>\n${JSON.stringify(error)}\n</ErrorDetails>`;
+          const details =
+            error instanceof Error ? error.message : JSON.stringify(error);
+          return `An error thrown from a tool call. \n<ErrorDetails>\n${details}\n</ErrorDetails>`;
         }
       },
     });

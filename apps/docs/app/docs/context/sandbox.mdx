@@ -20,7 +20,7 @@ bridges to combine approaches.
 | `createDockerSandbox` | Direct container control without AI agent wiring | Yes |
 | `createAppleContainerSandbox` + `createBashTool` | Agent needs real binaries in Apple Container lightweight VMs | No |
 | `createAppleContainerSandbox` | Direct VM-backed container control on Apple silicon/macOS 26+ | No |
-| `createMicrosandboxSandbox` + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output | No |
+| [`createMicrosandboxSandbox`](/docs/context/microsandbox-sandbox) + `createBashTool` | Agent needs OCI images in local microVMs with streaming process output | No |
 | `createMicrosandboxSandbox` | Direct local microVM control with get-or-create named sandboxes | No |
 | `createDaytonaSandbox(client, options)` + `createBashTool` | Managed remote sandbox with caller-owned Daytona client | No |
 | `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
@@ -379,6 +379,7 @@ await createBashTool({
 
 - [Docker Sandbox](/docs/context/docker-sandbox) - Three strategies for container creation
 - [Apple Container Sandbox](/docs/context/apple-container-sandbox) - Per-container lightweight VMs on Apple silicon
+- [Microsandbox Sandbox](/docs/context/microsandbox-sandbox) - OCI images in local microVMs
 - [Agent OS Sandbox](/docs/context/agent-os-sandbox) - WASM-based execution without Docker
 - [Subcommand Builders](/docs/context/subcommand) - Build just-bash command groups with dispatch and repair helpers
 - [Architecture: Sandbox](/docs/context/architecture-sandbox) - Strategy pattern and internals

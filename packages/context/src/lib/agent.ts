@@ -1,3 +1,4 @@
+import type { JSONObject } from '@ai-sdk/provider';
 import {
   type FlexibleSchema,
   type GenerateTextResult,
@@ -43,9 +44,19 @@ import {
 import { createRepairToolCall } from './repair.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 
-export type OutputExtractorFn = (
+/** Input schema shape accepted by the tool `asTool()` produces. */
+export interface SubagentToolInput {
+  input: string;
+  output?: string;
+}
+
+type SubagentExecuteOptions = Parameters<
+  NonNullable<Tool<SubagentToolInput, string>['execute']>
+>[1];
+
+export type OutputExtractorFn<T = string> = (
   output: GenerateTextResult<ToolSet, any>,
-) => string | Promise<string>;
+) => T | Promise<T>;
 
 export interface CreateAgent<CIn, COut = CIn> {
   name: string;
@@ -393,14 +404,21 @@ class Agent<CIn, COut = CIn> {
     return result;
   }
 
-  public asTool(props?: {
+  public asTool<T = string>(props?: {
     toolDescription?: string;
-    outputExtractor?: OutputExtractorFn;
+    outputExtractor?: OutputExtractorFn<T>;
+    /** Not sent to the model; surfaces on tool call/result and UI message parts */
+    metadata?: JSONObject;
+    toModelOutput?: Tool<SubagentToolInput, T | string>['toModelOutput'];
   }) {
-    return tool({
+    // Tool gates `execute` behind NeverOptional<OUTPUT, …>, which cannot resolve
+    // while OUTPUT is still a type parameter. Same bridge asAdvisor uses below.
+    const definition = {
       description:
         props?.toolDescription ||
         `Delegate to the ${this.#options.name} agent to handle the request.`,
+      metadata: props?.metadata,
+      toModelOutput: props?.toModelOutput,
       inputSchema: z.object({
         input: z.string(),
         output: z
@@ -410,7 +428,10 @@ class Agent<CIn, COut = CIn> {
             'Optional instructions on how the final output should be formatted. this would be passed to the underlying llm as part of the prompt.',
           ),
       }),
-      execute: async ({ input, output }, options) => {
+      execute: async (
+        { input, output }: SubagentToolInput,
+        options: SubagentExecuteOptions,
+      ): Promise<T | string> => {
         if (!this.context) {
           throw new Error(
             `Agent ${this.#options.name} is missing a context for asTool().`,
@@ -449,15 +470,22 @@ class Agent<CIn, COut = CIn> {
           if (props?.outputExtractor) {
             return await props.outputExtractor(result);
           }
-          return result.steps.map((it) => it.toolResults).flat();
+          return result.text;
         } catch (error) {
+          // Cancellation is control flow, not a tool failure: surfacing it as a
+          // tool result would let the parent model keep reasoning past an abort.
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw error;
+          }
           console.error(error);
           const details =
             error instanceof Error ? error.message : JSON.stringify(error);
           return `An error thrown from a tool call. \n<ErrorDetails>\n${details}\n</ErrorDetails>`;
         }
       },
-    });
+    } as unknown as Tool<SubagentToolInput, T | string>;
+
+    return tool(definition);
   }
 
   public asAdvisor(options?: AsAdvisorOptions): AdvisorResult {

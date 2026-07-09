@@ -9,10 +9,9 @@ import { researcher } from './subagents/researcher.ts';
 
 /**
  * Subagents-as-tools: the planner and researcher are normal `agent()`s, wired
- * into the root as tools via `agent.asTool()`. `asTool()` returns tool results
- * by default (empty for a subagent that calls no tools), so both pass an
- * `outputExtractor` to hand back the subagent's text (and, for research, its
- * sources).
+ * into the root as tools via `agent.asTool()`. `asTool()` returns the subagent's
+ * final text by default; research overrides that with an `outputExtractor` to
+ * append its sources.
  */
 export default defineAgent({
   name: 'ResearchBot',
@@ -23,7 +22,6 @@ export default defineAgent({
     plan_searches: planner.asTool({
       toolDescription:
         'Delegate to the planner. Pass the research query as `input`; returns 5–10 web searches to run.',
-      outputExtractor: (result) => result.text,
     }),
     research: researcher.asTool({
       toolDescription:

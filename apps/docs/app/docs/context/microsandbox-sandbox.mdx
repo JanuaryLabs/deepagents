@@ -1,0 +1,192 @@
+---
+title: Microsandbox Sandbox
+description: Execute OCI images in local hardware-isolated microVMs without Docker daemon coupling
+---
+
+The Microsandbox backend runs commands inside local hardware-isolated microVMs
+through the optional [`microsandbox`](https://www.npmjs.com/package/microsandbox)
+SDK. It implements the same `DisposableSandbox` contract as the other
+DeepAgents backends: `executeCommand`, `spawn`, `readFile`, `writeFiles`, and
+`dispose`.
+
+Use it when you want standard OCI images and real process streaming, but do not
+want your app coupled to a Docker daemon. The backend boots a microVM from an
+image, creates the working directory, and returns a sandbox that can plug
+directly into `createBashTool`.
+
+<Callout type="warn">
+  Microsandbox is an optional peer dependency. It requires Node 22+ and hardware
+  virtualization: Apple silicon, Linux with KVM, or Windows with WHP.
+</Callout>
+
+## Installation
+
+```npm
+npm install microsandbox
+```
+
+If the package or runtime is unavailable, `createMicrosandboxSandbox()` throws
+`MicrosandboxNotAvailableError`.
+
+## Basic Usage
+
+```typescript
+import { createMicrosandboxSandbox } from '@deepagents/context';
+
+await using sandbox = await createMicrosandboxSandbox({
+  image: 'alpine',
+});
+
+const result = await sandbox.executeCommand('echo "Hello from Microsandbox"');
+console.log(result.stdout);
+```
+
+The default image is `alpine`. The default working directory is `/workspace`,
+and the factory creates it during boot because common images do not ship that
+directory.
+
+## AI Agent Integration
+
+```typescript
+import {
+  MICROSANDBOX_DEFAULT_DESTINATION,
+  createBashTool,
+  createMicrosandboxSandbox,
+} from '@deepagents/context';
+
+const backend = await createMicrosandboxSandbox({
+  name: 'chat-123',
+  image: 'node:lts-alpine',
+});
+
+const sandbox = await createBashTool({
+  sandbox: backend,
+  destination: MICROSANDBOX_DEFAULT_DESTINATION,
+});
+```
+
+Pass the `sandbox.tools` object to an agent the same way you would with Docker,
+Apple Container, Agent OS, Daytona, or a virtual sandbox.
+
+## Named Sandboxes
+
+Pass `name` when a chat or workflow should resume the same microVM:
+
+```typescript
+const sandbox = await createMicrosandboxSandbox({
+  name: 'analytics-session',
+  image: 'python:3.12-alpine',
+});
+```
+
+Named creation uses get-or-create semantics:
+
+- If a sandbox with that name is running, the factory connects to it.
+- If it exists but is stopped, the factory starts it and preserves rootfs state.
+- If it does not exist, the factory creates it.
+
+`dispose()` stops a named sandbox but does not remove it, so the next
+`createMicrosandboxSandbox({ name })` can resume it. For a fresh named sandbox,
+pass `replace: true`.
+
+Unnamed sandboxes are ephemeral: the factory generates a name, and `dispose()`
+stops and removes the microVM.
+
+## Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `name` | `string` | Stable sandbox name for get-or-create reuse |
+| `image` | `string` | OCI image to boot; defaults to `alpine`; ignored when attaching to an existing sandbox |
+| `cpus` | `number` | Number of virtual CPUs |
+| `memory` | `number` | Memory in MiB |
+| `env` | `Record<string, string>` | Environment variables baked into the sandbox at boot |
+| `workdir` | `string` | Default working directory; defaults to `/workspace` |
+| `replace` | `boolean` | Replace an existing named sandbox instead of attaching |
+| `commandTimeout` | `number` | Per-command timeout for `executeCommand`, in milliseconds |
+| `readiness` | `(sandbox) => void \| Promise<void>` | Hook that must pass before the factory returns |
+| `configure` | `(builder) => builder` | Escape hatch for SDK builder options such as volumes, network policy, secrets, user, and idle timeout |
+
+`configure` runs only when creating a sandbox, not when attaching to an existing
+named sandbox.
+
+## Command Execution APIs
+
+`executeCommand` is buffered and accepts an optional `AbortSignal`:
+
+```typescript
+const controller = new AbortController();
+const pending = sandbox.executeCommand('sleep 30', {
+  signal: controller.signal,
+});
+setTimeout(() => controller.abort(), 1_000);
+await pending;
+```
+
+For live byte streams, use `spawn`:
+
+```typescript
+const proc = sandbox.spawn?.('node long-task.js', { cwd: '/workspace' });
+if (!proc) throw new Error('spawn is unavailable');
+
+const decoder = new TextDecoder();
+for await (const chunk of proc.stdout) {
+  process.stdout.write(decoder.decode(chunk, { stream: true }));
+}
+const exit = await proc.exit;
+```
+
+`executeCommand` lowers onto the same streaming path as `spawn`, so cancellation
+kills the guest process instead of abandoning it.
+
+## Readiness Hooks
+
+Use `readiness` when the image needs a daemon or service started before the
+agent gets the sandbox:
+
+```typescript
+const sandbox = await createMicrosandboxSandbox({
+  name: 'daemon-backed-chat',
+  image: 'my-daemon-image:0.1.0',
+  readiness: async (sandbox) => {
+    const result = await sandbox.executeCommand('start-daemon && wait-ready');
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+  },
+});
+```
+
+If `readiness` throws, the factory disposes the sandbox and rethrows the error.
+
+## Image Cache Demo
+
+The Text2SQL demo shows the local image-cache flow:
+
+```bash
+node demo/microsandbox-text2sql/bootstrap.ts
+node demo/microsandbox-text2sql/demo-microsandbox.ts
+```
+
+`bootstrap.ts` builds the shared daemon image with Docker, saves it, and loads it
+into the local Microsandbox image cache with `msb image load`. The demo then
+uses `createMicrosandboxSandbox({ image, configure })` with `pullPolicy('never')`
+so a missing local image fails clearly instead of trying a registry pull.
+
+## Error Handling
+
+All package-owned errors extend `MicrosandboxSandboxError`:
+
+| Error | When |
+|-------|------|
+| `MicrosandboxNotAvailableError` | The optional dependency or runtime is unavailable |
+| `MicrosandboxCreationError` | Sandbox creation fails outside a known SDK error |
+| `MicrosandboxCommandError` | File reads or writes through the VM filesystem fail |
+
+SDK-owned errors from `microsandbox` are preserved when possible, so callers can
+also handle specific SDK failure classes.
+
+## Next Steps
+
+- [Sandbox Overview](/docs/context/sandbox) - choosing the right approach
+- [Docker Sandbox](/docs/context/docker-sandbox) - full container isolation through Docker
+- [Apple Container Sandbox](/docs/context/apple-container-sandbox) - lightweight VMs on Apple silicon
+- [Architecture: Sandbox](/docs/context/architecture-sandbox) - how sandbox backends compose with `createBashTool`

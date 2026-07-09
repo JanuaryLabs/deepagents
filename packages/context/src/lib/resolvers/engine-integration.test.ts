@@ -154,6 +154,37 @@ describe('engine + resolver chain integration', () => {
     assert.ok(!systemPrompt.includes('from-original'));
   });
 
+  it('passes the custom resolver chain on to a forked child', async () => {
+    let customClaims = 0;
+    class CountingResolver {
+      readonly name = 'CountingResolver';
+      canResolve(v: unknown): boolean {
+        return typeof v === 'function';
+      }
+      async resolve() {
+        customClaims += 1;
+        return 'from-custom';
+      }
+    }
+
+    const engine = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'custom-chain-parent',
+      userId: 'u',
+      resolvers: [new CountingResolver()],
+    });
+    engine.set(fragment('x', async () => 'from-original'));
+
+    const { systemPrompt } = await engine.fork().resolve({
+      renderer: new XmlRenderer(),
+      sandbox: await createVirtualAgentSandbox(),
+    });
+
+    assert.strictEqual(customClaims, 1);
+    assert.ok(systemPrompt.includes('from-custom'));
+    assert.ok(!systemPrompt.includes('from-original'));
+  });
+
   it('coexists with sync (non-loader) fragments', async () => {
     const engine = newEngine();
     engine.set(

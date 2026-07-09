@@ -94,10 +94,10 @@ you'd also drop the local `minio`/`createbucket` services and create the bucket 
   (works on Docker Desktop). On a native-Linux daemon use the host gateway
   (`http://172.17.0.1:9000`) or your LAN address instead.
 - **Eventual consistency.** With `vfs_cache_mode: writes`, a write uploads after
-  close + `vfs_write_back` (`1s` here; rclone default `5s`) plus a flush on
-  unmount. The upload is asynchronous even at `0s` — an S3-side reader (e.g.
-  files-sdk) must poll for the object; only reads through the volume see it
-  immediately.
+  the file closes and `vfs_write_back` elapses (`1s` here; rclone default `5s`),
+  plus a final flush on unmount. The upload is asynchronous even at `0s` — an
+  S3-side reader (e.g. files-sdk) must poll for the object; only reads through
+  the volume see it immediately.
 - **Credentials live in the volume config**, so they show in `docker volume inspect`.
   Fine for local dev; for production keep them in a named `rclone.conf` remote
   instead (see the [MinIO recipe](../../apps/docs/app/docs/context/recipes/minio-cloud-storage.mdx)).

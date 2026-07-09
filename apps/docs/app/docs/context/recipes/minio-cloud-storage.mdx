@@ -94,7 +94,7 @@ docker compose up -d
 
 ## Things to know
 
-- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, a write lands in a local cache and uploads only after the file is **closed** plus `--vfs-write-back` (rclone default `5s`; the example above uses `1s`), with a final flush on unmount. The upload is asynchronous even at `0s`, so a reader on the S3 side (your app, another service) must poll for the object (HEAD until it appears) or read back through the mounted volume instead. A low `vfs-write-back` costs extra PUT requests — rapid re-writes of the same file upload each time instead of coalescing — a fine trade for the create-and-close pattern below.
+- **Writes are eventually consistent.** With `vfs-cache-mode=writes`, a write lands in a local cache and uploads after the file closes and the `--vfs-write-back` delay elapses (rclone default `5s`; the example above uses `1s`), with a final flush on unmount. The upload is asynchronous even at `0s`, so a reader on the S3 side (your app, another service) must poll for the object (HEAD until it appears) or read back through the mounted volume instead. A low `vfs-write-back` costs extra PUT requests — rapid re-writes of the same file upload each time instead of coalescing — a fine trade for the create-and-close pattern below.
 - **It's FUSE over object storage.** Whole-file create-and-close is the reliable write pattern; in-place random writes can misbehave.
 - **Credentials in the connection string show up in `docker volume inspect`.** Fine for local dev. To keep them out of volume metadata, use a named remote (below).
 - **No coupling in the library.** `@deepagents/context` only attaches an ordinary Docker volume; switching providers is a one-line connection-string change.

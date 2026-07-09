@@ -1038,3 +1038,141 @@ describe('asAdvisor maxConversationUses', () => {
     assert.strictEqual(getUsage().calls, 2);
   });
 });
+
+function createCallerContext() {
+  const ctx = createContext(role('caller agent'));
+  ctx.set(user('Do something.'));
+  return ctx;
+}
+
+describe('asTool output and options', () => {
+  it('returns the sub-agent final text when no outputExtractor is given', async () => {
+    const subAgent = agent({
+      name: 'worker',
+      sandbox,
+      model: createGenerateModel('The final answer.'),
+      context: createContext(role('worker agent')),
+    });
+
+    const callerAgent = agent({
+      name: 'caller',
+      sandbox,
+      model: createToolCallerModel(
+        'worker',
+        JSON.stringify({ input: 'Do the thing.' }),
+      ),
+      context: createCallerContext(),
+      tools: { worker: subAgent.asTool() },
+    });
+
+    const result = await callerAgent.generate({});
+
+    const toolResult = result.steps.flatMap((s) => s.toolResults).at(0);
+    assert.strictEqual(toolResult?.output, 'The final answer.');
+  });
+
+  it('surfaces AbortError as a tool error rather than a fabricated result', async () => {
+    const subAgent = agent({
+      name: 'worker',
+      sandbox,
+      model: createThrowingAdvisorModel(
+        () => new DOMException('aborted', 'AbortError'),
+      ),
+      context: createContext(role('worker agent')),
+    });
+
+    const callerAgent = agent({
+      name: 'caller',
+      sandbox,
+      model: createToolCallerModel(
+        'worker',
+        JSON.stringify({ input: 'Do the thing.' }),
+      ),
+      context: createCallerContext(),
+      tools: { worker: subAgent.asTool() },
+    });
+
+    const result = await callerAgent.generate({});
+
+    const contentTypes = result.steps.flatMap((step) =>
+      step.content.map((part) => part.type),
+    );
+    assert.ok(
+      contentTypes.includes('tool-error'),
+      'abort should raise a tool-error content part',
+    );
+    assert.strictEqual(
+      result.steps.flatMap((step) => step.toolResults).length,
+      0,
+      'abort must not produce a tool result the model can read as an answer',
+    );
+  });
+
+  it('still stringifies non-abort errors so the model can recover', async () => {
+    const subAgent = agent({
+      name: 'worker',
+      sandbox,
+      model: createThrowingAdvisorModel(
+        () => new Error('Model API unavailable'),
+      ),
+      context: createContext(role('worker agent')),
+    });
+
+    const callerAgent = agent({
+      name: 'caller',
+      sandbox,
+      model: createToolCallerModel(
+        'worker',
+        JSON.stringify({ input: 'Do the thing.' }),
+      ),
+      context: createCallerContext(),
+      tools: { worker: subAgent.asTool() },
+    });
+
+    const result = await callerAgent.generate({});
+
+    const toolResult = result.steps.flatMap((s) => s.toolResults).at(0);
+    assert.ok(String(toolResult?.output).includes('Model API unavailable'));
+  });
+
+  it('forwards tool metadata to the created tool', () => {
+    const subAgent = agent({
+      name: 'worker',
+      sandbox,
+      model: createGenerateModel('ok'),
+      context: createContext(role('worker agent')),
+    });
+
+    const subTool = subAgent.asTool({ metadata: { source: 'subagent' } });
+
+    assert.deepStrictEqual(subTool.metadata, { source: 'subagent' });
+  });
+
+  it('passes structured output through outputExtractor', async () => {
+    const subAgent = agent({
+      name: 'worker',
+      sandbox,
+      model: createGenerateModel('  The final answer.  '),
+      context: createContext(role('worker agent')),
+    });
+    const subTool = subAgent.asTool({
+      outputExtractor: (result) => ({ answer: result.text.trim() }),
+    });
+
+    const callerAgent = agent({
+      name: 'caller',
+      sandbox,
+      model: createToolCallerModel(
+        'worker',
+        JSON.stringify({ input: 'Do the thing.' }),
+      ),
+      context: createCallerContext(),
+      tools: { worker: subTool },
+    });
+
+    const result = await callerAgent.generate({});
+
+    const toolResult = result.steps.flatMap((s) => s.toolResults).at(0);
+    assert.deepStrictEqual(toolResult?.output, { answer: 'The final answer.' });
+  });
+});

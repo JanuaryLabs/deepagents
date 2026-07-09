@@ -14,16 +14,17 @@ agent exposed as a tool. The researcher queries a search API, synthesizes
 findings, and hands a brief back to the writer.
 
 ```typescript
-import {
-  agent,
-  ContextEngine,
-  InMemoryContextStore,
-  role,
-  user,
-} from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
 import z from 'zod';
+
+import {
+  ContextEngine,
+  InMemoryContextStore,
+  agent,
+  role,
+  user,
+} from '@deepagents/context';
 
 // -- Researcher agent --------------------------------------------------------
 
@@ -62,8 +63,12 @@ const writerContext = new ContextEngine({
   chatId: 'writer',
   userId: 'system',
 }).set(
-  role('You are a staff writer. Draft well-structured articles backed by research.'),
-  user('Write a 500-word article about the impact of LLMs on software testing.'),
+  role(
+    'You are a staff writer. Draft well-structured articles backed by research.',
+  ),
+  user(
+    'Write a 500-word article about the impact of LLMs on software testing.',
+  ),
 );
 
 const writer = agent({
@@ -128,7 +133,8 @@ const coordinator = agent({
   model: groq('gpt-oss-20b'),
   tools: {
     extract: extractor.asTool({
-      toolDescription: 'Query raw data from the database. Pass the question as input.',
+      toolDescription:
+        'Query raw data from the database. Pass the question as input.',
     }),
     transform: transformer.asTool({
       toolDescription:
@@ -143,13 +149,51 @@ combines both outputs into a final report.
 
 ## asTool() Options
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `toolDescription` | `string` | Override the auto-generated tool description |
-| `outputExtractor` | `(result) => string \| Promise<string>` | Transform the sub-agent result before returning it to the parent |
+| Option            | Type                          | Description                                                                                |
+| ----------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `toolDescription` | `string`                      | Override the auto-generated tool description                                               |
+| `outputExtractor` | `(result) => T \| Promise<T>` | Transform the sub-agent result before returning it to the parent                           |
+| `metadata`        | `JSONObject`                  | Not sent to the model; surfaces as `toolMetadata` on tool call/result and UI message parts |
+| `toModelOutput`   | `Tool['toModelOutput']`       | Narrow a structured output down to what the model should read                              |
 
-When `outputExtractor` is omitted, the tool returns the raw array of tool results
-from the sub-agent's generation steps.
+When `outputExtractor` is omitted, the tool returns the sub-agent's final text
+(`result.text`).
+
+`outputExtractor` may return any serializable value, not just a string. Pair a
+structured return with `toModelOutput` so the parent model reads only the answer
+while the UI keeps the full payload:
+
+```typescript
+analyst.asTool<{ answer: string }>({
+  metadata: { kind: 'subagent' },
+  outputExtractor: (result) => ({ answer: result.text.trim() }),
+  toModelOutput: ({ output }) => ({
+    type: 'text',
+    value: typeof output === 'string' ? output : output.answer,
+  }),
+});
+```
+
+The sub-agent's own `context` is what gets forked, once per invocation. To give
+it a system prompt of its own rather than the caller's, build that context from
+the sub-agent's own fragments and hand it to `agent({ context })` — `asTool()`
+forks it for each call, so invocations stay isolated from each other.
+
+Pass the output type explicitly when you combine `outputExtractor` with
+`toModelOutput`. TypeScript contextually types `toModelOutput` before
+`outputExtractor` can infer it, so without the type argument the output collapses
+to `string`.
+
+The `typeof output === 'string'` guard is required: when the sub-agent throws a
+non-abort error, `asTool()` returns a diagnostic **string** regardless of the
+extractor's return type.
+
+### Errors and cancellation
+
+A failing sub-agent returns an `An error thrown from a tool call.` string so the
+parent model can recover. An `AbortError` is re-thrown instead, producing a
+`tool-error` part rather than a tool result the model would mistake for an
+answer.
 
 ## When to Use asTool()
 

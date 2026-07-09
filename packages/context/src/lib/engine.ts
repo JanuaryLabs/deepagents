@@ -322,6 +322,8 @@ export class ContextEngine {
   /** Initial metadata to merge on first initialization */
   #initialMetadata: Record<string, unknown> | undefined;
   #loaderResolver: FragmentLoaderResolver;
+  /** Retained so forked children inherit the parent's resolver chain */
+  #resolvers: ValueResolver[] | undefined;
 
   get #activeBranch(): BranchData {
     if (!this.#branch) {
@@ -348,6 +350,7 @@ export class ContextEngine {
     this.#userId = options.userId;
     this.#branchName = 'main';
     this.#initialMetadata = options.metadata;
+    this.#resolvers = options.resolvers;
     this.#loaderResolver = new FragmentLoaderResolver(
       options.resolvers ?? defaultResolvers(),
     );
@@ -1472,7 +1475,7 @@ export class ContextEngine {
 
   /**
    * Create an isolated child context with the same system-prompt fragments
-   * but a fresh in-memory store and no message history.
+   * and resolver chain, but a fresh in-memory store and no message history.
    *
    * Useful for one-shot agent invocations (e.g., `asTool()`) that need
    * the parent's context fragments without sharing conversation state.
@@ -1484,6 +1487,7 @@ export class ContextEngine {
       store: new InMemoryContextStore(),
       chatId: crypto.randomUUID(),
       userId: this.#userId,
+      resolvers: this.#resolvers,
     });
     child.set(...this.#fragments);
     return child;

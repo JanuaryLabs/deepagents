@@ -76,18 +76,16 @@ const meta = context.chat;
 Add fragments to context. Message fragments queue for persistence; others stay in memory for system prompt.
 
 ```typescript
-import { role, hint, user, assistantText } from '@deepagents/context';
+import { assistantText, hint, role, user } from '@deepagents/context';
 
 context.set(
-  role('You are helpful.'),  // → system prompt
-  hint('Be concise.'),       // → system prompt
-  user('Hello!'),            // → queued for save()
+  role('You are helpful.'), // → system prompt
+  hint('Be concise.'), // → system prompt
+  user('Hello!'), // → queued for save()
 );
 
 // Chainable
-context
-  .set(role('You are helpful.'))
-  .set(user('Hello!'));
+context.set(role('You are helpful.')).set(user('Hello!'));
 ```
 
 #### resolve(options)
@@ -106,6 +104,7 @@ const { systemPrompt, messages } = await context.resolve({
 ```
 
 Behavior:
+
 1. Initializes chat/branch if needed
 2. Loads persisted messages from graph (walks parent chain)
 3. Renders context fragments to `systemPrompt`
@@ -137,8 +136,9 @@ const xml = context.render(new XmlRenderer());
 
 #### fork()
 
-Create an isolated child `ContextEngine` with the same non-message fragments but
-with a fresh in-memory store and no existing conversation history.
+Create an isolated child `ContextEngine` with the same non-message fragments and
+resolver chain, but a fresh in-memory store and no conversation history. The child
+gets a random `chatId`, so the run disappears with the process.
 
 ```typescript
 import { XmlRenderer, user } from '@deepagents/context';
@@ -154,6 +154,10 @@ const { systemPrompt, messages } = await child.resolve({
 Use `fork()` for one-shot helper flows such as `agent.asTool()` where you want
 to preserve the parent system context without mutating the parent chat thread.
 
+A forked child is deliberately not addressable. If you need a durable child run —
+one you can list, resume, or attribute back to its parent — create a chat of its
+own rather than forking.
+
 ### Graph Operations
 
 #### rewind(messageId)
@@ -163,7 +167,11 @@ Create a new branch from a specific message. The original branch is preserved.
 ```typescript
 // Conversation: q1 → a1 (wrong answer)
 context.set(
-  user({ id: 'q1', role: 'user', parts: [{ type: 'text', text: 'What is 2+2?' }] }),
+  user({
+    id: 'q1',
+    role: 'user',
+    parts: [{ type: 'text', text: 'What is 2+2?' }],
+  }),
 );
 context.set(assistantText('The answer is 5.'));
 await context.save();
@@ -248,6 +256,7 @@ await context.save();
 ```
 
 Unlike `rewind()`:
+
 - Uses current HEAD (no messageId needed)
 - Does NOT switch to new branch
 - Keeps pending messages intact
@@ -301,16 +310,17 @@ await fs.writeFile('debug.json', JSON.stringify(snapshot, null, 2));
 ## Complete Example
 
 ```typescript
-import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
-  role,
-  hint,
-  user,
   assistant,
+  hint,
+  role,
+  user,
 } from '@deepagents/context';
 
 async function chat(userMessage: string) {
@@ -353,12 +363,17 @@ async function chat(userMessage: string) {
 
 ```typescript
 // Setup
-const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
-  .set(role('You are helpful.'));
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+}).set(role('You are helpful.'));
 
 // Conversation
 context.set(user('Explain recursion', { id: 'q1' }));
-const { systemPrompt, messages } = await context.resolve({ renderer: new XmlRenderer() });
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
 
 const response = await generateText({
   model: groq('gpt-oss-20b'),
@@ -374,7 +389,9 @@ await context.rewind('q1');
 // Now on 'main-v2' branch
 
 context.set(hint('Explain like I am 5 years old.'));
-const { systemPrompt: sp2, messages: m2 } = await context.resolve({ renderer: new XmlRenderer() });
+const { systemPrompt: sp2, messages: m2 } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
 
 const simpler = await generateText({
   model: groq('gpt-oss-20b'),
