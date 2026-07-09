@@ -22,6 +22,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./coding-agent-reminders": {
+      "types": "./dist/coding-agent-reminders/index.d.ts",
+      "import": "./dist/coding-agent-reminders/index.js",
+      "default": "./dist/coding-agent-reminders/index.js"
+    },
     "./zukhruf": {
       "types": "./dist/zukhruf/index.d.ts",
       "import": "./dist/zukhruf/index.js",
@@ -39,9 +44,10 @@
   "dependencies": {
     "@deepagents/context": "4.2.1",
     "ai": "^6.0.218",
+    "just-bash": "^3.0.1",
     "pg-boss": "^12.24.1",
-    "uuid": "^13.0.2",
-    "just-bash": "^3.0.1"
+    "tiny-tfidf": "^1.0.0",
+    "uuid": "^13.0.2"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.13",

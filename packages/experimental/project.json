@@ -9,7 +9,10 @@
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
       "options": {
-        "additionalEntryPoints": ["packages/experimental/src/zukhruf/index.ts"],
+        "additionalEntryPoints": [
+          "packages/experimental/src/coding-agent-reminders/index.ts",
+          "packages/experimental/src/zukhruf/index.ts"
+        ],
         "assets": []
       }
     },
