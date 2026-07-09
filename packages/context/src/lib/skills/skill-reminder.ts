@@ -1,11 +1,12 @@
 import type { ContextFragment } from '../fragments.ts';
-import { type ReminderContext, reminder } from '../fragments/message/user.ts';
 import {
   BM25Classifier,
   type ClassifierMatch,
   type ClassifierOptions,
   type IClassifier,
-} from '../fragments/reminders/classifier.ts';
+  type ReminderContext,
+  reminder,
+} from '../fragments/reminders/index.ts';
 import type { SkillMetadata } from './types.ts';
 
 function formatSkillReminder(

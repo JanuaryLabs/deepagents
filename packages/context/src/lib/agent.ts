@@ -35,7 +35,8 @@ import {
   nullUsage,
 } from './advisor.ts';
 import { assistant } from './fragments.ts';
-import { toToolReminderModelOutput, user } from './fragments/message/user.ts';
+import { user } from './fragments/message/user.ts';
+import { toToolReminderModelOutput } from './fragments/reminders/index.ts';
 import {
   type Guardrail,
   type GuardrailContext,

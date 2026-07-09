@@ -5,7 +5,8 @@ import type { AgentModel } from './advisor.ts';
 import { structuredOutput } from './agent.ts';
 import { ContextEngine } from './engine.ts';
 import { role } from './fragments/domain.ts';
-import { stripReminders, user } from './fragments/message/user.ts';
+import { user } from './fragments/message/user.ts';
+import { stripReminders } from './fragments/reminders/index.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import { extractPlainText } from './text.ts';
 

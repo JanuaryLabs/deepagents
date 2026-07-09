@@ -1,4 +1,4 @@
-import type { WhenPredicate } from '../message/user.ts';
+import type { WhenPredicate } from '../types.ts';
 
 /**
  * Durable fire-once latch, composed into a steer reminder's `when`.

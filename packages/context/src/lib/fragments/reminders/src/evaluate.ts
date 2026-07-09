@@ -1,9 +1,9 @@
+import { resolveReminderAsync } from './reminders.ts';
 import {
   type ConditionalReminder,
   type ReminderResolution,
   type WhenContext,
-  resolveReminderAsync,
-} from '../fragments/message/user.ts';
+} from './types.ts';
 
 export interface FiredReminder {
   config: ConditionalReminder;

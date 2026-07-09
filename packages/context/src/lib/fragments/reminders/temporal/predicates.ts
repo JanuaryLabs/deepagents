@@ -1,10 +1,7 @@
 import type { UIMessage } from 'ai';
 
-import {
-  type WhenContext,
-  type WhenPredicate,
-  isRecord,
-} from '../../message/user.ts';
+import { isRecord } from '../src/reminders.ts';
+import type { WhenContext, WhenPredicate } from '../src/types.ts';
 
 export interface TemporalReminderOptions {
   tz?: string;

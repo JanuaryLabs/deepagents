@@ -1,7 +1,7 @@
-import { extractPlainText } from '../../text.ts';
-import { type WhenPredicate } from '../message/user.ts';
+import { extractPlainText } from '../../../../text.ts';
+import type { CountSpec, WhenPredicate } from '../types.ts';
 
-export type CountSpec = { gte?: number; lte?: number; eq?: number };
+export type { CountSpec } from '../types.ts';
 
 export function assertCountSpec(spec: CountSpec): void {
   const hasEq = spec.eq !== undefined;

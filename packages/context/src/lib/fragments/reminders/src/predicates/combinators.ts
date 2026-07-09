@@ -1,4 +1,4 @@
-import type { WhenContext, WhenPredicate } from '../message/user.ts';
+import type { WhenContext, WhenPredicate } from '../types.ts';
 
 export type AsyncWhenPredicate = (ctx: WhenContext) => Promise<boolean>;
 

@@ -1,11 +1,7 @@
 import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
 
-import { type WhenPredicate } from '../message/user.ts';
-import {
-  type CountSpec,
-  assertCountSpec,
-  checkCount,
-} from './message-predicates.ts';
+import type { CountSpec, WhenPredicate } from '../types.ts';
+import { assertCountSpec, checkCount } from './message.ts';
 
 export type ToolNameSpec = string | ((name: string) => boolean);
 

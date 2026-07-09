@@ -1,4 +1,4 @@
-import type { WhenPredicate } from '../message/user.ts';
+import type { WhenPredicate } from '../types.ts';
 
 export function everyNTurns(n: number): WhenPredicate {
   return ({ turn }) => turn % n === 0;

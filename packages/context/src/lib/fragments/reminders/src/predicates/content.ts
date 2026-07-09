@@ -1,4 +1,4 @@
-import { type WhenPredicate } from '../message/user.ts';
+import type { WhenPredicate } from '../types.ts';
 import {
   BM25Classifier,
   type ClassifierOptions,

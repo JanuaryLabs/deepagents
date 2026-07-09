@@ -23,6 +23,7 @@ import {
   isMessageFragment,
   toMessageFragment,
 } from './fragments.ts';
+import { user } from './fragments/message/user.ts';
 import {
   type BaseWhenCtx,
   type ConditionalReminder,
@@ -30,10 +31,10 @@ import {
   type WhenContext,
   applyRemindersToToolOutput,
   applyUserRemindersToMessage,
+  evaluateFiredReminders,
   isConditionalReminder,
   synthesizeSteerUserMessage,
-  user,
-} from './fragments/message/user.ts';
+} from './fragments/reminders/index.ts';
 import type { Models } from './models.generated.ts';
 import {
   type ContextRenderer,
@@ -45,7 +46,6 @@ import {
   defaultResolvers,
 } from './resolvers/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
-import { evaluateFiredReminders } from './save/reminder-eval.ts';
 import { SavePipeline, type SaveResult } from './save/save-pipeline.ts';
 import type { SkillPathMapping } from './skills/types.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';

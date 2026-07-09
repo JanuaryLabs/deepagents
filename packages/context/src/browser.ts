@@ -10,6 +10,24 @@ export * from './lib/estimate.ts';
 export * from './lib/fragments.ts';
 export * from './lib/fragments/domain.ts';
 export * from './lib/fragments/message/user.ts';
+export * from './lib/fragments/reminders/src/reminders.ts';
+export type {
+  BaseWhenCtx,
+  ConditionalReminder,
+  CountSpec,
+  ReminderContext,
+  ReminderFragment,
+  ReminderOptions,
+  ReminderRange,
+  ReminderResolution,
+  ReminderTarget,
+  ReminderText,
+  SyncReminderText,
+  SyntheticSteerMetadata,
+  UserReminderMetadata,
+  WhenContext,
+  WhenPredicate,
+} from './lib/fragments/reminders/src/types.ts';
 export * from './lib/fragments/user.ts';
 export * from './lib/guardrail.ts';
 export * from './lib/models.generated.ts';

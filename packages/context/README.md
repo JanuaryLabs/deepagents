@@ -300,15 +300,16 @@ const ranges = getReminderRanges(message.metadata).filter(
   (range) => range.partIndex === partIndex,
 );
 const visibleText = stripTextByRanges(message.parts[partIndex].text, ranges);
+const firedOnceIds = getReminderOnceIds(message);
 const messageWithoutReminders = stripReminders(message);
 ```
 
 - `getReminderRanges(metadata)` returns `metadata.reminders` as offset ranges (or `[]` when missing).
+- `getReminderOnceIds(message)` returns durable `once(id)` latch ids stored on a user message.
 
 Conditional reminders are registered on the engine, not inside `user(...)`.
 They can react to turn cadence, classifier matches, tool activity, assistant
-history, token usage, idle time, live tool output, and mid-loop streamed step
-boundaries:
+history, token usage, idle time, live tool output, and mid-loop steer points:
 
 For `target: 'tool-output'`, gate on `ctx.executingTool` to inspect the live
 tool call being wrapped. Assistant-history predicates such as `toolCalled(...)`
@@ -317,10 +318,10 @@ only describe already persisted calls.
 ```ts
 import {
   anyToolCalled,
+  elapsedExceeds,
   everyOfLastN,
   not,
   reminder,
-  streamStepsExceed,
   toolCalled,
   usageExceeds,
   user,
@@ -337,8 +338,8 @@ engine.set(
   reminder('Pause and summarize if the thread is getting expensive', {
     when: usageExceeds(20_000),
   }),
-  reminder('Checkpoint before taking another streamed tool step', {
-    when: streamStepsExceed(2),
+  reminder('Checkpoint before a long-running streamed turn continues', {
+    when: elapsedExceeds(40 * 60_000),
     target: 'steer',
   }),
   reminder('If no tools were needed for three turns, keep the answer brief', {
@@ -350,8 +351,7 @@ engine.set(
 
 Other exported helpers include `toolCallCount(...)`,
 `lastAssistantLength(...)`, `withinLastN(...)`, `everyOfLastN(...)`, and
-`elapsedExceeds(...)`. Streamed-turn helpers include `streamStepsExceed(...)`,
-`streamToolCallsExceed(...)`, and `streamUsageExceeds(...)`. See the
+`elapsedExceeds(...)`. See the
 [Predicates](https://januarylabs.github.io/deepagents/docs/context/predicates)
 page for the full catalog.
 

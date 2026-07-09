@@ -1,5 +1,6 @@
 import type { ContextFragment } from '../../../fragments.ts';
-import { type WhenPredicate, reminder } from '../../message/user.ts';
+import { reminder } from '../src/reminders.ts';
+import type { WhenPredicate } from '../src/types.ts';
 import {
   type TemporalReminderOptions,
   dayChanged,

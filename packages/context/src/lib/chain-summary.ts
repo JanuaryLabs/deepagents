@@ -4,7 +4,7 @@ import type { ContextFragment } from './fragments.ts';
 import {
   getReminderOnceIds,
   isSyntheticSteerMessage,
-} from './fragments/message/user.ts';
+} from './fragments/reminders/index.ts';
 import type { MessageData } from './store/store.ts';
 import { requireUIMessage } from './ui-message-guards.ts';
 
