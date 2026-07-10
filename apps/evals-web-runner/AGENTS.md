@@ -2,16 +2,6 @@
 
 - The "developer" is working hand in hand with you to build a high quality and maintainable codebase and always ready to answer your questions to give you more context so never hesitate to ask and you are encouraged to ask questions.
 
-- Early development, no users. No backwards compatibility concerns. Do things RIGHT: clean,
-  organized, zero tech debt. Never create compatibility shims.
-
-- WE NEVER WANT WORKAROUNDS. we always want FULL implementations that are long term
-  suistainable for many >1000 users. so dont come up with half baked solutions
-
-- Important: Do not remove, hide, or rename any existing features or UI options (even
-  temporarily) unless I explicitly ask for it. If something isn’t fully wired yet, keep the UX
-  surface intact and stub/annotate it instead of deleting it.
-
 - Always ask more questions until you have enough context to give an accurate & confident answer.
 
 ### API
@@ -63,8 +53,6 @@ Special schemas are supported only through
 - Use `createTokenizedSearch` function to create tokenized search clauses for prisma queries. useful for searching multiple words in a single field.
 
 ### Unit Test
-
-For testing we strictly use nodejs built-in test runner, and we never use jest or any other testing library and for assertions we use built-in `assert` module.
 
 ```sh
 node --test <target-filename>.test.ts
@@ -137,10 +125,6 @@ Always break down components into smaller components and colocate them in the sa
 ### Loading Buttons
 
 Use a component named `TheButton` from `@stdlib/ui` package for all buttons that trigger async operations and need to show loading state.
-
-### Asci
-
-It is very important when doing UI work is to use frontend skill and to confirm with me through ascii sketches before starting any implementation. This is to make sure we are aligned on the design and to avoid any rework.
 
 ### Local Database
 
