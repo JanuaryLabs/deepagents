@@ -189,12 +189,11 @@ real process backends can be plugged directly into the shared, owned
 
 ### Decorator Chain Behavior
 
-`createBashTool` layers decorators over the backend sandbox. Both core
-decorators now preserve `spawn` when the backend exposes it:
+`createBashTool` layers decorators over the backend sandbox. The decorators
+preserve `spawn` when the backend exposes it:
 
-- `withAbortSignal` injects the ambient signal from `runWithAbortSignal(...)`
-  into both `executeCommand` and `spawn` unless the call already provides
-  `options.signal`.
+- The bash tool forwards AI SDK's native `executionOptions.abortSignal` to
+  `executeCommand` as `options.signal`.
 - `observeSandboxFileEvents` snapshots before and after `spawn` to record
   write/modify/delete events under `destination`, and delays `exit` resolution
   until the post-spawn snapshot is captured.

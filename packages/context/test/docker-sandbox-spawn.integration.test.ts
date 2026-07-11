@@ -7,7 +7,6 @@ import {
   type DisposableSandbox,
   createBashTool,
   createDockerSandbox,
-  runWithAbortSignal,
 } from '@deepagents/context';
 
 async function isDockerAvailable(): Promise<boolean> {
@@ -225,40 +224,6 @@ describe('Docker Sandbox — spawn', async () => {
     });
 
     // Spawn file-change tracking is covered by file-changes.integration.test.ts
-    // (real strace image); this suite focuses on the spawn streaming/abort contract.
-
-    it('honors ambient abort signal from runWithAbortSignal', async () => {
-      assert.ok(agent.sandbox.spawn);
-      const spawnFn = agent.sandbox.spawn;
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 100);
-
-      const info = await runWithAbortSignal(controller.signal, async () => {
-        const child = spawnFn('printf hi; sleep 5; printf bye');
-        return child.exit;
-      });
-
-      assert.strictEqual(info.success, false);
-      assert.strictEqual(info.signal, 'SIGKILL');
-    });
-
-    it('explicit options.signal beats ambient', async () => {
-      assert.ok(agent.sandbox.spawn);
-      const spawnFn = agent.sandbox.spawn;
-      const ambient = new AbortController();
-      const explicit = new AbortController();
-      setTimeout(() => explicit.abort(), 100);
-
-      const info = await runWithAbortSignal(ambient.signal, async () => {
-        const child = spawnFn('printf hi; sleep 5; printf bye', {
-          signal: explicit.signal,
-        });
-        return child.exit;
-      });
-
-      assert.strictEqual(ambient.signal.aborted, false);
-      assert.strictEqual(explicit.signal.aborted, true);
-      assert.strictEqual(info.signal, 'SIGKILL');
-    });
+    // (real strace image); this suite focuses on the spawn streaming contract.
   });
 });

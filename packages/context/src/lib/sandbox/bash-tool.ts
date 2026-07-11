@@ -7,7 +7,6 @@ import z from 'zod';
 
 import { withHostOnlyToolMetadata } from '@deepagents/agent';
 
-import { withAbortSignal } from './abort.ts';
 import { BashException } from './bash-exception.ts';
 import { shellQuote } from './shell-quote.ts';
 import type {
@@ -316,7 +315,7 @@ export async function createBashTool(
 ): Promise<AgentSandbox> {
   const destination = options.destination ?? DEFAULT_DESTINATION;
   const initialFiles = await listInitialFiles(options);
-  const sandbox = withAbortSignal(withBashExceptionCatch(options.sandbox));
+  const sandbox = withBashExceptionCatch(options.sandbox);
 
   await uploadInitialFiles(sandbox, destination, initialFiles);
   const toolPrompt = await createToolPrompt(
