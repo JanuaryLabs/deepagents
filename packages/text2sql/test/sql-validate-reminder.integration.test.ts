@@ -4,7 +4,7 @@ import {
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -39,14 +39,17 @@ function sqlCommand() {
     execute: (sql) => db.prepare(sql).all(),
     grounding: [tables(), info()],
   });
-  const text2Sql = new Text2Sql({ adapters: { mem }, lock: new FileIndexLock() });
+  const text2Sql = new Text2Sql({
+    adapters: { mem },
+    lock: new FileIndexLock(),
+  });
   return createSqlCommand(text2Sql).command;
 }
 
 // One `bash` tool call per command, in order, then a text step that stops.
 function scriptedBash(commands: string[]) {
   let call = 0;
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => {
       const idx = call;
       call++;

@@ -1,5 +1,5 @@
 import { simulateReadableStream } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
@@ -37,7 +37,7 @@ const fixture = fileURLToPath(
 );
 
 function fastModel(calls: string[]) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       const messages = prompt as Array<{
         role: string;

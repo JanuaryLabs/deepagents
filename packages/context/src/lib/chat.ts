@@ -27,11 +27,11 @@ export interface ChatAgentLike<CIn> {
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
       maxRetries?: number;
     },
-  ): Promise<StreamTextResult<ToolSet, never>>;
+  ): Promise<StreamTextResult<ToolSet, any, any>>;
 }
 
 export type ChatMessageMetadata = NonNullable<
-  Parameters<StreamTextResult<ToolSet, never>['toUIMessageStream']>[0]
+  Parameters<StreamTextResult<ToolSet, any, any>['toUIMessageStream']>[0]
 >['messageMetadata'];
 
 export const defaultChatMessageMetadata: NonNullable<ChatMessageMetadata> = ({
@@ -131,10 +131,10 @@ export async function chat<CIn>(
   return createUIMessageStream({
     originalMessages: uiMessages,
     generateId: () => initialAssistantMsgId,
-    onStepFinish: async ({ responseMessage }) => {
+    onStepEnd: async ({ responseMessage }) => {
       await context.writeAssistantSegment(responseMessage as UIMessage);
     },
-    onFinish: async ({ responseMessage, isAborted }) => {
+    onEnd: async ({ responseMessage, isAborted }) => {
       let message = responseMessage as UIMessage;
       if (isAborted) {
         message = { ...message, parts: sanitizeAbortedParts(message.parts) };
@@ -150,7 +150,12 @@ export async function chat<CIn>(
       }
 
       await context.writeAssistantSegment(message);
-      await context.trackUsage(await result.totalUsage);
+      const usage = await result.usage;
+      // AI SDK v7 can resolve an aborted stream without usage data when the
+      // provider never emitted a finish chunk.
+      if (usage !== undefined) {
+        await context.trackUsage(usage);
+      }
     },
     execute: async ({ writer }) => {
       writer.merge(uiStream);

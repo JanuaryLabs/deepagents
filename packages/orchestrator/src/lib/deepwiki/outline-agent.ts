@@ -145,11 +145,7 @@ export async function generateOutline(state: OutlineAgentContext) {
       result.toUIMessageStream({
         generateMessageId: generateId,
         originalMessages: messages,
-        onFinish: async ({
-          responseMessage,
-        }: {
-          responseMessage: UIMessage;
-        }) => {
+        onEnd: async ({ responseMessage }: { responseMessage: UIMessage }) => {
           messages.push(responseMessage);
         },
       }),

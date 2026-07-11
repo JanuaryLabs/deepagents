@@ -4,7 +4,7 @@ import {
   generateId,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
@@ -117,7 +117,7 @@ class FailingGrounding extends AbstractGrounding {
 }
 
 function createMockModel(text = 'SELECT COUNT(*) FROM users') {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () =>
       ({
         stream: simulateReadableStream({

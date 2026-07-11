@@ -1,4 +1,4 @@
-import { type LanguageModelV3 } from '@ai-sdk/provider';
+import { type LanguageModelV4 } from '@ai-sdk/provider';
 import {
   type GenerateTextResult,
   type ModelMessage,
@@ -12,8 +12,8 @@ import {
   type UITools,
   dynamicTool,
   generateText,
+  isStepCount,
   jsonSchema,
-  stepCountIs,
   tool,
 } from 'ai';
 import chalk from 'chalk';
@@ -57,9 +57,9 @@ export function agent<Output, CIn = ContextVariables, COut = CIn>(
 
 export type ResponseMessage = UIMessage<unknown, UIDataTypes, UITools>;
 
-export type AgentModel = LanguageModelV3;
+export type AgentModel = LanguageModelV4;
 export type OutputExtractorFn = (
-  output: GenerateTextResult<ToolSet, any>,
+  output: GenerateTextResult<ToolSet, any, any>,
 ) => string | Promise<string>;
 export type PrepareHandoffFn = (
   messages: ModelMessage[],
@@ -70,8 +70,8 @@ export type PrepareEndFn<C, _O = unknown> = (config: {
   contextVariables: C;
   abortSignal?: AbortSignal;
 }) =>
-  | StreamTextResult<ToolSet, never>
-  | Promise<StreamTextResult<ToolSet, never>>
+  | StreamTextResult<ToolSet, any, any>
+  | Promise<StreamTextResult<ToolSet, any, any>>
   | undefined
   | void;
 
@@ -228,9 +228,10 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
       }),
       execute: async ({ input, output }, options) => {
         try {
+          const contextVariables = options.context as CIn;
           const result = await generateText({
             model: this.model,
-            system: this.#prepareInstructions(),
+            instructions: this.#prepareInstructions(),
             prompt: `
               <Input>
               ${input}
@@ -240,15 +241,19 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             temperature: 0,
             tools: this.handoff.tools,
             abortSignal: options.abortSignal,
-            stopWhen: stepCountIs(25),
-            experimental_repairToolCall: this.repairToolCall(
-              options.abortSignal,
-            ),
-            experimental_context: options.experimental_context,
+            stopWhen: isStepCount(25),
+            repairToolCall: this.repairToolCall(options.abortSignal),
+            runtimeContext: contextVariables as any,
+            toolsContext: Object.fromEntries(
+              Object.keys(this.handoff.tools).map((toolName) => [
+                toolName,
+                contextVariables,
+              ]),
+            ) as any,
             output: this.output
               ? Output.object({ schema: this.output })
               : undefined,
-            onStepFinish: (step) => {
+            onStepEnd: (step) => {
               const toolCall = step.toolCalls.at(-1);
               if (toolCall && this.logging) {
                 console.log(
@@ -256,11 +261,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
                 );
               }
             },
-            prepareStep: prepareStep(
-              this,
-              this.model,
-              options.experimental_context,
-            ),
+            prepareStep: prepareStep(this, this.model, contextVariables),
           });
           if (props?.outputExtractor) {
             return await props.outputExtractor(result);

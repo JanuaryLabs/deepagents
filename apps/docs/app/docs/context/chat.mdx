@@ -253,7 +253,7 @@ const { systemPrompt, messages } = await context.resolve({ renderer: new XmlRend
 
 const result = await generateText({
   model: groq('gpt-oss-20b'),
-  system: systemPrompt,
+  instructions: systemPrompt,
   messages,
 });
 
@@ -326,7 +326,7 @@ async function sendMessage(chatId: string, userId: string, text: string) {
 
   const result = await generateText({
     model: groq('gpt-oss-20b'),
-    system: systemPrompt,
+    instructions: systemPrompt,
     messages,
   });
 

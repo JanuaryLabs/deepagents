@@ -16,8 +16,8 @@ import {
   createUIMessageStream,
   generateId,
   generateText,
+  isStepCount,
   smoothStream,
-  stepCountIs,
   streamText,
 } from 'ai';
 import chalk from 'chalk';
@@ -29,7 +29,12 @@ import {
   type TransferTool,
   isTransferToolResult,
 } from './agent.ts';
-import { last, messageToUiMessage, user } from './stream_utils.ts';
+import {
+  last,
+  messageToUiMessage,
+  toToolsContext,
+  user,
+} from './stream_utils.ts';
 
 export type OutputMode = 'full_history' | 'last_message';
 
@@ -84,25 +89,27 @@ export async function generate<O, CIn, COut = CIn>(
     abortSignal?: AbortSignal;
     providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   },
-): Promise<GenerateTextResult<ToolSet, any>> {
+): Promise<GenerateTextResult<ToolSet, any, any>> {
+  const tools = agent.toToolset();
   return generateText({
     abortSignal: config?.abortSignal,
     providerOptions: agent.providerOptions ?? config?.providerOptions,
     model: agent.model,
-    system: agent.instructions(contextVariables),
+    instructions: agent.instructions(contextVariables),
     messages: await convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
       { ignoreIncompleteToolCalls: true },
     ),
-    experimental_repairToolCall: agent.repairToolCall(config?.abortSignal),
-    stopWhen: stepCountIs(25),
-    tools: agent.toToolset(),
+    repairToolCall: agent.repairToolCall(config?.abortSignal),
+    stopWhen: isStepCount(25),
+    tools,
     activeTools: agent.toolsNames,
-    experimental_context: contextVariables,
+    runtimeContext: contextVariables as any,
+    toolsContext: toToolsContext(tools, contextVariables) as any,
     toolChoice: agent.toolChoice,
     output: agent.output ? Output.object({ schema: agent.output }) : undefined,
-    // onStepFinish: (step) => tagAgents(step, agent.handoff.name),
-    onStepFinish: (step) => {
+    // onStepEnd: (step) => tagAgents(step, agent.handoff.name),
+    onStepEnd: (step) => {
       const toolCall = step.toolCalls.at(-1);
       if (toolCall) {
         console.log(
@@ -111,7 +118,7 @@ export async function generate<O, CIn, COut = CIn>(
       }
     },
     prepareStep: prepareStep(agent, agent.model, contextVariables),
-    // onFinish: (result) => {
+    // onEnd: (result) => {
     //   (contextVariables as any).content = result.content;
     // },
   });
@@ -126,24 +133,26 @@ export async function execute<O, CIn, COut = CIn>(
     providerOptions?: Parameters<typeof streamText>[0]['providerOptions'];
     transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   },
-): Promise<StreamTextResult<ToolSet, any>> {
+): Promise<StreamTextResult<ToolSet, any, any>> {
   const runId = generateId();
+  const tools = agent.toToolset();
   const stream = streamText({
     abortSignal: config?.abortSignal,
     providerOptions: config?.providerOptions,
     model: agent.model,
-    system: agent.instructions(contextVariables),
+    instructions: agent.instructions(contextVariables),
     messages: await convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
       { ignoreIncompleteToolCalls: true },
     ),
-    stopWhen: stepCountIs(25),
+    stopWhen: isStepCount(25),
     experimental_transform: config?.transform ?? smoothStream(),
-    tools: agent.toToolset(),
+    tools,
     activeTools: agent.toolsNames,
-    experimental_context: contextVariables,
+    runtimeContext: contextVariables as any,
+    toolsContext: toToolsContext(tools, contextVariables) as any,
     toolChoice: agent.toolChoice,
-    experimental_repairToolCall: agent.repairToolCall(config?.abortSignal),
+    repairToolCall: agent.repairToolCall(config?.abortSignal),
     onError: (error) => {
       console.error(
         chalk.red(
@@ -154,8 +163,8 @@ export async function execute<O, CIn, COut = CIn>(
       console.dir(error, { depth: null });
     },
     output: agent.output ? Output.object({ schema: agent.output }) : undefined,
-    // onStepFinish: (step) => tagAgents(step, agent.handoff.name),
-    onStepFinish: (step) => {
+    // onStepEnd: (step) => tagAgents(step, agent.handoff.name),
+    onStepEnd: (step) => {
       const toolCall = step.toolCalls.at(-1);
       if (toolCall) {
         console.log(
@@ -164,7 +173,7 @@ export async function execute<O, CIn, COut = CIn>(
       }
     },
     prepareStep: prepareStep(agent, agent.model, contextVariables),
-    // onFinish: (result) => {
+    // onEnd: (result) => {
     //   (contextVariables as any).content = result.content;
     // },
   });
@@ -226,13 +235,13 @@ export function swarm<CIn>(
         stream.toUIMessageStream({
           sendFinish: false,
           sendStart: true,
-          onFinish: (event) => {
+          onEnd: (event) => {
             parts.push(...event.responseMessage.parts);
           },
         }),
       );
       await stream.consumeStream({ onError: console.error });
-      await last(stream.fullStream);
+      await last(stream.stream);
 
       if (!agent.prepareEnd) return;
 
@@ -265,13 +274,13 @@ export function swarm<CIn>(
           stream.toUIMessageStream({
             sendFinish: false,
             sendStart: false,
-            onFinish: (event) => {
+            onEnd: (event) => {
               parts.push(...event.responseMessage.parts);
             },
           }),
         );
         await stream.consumeStream({ onError: console.error });
-        await last(stream.fullStream);
+        await last(stream.stream);
       }
 
       writer.write({ type: 'finish' });
@@ -292,7 +301,7 @@ export async function prepareAgent<CIn>(
   // No need for middleware to add response_format
   const stepModel = agent.model ?? defaultModel;
   return {
-    system: agent.instructions(contextVariables),
+    instructions: agent.instructions(contextVariables),
     activeTools: agent.toolsNames,
     model: stepModel,
     messages,

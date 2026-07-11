@@ -203,7 +203,7 @@ async function generateSql(
 
   const response = await generateText({
     model: groq('gpt-oss-20b'),
-    system: systemPrompt,
+    instructions: systemPrompt,
     messages: [{ role: 'user', content: question }],
   });
 
@@ -241,7 +241,7 @@ class SqlConversation {
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     });
 

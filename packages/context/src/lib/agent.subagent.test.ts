@@ -1,5 +1,5 @@
 import { APICallError, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -50,7 +50,7 @@ function extractSystemPrompt(
 }
 
 function createGenerateModel(responseText?: string) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => ({
       finishReason: { unified: 'stop' as const, raw: '' },
       usage: testUsage,
@@ -69,7 +69,7 @@ function createExecutorModel(advisorCallCount: number) {
   let step = 0;
   const totalSteps = advisorCallCount + 1;
 
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => {
       step++;
       if (step < totalSteps) {
@@ -102,7 +102,7 @@ function createExecutorModel(advisorCallCount: number) {
 function createToolCallerModel(toolName: string, toolInput: string) {
   let step = 0;
 
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => {
       step++;
       if (step === 1) {
@@ -142,7 +142,7 @@ function createContext(...fragments: Parameters<ContextEngine['set']>) {
 }
 
 function createThrowingAdvisorModel(errorFactory: () => Error) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => {
       throw errorFactory();
     },
@@ -357,7 +357,7 @@ describe('asTool', () => {
   });
 
   it('returns error string when sub-agent fails', async () => {
-    const failingModel = new MockLanguageModelV3({
+    const failingModel = new MockLanguageModelV4({
       doGenerate: async () => {
         throw new Error('Model API unavailable');
       },
@@ -414,7 +414,7 @@ describe('asTool', () => {
     });
 
     let subStep = 0;
-    const subModel = new MockLanguageModelV3({
+    const subModel = new MockLanguageModelV4({
       doGenerate: async () => {
         subStep++;
         if (subStep === 1) {
@@ -993,7 +993,7 @@ describe('asAdvisor maxConversationUses', () => {
 
   it('failed calls do not count against maxConversationUses', async () => {
     let advisorCallCount = 0;
-    const advisorModel = new MockLanguageModelV3({
+    const advisorModel = new MockLanguageModelV4({
       doGenerate: async () => {
         advisorCallCount++;
         if (advisorCallCount === 1) {

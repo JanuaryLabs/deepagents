@@ -5,7 +5,7 @@ import {
   simulateReadableStream,
   tool,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it, mock } from 'node:test';
@@ -39,13 +39,13 @@ const testUsage = {
 type StepSpec = { tool: string } | { text: string };
 
 /**
- * A V3 mock that scripts one model step per spec: `{tool}` emits a tool call and
+ * A V4 mock that scripts one model step per spec: `{tool}` emits a tool call and
  * keeps the loop going; `{text}` emits text and stops. `prompts` collects the
  * model prompt seen at each step so tests can assert store/prompt parity.
  */
 function scriptedModel(steps: StepSpec[], prompts: unknown[][]) {
   let call = 0;
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       prompts.push(prompt as unknown[]);
       const spec = steps[Math.min(call, steps.length - 1)];
@@ -91,7 +91,7 @@ const noopTool = tool({
 
 async function makeAgent(
   context: ContextEngine,
-  model: MockLanguageModelV3,
+  model: MockLanguageModelV4,
   name: string,
 ) {
   const sandbox = await createBashTool({

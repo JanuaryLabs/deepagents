@@ -1,5 +1,5 @@
 import { simulateReadableStream, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -38,7 +38,7 @@ function createRepairStreamingModel() {
 
   return {
     repairCalls,
-    model: new MockLanguageModelV3({
+    model: new MockLanguageModelV4({
       doGenerate: async ({ abortSignal }) => {
         repairCalls.push({ abortSignal });
 

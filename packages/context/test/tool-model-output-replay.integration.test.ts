@@ -1,5 +1,5 @@
 import { type UIMessage, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -109,7 +109,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     );
 
     let capturedPrompt: { role: string; content: unknown }[] = [];
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async (options) => {
         capturedPrompt = options.prompt as { role: string; content: unknown }[];
         return {

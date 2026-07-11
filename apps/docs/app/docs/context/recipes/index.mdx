@@ -116,7 +116,7 @@ async function processWithBudget(
 
     return generateText({
       model: groq('gpt-oss-20b'), // Cheaper model
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     }).then((r) => r.text);
   }
@@ -125,7 +125,7 @@ async function processWithBudget(
   const { systemPrompt, messages } = await context.resolve();
   return generateText({
     model: openai('gpt-4o'),
-    system: systemPrompt,
+    instructions: systemPrompt,
     messages,
   }).then((r) => r.text);
 }

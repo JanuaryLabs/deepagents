@@ -6,7 +6,7 @@ import {
   NoOutputGeneratedError,
   TypeValidationError,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -33,9 +33,9 @@ const testUsage = {
     reasoning: undefined,
   },
 } as const;
-/** Helper to create a MockLanguageModelV3 that returns a structured response */
+/** Helper to create a MockLanguageModelV4 that returns a structured response */
 function createMockModel(response: MockModelResponse) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: {
       finishReason: { unified: 'stop', raw: '' },
       usage: testUsage,
@@ -45,9 +45,9 @@ function createMockModel(response: MockModelResponse) {
   });
 }
 
-/** Helper to create a MockLanguageModelV3 that throws an error */
+/** Helper to create a MockLanguageModelV4 that throws an error */
 function createThrowingModel(errorFactory: () => Error) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => {
       throw errorFactory();
     },
@@ -60,7 +60,7 @@ function createCapturingModel(responses: Array<MockModelResponse | Error>) {
   let callIndex = 0;
   return {
     calls,
-    model: new MockLanguageModelV3({
+    model: new MockLanguageModelV4({
       doGenerate: async (options) => {
         calls.push({ messages: options.prompt, settings: options });
         const response = responses[callIndex++];
@@ -176,7 +176,7 @@ describe('toSql', () => {
     // Arrange
     const { adapter } = await init_db('', { validate: () => undefined });
     let callCount = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {
@@ -220,7 +220,7 @@ describe('toSql', () => {
   it('does not retry when model is not found', async () => {
     const { adapter } = await init_db('', { validate: () => undefined });
     let attempts = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async () => {
         attempts += 1;
         throw new APICallError({
@@ -401,7 +401,7 @@ describe('toSql', () => {
       validate: () => validateResponses.shift(),
     });
     let callCount = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {

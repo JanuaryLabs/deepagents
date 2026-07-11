@@ -1,5 +1,5 @@
 import { type UIMessage, generateId, simulateReadableStream } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -37,7 +37,7 @@ const testUsage = {
 function createMockModel(
   text = 'Here is your SQL: SELECT count(*) FROM users',
 ) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () =>
       ({
         stream: simulateReadableStream({
@@ -435,7 +435,7 @@ describe('Text2Sql user-constructed chat', () => {
 
     let receivedSignal: AbortSignal | undefined;
 
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async ({ abortSignal }: any) => {
         receivedSignal = abortSignal;
         return {

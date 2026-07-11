@@ -92,14 +92,6 @@ export function normalizeUsage(
     details.raw = normalizeForJson(usage.raw);
   }
 
-  if (usage.reasoningTokens !== undefined) {
-    details.reasoning_tokens = usage.reasoningTokens;
-  }
-
-  if (usage.cachedInputTokens !== undefined) {
-    details.cached_input_tokens = usage.cachedInputTokens;
-  }
-
   return {
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,

@@ -160,14 +160,6 @@ function mergeLanguageModelUsage(
       ),
     },
     totalTokens: addUsageValue(current?.totalTokens, next.totalTokens),
-    reasoningTokens: addUsageValue(
-      current?.reasoningTokens,
-      next.reasoningTokens,
-    ),
-    cachedInputTokens: addUsageValue(
-      current?.cachedInputTokens,
-      next.cachedInputTokens,
-    ),
     raw: next.raw ?? current?.raw,
   };
 }
@@ -191,10 +183,7 @@ function isEmptyAssistantPlaceholder(message: UIMessage): boolean {
 interface SteerFire {
   /** Step index the steer fired after (its segment boundary). */
   afterStep: number;
-  /** Index in the model `messages` array where the synth was spliced at fire. */
-  spliceIndex: number;
   synth: UIMessage & { role: 'user' };
-  synthModel: ModelMessage[];
 }
 
 interface SteerWhenBase {
@@ -236,20 +225,6 @@ function stepStartPartIndices(parts: UIMessage['parts']): number[] {
     if (parts[i].type === 'step-start') indices.push(i);
   }
   return indices;
-}
-
-function spliceSteerMessages(
-  messages: ModelMessage[],
-  fired: SteerFire[],
-): ModelMessage[] {
-  const ordered = [...fired].sort((a, b) => a.spliceIndex - b.spliceIndex);
-  const out = [...messages];
-  let offset = 0;
-  for (const fire of ordered) {
-    out.splice(fire.spliceIndex + offset, 0, ...fire.synthModel);
-    offset += fire.synthModel.length;
-  }
-  return out;
 }
 
 /**
@@ -688,7 +663,7 @@ export class ContextEngine {
    *   .set(role('You are helpful'), user('Hello'));
    *
    * const { systemPrompt, messages } = await context.resolve();
-   * await generateText({ system: systemPrompt, messages });
+   * await generateText({ instructions: systemPrompt, messages });
    * ```
    */
   public async resolve(options: ResolveOptions): Promise<ResolveResult> {
@@ -741,9 +716,9 @@ export class ContextEngine {
    *
    * Semantics are "inject once, persist": when a steer reminder's predicate
    * fires (only after the model has produced ≥1 step with content — the mid-loop
-   * gate), its `<system-reminder>` user message is spliced into the model prompt
-   * at the step boundary where it fired AND re-spliced on every subsequent step,
-   * so the model keeps seeing it for the rest of the loop.
+   * gate), its `<system-reminder>` user message is appended to the model prompt
+   * at the step boundary where it fired. AI SDK v7 carries prepared messages
+   * into subsequent steps, so it remains visible without being re-spliced.
    *
    * Firing is edge-triggered with a post-fire re-sample: each fire resets the
    * elapsed reference (`lastSyntheticAt`), then the config is immediately
@@ -795,21 +770,17 @@ export class ContextEngine {
             });
             session.fired.push({
               afterStep: stepNumber - 1,
-              spliceIndex: messages.length,
               synth,
-              synthModel,
             });
+
+            return {
+              messages: [...(messages as ModelMessage[]), ...synthModel],
+            };
           }
         }
       }
 
-      if (session.fired.length === 0) return undefined;
-      return {
-        messages: spliceSteerMessages(
-          messages as ModelMessage[],
-          session.fired,
-        ),
-      };
+      return undefined;
     };
   }
 
@@ -817,7 +788,7 @@ export class ContextEngine {
    * Persist the streamed assistant message, carving it into the steer split when
    * steer reminders fired this turn.
    *
-   * Called from chat()'s onStepFinish/onFinish (and the guardrail path) with the
+   * Called from chat()'s onStepEnd/onEnd (and the guardrail path) with the
    * cumulative response message. Segment boundaries come from the `step-start`
    * markers in the message itself — no cross-track store read — so the carve is
    * race-free. Idempotent: finalized segments keep stable ids; the open segment
@@ -1436,7 +1407,7 @@ export class ContextEngine {
    * @example
    * ```ts
    * // In onFinish callback
-   * const usage = await result.totalUsage;
+   * const usage = await result.usage;
    * await context.trackUsage(usage);
    * ```
    */

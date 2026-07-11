@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Host entrypoint for the text2sql demo on a Docker sandbox. Boots the shared text2sql-daemon image.",
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.80",
+    "@ai-sdk/openai": "^4.0.11",
     "@deepagents/agent": "4.3.0",
     "@deepagents/context": "4.3.0",
     "@deepagents/demo-text2sql-daemon": "4.3.0",

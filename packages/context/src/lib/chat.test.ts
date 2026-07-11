@@ -7,7 +7,7 @@ import {
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -38,7 +38,7 @@ const testUsage = {
 } as const;
 
 function createMockModel(text = 'Hello from assistant') {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => ({
       stream: simulateReadableStream({
         chunks: [
@@ -61,7 +61,7 @@ function createMockModelWithTitle(
   streamText = 'Hello from assistant',
   titleText = 'Generated Title',
 ) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => ({
       content: [
         { type: 'text' as const, text: JSON.stringify({ title: titleText }) },
@@ -373,7 +373,7 @@ describe('chat() title generation', () => {
       chatId: 'failed-first-turn-chat',
       userId: 'test-user',
     });
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async () => ({
         content: [
           { type: 'text' as const, text: JSON.stringify({ title: 'Doomed' }) },
@@ -456,12 +456,12 @@ function createAbortMockAgent(
     stream: async () =>
       ({
         toUIMessageStream: () => createChunkedStream(uiChunks),
-        totalUsage: Promise.resolve({
+        usage: Promise.resolve({
           inputTokens: 10,
           outputTokens: 5,
           totalTokens: 15,
         }),
-      }) as unknown as StreamTextResult<ToolSet, never>,
+      }) as unknown as StreamTextResult<ToolSet, any, any>,
   };
 }
 
@@ -745,7 +745,7 @@ describe('chat() abort signal integration', () => {
       userId: 'test-user',
     });
 
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream({
           chunks: [
@@ -817,7 +817,7 @@ describe('chat() abort signal integration', () => {
     const controller = new AbortController();
     let doStreamCalls = 0;
 
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         if (doStreamCalls >= 2) {
@@ -891,7 +891,7 @@ describe('chat() abort signal integration', () => {
       userId: 'test-user',
     });
 
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream({
           chunks: [
@@ -976,7 +976,7 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
     await context.save({ branch: false });
 
     let capturedPrompt: unknown[] = [];
-    const capturingModel = new MockLanguageModelV3({
+    const capturingModel = new MockLanguageModelV4({
       doStream: async (options: any) => {
         capturedPrompt = options.prompt;
         return {
@@ -1041,7 +1041,7 @@ describe('chat() guardrail retry context integrity', () => {
     });
 
     let doStreamCalls = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         return {
@@ -1143,7 +1143,7 @@ describe('chat() guardrail retry context integrity', () => {
     );
 
     let doStreamCalls = 0;
-    const model2 = new MockLanguageModelV3({
+    const model2 = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         return {
@@ -1241,7 +1241,7 @@ describe('chat() guardrail self-correction persistence', () => {
     });
 
     let doStreamCalls = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         return {
@@ -1326,7 +1326,7 @@ describe('chat() guardrail self-correction persistence', () => {
     });
 
     let doStreamCalls = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         return {
@@ -1416,7 +1416,7 @@ describe('chat() guardrail self-correction persistence', () => {
     let doStreamCalls = 0;
     let storeChainAtRetry: { name: string }[] | undefined;
 
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         if (doStreamCalls === 2) {
@@ -1484,7 +1484,7 @@ describe('chat() guardrail self-correction persistence', () => {
       storeChainAtRetry.map((e: { name: string }) => e.name),
       ['user', 'assistant'],
       'At retry time, store must already contain [user, assistant] — ' +
-        'proving finish-step → onStepFinish → save() completed before retry',
+        'proving finish-step → onStepEnd → save() completed before retry',
     );
   });
 
@@ -1500,7 +1500,7 @@ describe('chat() guardrail self-correction persistence', () => {
     await context.save();
 
     let doStreamCalls = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         return {
@@ -1579,7 +1579,7 @@ describe('chat() guardrail self-correction persistence', () => {
     });
 
     let doStreamCalls = 0;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamCalls++;
         if (doStreamCalls === 1) {

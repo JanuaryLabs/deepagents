@@ -1,5 +1,5 @@
-import { simulateReadableStream, stepCountIs } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { isStepCount, simulateReadableStream } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import nock from 'nock';
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -130,7 +130,7 @@ function assertWireSchema(spans: OpenAISpan[]): string[] {
 }
 
 function createMockModel(text = 'Hello world') {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => ({
       stream: simulateReadableStream({
         chunks: [
@@ -164,7 +164,7 @@ function createMockModel(text = 'Hello world') {
 function createTwoStepToolModel() {
   let callCount = 0;
 
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => {
       callCount += 1;
       const chunks: any[] =
@@ -257,7 +257,7 @@ describe('OpenAI Traces Integration', () => {
       const result = streamText({
         model: createMockModel(),
         prompt: 'Say hello',
-        experimental_telemetry: {
+        telemetry: {
           isEnabled: true,
           integrations: [integration],
         },
@@ -294,8 +294,6 @@ describe('OpenAI Traces Integration', () => {
             text_tokens: 4,
             reasoning_tokens: 1,
           },
-          reasoning_tokens: 1,
-          cached_input_tokens: 2,
         },
       });
 
@@ -345,7 +343,7 @@ describe('OpenAI Traces Integration', () => {
         const result = streamText({
           model: createMockModel(prompt),
           prompt,
-          experimental_telemetry: {
+          telemetry: {
             isEnabled: true,
             integrations: [integration],
           },
@@ -390,7 +388,7 @@ describe('OpenAI Traces Integration', () => {
         const result = streamText({
           model: createMockModel(prompt),
           prompt,
-          experimental_telemetry: {
+          telemetry: {
             isEnabled: true,
             integrations: [integration],
           },
@@ -438,8 +436,10 @@ describe('OpenAI Traces Integration', () => {
       });
 
       await integration.onStart?.({
+        callId: 'call_a',
+        operationId: 'ai.generateText',
         model: { provider: 'openai', modelId: 'gpt-5' },
-        system: undefined,
+        instructions: undefined,
         prompt: 'A',
         messages: [{ role: 'user', content: [{ type: 'text', text: 'A' }] }],
         tools: undefined,
@@ -463,12 +463,14 @@ describe('OpenAI Traces Integration', () => {
         include: undefined,
         functionId: 'A',
         metadata: undefined,
-        experimental_context: undefined,
-      });
+        runtimeContext: undefined,
+      } as never);
 
       await integration.onStart?.({
+        callId: 'call_b',
+        operationId: 'ai.generateText',
         model: { provider: 'openai', modelId: 'gpt-5' },
-        system: undefined,
+        instructions: undefined,
         prompt: 'B',
         messages: [{ role: 'user', content: [{ type: 'text', text: 'B' }] }],
         tools: undefined,
@@ -492,13 +494,14 @@ describe('OpenAI Traces Integration', () => {
         include: undefined,
         functionId: 'B',
         metadata: undefined,
-        experimental_context: undefined,
-      });
+        runtimeContext: undefined,
+      } as never);
 
       await integration.onStepStart?.({
+        callId: 'call_a',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
-        system: undefined,
+        instructions: undefined,
         messages: [{ role: 'user', content: [{ type: 'text', text: 'A' }] }],
         tools: undefined,
         toolChoice: undefined,
@@ -513,15 +516,16 @@ describe('OpenAI Traces Integration', () => {
         include: undefined,
         functionId: 'A',
         metadata: undefined,
-        experimental_context: undefined,
-      });
+        runtimeContext: undefined,
+      } as never);
 
-      await integration.onStepFinish?.({
+      await integration.onStepEnd?.({
+        callId: 'call_a',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         functionId: 'A',
         metadata: undefined,
-        experimental_context: undefined,
+        runtimeContext: undefined,
         content: [],
         text: '',
         reasoning: [],
@@ -562,12 +566,13 @@ describe('OpenAI Traces Integration', () => {
         providerMetadata: undefined,
       } as never);
 
-      await integration.onFinish?.({
+      await integration.onEnd?.({
+        callId: 'call_b',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         functionId: 'B',
         metadata: undefined,
-        experimental_context: undefined,
+        runtimeContext: undefined,
         content: [],
         text: '',
         reasoning: [],
@@ -607,6 +612,7 @@ describe('OpenAI Traces Integration', () => {
         },
         providerMetadata: undefined,
         steps: [],
+        finalStep: {} as never,
         totalUsage: {
           inputTokens: 1,
           inputTokenDetails: {
@@ -623,12 +629,13 @@ describe('OpenAI Traces Integration', () => {
         },
       } as never);
 
-      await integration.onFinish?.({
+      await integration.onEnd?.({
+        callId: 'call_a',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         functionId: 'A',
         metadata: undefined,
-        experimental_context: undefined,
+        runtimeContext: undefined,
         content: [],
         text: '',
         reasoning: [],
@@ -668,6 +675,7 @@ describe('OpenAI Traces Integration', () => {
         },
         providerMetadata: undefined,
         steps: [],
+        finalStep: {} as never,
         totalUsage: {
           inputTokens: 1,
           inputTokenDetails: {
@@ -726,8 +734,8 @@ describe('OpenAI Traces Integration', () => {
             execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
           }),
         },
-        stopWhen: stepCountIs(2),
-        experimental_telemetry: {
+        stopWhen: isStepCount(2),
+        telemetry: {
           isEnabled: true,
           integrations: [integration],
         },
@@ -778,8 +786,8 @@ describe('OpenAI Traces Integration', () => {
             execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
           }),
         },
-        stopWhen: stepCountIs(2),
-        experimental_telemetry: {
+        stopWhen: isStepCount(2),
+        telemetry: {
           isEnabled: true,
           integrations: [integration],
         },
@@ -826,8 +834,10 @@ describe('OpenAI Traces Integration', () => {
       });
 
       await integration.onStart?.({
+        callId: 'failing-tool-call',
+        operationId: 'ai.generateText',
         model: { provider: 'openai', modelId: 'gpt-5' },
-        system: undefined,
+        instructions: undefined,
         prompt: 'Run a tool',
         messages: [
           { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
@@ -853,13 +863,14 @@ describe('OpenAI Traces Integration', () => {
         include: undefined,
         functionId: 'failing-tool',
         metadata: undefined,
-        experimental_context: undefined,
-      });
+        runtimeContext: undefined,
+      } as never);
 
       await integration.onStepStart?.({
+        callId: 'failing-tool-call',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
-        system: undefined,
+        instructions: undefined,
         messages: [
           { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
         ],
@@ -876,10 +887,11 @@ describe('OpenAI Traces Integration', () => {
         include: undefined,
         functionId: 'failing-tool',
         metadata: undefined,
-        experimental_context: undefined,
-      });
+        runtimeContext: undefined,
+      } as never);
 
-      await integration.onToolCallStart?.({
+      await integration.onToolExecutionStart?.({
+        callId: 'failing-tool-call',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         toolCall: {
@@ -896,10 +908,11 @@ describe('OpenAI Traces Integration', () => {
         abortSignal: undefined,
         functionId: 'failing-tool',
         metadata: undefined,
-        experimental_context: undefined,
+        runtimeContext: undefined,
       } as never);
 
-      await integration.onToolCallFinish?.({
+      await integration.onToolExecutionEnd?.({
+        callId: 'failing-tool-call',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         toolCall: {
@@ -914,20 +927,27 @@ describe('OpenAI Traces Integration', () => {
           { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
         ],
         abortSignal: undefined,
-        durationMs: 5,
+        toolExecutionMs: 5,
         functionId: 'failing-tool',
         metadata: undefined,
-        experimental_context: undefined,
-        success: false,
-        error: new Error('boom'),
+        runtimeContext: undefined,
+        toolOutput: {
+          type: 'tool-error',
+          toolCallId: 'call_1',
+          toolName: 'explode',
+          input: { id: 1 },
+          error: new Error('boom'),
+          dynamic: true,
+        },
       } as never);
 
-      await integration.onStepFinish?.({
+      await integration.onStepEnd?.({
+        callId: 'failing-tool-call',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         functionId: 'failing-tool',
         metadata: undefined,
-        experimental_context: undefined,
+        runtimeContext: undefined,
         content: [],
         text: '',
         reasoning: [],
@@ -968,12 +988,13 @@ describe('OpenAI Traces Integration', () => {
         providerMetadata: undefined,
       } as never);
 
-      await integration.onFinish?.({
+      await integration.onEnd?.({
+        callId: 'failing-tool-call',
         stepNumber: 0,
         model: { provider: 'openai', modelId: 'gpt-5' },
         functionId: 'failing-tool',
         metadata: undefined,
-        experimental_context: undefined,
+        runtimeContext: undefined,
         content: [],
         text: '',
         reasoning: [],
@@ -1013,6 +1034,7 @@ describe('OpenAI Traces Integration', () => {
         },
         providerMetadata: undefined,
         steps: [],
+        finalStep: {} as never,
         totalUsage: {
           inputTokens: 1,
           inputTokenDetails: {
@@ -1068,8 +1090,8 @@ describe('OpenAI Traces Integration', () => {
             execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
           }),
         },
-        stopWhen: stepCountIs(2),
-        experimental_telemetry: {
+        stopWhen: isStepCount(2),
+        telemetry: {
           isEnabled: true,
           integrations: [integration],
         },
@@ -1286,7 +1308,7 @@ describe('OpenAI Traces wire format', () => {
     const result = streamText({
       model: createMockModel(),
       prompt: 'Say hello',
-      experimental_telemetry: {
+      telemetry: {
         isEnabled: true,
         integrations: [integration],
       },
@@ -1326,7 +1348,7 @@ describe('OpenAI Traces wire format', () => {
     const result = streamText({
       model: createMockModel(),
       prompt: 'Say hello',
-      experimental_telemetry: {
+      telemetry: {
         isEnabled: true,
         integrations: [integration],
       },
@@ -1371,8 +1393,8 @@ describe('OpenAI Traces wire format', () => {
           execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
         }),
       },
-      stopWhen: stepCountIs(2),
-      experimental_telemetry: {
+      stopWhen: isStepCount(2),
+      telemetry: {
         isEnabled: true,
         integrations: [integration],
       },
@@ -1414,7 +1436,7 @@ describe('OpenAI Traces wire format', () => {
     const result = streamText({
       model: createMockModel(),
       prompt: 'Hello',
-      experimental_telemetry: {
+      telemetry: {
         isEnabled: true,
         integrations: [integration],
       },
@@ -1534,8 +1556,8 @@ describe('OpenAI Traces wire format', () => {
           execute: async ({ city }: { city: string }) => ({ temp: 15, city }),
         }),
       },
-      stopWhen: stepCountIs(2),
-      experimental_telemetry: {
+      stopWhen: isStepCount(2),
+      telemetry: {
         isEnabled: true,
         integrations: [integration],
       },
@@ -1580,7 +1602,7 @@ describe('OpenAI Traces wire format', () => {
       const result = streamText({
         model: createMockModel(prompt),
         prompt,
-        experimental_telemetry: {
+        telemetry: {
           isEnabled: true,
           integrations: [integration],
         },

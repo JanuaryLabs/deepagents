@@ -108,7 +108,7 @@ async function main() {
 
   const response = await generateText({
     model: groq('gpt-oss-20b'),
-    system: systemPrompt,
+    instructions: systemPrompt,
     messages,
   });
 

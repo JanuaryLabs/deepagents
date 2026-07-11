@@ -27,6 +27,7 @@ describe('createBashTool abort handling', () => {
 
     const execOptions: BashExecuteOptions = {
       abortSignal: abortController.signal,
+      context: {},
       messages: [],
       toolCallId: 'call-1',
     };

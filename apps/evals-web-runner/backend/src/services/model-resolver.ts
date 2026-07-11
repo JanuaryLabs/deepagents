@@ -3,9 +3,9 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import type { LanguageModelV3 } from '@ai-sdk/provider';
+import type { LanguageModelV4 } from '@ai-sdk/provider';
 
-type ProviderFactory = (modelId: string) => LanguageModelV3;
+type ProviderFactory = (modelId: string) => LanguageModelV4;
 
 const providers: Record<string, ProviderFactory> = {
   openai: (id) => createOpenAI()(id),
@@ -24,7 +24,7 @@ const providers: Record<string, ProviderFactory> = {
     })(id),
 };
 
-export function resolveModel(modelString: string): LanguageModelV3 {
+export function resolveModel(modelString: string): LanguageModelV4 {
   const slashIndex = modelString.indexOf('/');
   if (slashIndex === -1) {
     throw new Error(

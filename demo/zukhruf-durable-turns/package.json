@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Runnable showcase for the zukhruf durable background-agent harness (@deepagents/experimental/zukhruf): enqueue a turn, detach mid-stream, resume, and watch strict per-chat FIFO.",
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.80",
+    "@ai-sdk/openai": "^4.0.11",
     "@deepagents/agent": "4.3.0",
     "@deepagents/context": "4.3.0",
     "@deepagents/experimental": "4.3.0",

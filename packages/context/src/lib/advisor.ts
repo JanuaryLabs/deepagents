@@ -1,9 +1,9 @@
-import type { LanguageModelV3 } from '@ai-sdk/provider';
+import type { LanguageModelV4 } from '@ai-sdk/provider';
 import { APICallError, type LanguageModelUsage, type Tool } from 'ai';
 
 import type { ContextFragment } from './fragments.ts';
 
-export type AgentModel = LanguageModelV3;
+export type AgentModel = LanguageModelV4;
 
 export type AdvisorErrorCode =
   | 'max_uses_exceeded'

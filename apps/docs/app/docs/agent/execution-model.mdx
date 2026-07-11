@@ -116,16 +116,16 @@ When a transfer tool executes, it sets `currentActiveAgent` in the context. The 
 By default, execution stops after 25 steps to prevent infinite loops:
 
 ```typescript
-stopWhen: stepCountIs(25);
+stopWhen: isStepCount(25);
 ```
 
 A step is one model invocation. If you have complex workflows with many tool calls, you may need to adjust:
 
 ```typescript
-import { stepCountIs } from 'ai';
+import { isStepCount } from 'ai';
 
 // In your agent configuration or execution options
-stopWhen: stepCountIs(50);
+stopWhen: isStepCount(50);
 ```
 
 ## Tool Call Repair
@@ -293,16 +293,16 @@ for await (const chunk of stream.textStream) {
 Access all events including tool calls:
 
 ```typescript
-for await (const part of stream.fullStream) {
+for await (const part of stream.stream) {
   switch (part.type) {
     case 'text-delta':
-      console.log('Text:', part.textDelta);
+      console.log('Text:', part.text);
       break;
     case 'tool-call':
       console.log('Tool:', part.toolName);
       break;
     case 'tool-result':
-      console.log('Result:', part.result);
+      console.log('Result:', part.output);
       break;
   }
 }

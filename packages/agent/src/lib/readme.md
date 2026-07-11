@@ -427,7 +427,7 @@ const result = await execute(
 
 // Access response
 const text = await result.text;
-const usage = await result.totalUsage;
+const usage = await result.usage;
 ```
 
 ### swarm() Function

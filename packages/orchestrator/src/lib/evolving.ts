@@ -115,7 +115,7 @@ const write_content_tool = tool({
   }),
   execute: async (
     { fileName, content }: { fileName: string; content: string },
-    _options: ToolExecutionOptions,
+    _options: ToolExecutionOptions<any>,
   ) => {
     if (extname(fileName) !== '.ts') {
       return 'Error: Can only write .ts files.';
@@ -141,7 +141,7 @@ const run_code_tool = tool({
   }),
   execute: async (
     { fileName }: { fileName: string },
-    _options: ToolExecutionOptions,
+    _options: ToolExecutionOptions<any>,
   ) => {
     return await import(join(process.cwd(), '.evolving', fileName));
   },

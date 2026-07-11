@@ -22,11 +22,13 @@ import {
   visualizeSemantic,
 } from './visualize.ts';
 
-export async function streamWrite(response: StreamTextResult<ToolSet, never>) {
+export async function streamWrite(
+  response: StreamTextResult<ToolSet, any, any>,
+) {
   response.consumeStream();
   const writeStream = createWriteStream('blog_writer_output.md');
   Readable.fromWeb(response.textStream as any).pipe(writeStream);
-  console.log(await response.totalUsage);
+  console.log(await response.usage);
 }
 
 function printChunk(
@@ -88,7 +90,7 @@ export const printer = {
     }
   },
   stdout: async (
-    response: StreamTextResult<ToolSet, never>,
+    response: StreamTextResult<ToolSet, any, any>,
     options?: { reasoning?: boolean; text?: boolean; wrapInTags?: boolean },
   ) => {
     const includeReasoning = options?.reasoning ?? true;
@@ -102,7 +104,7 @@ export const printer = {
         state,
       );
     }
-    console.log(await response.totalUsage);
+    console.log(await response.usage);
   },
   mermaid: flow(visualizeMermaid, console.log),
   semantic: flow(visualizeSemantic, console.log),
@@ -180,14 +182,20 @@ export async function finished<T>(iterable: AsyncIterable<T>) {
 
 export function toOutput<T extends Output.Output>(
   result:
-    | Promise<GenerateTextResult<ToolSet, T>>
-    | StreamTextResult<ToolSet, T>,
+    | Promise<GenerateTextResult<ToolSet, any, T>>
+    | StreamTextResult<ToolSet, any, T>,
 ) {
   return isPromise(result)
     ? result.then((res) => res.output)
     : last(result.partialOutputStream);
 }
 
-export function toState<C>(options: ToolExecutionOptions): C {
-  return options.experimental_context as C;
+export function toState<C>(options: ToolExecutionOptions<any>): C {
+  return options.context as C;
+}
+
+export function toToolsContext<C>(tools: ToolSet, context: C) {
+  return Object.fromEntries(
+    Object.keys(tools).map((toolName) => [toolName, context]),
+  );
 }

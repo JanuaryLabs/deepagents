@@ -1,4 +1,4 @@
-import type { LanguageModelV3StreamPart } from '@ai-sdk/provider';
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import {
   type ToolSet,
@@ -6,7 +6,7 @@ import {
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -70,7 +70,7 @@ function scriptedModel(
   track: ModelTrack,
   options?: { chunkDelayInMs?: number; gate?: PromiseWithResolvers<void> },
 ) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       const text = lastUserText(prompt);
       track.calls.push(text);
@@ -129,7 +129,7 @@ function buildStream(
 }
 
 function slowModel(track: ModelTrack) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       track.calls.push(lastUserText(prompt));
       return {
@@ -185,14 +185,14 @@ function approvalSetup() {
    * based on whether the tool result is visible (approved) or not (denied).
    * Other asks reply plainly. Keyed on prompt content, retry-proof.
    */
-  const model = new MockLanguageModelV3({
+  const model = new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       const text = lastUserText(prompt);
       track.calls.push(text);
       const raw = JSON.stringify(prompt);
       const priorCallsForAsk = track.calls.filter((c) => c === text).length;
 
-      let chunks: LanguageModelV3StreamPart[];
+      let chunks: LanguageModelV4StreamPart[];
       if (!text.includes('send') || priorCallsForAsk === 1) {
         chunks = text.includes('send')
           ? [

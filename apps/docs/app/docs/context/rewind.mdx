@@ -47,7 +47,7 @@ const { systemPrompt, messages } = await context.resolve({
 
 const response = await generateText({
   model: groq('gpt-oss-20b'),
-  system: systemPrompt,
+  instructions: systemPrompt,
   messages,
 });
 
@@ -74,7 +74,7 @@ const { systemPrompt: sp2, messages: m2 } = await context.resolve({
 
 const retry = await generateText({
   model: groq('gpt-oss-20b'),
-  system: sp2,
+  instructions: sp2,
   messages: m2,
 });
 
@@ -169,7 +169,7 @@ async function regenerate(
 
   const response = await generateText({
     model: groq('gpt-oss-20b'),
-    system: systemPrompt,
+    instructions: systemPrompt,
     messages,
     temperature: 0.9,
   });
@@ -232,7 +232,7 @@ async function retryUntilGood(
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
       temperature: 0.5 + i * 0.2,
     });

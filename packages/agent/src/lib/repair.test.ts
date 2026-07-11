@@ -1,5 +1,5 @@
 import { simulateReadableStream, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import z from 'zod';
@@ -26,7 +26,7 @@ function createRepairSequenceModel() {
 
   return {
     calls,
-    model: new MockLanguageModelV3({
+    model: new MockLanguageModelV4({
       doGenerate: async ({ abortSignal }) => {
         calls.push({ abortSignal });
 
@@ -78,7 +78,7 @@ function createRepairStreamingModel() {
 
   return {
     repairCalls,
-    model: new MockLanguageModelV3({
+    model: new MockLanguageModelV4({
       doGenerate: async ({ abortSignal }) => {
         repairCalls.push({ abortSignal });
 

@@ -44,7 +44,7 @@ class ChatSession {
     // Generate response
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     });
 
@@ -97,7 +97,7 @@ class UserConversation {
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     });
 
@@ -261,7 +261,7 @@ class ManagedChatSession {
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     });
 
@@ -301,7 +301,7 @@ class SummarizingSession {
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     });
 
@@ -319,7 +319,7 @@ class SummarizingSession {
     // Generate summary
     const summaryResponse = await generateText({
       model: groq('gpt-oss-20b'),
-      system: 'Summarize this conversation briefly, keeping key facts and context.',
+      instructions: 'Summarize this conversation briefly, keeping key facts and context.',
       messages: toSummarize.map((m) => ({
         role: m.role,
         content: m.content,
@@ -382,7 +382,7 @@ class MetadataSession {
 
     const response = await generateText({
       model: groq('gpt-oss-20b'),
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages,
     });
 

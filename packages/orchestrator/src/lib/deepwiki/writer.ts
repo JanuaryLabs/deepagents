@@ -51,7 +51,7 @@ const write_section_tool = tool({
       sectionTitle,
       sectionContent,
     }: { sectionTitle: string; sectionContent: string },
-    options: ToolExecutionOptions,
+    options: ToolExecutionOptions<any>,
   ) => {
     const context = toState<SectionAgentContext>(options);
     const p = `./docs/section_${snakeCase(sectionTitle)}.md`;

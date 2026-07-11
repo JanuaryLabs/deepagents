@@ -417,8 +417,8 @@ const myTool = tool({
       throw new Error('Operation cancelled');
     }
 
-    // Access experimental context for state sharing
-    const state = options.experimental_context;
+    // Access this tool's context for state sharing
+    const state = options.context;
 
     // Perform work
     return await processQuery(query);

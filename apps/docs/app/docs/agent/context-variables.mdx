@@ -26,7 +26,7 @@ const stream = execute(agent, messages, {
 This context is available throughout execution:
 
 - In prompt functions
-- In tool execution via `experimental_context`
+- In tool execution via `options.context`
 - Across agent handoffs
 - In lifecycle hooks
 
@@ -89,7 +89,8 @@ The function form runs each time the agent's instructions are needed, so context
 
 ## Accessing Context in Tools
 
-Tools access context via `experimental_context` in their options:
+Tools access their per-tool context via `options.context`. The `toState()`
+helper keeps that access typed:
 
 ```typescript
 import { tool } from 'ai';

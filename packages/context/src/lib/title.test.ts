@@ -1,5 +1,5 @@
 import { type UIMessage, generateId } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -19,7 +19,7 @@ const testUsage = {
 } as const;
 
 function modelReturningTitle(title: string) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: async () => ({
       content: [{ type: 'text' as const, text: JSON.stringify({ title }) }],
       finishReason: { unified: 'stop' as const, raw: '' },
@@ -64,7 +64,7 @@ describe('TitleGenerator.ensure()', () => {
     await context.updateChat({ title: EXISTING_TITLE });
 
     let modelInvoked = false;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async () => {
         modelInvoked = true;
         return {
@@ -107,7 +107,7 @@ describe('TitleGenerator.ensure()', () => {
     context.set(user('help me'));
     await context.save();
 
-    const erroringModel = new MockLanguageModelV3({
+    const erroringModel = new MockLanguageModelV4({
       doGenerate: async () => {
         throw new Error('LLM unavailable');
       },
@@ -132,7 +132,7 @@ describe('TitleGenerator.ensure()', () => {
     controller.abort();
 
     let signalSeen: AbortSignal | undefined;
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doGenerate: async (options) => {
         signalSeen = options.abortSignal;
         if (options.abortSignal?.aborted) {

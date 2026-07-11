@@ -6,7 +6,7 @@ import {
   simulateReadableStream,
   tool,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -33,7 +33,7 @@ type StepSpec = { tool: string } | { text: string };
 
 function scriptedModel(steps: StepSpec[], prompts: unknown[][]) {
   let call = 0;
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       prompts.push(prompt as unknown[]);
       const spec = steps[Math.min(call, steps.length - 1)];
@@ -90,7 +90,7 @@ const metaTool = tool({
 
 async function makeAgent(
   context: ContextEngine,
-  model: MockLanguageModelV3,
+  model: MockLanguageModelV4,
   name: string,
   tools: ToolSet = { noop: noopTool },
 ) {

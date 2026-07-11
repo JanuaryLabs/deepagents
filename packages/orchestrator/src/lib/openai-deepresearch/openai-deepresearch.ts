@@ -22,7 +22,7 @@ import {
 //     result.toUIMessageStream({
 //       generateMessageId: generateId,
 //       originalMessages: messages,
-//       onFinish: async ({ responseMessage }) => {
+//       onEnd: async ({ responseMessage }) => {
 //         messages.push(responseMessage);
 //       },
 //     }),
@@ -56,11 +56,7 @@ async function startResearch(brief: string) {
       result.toUIMessageStream({
         generateMessageId: generateId,
         originalMessages: messages,
-        onFinish: async ({
-          responseMessage,
-        }: {
-          responseMessage: UIMessage;
-        }) => {
+        onEnd: async ({ responseMessage }: { responseMessage: UIMessage }) => {
           messages.push(responseMessage);
         },
       }),

@@ -39,9 +39,9 @@
   "dependencies": {
     "@deepagents/agent": "4.3.0",
     "@deepagents/context": "4.3.0",
-    "@ai-sdk/groq": "^3.0.47",
-    "@ai-sdk/openai": "^3.0.80",
-    "ai": "^6.0.218",
+    "@ai-sdk/groq": "^4.0.7",
+    "@ai-sdk/openai": "^4.0.11",
+    "ai": "^7.0.20",
     "zod": "^3.25.76 || ^4.0.0",
     "lodash-es": "^4.17.21",
     "@deepagents/retrieval": "4.3.0",

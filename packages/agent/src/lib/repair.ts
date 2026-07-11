@@ -1,4 +1,4 @@
-import { type LanguageModelV3 } from '@ai-sdk/provider';
+import { type LanguageModelV4 } from '@ai-sdk/provider';
 import {
   NoSuchToolError,
   Output,
@@ -9,7 +9,7 @@ import {
 import chalk from 'chalk';
 
 export function createRepairToolCall(
-  model: LanguageModelV3,
+  model: LanguageModelV4,
   abortSignal?: AbortSignal,
 ): ToolCallRepairFunction<ToolSet> {
   return async ({ toolCall, tools, inputSchema, error }) => {

@@ -4,7 +4,7 @@ description: Ship AI SDK spans to OpenAI's Traces API with batching, retry, and 
 ---
 
 `@deepagents/context/tracing` is a subpath export that provides a
-`TelemetryIntegration` for the AI SDK. Pass it to `experimental_telemetry`
+`Telemetry` integration for the AI SDK. Pass it to `telemetry`
 and every `generateText` / `streamText` call produces an OpenAI trace with
 nested spans for steps, tool calls, and handoffs — shipped to the OpenAI
 Traces ingest endpoint (or any compatible endpoint).
@@ -27,7 +27,7 @@ const assistant = agent({
   sandbox,
   context,
   model: groq('gpt-oss-20b'),
-  experimental_telemetry: { integrations: [telemetry] },
+  telemetry: { integrations: [telemetry] },
 });
 ```
 
@@ -37,10 +37,10 @@ Spans are queued by a `BatchTraceProcessor`, shipped in batches via an
 
 ## `createOpenAITracesIntegration(options)`
 
-Returns a `TelemetryIntegration` compatible with the AI SDK's `experimental_telemetry`
-hook points. It listens for `onStart`, `onStepStart`, `onStepFinish`,
-`onToolCallStart`, `onToolCallFinish`, and `onFinish` events and emits one
-trace per run with nested spans.
+Returns an AI SDK `Telemetry` implementation compatible with the
+stable `telemetry` integration option. It listens for `onStart`,
+`onStepStart`, `onStepEnd`, `onToolExecutionStart`, `onToolExecutionEnd`, and
+`onEnd` events and emits one trace per run with nested spans.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -70,17 +70,16 @@ spans:
 | --- | --- | --- |
 | `onStart` | `agent` (root) | Workflow name, available tools, output type |
 | `onStepStart` | `generation` | Model id, provider, tool choice, messages (if sensitive data is enabled) |
-| `onStepFinish` | closes the generation span | Usage tokens, response messages |
-| `onToolCallStart` | `function` | Tool name + JSON-stringified input |
-| `onToolCallFinish` | closes the function span | JSON-stringified output, or error |
-| `onFinish` | closes the root span | Total usage, step count, finish reason |
+| `onStepEnd` | closes the generation span | Usage tokens, response messages |
+| `onToolExecutionStart` | `function` | Tool name + JSON-stringified input |
+| `onToolExecutionEnd` | closes the function span | JSON-stringified output, or error |
+| `onEnd` | closes the root span | Total usage, step count, finish reason |
 
 When multiple runs are open concurrently (nested agents, `asAdvisor`),
-events are routed to the correct run by matching `response.id`,
-`toolCall.toolCallId`, `experimental_context`, `metadata`, `abortSignal`,
-`functionId`, `model`, and an input fingerprint — in descending priority.
-When exactly one run is open, it gets the event directly. When no run is
-open, the event is dropped rather than attached to the wrong trace.
+events are routed to the correct run by the AI SDK v7 `callId`, then by
+`response.id` or `toolCall.toolCallId` when available. When exactly one run is
+open, it gets an otherwise uncorrelated event directly. When no run is open,
+the event is dropped rather than attached to the wrong trace.
 
 ## Per-Span Wire Contracts
 
@@ -201,5 +200,5 @@ identical — only the payload bodies drop.
 
 ## Related
 
-- [Agent](/docs/context/agent) — `experimental_telemetry` on the agent options
+- [Agent](/docs/context/agent) — `telemetry` on the agent options
 - [Chat Function](/docs/context/chat-function) — Streaming entry point that forwards telemetry

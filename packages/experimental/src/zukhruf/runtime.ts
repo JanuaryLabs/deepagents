@@ -157,7 +157,7 @@ export function createRuntime(
 
     const responded = {
       ...part,
-      state: 'approval-responded',
+      state: approval.approved ? 'approval-responded' : 'output-denied',
       approval: { ...part.approval, ...approval },
     };
     const updated: UIMessage = {

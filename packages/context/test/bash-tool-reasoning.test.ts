@@ -1,5 +1,5 @@
-import { generateText, stepCountIs } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { generateText, isStepCount } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -21,7 +21,7 @@ const testUsage = {
 } as const;
 
 function createBashToolCallModel(input: string) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doGenerate: {
       finishReason: { unified: 'tool-calls', raw: undefined },
       usage: testUsage,
@@ -47,7 +47,7 @@ async function runBashToolCall(input: string) {
   const result = await generateText({
     model: createBashToolCallModel(input),
     prompt: 'test-input',
-    stopWhen: stepCountIs(1),
+    stopWhen: isStepCount(1),
     tools: { bash: tools.bash },
   });
 

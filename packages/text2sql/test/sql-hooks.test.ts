@@ -52,6 +52,7 @@ async function executeWithSqlHooks(
   assert.ok(execute, 'bash tool execution should be available');
   type BashExecuteOptions = Parameters<typeof execute>[1];
   const execOptions: BashExecuteOptions = {
+    context: {},
     messages: [],
     toolCallId: 'sql-hooks',
   };

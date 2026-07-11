@@ -152,11 +152,12 @@ const assistant = agent({
 | `name` | `string` | required | Identifier for logging and error messages |
 | `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
 | `context` | `ContextEngine` | `undefined` | Engine that resolves system prompt and messages |
-| `model` | `LanguageModelV3` | `undefined` | AI SDK model to use for generation |
+| `model` | `LanguageModelV4` | `undefined` | AI SDK model to use for generation |
 | `tools` | `ToolSet` | `{}` | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict) |
 | `toolChoice` | `ToolChoice` | `undefined` | Controls how the model selects tools |
 | `providerOptions` | `object` | `undefined` | Provider-specific options forwarded to the AI SDK |
-| `experimental_telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
+| `telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
+| `experimental_telemetry` | `object` | `undefined` | Deprecated alias for `telemetry` |
 | `guardrails` | `Guardrail[]` | `[]` | Guardrails applied during streaming |
 | `maxGuardrailRetries` | `number` | `3` | Max retry attempts when a guardrail fails |
 | `logging` | `boolean` | `undefined` | Enable debug logging |
@@ -169,7 +170,7 @@ The agent exposes these readonly properties after creation:
 | --- | --- | --- |
 | `tools` | `ToolSet` | Merged toolset (sandbox tools + user tools) |
 | `context` | `ContextEngine \| undefined` | The context engine bound to this agent |
-| `model` | `LanguageModelV3 \| undefined` | The model configured for this agent |
+| `model` | `LanguageModelV4 \| undefined` | The model configured for this agent |
 
 ## generate()
 
@@ -189,7 +190,7 @@ console.log(result.text);
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `contextVariables` | `CIn` | Passed as `experimental_context` to the AI SDK |
+| `contextVariables` | `CIn` | Passed as AI SDK `runtimeContext` and as each tool's `context` |
 | `config.abortSignal` | `AbortSignal` | Cancel the request |
 
 `config.abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
@@ -215,7 +216,7 @@ for await (const part of stream.toUIMessageStream()) {
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `contextVariables` | `CIn` | Passed as `experimental_context` to the AI SDK |
+| `contextVariables` | `CIn` | Passed as AI SDK `runtimeContext` and as each tool's `context` |
 | `config.abortSignal` | `AbortSignal` | Cancel the request |
 | `config.transform` | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |
 | `config.maxRetries` | `number` | Override `maxGuardrailRetries` for this call |
@@ -384,10 +385,11 @@ const person = await extractor.generate({});
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `context` | `ContextEngine` | required | Engine that resolves system prompt and messages |
-| `model` | `LanguageModelV3` | required | AI SDK model |
+| `model` | `LanguageModelV4` | required | AI SDK model |
 | `schema` | `z.ZodType` | required | Zod schema for the output type |
 | `providerOptions` | `object` | `undefined` | Provider-specific options |
-| `experimental_telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
+| `telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
+| `experimental_telemetry` | `object` | `undefined` | Deprecated alias for `telemetry` |
 | `tools` | `ToolSet` | `undefined` | Tools available during generation |
 
 ### structuredOutput Methods

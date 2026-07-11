@@ -1,5 +1,5 @@
-import { generateText, stepCountIs } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { generateText, isStepCount } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import type { CommandResult } from 'bash-tool';
 import { build } from 'esbuild';
 import spawn from 'nano-spawn';
@@ -357,7 +357,7 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
     await withSandbox(async (s) => {
       // One assistant turn issuing two bash tool calls; aggregating a message's
       // file changes = traversing its tool results and flattening output.meta.
-      const model = new MockLanguageModelV3({
+      const model = new MockLanguageModelV4({
         doGenerate: async () =>
           toolCallsResponse([
             bashToolCall('c1', `echo one > ${ROOT}/agg1.txt`),
@@ -369,7 +369,7 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
         model,
         tools: s.tools,
         prompt: 'go',
-        stopWhen: stepCountIs(1),
+        stopWhen: isStepCount(1),
       });
 
       const aggregated = res.toolResults.flatMap(
@@ -558,7 +558,7 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
     const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
-      const model = new MockLanguageModelV3({
+      const model = new MockLanguageModelV4({
         doGenerate: async () =>
           toolCallsResponse([
             writeFileToolCall('w1', `${ROOT}/blocked.json`, 'x'),
@@ -569,7 +569,7 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
         model,
         tools: s.tools,
         prompt: 'go',
-        stopWhen: stepCountIs(1),
+        stopWhen: isStepCount(1),
       });
 
       // The model sees a failed RESULT (the caller's format()), not a thrown
@@ -596,7 +596,7 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
     const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
-      const model = new MockLanguageModelV3({
+      const model = new MockLanguageModelV4({
         doGenerate: async () =>
           toolCallsResponse([bashToolCall('c1', `echo hi > ${ROOT}/r.txt`)]),
       });
@@ -605,7 +605,7 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
         model,
         tools: s.tools,
         prompt: 'go',
-        stopWhen: stepCountIs(1),
+        stopWhen: isStepCount(1),
       });
 
       const output = res.toolResults[0].output as {

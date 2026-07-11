@@ -21,7 +21,7 @@ export const GetWeatherSchema = z.object({
 type GetWeatherInput = z.infer<typeof GetWeatherInputSchema>;
 export type GetWeatherResult = z.infer<typeof GetWeatherSchema>;
 
-export const getWeatherTool = tool<GetWeatherInput, GetWeatherResult>({
+export const getWeatherTool = tool({
   description: 'Get the current weather for a location.',
   inputSchema: GetWeatherInputSchema,
   outputSchema: GetWeatherSchema,

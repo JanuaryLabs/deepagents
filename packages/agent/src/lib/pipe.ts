@@ -84,7 +84,7 @@ export function pipe(
               result.toUIMessageStream({
                 generateMessageId: generateId,
                 originalMessages: state.messages,
-                onFinish: async ({
+                onEnd: async ({
                   responseMessage,
                 }: {
                   responseMessage: UIMessage;

@@ -15,8 +15,8 @@ import {
   createUIMessageStream,
   generateId,
   generateText,
+  isStepCount,
   smoothStream,
-  stepCountIs,
   streamText,
   tool,
 } from 'ai';
@@ -56,7 +56,7 @@ type SubagentExecuteOptions = Parameters<
 >[1];
 
 export type OutputExtractorFn<T = string> = (
-  output: GenerateTextResult<ToolSet, any>,
+  output: GenerateTextResult<ToolSet, any, any>,
 ) => T | Promise<T>;
 
 export interface CreateAgent<CIn, COut = CIn> {
@@ -67,6 +67,8 @@ export interface CreateAgent<CIn, COut = CIn> {
   model?: AgentModel;
   toolChoice?: ToolChoice<Record<string, COut>>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  telemetry?: Parameters<typeof generateText>[0]['telemetry'];
+  /** @deprecated Use `telemetry` instead. */
   experimental_telemetry?: Parameters<
     typeof generateText
   >[0]['experimental_telemetry'];
@@ -107,7 +109,7 @@ class Agent<CIn, COut = CIn> {
       abortSignal?: AbortSignal;
     },
   ): Promise<
-    GenerateTextResult<ToolSet, Output.Output<string, string, unknown>>
+    GenerateTextResult<ToolSet, any, Output.Output<string, string, unknown>>
   > {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
@@ -126,22 +128,24 @@ class Agent<CIn, COut = CIn> {
     return generateText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
-      experimental_telemetry: this.#options.experimental_telemetry,
+      telemetry:
+        this.#options.telemetry ?? this.#options.experimental_telemetry,
       model: this.#options.model,
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
         ignoreIncompleteToolCalls: true,
         tools: this.tools,
       }),
-      stopWhen: stepCountIs(200),
+      stopWhen: isStepCount(200),
       tools: this.tools,
-      experimental_context: contextVariables,
-      experimental_repairToolCall: createRepairToolCall(
+      runtimeContext: contextVariables as any,
+      toolsContext: createToolsContext(this.tools, contextVariables) as any,
+      repairToolCall: createRepairToolCall(
         this.#options.model,
         config?.abortSignal,
       ),
       toolChoice: this.#options.toolChoice,
-      onStepFinish: (step) => {
+      onStepEnd: (step) => {
         if (!this.#options.logging) return;
         const toolCall = step.toolCalls.at(-1);
         if (toolCall) {
@@ -177,7 +181,7 @@ class Agent<CIn, COut = CIn> {
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
       maxRetries?: number;
     },
-  ): Promise<StreamTextResult<ToolSet, never>> {
+  ): Promise<StreamTextResult<ToolSet, any, any>> {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
     }
@@ -223,24 +227,23 @@ class Agent<CIn, COut = CIn> {
     return streamText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
-      experimental_telemetry: this.#options.experimental_telemetry,
+      telemetry:
+        this.#options.telemetry ?? this.#options.experimental_telemetry,
       model,
-      system: systemPrompt,
+      instructions: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
         ignoreIncompleteToolCalls: true,
         tools: this.tools,
       }),
-      experimental_repairToolCall: createRepairToolCall(
-        model,
-        config?.abortSignal,
-      ),
-      stopWhen: stepCountIs(200),
+      repairToolCall: createRepairToolCall(model, config?.abortSignal),
+      stopWhen: isStepCount(200),
       prepareStep: context.createSteerPrepareStep(),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
-      experimental_context: contextVariables,
+      runtimeContext: contextVariables as any,
+      toolsContext: createToolsContext(this.tools, contextVariables) as any,
       toolChoice: this.#options.toolChoice,
-      onStepFinish: (step) => {
+      onStepEnd: (step) => {
         if (!this.#options.logging) return;
         const toolCall = step.toolCalls.at(-1);
         if (toolCall) {
@@ -257,18 +260,18 @@ class Agent<CIn, COut = CIn> {
    *
    * When a guardrail fails:
    * 1. The feedback is written to the output stream (user sees the correction)
-   * 2. A finish-step is emitted, triggering onStepFinish to persist the self-correction
+   * 2. A finish-step is emitted, triggering onStepEnd to persist the self-correction
    * 3. A new stream is started and the model continues from the correction
    */
   #wrapWithGuardrails<CIn>(
-    result: StreamTextResult<ToolSet, never>,
+    result: StreamTextResult<ToolSet, any, any>,
     contextVariables: CIn,
     config?: {
       abortSignal?: AbortSignal;
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
       maxRetries?: number;
     },
-  ): StreamTextResult<ToolSet, never> {
+  ): StreamTextResult<ToolSet, any, any> {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
     const context = this.#options.context;
@@ -286,12 +289,12 @@ class Agent<CIn, COut = CIn> {
 
       return createUIMessageStream({
         generateId: assistantMsgId ? () => assistantMsgId : generateId,
-        onStepFinish: async ({ responseMessage }) => {
+        onStepEnd: async ({ responseMessage }) => {
           if (!stepSaved) return;
 
           // When chat() reserved an assistant head (the steer-capable path),
           // route through writeAssistantSegment so the steer split is honored and
-          // we stay idempotent with chat()'s own onStepFinish. For direct
+          // we stay idempotent with chat()'s own onStepEnd. For direct
           // guardrail usage with no reserved placeholder, append a fresh assistant.
           const head = await context.headMessage();
           if (head?.name === 'assistant') {
@@ -308,7 +311,7 @@ class Agent<CIn, COut = CIn> {
           stepSaved = null;
         },
         execute: async ({ writer }) => {
-          let currentResult: StreamTextResult<ToolSet, never> = result;
+          let currentResult: StreamTextResult<ToolSet, any, any> = result;
           let attempt = 0;
 
           // Create guardrail context with available tools and skills
@@ -458,7 +461,8 @@ class Agent<CIn, COut = CIn> {
             context: ctx,
             tools: this.#options.tools,
             providerOptions: this.#options.providerOptions,
-            experimental_telemetry: this.#options.experimental_telemetry,
+            telemetry:
+              this.#options.telemetry ?? this.#options.experimental_telemetry,
           });
 
           const result = await sub.generate(
@@ -536,7 +540,7 @@ class Agent<CIn, COut = CIn> {
         try {
           const result = await generateText({
             model: this.model,
-            system: advisorSystemPrompt,
+            instructions: advisorSystemPrompt,
             messages: executionOptions.messages,
             maxOutputTokens,
             abortSignal: executionOptions.abortSignal,
@@ -664,6 +668,8 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
    */
   sandbox?: AgentSandbox;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+  telemetry?: Parameters<typeof generateText>[0]['telemetry'];
+  /** @deprecated Use `telemetry` instead. */
   experimental_telemetry?: Parameters<
     typeof generateText
   >[0]['experimental_telemetry'];
@@ -708,7 +714,7 @@ export interface StructuredOutputResult<TSchema extends FlexibleSchema> {
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     },
   ): Promise<
-    StreamTextResult<ToolSet, Output.Output<unknown, unknown, unknown>>
+    StreamTextResult<ToolSet, any, Output.Output<unknown, unknown, unknown>>
   >;
 }
 
@@ -735,19 +741,23 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       const result = await generateText({
         abortSignal: config?.abortSignal,
         providerOptions: options.providerOptions,
-        experimental_telemetry: options.experimental_telemetry,
+        telemetry: options.telemetry ?? options.experimental_telemetry,
         model: options.model,
-        system: systemPrompt,
+        instructions: systemPrompt,
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
           tools: options.tools,
         }),
-        stopWhen: stepCountIs(200),
-        experimental_repairToolCall: createRepairToolCall(
+        stopWhen: isStepCount(200),
+        repairToolCall: createRepairToolCall(
           options.model,
           config?.abortSignal,
         ),
-        experimental_context: contextVariables,
+        runtimeContext: contextVariables as any,
+        toolsContext: createToolsContext(
+          options.tools ?? {},
+          contextVariables,
+        ) as any,
         output: Output.object({ schema: options.schema }),
         tools: options.tools,
       });
@@ -779,10 +789,10 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       return streamText({
         abortSignal: config?.abortSignal,
         providerOptions: options.providerOptions,
-        experimental_telemetry: options.experimental_telemetry,
+        telemetry: options.telemetry ?? options.experimental_telemetry,
         model: options.model,
-        system: systemPrompt,
-        experimental_repairToolCall: createRepairToolCall(
+        instructions: systemPrompt,
+        repairToolCall: createRepairToolCall(
           options.model,
           config?.abortSignal,
         ),
@@ -790,14 +800,24 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
           ignoreIncompleteToolCalls: true,
           tools: options.tools,
         }),
-        stopWhen: stepCountIs(200),
+        stopWhen: isStepCount(200),
         experimental_transform: config?.transform ?? smoothStream(),
-        experimental_context: contextVariables,
+        runtimeContext: contextVariables as any,
+        toolsContext: createToolsContext(
+          options.tools ?? {},
+          contextVariables,
+        ) as any,
         output: Output.object({ schema: options.schema }),
         tools: options.tools,
       });
     },
   };
+}
+
+function createToolsContext<C>(tools: ToolSet, context: C) {
+  return Object.fromEntries(
+    Object.keys(tools).map((toolName) => [toolName, context]),
+  );
 }
 
 function writeText(writer: UIMessageStreamWriter, text: string) {

@@ -4,7 +4,7 @@
  * never exits on its own — the parent test SIGKILLs it mid-turn.
  */
 import { simulateReadableStream } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import { PgBoss } from 'pg-boss';
 
@@ -34,7 +34,7 @@ const usage = {
   outputTokens: { total: 2, text: 2, reasoning: undefined },
 } as const;
 
-const glacialModel = new MockLanguageModelV3({
+const glacialModel = new MockLanguageModelV4({
   doStream: async () => ({
     stream: simulateReadableStream({
       initialDelayInMs: 100,

@@ -4,7 +4,7 @@ import {
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -29,7 +29,7 @@ const NUDGE = 'VALIDATE-FIRST-NUDGE';
 // step 1 -> call `bash` with `command`, step 2 -> emit text and stop.
 function bashThenStop(command: string) {
   let call = 0;
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => {
       call++;
       const id = `s${call}`;
