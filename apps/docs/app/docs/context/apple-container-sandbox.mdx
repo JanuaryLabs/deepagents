@@ -38,6 +38,8 @@ await using sandbox = await createAppleContainerSandbox({
   image: 'docker.io/library/alpine:latest',
   installers: [pkg(['curl', 'jq', 'python3'])],
   resources: { memory: '512M', cpus: 1 },
+  // Override a host resolver that is unreachable from the container VM.
+  dns: ['1.1.1.1'],
 });
 
 const { stdout } = await sandbox.executeCommand('python3 --version');

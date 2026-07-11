@@ -101,6 +101,8 @@ type StableContainerName = string;
 export interface AppleContainerCommonOptions {
   volumes?: AppleContainerVolume[];
   resources?: AppleContainerResources;
+  /** DNS nameservers passed to `container run --dns`. */
+  dns?: readonly string[];
   env?: Record<string, string>;
   name?: StableContainerName;
   /**
@@ -230,6 +232,9 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
 
     if (opts.arch) {
       args.push('--arch', opts.arch);
+    }
+    for (const nameserver of opts.dns ?? []) {
+      args.push('--dns', nameserver);
     }
     for (const [key, value] of Object.entries(opts.env ?? {})) {
       args.push('--env', `${key}=${value}`);

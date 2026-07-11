@@ -190,6 +190,21 @@ describe('appleEngine.parseStatus', () => {
   });
 });
 
+describe('appleEngine.runArgs', () => {
+  it('passes explicit DNS nameservers to the container runtime', () => {
+    const args = appleEngine.runArgs(
+      ALPINE,
+      'sandbox-dns',
+      { dns: ['1.1.1.1', '8.8.8.8'] },
+      '/workspace',
+    );
+
+    assert.strictEqual(args.filter((arg) => arg === '--dns').length, 2);
+    assert.ok(args.includes('1.1.1.1'));
+    assert.ok(args.includes('8.8.8.8'));
+  });
+});
+
 describe('Apple container sandbox (runtime)', async () => {
   const usable = await isAppleContainerUsable();
   if (!usable) {
@@ -296,7 +311,7 @@ describe('Apple container sandbox (runtime)', async () => {
 
   it('runs installers (pkg) against the real package manager', async () => {
     await useAppleContainerSandbox(
-      { image: ALPINE, installers: [pkg(['jq'])] },
+      { image: ALPINE, dns: ['1.1.1.1'], installers: [pkg(['jq'])] },
       async (sandbox) => {
         const result = await sandbox.executeCommand('echo \'{"a":1}\' | jq .a');
         assert.strictEqual(result.exitCode, 0);

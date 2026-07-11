@@ -63,7 +63,14 @@ export class SqliteContextStore extends ContextStore {
       this.#db.exec('COMMIT');
       return result;
     } catch (error) {
-      this.#db.exec('ROLLBACK');
+      // SQLite can end a transaction itself after fatal I/O errors such as
+      // SQLITE_FULL. A follow-up ROLLBACK then fails with "no transaction is
+      // active"; never let that cleanup failure mask the original error.
+      try {
+        this.#db.exec('ROLLBACK');
+      } catch {
+        // Best effort: preserve the operation error that triggered cleanup.
+      }
       throw error;
     }
   }
