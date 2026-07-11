@@ -1,4 +1,3 @@
-import type { CommandResult } from 'bash-tool';
 import type { Command, CommandContext, ExecResult } from 'just-bash';
 import { posix } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -6,6 +5,7 @@ import { v7 } from 'uuid';
 
 import {
   BashException,
+  type CommandResult,
   buildSubcommandRepair,
   defineSubcommandGroup,
   repairQuotedArg,

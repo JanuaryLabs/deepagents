@@ -1,4 +1,5 @@
 import {
+  type ToolSet,
   type ToolUIPart,
   type UIMessage,
   generateId,
@@ -413,6 +414,10 @@ export function applyRemindersToToolOutput(
   };
 }
 
+type ToolModelOutput = Awaited<
+  ReturnType<NonNullable<ToolSet[string]['toModelOutput']>>
+>;
+
 /**
  * Project a tool-output reminder envelope to its model-facing form: run the
  * wrapped tool's own projection over the inner `result` (so a tool's host-only
@@ -420,19 +425,46 @@ export function applyRemindersToToolOutput(
  * envelope's own host-only `meta` marker is dropped. Returns null for anything
  * that is not one of our envelopes, so the caller can project the raw output.
  */
-export function toToolReminderModelOutput(
+export async function toToolReminderModelOutput(
   output: unknown,
-  projectResult: (result: unknown) => unknown,
-): { type: 'json'; value: unknown } | null {
+  projectResult: (
+    result: unknown,
+  ) => ToolModelOutput | PromiseLike<ToolModelOutput>,
+): Promise<ToolModelOutput | null> {
   if (!isToolOutputReminderEnvelope(output)) return null;
-  const projected = projectResult(output.result);
-  return {
-    type: 'json',
-    value: {
-      result: isRecord(projected) ? projected.value : projected,
-      systemReminder: output.systemReminder,
-    },
-  };
+  const projected = await projectResult(output.result);
+  switch (projected.type) {
+    case 'text':
+    case 'error-text':
+      return {
+        ...projected,
+        value: `${projected.value}\n\n${output.systemReminder}`,
+      };
+    case 'json':
+    case 'error-json':
+      return {
+        ...projected,
+        value: {
+          result: projected.value,
+          systemReminder: output.systemReminder,
+        },
+      };
+    case 'content':
+      return {
+        ...projected,
+        value: [
+          ...projected.value,
+          { type: 'text', text: output.systemReminder },
+        ],
+      };
+    case 'execution-denied':
+      return {
+        ...projected,
+        reason: projected.reason
+          ? `${projected.reason}\n\n${output.systemReminder}`
+          : output.systemReminder,
+      };
+  }
 }
 
 export function mergeReminderMetadata(

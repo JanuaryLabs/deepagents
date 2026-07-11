@@ -5,3 +5,4 @@ export * from './lib/prompts.ts';
 export * from './lib/repair.ts';
 export * from './lib/stream_utils.ts';
 export * from './lib/swarm.ts';
+export * from './lib/tool-output.ts';

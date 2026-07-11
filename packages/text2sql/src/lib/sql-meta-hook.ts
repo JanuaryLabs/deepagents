@@ -1,6 +1,4 @@
-import type { CommandResult } from 'bash-tool';
-
-import { useBashMeta } from '@deepagents/context';
+import type { CommandResult } from '@deepagents/context';
 
 import {
   type SqlQueryInvocation,
@@ -47,14 +45,13 @@ export function createSqlMetaHook({ adapters }: CreateSqlMetaHookOptions) {
       if (!adapter) return undefined;
 
       try {
-        useBashMeta()?.setHidden({
-          formattedSql: adapter.format(invocation.sql),
-        });
+        return {
+          meta: { formattedSql: adapter.format(invocation.sql) },
+        };
       } catch {
         // Formatting metadata is best-effort and must not change command output.
+        return undefined;
       }
-
-      return undefined;
     },
   };
 }

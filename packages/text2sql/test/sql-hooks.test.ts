@@ -1,9 +1,12 @@
-import type { CommandResult } from 'bash-tool';
 import { InMemoryFs, defineCommand } from 'just-bash';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createBashTool, createVirtualSandbox } from '@deepagents/context';
+import {
+  type CommandResult,
+  createBashTool,
+  createVirtualSandbox,
+} from '@deepagents/context';
 import { createSqlCommandHooks } from '@deepagents/text2sql';
 
 interface CapturedSqlInvocation {

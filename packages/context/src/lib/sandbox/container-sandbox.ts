@@ -1,4 +1,3 @@
-import { type CommandResult } from 'bash-tool';
 import spawn, { type SubprocessError } from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -19,6 +18,7 @@ import { ContainerSandboxError } from './container-sandbox-errors.ts';
 import { type Installer } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
 import type {
+  CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
   SandboxProcess,

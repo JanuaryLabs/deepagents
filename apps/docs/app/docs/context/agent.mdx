@@ -11,18 +11,22 @@ Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `
 
 | Approach | When to use | Docker? | Supports `skills` |
 |---|---|---|---|
-| `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
+| `createVirtualSandbox()` + `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
 | `createDockerSandbox()` + `createBashTool()` | Real binaries in isolated Docker containers | Yes | Yes |
 | `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes | No | Yes |
 | `createBashTool({ sandbox: e2bSandbox })` | Other cloud sandboxes via adapter | No | Yes |
 
-Import `createBashTool` from `@deepagents/context` (not the raw `bash-tool` package). The `@deepagents/context` wrapper adds the `skills` option and always returns an `AgentSandbox`.
+`createBashTool` is owned by `@deepagents/context`; it adds the AI SDK tools to an explicit backend, supports skill uploads, and returns an `AgentSandbox`.
 
 ```typescript
-import { createBashTool } from '@deepagents/context';
+import { InMemoryFs } from 'just-bash';
+
+import { createBashTool, createVirtualSandbox } from '@deepagents/context';
 
 // Simplest: just-bash virtual sandbox (no Docker needed)
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 ```
 
 ```typescript
@@ -117,6 +121,48 @@ identifiers.
 
 The agent merges `sandbox.tools` into its toolset automatically. Any `tools` you pass override sandbox tools on name conflict.
 
+## Host-only Tool Metadata
+
+Any object-returning tool can include a top-level `meta` field for information
+the application should retain without sending it back to the model. No
+per-tool `toModelOutput` is required; the agent applies the projection to its
+entire toolset for generation, streaming, and persisted-history replay.
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+import { agent } from '@deepagents/context';
+
+const inspect = tool({
+  description: 'Inspect a resource',
+  inputSchema: z.object({ id: z.string() }),
+  execute: async ({ id }) => ({
+    status: 'ready',
+    meta: {
+      requestId: `request-${id}`,
+      durationMs: 18,
+    },
+  }),
+});
+
+const assistant = agent({
+  name: 'inspector',
+  sandbox,
+  context,
+  model,
+  tools: { inspect },
+});
+```
+
+Host-side tool results and UI messages retain both `status` and `meta`. The
+model sees only `{ status: 'ready' }`. A tool that defines its own
+`toModelOutput` keeps that custom projection.
+
+Host-only means hidden from the model, not secret: metadata can still be
+streamed, persisted, logged, or sent to a client. Keep sensitive values in a
+server-side store and put only an opaque reference in `meta`.
+
 ## Creating an Agent
 
 ```typescript
@@ -125,11 +171,15 @@ import {
   ContextEngine,
   SqliteContextStore,
   createBashTool,
+  createVirtualSandbox,
   role,
 } from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
 
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
   store,

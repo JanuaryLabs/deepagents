@@ -1,9 +1,8 @@
-import type { Sandbox } from 'bash-tool';
 import * as path from 'node:path';
 
 import { discoverSkillsInDirectory } from '../skills/loader.ts';
 import type { SkillPathMapping } from '../skills/types.ts';
-import type { SkillUploadInput } from './types.ts';
+import type { Sandbox, SkillUploadInput } from './types.ts';
 import { walkDirectory } from './walk.ts';
 
 function expandHome(input: string): string {

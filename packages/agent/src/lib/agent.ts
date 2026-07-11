@@ -27,6 +27,7 @@ import {
 import { createRepairToolCall } from './repair.ts';
 import { toState } from './stream_utils.ts';
 import { prepareStep } from './swarm.ts';
+import { withHostOnlyToolMetadata } from './tool-output.ts';
 
 export interface Handoff<CIn> {
   name: string;
@@ -119,7 +120,7 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
     this.handoff = {
       name: this.internalName,
       instructions: config.prompt,
-      tools: config.tools ?? {},
+      tools: withHostOnlyToolMetadata(config.tools ?? {}),
       handoffDescription: config.handoffDescription,
     };
     this.handoffToolName = `transfer_to_${this.internalName}`;

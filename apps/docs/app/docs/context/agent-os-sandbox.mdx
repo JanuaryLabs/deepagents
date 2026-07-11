@@ -152,7 +152,7 @@ const { tools } = await createBashTool({ sandbox });
 // Pass tools to generateText() or streamText()
 ```
 
-Since `AgentOsSandbox` implements the `Sandbox` interface from `bash-tool`, any code that accepts a `Sandbox` works with both Docker and WASM backends without changes.
+Since `AgentOsSandbox` implements the `DisposableSandbox` interface from `@deepagents/context`, the same owned tools work with both Docker and WASM backends without changes.
 
 ## Lifecycle
 

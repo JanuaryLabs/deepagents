@@ -1,6 +1,6 @@
+import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import type { CommandResult } from 'bash-tool';
 import { build } from 'esbuild';
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
@@ -11,6 +11,7 @@ import { describe, it } from 'node:test';
 
 import {
   BashException,
+  type CommandResult,
   type FileChange,
   createBashTool,
   createDockerSandbox,
@@ -135,6 +136,23 @@ const toolCallsResponse = (content: ReturnType<typeof toolCall>[]) => ({
   content,
   warnings: [],
 });
+
+const stopResponse = {
+  finishReason: { unified: 'stop' as const, raw: undefined },
+  usage: toolCallsResponse([]).usage,
+  content: [{ type: 'text' as const, text: 'done' }],
+  warnings: [],
+};
+
+function toolResultOutputs(prompt: LanguageModelV4Prompt) {
+  return prompt.flatMap((message) =>
+    message.role === 'tool'
+      ? message.content
+          .filter((part) => part.type === 'tool-result')
+          .map((part) => part.output)
+      : [],
+  );
+}
 
 interface Recorder {
   /** Flatten + clear changes seen via onFileChanges since the last drain. */
@@ -355,21 +373,26 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
 
   it('exposes each tool call’s changes on its tool result (per-message aggregation via meta, hidden from the model)', async () => {
     await withSandbox(async (s) => {
-      // One assistant turn issuing two bash tool calls; aggregating a message's
-      // file changes = traversing its tool results and flattening output.meta.
+      const prompts: LanguageModelV4Prompt[] = [];
+      let call = 0;
       const model = new MockLanguageModelV4({
-        doGenerate: async () =>
-          toolCallsResponse([
-            bashToolCall('c1', `echo one > ${ROOT}/agg1.txt`),
-            bashToolCall('c2', `echo two > ${ROOT}/agg2.txt`),
-          ]),
+        doGenerate: async (options) => {
+          prompts.push(options.prompt);
+          call++;
+          return call === 1
+            ? toolCallsResponse([
+                bashToolCall('c1', `echo one > ${ROOT}/agg1.txt`),
+                bashToolCall('c2', `echo two > ${ROOT}/agg2.txt`),
+              ])
+            : stopResponse;
+        },
       });
 
       const res = await generateText({
         model,
         tools: s.tools,
         prompt: 'go',
-        stopWhen: isStepCount(1),
+        stopWhen: isStepCount(2),
       });
 
       const aggregated = res.toolResults.flatMap(
@@ -381,17 +404,16 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
         `${ROOT}/agg1.txt`,
         `${ROOT}/agg2.txt`,
       ]);
-
-      // The model never sees `meta`: toModelOutput strips it.
-      const modelView = (
-        s.bash as unknown as {
-          toModelOutput?: (a: { output: unknown }) => { value: unknown };
-        }
-      ).toModelOutput?.({ output: res.toolResults[0].output });
-      assert.ok(
-        modelView && !('meta' in (modelView.value as object)),
-        `meta must be stripped from the model view, got ${JSON.stringify(modelView)}`,
-      );
+      assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+        {
+          type: 'json',
+          value: { stdout: '', stderr: '', exitCode: 0 },
+        },
+        {
+          type: 'json',
+          value: { stdout: '', stderr: '', exitCode: 0 },
+        },
+      ]);
     });
   });
 
@@ -477,12 +499,14 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
       // The setup mkdir trips the tripwire too — swallow its failed call.
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
       const r = await s.sandbox.executeCommand(`echo hi > ${ROOT}/a.txt`);
-      // withBashExceptionCatch one level up used the caller's format() verbatim.
-      assert.deepStrictEqual(r, {
-        stdout: '',
-        stderr: 'rejected: no writes allowed\n',
-        exitCode: 42,
-      });
+      assert.strictEqual(r.stdout, '');
+      assert.strictEqual(r.stderr, 'rejected: no writes allowed\n');
+      assert.strictEqual(r.exitCode, 42);
+      const changes = (r.meta?.fileChanges ?? []) as FileChange[];
+      assert.deepStrictEqual(
+        changes.map(({ op, path }) => ({ op, path })),
+        [{ op: 'write', path: `${ROOT}/a.txt` }],
+      );
       // onError is spawn-only — the command path never reaches it.
       assert.strictEqual(errors.length, 0);
 
@@ -596,24 +620,46 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
     const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
+      const prompts: LanguageModelV4Prompt[] = [];
+      let call = 0;
       const model = new MockLanguageModelV4({
-        doGenerate: async () =>
-          toolCallsResponse([bashToolCall('c1', `echo hi > ${ROOT}/r.txt`)]),
+        doGenerate: async (options) => {
+          prompts.push(options.prompt);
+          call++;
+          return call === 1
+            ? toolCallsResponse([bashToolCall('c1', `echo hi > ${ROOT}/r.txt`)])
+            : stopResponse;
+        },
       });
 
       const res = await generateText({
         model,
         tools: s.tools,
         prompt: 'go',
-        stopWhen: isStepCount(1),
+        stopWhen: isStepCount(2),
       });
 
       const output = res.toolResults[0].output as {
         exitCode: number;
         stderr: string;
+        meta?: { fileChanges?: FileChange[] };
       };
       assert.strictEqual(output.exitCode, 42);
       assert.match(output.stderr, /rejected: no writes allowed/);
+      assert.deepStrictEqual(
+        (output.meta?.fileChanges ?? []).map(({ op, path }) => ({ op, path })),
+        [{ op: 'write', path: `${ROOT}/r.txt` }],
+      );
+      assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+        {
+          type: 'json',
+          value: {
+            stdout: '',
+            stderr: 'rejected: no writes allowed\n',
+            exitCode: 42,
+          },
+        },
+      ]);
     } finally {
       await s.sandbox.dispose();
     }

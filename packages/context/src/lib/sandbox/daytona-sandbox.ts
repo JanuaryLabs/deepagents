@@ -4,11 +4,11 @@ import type {
   Daytona,
   Sandbox,
 } from '@daytona/sdk';
-import { type CommandResult } from 'bash-tool';
 import { randomUUID } from 'node:crypto';
 
 import { shellQuote } from './shell-quote.ts';
 import type {
+  CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,

@@ -1,11 +1,18 @@
 import type { Tool } from 'ai';
-import type {
-  BashToolkit,
-  CommandResult,
-  Sandbox as UpstreamSandbox,
-} from 'bash-tool';
 
 import type { SkillPathMapping } from '../skills/types.ts';
+
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  /** Host-only data omitted from model-facing tool output. */
+  meta?: Record<string, unknown>;
+  teeFiles?: Array<{
+    command: string;
+    stdoutFile: string;
+  }>;
+}
 
 /**
  * Options accepted by `DisposableSandbox.executeCommand`. Currently only
@@ -14,6 +21,17 @@ import type { SkillPathMapping } from '../skills/types.ts';
  */
 export interface ExecuteCommandOptions {
   signal?: AbortSignal;
+}
+
+export interface Sandbox {
+  executeCommand(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult>;
+  readFile(path: string): Promise<string>;
+  writeFiles(
+    files: Array<{ path: string; content: string | Buffer }>,
+  ): Promise<void>;
 }
 
 export interface SpawnOptions {
@@ -36,9 +54,8 @@ export interface SandboxProcess {
 }
 
 /**
- * Sandbox contract used throughout this package: upstream's three-method
- * shape plus a lifecycle hook, with `executeCommand` widened to accept
- * optional cancellation. Every backend (virtual, docker, agent-os)
+ * Sandbox contract used throughout this package: buffered command execution,
+ * file IO, and a lifecycle hook. Every backend (virtual, docker, agent-os)
  * implements this so callers can dispose uniformly. Backends that honor
  * `options.signal` forward it to their runner; others ignore. Pure
  * backends with no external resources (e.g. virtual-sandbox) supply a
@@ -49,12 +66,7 @@ export interface SandboxProcess {
  * feature-detect with `if (!sandbox.spawn) ...` — no silent fallback that
  * aggregates output and flushes on completion.
  */
-export interface DisposableSandbox
-  extends Omit<UpstreamSandbox, 'executeCommand'>, AsyncDisposable {
-  executeCommand(
-    command: string,
-    options?: ExecuteCommandOptions,
-  ): Promise<CommandResult>;
+export interface DisposableSandbox extends Sandbox, AsyncDisposable {
   spawn?(command: string, options?: SpawnOptions): SandboxProcess;
   /**
    * Release the backend's external resources. Called explicitly, or
@@ -97,30 +109,93 @@ export interface SkillUploadInput {
 }
 
 /**
- * Input schema exposed by the wrapped bash tool — adds a required `reasoning`
- * field on top of the upstream `{ command }` shape.
+ * Input schema exposed by the bash tool. `reasoning` is required for an
+ * auditable explanation of every model-initiated command.
  */
 export interface BashToolInput {
   command: string;
   reasoning: string;
 }
 
-/** The shared wrapper's bash tool type (widened from upstream). */
-export type WrappedBashTool = Tool<BashToolInput, CommandResult>;
+export type BashToolResult = CommandResult;
+
+export interface ReadFileToolInput {
+  path: string;
+}
+
+export interface ReadFileToolResult {
+  content: string;
+}
+
+export interface WriteFileToolInput {
+  path: string;
+  content: string;
+}
+
+export type WriteFileToolResult = { success: true } | CommandResult;
+
+export interface BeforeBashCallInput {
+  command: string;
+}
+
+export interface BeforeBashCallOutput {
+  command: string;
+}
+
+export interface AfterBashCallInput {
+  command: string;
+  result: CommandResult;
+}
+
+export interface AfterBashCallOutput {
+  result?: CommandResult;
+  meta?: Record<string, unknown>;
+}
+
+export interface CreateBashToolOptions {
+  sandbox: DisposableSandbox;
+  destination?: string;
+  files?: Record<string, string>;
+  uploadDirectory?: {
+    source: string;
+    include?: string;
+  };
+  extraInstructions?: string;
+  promptOptions?: {
+    toolPrompt?: string;
+  };
+  onBeforeBashCall?: (
+    input: BeforeBashCallInput,
+  ) => BeforeBashCallOutput | undefined;
+  onAfterBashCall?: (
+    input: AfterBashCallInput,
+  ) => AfterBashCallOutput | undefined;
+  maxOutputLength?: number;
+  maxFiles?: number;
+  experimentalTeeTransform?: boolean;
+}
+
+export type WrappedBashTool = Tool<BashToolInput, BashToolResult>;
+export type ReadFileTool = Tool<ReadFileToolInput, ReadFileToolResult>;
+export type WriteFileTool = Tool<WriteFileToolInput, WriteFileToolResult>;
+
+export interface BashToolkit {
+  bash: WrappedBashTool;
+  tools: {
+    bash: WrappedBashTool;
+    readFile: ReadFileTool;
+    writeFile: WriteFileTool;
+  };
+  sandbox: DisposableSandbox;
+}
 
 /**
  * A sandbox that owns its skills. The factory uploads files + parses
  * frontmatter once; `skills` is then the single source of truth for
- * the `skills()` fragment. The `bash` tool is widened to require a
- * `reasoning` input on every call.
+ * the `skills()` fragment. The `bash` tool requires a `reasoning` input on
+ * every call.
  */
-export interface AgentSandbox extends Omit<
-  BashToolkit,
-  'bash' | 'tools' | 'sandbox'
-> {
+export interface AgentSandbox extends BashToolkit {
   /** Discovered skills — empty array if none were configured. */
   skills: SkillPathMapping[];
-  bash: WrappedBashTool;
-  tools: Omit<BashToolkit['tools'], 'bash'> & { bash: WrappedBashTool };
-  sandbox: DisposableSandbox;
 }

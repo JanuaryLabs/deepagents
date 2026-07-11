@@ -98,7 +98,7 @@ export async function generate<O, CIn, COut = CIn>(
     instructions: agent.instructions(contextVariables),
     messages: await convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
-      { ignoreIncompleteToolCalls: true },
+      { ignoreIncompleteToolCalls: true, tools },
     ),
     repairToolCall: agent.repairToolCall(config?.abortSignal),
     stopWhen: isStepCount(25),
@@ -143,7 +143,7 @@ export async function execute<O, CIn, COut = CIn>(
     instructions: agent.instructions(contextVariables),
     messages: await convertToModelMessages(
       Array.isArray(messages) ? messages : [user(messages)],
-      { ignoreIncompleteToolCalls: true },
+      { ignoreIncompleteToolCalls: true, tools },
     ),
     stopWhen: isStepCount(25),
     experimental_transform: config?.transform ?? smoothStream(),

@@ -88,6 +88,44 @@ const metaTool = tool({
   },
 });
 
+const defaultMetaTool = tool({
+  description: 'A tool that relies on the default host-only meta projection.',
+  inputSchema: z.object({}),
+  execute: async () => ({ value: 42, meta: { hidden: 'SECRET' } }),
+});
+
+const asyncMetaTool = tool({
+  description: 'A tool with an asynchronous model projection.',
+  inputSchema: z.object({}),
+  execute: async () => ({ value: 42, meta: { hidden: 'SECRET' } }),
+  toModelOutput: async ({ output }) => {
+    await Promise.resolve();
+    return {
+      type: 'json',
+      value: { value: output.value },
+      providerOptions: { test: { projection: 'async' } },
+    };
+  },
+});
+
+const contentTool = tool({
+  description: 'A tool with file content in its model projection.',
+  inputSchema: z.object({}),
+  execute: async () => ({ artifactId: 'artifact-1' }),
+  toModelOutput: () => ({
+    type: 'content',
+    value: [
+      {
+        type: 'file',
+        data: { type: 'text', text: 'artifact contents' },
+        mediaType: 'text/plain',
+        filename: 'artifact.txt',
+        providerOptions: { test: { projection: 'content' } },
+      },
+    ],
+  }),
+});
+
 async function makeAgent(
   context: ContextEngine,
   model: MockLanguageModelV4,
@@ -145,6 +183,20 @@ function toolResultValuesIn(prompt: unknown[]): unknown[] {
     }
   }
   return values;
+}
+
+function toolResultOutputsIn(prompt: unknown[]): unknown[] {
+  const outputs: unknown[] = [];
+  for (const message of prompt as Array<{
+    role: string;
+    content: Array<{ type: string; output?: unknown }>;
+  }>) {
+    if (message.role !== 'tool') continue;
+    for (const item of message.content) {
+      if (item.type === 'tool-result') outputs.push(item.output);
+    }
+  }
+  return outputs;
 }
 
 const WRAPPED_STORED = {
@@ -289,5 +341,119 @@ describe('tool-output reminders (execute-time wrapping)', () => {
       ],
       "the tool's host-only meta must be stripped from the inner result even when a reminder fires",
     );
+  });
+
+  it('composes reminders with the default host-only meta projection', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'default-meta',
+      userId: 'u1',
+    });
+    const prompts: unknown[][] = [];
+    const model = scriptedModel(
+      [{ tool: 'defaultMetaTool' }, { text: 'done' }],
+      prompts,
+    );
+    const chatAgent = await makeAgent(context, model, 'default-meta', {
+      defaultMetaTool,
+    });
+    context.set(
+      reminder('CHECK', { when: afterTurn(0), target: 'tool-output' }),
+    );
+
+    await context.continue(userMessage('run the task'));
+    await drain(await chat(chatAgent));
+
+    const assistantMsg = await storedAssistant(store, 'default-meta');
+    assert.deepStrictEqual(toolOutputsOf(assistantMsg), [
+      {
+        result: { value: 42, meta: { hidden: 'SECRET' } },
+        systemReminder: '<system-reminder>CHECK</system-reminder>',
+        meta: { reminder: true },
+      },
+    ]);
+    assert.deepStrictEqual(toolResultValuesIn(prompts.at(-1) ?? []), [
+      {
+        result: { value: 42 },
+        systemReminder: '<system-reminder>CHECK</system-reminder>',
+      },
+    ]);
+  });
+
+  it('awaits an asynchronous model projection before adding the reminder', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'async-projection',
+      userId: 'u1',
+    });
+    const prompts: unknown[][] = [];
+    const model = scriptedModel(
+      [{ tool: 'asyncMetaTool' }, { text: 'done' }],
+      prompts,
+    );
+    const chatAgent = await makeAgent(context, model, 'async-projection', {
+      asyncMetaTool,
+    });
+    context.set(
+      reminder('CHECK', { when: afterTurn(0), target: 'tool-output' }),
+    );
+
+    await context.continue(userMessage('run the task'));
+    await drain(await chat(chatAgent));
+
+    assert.deepStrictEqual(toolResultOutputsIn(prompts.at(-1) ?? []), [
+      {
+        type: 'json',
+        value: {
+          result: { value: 42 },
+          systemReminder: '<system-reminder>CHECK</system-reminder>',
+        },
+        providerOptions: { test: { projection: 'async' } },
+      },
+    ]);
+  });
+
+  it('preserves content projections and appends the reminder as text', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'content-projection',
+      userId: 'u1',
+    });
+    const prompts: unknown[][] = [];
+    const model = scriptedModel(
+      [{ tool: 'contentTool' }, { text: 'done' }],
+      prompts,
+    );
+    const chatAgent = await makeAgent(context, model, 'content-projection', {
+      contentTool,
+    });
+    context.set(
+      reminder('CHECK', { when: afterTurn(0), target: 'tool-output' }),
+    );
+
+    await context.continue(userMessage('read the artifact'));
+    await drain(await chat(chatAgent));
+
+    assert.deepStrictEqual(toolResultOutputsIn(prompts.at(-1) ?? []), [
+      {
+        type: 'content',
+        value: [
+          {
+            type: 'file',
+            data: { type: 'text', text: 'artifact contents' },
+            mediaType: 'text/plain',
+            filename: 'artifact.txt',
+            providerOptions: { test: { projection: 'content' } },
+          },
+          {
+            type: 'text',
+            text: '<system-reminder>CHECK</system-reminder>',
+          },
+        ],
+      },
+    ]);
   });
 });

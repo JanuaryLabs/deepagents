@@ -26,20 +26,23 @@ export function runWithAbortSignal<T>(
  * caller-provided signals take precedence. Has no effect outside a
  * `runWithAbortSignal` scope.
  *
- * Bridges the signature mismatch between upstream `bash-tool` (which
- * calls `sandbox.executeCommand(command)` with no options) and backends
- * that can honor cancellation. The decorator goes between upstream and
- * the inner sandbox.
+ * This remains useful for callers that start work outside an AI SDK tool
+ * execution callback. The owned bash tool passes its abort signal explicitly.
  */
 export function withAbortSignal(sandbox: DisposableSandbox): DisposableSandbox {
   const decorated: DisposableSandbox = {
-    ...sandbox,
     async executeCommand(command, options) {
       const signal = options?.signal ?? ambientAbortSignal.getStore();
       return sandbox.executeCommand(
         command,
         signal ? { ...options, signal } : options,
       );
+    },
+    readFile: (path) => sandbox.readFile(path),
+    writeFiles: (files) => sandbox.writeFiles(files),
+    dispose: () => sandbox.dispose(),
+    [Symbol.asyncDispose]() {
+      return decorated.dispose();
     },
   };
 

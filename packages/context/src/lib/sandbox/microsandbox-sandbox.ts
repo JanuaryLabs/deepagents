@@ -1,4 +1,3 @@
-import { type CommandResult } from 'bash-tool';
 import type {
   ExecHandle,
   Sandbox as MicrosandboxVm,
@@ -8,6 +7,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 
 import type {
+  CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
   ExitInfo,

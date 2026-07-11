@@ -259,7 +259,7 @@ When you want command groups such as `sql run`, `tool validate`, or
 
 ## Bash Tool Schema
 
-`createBashTool()` from `@deepagents/context` returns a bash tool whose input schema requires two fields: `command` and `reasoning`. The LLM must provide a brief reason on every call — the wrapper enforces it at the Zod schema level, and the upstream `bash-tool` package's `{ command }` shape is widened accordingly.
+`createBashTool()` from `@deepagents/context` returns a bash tool whose input schema requires two fields: `command` and `reasoning`. The LLM must provide a brief reason on every call; the owned tool enforces it at the Zod schema level.
 
 ```typescript
 interface BashToolInput {
@@ -273,7 +273,9 @@ type WrappedBashTool = Tool<BashToolInput, CommandResult>;
 The reasoning field is stripped before the command runs — it never influences execution. The AI SDK records it as part of the `tool-call` step input, so it remains visible in the response's content array for auditing. Calls missing `reasoning` fail schema validation before `execute` is invoked.
 
 ```typescript
-const sandbox = await createBashTool();
+const sandbox = await createBashTool({
+  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+});
 
 // ✅ Accepted by the tool schema
 await sandbox.tools.bash.execute(
@@ -290,32 +292,24 @@ await sandbox.tools.bash.execute(
 
 Type-safe consumers can import `WrappedBashTool` and `BashToolInput` directly from `@deepagents/context`.
 
-## Meta Channel
+## Command Metadata
 
-Some bash handlers need to surface two different outputs at once:
-
-- host-only metadata for the application runtime
-- a short reminder the model should see on its next turn
-
-`useBashMeta()` gives handlers both channels inside the `createBashTool()`
-execution frame.
+A bash hook can return host-only metadata alongside an optional replacement
+result. `createBashTool()` merges it with metadata already returned by sandbox
+decorators such as `withStraceFileChanges()`.
 
 ```typescript
-import { useBashMeta } from '@deepagents/context';
-
-function markResult() {
-  const meta = useBashMeta();
-
-  meta?.setHidden({ formattedSql: 'SELECT 1' });
-  meta?.setReminder('Validate before executing the next query.');
-
-  return { stdout: 'ok\n', stderr: '', exitCode: 0 };
-}
+const sandbox = await createBashTool({
+  sandbox: backend,
+  onAfterBashCall: ({ command }) =>
+    command.startsWith('sql ')
+      ? { meta: { formattedSql: 'SELECT 1' } }
+      : undefined,
+});
 ```
 
 `meta` is preserved in the raw tool result for host-side consumers and stripped
-from model-visible output. `reminder` stays visible to the model. If a command
-runs outside the `createBashTool()` wrapper, `useBashMeta()` returns `null`.
+from model-visible output by the toolkit's shared toolset projection.
 
 ## Custom Errors: `BashException`
 
@@ -323,8 +317,7 @@ Subclass `BashException` when you want a command or transform hook to fail with
 an explicit `CommandResult` shape.
 
 ```typescript
-import type { CommandResult } from 'bash-tool';
-import { BashException } from '@deepagents/context';
+import { BashException, type CommandResult } from '@deepagents/context';
 
 class RateLimitError extends BashException {
   constructor(private readonly retryAfterMs: number) {

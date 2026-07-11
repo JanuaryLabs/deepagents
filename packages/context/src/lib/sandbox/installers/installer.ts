@@ -1,4 +1,3 @@
-import { type CommandResult } from 'bash-tool';
 import spawn from 'nano-spawn';
 
 import {
@@ -6,6 +5,7 @@ import {
   PackageInstallError,
 } from '../docker-sandbox-errors.ts';
 import { shellQuote } from '../shell-quote.ts';
+import type { CommandResult } from '../types.ts';
 
 export type PackageManager = 'apk' | 'apt-get';
 

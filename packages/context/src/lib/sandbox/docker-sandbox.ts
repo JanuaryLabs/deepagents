@@ -1,4 +1,3 @@
-import { type CommandResult } from 'bash-tool';
 import spawn, { type SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -34,13 +33,14 @@ import {
   createInstallerContext,
 } from './installers/installer.ts';
 import type {
+  CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
   SandboxProcess,
   SpawnOptions,
 } from './types.ts';
 
-export type { CommandResult as ExecResult, Sandbox } from 'bash-tool';
+export type { CommandResult as ExecResult, Sandbox } from './types.ts';
 export type {
   SandboxBindVolume as DockerBindVolume,
   SandboxNamedVolume as DockerNamedVolume,

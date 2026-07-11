@@ -184,9 +184,8 @@ Any `DisposableSandbox` matches what `createBashTool` expects from its
 exitCode }`). Backends that can expose unbuffered process streams, including
 Docker, Apple Container, Microsandbox, Agent OS, and Daytona, also implement
 optional `spawn(command, options?)` for streaming stdout/stderr. This is why
-real process backends can be plugged directly into the shared `createBashTool`
-from `@deepagents/context`, which in turn delegates to the upstream `bash-tool`
-package.
+real process backends can be plugged directly into the shared, owned
+`createBashTool` from `@deepagents/context`.
 
 ### Decorator Chain Behavior
 

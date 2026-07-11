@@ -23,6 +23,8 @@ import {
 import chalk from 'chalk';
 import z from 'zod';
 
+import { withHostOnlyToolMetadata } from '@deepagents/agent';
+
 import { type ContextEngine, XmlRenderer } from '../index.ts';
 import {
   type AdvisorResult,
@@ -588,10 +590,11 @@ function wrapToolsWithOutputReminders(
   tools: ToolSet,
   context: ContextEngine | undefined,
 ): ToolSet {
-  if (!context) return tools;
+  const toolsWithHostMetadata = withHostOnlyToolMetadata(tools);
+  if (!context) return toolsWithHostMetadata;
 
   const wrapped: ToolSet = {};
-  for (const [name, toolDef] of Object.entries(tools)) {
+  for (const [name, toolDef] of Object.entries(toolsWithHostMetadata)) {
     const execute = toolDef.execute;
     if (typeof execute !== 'function') {
       wrapped[name] = toolDef;
@@ -608,22 +611,21 @@ function wrapToolsWithOutputReminders(
           input,
         });
       },
-      toModelOutput: (args: {
+      toModelOutput: async (args: {
         toolCallId: string;
         input: unknown;
         output: unknown;
       }) => {
         const project = (output: unknown) =>
-          originalToModelOutput
-            ? originalToModelOutput({
-                ...args,
-                output,
-              } as Parameters<typeof originalToModelOutput>[0])
-            : defaultToolModelOutput(output);
-        return (
-          toToolReminderModelOutput(args.output, project) ??
-          project(args.output)
+          originalToModelOutput({
+            ...args,
+            output,
+          } as Parameters<typeof originalToModelOutput>[0]);
+        const reminderOutput = await toToolReminderModelOutput(
+          args.output,
+          project,
         );
+        return reminderOutput ?? project(args.output);
       },
     } as typeof toolDef;
   }
@@ -638,14 +640,6 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
     typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
       'function'
   );
-}
-
-// Mirrors the AI SDK's default tool-output projection for tools that have no
-// `toModelOutput` of their own; the wrapper must supply one to hide envelope meta.
-function defaultToolModelOutput(output: unknown) {
-  return typeof output === 'string'
-    ? { type: 'text' as const, value: output }
-    : { type: 'json' as const, value: output ?? null };
 }
 
 export function agent<CIn, COut = CIn>(
@@ -721,6 +715,9 @@ export interface StructuredOutputResult<TSchema extends FlexibleSchema> {
 export function structuredOutput<TSchema extends FlexibleSchema>(
   options: StructuredOutputOptions<TSchema>,
 ): StructuredOutputResult<TSchema> {
+  const tools = options.tools
+    ? withHostOnlyToolMetadata(options.tools)
+    : undefined;
   return {
     async generate<CIn>(
       contextVariables?: CIn,
@@ -746,7 +743,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
         instructions: systemPrompt,
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
-          tools: options.tools,
+          tools,
         }),
         stopWhen: isStepCount(200),
         repairToolCall: createRepairToolCall(
@@ -754,12 +751,9 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
           config?.abortSignal,
         ),
         runtimeContext: contextVariables as any,
-        toolsContext: createToolsContext(
-          options.tools ?? {},
-          contextVariables,
-        ) as any,
+        toolsContext: createToolsContext(tools ?? {}, contextVariables) as any,
         output: Output.object({ schema: options.schema }),
-        tools: options.tools,
+        tools,
       });
 
       return result.output as InferSchema<TSchema>;
@@ -798,17 +792,14 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
         ),
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
-          tools: options.tools,
+          tools,
         }),
         stopWhen: isStepCount(200),
         experimental_transform: config?.transform ?? smoothStream(),
         runtimeContext: contextVariables as any,
-        toolsContext: createToolsContext(
-          options.tools ?? {},
-          contextVariables,
-        ) as any,
+        toolsContext: createToolsContext(tools ?? {}, contextVariables) as any,
         output: Output.object({ schema: options.schema }),
-        tools: options.tools,
+        tools,
       });
     },
   };

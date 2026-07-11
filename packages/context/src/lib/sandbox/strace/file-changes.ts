@@ -1,10 +1,9 @@
-import type { CommandResult } from 'bash-tool';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 
-import { useBashMeta } from '../bash-meta.ts';
+import { BashException } from '../bash-exception.ts';
 import { shellQuote } from '../shell-quote.ts';
-import type { DisposableSandbox } from '../types.ts';
+import type { CommandResult, DisposableSandbox } from '../types.ts';
 import type { FileChange } from './file-change.ts';
 import {
   buildStraceCommand,
@@ -63,15 +62,9 @@ function warnOnFileChangesError(error: unknown): void {
  * A `with*` decorator that wraps the sandbox so each `executeCommand` is traced
  * and its filesystem mutations parsed into a per-call `FileChange[]`. Per-call
  * attribution is structural — one UUID-keyed trace file per call — so it is safe under
- * concurrent tool calls. Each call's manifest is surfaced two stateless ways: attached to
- * the tool result via the bash-meta channel (`meta.fileChanges`, hidden from the
- * model) and passed to `onFileChanges`. No buffer is retained.
- *
- * This decorator lives on the main barrel (not the lean `./sandbox/strace`
- * leaf) on purpose: the `meta.fileChanges` channel works by sharing one
- * `bash-meta` AsyncLocalStorage with `createBashTool`, and AsyncLocalStorage
- * context does not cross bundle boundaries — so the decorator must be bundled
- * with `createBashTool`. The leaf carries only the self-contained probe.
+ * concurrent tool calls. Each call's manifest is surfaced two stateless ways:
+ * attached directly to the command result as `meta.fileChanges` and passed to
+ * `onFileChanges`. No buffer is retained.
  *
  * This decorator TRUSTS that strace tracing works in the sandbox; it does not
  * self-test. "strace works here" is an invariant of the (image + host kernel +
@@ -88,7 +81,7 @@ function warnOnFileChangesError(error: unknown): void {
  * `dispose` also sweeps the trace
  * dir. `spawn` is traced the same way — its trace is read when the process exits
  * (strace is the top process, so the trace is fully flushed by then). `spawn`
- * carries no bash-meta scope, so its changes go to `onFileChanges` only.
+ * has no command result, so its changes go to `onFileChanges` only.
  *
  * The trace file is always swept once parsed. A throwing `onFileChanges` on the
  * tool-call path propagates to `withBashExceptionCatch` one level up: a caller's
@@ -179,8 +172,20 @@ export async function withStraceFileChanges(
       // (withBashExceptionCatch) turns a BashException into the tool result, or
       // fails the call for any other error.
       if (changes.length) {
-        useBashMeta()?.setHidden({ fileChanges: changes });
-        await onFileChanges?.(changes);
+        try {
+          await onFileChanges?.(changes);
+        } catch (error) {
+          if (!(error instanceof BashException)) throw error;
+          const formatted = error.format();
+          return {
+            ...formatted,
+            meta: { ...result.meta, ...formatted.meta, fileChanges: changes },
+          };
+        }
+        return {
+          ...result,
+          meta: { ...result.meta, fileChanges: changes },
+        };
       }
       return result;
     },
@@ -194,8 +199,8 @@ export async function withStraceFileChanges(
     writeFiles: async (files) => {
       await innerWriteFiles(files);
       const now = Date.now();
-      // Upstream bash-tool resolves writeFile paths to absolute before they
-      // reach here, so match the include/exclude globs against them directly.
+      // File tools resolve writeFile paths to absolute before they reach here,
+      // so match the include/exclude globs against them directly.
       const changes = files
         .map((f) => posix.normalize(f.path))
         .filter((path) => matchesGlobs(path, include, exclude))

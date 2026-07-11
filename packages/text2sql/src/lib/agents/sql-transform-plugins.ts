@@ -1,4 +1,3 @@
-import type { CommandResult } from 'bash-tool';
 import type {
   CommandNode,
   ScriptNode,
@@ -11,7 +10,11 @@ import { parse, serialize } from 'just-bash';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 
-import { BashException, asStaticWordText } from '@deepagents/context';
+import {
+  BashException,
+  type CommandResult,
+  asStaticWordText,
+} from '@deepagents/context';
 
 import { isValidAdapterName } from '../adapter-name.ts';
 

@@ -1,4 +1,3 @@
-import { type CommandResult } from 'bash-tool';
 import spawn, { type SubprocessError } from 'nano-spawn';
 import { spawn as childSpawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -29,7 +28,7 @@ import {
   isDebianBased,
 } from './installers/installer.ts';
 import { shellQuote } from './shell-quote.ts';
-import type { DisposableSandbox } from './types.ts';
+import type { CommandResult, DisposableSandbox } from './types.ts';
 
 export {
   AppleContainerCreationError,

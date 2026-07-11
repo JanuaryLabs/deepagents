@@ -597,9 +597,9 @@ const grettingAgent = agent({
   context,
 });
 
-// Create the skill-aware agent with bash-tool
+// Create the skill-aware agent with the sandbox toolkit
 async function createSkillAwareAgent() {
-  console.log('\n=== Skill-Aware Agent Demo (using bash-tool) ===');
+  console.log('\n=== Skill-Aware Agent Demo (using sandbox tools) ===');
 
   const skillSandbox = await createBashTool({
     sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),

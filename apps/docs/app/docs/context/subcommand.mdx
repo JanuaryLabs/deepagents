@@ -1,6 +1,6 @@
 ---
 title: Subcommand Builders
-description: Build just-bash command groups with dispatch, quote repair, and structured bash metadata
+description: Build just-bash command groups with dispatch, quote repair, and structured errors
 ---
 
 Use these helpers when a just-bash-backed sandbox needs a command surface such
@@ -168,10 +168,10 @@ helper when your command has a selector before the quoted body, such as
 
 ## Related Sandbox Helpers
 
-Subcommand handlers compose cleanly with two other sandbox APIs:
+Subcommand handlers compose cleanly with other sandbox APIs:
 
-- `useBashMeta()` attaches host-only metadata or a model-visible reminder to the current tool result.
 - `BashException` lets a handler fail with a structured `CommandResult` instead of throwing a generic error.
+- `onAfterBashCall` can attach host-only `meta` to a successful command result.
 
 See [Sandbox](/docs/context/sandbox) for those helpers and for the broader
 `createBashTool()` wrapper behavior.

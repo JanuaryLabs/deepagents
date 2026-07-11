@@ -1,7 +1,7 @@
-import { type CommandResult } from 'bash-tool';
 import { PassThrough, Readable } from 'node:stream';
 
 import type {
+  CommandResult,
   DisposableSandbox,
   ExecuteCommandOptions,
   SandboxProcess,
@@ -192,7 +192,7 @@ function bindAbort(
  *
  * @example With createBashTool (AI SDK integration)
  * ```typescript
- * import { createBashTool } from 'bash-tool';
+ * import { createBashTool } from '@deepagents/context';
  * import common from '@rivet-dev/agent-os-common';
  *
  * const sandbox = await createAgentOsSandbox({ software: [common] });

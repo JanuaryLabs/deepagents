@@ -1,209 +1,439 @@
 import { tool } from 'ai';
-import {
-  type CommandResult,
-  type CreateBashToolOptions,
-  createBashTool as externalCreateBashTool,
-} from 'bash-tool';
+import fg from 'fast-glob';
+import { BashTransformPipeline, TeePlugin } from 'just-bash';
+import { readFile } from 'node:fs/promises';
+import * as path from 'node:path';
 import z from 'zod';
 
-import { runWithAbortSignal, withAbortSignal } from './abort.ts';
+import { withHostOnlyToolMetadata } from '@deepagents/agent';
+
+import { withAbortSignal } from './abort.ts';
 import { BashException } from './bash-exception.ts';
-import { readBashMeta, runWithBashMeta } from './bash-meta.ts';
+import { shellQuote } from './shell-quote.ts';
 import type {
   AgentSandbox,
+  BashToolResult,
+  CommandResult,
+  CreateBashToolOptions,
   DisposableSandbox,
+  ReadFileTool,
   SkillUploadInput,
   WrappedBashTool,
+  WriteFileTool,
 } from './types.ts';
 import { uploadSkills } from './upload-skills.ts';
+
+const DEFAULT_DESTINATION = '/workspace';
+const DEFAULT_MAX_FILES = 1_000;
+const DEFAULT_MAX_OUTPUT_LENGTH = 30_000;
+const TEE_OUTPUT_DIR = '/tmp/bash-tool';
+const WRITE_BATCH_SIZE = 20;
 
 const REASONING_INSTRUCTION =
   'Every bash tool call must include a brief non-empty "reasoning" input explaining why the command is needed.';
 
-/**
- * Decorator: converts `BashException` thrown from `executeCommand` into a
- * normal `CommandResult` via `BashException.format()`. Other errors pass
- * through unchanged. Stacks outside any caller-composed tracker (e.g.
- * `withStraceFileChanges`), so a `BashException` raised by that tracker's
- * `onFileChanges` tripwire is still rendered via `format()`.
- *
- * Backends must be plain object literals (not class instances) since the
- * spread below copies only own enumerable properties; prototype methods
- * would be lost.
- */
+const KNOWN_TOOLS = new Set([
+  'awk',
+  'cat',
+  'column',
+  'comm',
+  'curl',
+  'cut',
+  'diff',
+  'expand',
+  'find',
+  'fold',
+  'grep',
+  'head',
+  'html-to-markdown',
+  'iconv',
+  'join',
+  'jq',
+  'node',
+  'nl',
+  'od',
+  'paste',
+  'printf',
+  'python',
+  'rev',
+  'sed',
+  'sort',
+  'split',
+  'strings',
+  'tail',
+  'tee',
+  'tr',
+  'uniq',
+  'unexpand',
+  'wc',
+  'xan',
+  'xargs',
+  'xxd',
+  'yq',
+]);
+
+const FORMAT_TOOLS = {
+  json: ['jq'],
+  yaml: ['yq'],
+  html: ['html-to-markdown'],
+  xml: ['yq'],
+  csv: ['xan', 'awk', 'cut'],
+  toml: ['yq'],
+  ini: ['yq'],
+} as const;
+
+const FORMAT_LABELS: Record<keyof typeof FORMAT_TOOLS, string> = {
+  json: 'JSON',
+  yaml: 'YAML',
+  html: 'HTML',
+  xml: 'XML',
+  csv: 'CSV/TSV',
+  toml: 'TOML',
+  ini: 'INI',
+};
+
+const EXTENSION_FORMATS: Record<string, keyof typeof FORMAT_TOOLS> = {
+  '.json': 'json',
+  '.jsonl': 'json',
+  '.ndjson': 'json',
+  '.yaml': 'yaml',
+  '.yml': 'yaml',
+  '.html': 'html',
+  '.htm': 'html',
+  '.xml': 'xml',
+  '.svg': 'xml',
+  '.csv': 'csv',
+  '.tsv': 'csv',
+  '.toml': 'toml',
+  '.ini': 'ini',
+  '.cfg': 'ini',
+  '.conf': 'ini',
+};
+
+/** Options added by DeepAgents to the owned bash toolkit. */
+export interface CreateBashToolWithSkillsOptions extends CreateBashToolOptions {
+  /** Skill directories copied into the sandbox before the toolkit is returned. */
+  skills?: SkillUploadInput[];
+}
+
+/** Catch structured bash errors without spreading class-based sandboxes. */
 function withBashExceptionCatch(sandbox: DisposableSandbox): DisposableSandbox {
-  return {
-    ...sandbox,
+  const decorated: DisposableSandbox = {
     async executeCommand(command, options) {
       try {
         return await sandbox.executeCommand(command, options);
-      } catch (err) {
-        if (err instanceof BashException) return err.format();
-        throw err;
+      } catch (error) {
+        if (error instanceof BashException) return error.format();
+        throw error;
       }
     },
+    readFile: (filePath) => sandbox.readFile(filePath),
+    writeFiles: (files) => sandbox.writeFiles(files),
+    dispose: () => sandbox.dispose(),
+    [Symbol.asyncDispose]() {
+      return decorated.dispose();
+    },
   };
+
+  if (sandbox.spawn) {
+    const spawn = sandbox.spawn.bind(sandbox);
+    decorated.spawn = (command, options) => spawn(command, options);
+  }
+
+  return decorated;
 }
 
-export interface CreateBashToolWithSkillsOptions extends Omit<
-  CreateBashToolOptions,
-  'sandbox'
-> {
-  /**
-   * Backend satisfying `DisposableSandbox`. Callers pick the backend
-   * explicitly via `createVirtualSandbox`, `createDockerSandbox`, or
-   * `createAgentOsSandbox`. `@vercel/sandbox` is intentionally not
-   * accepted; if it's needed, wrap it to `DisposableSandbox` first.
-   */
-  sandbox: DisposableSandbox;
-  /**
-   * Skill directories to upload into the sandbox at startup. Each entry's
-   * contents are copied to `sandbox` (files + subdirectories) and each
-   * subdirectory containing a SKILL.md is parsed into `sandbox.skills`.
-   */
-  skills?: SkillUploadInput[];
-  /**
-   * Working directory passed to upstream `bash-tool`. Defaults to `/workspace`.
-   * File-change tracking is no longer wired here — compose
-   * `withStraceFileChanges(backend, { destination, onFileChanges })` on the
-   * backend yourself and pass the result as `sandbox`.
-   */
-  destination?: string;
+function truncateOutput(
+  output: string,
+  maxLength: number,
+  streamName: 'stdout' | 'stderr',
+): string {
+  if (output.length <= maxLength) return output;
+  const removed = output.length - maxLength;
+  return `${output.slice(0, maxLength)}\n\n[${streamName} truncated: ${removed} characters removed]`;
+}
+
+function makeTeeScriptPortable(script: string): string {
+  const withoutStatusAssignments = script.replace(
+    /\s*;\s*__tps\d+=\$\{PIPESTATUS\[\d+\]\}(?:\s+__tps\d+=\$\{PIPESTATUS\[\d+\]\})*\s*;\s*(!\s+)?\(exit\s+\$__tps\d+\)(?:\s*\|\s*\(exit\s+\$__tps\d+\))*/g,
+    (_match, negated: string | undefined) => (negated ? '; test $? -ne 0' : ''),
+  );
+  return `set -o pipefail; ${withoutStatusAssignments}`;
+}
+
+type InitialFile =
+  | { path: string; content: string }
+  | { path: string; sourcePath: string };
+
+async function listInitialFiles(
+  options: CreateBashToolOptions,
+): Promise<InitialFile[]> {
+  const files = new Map<string, InitialFile>();
+
+  if (options.uploadDirectory) {
+    const { source, include = '**/*' } = options.uploadDirectory;
+    const absoluteSource = path.resolve(source);
+    const uploaded = await fg(include, {
+      cwd: absoluteSource,
+      dot: true,
+      onlyFiles: true,
+      ignore: ['**/.git/**', '**/node_modules/**'],
+    });
+    for (const relativePath of uploaded) {
+      files.set(relativePath, {
+        path: relativePath,
+        sourcePath: path.join(absoluteSource, relativePath),
+      });
+    }
+  }
+
+  for (const [relativePath, content] of Object.entries(options.files ?? {})) {
+    files.set(relativePath, { path: relativePath, content });
+  }
+
+  const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
+  if (maxFiles > 0 && files.size > maxFiles) {
+    throw new Error(
+      `Too many files to upload: ${files.size} files exceeds the limit of ${maxFiles}. ` +
+        'Increase maxFiles, narrow uploadDirectory.include, or upload files before creating the toolkit.',
+    );
+  }
+
+  return [...files.values()];
+}
+
+async function uploadInitialFiles(
+  sandbox: DisposableSandbox,
+  destination: string,
+  files: InitialFile[],
+): Promise<void> {
+  for (let index = 0; index < files.length; index += WRITE_BATCH_SIZE) {
+    const batch = await Promise.all(
+      files.slice(index, index + WRITE_BATCH_SIZE).map(async (file) => ({
+        path: path.posix.join(destination, file.path),
+        content:
+          'content' in file ? file.content : await readFile(file.sourcePath),
+      })),
+    );
+    await sandbox.writeFiles(batch);
+  }
+}
+
+async function createToolPrompt(
+  sandbox: DisposableSandbox,
+  filenames: string[],
+  customPrompt: string | undefined,
+): Promise<string> {
+  if (customPrompt !== undefined) return customPrompt;
+
+  const result = await sandbox.executeCommand(
+    'ls /usr/bin /usr/local/bin /bin /sbin /usr/sbin 2>/dev/null',
+  );
+  const available = new Set(
+    result.stdout.split('\n').filter((entry) => KNOWN_TOOLS.has(entry)),
+  );
+  if (available.size === 0) return '';
+
+  const lines = [
+    `Available tools: ${[...available].sort().join(', ')}, and more`,
+  ];
+  const formats = new Set(
+    filenames
+      .map(
+        (filename) => EXTENSION_FORMATS[path.extname(filename).toLowerCase()],
+      )
+      .filter((format) => format !== undefined),
+  );
+  for (const format of formats) {
+    const tools = FORMAT_TOOLS[format].filter((name) => available.has(name));
+    if (tools.length > 0) {
+      lines.push(`For ${FORMAT_LABELS[format]}: ${tools.join(', ')}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function createBashDescription(options: {
+  destination: string;
+  filenames: string[];
+  toolPrompt: string;
+  extraInstructions: string;
+  experimentalTeeTransform: boolean;
+}): string {
+  const lines = [
+    'Execute bash commands in the sandbox environment.',
+    '',
+    `WORKING DIRECTORY: ${options.destination}`,
+    'All commands execute from this directory. Use relative paths from here.',
+    '',
+  ];
+
+  if (options.filenames.length > 0) {
+    lines.push('Available files:');
+    for (const filename of options.filenames.slice(0, 8)) {
+      lines.push(`  ${filename}`);
+    }
+    if (options.filenames.length > 8) {
+      lines.push(`  ... and ${options.filenames.length - 8} more files`);
+    }
+    lines.push('');
+  }
+
+  if (options.toolPrompt) lines.push(options.toolPrompt, '');
+
+  lines.push(
+    'Common operations:',
+    '  ls -la              # List files with details',
+    "  find . -name '*.ts' # Find files by pattern",
+    "  grep -r 'pattern' . # Search file contents",
+    '  cat <file>          # View file contents',
+    '',
+  );
+
+  if (options.experimentalTeeTransform) {
+    lines.push(
+      'INTERMEDIATE OUTPUT CAPTURE:',
+      `Pipeline stdout is captured under ${TEE_OUTPUT_DIR}/.`,
+      'Use the returned teeFiles paths to inspect full intermediate output.',
+      '',
+    );
+  }
+
+  if (options.extraInstructions) {
+    lines.push(options.extraInstructions, '');
+  }
+
+  return lines.join('\n').trim();
 }
 
 /**
- * Composes an `AgentSandbox` from a backend by layering decorators:
- *
- *     backend → withBashExceptionCatch → withAbortSignal
- *
- * File-change tracking is not composed here — a caller that wants it wraps the
- * backend with `withStraceFileChanges` first, so the tracer sits innermost
- * (backend → withStraceFileChanges → withBashExceptionCatch → withAbortSignal).
- *
- * The composed sandbox is handed to upstream `bash-tool`; upstream's
- * internal `bash` / `readFile` / `writeFile` tools therefore close over
- * the decorated methods. The outer `bash` tool adds:
- *
- *   - `reasoning` input on the schema.
- *   - Host-only meta channel (`useBashMeta().setHidden(patch)`): attaches
- *     metadata that `toModelOutput` strips from the model-facing result.
- *     Model-visible nudges are declared as `target: 'tool-output'` reminders.
- *   - Single-shot `skills` upload populating `sandbox.skills`.
+ * Build the DeepAgents-owned bash/readFile/writeFile toolkit around a sandbox.
+ * The sandbox provides isolation and execution; these tools only translate AI
+ * SDK tool calls into that backend contract.
  */
 export async function createBashTool(
   options: CreateBashToolWithSkillsOptions,
 ): Promise<AgentSandbox> {
-  const {
-    skills: skillInputs = [],
-    extraInstructions,
-    sandbox: backend,
-    destination,
-    ...rest
-  } = options;
+  const destination = options.destination ?? DEFAULT_DESTINATION;
+  const initialFiles = await listInitialFiles(options);
+  const sandbox = withAbortSignal(withBashExceptionCatch(options.sandbox));
 
-  // File-change tracking is the caller's concern: wrap the backend with
-  // `withStraceFileChanges` before passing it in if you want it. createBashTool
-  // only adds the BashException catcher and ambient-abort decorators.
-  const sandbox = withAbortSignal(withBashExceptionCatch(backend));
-
-  const combinedInstructions = [extraInstructions, REASONING_INSTRUCTION]
+  await uploadInitialFiles(sandbox, destination, initialFiles);
+  const toolPrompt = await createToolPrompt(
+    sandbox,
+    initialFiles.map((file) => file.path),
+    options.promptOptions?.toolPrompt,
+  );
+  const extraInstructions = [options.extraInstructions, REASONING_INSTRUCTION]
     .filter(Boolean)
     .join('\n\n');
+  const experimentalTeeTransform = options.experimentalTeeTransform ?? false;
 
-  const toolkit = await externalCreateBashTool({
-    ...rest,
-    sandbox,
-    destination,
-    extraInstructions: combinedInstructions,
-  });
-
-  const upstreamBash = toolkit.bash as unknown as Record<string, unknown> & {
-    description?: string;
-    execute?: (
-      input: { command: string },
-      options: unknown,
-    ) => Promise<CommandResult>;
-  };
-  const originalExecute = upstreamBash.execute;
-
-  // `tool()`'s overloads can't reconcile our wider inputSchema with
-  // toModelOutput's NoInfer<TOutput> inference — without the cast TS resolves
-  // the generic to Tool<never, never>. The cast fixes the inference
-  // dead-end; the actual runtime shape is verified by tests.
-  const toolBuilder = tool as unknown as (config: unknown) => WrappedBashTool;
-
-  const bash = toolBuilder({
-    ...upstreamBash,
-    description: upstreamBash.description ?? '',
+  const bash: WrappedBashTool = tool({
+    description: createBashDescription({
+      destination,
+      filenames: initialFiles.map((file) => file.path),
+      toolPrompt,
+      extraInstructions,
+      experimentalTeeTransform,
+    }),
     inputSchema: z.object({
       command: z.string().describe('The bash command to execute'),
       reasoning: z
         .string()
         .trim()
+        .min(1)
         .describe('Brief reason for executing this command'),
     }),
     execute: async (
-      { command }: { command: string; reasoning: string },
-      execOptions: unknown,
-    ) => {
-      if (!originalExecute) {
-        throw new Error('bash tool execution is not available');
+      { command: originalCommand },
+      executionOptions,
+    ): Promise<BashToolResult> => {
+      let command = originalCommand;
+      const before = options.onBeforeBashCall?.({ command });
+      if (before?.command !== undefined) command = before.command;
+
+      let fullCommand: string;
+      let teeFiles: CommandResult['teeFiles'];
+      if (experimentalTeeTransform) {
+        const pipeline = new BashTransformPipeline().use(
+          new TeePlugin({ outputDir: TEE_OUTPUT_DIR }),
+        );
+        const transformed = pipeline.transform(command);
+        fullCommand =
+          `mkdir -p ${shellQuote(TEE_OUTPUT_DIR)} ${shellQuote(destination)} && ` +
+          `cd ${shellQuote(destination)} && ${makeTeeScriptPortable(transformed.script)}`;
+        teeFiles = transformed.metadata.teeFiles.map(
+          (file: { command: string; stdoutFile: string }) => ({
+            command: file.command,
+            stdoutFile: file.stdoutFile,
+          }),
+        );
+      } else {
+        fullCommand =
+          `mkdir -p ${shellQuote(destination)} && ` +
+          `cd ${shellQuote(destination)} && ${command}`;
       }
-      const { abortSignal } = execOptions as { abortSignal?: AbortSignal };
-      return runWithAbortSignal(abortSignal, () =>
-        runWithBashMeta(async () => {
-          const result = await originalExecute({ command }, execOptions);
-          const state = readBashMeta();
-          if (!state) return result;
-          if (Object.keys(state.hidden).length === 0) return result;
-          return { ...result, meta: state.hidden };
-        }),
-      );
-    },
-    toModelOutput: ({ output }: { output: unknown }) => {
-      if (typeof output !== 'object' || output === null) {
-        return { type: 'json' as const, value: output };
-      }
-      const { meta: _meta, ...visible } = output as { meta?: unknown };
-      return { type: 'json' as const, value: visible };
+
+      let result = await sandbox.executeCommand(fullCommand, {
+        signal: executionOptions.abortSignal,
+      });
+      const maxOutputLength =
+        options.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH;
+      result = {
+        ...result,
+        stdout: truncateOutput(result.stdout, maxOutputLength, 'stdout'),
+        stderr: truncateOutput(result.stderr, maxOutputLength, 'stderr'),
+        ...(teeFiles ? { teeFiles } : {}),
+      };
+
+      const executionMeta = result.meta;
+      const after = options.onAfterBashCall?.({ command, result });
+      if (after?.result !== undefined) result = after.result;
+
+      const meta = { ...executionMeta, ...result.meta, ...after?.meta };
+      return Object.keys(meta).length > 0 ? { ...result, meta } : result;
     },
   });
 
-  // Mirror the bash path for the writeFile tool. If the caller composed a
-  // tracker, a write goes through its `writeFiles`, so a tripwire `onFileChanges`
-  // can throw — render a thrown BashException as the tool RESULT via its format()
-  // (the same contract as bash), so the model sees a failed result it can act on
-  // instead of a rejected tool call the agent/guardrail would swallow. Other
-  // errors propagate.
-  const upstreamWriteFile = toolkit.tools.writeFile as unknown as {
-    execute?: (input: unknown, options: unknown) => Promise<unknown>;
-  };
-  const originalWriteExecute = upstreamWriteFile.execute;
-  const writeFileBuilder = tool as unknown as (
-    config: unknown,
-  ) => typeof toolkit.tools.writeFile;
-  const writeFile = writeFileBuilder({
-    ...upstreamWriteFile,
-    execute: async (input: unknown, options: unknown) => {
-      if (!originalWriteExecute) {
-        throw new Error('writeFile tool execution is not available');
-      }
+  const readFile: ReadFileTool = tool({
+    description: 'Read the contents of a file from the sandbox.',
+    inputSchema: z.object({
+      path: z.string().describe('The path to the file to read'),
+    }),
+    execute: async ({ path: filePath }) => ({
+      content: await sandbox.readFile(
+        path.posix.resolve(destination, filePath),
+      ),
+    }),
+  });
+
+  const writeFile: WriteFileTool = tool({
+    description:
+      'Write content to a file in the sandbox. Creates parent directories if needed.',
+    inputSchema: z.object({
+      path: z.string().describe('The path where the file should be written'),
+      content: z.string().describe('The content to write to the file'),
+    }),
+    execute: async ({ path: filePath, content }) => {
       try {
-        return await originalWriteExecute(input, options);
-      } catch (err) {
-        if (err instanceof BashException) return err.format();
-        throw err;
+        await sandbox.writeFiles([
+          {
+            path: path.posix.resolve(destination, filePath),
+            content,
+          },
+        ]);
+        return { success: true } as const;
+      } catch (error) {
+        if (error instanceof BashException) return error.format();
+        throw error;
       }
     },
   });
 
-  const skills = await uploadSkills(backend, skillInputs);
-
-  return {
-    ...toolkit,
-    sandbox,
-    bash,
-    tools: { ...toolkit.tools, bash, writeFile },
-    skills,
-  };
+  const skills = await uploadSkills(options.sandbox, options.skills ?? []);
+  const tools = withHostOnlyToolMetadata({ bash, readFile, writeFile });
+  return { bash: tools.bash, tools, sandbox, skills };
 }
+
+export { DEFAULT_MAX_OUTPUT_LENGTH };
