@@ -1,4 +1,4 @@
-import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
+import { type UIMessage } from 'ai';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
@@ -6,7 +6,6 @@ import {
   ContextEngine,
   InMemoryContextStore,
   type UserReminderMetadata,
-  applyRemindersToToolOutput,
   everyNTurns,
   first,
   getReminderRanges,
@@ -17,11 +16,6 @@ import {
   stripTextByRanges,
   user,
 } from '@deepagents/context';
-
-type OutputAvailableToolPart = ToolUIPart & {
-  state: 'output-available';
-  output: unknown;
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -55,25 +49,6 @@ function isReminderMetadata(value: unknown): value is UserReminderMetadata {
 
 function getMetadata(message: UIMessage): Record<string, unknown> {
   return isRecord(message.metadata) ? message.metadata : {};
-}
-
-function isOutputAvailableToolPart(
-  part: UIMessage['parts'][number] | undefined,
-): part is OutputAvailableToolPart {
-  return (
-    part !== undefined &&
-    isStaticToolUIPart(part) &&
-    part.state === 'output-available'
-  );
-}
-
-function getToolOutput(message: UIMessage, index = 0): unknown {
-  const part = message.parts[index];
-  assert.ok(
-    isOutputAvailableToolPart(part),
-    `Expected output-available tool part at index ${index}`,
-  );
-  return part.output;
 }
 
 function decodeMessage(fragment: ReturnType<typeof user>): UIMessage {
@@ -572,92 +547,6 @@ describe('reminder range helpers', () => {
     );
 
     assert.deepStrictEqual(stripped.metadata, { source: 'seed' });
-  });
-
-  it('strips user reminders and unwraps tool-output envelopes without metadata records', async () => {
-    const userMessage = await bakeUserReminders(
-      'Deploy now.',
-      reminder('user-reminder'),
-    );
-
-    const envelopeToolMessage: UIMessage = {
-      id: 'assistant-envelope-tool-reminder',
-      role: 'assistant',
-      parts: [
-        {
-          type: 'tool-sql',
-          toolCallId: 'tool-envelope',
-          state: 'output-available',
-          input: {},
-          output: applyRemindersToToolOutput({ rows: [{ id: 1 }] }, [
-            'object-tool-reminder',
-          ]),
-        },
-      ],
-    };
-
-    const strippedUser = stripReminders(userMessage);
-    const strippedEnvelopeTool = stripReminders(envelopeToolMessage);
-
-    assert.strictEqual(getTextPart(strippedUser), 'Deploy now.');
-    assert.strictEqual(strippedUser.metadata, undefined);
-
-    assert.deepStrictEqual(getToolOutput(strippedEnvelopeTool), {
-      rows: [{ id: 1 }],
-    });
-    assert.strictEqual(strippedEnvelopeTool.metadata, undefined);
-  });
-
-  it('does not mistake a real tool output with a systemReminder field for a reminder envelope', () => {
-    // A legitimate tool whose output happens to carry a `systemReminder` string
-    // (e.g. a notification tool) and no `result` key must pass through untouched.
-    const legitOutput = { messageId: 'abc', systemReminder: 'Check at 5pm' };
-    const toolMessage: UIMessage = {
-      id: 'assistant-legit-tool',
-      role: 'assistant',
-      parts: [
-        {
-          type: 'tool-notify',
-          toolCallId: 'tool-legit',
-          state: 'output-available',
-          input: {},
-          output: legitOutput,
-        },
-      ],
-    };
-
-    const stripped = stripReminders(toolMessage);
-    assert.deepStrictEqual(
-      getToolOutput(stripped),
-      legitOutput,
-      'a non-envelope object output must not be replaced with its (missing) .result',
-    );
-  });
-
-  it('treats old reminder metadata without target as a user reminder', () => {
-    const encodedReminder = taggedReminder('legacy-reminder');
-    const message: UIMessage = {
-      id: 'legacy-reminder-metadata',
-      role: 'user',
-      parts: [{ type: 'text', text: `body${encodedReminder}` }],
-      metadata: {
-        reminders: [
-          {
-            id: 'legacy-reminder',
-            text: 'legacy-reminder',
-            partIndex: 0,
-            start: 'body'.length,
-            end: 'body'.length + encodedReminder.length,
-            mode: 'inline',
-          },
-        ],
-      },
-    };
-
-    const stripped = stripReminders(message);
-
-    assert.strictEqual(getTextPart(stripped), 'body');
-    assert.strictEqual(stripped.metadata, undefined);
   });
 });
 

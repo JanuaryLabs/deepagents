@@ -9,12 +9,12 @@ Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `
 
 ## Sandbox Options
 
-| Approach | When to use | Docker? | Supports `skills` |
-|---|---|---|---|
-| `createVirtualSandbox()` + `createBashTool()` | Local dev, tests, lightweight tasks | No | Yes |
-| `createDockerSandbox()` + `createBashTool()` | Real binaries in isolated Docker containers | Yes | Yes |
-| `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes | No | Yes |
-| `createBashTool({ sandbox: e2bSandbox })` | Other cloud sandboxes via adapter | No | Yes |
+| Approach                                                     | When to use                                 | Docker? | Supports `skills` |
+| ------------------------------------------------------------ | ------------------------------------------- | ------- | ----------------- |
+| `createVirtualSandbox()` + `createBashTool()`                | Local dev, tests, lightweight tasks         | No      | Yes               |
+| `createDockerSandbox()` + `createBashTool()`                 | Real binaries in isolated Docker containers | Yes     | Yes               |
+| `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes                   | No      | Yes               |
+| `createBashTool({ sandbox: e2bSandbox })`                    | Other cloud sandboxes via adapter           | No      | Yes               |
 
 `createBashTool` is owned by `@deepagents/context`; it adds the AI SDK tools to an explicit backend, supports skill uploads, and returns an `AgentSandbox`.
 
@@ -30,11 +30,7 @@ const sandbox = await createBashTool({
 ```
 
 ```typescript
-import {
-  createBashTool,
-  createDockerSandbox,
-  pkg,
-} from '@deepagents/context';
+import { createBashTool, createDockerSandbox, pkg } from '@deepagents/context';
 
 // Docker with skills: pick the backend, then layer the bash tool.
 const backend = await createDockerSandbox({
@@ -52,11 +48,7 @@ const sandbox = await createBashTool({
 `bin()` symlinks a binary that already exists inside the container — typically reached via a bind-mounted workspace — onto `PATH`. The dev loop becomes `nx run <pkg>:build` → rerun the agent. No `docker build`, no esbuild bake-in, no re-published package.
 
 ```typescript
-import {
-  bin,
-  createBashTool,
-  createDockerSandbox,
-} from '@deepagents/context';
+import { bin, createBashTool, createDockerSandbox } from '@deepagents/context';
 
 const backend = await createDockerSandbox({
   image: 'node:lts-alpine',
@@ -86,12 +78,13 @@ bin('/opt/tools/cli.mjs', { target: '/opt/bin/tool' });
 `bin()` requires the file to exist at install time — a missing path throws `InstallError` with `source: 'bin'` instead of silently creating a dangling symlink. The `chmod +x` step is skipped when the file is already executable, so read-only bind mounts of pre-built artifacts work without a writable mount.
 
 ```typescript
+import { Daytona } from '@daytona/sdk';
+
 import {
   DAYTONA_DEFAULT_DESTINATION,
   createBashTool,
   createDaytonaSandbox,
 } from '@deepagents/context';
-import { Daytona } from '@daytona/sdk';
 
 const client = new Daytona({
   apiKey: process.env.DAYTONA_API_KEY!,
@@ -166,16 +159,17 @@ server-side store and put only an opaque reference in `meta`.
 ## Creating an Agent
 
 ```typescript
+import { groq } from '@ai-sdk/groq';
+import { InMemoryFs } from 'just-bash';
+
 import {
-  agent,
   ContextEngine,
   SqliteContextStore,
+  agent,
   createBashTool,
   createVirtualSandbox,
   role,
 } from '@deepagents/context';
-import { groq } from '@ai-sdk/groq';
-import { InMemoryFs } from 'just-bash';
 
 const sandbox = await createBashTool({
   sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
@@ -197,30 +191,29 @@ const assistant = agent({
 
 ## Configuration
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `name` | `string` | required | Identifier for logging and error messages |
-| `sandbox` | `AgentSandbox` | required | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
-| `context` | `ContextEngine` | `undefined` | Engine that resolves system prompt and messages |
-| `model` | `LanguageModelV4` | `undefined` | AI SDK model to use for generation |
-| `tools` | `ToolSet` | `{}` | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict) |
-| `toolChoice` | `ToolChoice` | `undefined` | Controls how the model selects tools |
-| `providerOptions` | `object` | `undefined` | Provider-specific options forwarded to the AI SDK |
-| `telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
-| `experimental_telemetry` | `object` | `undefined` | Deprecated alias for `telemetry` |
-| `guardrails` | `Guardrail[]` | `[]` | Guardrails applied during streaming |
-| `maxGuardrailRetries` | `number` | `3` | Max retry attempts when a guardrail fails |
-| `logging` | `boolean` | `undefined` | Enable debug logging |
+| Option                | Type              | Default     | Description                                                                                                                                                                                                                   |
+| --------------------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                | `string`          | required    | Identifier for logging and error messages                                                                                                                                                                                     |
+| `sandbox`             | `AgentSandbox`    | required    | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
+| `context`             | `ContextEngine`   | `undefined` | Engine that resolves system prompt and messages                                                                                                                                                                               |
+| `model`               | `LanguageModelV4` | `undefined` | AI SDK model to use for generation                                                                                                                                                                                            |
+| `tools`               | `ToolSet`         | `{}`        | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict)                                                                                                                      |
+| `toolChoice`          | `ToolChoice`      | `undefined` | Controls how the model selects tools                                                                                                                                                                                          |
+| `providerOptions`     | `object`          | `undefined` | Provider-specific options forwarded to the AI SDK                                                                                                                                                                             |
+| `telemetry`           | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                              |
+| `guardrails`          | `Guardrail[]`     | `[]`        | Guardrails applied during streaming                                                                                                                                                                                           |
+| `maxGuardrailRetries` | `number`          | `3`         | Max retry attempts when a guardrail fails                                                                                                                                                                                     |
+| `logging`             | `boolean`         | `undefined` | Enable debug logging                                                                                                                                                                                                          |
 
 ## Instance Properties
 
 The agent exposes these readonly properties after creation:
 
-| Property | Type | Description |
-| --- | --- | --- |
-| `tools` | `ToolSet` | Merged toolset (sandbox tools + user tools) |
-| `context` | `ContextEngine \| undefined` | The context engine bound to this agent |
-| `model` | `LanguageModelV4 \| undefined` | The model configured for this agent |
+| Property  | Type                           | Description                                 |
+| --------- | ------------------------------ | ------------------------------------------- |
+| `tools`   | `ToolSet`                      | Merged toolset (sandbox tools + user tools) |
+| `context` | `ContextEngine \| undefined`   | The context engine bound to this agent      |
+| `model`   | `LanguageModelV4 \| undefined` | The model configured for this agent         |
 
 ## generate()
 
@@ -238,10 +231,10 @@ console.log(result.text);
 
 `generate()` accepts two arguments:
 
-| Argument | Type | Description |
-| --- | --- | --- |
-| `contextVariables` | `CIn` | Passed as AI SDK `runtimeContext` and as each tool's `context` |
-| `config.abortSignal` | `AbortSignal` | Cancel the request |
+| Argument             | Type          | Description                                                    |
+| -------------------- | ------------- | -------------------------------------------------------------- |
+| `contextVariables`   | `CIn`         | Passed as AI SDK `runtimeContext` and as each tool's `context` |
+| `config.abortSignal` | `AbortSignal` | Cancel the request                                             |
 
 `config.abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
 
@@ -264,12 +257,12 @@ for await (const part of stream.toUIMessageStream()) {
 
 `stream()` accepts two arguments:
 
-| Argument | Type | Description |
-| --- | --- | --- |
-| `contextVariables` | `CIn` | Passed as AI SDK `runtimeContext` and as each tool's `context` |
-| `config.abortSignal` | `AbortSignal` | Cancel the request |
-| `config.transform` | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |
-| `config.maxRetries` | `number` | Override `maxGuardrailRetries` for this call |
+| Argument             | Type                                           | Description                                                    |
+| -------------------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| `contextVariables`   | `CIn`                                          | Passed as AI SDK `runtimeContext` and as each tool's `context` |
+| `config.abortSignal` | `AbortSignal`                                  | Cancel the request                                             |
+| `config.transform`   | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`)        |
+| `config.maxRetries`  | `number`                                       | Override `maxGuardrailRetries` for this call                   |
 
 `config.abortSignal` is reused across repair attempts and guardrail retries, so cancelling a stream stops the active turn cleanly.
 
@@ -325,9 +318,9 @@ const writer = agent({
 
 ### asTool() Options
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `toolDescription` | `string` | Override the generated tool description |
+| Option            | Type                                    | Description                                                  |
+| ----------------- | --------------------------------------- | ------------------------------------------------------------ |
+| `toolDescription` | `string`                                | Override the generated tool description                      |
 | `outputExtractor` | `(result) => string \| Promise<string>` | Transform the sub-agent result before the parent receives it |
 
 ## asAdvisor()
@@ -365,12 +358,12 @@ returned advisor instance.
 
 ### asAdvisor() Options
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `maxUses` | `number` | Hard cap on total tool invocations for this advisor instance |
-| `maxConversationUses` | `number` | Cap on successful advisor responses before the tool returns `max_uses_exceeded` |
-| `maxOutputTokens` | `number` | Maximum output tokens for the advisor response |
-| `concise` | `boolean \| string` | Use the built-in concise prompt, or provide custom advisor instructions |
+| Option                | Type                | Description                                                                     |
+| --------------------- | ------------------- | ------------------------------------------------------------------------------- |
+| `maxUses`             | `number`            | Hard cap on total tool invocations for this advisor instance                    |
+| `maxConversationUses` | `number`            | Cap on successful advisor responses before the tool returns `max_uses_exceeded` |
+| `maxOutputTokens`     | `number`            | Maximum output tokens for the advisor response                                  |
+| `concise`             | `boolean \| string` | Use the built-in concise prompt, or provide custom advisor instructions         |
 
 The tool returns short machine-readable status codes such as
 `too_many_requests`, `prompt_too_long`, or `execution_time_exceeded` when the
@@ -400,9 +393,16 @@ See the [Guardrails reference](/docs/context/guardrails) for the full API — wr
 Returns type-safe structured data parsed against a Zod schema. Separate from `agent()` because it uses `Output.object()` under the hood.
 
 ```typescript
-import { structuredOutput, ContextEngine, SqliteContextStore, role, user } from '@deepagents/context';
 import { groq } from '@ai-sdk/groq';
 import z from 'zod';
+
+import {
+  ContextEngine,
+  SqliteContextStore,
+  role,
+  structuredOutput,
+  user,
+} from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
@@ -432,15 +432,14 @@ const person = await extractor.generate({});
 
 ### structuredOutput Configuration
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `context` | `ContextEngine` | required | Engine that resolves system prompt and messages |
-| `model` | `LanguageModelV4` | required | AI SDK model |
-| `schema` | `z.ZodType` | required | Zod schema for the output type |
-| `providerOptions` | `object` | `undefined` | Provider-specific options |
-| `telemetry` | `object` | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
-| `experimental_telemetry` | `object` | `undefined` | Deprecated alias for `telemetry` |
-| `tools` | `ToolSet` | `undefined` | Tools available during generation |
+| Option            | Type              | Default     | Description                                                                      |
+| ----------------- | ----------------- | ----------- | -------------------------------------------------------------------------------- |
+| `context`         | `ContextEngine`   | required    | Engine that resolves system prompt and messages                                  |
+| `model`           | `LanguageModelV4` | required    | AI SDK model                                                                     |
+| `schema`          | `z.ZodType`       | required    | Zod schema for the output type                                                   |
+| `providerOptions` | `object`          | `undefined` | Provider-specific options                                                        |
+| `telemetry`       | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
+| `tools`           | `ToolSet`         | `undefined` | Tools available during generation                                                |
 
 ### structuredOutput Methods
 

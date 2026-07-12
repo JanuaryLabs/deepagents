@@ -1,10 +1,14 @@
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import {
   type UIMessage,
   generateId,
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  MockLanguageModelV4,
+  convertReadableStreamToArray as drain,
+} from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -28,12 +32,11 @@ const NUDGE = 'VALIDATE-FIRST-NUDGE';
 
 // step 1 -> call `bash` with `command`, step 2 -> emit text and stop.
 function bashThenStop(command: string) {
-  let call = 0;
-  return new MockLanguageModelV4({
+  const model = new MockLanguageModelV4({
     doStream: async () => {
-      call++;
+      const call = model.doStreamCalls.length;
       const id = `s${call}`;
-      const chunks: Record<string, unknown>[] =
+      const chunks: LanguageModelV4StreamPart[] =
         call === 1
           ? [
               {
@@ -59,23 +62,15 @@ function bashThenStop(command: string) {
               },
             ];
       return {
-        stream: simulateReadableStream({ chunks: chunks as never }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
+        stream: simulateReadableStream({ chunks }),
       };
     },
   });
+  return model;
 }
 
 function userMessage(text: string): UIMessage {
   return { id: generateId(), role: 'user', parts: [{ type: 'text', text }] };
-}
-
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
 }
 
 async function storedToolOutput(
@@ -85,13 +80,12 @@ async function storedToolOutput(
   const branch = await store.getActiveBranch(chatId);
   assert.ok(branch?.headMessageId, 'expected a branch head');
   const chain = await store.getMessageChain(branch.headMessageId);
-  const assistant = chain.findLast((e) => e.name === 'assistant');
-  assert.ok(assistant, 'expected a stored assistant message');
-  const msg = assistant.data as UIMessage;
-  const outputs = msg.parts
+  const outputs = chain
+    .filter((entry) => entry.name === 'assistant')
+    .flatMap((entry) => (entry.data as UIMessage).parts)
     .filter(isToolUIPart)
-    .filter((p) => p.state === 'output-available')
-    .map((p) => p.output);
+    .filter((part) => part.state === 'output-available')
+    .map((part) => part.output);
   assert.equal(outputs.length, 1, 'expected exactly one tool output');
   return outputs[0] as Record<string, unknown>;
 }
@@ -109,7 +103,7 @@ async function runBash(chatId: string, command: string) {
     reminder(NUDGE, {
       target: 'tool-output',
       when: (ctx) => {
-        const call = ctx.executingTool;
+        const call = ctx.toolOutcome;
         return (
           call?.name === 'bash' &&
           /^\s*sql\s+run\b/.test((call.input as { command: string }).command)
@@ -120,27 +114,47 @@ async function runBash(chatId: string, command: string) {
 
   await context.continue(userMessage('go'));
   await drain(await chat(chatAgent));
-  return storedToolOutput(store, chatId);
+  return { output: await storedToolOutput(store, chatId), model };
 }
 
-describe('ctx.executingTool gates a tool-output reminder on the live bash command', () => {
-  it('wraps a `sql run` result with the tagged reminder', async () => {
-    const output = await runBash('run', 'sql run main "SELECT 1"');
-    assert.ok('systemReminder' in output, 'sql run output should be wrapped');
-    assert.match(String(output.systemReminder), /<system-reminder>/);
-    assert.match(String(output.systemReminder), new RegExp(NUDGE));
-    assert.ok('result' in output, 'wrapped envelope carries the inner result');
+function reminderTextsIn(prompt: unknown[]): string[] {
+  return prompt.flatMap((message) => {
+    const candidate = message as {
+      role?: string;
+      content?: Array<{ type?: string; text?: string }>;
+    };
+    if (candidate.role !== 'user' || !Array.isArray(candidate.content))
+      return [];
+    return candidate.content.flatMap((part) =>
+      part.type === 'text' && part.text?.startsWith('<system-reminder>')
+        ? [part.text]
+        : [],
+    );
+  });
+}
+
+describe('ctx.toolOutcome gates a tool-output reminder on the live bash command', () => {
+  it('injects a reminder after a matching `sql run` result', async () => {
+    const { output, model } = await runBash('run', 'sql run main "SELECT 1"');
+    assert.ok('exitCode' in output, 'stored output remains the raw result');
+    assert.deepStrictEqual(
+      reminderTextsIn(model.doStreamCalls.at(-1)?.prompt ?? []),
+      [`<system-reminder>${NUDGE}</system-reminder>`],
+    );
   });
 
-  it('does NOT wrap a `sql validate` result (input predicate misses)', async () => {
-    const output = await runBash('validate', 'sql validate main "SELECT 1"');
-    assert.ok(
-      !('systemReminder' in output),
-      'sql validate output must be the raw, unwrapped result',
+  it('does not inject after `sql validate` when the input predicate misses', async () => {
+    const { output, model } = await runBash(
+      'validate',
+      'sql validate main "SELECT 1"',
     );
     assert.ok(
       'exitCode' in output,
-      'unwrapped result is the raw bash CommandResult',
+      'stored output is the raw bash CommandResult',
+    );
+    assert.deepStrictEqual(
+      reminderTextsIn(model.doStreamCalls.at(-1)?.prompt ?? []),
+      [],
     );
   });
 });

@@ -126,6 +126,47 @@ Each message becomes a node with `parentId` pointing to the previous message. Th
 
 If there are no pending messages, `save()` returns the current head without modifying the graph.
 
+#### createPrepareStep(options?)
+
+Build the AI SDK v7 `prepareStep` hook used by Context agents. The hook evaluates
+terminal tool outcomes before the next model generation and, by default,
+evaluates steer reminders after the first completed model step.
+
+```typescript
+const prepareStep = context.createPrepareStep();
+
+const result = streamText({
+  model,
+  messages,
+  tools,
+  prepareStep,
+});
+```
+
+Pass `{ steer: false }` to disable steer evaluation while retaining tool-output
+reminders. Returned message overrides carry forward to later AI SDK steps.
+
+`agent()` wires this hook automatically. Direct AI SDK users are responsible
+for persisting generated assistant messages; use `writeAssistantSegment()` when
+the stored chain must reproduce the reminder boundaries sent to the model.
+
+#### writeAssistantSegment(message, options?)
+
+Persist a cumulative streamed assistant `UIMessage` into the assistant head
+reserved by `continue()`. When `createPrepareStep()` fired model-only reminders,
+this method stores the corresponding
+`assistant → synthetic reminder → assistant` segments. `chat()` calls it
+automatically; it is primarily exposed for custom stream integrations.
+
+In `onEnd`, abort, and failure cleanup, pass `{ final: true }`. This persists a
+reminder that was already sent to the model even when the provider terminates
+before emitting the following step marker. A failure handler should pass the
+latest cumulative assistant message it retained from the stream.
+
+```typescript
+await context.writeAssistantSegment(responseMessage, { final: true });
+```
+
 #### render(renderer)
 
 Low-level render of context fragments. Use `resolve()` instead.

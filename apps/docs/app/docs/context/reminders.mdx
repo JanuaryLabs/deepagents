@@ -3,7 +3,7 @@ title: Reminders
 description: Inject situational context into model-visible carriers so the LLM stays aware of hidden runtime facts, active skills, and recent conversation signals
 ---
 
-Reminders inject hidden text into the model conversation to give the LLM situational awareness — current date, active skills, recent tool behavior, recurring instructions. Depending on the target, the text can merge into a user message, wrap a tool result, or splice a synthetic mid-loop steer message into a streaming turn. In every case the text is invisible to the end user but visible to the model.
+Reminders inject hidden text into the model conversation to give the LLM situational awareness — current date, active skills, recent tool behavior, recurring instructions. Depending on the target, the text either merges into a real user message or becomes a persisted synthetic user message between model steps. Reminder text is model-facing, not user-facing.
 
 ## How Reminders Work
 
@@ -15,10 +15,10 @@ A reminder is always a context fragment. Create it with `reminder()` and declare
 The `when` predicate is optional for `target: 'user'` — omit it for an always-on instruction. For `tool-output` and `steer` a `when` predicate is required.
 
 ```ts
-import { reminder, once, everyNTurns } from '@deepagents/context';
+import { everyNTurns, once, reminder } from '@deepagents/context';
 
-engine.set(reminder('Keep responses concise'));                // user, always on
-engine.set(reminder('Welcome!', { when: once('welcome') }));   // user, one-time
+engine.set(reminder('Keep responses concise')); // user, always on
+engine.set(reminder('Welcome!', { when: once('welcome') })); // user, one-time
 engine.set(reminder('RECAP', { when: everyNTurns(3), target: 'steer' }));
 ```
 
@@ -56,7 +56,13 @@ engine.set(
 Add a `when` predicate to fold the reminder only when it fires — gated by turn count, message content, assistant/tool history, token usage, or time. The engine builds a `WhenContext` at `save()` time and evaluates each predicate.
 
 ```ts
-import { reminder, contentIncludes, afterTurn, and, user } from '@deepagents/context';
+import {
+  afterTurn,
+  and,
+  contentIncludes,
+  reminder,
+  user,
+} from '@deepagents/context';
 
 // Only fires when the user mentions code AND after the first 2 turns
 engine.set(
@@ -70,9 +76,12 @@ engine.set(
 Pass `once(id)` as the predicate for a one-time user reminder. The id is durably latched in the folded message's metadata, so a fresh engine re-reads it and the reminder never fires twice — even across restarts.
 
 ```ts
-import { reminder, once, user } from '@deepagents/context';
+import { once, reminder, user } from '@deepagents/context';
 
-engine.set(reminder('Welcome! Type /help to see commands', { when: once('welcome') }), user('hi'));
+engine.set(
+  reminder('Welcome! Type /help to see commands', { when: once('welcome') }),
+  user('hi'),
+);
 ```
 
 See [Predicates](/docs/context/predicates) for the full predicate catalog and composition rules.
@@ -89,9 +98,11 @@ Reminders default inline so the model sees the context next to the user's words.
 ```ts
 import { reminder, workflow } from '@deepagents/context';
 
-engine.set(reminder('hint'));                                            // inline
-engine.set(reminder(workflow({ task: 'Deploy', steps: ['…'] })));       // inline
-engine.set(reminder(workflow({ task: 'Deploy', steps: ['…'] }), { asPart: true })); // forced part
+engine.set(reminder('hint')); // inline
+engine.set(reminder(workflow({ task: 'Deploy', steps: ['…'] }))); // inline
+engine.set(
+  reminder(workflow({ task: 'Deploy', steps: ['…'] }), { asPart: true }),
+); // forced part
 ```
 
 Use part mode for structured data (dates, skill lists, fragments) to keep reminder text separate from the user's message. `asPart` only applies to `target: 'user'`; `tool-output` and `steer` ignore it.
@@ -100,31 +111,67 @@ Use part mode for structured data (dates, skill lists, fragments) to keep remind
 
 A reminder fires in one of three places, chosen by `target`:
 
-| Target | When it runs | What the model sees |
-| --- | --- | --- |
-| `user` | During `engine.save()` on the last pending user message | Reminder text folded into that user message |
-| `tool-output` | Right after a tool `execute()` resolves | Wrapped tool output on the next model step; the persisted chain also keeps a host-only metadata marker so reminder envelopes can be unwrapped safely |
-| `steer` | Mid-loop between streaming steps, after the model has already emitted content | A synthetic hidden user message containing one or more `<system-reminder>` parts |
+| Target        | When it runs                                                                                                 | What the model sees                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `user`        | During `engine.save()` on the last pending user message                                                      | Reminder text folded into that user message                                      |
+| `tool-output` | At the next `prepareStep` boundary, after a tool has a terminal outcome and before the next model generation | The raw tool result followed by a synthetic user message containing the reminder |
+| `steer`       | At an eligible `prepareStep` boundary after the model has already produced a content step                    | A synthetic user message containing one or more `<system-reminder>` parts        |
 
 `user` is the default and may omit `when`. `tool-output` and `steer` require a `when` predicate — `reminder()` throws if it is missing.
 
-During `tool-output` evaluation, the predicate context includes `ctx.executingTool` with the live tool name, input, and raw output being wrapped. Use it when a reminder should fire only for a specific tool call; `lastAssistantMessage` and `lastAssistantMessages` only describe already-persisted assistant history.
+During `tool-output` evaluation, the predicate context includes a discriminated `ctx.toolOutcome`. The engine evaluates every terminal state and lets the predicate decide which ones matter:
+
+```ts
+type ToolOutcome =
+  | {
+      state: 'output-available';
+      name: string;
+      input: unknown;
+      output: unknown;
+    }
+  | {
+      state: 'output-error';
+      name: string;
+      input: unknown;
+      error: unknown;
+      errorText: string;
+    }
+  | {
+      state: 'output-denied';
+      name: string;
+      input: unknown;
+      reason?: string;
+    };
+```
+
+Use `toolOutput(...)` for normal state/name/input/output matching. Read
+`ctx.toolOutcome` directly when the condition needs more custom logic.
+`lastAssistantMessage` and `lastAssistantMessages` remain history fields; they
+do not represent the terminal outcome currently being evaluated.
 
 ```ts
 import {
-  everyNTurns,
   elapsedExceeds,
+  everyNTurns,
   reminder,
+  toolOutput,
 } from '@deepagents/context';
 
 engine.set(
   reminder('Double-check filesystem side effects', {
-    when: (ctx) =>
-      ctx.executingTool?.name === 'bash' &&
-      typeof ctx.executingTool.input === 'object' &&
-      ctx.executingTool.input !== null &&
-      'command' in ctx.executingTool.input &&
-      String(ctx.executingTool.input.command).startsWith('rm '),
+    when: toolOutput({
+      name: 'bash',
+      state: 'output-available',
+      input: (input) =>
+        typeof input === 'object' &&
+        input !== null &&
+        'command' in input &&
+        String(input.command).startsWith('rm '),
+    }),
+    target: 'tool-output',
+  }),
+  reminder('Explain why the tool could not run', {
+    when: toolOutput({ state: 'output-denied' }),
     target: 'tool-output',
   }),
   reminder('Checkpoint before taking another tool step', {
@@ -137,17 +184,33 @@ engine.set(
 );
 ```
 
-Use `tool-output` when the reminder should travel with a tool result. Use `steer` when the agent needs a hidden nudge during a multi-step streamed turn without waiting for the next user message. Steer reminders only fire after the model has produced at least one streamed step with content. When a steer reminder fires, the engine persists the same assistant/steer/assistant split that the model saw.
+Use `tool-output` when the reminder should follow a terminal tool outcome. Raw tool outputs are never wrapped or replaced. `prepareStep` appends the reminder after the tool result, and AI SDK v7 carries that message override into later steps. Provider adapters may serialize adjacent provider-neutral messages into their native compound wire format; the runtime does not contain provider-specific reminder handling.
 
-`once(id)` works on `target: 'user'` and `target: 'steer'` for a durable one-time fire that survives restarts. It is **not** supported on `target: 'tool-output'`, where no persisted carrier records the fire — `reminder()` throws if you try.
+Use `steer` when the agent needs a hidden nudge during a multi-step turn without waiting for the next user message. Steer reminders do not run before the initial generation: context needed there belongs on a `user` reminder. A predicate that stays true fires at every eligible continuation boundary; compose `once(id)` when it should latch after the first fire.
+
+For streamed chat turns, the engine persists the same
+`assistant/tool result → synthetic reminder → assistant` split the model saw.
+Later top-level requests replay that exact prefix, preserving provider prompt
+cache stability. Tool-output and steer reminders that fire at the same boundary
+are merged into one synthetic user message.
+
+`once(id)` works on `user`, `tool-output`, and `steer`. Its id is persisted only when the enclosing reminder actually fires, and the latch survives engine restarts.
 
 ## Built-in Reminders
 
 The library ships with pre-built reminders for common needs:
 
 <Cards>
-  <Card title="Temporal Reminders" href="/docs/context/temporal-reminders" description="Date, time, season, and locale atoms that fire only when their value changes" />
-  <Card title="Skill Reminders" href="/docs/context/skill-reminders" description="BM25-based skill matching that surfaces relevant skills per user query" />
+  <Card
+    title="Temporal Reminders"
+    href="/docs/context/temporal-reminders"
+    description="Date, time, season, and locale atoms that fire only when their value changes"
+  />
+  <Card
+    title="Skill Reminders"
+    href="/docs/context/skill-reminders"
+    description="BM25-based skill matching that surfaces relevant skills per user query"
+  />
 </Cards>
 
 ## ReminderContext
@@ -156,35 +219,46 @@ A reminder's text factory receives a context object:
 
 ```ts
 interface ReminderContext {
-  content: string;            // Plain text of the user message
-  turn?: number;              // Current user turn count
-  lastMessageAt?: number;     // Timestamp of last persisted user message
-  lastMessage?: UIMessage;    // Last persisted user message (with metadata)
+  content: string; // Plain text of the user message
+  turn?: number; // Current user turn count
+  lastMessageAt?: number; // Timestamp of last persisted user message
+  lastMessage?: UIMessage; // Last persisted user message (with metadata)
   currentMessage?: UIMessage; // Pending user message for the current turn
-  chat?: StoredChatData;      // Active chat record
+  chat?: StoredChatData; // Active chat record
   usage?: LanguageModelUsage; // Accumulated usage metadata
-  branch?: string;            // Active branch name
-  elapsed?: number;           // Milliseconds since last persisted user message
-  messageCount?: number;      // Total message count across all roles
+  branch?: string; // Active branch name
+  elapsed?: number; // Milliseconds since last persisted user message
+  messageCount?: number; // Total message count across all roles
   lastAssistantMessage?: UIMessage; // Last persisted assistant message
-  lastAssistantMessages?: UIMessage[]; // Recent persisted assistant messages
-  executingTool?: {           // Only for target: 'tool-output'
-    name: string;
-    input: unknown;
-    output: unknown;
-  };
+  toolOutcome?: ToolOutcome; // Current terminal outcome for tool-output
 }
 ```
 
-The engine populates these fields when it resolves the reminder. A reminder gated by a `when` predicate receives the matching `WhenContext` (see [Predicates](/docs/context/predicates)); a plain `(ctx) => string` factory on a `user` reminder receives at least `content`.
+The engine populates these fields when it resolves reminder text. During tool-output evaluation, both the predicate and a dynamic text factory can read `toolOutcome`. A reminder gated by a `when` predicate receives the richer `WhenContext` (see [Predicates](/docs/context/predicates)); a plain `(ctx) => string` factory on a user reminder receives at least `content`.
 
 ## Stripping Reminders
 
-`stripReminders()` removes all reminder text and metadata from a message. Use it to display clean message history or export conversations.
+User reminders carry range metadata so they can be stripped. Mid-loop reminders use a whole-message synthetic marker:
 
 ```ts
-import { stripReminders } from '@deepagents/context';
-
-const clean = stripReminders(message);
-// No <system-reminder> tags, no reminder metadata
+type SyntheticReminderMetadata = {
+  source: 'reminder';
+  firedAt: number;
+  onceIds?: string[];
+};
 ```
+
+Use `isSyntheticReminderMessage()` to omit these model-only messages from a UI. Use `stripReminders()` to remove reminder content and metadata when exporting or sanitizing individual messages.
+
+```ts
+import {
+  isSyntheticReminderMessage,
+  stripReminders,
+} from '@deepagents/context';
+
+const visibleMessages = messages
+  .filter((message) => !isSyntheticReminderMessage(message))
+  .map(stripReminders);
+```
+
+`synthesizeReminderMessage(text, firedAt, onceIds?)` builds the same synthetic carrier for advanced host integrations. Normal `agent()` + `chat()` users do not need to call it: the agent creates carriers and `chat()` persists the matching assistant/reminder split. Direct AI SDK integrations that call `createPrepareStep()` own assistant persistence and must pair the hook with `writeAssistantSegment()` if they need prompt/store parity.

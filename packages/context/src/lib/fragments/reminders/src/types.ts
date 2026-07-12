@@ -15,12 +15,34 @@ export interface ReminderContext {
   elapsed?: number;
   messageCount?: number;
   lastAssistantMessage?: UIMessage;
+  toolOutcome?: ToolOutcome;
 }
 
 export interface ReminderResolution {
   text: string;
   metadata?: Record<string, unknown>;
 }
+
+export type ToolOutcome =
+  | {
+      state: 'output-available';
+      name: string;
+      input: unknown;
+      output: unknown;
+    }
+  | {
+      state: 'output-error';
+      name: string;
+      input: unknown;
+      error: unknown;
+      errorText: string;
+    }
+  | {
+      state: 'output-denied';
+      name: string;
+      input: unknown;
+      reason?: string;
+    };
 
 export type SyncReminderText =
   | string
@@ -45,18 +67,12 @@ export interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
-  /**
-   * The tool call whose result is being wrapped, populated only during
-   * `target: 'tool-output'` evaluation — the live call in flight, which the
-   * finalized message chain cannot yet contain (`lastAssistantMessage` holds
-   * prior, already-completed calls). Read it directly in a predicate to gate on
-   * the executing tool's name/input/result. Undefined for `user` / `steer`.
-   */
-  executingTool?: { name: string; input: unknown; output: unknown };
+  /** The terminal tool outcome currently being evaluated. */
+  toolOutcome?: ToolOutcome;
   /**
    * Ids that a fire-once latch has already fired for in this conversation
-   * (persisted synth onceIds ∪ this stream's fires). Populated only during
-   * steer evaluation; `once(id)` reads it to suppress a second fire.
+   * (persisted synth onceIds ∪ this stream's fires). `once(id)` reads it to
+   * suppress a second fire.
    */
   firedOnceIds?: ReadonlySet<string>;
   /**
@@ -84,8 +100,8 @@ export type WhenPredicate = (ctx: WhenContext) => boolean | Promise<boolean>;
 
 export type ReminderTarget = 'user' | 'tool-output' | 'steer';
 
-export interface SyntheticSteerMetadata {
-  source: 'steer-reminder';
+export interface SyntheticReminderMetadata {
+  source: 'reminder';
   firedAt: number;
   onceIds?: string[];
 }

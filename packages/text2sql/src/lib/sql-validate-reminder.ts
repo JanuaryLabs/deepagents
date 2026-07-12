@@ -2,11 +2,11 @@ import { type UIMessage, isToolUIPart } from 'ai';
 
 import { type WhenPredicate, reminder } from '@deepagents/context';
 
-import { repairSqlCommand } from './sql-repair.ts';
 import {
   type SqlQueryInvocation,
   parseSqlQueryInvocation,
 } from './sql-invocation.ts';
+import { repairSqlCommand } from './sql-repair.ts';
 
 export const SQL_VALIDATE_REMINDER =
   'Always run `sql validate <db> "..."` before `sql run <db> "..."` to catch syntax errors early.';
@@ -49,15 +49,17 @@ function alreadyValidated(
 }
 
 /**
- * Fires when the tool call being wrapped is a `sql run` that was NOT preceded
- * by a `sql validate` of the same query. Reads the live call from
- * `ctx.executingTool` (only populated at `target: 'tool-output'` time) and scans
+ * Fires after a successful `sql run` that was NOT preceded by a `sql validate`
+ * of the same query. Reads the terminal call from `ctx.toolOutcome` (only
+ * populated at `target: 'tool-output'` time) and scans
  * `ctx.lastAssistantMessages` for a matching prior validate.
  */
 export function sqlRunMissingValidate(): WhenPredicate {
   return (ctx) => {
-    const call = ctx.executingTool;
-    if (!call || call.name !== 'bash') return false;
+    const call = ctx.toolOutcome;
+    if (!call || call.state !== 'output-available' || call.name !== 'bash') {
+      return false;
+    }
     const run = extractSqlInvocation(inputCommand(call.input));
     if (run?.subcommand !== 'run') return false;
     return !alreadyValidated(ctx.lastAssistantMessages, run);

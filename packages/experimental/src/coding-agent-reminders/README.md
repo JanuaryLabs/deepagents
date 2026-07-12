@@ -44,6 +44,13 @@ before adding them.
 | `steer` before finishing | `stop-feedback`          | `Stop`, `SubagentStop`                    |
 | guard, not reminder      | guard rule               | `PreToolUse`                              |
 
+This table maps equivalent lifecycle moments, not wire formats. In
+`@deepagents/context`, `tool-output` predicates receive a terminal
+`ToolOutcome` (`output-available`, `output-error`, or `output-denied`) at the
+AI SDK `prepareStep` boundary. Claude hooks expose success and failure as
+separate post-tool events and return `additionalContext` through Claude's hook
+protocol.
+
 Guards are evaluated only for `PreToolUse` and fail closed if their predicate
 throws. Stop feedback is suppressed when `stop_hook_active` is true so a hook
 cannot continue its own continuation repeatedly. `PostToolBatch` predicates

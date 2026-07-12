@@ -1,7 +1,7 @@
 import type { WhenPredicate } from '../types.ts';
 
 /**
- * Durable fire-once latch, composed into a steer reminder's `when`.
+ * Durable fire-once latch composed into a reminder's `when`.
  *
  * Two effects, both on `ctx` and nothing else:
  * - READ: returns false once `id` has fired in this conversation (the persisted
@@ -24,14 +24,10 @@ export function once(id: string): WhenPredicate {
     throw new Error('once(id) requires a non-empty id');
   }
   return (ctx) => {
-    // firedOnceIds is wired for steer and user evaluation; its absence means
-    // once() was used on a tool-output target where it cannot durably latch
-    // (no persisted carrier records the fire). Throw rather than silently fire
-    // every turn (the eval pipeline isolates this into "did not fire" + warning).
+    // All persisted reminder targets wire firedOnceIds. Its absence means this
+    // predicate is being evaluated outside the reminder engine contract.
     if (ctx.firedOnceIds === undefined) {
-      throw new Error(
-        `once('${id}') is not supported on target:'tool-output' reminders`,
-      );
+      throw new Error(`once('${id}') requires durable reminder context`);
     }
     if (ctx.firedOnceIds.has(id)) return false;
     ctx.onceCollector?.add(id);

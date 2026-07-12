@@ -184,9 +184,13 @@ model must pass to `sql validate <db>` and `sql run <db>`. Add or replace the
 instructions with your own domain fragments as needed.
 
 `sqlValidateReminder()` returns a context reminder fragment backed by
-`SQL_VALIDATE_REMINDER`. It adds a tool-output system reminder when the current
-assistant turn calls `sql run <db> "..."` without a prior `sql validate <db>
-"..."` for the same configured adapter name and exact SQL text.
+`SQL_VALIDATE_REMINDER`. After a successful `sql run <db> "..."`, it adds a
+model-only tool-output reminder before the next generation when no prior
+`sql validate <db> "..."` used the same configured adapter name and exact SQL
+text. The raw SQL command result remains unchanged. During streamed `chat()`
+turns, the reminder is persisted as a separate synthetic context message for
+replay and prompt caching; bare `createPrepareStep()` integrations and
+`agent.generate()` own persistence of their generated assistant history.
 
 ## Advanced: SQL CLI in Sandboxes
 

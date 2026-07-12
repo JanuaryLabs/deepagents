@@ -19,7 +19,7 @@ export interface FiredReminder {
  * Each predicate and each async text resolver is isolated: a throwing/rejecting
  * `when()` or reminder text is treated as "did not fire" and logged, never
  * propagated. This is the single evaluation core shared by the save pipeline
- * and the steer loop, so a misbehaving user predicate can never tear down a
+ * and prepare-step loop, so a misbehaving user predicate can never tear down a
  * save or an in-flight assistant turn.
  */
 export async function evaluateFiredReminders(

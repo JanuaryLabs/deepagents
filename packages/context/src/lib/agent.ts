@@ -4,6 +4,7 @@ import {
   type GenerateTextResult,
   type InferSchema,
   Output,
+  type PrepareStepFunction,
   type StreamTextResult,
   type StreamTextTransform,
   type Tool,
@@ -38,7 +39,6 @@ import {
 } from './advisor.ts';
 import { assistant } from './fragments.ts';
 import { user } from './fragments/message/user.ts';
-import { toToolReminderModelOutput } from './fragments/reminders/index.ts';
 import {
   type Guardrail,
   type GuardrailContext,
@@ -70,10 +70,6 @@ export interface CreateAgent<CIn, COut = CIn> {
   toolChoice?: ToolChoice<Record<string, COut>>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
-  /** @deprecated Use `telemetry` instead. */
-  experimental_telemetry?: Parameters<
-    typeof generateText
-  >[0]['experimental_telemetry'];
   logging?: boolean;
   /**
    * Guardrails to apply during streaming.
@@ -95,10 +91,10 @@ class Agent<CIn, COut = CIn> {
   readonly sandbox: AgentSandbox;
   constructor(options: CreateAgent<CIn, COut>) {
     this.#options = options;
-    this.tools = wrapToolsWithOutputReminders(
-      { ...options.sandbox.tools, ...(options.tools || {}) },
-      options.context,
-    );
+    this.tools = withHostOnlyToolMetadata({
+      ...options.sandbox.tools,
+      ...(options.tools || {}),
+    });
     this.context = options.context;
     this.model = options.model;
     this.sandbox = options.sandbox;
@@ -130,8 +126,7 @@ class Agent<CIn, COut = CIn> {
     return generateText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
-      telemetry:
-        this.#options.telemetry ?? this.#options.experimental_telemetry,
+      telemetry: this.#options.telemetry,
       model: this.#options.model,
       instructions: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
@@ -139,6 +134,7 @@ class Agent<CIn, COut = CIn> {
         tools: this.tools,
       }),
       stopWhen: isStepCount(200),
+      prepareStep: this.#options.context.createPrepareStep({ steer: false }),
       tools: this.tools,
       runtimeContext: contextVariables as any,
       toolsContext: createToolsContext(this.tools, contextVariables) as any,
@@ -191,13 +187,23 @@ class Agent<CIn, COut = CIn> {
       throw new Error(`Agent ${this.#options.name} is missing a model.`);
     }
 
-    const result = await this.#createRawStream(contextVariables, config);
+    const prepareStep = this.#options.context.createPrepareStep();
+    const result = await this.#createRawStream(
+      contextVariables,
+      config,
+      prepareStep,
+    );
 
     if (this.#guardrails.length === 0) {
       return result;
     }
 
-    return this.#wrapWithGuardrails(result, contextVariables, config);
+    return this.#wrapWithGuardrails(
+      result,
+      contextVariables,
+      config,
+      prepareStep,
+    );
   }
 
   /**
@@ -209,6 +215,7 @@ class Agent<CIn, COut = CIn> {
       abortSignal?: AbortSignal;
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
     },
+    prepareStep?: PrepareStepFunction<ToolSet>,
   ) {
     const context = this.#options.context;
     if (!context) {
@@ -229,8 +236,7 @@ class Agent<CIn, COut = CIn> {
     return streamText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
-      telemetry:
-        this.#options.telemetry ?? this.#options.experimental_telemetry,
+      telemetry: this.#options.telemetry,
       model,
       instructions: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
@@ -239,7 +245,7 @@ class Agent<CIn, COut = CIn> {
       }),
       repairToolCall: createRepairToolCall(model, config?.abortSignal),
       stopWhen: isStepCount(200),
-      prepareStep: context.createSteerPrepareStep(),
+      prepareStep: prepareStep ?? context.createPrepareStep(),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
       runtimeContext: contextVariables as any,
@@ -273,6 +279,7 @@ class Agent<CIn, COut = CIn> {
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
       maxRetries?: number;
     },
+    prepareStep?: PrepareStepFunction<ToolSet>,
   ): StreamTextResult<ToolSet, any, any> {
     const maxRetries =
       config?.maxRetries ?? this.#options.maxGuardrailRetries ?? 3;
@@ -295,7 +302,7 @@ class Agent<CIn, COut = CIn> {
           if (!stepSaved) return;
 
           // When chat() reserved an assistant head (the steer-capable path),
-          // route through writeAssistantSegment so the steer split is honored and
+          // route through writeAssistantSegment so reminder splits are honored and
           // we stay idempotent with chat()'s own onStepEnd. For direct
           // guardrail usage with no reserved placeholder, append a fresh assistant.
           const head = await context.headMessage();
@@ -396,6 +403,7 @@ class Agent<CIn, COut = CIn> {
             currentResult = await this.#createRawStream(
               contextVariables,
               config,
+              prepareStep,
             );
           }
         },
@@ -463,8 +471,7 @@ class Agent<CIn, COut = CIn> {
             context: ctx,
             tools: this.#options.tools,
             providerOptions: this.#options.providerOptions,
-            telemetry:
-              this.#options.telemetry ?? this.#options.experimental_telemetry,
+            telemetry: this.#options.telemetry,
           });
 
           const result = await sub.generate(
@@ -578,70 +585,6 @@ class Agent<CIn, COut = CIn> {
   }
 }
 
-/**
- * Wrap every executable tool so `target: 'tool-output'` reminders are applied
- * to the raw result at the execution boundary. The store keeps the host-marked
- * envelope; the model-facing projection strips the host-only marker while
- * preserving the result and reminder text.
- * Streaming results (async iterables) pass through untouched — wrapping them
- * would break their consumption contract.
- */
-function wrapToolsWithOutputReminders(
-  tools: ToolSet,
-  context: ContextEngine | undefined,
-): ToolSet {
-  const toolsWithHostMetadata = withHostOnlyToolMetadata(tools);
-  if (!context) return toolsWithHostMetadata;
-
-  const wrapped: ToolSet = {};
-  for (const [name, toolDef] of Object.entries(toolsWithHostMetadata)) {
-    const execute = toolDef.execute;
-    if (typeof execute !== 'function') {
-      wrapped[name] = toolDef;
-      continue;
-    }
-    const originalToModelOutput = toolDef.toModelOutput;
-    wrapped[name] = {
-      ...toolDef,
-      execute: async (input, options) => {
-        const result = await execute.call(toolDef, input, options);
-        if (isAsyncIterable(result)) return result;
-        return context.applyToolOutputReminders(result, {
-          toolName: name,
-          input,
-        });
-      },
-      toModelOutput: async (args: {
-        toolCallId: string;
-        input: unknown;
-        output: unknown;
-      }) => {
-        const project = (output: unknown) =>
-          originalToModelOutput({
-            ...args,
-            output,
-          } as Parameters<typeof originalToModelOutput>[0]);
-        const reminderOutput = await toToolReminderModelOutput(
-          args.output,
-          project,
-        );
-        return reminderOutput ?? project(args.output);
-      },
-    } as typeof toolDef;
-  }
-  return wrapped;
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Symbol.asyncIterator in value &&
-    typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
-      'function'
-  );
-}
-
 export function agent<CIn, COut = CIn>(
   options: CreateAgent<CIn, COut>,
 ): Agent<CIn, COut> {
@@ -663,10 +606,6 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
   sandbox?: AgentSandbox;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
-  /** @deprecated Use `telemetry` instead. */
-  experimental_telemetry?: Parameters<
-    typeof generateText
-  >[0]['experimental_telemetry'];
   tools?: ToolSet;
 }
 
@@ -738,7 +677,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       const result = await generateText({
         abortSignal: config?.abortSignal,
         providerOptions: options.providerOptions,
-        telemetry: options.telemetry ?? options.experimental_telemetry,
+        telemetry: options.telemetry,
         model: options.model,
         instructions: systemPrompt,
         messages: await convertToModelMessages(messages as never, {
@@ -783,7 +722,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       return streamText({
         abortSignal: config?.abortSignal,
         providerOptions: options.providerOptions,
-        telemetry: options.telemetry ?? options.experimental_telemetry,
+        telemetry: options.telemetry,
         model: options.model,
         instructions: systemPrompt,
         repairToolCall: createRepairToolCall(

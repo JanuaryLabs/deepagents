@@ -128,12 +128,12 @@ async function runToolOutputs(chatId: string, commands: string[]) {
   const branch = await store.getActiveBranch(chatId);
   assert.ok(branch?.headMessageId);
   const chain = await store.getMessageChain(branch.headMessageId);
-  const assistant = chain.findLast((e) => e.name === 'assistant');
-  assert.ok(assistant, 'expected a stored assistant message');
-  const outputs = (assistant.data as UIMessage).parts
+  const outputs = chain
+    .filter((entry) => entry.name === 'assistant')
+    .flatMap((entry) => (entry.data as UIMessage).parts)
     .filter(isToolUIPart)
-    .filter((p) => p.state === 'output-available')
-    .map((p) => p.output as Record<string, unknown>);
+    .filter((part) => part.state === 'output-available')
+    .map((part) => part.output as Record<string, unknown>);
   return { model, outputs };
 }
 

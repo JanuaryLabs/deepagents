@@ -1,10 +1,4 @@
-import {
-  type ToolSet,
-  type ToolUIPart,
-  type UIMessage,
-  generateId,
-  isStaticToolUIPart,
-} from 'ai';
+import { type UIMessage, generateId } from 'ai';
 
 import { type ContextFragment, isFragment } from '../../../fragments.ts';
 import { XmlRenderer } from '../../../renderers/abstract.renderer.ts';
@@ -18,7 +12,7 @@ import type {
   ReminderTarget,
   ReminderText,
   SyncReminderText,
-  SyntheticSteerMetadata,
+  SyntheticReminderMetadata,
   UserReminderMetadata,
 } from './types.ts';
 
@@ -33,15 +27,7 @@ export function isConditionalReminder(
 const SYSTEM_REMINDER_OPEN_TAG = '<system-reminder>';
 const SYSTEM_REMINDER_CLOSE_TAG = '</system-reminder>';
 
-type ReminderMetadataRecord = ReminderRange & {
-  target?: unknown;
-  mode?: unknown;
-};
-
-type OutputAvailableToolPart = ToolUIPart & {
-  state: 'output-available';
-  output: unknown;
-};
+type ReminderMetadataRecord = ReminderRange;
 
 export function getReminderRanges(
   metadata: Record<string, unknown> | undefined,
@@ -56,7 +42,7 @@ export function getReminderRanges(
 /**
  * Once-ids latched by `once()`-gated reminders folded into this user message.
  * Persisted so a fresh engine re-reads them (the durable suppression record for
- * user-target `once()`, mirroring synthetic steer messages).
+ * user-target `once()`, mirroring synthetic reminder messages).
  */
 export function getReminderOnceIds(message: UIMessage): string[] {
   const meta = message.metadata;
@@ -91,27 +77,6 @@ function normalizeConditionalReminderText(
   return isFragment(textOrFragment)
     ? new XmlRenderer().render([textOrFragment])
     : textOrFragment;
-}
-
-function isOutputAvailableToolPart(
-  part: UIMessage['parts'][number],
-): part is OutputAvailableToolPart {
-  return isStaticToolUIPart(part) && part.state === 'output-available';
-}
-
-function isToolOutputReminderEnvelope(
-  value: unknown,
-): value is { result: unknown; systemReminder: string } {
-  // Detect via the host-only `meta` marker, not the reminder tag text, so
-  // detection survives a future change to the tag format. A real tool output
-  // never sets meta.reminder, so there are no false positives.
-  return (
-    isRecord(value) &&
-    isRecord(value.meta) &&
-    value.meta.reminder === true &&
-    'result' in value &&
-    typeof value.systemReminder === 'string'
-  );
 }
 
 export function stripTextByRanges(
@@ -161,8 +126,8 @@ export function stripTextByRanges(
  * - `metadata.reminders` is removed from the returned message.
  */
 export function stripReminders(message: UIMessage): UIMessage {
-  if (isSyntheticSteerMessage(message)) {
-    return stripSyntheticSteerMessage(message);
+  if (isSyntheticReminderMessage(message)) {
+    return stripSyntheticReminderMessage(message);
   }
 
   const reminderRecords = getReminderMetadataRecords(
@@ -181,13 +146,6 @@ export function stripReminders(message: UIMessage): UIMessage {
 
   const strippedParts = message.parts.flatMap((part, partIndex) => {
     const clonedPart = { ...part };
-
-    if (
-      isOutputAvailableToolPart(clonedPart) &&
-      isToolOutputReminderEnvelope(clonedPart.output)
-    ) {
-      return [{ ...clonedPart, output: clonedPart.output.result }];
-    }
 
     const ranges = rangesByPartIndex.get(partIndex);
 
@@ -393,80 +351,6 @@ export function applyReminderToMessage(
     : applyInlineReminder(message, resolved.text);
 }
 
-/**
- * Wrap a tool's raw `execute()` result with fired reminder texts.
- *
- * Applied at the tool-execution boundary — before the AI SDK hands the result
- * back to the model — so the wrapped value flows identically into the next
- * model step and the persisted chain. The envelope shape is uniform regardless
- * of the output type, which lets `stripReminders` undo it structurally without
- * metadata bookkeeping.
- */
-export function applyRemindersToToolOutput(
-  output: unknown,
-  texts: string[],
-): unknown {
-  if (texts.length === 0) return output;
-  return {
-    result: output === undefined ? null : output,
-    systemReminder: formatTaggedReminder(texts.join('\n')),
-    meta: { reminder: true },
-  };
-}
-
-type ToolModelOutput = Awaited<
-  ReturnType<NonNullable<ToolSet[string]['toModelOutput']>>
->;
-
-/**
- * Project a tool-output reminder envelope to its model-facing form: run the
- * wrapped tool's own projection over the inner `result` (so a tool's host-only
- * `meta` channel is still stripped), then re-attach the `systemReminder`. The
- * envelope's own host-only `meta` marker is dropped. Returns null for anything
- * that is not one of our envelopes, so the caller can project the raw output.
- */
-export async function toToolReminderModelOutput(
-  output: unknown,
-  projectResult: (
-    result: unknown,
-  ) => ToolModelOutput | PromiseLike<ToolModelOutput>,
-): Promise<ToolModelOutput | null> {
-  if (!isToolOutputReminderEnvelope(output)) return null;
-  const projected = await projectResult(output.result);
-  switch (projected.type) {
-    case 'text':
-    case 'error-text':
-      return {
-        ...projected,
-        value: `${projected.value}\n\n${output.systemReminder}`,
-      };
-    case 'json':
-    case 'error-json':
-      return {
-        ...projected,
-        value: {
-          result: projected.value,
-          systemReminder: output.systemReminder,
-        },
-      };
-    case 'content':
-      return {
-        ...projected,
-        value: [
-          ...projected.value,
-          { type: 'text', text: output.systemReminder },
-        ],
-      };
-    case 'execution-denied':
-      return {
-        ...projected,
-        reason: projected.reason
-          ? `${projected.reason}\n\n${output.systemReminder}`
-          : output.systemReminder,
-      };
-  }
-}
-
 export function mergeReminderMetadata(
   message: UIMessage,
   addedReminders: UserReminderMetadata[],
@@ -482,8 +366,9 @@ export function mergeReminderMetadata(
  * Create a reminder fragment, set on the engine via `engine.set()`. The engine
  * folds it into the model's view when its `when` fires: `user` reminders bake a
  * `<system-reminder>` into the last user message at save; `steer` injects mid-
- * loop; `tool-output` wraps the tool result. Text may be a string, a `(ctx) =>
- * string` factory (self-gates by returning `''`), or a context fragment.
+ * loop; `tool-output` injects after a completed tool step. Text may be a string,
+ * a `(ctx) => string` factory (self-gates by returning `''`), or a context
+ * fragment.
  *
  * For `target: 'user'`, `when` is optional — omit it for an always-on
  * instruction, or pass `once(id)` for a one-time reminder. `steer` and
@@ -551,7 +436,7 @@ export function applyUserRemindersToMessage(
 }
 
 /**
- * Build the hidden synthetic user message injected mid-loop for steer reminders.
+ * Build a hidden synthetic user message injected between model steps.
  *
  * Multiple reminder texts that fire at the same step boundary are folded into a
  * single user message (one `<system-reminder>` text part each) so the model
@@ -559,7 +444,7 @@ export function applyUserRemindersToMessage(
  * reject. The `metadata.synthetic` marker lets the chain summary, title
  * generation, and `stripReminders` treat these as non-conversational.
  */
-export function synthesizeSteerUserMessage(
+export function synthesizeReminderMessage(
   text: string | string[],
   firedAt: number,
   onceIds: string[] = [],
@@ -575,32 +460,32 @@ export function synthesizeSteerUserMessage(
     })),
     metadata: {
       synthetic: {
-        source: 'steer-reminder',
+        source: 'reminder',
         firedAt,
         ...(onceIds.length > 0 ? { onceIds } : {}),
-      } satisfies SyntheticSteerMetadata,
+      } satisfies SyntheticReminderMetadata,
     },
   };
 }
 
-export function isSyntheticSteerMessage(
+export function isSyntheticReminderMessage(
   message: UIMessage,
 ): message is UIMessage & {
-  metadata: { synthetic: SyntheticSteerMetadata };
+  metadata: { synthetic: SyntheticReminderMetadata };
 } {
   const meta = message.metadata;
   if (!isRecord(meta)) return false;
   const synthetic = meta.synthetic;
   if (!isRecord(synthetic)) return false;
-  return synthetic.source === 'steer-reminder';
+  return synthetic.source === 'reminder';
 }
 
 /**
- * A synthetic steer message is entirely `<system-reminder>` payload, so
+ * A synthetic reminder message is entirely `<system-reminder>` payload, so
  * stripping reminders drops its text parts wholesale and clears the synthetic
  * marker — leaving nothing for title/strip consumers to leak.
  */
-function stripSyntheticSteerMessage(message: UIMessage): UIMessage {
+function stripSyntheticReminderMessage(message: UIMessage): UIMessage {
   const next: UIMessage = {
     ...message,
     parts: message.parts.filter((part) => part.type !== 'text'),

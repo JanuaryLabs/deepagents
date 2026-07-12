@@ -1,6 +1,6 @@
 import { type ToolUIPart, type UIMessage, isStaticToolUIPart } from 'ai';
 
-import type { CountSpec, WhenPredicate } from '../types.ts';
+import type { CountSpec, ToolOutcome, WhenPredicate } from '../types.ts';
 import { assertCountSpec, checkCount } from './message.ts';
 
 export type ToolNameSpec = string | ((name: string) => boolean);
@@ -11,6 +11,16 @@ export interface ToolCallOptions {
   input?: (input: unknown) => boolean;
   output?: (output: unknown) => boolean;
   errorText?: (text: string) => boolean;
+}
+
+export interface ToolOutputOptions {
+  name?: ToolNameSpec;
+  state?: ToolOutcome['state'];
+  input?: (input: unknown) => boolean;
+  output?: (output: unknown) => boolean;
+  error?: (error: unknown) => boolean;
+  errorText?: (text: string) => boolean;
+  reason?: (reason: string | undefined) => boolean;
 }
 
 const COMPLETED_STATES: ReadonlySet<ToolUIPart['state']> = new Set([
@@ -65,6 +75,41 @@ export function toolCall(options: ToolCallOptions): WhenPredicate {
       }
       return true;
     });
+  };
+}
+
+/** Match the terminal tool outcome currently being evaluated. */
+export function toolOutput(options: ToolOutputOptions = {}): WhenPredicate {
+  return (ctx) => {
+    const outcome = ctx.toolOutcome;
+    if (!outcome) return false;
+    if (options.state !== undefined && outcome.state !== options.state) {
+      return false;
+    }
+    if (
+      options.name !== undefined &&
+      !matchesName(options.name, outcome.name)
+    ) {
+      return false;
+    }
+    if (options.input && !options.input(outcome.input)) return false;
+    if (options.output) {
+      if (outcome.state !== 'output-available') return false;
+      if (!options.output(outcome.output)) return false;
+    }
+    if (options.error) {
+      if (outcome.state !== 'output-error') return false;
+      if (!options.error(outcome.error)) return false;
+    }
+    if (options.errorText) {
+      if (outcome.state !== 'output-error') return false;
+      if (!options.errorText(outcome.errorText)) return false;
+    }
+    if (options.reason) {
+      if (outcome.state !== 'output-denied') return false;
+      if (!options.reason(outcome.reason)) return false;
+    }
+    return true;
   };
 }
 

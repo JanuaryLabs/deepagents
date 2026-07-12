@@ -8,9 +8,11 @@ import {
   fromFragment,
   getReminderRanges,
   identity,
+  isSyntheticReminderMessage,
   render,
   stripReminders,
   stripTextByRanges,
+  synthesizeReminderMessage,
   term,
   toFragment,
   user,
@@ -73,6 +75,13 @@ describe('browser export path', () => {
       | { reminders?: unknown }
       | undefined;
     assert.strictEqual(strippedMetadata?.reminders, undefined);
+  });
+
+  it('identifies synthetic tool reminders through the browser entrypoint', () => {
+    const message = synthesizeReminderMessage('hidden tool guidance', 123);
+
+    assert.strictEqual(isSyntheticReminderMessage(message), true);
+    assert.deepStrictEqual(stripReminders(message).parts, []);
   });
 
   it('exposes renderer classes from browser entrypoint', () => {

@@ -149,7 +149,7 @@ export async function chat<CIn>(
         message = { ...message, metadata: mergedMetadata } as UIMessage;
       }
 
-      await context.writeAssistantSegment(message);
+      await context.writeAssistantSegment(message, { final: true });
       const usage = await result.usage;
       // AI SDK v7 can resolve an aborted stream without usage data when the
       // provider never emitted a finish chunk.

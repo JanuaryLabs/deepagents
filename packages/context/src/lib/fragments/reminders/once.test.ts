@@ -4,8 +4,8 @@ import { describe, it } from 'node:test';
 import { and, once, or } from '@deepagents/context';
 import type { WhenContext } from '@deepagents/context';
 
-// Steer-realistic context: firedOnceIds is always a Set during steer evaluation
-// (only its absence signals a non-steer target). Tests override as needed.
+// Engine-realistic context: every persisted reminder target receives the
+// durable once-id set. Tests override it only to verify the contract guard.
 function ctx(over: Partial<WhenContext> = {}): WhenContext {
   return {
     turn: 1,
@@ -32,10 +32,10 @@ describe('once(id)', () => {
     );
   });
 
-  it('throws when firedOnceIds is absent (tool-output target)', async () => {
+  it('throws when evaluated without durable reminder context', async () => {
     await assert.rejects(
       async () => once('x')(ctx({ firedOnceIds: undefined })),
-      /not supported on target:'tool-output'/,
+      /requires durable reminder context/,
     );
   });
 

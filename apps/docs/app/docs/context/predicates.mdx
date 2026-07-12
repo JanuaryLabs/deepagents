@@ -6,12 +6,9 @@ description: Composable functions that control when conditional reminders fire b
 A predicate is a function that receives a `WhenContext` and returns `true` (fire the reminder) or `false` (skip it). Pass predicates to `reminder()` via the `when` option to create conditional reminders.
 
 ```ts
-import { reminder, everyNTurns, user } from '@deepagents/context';
+import { everyNTurns, reminder, user } from '@deepagents/context';
 
-engine.set(
-  reminder('Stay concise', { when: everyNTurns(3) }),
-  user('hello'),
-);
+engine.set(reminder('Stay concise', { when: everyNTurns(3) }), user('hello'));
 ```
 
 ## WhenContext
@@ -24,7 +21,7 @@ interface WhenContext {
   content: string;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
-  currentMessage?: UIMessage;
+  currentMessage: UIMessage;
   chat: StoredChatData;
   usage?: LanguageModelUsage;
   branch: string;
@@ -32,31 +29,31 @@ interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
-  executingTool?: { name: string; input: unknown; output: unknown };
+  toolOutcome?: ToolOutcome;
   firedOnceIds?: ReadonlySet<string>;
   onceCollector?: Set<string>;
 }
 ```
 
-| Field | Description |
-| --- | --- |
-| `turn` | Current user turn count (persisted + pending) |
-| `content` | Plain text of the user message |
-| `lastMessageAt` | Timestamp of the last persisted user message |
-| `lastMessage` | The last persisted user `UIMessage` (with metadata) |
-| `currentMessage` | The pending user `UIMessage` for the current turn (visible before persistence) |
-| `chat` | Full `StoredChatData` object (id, userId, metadata, timestamps) |
-| `usage` | Accumulated `LanguageModelUsage` from `chat.metadata.usage` |
-| `branch` | Active branch name (e.g. `"main"`) |
-| `elapsed` | Milliseconds since the last persisted user message |
-| `messageCount` | Total message count across all roles |
-| `lastAssistantMessage` | The last persisted assistant `UIMessage` |
-| `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()` |
-| `executingTool` | The live tool call being wrapped during `target: 'tool-output'` evaluation; undefined for user and steer reminders |
-| `firedOnceIds` | Ids already latched by `once()` this conversation (steer + user); populated by the engine |
-| `onceCollector` | Per-evaluation buffer `once()` appends to; the engine commits it only if the reminder fires |
+| Field                   | Description                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `turn`                  | Current user turn count (persisted + pending)                                                                       |
+| `content`               | Plain text of the user message                                                                                      |
+| `lastMessageAt`         | Timestamp of the last persisted user message                                                                        |
+| `lastMessage`           | The last persisted user `UIMessage` (with metadata)                                                                 |
+| `currentMessage`        | The real user `UIMessage` for the current turn                                                                      |
+| `chat`                  | Full `StoredChatData` object (id, userId, metadata, timestamps)                                                     |
+| `usage`                 | Accumulated `LanguageModelUsage` from `chat.metadata.usage`                                                         |
+| `branch`                | Active branch name (e.g. `"main"`)                                                                                  |
+| `elapsed`               | Milliseconds since the last persisted user message                                                                  |
+| `messageCount`          | Total message count across all roles                                                                                |
+| `lastAssistantMessage`  | The last persisted assistant `UIMessage`                                                                            |
+| `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()`                                           |
+| `toolOutcome`           | The terminal outcome currently being evaluated for a `tool-output` reminder; undefined for user and steer reminders |
+| `firedOnceIds`          | Ids already latched by `once()` this conversation across all reminder targets                                       |
+| `onceCollector`         | Per-evaluation buffer `once()` appends to; the engine commits it only if the reminder fires                         |
 
-`currentMessage` lets a predicate read metadata the user attached to *this* turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. `executingTool` is the only field that describes a tool call still in flight; `lastAssistantMessage` and `lastAssistantMessages` only describe already-persisted assistant history. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
+`currentMessage` lets a predicate read metadata the user attached to _this_ turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. `toolOutcome` describes the terminal tool result being considered before the next model generation; `lastAssistantMessage` and `lastAssistantMessages` describe persisted history. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
 
 ## Turn-Based Predicates
 
@@ -121,7 +118,7 @@ These predicates use BM25 text matching to determine relevance, offering more so
 Fires when the user's message relates to any of the given topics, using BM25 scoring internally. Each topic string becomes a document in the corpus, and the user's message is scored against them.
 
 ```ts
-import { reminder, contentMatches } from '@deepagents/context';
+import { contentMatches, reminder } from '@deepagents/context';
 
 engine.set(
   reminder('Consider indexing strategies', {
@@ -130,16 +127,16 @@ engine.set(
 );
 ```
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `threshold` | `number` | `0` | Minimum BM25 score to count as a match |
+| Option      | Type     | Default | Description                            |
+| ----------- | -------- | ------- | -------------------------------------- |
+| `threshold` | `number` | `0`     | Minimum BM25 score to count as a match |
 
 ### classifies(classifier, options?)
 
 Fires when the given classifier returns at least one result for the user's message. Works with any `IClassifier<T>` implementation, not just the built-in `BM25Classifier`.
 
 ```ts
-import { reminder, classifies, BM25Classifier } from '@deepagents/context';
+import { BM25Classifier, classifies, reminder } from '@deepagents/context';
 
 const classifier = new BM25Classifier([
   { name: 'auth', description: 'authentication and authorization' },
@@ -153,10 +150,10 @@ engine.set(
 );
 ```
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `topN` | `number` | `5` | Maximum number of results the classifier returns |
-| `threshold` | `number` | `0` | Minimum score to count as a match |
+| Option      | Type     | Default | Description                                      |
+| ----------- | -------- | ------- | ------------------------------------------------ |
+| `topN`      | `number` | `5`     | Maximum number of results the classifier returns |
+| `threshold` | `number` | `0`     | Minimum score to count as a match                |
 
 See [Skill Reminders](/docs/context/skill-reminders) for details on `IClassifier`, `BM25Classifier`, and building custom classifiers.
 
@@ -170,7 +167,7 @@ Fires when the plain-text length of the last persisted assistant reply matches a
 import { lastAssistantLength } from '@deepagents/context';
 
 lastAssistantLength({ gte: 2_000 }); // assistant reply is at least 2,000 chars
-lastAssistantLength({ eq: 0 });      // assistant reply is empty
+lastAssistantLength({ eq: 0 }); // assistant reply is empty
 ```
 
 `spec` uses this shape:
@@ -181,9 +178,45 @@ type CountSpec = { gte?: number; lte?: number; eq?: number };
 
 Use either `eq` or a `gte`/`lte` range. `eq` cannot be combined with range bounds.
 
-## Tool-Based Predicates
+## Current Tool-Outcome Predicate
 
-These predicates inspect tool parts on `lastAssistantMessage`, so they describe completed tool calls that are already in the conversation history. For `target: 'tool-output'` reminders that need to gate on the live tool call being wrapped, read `ctx.executingTool` directly in a custom predicate.
+### toolOutput(options?)
+
+Matches the terminal tool outcome currently being evaluated by a
+`target: 'tool-output'` reminder. It does not search assistant history.
+
+```ts
+import { reminder, toolOutput } from '@deepagents/context';
+
+engine.set(
+  reminder('Recover from the failed command', {
+    target: 'tool-output',
+    when: toolOutput({
+      name: 'bash',
+      state: 'output-error',
+      errorText: (text) => text.includes('permission denied'),
+    }),
+  }),
+);
+```
+
+| Option      | Type                                                      | Description                                         |
+| ----------- | --------------------------------------------------------- | --------------------------------------------------- |
+| `name`      | `string \| ((name: string) => boolean)`                   | Match the current tool name                         |
+| `state`     | `'output-available' \| 'output-error' \| 'output-denied'` | Restrict matching to one terminal state             |
+| `input`     | `(input: unknown) => boolean`                             | Inspect the tool input in any state                 |
+| `output`    | `(output: unknown) => boolean`                            | Inspect a successful raw output                     |
+| `error`     | `(error: unknown) => boolean`                             | Inspect the raw thrown or validation error          |
+| `errorText` | `(text: string) => boolean`                               | Inspect the normalized error text sent to the model |
+| `reason`    | `(reason: string \| undefined) => boolean`                | Inspect an execution-denial reason                  |
+
+The engine evaluates successful results, thrown errors, invalid-input errors,
+approval denials, and provider-executed terminal outcomes. Preliminary streaming
+tool outputs are not terminal and are not evaluated.
+
+## Assistant-History Tool Predicates
+
+These predicates inspect tool parts on `lastAssistantMessage`, so they describe completed tool calls already in conversation history. Use `toolOutput()` instead when a tool-output reminder needs the terminal outcome at the current step boundary.
 
 ### toolCalled(name)
 
@@ -230,13 +263,13 @@ toolCall({
 });
 ```
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `name` | `string \| ((name: string) => boolean)` | Match a tool name exactly or with a predicate |
-| `state` | `ToolUIPart['state']` | Restrict matching to a specific tool part state |
-| `input` | `(input: unknown) => boolean` | Inspect the tool input payload |
-| `output` | `(output: unknown) => boolean` | Inspect the output payload for `output-available` parts |
-| `errorText` | `(text: string) => boolean` | Inspect the error text for `output-error` parts |
+| Option      | Type                                    | Description                                             |
+| ----------- | --------------------------------------- | ------------------------------------------------------- |
+| `name`      | `string \| ((name: string) => boolean)` | Match a tool name exactly or with a predicate           |
+| `state`     | `ToolUIPart['state']`                   | Restrict matching to a specific tool part state         |
+| `input`     | `(input: unknown) => boolean`           | Inspect the tool input payload                          |
+| `output`    | `(output: unknown) => boolean`          | Inspect the output payload for `output-available` parts |
+| `errorText` | `(text: string) => boolean`             | Inspect the error text for `output-error` parts         |
 
 ### toolCallCount(name, spec)
 
@@ -248,6 +281,28 @@ import { toolCallCount } from '@deepagents/context';
 toolCallCount('bash', { gte: 3 });
 toolCallCount('sql', { eq: 1 });
 ```
+
+## Durable Fire-Once Predicate
+
+### once(id)
+
+Returns true until `id` has fired, then remains false for the conversation. The
+engine stores the id only if the complete reminder predicate fires, so it is
+safe inside `and()` and `or()`.
+
+```ts
+import { and, once, reminder, toolOutput } from '@deepagents/context';
+
+engine.set(
+  reminder('Explain the first tool failure', {
+    target: 'tool-output',
+    when: and(toolOutput({ state: 'output-error' }), once('first-tool-error')),
+  }),
+);
+```
+
+The latch works for `user`, `tool-output`, and `steer` reminders and survives
+engine restarts.
 
 ## Usage and Elapsed Predicates
 
@@ -275,29 +330,34 @@ elapsedExceeds(60_000); // one minute
 
 Compare `new Date()` against `lastMessageAt` using timezone-aware formatting. All return `true` on the first turn (when `lastMessageAt` is `undefined`).
 
-| Predicate | Fires when... |
-| --- | --- |
-| `dayChanged(options?)` | The calendar date has changed |
-| `hourChanged(options?)` | The hour has changed |
-| `monthChanged(options?)` | The month has changed |
-| `yearChanged(options?)` | The year has changed |
+| Predicate                 | Fires when...                         |
+| ------------------------- | ------------------------------------- |
+| `dayChanged(options?)`    | The calendar date has changed         |
+| `hourChanged(options?)`   | The hour has changed                  |
+| `monthChanged(options?)`  | The month has changed                 |
+| `yearChanged(options?)`   | The year has changed                  |
 | `seasonChanged(options?)` | The meteorological season has changed |
-| `weekChanged(options?)` | The ISO week has changed |
+| `weekChanged(options?)`   | The ISO week has changed              |
 
 Each accepts an optional `{ tz?: string }`. When `tz` is omitted, the predicate falls back to `currentMessage.metadata.locale.timeZone`, then `lastMessage.metadata.locale.timeZone`, then `'UTC'`.
 
 ```ts
 import { dayChanged, hourChanged } from '@deepagents/context';
 
-dayChanged();                          // resolves tz from message metadata, else UTC
+dayChanged(); // resolves tz from message metadata, else UTC
 dayChanged({ tz: 'America/New_York' }); // explicit Eastern time
-hourChanged({ tz: 'Asia/Tokyo' });     // explicit JST
+hourChanged({ tz: 'Asia/Tokyo' }); // explicit JST
 ```
 
 Pair tz-less predicates with `localeReminder` (or any user message that sets `metadata.locale`) and they pick the user's timezone up automatically:
 
 ```ts
-import { dayChanged, localeReminder, reminder, user } from '@deepagents/context';
+import {
+  dayChanged,
+  localeReminder,
+  reminder,
+  user,
+} from '@deepagents/context';
 
 engine.set(
   localeReminder({ language: 'Japanese', timeZone: 'Asia/Tokyo' }),
@@ -345,7 +405,7 @@ Compose predicates with boolean logic.
 All predicates must return `true`.
 
 ```ts
-import { and, dayChanged, afterTurn } from '@deepagents/context';
+import { afterTurn, and, dayChanged } from '@deepagents/context';
 
 and(dayChanged(), afterTurn(3));
 // day changed AND past turn 3
@@ -356,7 +416,7 @@ and(dayChanged(), afterTurn(3));
 Any predicate must return `true`.
 
 ```ts
-import { or, dayChanged, hourChanged } from '@deepagents/context';
+import { dayChanged, hourChanged, or } from '@deepagents/context';
 
 or(dayChanged(), hourChanged());
 // day OR hour changed
@@ -367,7 +427,7 @@ or(dayChanged(), hourChanged());
 Negates a predicate.
 
 ```ts
-import { not, dayChanged } from '@deepagents/context';
+import { dayChanged, not } from '@deepagents/context';
 
 not(dayChanged());
 // day has NOT changed
@@ -378,11 +438,7 @@ not(dayChanged());
 Combinators nest freely:
 
 ```ts
-and(
-  or(dayChanged(), hourChanged()),
-  not(first()),
-  afterTurn(2),
-);
+and(or(dayChanged(), hourChanged()), not(first()), afterTurn(2));
 ```
 
 ## Custom Predicates
@@ -390,7 +446,7 @@ and(
 A predicate is any function with the signature `(ctx: WhenContext) => boolean | Promise<boolean>`:
 
 ```ts
-import { reminder, type WhenPredicate } from '@deepagents/context';
+import { type WhenPredicate, reminder } from '@deepagents/context';
 
 const businessHours: WhenPredicate = (ctx) => {
   const hour = new Date().getHours();
@@ -418,7 +474,7 @@ const isHighPriority: WhenPredicate = async (ctx) => {
 `reminder()` accepts any `ContextFragment` as its first argument. The fragment is pre-rendered to XML and injected as reminder text when the predicate fires.
 
 ```ts
-import { reminder, workflow, hint, contentIncludes } from '@deepagents/context';
+import { contentIncludes, hint, reminder, workflow } from '@deepagents/context';
 
 // Inject a workflow as a reminder when the user mentions errors
 engine.set(
@@ -434,7 +490,9 @@ engine.set(
 
 // Works with any fragment type
 engine.set(
-  reminder(hint('Check indexes for slow queries'), { when: contentIncludes(['slow']) }),
+  reminder(hint('Check indexes for slow queries'), {
+    when: contentIncludes(['slow']),
+  }),
   user('this query is slow'),
 );
 

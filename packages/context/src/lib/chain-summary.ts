@@ -3,7 +3,7 @@ import type { UIMessage } from 'ai';
 import type { ContextFragment } from './fragments.ts';
 import {
   getReminderOnceIds,
-  isSyntheticSteerMessage,
+  isSyntheticReminderMessage,
 } from './fragments/reminders/index.ts';
 import type { MessageData } from './store/store.ts';
 import { requireUIMessage } from './ui-message-guards.ts';
@@ -48,11 +48,11 @@ export class ChainSummaryBuilder {
       msg.data,
       `Stored user message "${msg.id}"`,
     );
-    // Synthetic steer users are mid-loop nudges, never conversation turns:
+    // Synthetic reminder users are model-only nudges, never conversation turns:
     // they advance neither turn nor lastMessageAt (elapsed measures from the
     // last real user message). Their persisted once-ids are the durable record
     // that lets once() suppress a fire-once reminder across runs.
-    if (isSyntheticSteerMessage(message)) {
+    if (isSyntheticReminderMessage(message)) {
       for (const id of message.metadata.synthetic.onceIds ?? []) {
         this.#firedOnceIds.add(id);
       }
@@ -72,7 +72,7 @@ export class ChainSummaryBuilder {
     this.#messageCount++;
     if (fragment.name !== 'user') return;
     const encoded = fragment.codec?.encode();
-    if (encoded && isSyntheticSteerMessage(encoded as UIMessage)) return;
+    if (encoded && isSyntheticReminderMessage(encoded as UIMessage)) return;
     this.#turn++;
   }
 
