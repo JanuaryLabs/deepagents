@@ -51,7 +51,7 @@ function extractSystemPrompt(
 
 function createGenerateModel(responseText?: string) {
   return new MockLanguageModelV4({
-    doGenerate: async () => ({
+    doGenerate: {
       finishReason: { unified: 'stop' as const, raw: '' },
       usage: testUsage,
       warnings: [],
@@ -61,17 +61,16 @@ function createGenerateModel(responseText?: string) {
           text: responseText ?? 'Generated response.',
         },
       ],
-    }),
+    },
   });
 }
 
 function createExecutorModel(advisorCallCount: number) {
-  let step = 0;
   const totalSteps = advisorCallCount + 1;
 
-  return new MockLanguageModelV4({
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
     doGenerate: async () => {
-      step++;
+      const step = model.doGenerateCalls.length;
       if (step < totalSteps) {
         return {
           finishReason: { unified: 'tool-calls' as const, raw: '' },
@@ -80,7 +79,6 @@ function createExecutorModel(advisorCallCount: number) {
           content: [
             {
               type: 'tool-call' as const,
-              toolCallType: 'function' as const,
               toolCallId: `advisor-${step}`,
               toolName: 'advisor',
               input: '{}',
@@ -97,14 +95,13 @@ function createExecutorModel(advisorCallCount: number) {
       };
     },
   });
+  return model;
 }
 
 function createToolCallerModel(toolName: string, toolInput: string) {
-  let step = 0;
-
-  return new MockLanguageModelV4({
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
     doGenerate: async () => {
-      step++;
+      const step = model.doGenerateCalls.length;
       if (step === 1) {
         return {
           finishReason: { unified: 'tool-calls' as const, raw: '' },
@@ -113,7 +110,6 @@ function createToolCallerModel(toolName: string, toolInput: string) {
           content: [
             {
               type: 'tool-call' as const,
-              toolCallType: 'function' as const,
               toolCallId: 'tc-1',
               toolName,
               input: toolInput,
@@ -129,6 +125,7 @@ function createToolCallerModel(toolName: string, toolInput: string) {
       };
     },
   });
+  return model;
 }
 
 function createContext(...fragments: Parameters<ContextEngine['set']>) {
@@ -302,14 +299,11 @@ describe('asTool', () => {
 
     const allToolResults = result.steps.flatMap((s) => s.toolResults);
     const extracted = allToolResults.find(
-      (tr: any) =>
+      (tr) =>
         typeof tr.output === 'string' && tr.output.startsWith('EXTRACTED:'),
     );
     assert.ok(extracted, 'Should have a tool result with extracted output');
-    assert.strictEqual(
-      (extracted as any).output,
-      'EXTRACTED: Raw sub-agent text.',
-    );
+    assert.strictEqual(extracted.output, 'EXTRACTED: Raw sub-agent text.');
   });
 
   it('forwards output instructions to sub-agent prompt', async () => {
@@ -392,12 +386,13 @@ describe('asTool', () => {
 
     const allToolResults = result.steps.flatMap((s) => s.toolResults);
     const errorResult = allToolResults.find(
-      (tr: any) =>
+      (tr) =>
         typeof tr.output === 'string' && tr.output.includes('ErrorDetails'),
     );
     assert.ok(errorResult, 'Should have an error tool result');
+    assert.strictEqual(typeof errorResult.output, 'string');
     assert.ok(
-      (errorResult as any).output.includes('Model API unavailable'),
+      errorResult.output.includes('Model API unavailable'),
       'Error message should be preserved',
     );
   });
@@ -413,11 +408,9 @@ describe('asTool', () => {
       },
     });
 
-    let subStep = 0;
     const subModel = new MockLanguageModelV4({
       doGenerate: async () => {
-        subStep++;
-        if (subStep === 1) {
+        if (subModel.doGenerateCalls.length === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: '' },
             usage: testUsage,
@@ -425,7 +418,6 @@ describe('asTool', () => {
             content: [
               {
                 type: 'tool-call' as const,
-                toolCallType: 'function' as const,
                 toolCallId: 'sub-tc-1',
                 toolName: 'lookup',
                 input: '{"id":"abc"}',
@@ -992,11 +984,9 @@ describe('asAdvisor maxConversationUses', () => {
   });
 
   it('failed calls do not count against maxConversationUses', async () => {
-    let advisorCallCount = 0;
     const advisorModel = new MockLanguageModelV4({
       doGenerate: async () => {
-        advisorCallCount++;
-        if (advisorCallCount === 1) {
+        if (advisorModel.doGenerateCalls.length === 1) {
           throw createAPICallError(429);
         }
         return {

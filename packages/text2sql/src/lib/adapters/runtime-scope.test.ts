@@ -4,7 +4,15 @@ import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { after, afterEach, before, describe, it, mock } from 'node:test';
+import {
+  type TestContext,
+  after,
+  afterEach,
+  before,
+  describe,
+  it,
+  mock,
+} from 'node:test';
 import pg from 'pg';
 
 import {
@@ -674,9 +682,17 @@ for (const adapterCase of adapterCases) {
       return runtime?.createEmptyScope();
     }
 
-    it('allows entity-free queries', async () => {
+    function skipUnavailableRuntime(t: TestContext): boolean {
+      if (runtime) return false;
+      t.skip(`${adapterCase.name} runtime is unavailable`);
+      return true;
+    }
+
+    it('allows entity-free queries', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate('SELECT 1');
@@ -687,9 +703,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('allows in-scope table queries in validate', async () => {
+    it('allows in-scope table queries in validate', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.inScopeSql);
@@ -700,9 +718,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('allows in-scope table queries in execute', async () => {
+    it('allows in-scope table queries in execute', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.execute(runtime.queries.inScopeSql);
@@ -713,9 +733,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 1);
     });
 
-    it('allows in-scope view queries in validate', async () => {
+    it('allows in-scope view queries in validate', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.inScopeViewSql);
@@ -726,9 +748,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('allows in-scope view queries in execute', async () => {
+    it('allows in-scope view queries in execute', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.execute(runtime.queries.inScopeViewSql);
@@ -739,9 +763,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 1);
     });
 
-    it('allows CTE queries when their base entities are grounded', async () => {
+    it('allows CTE queries when their base entities are grounded', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.cteSql);
@@ -752,9 +778,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('allows subquery queries when their base entities are grounded', async () => {
+    it('allows subquery queries when their base entities are grounded', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.subquerySql);
@@ -765,9 +793,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('allows set-operation queries when their base entities are grounded', async () => {
+    it('allows set-operation queries when their base entities are grounded', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.setOperationSql);
@@ -778,9 +808,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('blocks out-of-scope validate queries before hitting the db validator', async () => {
+    it('blocks out-of-scope validate queries before hitting the db validator', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.outOfScopeSql);
@@ -793,9 +825,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('blocks out-of-scope execute queries before hitting the db executor', async () => {
+    it('blocks out-of-scope execute queries before hitting the db executor', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const rt = runtime;
       const { adapter, probes } = created;
 
@@ -815,9 +849,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('blocks base-entity validate queries when grounded scope resolves no entities', async () => {
+    it('blocks base-entity validate queries when grounded scope resolves no entities', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createEmptyScopeAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate(runtime.queries.inScopeSql);
@@ -829,9 +865,11 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('blocks base-entity execute queries when grounded scope resolves no entities', async () => {
+    it('blocks base-entity execute queries when grounded scope resolves no entities', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createEmptyScopeAdapter();
-      if (!created || !runtime) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
+      assert.ok(runtime, `${adapterCase.name} runtime must be available`);
       const rt = runtime;
       const { adapter, probes } = created;
 
@@ -850,9 +888,10 @@ for (const adapterCase of adapterCases) {
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
 
-    it('returns SQL_SCOPE_PARSE_ERROR and never touches the db on parse failure', async () => {
+    it('returns SQL_SCOPE_PARSE_ERROR and never touches the db on parse failure', async (t) => {
+      if (skipUnavailableRuntime(t)) return;
       const created = await createAdapter();
-      if (!created) return;
+      assert.ok(created, `${adapterCase.name} adapter must be available`);
       const { adapter, probes } = created;
 
       const result = await adapter.validate('SELECT * FROM');
@@ -1076,8 +1115,14 @@ describe('bigquery scope normalization', () => {
     });
   }
 
-  it('allows backtick-quoted 3-part name when dataset.table is in allowed set', async () => {
-    if (!runtime) return;
+  function skipUnavailableRuntime(t: TestContext): boolean {
+    if (runtime) return false;
+    t.skip('BigQuery runtime is unavailable');
+    return true;
+  }
+
+  it('allows backtick-quoted 3-part name when dataset.table is in allowed set', async (t) => {
+    if (skipUnavailableRuntime(t) || !runtime) return;
     const { adapter } = createBigQuery([`${runtime.datasetId}.users`]);
     const result = await adapter.validate(
       `SELECT id, name FROM \`${runtime.projectId}.${runtime.datasetId}.users\` LIMIT 50`,
@@ -1085,8 +1130,8 @@ describe('bigquery scope normalization', () => {
     assert.strictEqual(result, undefined);
   });
 
-  it('blocks unauthorized backtick-quoted 3-part name', async () => {
-    if (!runtime) return;
+  it('blocks unauthorized backtick-quoted 3-part name', async (t) => {
+    if (skipUnavailableRuntime(t) || !runtime) return;
     const { adapter } = createBigQuery([`${runtime.datasetId}.users`]);
     const result = await adapter.validate(
       `SELECT * FROM \`${runtime.projectId}.${runtime.datasetId}.secrets\``,
@@ -1096,8 +1141,8 @@ describe('bigquery scope normalization', () => {
     assert.strictEqual(payload.error_type, 'OUT_OF_SCOPE');
   });
 
-  it('allows unquoted 2-part dataset.table name', async () => {
-    if (!runtime) return;
+  it('allows unquoted 2-part dataset.table name', async (t) => {
+    if (skipUnavailableRuntime(t) || !runtime) return;
     const { adapter } = createBigQuery([`${runtime.datasetId}.users`]);
     const result = await adapter.validate(
       `SELECT * FROM ${runtime.datasetId}.users`,

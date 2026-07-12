@@ -7,7 +7,7 @@
       "prompt": "I have this function in retry.ts:\n\n```ts\nimport { generateText } from 'ai';\n\nexport async function askWithRetry(model, prompt, maxAttempts = 3) {\n  let lastErr;\n  for (let i = 0; i < maxAttempts; i++) {\n    try {\n      return await generateText({ model, prompt });\n    } catch (e) {\n      if (e?.isRetryable) { lastErr = e; continue; }\n      throw e;\n    }\n  }\n  throw lastErr;\n}\n```\n\nWrite a Node.js test runner (`node --test`) integration test that mocks the AI SDK model using `ai/test` so it throws a retryable APICallError on the first call and returns a normal text response on the second call. Assert the text comes through and that the model was called exactly twice.",
       "files": [],
       "assertions": [
-        { "text": "uses MockLanguageModelV3 from 'ai/test'" },
+        { "text": "uses MockLanguageModelV4 from 'ai/test'" },
         { "text": "throws APICallError with isRetryable: true from ai" },
         {
           "text": "returns a content array with a { type: 'text', text: ... } part"
@@ -16,7 +16,7 @@
           "text": "finishReason is an object with unified field, not a bare string"
         },
         {
-          "text": "uses model.doGenerateCalls.length to sequence the two responses (preferred over manual callIndex)"
+          "text": "uses model.doGenerateCalls.length to sequence a throwing response without a separate manual counter"
         },
         { "text": "asserts model was called exactly twice" },
         { "text": "does NOT use obsolete 'rawCall' field" },
@@ -44,6 +44,36 @@
         },
         {
           "text": "matching ids across tool-input-start/delta/end and tool-call"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "v7-prebuilt-migration-with-unique-validator",
+      "prompt": "Review an AI SDK test helper module after upgrading to ai@7. It currently uses MockLanguageModelV3, a hand-written sequential-value closure, a hand-written deterministic ID counter, a custom ReadableStream collector, and a JSON chunk validator that checks start/delta/end ordering and matching IDs. Rewrite or remove helpers where AI SDK v7 already provides an equivalent, use only the current V4 provider protocol, and preserve any behavior for which ai/test has no public equivalent. Explain each keep/replace/remove decision with the exact installed export or source behavior that supports it.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "uses only V4 model mocks and V4 provider types in resulting examples"
+        },
+        {
+          "text": "replaces sequential-value closure with mockValues where no throwing behavior is required"
+        },
+        { "text": "replaces deterministic ID counter with mockId" },
+        {
+          "text": "replaces custom stream collection with convertReadableStreamToArray"
+        },
+        {
+          "text": "imports simulateReadableStream from ai rather than its deprecated ai/test re-export"
+        },
+        {
+          "text": "preserves the semantic JSON chunk validator because ai/test has no public ordering or matching-ID validator"
+        },
+        {
+          "text": "does not claim all V4 modality mocks capture calls; only language and embedding mocks do"
+        },
+        {
+          "text": "verifies array-backed language-model responses return index 0 on the first call"
         }
       ]
     }

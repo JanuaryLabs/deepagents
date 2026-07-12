@@ -1,3 +1,4 @@
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import {
   type UIMessage,
   convertToModelMessages,
@@ -5,7 +6,10 @@ import {
   simulateReadableStream,
   tool,
 } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  MockLanguageModelV4,
+  convertReadableStreamToArray as drain,
+} from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it, mock } from 'node:test';
@@ -40,18 +44,16 @@ type StepSpec = { tool: string } | { text: string };
 
 /**
  * A V4 mock that scripts one model step per spec: `{tool}` emits a tool call and
- * keeps the loop going; `{text}` emits text and stops. `prompts` collects the
- * model prompt seen at each step so tests can assert store/prompt parity.
+ * keeps the loop going; `{text}` emits text and stops. Tests inspect the mock's
+ * built-in call history when they need the prompt for a step.
  */
-function scriptedModel(steps: StepSpec[], prompts: unknown[][]) {
-  let call = 0;
-  return new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
-      prompts.push(prompt as unknown[]);
-      const spec = steps[Math.min(call, steps.length - 1)];
-      call++;
+function scriptedModel(steps: StepSpec[]) {
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      const call = model.doStreamCalls.length;
+      const spec = steps[Math.min(call - 1, steps.length - 1)];
       const id = `s${call}`;
-      const chunks: Record<string, unknown>[] = [];
+      const chunks: LanguageModelV4StreamPart[] = [];
       if ('text' in spec) {
         chunks.push(
           { type: 'text-start', id },
@@ -76,11 +78,11 @@ function scriptedModel(steps: StepSpec[], prompts: unknown[][]) {
         usage: testUsage,
       });
       return {
-        stream: simulateReadableStream({ chunks: chunks as never }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
+        stream: simulateReadableStream({ chunks }),
       };
     },
   });
+  return model;
 }
 
 const noopTool = tool({
@@ -104,14 +106,6 @@ function userMessage(text: string): UIMessage {
   return { id: generateId(), role: 'user', parts: [{ type: 'text', text }] };
 }
 
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
-}
-
 async function storedEntries(store: InMemoryContextStore, chatId: string) {
   const branch = await store.getActiveBranch(chatId);
   assert.ok(branch?.headMessageId, 'expected a branch head');
@@ -133,11 +127,10 @@ describe('steer reminders integration (chat flow)', () => {
   it('fires mid-loop: stored chain splits assistant and matches the model prompt (parity)', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'mid', userId: 'u1' });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel(
-      [{ tool: 'noop' }, { text: 'post-steer answer' }],
-      prompts,
-    );
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { text: 'post-steer answer' },
+    ]);
     const chatAgent = await makeAgent(context, model, 'mid');
 
     context.set(reminder('RECAP', { when: everyNTurns(1), target: 'steer' }));
@@ -183,12 +176,12 @@ describe('steer reminders integration (chat flow)', () => {
     const storedUi = chain
       .map((e) => stripData(e.data as UIMessage))
       .filter((m) => !(m.role === 'assistant' && m.parts.length === 0));
-    const storedModel = await convertToModelMessages(storedUi as never, {
+    const storedModel = await convertToModelMessages(storedUi, {
       ignoreIncompleteToolCalls: true,
     });
-    const promptNoSystem = (
-      prompts[prompts.length - 1] as { role: string }[]
-    ).filter((m) => m.role !== 'system');
+    const promptNoSystem = model.doStreamCalls
+      .at(-1)!
+      .prompt.filter((message) => message.role !== 'system');
     assert.deepStrictEqual(
       rolesOf(storedModel).slice(0, promptNoSystem.length),
       rolesOf(promptNoSystem),
@@ -206,11 +199,11 @@ describe('steer reminders integration (chat flow)', () => {
   it('a bare constant predicate fires every mid-loop step (spam is by design)', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'spam', userId: 'u1' });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel(
-      [{ tool: 'noop' }, { tool: 'noop' }, { text: 'done' }],
-      prompts,
-    );
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { text: 'done' },
+    ]);
     const chatAgent = await makeAgent(context, model, 'spam');
 
     context.set(reminder('NUDGE', { when: everyNTurns(1), target: 'steer' }));
@@ -236,11 +229,11 @@ describe('steer reminders integration (chat flow)', () => {
   it('once(id) latches a constant predicate to a single fire', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'latch', userId: 'u1' });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel(
-      [{ tool: 'noop' }, { tool: 'noop' }, { text: 'done' }],
-      prompts,
-    );
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { text: 'done' },
+    ]);
     const chatAgent = await makeAgent(context, model, 'latch');
 
     context.set(
@@ -277,7 +270,7 @@ describe('steer reminders integration (chat flow)', () => {
     const c1 = new ContextEngine({ store, chatId, userId: 'u1' });
     const a1 = await makeAgent(
       c1,
-      scriptedModel([{ tool: 'noop' }, { text: 'done' }], []),
+      scriptedModel([{ tool: 'noop' }, { text: 'done' }]),
       'durable',
     );
     c1.set(
@@ -294,7 +287,7 @@ describe('steer reminders integration (chat flow)', () => {
     const c2 = new ContextEngine({ store, chatId, userId: 'u1' });
     const a2 = await makeAgent(
       c2,
-      scriptedModel([{ tool: 'noop' }, { text: 'done' }], []),
+      scriptedModel([{ tool: 'noop' }, { text: 'done' }]),
       'durable',
     );
     c2.set(
@@ -327,7 +320,7 @@ describe('steer reminders integration (chat flow)', () => {
     const c1 = new ContextEngine({ store, chatId, userId: 'u1' });
     const a1 = await makeAgent(
       c1,
-      scriptedModel([{ tool: 'noop' }, { text: 'done' }], []),
+      scriptedModel([{ tool: 'noop' }, { text: 'done' }]),
       chatId,
     );
     c1.set(
@@ -344,7 +337,7 @@ describe('steer reminders integration (chat flow)', () => {
     const c2 = new ContextEngine({ store, chatId, userId: 'u1' });
     const a2 = await makeAgent(
       c2,
-      scriptedModel([{ tool: 'noop' }, { text: 'done' }], []),
+      scriptedModel([{ tool: 'noop' }, { text: 'done' }]),
       chatId,
     );
     c2.set(
@@ -377,10 +370,11 @@ describe('steer reminders integration (chat flow)', () => {
         chatId: `order-${order}`,
         userId: 'u1',
       });
-      const model = scriptedModel(
-        [{ tool: 'noop' }, { tool: 'noop' }, { text: 'done' }],
-        [],
-      );
+      const model = scriptedModel([
+        { tool: 'noop' },
+        { tool: 'noop' },
+        { text: 'done' },
+      ]);
       const chatAgent = await makeAgent(context, model, `order-${order}`);
 
       const when =
@@ -412,8 +406,7 @@ describe('steer reminders integration (chat flow)', () => {
       chatId: 'single',
       userId: 'u1',
     });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel([{ text: 'just text' }], prompts);
+    const model = scriptedModel([{ text: 'just text' }]);
     const chatAgent = await makeAgent(context, model, 'single');
 
     context.set(reminder('NEVER', { when: everyNTurns(1), target: 'steer' }));
@@ -432,8 +425,7 @@ describe('steer reminders integration (chat flow)', () => {
   it('two steer reminders firing at the same boundary merge into one synthetic user (no consecutive users)', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'two', userId: 'u1' });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel([{ tool: 'noop' }, { text: 'after' }], prompts);
+    const model = scriptedModel([{ tool: 'noop' }, { text: 'after' }]);
     const chatAgent = await makeAgent(context, model, 'two');
 
     context.set(
@@ -459,7 +451,7 @@ describe('steer reminders integration (chat flow)', () => {
       .map((e) => e.data as UIMessage)
       .filter((m) => !(m.role === 'assistant' && m.parts.length === 0));
     const roles = rolesOf(
-      await convertToModelMessages(storedUi as never, {
+      await convertToModelMessages(storedUi, {
         ignoreIncompleteToolCalls: true,
       }),
     );
@@ -478,11 +470,7 @@ describe('steer reminders integration (chat flow)', () => {
       chatId: 'throws',
       userId: 'u1',
     });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel(
-      [{ tool: 'noop' }, { text: 'survived' }],
-      prompts,
-    );
+    const model = scriptedModel([{ tool: 'noop' }, { text: 'survived' }]);
     const chatAgent = await makeAgent(context, model, 'throws');
 
     context.set(
@@ -515,8 +503,7 @@ describe('steer reminders integration (chat flow)', () => {
   it('no steer configured: a multi-step loop persists a single assistant (no split)', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'plain', userId: 'u1' });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel([{ tool: 'noop' }, { text: 'final' }], prompts);
+    const model = scriptedModel([{ tool: 'noop' }, { text: 'final' }]);
     const chatAgent = await makeAgent(context, model, 'plain');
 
     await context.continue(userMessage('hello'));
@@ -532,8 +519,7 @@ describe('steer reminders integration (chat flow)', () => {
   it('stripReminders removes the synthetic steer payload (no system-reminder leak)', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'strip', userId: 'u1' });
-    const prompts: unknown[][] = [];
-    const model = scriptedModel([{ tool: 'noop' }, { text: 'done' }], prompts);
+    const model = scriptedModel([{ tool: 'noop' }, { text: 'done' }]);
     const chatAgent = await makeAgent(context, model, 'strip');
 
     context.set(reminder('SECRET', { when: everyNTurns(1), target: 'steer' }));
@@ -563,10 +549,11 @@ describe('steer reminders integration (chat flow)', () => {
     const context = new ContextEngine({ store, chatId: 'gr', userId: 'u1' });
     // step0 tool (lets steer fire at prepareStep step1), step1 text that the
     // guardrail rejects once → retry, retry produces the final text.
-    const model = scriptedModel(
-      [{ tool: 'noop' }, { text: 'first attempt' }, { text: 'final answer' }],
-      [],
-    );
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { text: 'first attempt' },
+      { text: 'final answer' },
+    ]);
     let guardrailHits = 0;
     const failOnce: Guardrail = {
       id: 'fail-once',
@@ -619,7 +606,7 @@ describe('steer reminders integration (chat flow)', () => {
 
   it('reminder({ target: "steer" }) without a when predicate throws a steer-specific error', () => {
     assert.throws(
-      () => reminder('X', { target: 'steer' } as never),
+      () => reminder('X', { target: 'steer' }),
       /Reminder target "steer" requires a when predicate/,
     );
   });
@@ -634,15 +621,12 @@ describe('steer reminders integration (chat flow)', () => {
         chatId: 'recur',
         userId: 'u1',
       });
-      const model = scriptedModel(
-        [
-          { tool: 'slow' },
-          { tool: 'slow' },
-          { tool: 'slow' },
-          { text: 'done' },
-        ],
-        [],
-      );
+      const model = scriptedModel([
+        { tool: 'slow' },
+        { tool: 'slow' },
+        { tool: 'slow' },
+        { text: 'done' },
+      ]);
       const slowTool = tool({
         description: 'a tool that takes 61 seconds',
         inputSchema: z.object({}),

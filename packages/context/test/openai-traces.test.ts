@@ -1,4 +1,5 @@
-import { isStepCount, simulateReadableStream } from 'ai';
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { type Telemetry, isStepCount, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import nock from 'nock';
 import assert from 'node:assert';
@@ -17,6 +18,35 @@ import {
 
 interface IngestBody {
   data: TraceItem[];
+}
+
+type TelemetryEvent<K extends keyof Telemetry> = Parameters<
+  NonNullable<Telemetry[K]>
+>[0];
+
+function captureTelemetryEvents() {
+  const events = {
+    starts: [] as TelemetryEvent<'onStart'>[],
+    stepStarts: [] as TelemetryEvent<'onStepStart'>[],
+    stepEnds: [] as TelemetryEvent<'onStepEnd'>[],
+    ends: [] as TelemetryEvent<'onEnd'>[],
+  };
+  const telemetry: Telemetry = {
+    onStart: (event) => {
+      events.starts.push(event);
+    },
+    onStepStart: (event) => {
+      events.stepStarts.push(event);
+    },
+    onStepEnd: (event) => {
+      events.stepEnds.push(event);
+    },
+    onEnd: (event) => {
+      events.ends.push(event);
+    },
+  };
+
+  return { events, telemetry };
 }
 
 function traceMetadataValue<T = unknown>(
@@ -131,7 +161,7 @@ function assertWireSchema(spans: OpenAISpan[]): string[] {
 
 function createMockModel(text = 'Hello world') {
   return new MockLanguageModelV4({
-    doStream: async () => ({
+    doStream: {
       stream: simulateReadableStream({
         chunks: [
           { type: 'text-start', id: 'text-1' },
@@ -156,75 +186,64 @@ function createMockModel(text = 'Hello world') {
           },
         ],
       }),
-      rawCall: { rawPrompt: undefined, rawSettings: {} },
-    }),
+    },
   });
 }
 
 function createTwoStepToolModel() {
-  let callCount = 0;
+  const toolCallChunks = [
+    {
+      type: 'tool-call',
+      toolCallId: 'call_1',
+      toolName: 'get_weather',
+      input: JSON.stringify({ city: 'London' }),
+    },
+    {
+      type: 'finish',
+      finishReason: { unified: 'tool-calls', raw: '' },
+      usage: {
+        inputTokens: {
+          total: 20,
+          noCache: undefined,
+          cacheRead: undefined,
+          cacheWrite: undefined,
+        },
+        outputTokens: {
+          total: 8,
+          text: 8,
+          reasoning: undefined,
+        },
+      },
+    },
+  ] satisfies LanguageModelV4StreamPart[];
+  const answerChunks = [
+    { type: 'text-start', id: 'text-2' },
+    { type: 'text-delta', id: 'text-2', delta: 'Weather is 15C' },
+    { type: 'text-end', id: 'text-2' },
+    {
+      type: 'finish',
+      finishReason: { unified: 'stop', raw: '' },
+      usage: {
+        inputTokens: {
+          total: 12,
+          noCache: undefined,
+          cacheRead: undefined,
+          cacheWrite: undefined,
+        },
+        outputTokens: {
+          total: 6,
+          text: 6,
+          reasoning: undefined,
+        },
+      },
+    },
+  ] satisfies LanguageModelV4StreamPart[];
 
   return new MockLanguageModelV4({
-    doStream: async () => {
-      callCount += 1;
-      const chunks: any[] =
-        callCount === 1
-          ? [
-              {
-                type: 'tool-call',
-                id: 'tc-1',
-                toolCallId: 'call_1',
-                toolName: 'get_weather',
-                input: JSON.stringify({ city: 'London' }),
-              },
-              {
-                type: 'finish',
-                finishReason: { unified: 'tool-calls', raw: '' },
-                usage: {
-                  inputTokens: {
-                    total: 20,
-                    noCache: undefined,
-                    cacheRead: undefined,
-                    cacheWrite: undefined,
-                  },
-                  outputTokens: {
-                    total: 8,
-                    text: 8,
-                    reasoning: undefined,
-                  },
-                },
-              },
-            ]
-          : [
-              { type: 'text-start', id: 'text-2' },
-              { type: 'text-delta', id: 'text-2', delta: 'Weather is 15C' },
-              { type: 'text-end', id: 'text-2' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage: {
-                  inputTokens: {
-                    total: 12,
-                    noCache: undefined,
-                    cacheRead: undefined,
-                    cacheWrite: undefined,
-                  },
-                  outputTokens: {
-                    total: 6,
-                    text: 6,
-                    reasoning: undefined,
-                  },
-                },
-              },
-            ];
-
-      return {
-        stream: simulateReadableStream({
-          chunks,
-        }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
-      };
-    },
+    doStream: [
+      { stream: simulateReadableStream({ chunks: toolCallChunks }) },
+      { stream: simulateReadableStream({ chunks: answerChunks }) },
+    ],
   });
 }
 
@@ -429,268 +448,43 @@ describe('OpenAI Traces Integration', () => {
     });
 
     it('matches interleaved callbacks by event identity instead of stack order', async () => {
+      const { streamText } = await import('ai');
       const captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
         batch: { scheduleDelayMs: 60_000 },
       });
 
-      await integration.onStart?.({
-        callId: 'call_a',
-        operationId: 'ai.generateText',
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        instructions: undefined,
+      const runA = captureTelemetryEvents();
+      const resultA = streamText({
+        model: createMockModel('A'),
         prompt: 'A',
-        messages: [{ role: 'user', content: [{ type: 'text', text: 'A' }] }],
-        tools: undefined,
-        toolChoice: undefined,
-        activeTools: undefined,
-        maxOutputTokens: undefined,
-        temperature: undefined,
-        topP: undefined,
-        topK: undefined,
-        presencePenalty: undefined,
-        frequencyPenalty: undefined,
-        stopSequences: undefined,
-        seed: undefined,
-        maxRetries: 0,
-        timeout: undefined,
-        headers: undefined,
-        providerOptions: undefined,
-        stopWhen: undefined,
-        output: undefined,
-        abortSignal: undefined,
-        include: undefined,
-        functionId: 'A',
-        metadata: undefined,
-        runtimeContext: undefined,
-      } as never);
+        telemetry: {
+          isEnabled: true,
+          integrations: [runA.telemetry],
+          functionId: 'A',
+        },
+      });
+      await resultA.consumeStream();
 
-      await integration.onStart?.({
-        callId: 'call_b',
-        operationId: 'ai.generateText',
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        instructions: undefined,
+      const runB = captureTelemetryEvents();
+      const resultB = streamText({
+        model: createMockModel('B'),
         prompt: 'B',
-        messages: [{ role: 'user', content: [{ type: 'text', text: 'B' }] }],
-        tools: undefined,
-        toolChoice: undefined,
-        activeTools: undefined,
-        maxOutputTokens: undefined,
-        temperature: undefined,
-        topP: undefined,
-        topK: undefined,
-        presencePenalty: undefined,
-        frequencyPenalty: undefined,
-        stopSequences: undefined,
-        seed: undefined,
-        maxRetries: 0,
-        timeout: undefined,
-        headers: undefined,
-        providerOptions: undefined,
-        stopWhen: undefined,
-        output: undefined,
-        abortSignal: undefined,
-        include: undefined,
-        functionId: 'B',
-        metadata: undefined,
-        runtimeContext: undefined,
-      } as never);
+        telemetry: {
+          isEnabled: true,
+          integrations: [runB.telemetry],
+          functionId: 'B',
+        },
+      });
+      await resultB.consumeStream();
 
-      await integration.onStepStart?.({
-        callId: 'call_a',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        instructions: undefined,
-        messages: [{ role: 'user', content: [{ type: 'text', text: 'A' }] }],
-        tools: undefined,
-        toolChoice: undefined,
-        activeTools: undefined,
-        steps: [],
-        providerOptions: undefined,
-        timeout: undefined,
-        headers: undefined,
-        stopWhen: undefined,
-        output: undefined,
-        abortSignal: undefined,
-        include: undefined,
-        functionId: 'A',
-        metadata: undefined,
-        runtimeContext: undefined,
-      } as never);
-
-      await integration.onStepEnd?.({
-        callId: 'call_a',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        functionId: 'A',
-        metadata: undefined,
-        runtimeContext: undefined,
-        content: [],
-        text: '',
-        reasoning: [],
-        reasoningText: undefined,
-        files: [],
-        sources: [],
-        toolCalls: [],
-        staticToolCalls: [],
-        dynamicToolCalls: [],
-        toolResults: [],
-        staticToolResults: [],
-        dynamicToolResults: [],
-        finishReason: 'stop',
-        rawFinishReason: 'stop',
-        usage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-        warnings: undefined,
-        request: { body: undefined },
-        response: {
-          id: 'response_a',
-          timestamp: new Date(),
-          modelId: 'gpt-5',
-          headers: {},
-          messages: [],
-        },
-        providerMetadata: undefined,
-      } as never);
-
-      await integration.onEnd?.({
-        callId: 'call_b',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        functionId: 'B',
-        metadata: undefined,
-        runtimeContext: undefined,
-        content: [],
-        text: '',
-        reasoning: [],
-        reasoningText: undefined,
-        files: [],
-        sources: [],
-        toolCalls: [],
-        staticToolCalls: [],
-        dynamicToolCalls: [],
-        toolResults: [],
-        staticToolResults: [],
-        dynamicToolResults: [],
-        finishReason: 'stop',
-        rawFinishReason: 'stop',
-        usage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-        warnings: undefined,
-        request: { body: undefined },
-        response: {
-          id: 'response_b',
-          timestamp: new Date(),
-          modelId: 'gpt-5',
-          headers: {},
-          messages: [],
-        },
-        providerMetadata: undefined,
-        steps: [],
-        finalStep: {} as never,
-        totalUsage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-      } as never);
-
-      await integration.onEnd?.({
-        callId: 'call_a',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        functionId: 'A',
-        metadata: undefined,
-        runtimeContext: undefined,
-        content: [],
-        text: '',
-        reasoning: [],
-        reasoningText: undefined,
-        files: [],
-        sources: [],
-        toolCalls: [],
-        staticToolCalls: [],
-        dynamicToolCalls: [],
-        toolResults: [],
-        staticToolResults: [],
-        dynamicToolResults: [],
-        finishReason: 'stop',
-        rawFinishReason: 'stop',
-        usage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-        warnings: undefined,
-        request: { body: undefined },
-        response: {
-          id: 'response_a',
-          timestamp: new Date(),
-          modelId: 'gpt-5',
-          headers: {},
-          messages: [],
-        },
-        providerMetadata: undefined,
-        steps: [],
-        finalStep: {} as never,
-        totalUsage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-      } as never);
+      await integration.onStart?.(runA.events.starts[0]!);
+      await integration.onStart?.(runB.events.starts[0]!);
+      await integration.onStepStart?.(runA.events.stepStarts[0]!);
+      await integration.onStepEnd?.(runA.events.stepEnds[0]!);
+      await integration.onEnd?.(runB.events.ends[0]!);
+      await integration.onEnd?.(runA.events.ends[0]!);
 
       const traceForA = captured
         .map(
@@ -826,6 +620,8 @@ describe('OpenAI Traces Integration', () => {
     });
 
     it('records tool failures using span error data', async () => {
+      const { streamText, tool } = await import('ai');
+      const { z } = await import('zod');
       const captured = captureIngestRequests();
       const integration = createOpenAITracesIntegration({
         apiKey: 'test-key',
@@ -833,223 +629,25 @@ describe('OpenAI Traces Integration', () => {
         batch: { scheduleDelayMs: 60_000 },
       });
 
-      await integration.onStart?.({
-        callId: 'failing-tool-call',
-        operationId: 'ai.generateText',
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        instructions: undefined,
+      const result = streamText({
+        model: createTwoStepToolModel(),
         prompt: 'Run a tool',
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
-        ],
-        tools: undefined,
-        toolChoice: undefined,
-        activeTools: undefined,
-        maxOutputTokens: undefined,
-        temperature: undefined,
-        topP: undefined,
-        topK: undefined,
-        presencePenalty: undefined,
-        frequencyPenalty: undefined,
-        stopSequences: undefined,
-        seed: undefined,
-        maxRetries: 0,
-        timeout: undefined,
-        headers: undefined,
-        providerOptions: undefined,
-        stopWhen: undefined,
-        output: undefined,
-        abortSignal: undefined,
-        include: undefined,
-        functionId: 'failing-tool',
-        metadata: undefined,
-        runtimeContext: undefined,
-      } as never);
-
-      await integration.onStepStart?.({
-        callId: 'failing-tool-call',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        instructions: undefined,
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
-        ],
-        tools: undefined,
-        toolChoice: undefined,
-        activeTools: undefined,
-        steps: [],
-        providerOptions: undefined,
-        timeout: undefined,
-        headers: undefined,
-        stopWhen: undefined,
-        output: undefined,
-        abortSignal: undefined,
-        include: undefined,
-        functionId: 'failing-tool',
-        metadata: undefined,
-        runtimeContext: undefined,
-      } as never);
-
-      await integration.onToolExecutionStart?.({
-        callId: 'failing-tool-call',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        toolCall: {
-          type: 'tool-call',
-          toolCallId: 'call_1',
-          toolName: 'explode',
-          input: { id: 1 },
-          providerExecuted: false,
-          dynamic: false,
+        tools: {
+          get_weather: tool({
+            inputSchema: z.object({ city: z.string() }),
+            execute: async (_input: { city: string }): Promise<string> => {
+              throw new Error('boom');
+            },
+          }),
         },
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
-        ],
-        abortSignal: undefined,
-        functionId: 'failing-tool',
-        metadata: undefined,
-        runtimeContext: undefined,
-      } as never);
-
-      await integration.onToolExecutionEnd?.({
-        callId: 'failing-tool-call',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        toolCall: {
-          type: 'tool-call',
-          toolCallId: 'call_1',
-          toolName: 'explode',
-          input: { id: 1 },
-          providerExecuted: false,
-          dynamic: false,
+        stopWhen: isStepCount(2),
+        telemetry: {
+          isEnabled: true,
+          integrations: [integration],
+          functionId: 'failing-tool',
         },
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'Run a tool' }] },
-        ],
-        abortSignal: undefined,
-        toolExecutionMs: 5,
-        functionId: 'failing-tool',
-        metadata: undefined,
-        runtimeContext: undefined,
-        toolOutput: {
-          type: 'tool-error',
-          toolCallId: 'call_1',
-          toolName: 'explode',
-          input: { id: 1 },
-          error: new Error('boom'),
-          dynamic: true,
-        },
-      } as never);
-
-      await integration.onStepEnd?.({
-        callId: 'failing-tool-call',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        functionId: 'failing-tool',
-        metadata: undefined,
-        runtimeContext: undefined,
-        content: [],
-        text: '',
-        reasoning: [],
-        reasoningText: undefined,
-        files: [],
-        sources: [],
-        toolCalls: [],
-        staticToolCalls: [],
-        dynamicToolCalls: [],
-        toolResults: [],
-        staticToolResults: [],
-        dynamicToolResults: [],
-        finishReason: 'tool-calls',
-        rawFinishReason: 'tool-calls',
-        usage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-        warnings: undefined,
-        request: { body: undefined },
-        response: {
-          id: 'response_1',
-          timestamp: new Date(),
-          modelId: 'gpt-5',
-          headers: {},
-          messages: [],
-        },
-        providerMetadata: undefined,
-      } as never);
-
-      await integration.onEnd?.({
-        callId: 'failing-tool-call',
-        stepNumber: 0,
-        model: { provider: 'openai', modelId: 'gpt-5' },
-        functionId: 'failing-tool',
-        metadata: undefined,
-        runtimeContext: undefined,
-        content: [],
-        text: '',
-        reasoning: [],
-        reasoningText: undefined,
-        files: [],
-        sources: [],
-        toolCalls: [],
-        staticToolCalls: [],
-        dynamicToolCalls: [],
-        toolResults: [],
-        staticToolResults: [],
-        dynamicToolResults: [],
-        finishReason: 'stop',
-        rawFinishReason: 'stop',
-        usage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-        warnings: undefined,
-        request: { body: undefined },
-        response: {
-          id: 'response_1',
-          timestamp: new Date(),
-          modelId: 'gpt-5',
-          headers: {},
-          messages: [],
-        },
-        providerMetadata: undefined,
-        steps: [],
-        finalStep: {} as never,
-        totalUsage: {
-          inputTokens: 1,
-          inputTokenDetails: {
-            noCacheTokens: undefined,
-            cacheReadTokens: undefined,
-            cacheWriteTokens: undefined,
-          },
-          outputTokens: 1,
-          outputTokenDetails: {
-            textTokens: 1,
-            reasoningTokens: undefined,
-          },
-          totalTokens: 2,
-        },
-      } as never);
+      });
+      await result.consumeStream();
 
       await flushTelemetry();
 

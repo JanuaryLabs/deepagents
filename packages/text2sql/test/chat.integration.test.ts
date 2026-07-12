@@ -1,5 +1,8 @@
 import { type UIMessage, generateId, simulateReadableStream } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  MockLanguageModelV4,
+  convertReadableStreamToArray as drain,
+} from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -30,29 +33,28 @@ const sandbox = await createBashTool({
 });
 
 const testUsage = {
-  inputTokens: { total: 10 },
-  outputTokens: { total: 5 },
+  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 5, text: 5, reasoning: 0 },
 } as const;
 
 function createMockModel(
   text = 'Here is your SQL: SELECT count(*) FROM users',
 ) {
   return new MockLanguageModelV4({
-    doStream: async () =>
-      ({
-        stream: simulateReadableStream({
-          chunks: [
-            { type: 'text-start', id: 'text-1' },
-            { type: 'text-delta', id: 'text-1', delta: text },
-            { type: 'text-end', id: 'text-1' },
-            {
-              type: 'finish',
-              finishReason: { unified: 'stop', raw: '' },
-              usage: testUsage,
-            },
-          ],
-        }),
-      }) as any,
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks: [
+          { type: 'text-start', id: 'text-1' },
+          { type: 'text-delta', id: 'text-1', delta: text },
+          { type: 'text-end', id: 'text-1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: '' },
+            usage: testUsage,
+          },
+        ],
+      }),
+    }),
   });
 }
 
@@ -62,14 +64,6 @@ function userMessage(text: string): UIMessage {
     role: 'user',
     parts: [{ type: 'text', text }],
   };
-}
-
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
 }
 
 async function setup(mockText?: string) {
@@ -128,8 +122,8 @@ describe('Text2Sql user-constructed chat', () => {
     assert.ok(persisted, 'user message should be persisted');
 
     const data = persisted.data as UIMessage;
-    const textPart = data.parts?.find((p: any) => p.type === 'text');
-    assert.strictEqual((textPart as any)?.text, 'How many users are there?');
+    const textPart = data.parts.find((part) => part.type === 'text');
+    assert.strictEqual(textPart?.text, 'How many users are there?');
   });
 
   it('saves assistant response to context store after stream is consumed', async () => {
@@ -433,25 +427,20 @@ describe('Text2Sql user-constructed chat', () => {
       'CREATE TABLE users (id INTEGER, name TEXT)',
     );
 
-    let receivedSignal: AbortSignal | undefined;
-
     const model = new MockLanguageModelV4({
-      doStream: async ({ abortSignal }: any) => {
-        receivedSignal = abortSignal;
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'text-1' },
-              { type: 'text-delta', id: 'text-1', delta: 'response' },
-              { type: 'text-end', id: 'text-1' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage: testUsage,
-              },
-            ],
-          }),
-        } as any;
+      doStream: {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start', id: 'text-1' },
+            { type: 'text-delta', id: 'text-1', delta: 'response' },
+            { type: 'text-end', id: 'text-1' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage: testUsage,
+            },
+          ],
+        }),
       },
     });
 
@@ -484,6 +473,7 @@ describe('Text2Sql user-constructed chat', () => {
     });
     await drain(stream);
 
+    const receivedSignal = model.doStreamCalls[0].abortSignal;
     assert.ok(receivedSignal, 'model should receive an AbortSignal');
     controller.abort();
     assert.ok(
@@ -522,14 +512,14 @@ describe('Text2Sql user-constructed chat', () => {
     assert.ok(persisted, 'user message should be persisted');
 
     const data = persisted.data as UIMessage;
-    const textPart = data.parts?.find((p: any) => p.type === 'text');
+    const textPart = data.parts.find((part) => part.type === 'text');
     assert.ok(textPart, 'should have a text part');
     assert.ok(
-      (textPart as any).text.includes('<system-reminder>'),
+      textPart.text.includes('<system-reminder>'),
       'text should contain system-reminder tag',
     );
     assert.ok(
-      (textPart as any).text.includes('Always explain your SQL'),
+      textPart.text.includes('Always explain your SQL'),
       'text should contain the reminder content',
     );
 

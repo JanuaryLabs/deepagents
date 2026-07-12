@@ -7,7 +7,10 @@ import {
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  MockLanguageModelV4,
+  convertReadableStreamToArray as drain,
+} from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -52,7 +55,6 @@ function createMockModel(text = 'Hello from assistant') {
           },
         ],
       }),
-      rawCall: { rawPrompt: undefined, rawSettings: {} },
     }),
   });
 }
@@ -62,14 +64,14 @@ function createMockModelWithTitle(
   titleText = 'Generated Title',
 ) {
   return new MockLanguageModelV4({
-    doGenerate: async () => ({
+    doGenerate: {
       content: [
         { type: 'text' as const, text: JSON.stringify({ title: titleText }) },
       ],
       finishReason: { unified: 'stop' as const, raw: '' },
       usage: testUsage,
       warnings: [],
-    }),
+    },
     doStream: async () => ({
       stream: simulateReadableStream({
         chunks: [
@@ -83,7 +85,6 @@ function createMockModelWithTitle(
           },
         ],
       }),
-      rawCall: { rawPrompt: undefined, rawSettings: {} },
     }),
   });
 }
@@ -94,14 +95,6 @@ function userMessage(text: string): UIMessage {
     role: 'user',
     parts: [{ type: 'text', text }],
   };
-}
-
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
 }
 
 function setup(mockText?: string) {
@@ -348,17 +341,16 @@ describe('chat() title generation', () => {
     await context.continue(userMessage('test'));
     const stream = await chat(chatAgent, { generateTitle: true });
 
-    const reader = stream.getReader();
-    const parts: unknown[] = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      parts.push(value);
-    }
-
+    const parts = await drain(stream);
     const titlePart = parts.find(
-      (p: any) => p?.type === 'data-chat-title',
-    ) as any;
+      (part): part is { type: 'data-chat-title'; data: string } =>
+        typeof part === 'object' &&
+        part !== null &&
+        'type' in part &&
+        part.type === 'data-chat-title' &&
+        'data' in part &&
+        typeof part.data === 'string',
+    );
     assert.ok(titlePart, 'Stream should contain data-chat-title event');
     assert.deepStrictEqual(
       { type: titlePart.type, data: titlePart.data },
@@ -373,15 +365,15 @@ describe('chat() title generation', () => {
       chatId: 'failed-first-turn-chat',
       userId: 'test-user',
     });
-    const model = new MockLanguageModelV4({
-      doGenerate: async () => ({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doGenerate: {
         content: [
           { type: 'text' as const, text: JSON.stringify({ title: 'Doomed' }) },
         ],
         finishReason: { unified: 'stop' as const, raw: '' },
         usage: testUsage,
         warnings: [],
-      }),
+      },
       doStream: async () => {
         throw new Error('model unavailable');
       },
@@ -745,8 +737,8 @@ describe('chat() abort signal integration', () => {
       userId: 'test-user',
     });
 
-    const model = new MockLanguageModelV4({
-      doStream: async () => ({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doStream: {
         stream: simulateReadableStream({
           chunks: [
             { type: 'text-start', id: 'text-1' },
@@ -763,8 +755,7 @@ describe('chat() abort signal integration', () => {
             },
           ],
         }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
-      }),
+      },
     });
 
     const controller = new AbortController();
@@ -815,24 +806,22 @@ describe('chat() abort signal integration', () => {
     });
 
     const controller = new AbortController();
-    let doStreamCalls = 0;
-
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
-        if (doStreamCalls >= 2) {
+        const call = model.doStreamCalls.length;
+        if (call >= 2) {
           controller.abort();
         }
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `text-${doStreamCalls}` },
+              { type: 'text-start', id: `text-${call}` },
               {
                 type: 'text-delta',
-                id: `text-${doStreamCalls}`,
+                id: `text-${call}`,
                 delta: 'bad content',
               },
-              { type: 'text-end', id: `text-${doStreamCalls}` },
+              { type: 'text-end', id: `text-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -840,7 +829,6 @@ describe('chat() abort signal integration', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -877,7 +865,7 @@ describe('chat() abort signal integration', () => {
     }
 
     assert.strictEqual(
-      doStreamCalls,
+      model.doStreamCalls.length,
       2,
       'should call doStream exactly twice: initial + retry that triggers abort',
     );
@@ -891,8 +879,8 @@ describe('chat() abort signal integration', () => {
       userId: 'test-user',
     });
 
-    const model = new MockLanguageModelV4({
-      doStream: async () => ({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doStream: {
         stream: simulateReadableStream({
           chunks: [
             { type: 'text-start', id: 'text-1' },
@@ -905,8 +893,7 @@ describe('chat() abort signal integration', () => {
             },
           ],
         }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
-      }),
+      },
     });
 
     const controller = new AbortController();
@@ -975,25 +962,20 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
     context.set(assistant(corruptAssistant));
     await context.save({ branch: false });
 
-    let capturedPrompt: unknown[] = [];
     const capturingModel = new MockLanguageModelV4({
-      doStream: async (options: any) => {
-        capturedPrompt = options.prompt;
-        return {
-          stream: simulateReadableStream({
-            chunks: [
-              { type: 'text-start', id: 'text-1' },
-              { type: 'text-delta', id: 'text-1', delta: 'response' },
-              { type: 'text-end', id: 'text-1' },
-              {
-                type: 'finish',
-                finishReason: { unified: 'stop', raw: '' },
-                usage: testUsage,
-              },
-            ],
-          }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
-        };
+      doStream: {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start', id: 'text-1' },
+            { type: 'text-delta', id: 'text-1', delta: 'response' },
+            { type: 'text-end', id: 'text-1' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage: testUsage,
+            },
+          ],
+        }),
       },
     });
 
@@ -1010,16 +992,16 @@ describe('convertToModelMessages strips incomplete tool calls', () => {
     });
     await drain(secondStream);
 
+    const capturedPrompt = capturingModel.doStreamCalls[0].prompt;
     assert.ok(
       capturedPrompt.length > 0,
       'model should have been called with a non-empty prompt',
     );
 
-    const hasOrphanedToolCall = capturedPrompt.some((msg: any) => {
+    const hasOrphanedToolCall = capturedPrompt.some((msg) => {
       if (msg.role !== 'assistant') return false;
       return msg.content?.some(
-        (part: any) =>
-          part.type === 'tool-call' && part.toolCallId === 'orphan-tc',
+        (part) => part.type === 'tool-call' && part.toolCallId === 'orphan-tc',
       );
     });
 
@@ -1040,23 +1022,22 @@ describe('chat() guardrail retry context integrity', () => {
       userId: 'test-user',
     });
 
-    let doStreamCalls = 0;
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
+        const call = model.doStreamCalls.length;
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `text-${doStreamCalls}` },
+              { type: 'text-start', id: `text-${call}` },
               {
                 type: 'text-delta',
-                id: `text-${doStreamCalls}`,
+                id: `text-${call}`,
                 delta:
-                  doStreamCalls === 1
+                  call === 1
                     ? 'oh I understand, let me help'
                     : 'Here are your results',
               },
-              { type: 'text-end', id: `text-${doStreamCalls}` },
+              { type: 'text-end', id: `text-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -1064,7 +1045,6 @@ describe('chat() guardrail retry context integrity', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1142,23 +1122,19 @@ describe('chat() guardrail retry context integrity', () => {
       ['user', 'assistant'],
     );
 
-    let doStreamCalls = 0;
-    const model2 = new MockLanguageModelV4({
+    const model2: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
+        const call = model2.doStreamCalls.length;
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `t2-${doStreamCalls}` },
+              { type: 'text-start', id: `t2-${call}` },
               {
                 type: 'text-delta',
-                id: `t2-${doStreamCalls}`,
-                delta:
-                  doStreamCalls === 1
-                    ? 'let me check gdrive'
-                    : 'Here is your file',
+                id: `t2-${call}`,
+                delta: call === 1 ? 'let me check gdrive' : 'Here is your file',
               },
-              { type: 'text-end', id: `t2-${doStreamCalls}` },
+              { type: 'text-end', id: `t2-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -1166,7 +1142,6 @@ describe('chat() guardrail retry context integrity', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1240,21 +1215,19 @@ describe('chat() guardrail self-correction persistence', () => {
       userId: 'test-user',
     });
 
-    let doStreamCalls = 0;
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
+        const call = model.doStreamCalls.length;
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `t-${doStreamCalls}` },
+              { type: 'text-start', id: `t-${call}` },
               {
                 type: 'text-delta',
-                id: `t-${doStreamCalls}`,
-                delta:
-                  doStreamCalls === 1 ? 'bad output' : 'corrected response',
+                id: `t-${call}`,
+                delta: call === 1 ? 'bad output' : 'corrected response',
               },
-              { type: 'text-end', id: `t-${doStreamCalls}` },
+              { type: 'text-end', id: `t-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -1262,7 +1235,6 @@ describe('chat() guardrail self-correction persistence', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1325,20 +1297,19 @@ describe('chat() guardrail self-correction persistence', () => {
       userId: 'test-user',
     });
 
-    let doStreamCalls = 0;
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
+        const call = model.doStreamCalls.length;
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `t-${doStreamCalls}` },
+              { type: 'text-start', id: `t-${call}` },
               {
                 type: 'text-delta',
-                id: `t-${doStreamCalls}`,
-                delta: doStreamCalls === 1 ? 'bad output' : 'clean result',
+                id: `t-${call}`,
+                delta: call === 1 ? 'bad output' : 'clean result',
               },
-              { type: 'text-end', id: `t-${doStreamCalls}` },
+              { type: 'text-end', id: `t-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -1346,7 +1317,6 @@ describe('chat() guardrail self-correction persistence', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1413,13 +1383,12 @@ describe('chat() guardrail self-correction persistence', () => {
       userId: 'test-user',
     });
 
-    let doStreamCalls = 0;
     let storeChainAtRetry: { name: string }[] | undefined;
 
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
-        if (doStreamCalls === 2) {
+        const call = model.doStreamCalls.length;
+        if (call === 2) {
           const branch = await store.getActiveBranch(chatId);
           if (branch?.headMessageId) {
             storeChainAtRetry = await store.getMessageChain(
@@ -1430,13 +1399,13 @@ describe('chat() guardrail self-correction persistence', () => {
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `t-${doStreamCalls}` },
+              { type: 'text-start', id: `t-${call}` },
               {
                 type: 'text-delta',
-                id: `t-${doStreamCalls}`,
-                delta: doStreamCalls === 1 ? 'first attempt' : 'retry response',
+                id: `t-${call}`,
+                delta: call === 1 ? 'first attempt' : 'retry response',
               },
-              { type: 'text-end', id: `t-${doStreamCalls}` },
+              { type: 'text-end', id: `t-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -1444,7 +1413,6 @@ describe('chat() guardrail self-correction persistence', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1499,20 +1467,19 @@ describe('chat() guardrail self-correction persistence', () => {
     context.set(user('test'));
     await context.save();
 
-    let doStreamCalls = 0;
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
+        const call = model.doStreamCalls.length;
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start', id: `t-${doStreamCalls}` },
+              { type: 'text-start', id: `t-${call}` },
               {
                 type: 'text-delta',
-                id: `t-${doStreamCalls}`,
-                delta: doStreamCalls === 1 ? 'wrong answer' : 'right answer',
+                id: `t-${call}`,
+                delta: call === 1 ? 'wrong answer' : 'right answer',
               },
-              { type: 'text-end', id: `t-${doStreamCalls}` },
+              { type: 'text-end', id: `t-${call}` },
               {
                 type: 'finish',
                 finishReason: { unified: 'stop', raw: '' },
@@ -1520,7 +1487,6 @@ describe('chat() guardrail self-correction persistence', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1560,7 +1526,7 @@ describe('chat() guardrail self-correction persistence', () => {
     await drain(uiStream);
 
     assert.strictEqual(
-      doStreamCalls,
+      model.doStreamCalls.length,
       2,
       'Model should have been called twice (original + retry)',
     );
@@ -1578,11 +1544,10 @@ describe('chat() guardrail self-correction persistence', () => {
       userId: 'test-user',
     });
 
-    let doStreamCalls = 0;
-    const model = new MockLanguageModelV4({
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
       doStream: async () => {
-        doStreamCalls++;
-        if (doStreamCalls === 1) {
+        const call = model.doStreamCalls.length;
+        if (call === 1) {
           return {
             stream: simulateReadableStream({
               chunks: [
@@ -1600,7 +1565,6 @@ describe('chat() guardrail self-correction persistence', () => {
                 },
               ],
             }),
-            rawCall: { rawPrompt: undefined, rawSettings: {} },
           };
         }
         return {
@@ -1620,7 +1584,6 @@ describe('chat() guardrail self-correction persistence', () => {
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
       },
     });
@@ -1640,7 +1603,7 @@ describe('chat() guardrail self-correction persistence', () => {
     await drain(stream);
 
     assert.strictEqual(
-      doStreamCalls,
+      model.doStreamCalls.length,
       2,
       'Model should be called twice (original errored, retry succeeded)',
     );

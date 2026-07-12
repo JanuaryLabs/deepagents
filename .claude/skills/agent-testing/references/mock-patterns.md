@@ -1,328 +1,176 @@
-# MockLanguageModelV3 Patterns
+# AI SDK v7 mock patterns
 
-All patterns below have been reconciled against `ai/test` source in `node_modules/ai/dist/test/index.mjs` and the `LanguageModelV3*` type definitions in `@ai-sdk/provider/dist/index.d.ts`. If something here disagrees with those, trust the source.
+All examples target the V4 provider protocol.
 
-## Table of contents
-
-1. [Usage fixture](#1-usage-fixture)
-2. [Static `doGenerate`](#2-static-dogenerate)
-3. [Inspecting the prompt](#3-inspecting-the-prompt)
-4. [Throwing model (error paths)](#4-throwing-model-error-paths)
-5. [Sequencing multiple responses](#5-sequencing-multiple-responses)
-6. [Tool calls (non-streaming)](#6-tool-calls-non-streaming)
-7. [Streaming basics](#7-streaming-basics)
-8. [AI SDK error classes](#8-ai-sdk-error-classes)
-9. [Structured output (`generateObject`)](#9-structured-output-generateobject)
-
----
-
-## 1. Usage fixture
-
-Every result shape needs a `usage` object conforming to `LanguageModelV3Usage`. Declare it once per test file:
+## Shared typed fixtures
 
 ```ts
-const testUsage = {
-  inputTokens: {
-    total: 3,
-    noCache: 3,
-    cacheRead: undefined,
-    cacheWrite: undefined,
-  },
-  outputTokens: { total: 10, text: 10, reasoning: undefined },
+import type {
+  LanguageModelV4GenerateResult,
+  LanguageModelV4StreamPart,
+} from '@ai-sdk/provider';
+
+const usage = {
+  inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 4, text: 4, reasoning: 0 },
 } as const;
+
+const textResult = (text: string) =>
+  ({
+    content: [{ type: 'text', text }],
+    finishReason: { unified: 'stop', raw: 'stop' },
+    usage,
+    warnings: [],
+  }) satisfies LanguageModelV4GenerateResult;
 ```
 
-`as const` matters: it narrows `undefined` to the exact literal instead of `number | undefined`, which avoids spurious type errors on the mock.
+## Fixed and sequential results
 
----
-
-## 2. Static `doGenerate`
-
-Smallest possible mock — the model always returns the same response. Good for happy-path assertions about downstream behaviour (parsing, formatting, storage).
+Use the constructor's built-in fixed and array forms:
 
 ```ts
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 
-const model = new MockLanguageModelV3({
-  doGenerate: {
-    finishReason: { unified: 'stop', raw: undefined },
-    usage: testUsage,
-    content: [{ type: 'text', text: JSON.stringify({ answer: 'Paris' }) }],
-    warnings: [],
-  },
+const fixed = new MockLanguageModelV4({ doGenerate: textResult('ok') });
+const sequence = new MockLanguageModelV4({
+  doGenerate: [textResult('first'), textResult('second')],
 });
 ```
 
-Why the `content: [{ type: 'text', text }]` wrapper: the V3 protocol treats content as an ordered list of tagged parts, so that a single reply can mix text + tool calls + reasoning. Even a plain text response needs the wrapper.
+The array is zero-indexed. The first call returns element 0.
 
----
-
-## 3. Inspecting the prompt
-
-You do **not** need a custom capturing wrapper — the mock records every call on `model.doGenerateCalls` automatically. Each entry is the full `LanguageModelV3CallOptions`, including `prompt`, `tools`, `temperature`, `abortSignal`, `providerOptions`, etc.
+`mockValues` expresses the same sequence and repeats its final value if calls continue:
 
 ```ts
-const model = new MockLanguageModelV3({
-  doGenerate: {
-    finishReason: { unified: 'stop', raw: undefined },
-    usage: testUsage,
-    content: [{ type: 'text', text: 'ok' }],
-    warnings: [],
-  },
+import { MockLanguageModelV4, mockValues } from 'ai/test';
+
+const model = new MockLanguageModelV4({
+  doGenerate: mockValues(textResult('first'), textResult('second')),
 });
-
-await generateText({ model, prompt: 'What is the capital of France?' });
-
-const call = model.doGenerateCalls[0];
-assert.deepStrictEqual(
-  {
-    mentionsCapital: JSON.stringify(call.prompt).includes('capital'),
-    calls: model.doGenerateCalls.length,
-  },
-  { mentionsCapital: true, calls: 1 },
-);
 ```
 
-This skill uses `assert.deepStrictEqual` for every check, even scalar ones — a single structured comparison beats a stack of `strictEqual`/`ok` calls because the diff on failure shows the whole expected shape at once.
+## Throwing and option-dependent behavior
 
----
-
-## 4. Throwing model (error paths)
-
-Function form + `throw` gives you control over whether the error is sync or async, and lets you pick the AI SDK error type the code under test expects.
+Use function form only when behavior must throw, inspect options, or branch on captured state:
 
 ```ts
 import { APICallError } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 
-const model = new MockLanguageModelV3({
-  doGenerate: async () => {
-    throw new APICallError({
-      message: 'Rate limit exceeded',
-      url: 'https://api.example.com',
-      requestBodyValues: {},
-      isRetryable: true,
-      statusCode: 429,
-    });
-  },
-});
-```
-
-Why this over returning `{ type: 'error' }` content: errors from `doGenerate` propagate as exceptions from `generateText` — that's the contract retry/repair logic is built on. An `{ type: 'error' }` inside `content` is for reporting provider-side errors without aborting the call, which is a different code path.
-
----
-
-## 5. Sequencing multiple responses
-
-When the code under test makes several calls (e.g. tool-call → repair → final response, or retry logic), you need each call to return something different.
-
-**Preferred — function form with `doGenerateCalls.length`:**
-
-```ts
-const model = new MockLanguageModelV3({
-  doGenerate: async () => {
-    const n = model.doGenerateCalls.length; // 1 for first call, 2 for second, ...
-    if (n === 1) {
+const model = new MockLanguageModelV4({
+  doGenerate: async (options) => {
+    if (model.doGenerateCalls.length === 1) {
       throw new APICallError({
-        message: 'transient',
-        url: 'x',
+        message: 'rate limited',
+        url: 'https://example.test',
         requestBodyValues: {},
+        statusCode: 429,
         isRetryable: true,
       });
     }
-    return {
-      finishReason: { unified: 'stop', raw: undefined },
-      usage: testUsage,
-      content: [{ type: 'text', text: 'succeeded on retry' }],
-      warnings: [],
-    };
+    return textResult(JSON.stringify({ ok: true }));
   },
 });
 ```
 
-Why this is the preferred pattern: it's explicit, reads top-to-bottom like the scenario it describes, and keeps the counter in one place so you can assert on it at the end (`model.doGenerateCalls.length === 2`).
+The mock records the options before invoking the function, so `doGenerateCalls.length` is 1 during the first call. Assert prompts, tools, provider options, and abort signals from `doGenerateCalls`/`doStreamCalls`; do not build a capturing wrapper.
 
-**Array form — use with care:**
+## Non-streaming tool call
 
 ```ts
-const model = new MockLanguageModelV3({
-  doGenerate: [
-    undefined as any, // element 0 is NEVER returned — see gotcha
-    firstResult,
-    secondResult,
+const toolCall = {
+  content: [
+    {
+      type: 'tool-call',
+      toolCallId: 'call-1',
+      toolName: 'search',
+      input: JSON.stringify({ query: 'weather' }),
+    },
   ],
-});
+  finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+  usage,
+  warnings: [],
+} satisfies LanguageModelV4GenerateResult;
 ```
 
-The runtime code does `calls.push(options); return array[calls.length]`, so on the first call it returns `array[1]`. Always pad the 0th slot. In practice, the function form avoids this entire class of confusion.
+Keep `input` stringified. Let `generateText` parse and validate it against the tool schema.
 
----
+## Streaming and collection
 
-## 6. Tool calls (non-streaming)
-
-Return a `tool-call` content part and set `finishReason.unified: 'tool-calls'`. The AI SDK will dispatch to your registered tool and include the tool-result in the next step — use `stopWhen: stepCountIs(1)` to short-circuit after the dispatch so your test asserts on the intermediate state.
-
-```ts
-import { generateText, stepCountIs, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
-import { z } from 'zod';
-
-const model = new MockLanguageModelV3({
-  doGenerate: {
-    finishReason: { unified: 'tool-calls', raw: undefined },
-    usage: testUsage,
-    warnings: [],
-    content: [
-      {
-        type: 'tool-call',
-        toolCallId: 'call-1',
-        toolName: 'search',
-        input: JSON.stringify({ query: 'weather' }),
-      },
-    ],
-  },
-});
-
-const result = await generateText({
-  model,
-  prompt: 'What is the weather?',
-  stopWhen: stepCountIs(1),
-  tools: {
-    search: tool({
-      inputSchema: z.object({ query: z.string() }),
-      execute: async ({ query }) => `results for ${query}`,
-    }),
-  },
-});
-
-const toolResult = result.content.find(
-  (p) => p.type === 'tool-result' && p.toolName === 'search',
-);
-assert.deepStrictEqual(
-  { dispatched: Boolean(toolResult), toolName: toolResult?.toolName },
-  { dispatched: true, toolName: 'search' },
-);
-```
-
-Note: the `input` field is always a **stringified** JSON (per the V3 spec), even though you might be tempted to pass an object. The SDK parses it against your `inputSchema`.
-
----
-
-## 7. Streaming basics
-
-For any code that calls `streamText`, provide `doStream`. See [stream-chunks.md](stream-chunks.md) for the full chunk catalog; the minimal "say text and finish" looks like:
+`ReadableStream` instances are single-consumption. A fixed `doStream: { stream }` result is valid only for a model that will be called once. Reusable models need function form so every call constructs a new stream; fixed multi-step scenarios need an array with a distinct stream in every result.
 
 ```ts
 import { simulateReadableStream } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4, convertReadableStreamToArray } from 'ai/test';
 
-const model = new MockLanguageModelV3({
+const chunks = [
+  { type: 'text-start', id: 'text-1' },
+  { type: 'text-delta', id: 'text-1', delta: 'hello' },
+  { type: 'text-end', id: 'text-1' },
+  {
+    type: 'finish',
+    finishReason: { unified: 'stop', raw: 'stop' },
+    usage,
+  },
+] satisfies LanguageModelV4StreamPart[];
+
+const model = new MockLanguageModelV4({
   doStream: async () => ({
     stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start', id: 't1' },
-        { type: 'text-delta', id: 't1', delta: 'Hello ' },
-        { type: 'text-delta', id: 't1', delta: 'world' },
-        { type: 'text-end', id: 't1' },
-        {
-          type: 'finish',
-          finishReason: { unified: 'stop', raw: undefined },
-          usage: testUsage,
-        },
-      ],
+      chunks,
+      initialDelayInMs: null,
+      chunkDelayInMs: null,
     }),
   }),
 });
+
+const observed = await convertReadableStreamToArray(
+  simulateReadableStream({
+    chunks,
+    initialDelayInMs: null,
+    chunkDelayInMs: null,
+  }),
+);
 ```
 
-To consume the stream in your test without depending on SDK-specific iterators:
+In real integration tests, consume the public `streamText` result. Use `convertReadableStreamToArray` when the object under test exposes a raw `ReadableStream`; do not write a local drain loop.
+
+## Deterministic IDs
 
 ```ts
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
-}
+import { mockId } from 'ai/test';
+
+const generateId = mockId({ prefix: 'message' });
+// message-0, message-1, ...
 ```
 
-If the code under test calls `streamText({ experimental_transform: smoothStream() })` or similar, pass `transform: () => new TransformStream()` when invoking it in the test. `smoothStream`'s internal timing assumes a real event loop and hangs under synthetic schedulers.
+Inject this function only through a public `generateId` option. Do not patch global randomness.
 
----
+## Capturing calls for other model types
 
-## 8. AI SDK error classes
-
-All importable from `'ai'` (not `ai/test`). Use `ErrorClass.isInstance(err)` in assertions — it survives realm and dual-bundle boundaries where `instanceof` would fail.
+Language and embedding mocks have call arrays. Image, speech, transcription, reranking, and video mocks do not. Use the Node runner's built-in spy:
 
 ```ts
-import {
-  APICallError,
-  JSONParseError,
-  NoContentGeneratedError,
-  NoObjectGeneratedError,
-  NoOutputGeneratedError,
-  TypeValidationError,
-} from 'ai';
+import { MockImageModelV4 } from 'ai/test';
+import { mock } from 'node:test';
 
-new APICallError({
-  message: 'Rate limit exceeded',
-  url: 'https://api.example.com',
-  requestBodyValues: {},
-  isRetryable: true,
-  statusCode: 429, // optional
-  responseBody: '...', // optional
-});
+const doGenerate = mock.fn(async (options) => imageResult);
+const model = new MockImageModelV4({ doGenerate });
 
-new JSONParseError({
-  text: '{ bad json',
-  cause: new SyntaxError('Unexpected token'),
-});
-
-new TypeValidationError({
-  value: { invalid: true },
-  cause: new Error('Expected string, got number'),
-});
-
-new NoObjectGeneratedError({
-  response: { id: 'r1', timestamp: new Date(), modelId: 'test' },
-  usage: { inputTokens: 10, outputTokens: 0, totalTokens: 10 },
-  finishReason: 'error',
-});
-
-new NoOutputGeneratedError(); // no-arg
-new NoContentGeneratedError(); // no-arg
+await generateImage({ model, prompt: 'a lighthouse' });
+assert.deepStrictEqual(doGenerate.mock.callCount(), 1);
 ```
 
-All of these extend `Error`, so `err instanceof Error` is still `true` — but for precise type matching, use `isInstance`:
+## Provider registry
 
 ```ts
-assert.deepStrictEqual(APICallError.isInstance(err), true);
-```
+import { MockLanguageModelV4, MockProviderV4 } from 'ai/test';
 
----
-
-## 9. Structured output (`generateObject`)
-
-`generateObject` expects the model to return a single text content part whose text is valid JSON matching the provided schema. Return it exactly like a text response:
-
-```ts
-const model = new MockLanguageModelV3({
-  doGenerate: {
-    finishReason: { unified: 'stop', raw: undefined },
-    usage: testUsage,
-    content: [{ type: 'text', text: JSON.stringify({ name: 'Ada', age: 36 }) }],
-    warnings: [],
+const provider = new MockProviderV4({
+  languageModels: {
+    primary: new MockLanguageModelV4({ doGenerate: textResult('ok') }),
   },
 });
-
-const result = await generateObject({
-  model,
-  schema: z.object({ name: z.string(), age: z.number() }),
-  prompt: 'Tell me about Ada.',
-});
-
-assert.deepStrictEqual(result.object, { name: 'Ada', age: 36 });
 ```
 
-To test schema repair / retry, combine with the sequencing pattern (section 5): first call returns malformed JSON → SDK throws `JSONParseError` → code under test retries → second call returns valid JSON.
+Use this when the code resolves models by provider/model ID. Unknown IDs intentionally raise `NoSuchModelError`.

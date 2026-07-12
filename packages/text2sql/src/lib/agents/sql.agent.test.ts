@@ -1,3 +1,4 @@
+import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider';
 import {
   APICallError,
   JSONParseError,
@@ -54,28 +55,24 @@ function createThrowingModel(errorFactory: () => Error) {
   });
 }
 
-/** Helper to create a model that captures call metadata */
+/** Helper to create a model with sequential responses. */
 function createCapturingModel(responses: Array<MockModelResponse | Error>) {
-  const calls: Array<{ messages: unknown; settings: unknown }> = [];
-  let callIndex = 0;
-  return {
-    calls,
-    model: new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        calls.push({ messages: options.prompt, settings: options });
-        const response = responses[callIndex++];
-        if (response instanceof Error) {
-          throw response;
-        }
-        return {
-          finishReason: { unified: 'stop', raw: '' },
-          usage: testUsage,
-          content: [{ type: 'text' as const, text: JSON.stringify(response) }],
-          warnings: [],
-        };
-      },
-    }),
-  };
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
+    doGenerate: async (): Promise<LanguageModelV4GenerateResult> => {
+      const response = responses[model.doGenerateCalls.length - 1];
+      assert.ok(response, 'Mock model exhausted its configured responses');
+      if (response instanceof Error) {
+        throw response;
+      }
+      return {
+        finishReason: { unified: 'stop', raw: '' },
+        usage: testUsage,
+        content: [{ type: 'text' as const, text: JSON.stringify(response) }],
+        warnings: [],
+      };
+    },
+  });
+  return model;
 }
 
 describe('toSql', () => {
@@ -106,7 +103,7 @@ describe('toSql', () => {
     const { adapter } = await init_db('', {
       validate: () => validateResponses.shift(),
     });
-    const { model, calls } = createCapturingModel([
+    const model = createCapturingModel([
       { result: { sql: 'SELECT 1', reasoning: 'test' } },
       { result: { sql: 'SELECT 1', reasoning: 'test' } },
     ]);
@@ -126,8 +123,8 @@ describe('toSql', () => {
       'SQL Validation Error: syntax error',
     ]);
 
-    assert.strictEqual(calls.length, 2);
-    const secondCallMessages = JSON.stringify(calls[1].messages);
+    assert.strictEqual(model.doGenerateCalls.length, 2);
+    const secondCallMessages = JSON.stringify(model.doGenerateCalls[1].prompt);
     assert.ok(
       secondCallMessages.includes('syntax error'),
       'Second call should include previous error in prompt',
@@ -145,7 +142,7 @@ describe('toSql', () => {
         validate: () => undefined,
       },
     );
-    const { model, calls } = createCapturingModel([
+    const model = createCapturingModel([
       { result: { sql: 'SELECT * FROM secrets', reasoning: 'test' } },
       { result: { sql: 'SELECT * FROM users', reasoning: 'test' } },
     ]);
@@ -164,8 +161,8 @@ describe('toSql', () => {
       'scope violations should surface as validation errors',
     );
 
-    assert.strictEqual(calls.length, 2);
-    const secondCallMessages = JSON.stringify(calls[1].messages);
+    assert.strictEqual(model.doGenerateCalls.length, 2);
+    const secondCallMessages = JSON.stringify(model.doGenerateCalls[1].prompt);
     assert.ok(
       secondCallMessages.includes('OUT_OF_SCOPE'),
       'retry prompt should include the scope violation payload',
@@ -175,11 +172,9 @@ describe('toSql', () => {
   it('retries on JSON validation error', async () => {
     // Arrange
     const { adapter } = await init_db('', { validate: () => undefined });
-    let callCount = 0;
     const model = new MockLanguageModelV4({
       doGenerate: async () => {
-        callCount++;
-        if (callCount === 1) {
+        if (model.doGenerateCalls.length === 1) {
           throw new APICallError({
             message: 'Failed to validate JSON',
             url: 'https://api.test.com',
@@ -219,10 +214,8 @@ describe('toSql', () => {
 
   it('does not retry when model is not found', async () => {
     const { adapter } = await init_db('', { validate: () => undefined });
-    let attempts = 0;
     const model = new MockLanguageModelV4({
       doGenerate: async () => {
-        attempts += 1;
         throw new APICallError({
           message:
             'The model `gpt-oss-20b` does not exist or you do not have access to it.',
@@ -254,7 +247,7 @@ describe('toSql', () => {
       },
     );
 
-    assert.strictEqual(attempts, 1);
+    assert.strictEqual(model.doGenerateCalls.length, 1);
   });
 
   it('throws SQLValidationError when retries exhausted', async () => {
@@ -361,7 +354,7 @@ describe('toSql', () => {
       validate: () => validateResponses.shift(),
     });
 
-    const { model, calls } = createCapturingModel([
+    const model = createCapturingModel([
       { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 1
       { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 2
       { result: { sql: 'SELECT 1', reasoning: 'test' } }, // attempt 3
@@ -381,11 +374,11 @@ describe('toSql', () => {
     assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 6);
     assert.strictEqual(result.errors?.length, 5);
-    assert.strictEqual(calls.length, 6);
+    assert.strictEqual(model.doGenerateCalls.length, 6);
     const expectedTemperatures = [0, 0.2, 0.3, 0.3, 0.3, 0.3];
 
-    for (let i = 0; i < calls.length; i++) {
-      const settings = calls[i].settings as { temperature?: number };
+    for (let i = 0; i < model.doGenerateCalls.length; i++) {
+      const settings = model.doGenerateCalls[i];
       assert.strictEqual(
         settings.temperature,
         expectedTemperatures[i],
@@ -400,11 +393,9 @@ describe('toSql', () => {
     const { adapter } = await init_db('', {
       validate: () => validateResponses.shift(),
     });
-    let callCount = 0;
     const model = new MockLanguageModelV4({
       doGenerate: async () => {
-        callCount++;
-        if (callCount === 1) {
+        if (model.doGenerateCalls.length === 1) {
           throw new APICallError({
             message: 'Failed to validate JSON',
             url: 'https://api.test.com',
@@ -444,7 +435,7 @@ describe('toSql', () => {
   it('uses best-effort fallback when first response is unanswerable', async () => {
     // Arrange
     const { adapter } = await init_db('', { validate: () => undefined });
-    const { model, calls } = createCapturingModel([
+    const model = createCapturingModel([
       { result: { error: 'No matching table' } },
       { sql: 'SELECT 1', reasoning: 'best effort fallback' },
     ]);
@@ -461,10 +452,10 @@ describe('toSql', () => {
     // Assert
     assert.strictEqual(result.sql, adapter.format('SELECT 1'));
     assert.strictEqual(result.attempts, 1);
-    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(model.doGenerateCalls.length, 2);
     assert.strictEqual(
-      calls.some((c) =>
-        JSON.stringify(c.messages).includes('best_effort_fallback'),
+      model.doGenerateCalls.some((call) =>
+        JSON.stringify(call.prompt).includes('best_effort_fallback'),
       ),
       true,
     );
@@ -656,7 +647,7 @@ describe('toSql', () => {
   describe('previous error injection', () => {
     it('does not include validation_error on first attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
@@ -668,8 +659,8 @@ describe('toSql', () => {
         maxRetries: 1,
       });
 
-      assert.strictEqual(calls.length, 1);
-      const firstCallMessages = JSON.stringify(calls[0].messages);
+      assert.strictEqual(model.doGenerateCalls.length, 1);
+      const firstCallMessages = JSON.stringify(model.doGenerateCalls[0].prompt);
       assert.ok(
         !firstCallMessages.includes('validation_error'),
         'First call should not include validation_error block',
@@ -802,7 +793,7 @@ describe('toSql', () => {
           validate: () => undefined,
         },
       );
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         { result: { sql: 'SELECT email FROM users', reasoning: 'test' } },
       ]);
       const inputWithSpecialChars =
@@ -817,7 +808,7 @@ describe('toSql', () => {
       });
 
       assert.strictEqual(result.sql, adapter.format('SELECT email FROM users'));
-      const promptContent = JSON.stringify(calls[0].messages);
+      const promptContent = JSON.stringify(model.doGenerateCalls[0].prompt);
       assert.ok(promptContent.includes("What's the user's email?"));
     });
 
@@ -888,7 +879,7 @@ describe('toSql', () => {
   describe('retryable AI SDK errors', () => {
     it('retries on JSONParseError and succeeds on next attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         new JSONParseError({
           text: '{ bad json',
           cause: new SyntaxError('Unexpected token'),
@@ -906,12 +897,12 @@ describe('toSql', () => {
       assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 2);
       assert.strictEqual(result.errors?.length, 1);
-      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(model.doGenerateCalls.length, 2);
     });
 
     it('retries on TypeValidationError and succeeds on next attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         new TypeValidationError({
           value: { invalid: true },
           cause: new Error('Expected string, got number'),
@@ -929,12 +920,12 @@ describe('toSql', () => {
       assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 2);
       assert.strictEqual(result.errors?.length, 1);
-      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(model.doGenerateCalls.length, 2);
     });
 
     it('retries on NoObjectGeneratedError and succeeds on next attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         new NoObjectGeneratedError({
           response: { id: 'r1', timestamp: new Date(), modelId: 'test' },
           usage: {
@@ -966,12 +957,12 @@ describe('toSql', () => {
       assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 2);
       assert.strictEqual(result.errors?.length, 1);
-      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(model.doGenerateCalls.length, 2);
     });
 
     it('retries on NoOutputGeneratedError and succeeds on next attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         new NoOutputGeneratedError(),
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
@@ -986,12 +977,12 @@ describe('toSql', () => {
       assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 2);
       assert.strictEqual(result.errors?.length, 1);
-      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(model.doGenerateCalls.length, 2);
     });
 
     it('retries on NoContentGeneratedError and succeeds on next attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         new NoContentGeneratedError(),
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
@@ -1006,14 +997,14 @@ describe('toSql', () => {
       assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 2);
       assert.strictEqual(result.errors?.length, 1);
-      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(model.doGenerateCalls.length, 2);
     });
   });
 
   describe('non-retryable errors', () => {
     it('does not retry on unknown error types and makes only one attempt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         new Error('Unknown internal failure'),
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
@@ -1034,12 +1025,12 @@ describe('toSql', () => {
         },
       );
 
-      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(model.doGenerateCalls.length, 1);
     });
 
     it('uses fallback prompt after unanswerable and succeeds without pRetry rerun', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         { result: { error: 'No table matches this question' } },
         { sql: 'SELECT 1', reasoning: 'best effort fallback' },
       ]);
@@ -1054,14 +1045,14 @@ describe('toSql', () => {
 
       assert.strictEqual(result.sql, adapter.format('SELECT 1'));
       assert.strictEqual(result.attempts, 1);
-      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(model.doGenerateCalls.length, 2);
     });
   });
 
   describe('prompt assembly', () => {
     it('includes schema fragments in model prompt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
@@ -1074,7 +1065,7 @@ describe('toSql', () => {
         model,
       });
 
-      const promptContent = JSON.stringify(calls[0].messages);
+      const promptContent = JSON.stringify(model.doGenerateCalls[0].prompt);
       assert.ok(
         promptContent.includes('CREATE TABLE orders'),
         'Prompt should contain schema fragment content',
@@ -1083,7 +1074,7 @@ describe('toSql', () => {
 
     it('includes instruction fragments in model prompt', async () => {
       const { adapter } = await init_db('', { validate: () => undefined });
-      const { model, calls } = createCapturingModel([
+      const model = createCapturingModel([
         { result: { sql: 'SELECT 1', reasoning: 'test' } },
       ]);
 
@@ -1094,7 +1085,7 @@ describe('toSql', () => {
         model,
       });
 
-      const promptContent = JSON.stringify(calls[0].messages);
+      const promptContent = JSON.stringify(model.doGenerateCalls[0].prompt);
       assert.ok(
         promptContent.includes('Always use LIMIT 10'),
         'Prompt should contain instruction fragment content',

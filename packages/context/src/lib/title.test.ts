@@ -20,12 +20,12 @@ const testUsage = {
 
 function modelReturningTitle(title: string) {
   return new MockLanguageModelV4({
-    doGenerate: async () => ({
+    doGenerate: {
       content: [{ type: 'text' as const, text: JSON.stringify({ title }) }],
       finishReason: { unified: 'stop' as const, raw: '' },
       usage: testUsage,
       warnings: [],
-    }),
+    },
   });
 }
 
@@ -63,16 +63,12 @@ describe('TitleGenerator.ensure()', () => {
     await context.save();
     await context.updateChat({ title: EXISTING_TITLE });
 
-    let modelInvoked = false;
     const model = new MockLanguageModelV4({
-      doGenerate: async () => {
-        modelInvoked = true;
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ title: 'Wrong' }) }],
-          finishReason: { unified: 'stop' as const, raw: '' },
-          usage: testUsage,
-          warnings: [],
-        };
+      doGenerate: {
+        content: [{ type: 'text', text: JSON.stringify({ title: 'Wrong' }) }],
+        finishReason: { unified: 'stop' as const, raw: '' },
+        usage: testUsage,
+        warnings: [],
       },
     });
 
@@ -80,7 +76,7 @@ describe('TitleGenerator.ensure()', () => {
     const result = await titler.ensure({ model });
 
     assert.strictEqual(result, null);
-    assert.strictEqual(modelInvoked, false);
+    assert.strictEqual(model.doGenerateCalls.length, 0);
     assert.strictEqual(
       (await store.getChat('ensure-titled'))?.title,
       EXISTING_TITLE,
@@ -131,10 +127,8 @@ describe('TitleGenerator.ensure()', () => {
     const controller = new AbortController();
     controller.abort();
 
-    let signalSeen: AbortSignal | undefined;
     const model = new MockLanguageModelV4({
       doGenerate: async (options) => {
-        signalSeen = options.abortSignal;
         if (options.abortSignal?.aborted) {
           throw new DOMException('Aborted', 'AbortError');
         }
@@ -153,7 +147,7 @@ describe('TitleGenerator.ensure()', () => {
       abortSignal: controller.signal,
     });
 
-    assert.strictEqual(signalSeen, controller.signal);
+    assert.strictEqual(model.doGenerateCalls[0].abortSignal, controller.signal);
     assert.deepStrictEqual(result, { title: 'do work', source: 'static' });
   });
 });

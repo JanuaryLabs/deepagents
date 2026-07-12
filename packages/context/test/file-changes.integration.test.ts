@@ -373,13 +373,9 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
 
   it('exposes each tool call’s changes on its tool result (per-message aggregation via meta, hidden from the model)', async () => {
     await withSandbox(async (s) => {
-      const prompts: LanguageModelV4Prompt[] = [];
-      let call = 0;
-      const model = new MockLanguageModelV4({
-        doGenerate: async (options) => {
-          prompts.push(options.prompt);
-          call++;
-          return call === 1
+      const model: MockLanguageModelV4 = new MockLanguageModelV4({
+        doGenerate: async () => {
+          return model.doGenerateCalls.length === 1
             ? toolCallsResponse([
                 bashToolCall('c1', `echo one > ${ROOT}/agg1.txt`),
                 bashToolCall('c2', `echo two > ${ROOT}/agg2.txt`),
@@ -404,16 +400,19 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
         `${ROOT}/agg1.txt`,
         `${ROOT}/agg2.txt`,
       ]);
-      assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
-        {
-          type: 'json',
-          value: { stdout: '', stderr: '', exitCode: 0 },
-        },
-        {
-          type: 'json',
-          value: { stdout: '', stderr: '', exitCode: 0 },
-        },
-      ]);
+      assert.deepStrictEqual(
+        toolResultOutputs(model.doGenerateCalls[1].prompt),
+        [
+          {
+            type: 'json',
+            value: { stdout: '', stderr: '', exitCode: 0 },
+          },
+          {
+            type: 'json',
+            value: { stdout: '', stderr: '', exitCode: 0 },
+          },
+        ],
+      );
     });
   });
 
@@ -582,11 +581,10 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
     const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
-      const model = new MockLanguageModelV4({
-        doGenerate: async () =>
-          toolCallsResponse([
-            writeFileToolCall('w1', `${ROOT}/blocked.json`, 'x'),
-          ]),
+      const model: MockLanguageModelV4 = new MockLanguageModelV4({
+        doGenerate: toolCallsResponse([
+          writeFileToolCall('w1', `${ROOT}/blocked.json`, 'x'),
+        ]),
       });
 
       const res = await generateText({
@@ -620,13 +618,9 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
     const s = await createBashTool({ sandbox: tracked, destination: ROOT });
     try {
       await s.sandbox.executeCommand(`mkdir -p ${ROOT}`).catch(() => {});
-      const prompts: LanguageModelV4Prompt[] = [];
-      let call = 0;
-      const model = new MockLanguageModelV4({
-        doGenerate: async (options) => {
-          prompts.push(options.prompt);
-          call++;
-          return call === 1
+      const model: MockLanguageModelV4 = new MockLanguageModelV4({
+        doGenerate: async () => {
+          return model.doGenerateCalls.length === 1
             ? toolCallsResponse([bashToolCall('c1', `echo hi > ${ROOT}/r.txt`)])
             : stopResponse;
         },
@@ -650,16 +644,19 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
         (output.meta?.fileChanges ?? []).map(({ op, path }) => ({ op, path })),
         [{ op: 'write', path: `${ROOT}/r.txt` }],
       );
-      assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
-        {
-          type: 'json',
-          value: {
-            stdout: '',
-            stderr: 'rejected: no writes allowed\n',
-            exitCode: 42,
+      assert.deepStrictEqual(
+        toolResultOutputs(model.doGenerateCalls[1].prompt),
+        [
+          {
+            type: 'json',
+            value: {
+              stdout: '',
+              stderr: 'rejected: no writes allowed\n',
+              exitCode: 42,
+            },
           },
-        },
-      ]);
+        ],
+      );
     } finally {
       await s.sandbox.dispose();
     }

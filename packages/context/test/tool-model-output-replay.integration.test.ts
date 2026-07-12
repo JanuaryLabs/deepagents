@@ -1,6 +1,12 @@
-import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
+import type {
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+} from '@ai-sdk/provider';
 import { type UIMessage, isToolUIPart, simulateReadableStream, tool } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  MockLanguageModelV4,
+  convertReadableStreamToArray as drain,
+} from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -89,11 +95,6 @@ function toolResultOutputs(prompt: LanguageModelV4Prompt) {
   return outputs;
 }
 
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (!(await reader.read()).done) {}
-}
-
 describe('replaying history with a tool result carrying host-only meta', () => {
   it('automatically hides meta from the model during replay', async () => {
     const engine = new ContextEngine({
@@ -117,16 +118,12 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       }),
     );
 
-    let capturedPrompt: LanguageModelV4Prompt = [];
     const model = new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        capturedPrompt = options.prompt;
-        return {
-          finishReason: { unified: 'stop', raw: undefined },
-          usage: testUsage,
-          content: [{ type: 'text', text: 'There are no admins.' }],
-          warnings: [],
-        };
+      doGenerate: {
+        finishReason: { unified: 'stop', raw: undefined },
+        usage: testUsage,
+        content: [{ type: 'text', text: 'There are no admins.' }],
+        warnings: [],
       },
     });
 
@@ -140,7 +137,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     await sut.generate({});
 
-    const [output] = toolResultOutputs(capturedPrompt);
+    const [output] = toolResultOutputs(model.doGenerateCalls[0].prompt);
     assert.deepStrictEqual(output, {
       type: 'json',
       value: { rows: [{ id: 1 }] },
@@ -155,12 +152,9 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
     engine.set(user('how many users?'));
 
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        prompts.push(options.prompt);
-        call++;
+      doGenerate: async () => {
+        const call = model.doGenerateCalls.length;
         if (call === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: undefined },
@@ -194,7 +188,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       rows: [{ id: 1 }],
       meta: { formattedSql: 'SELECT id FROM users' },
     });
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doGenerateCalls[1].prompt), [
       {
         type: 'json',
         value: { rows: [{ id: 1 }] },
@@ -210,13 +204,10 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
     engine.set(user('how many users?'));
 
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doStream: async (options) => {
-        prompts.push(options.prompt);
-        call++;
-        const chunks: Record<string, unknown>[] =
+      doStream: async () => {
+        const call = model.doStreamCalls.length;
+        const chunks: LanguageModelV4StreamPart[] =
           call === 1
             ? [
                 {
@@ -242,8 +233,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 },
               ];
         return {
-          stream: simulateReadableStream({ chunks: chunks as never }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
+          stream: simulateReadableStream({ chunks }),
         };
       },
     });
@@ -268,7 +258,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
         meta: { formattedSql: 'SELECT id FROM users' },
       },
     ]);
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doStreamCalls[1].prompt), [
       {
         type: 'json',
         value: { rows: [{ id: 1 }] },
@@ -283,13 +273,10 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       chatId: 'tool-model-output-persisted',
       userId: 'test-user',
     });
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doStream: async (options) => {
-        prompts.push(options.prompt);
-        call++;
-        const chunks: Record<string, unknown>[] =
+      doStream: async () => {
+        const call = model.doStreamCalls.length;
+        const chunks: LanguageModelV4StreamPart[] =
           call === 1
             ? [
                 {
@@ -315,8 +302,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 },
               ];
         return {
-          stream: simulateReadableStream({ chunks: chunks as never }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
+          stream: simulateReadableStream({ chunks }),
         };
       },
     });
@@ -351,7 +337,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
         meta: { formattedSql: 'SELECT id FROM users' },
       },
     ]);
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doStreamCalls[1].prompt), [
       { type: 'json', value: { rows: [{ id: 1 }] } },
     ]);
   });
@@ -364,12 +350,9 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
     engine.set(user('inspect both resources'));
 
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        prompts.push(options.prompt);
-        call++;
+      doGenerate: async () => {
+        const call = model.doGenerateCalls.length;
         if (call === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: undefined },
@@ -409,7 +392,9 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       .sort((left, right) =>
         JSON.stringify(left).localeCompare(JSON.stringify(right)),
       );
-    const modelOutputs = toolResultOutputs(prompts[1]).sort((left, right) =>
+    const modelOutputs = toolResultOutputs(
+      model.doGenerateCalls[1].prompt,
+    ).sort((left, right) =>
       JSON.stringify(left).localeCompare(JSON.stringify(right)),
     );
 
@@ -431,12 +416,9 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
     context.set(user('count the users'));
 
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        prompts.push(options.prompt);
-        call++;
+      doGenerate: async () => {
+        const call = model.doGenerateCalls.length;
         if (call === 1) {
           return {
             finishReason: { unified: 'tool-calls' as const, raw: undefined },
@@ -468,7 +450,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
 
     assert.deepStrictEqual(await extract.generate({}), { count: 2 });
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doGenerateCalls[1].prompt), [
       { type: 'json', value: { rows: [{ id: 1 }] } },
     ]);
   });
@@ -481,13 +463,10 @@ describe('replaying history with a tool result carrying host-only meta', () => {
     });
     context.set(user('count the users'));
 
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doStream: async (options) => {
-        prompts.push(options.prompt);
-        call++;
-        const chunks: Record<string, unknown>[] =
+      doStream: async () => {
+        const call = model.doStreamCalls.length;
+        const chunks: LanguageModelV4StreamPart[] =
           call === 1
             ? [
                 {
@@ -517,8 +496,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
                 },
               ];
         return {
-          stream: simulateReadableStream({ chunks: chunks as never }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
+          stream: simulateReadableStream({ chunks }),
         };
       },
     });
@@ -542,7 +520,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       },
     ]);
     assert.deepStrictEqual(await result.output, { count: 2 });
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doStreamCalls[1].prompt), [
       { type: 'json', value: { rows: [{ id: 1 }] } },
     ]);
   });

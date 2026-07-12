@@ -8,7 +8,7 @@
     "should_trigger": true
   },
   {
-    "query": "write a vitest test where my agent calls generateObject and i want to assert the parsed zod object matches {name:'Ada', age:36}",
+    "query": "write a vitest test where my AI SDK v7 agent uses generateText with Output.object and i want to assert the parsed zod object matches {name:'Ada', age:36}",
     "should_trigger": true
   },
   {

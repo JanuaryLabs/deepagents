@@ -1,10 +1,17 @@
+import type {
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+} from '@ai-sdk/provider';
 import {
   type UIMessage,
   generateId,
   isToolUIPart,
   simulateReadableStream,
 } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import {
+  MockLanguageModelV4,
+  convertReadableStreamToArray as drain,
+} from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -48,13 +55,12 @@ function sqlCommand() {
 
 // One `bash` tool call per command, in order, then a text step that stops.
 function scriptedBash(commands: string[]) {
-  let call = 0;
-  return new MockLanguageModelV4({
+  const model = new MockLanguageModelV4({
     doStream: async () => {
-      const idx = call;
-      call++;
+      const call = model.doStreamCalls.length;
+      const idx = call - 1;
       const id = `s${call}`;
-      const chunks: Record<string, unknown>[] =
+      const chunks: LanguageModelV4StreamPart[] =
         idx < commands.length
           ? [
               {
@@ -83,27 +89,16 @@ function scriptedBash(commands: string[]) {
               },
             ];
       return {
-        stream: simulateReadableStream({ chunks: chunks as never }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
+        stream: simulateReadableStream({ chunks }),
       };
     },
   });
-}
-
-async function drain(stream: ReadableStream) {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
+  return model;
 }
 
 // Drive a real agent loop over `commands` with the sql-validate reminder
 // registered, and return the stored tool outputs in call order.
-async function runToolOutputs(
-  chatId: string,
-  commands: string[],
-): Promise<Record<string, unknown>[]> {
+async function runToolOutputs(chatId: string, commands: string[]) {
   const backend = await createVirtualSandbox({
     fs: new InMemoryFs(),
     customCommands: [sqlCommand()],
@@ -115,11 +110,12 @@ async function runToolOutputs(
   const context = new ContextEngine({ store, chatId, userId: 'u1' });
   context.set(sqlValidateReminder());
 
+  const model = scriptedBash(commands);
   const chatAgent = agent({
     sandbox,
     name: chatId,
     context,
-    model: scriptedBash(commands),
+    model,
   });
 
   await context.continue({
@@ -134,10 +130,22 @@ async function runToolOutputs(
   const chain = await store.getMessageChain(branch.headMessageId);
   const assistant = chain.findLast((e) => e.name === 'assistant');
   assert.ok(assistant, 'expected a stored assistant message');
-  return (assistant.data as UIMessage).parts
+  const outputs = (assistant.data as UIMessage).parts
     .filter(isToolUIPart)
     .filter((p) => p.state === 'output-available')
     .map((p) => p.output as Record<string, unknown>);
+  return { model, outputs };
+}
+
+function reminderTextsIn(prompt: LanguageModelV4Prompt): string[] {
+  return prompt.flatMap((message) => {
+    if (message.role !== 'user' || !Array.isArray(message.content)) return [];
+    return message.content.flatMap((part) =>
+      part.type === 'text' && part.text.startsWith('<system-reminder>')
+        ? [part.text]
+        : [],
+    );
+  });
 }
 
 const QUERY = 'sql run mem "SELECT id, name FROM users"';
@@ -145,17 +153,20 @@ const VALIDATE = 'sql validate mem "SELECT id, name FROM users"';
 
 describe('sqlValidateReminder over a real agent loop', () => {
   it('nudges on a `sql run` that was not preceded by a validate', async () => {
-    const [runOutput] = await runToolOutputs('unvalidated', [QUERY]);
-    assert.ok('systemReminder' in runOutput, 'run result should be wrapped');
-    assert.match(String(runOutput.systemReminder), /<system-reminder>/);
-    assert.match(String(runOutput.systemReminder), /sql validate/);
+    const { model, outputs } = await runToolOutputs('unvalidated', [QUERY]);
+    const [runOutput] = outputs;
+    assert.ok('exitCode' in runOutput, 'stored output stays raw');
+    const reminders = reminderTextsIn(model.doStreamCalls.at(-1)!.prompt);
+    assert.strictEqual(reminders.length, 1);
+    assert.match(reminders[0], /sql validate/);
   });
 
   it('suppresses the nudge when the same query was already validated', async () => {
-    const [validateOutput, runOutput] = await runToolOutputs('validated', [
+    const { model, outputs } = await runToolOutputs('validated', [
       VALIDATE,
       QUERY,
     ]);
+    const [validateOutput, runOutput] = outputs;
     assert.ok(
       !('systemReminder' in validateOutput),
       'validate result is never nudged',
@@ -163,6 +174,10 @@ describe('sqlValidateReminder over a real agent loop', () => {
     assert.ok(
       !('systemReminder' in runOutput),
       'run after a matching validate must not be nudged',
+    );
+    assert.deepStrictEqual(
+      reminderTextsIn(model.doStreamCalls.at(-1)!.prompt),
+      [],
     );
   });
 });

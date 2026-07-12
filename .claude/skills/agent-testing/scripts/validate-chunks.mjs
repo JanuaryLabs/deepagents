@@ -1,13 +1,8 @@
 #!/usr/bin/env node
-// Validates an array of LanguageModelV3 stream chunks against the V3 protocol rules.
-// Usage:
-//   node validate-chunks.mjs chunks.json
-//   echo '[{"type":"text-delta","id":"t1","delta":"hi"}]' | node validate-chunks.mjs -
-//
-// Catches the bugs the skill's "Gotchas" list warns about, before the SDK silently
-// swallows them. Exits 0 if valid, 1 with a message per problem if not.
+// Validate JSON fixtures against AI SDK v7's LanguageModelV4 stream lifecycle.
+// The SDK exports stream builders and collectors, but no public semantic validator.
 import { readFileSync } from 'node:fs';
-import { argv, exit, stdin } from 'node:process';
+import { argv, exit } from 'node:process';
 
 const VALID_UNIFIED = new Set([
   'stop',
@@ -18,7 +13,7 @@ const VALID_UNIFIED = new Set([
   'other',
 ]);
 
-const STREAM_PART_SHAPES = {
+const REQUIRED_FIELDS = {
   'stream-start': ['warnings'],
   'response-metadata': [],
   'text-start': ['id'],
@@ -30,150 +25,119 @@ const STREAM_PART_SHAPES = {
   'tool-input-start': ['id', 'toolName'],
   'tool-input-delta': ['id', 'delta'],
   'tool-input-end': ['id'],
+  'tool-approval-request': ['approvalId', 'toolCallId'],
   'tool-call': ['toolCallId', 'toolName', 'input'],
   'tool-result': ['toolCallId', 'toolName', 'result'],
+  custom: ['kind'],
   source: ['sourceType', 'id'],
   file: ['mediaType', 'data'],
+  'reasoning-file': ['mediaType', 'data'],
   finish: ['usage', 'finishReason'],
   error: ['error'],
   raw: ['rawValue'],
-  'tool-approval-request': ['approvalId', 'toolCallId'],
 };
-
-function readInput() {
-  if (argv[2] === '-' || argv.length < 3) {
-    return readFileSync(0, 'utf8');
-  }
-  return readFileSync(argv[2], 'utf8');
-}
 
 function validate(chunks) {
   const problems = [];
-  if (!Array.isArray(chunks)) {
-    problems.push('top-level: expected an array of chunks');
-    return problems;
-  }
+  if (!Array.isArray(chunks)) return ['top-level: expected an array of chunks'];
 
-  const openIds = {
+  const open = {
     text: new Set(),
     reasoning: new Set(),
     'tool-input': new Set(),
   };
   let seenFinish = false;
 
-  chunks.forEach((chunk, i) => {
-    const at = `chunks[${i}]`;
-    if (!chunk || typeof chunk !== 'object') {
-      problems.push(`${at}: not an object`);
-      return;
+  for (const [index, chunk] of chunks.entries()) {
+    const at = `chunks[${index}]`;
+    if (!chunk || typeof chunk !== 'object' || Array.isArray(chunk)) {
+      problems.push(`${at}: expected an object`);
+      continue;
     }
-    if (seenFinish) {
-      problems.push(`${at}: chunks after 'finish' are never emitted`);
-    }
-    const { type } = chunk;
-    if (!type) {
-      problems.push(`${at}: missing 'type' field`);
-      return;
-    }
-
-    // V2 holdover
+    if (seenFinish) problems.push(`${at}: appears after terminal finish`);
     if ('textDelta' in chunk) {
-      problems.push(
-        `${at}: field 'textDelta' is V2; V3 uses 'delta'. The SDK will silently drop this text.`,
-      );
+      problems.push(`${at}: textDelta is not a V4 field; use delta`);
     }
 
-    const shape = STREAM_PART_SHAPES[type];
-    if (!shape) {
-      problems.push(`${at}: unknown chunk type '${type}'`);
-      return;
+    const required = REQUIRED_FIELDS[chunk.type];
+    if (!required) {
+      problems.push(`${at}: unknown V4 chunk type '${chunk.type}'`);
+      continue;
     }
-    for (const required of shape) {
-      if (!(required in chunk)) {
-        problems.push(`${at} (${type}): missing required field '${required}'`);
-      }
+    for (const field of required) {
+      if (!(field in chunk)) problems.push(`${at}: missing '${field}'`);
     }
 
-    // Content stream lifecycle
-    if (type === 'text-start') openIds.text.add(chunk.id);
-    if (type === 'text-delta' && !openIds.text.has(chunk.id)) {
-      problems.push(
-        `${at}: text-delta with id '${chunk.id}' has no preceding text-start`,
-      );
-    }
-    if (type === 'text-end') {
-      if (!openIds.text.has(chunk.id)) {
+    const match = /^(text|reasoning|tool-input)-(start|delta|end)$/.exec(
+      chunk.type,
+    );
+    if (match) {
+      const [, kind, phase] = match;
+      if (phase === 'start') {
+        if (open[kind].has(chunk.id)) {
+          problems.push(`${at}: duplicate ${kind}-start for '${chunk.id}'`);
+        }
+        open[kind].add(chunk.id);
+      } else if (!open[kind].has(chunk.id)) {
         problems.push(
-          `${at}: text-end with id '${chunk.id}' has no matching text-start`,
+          `${at}: ${kind}-${phase} has no open start for '${chunk.id}'`,
         );
+      } else if (phase === 'end') {
+        open[kind].delete(chunk.id);
       }
-      openIds.text.delete(chunk.id);
     }
 
-    if (type === 'reasoning-start') openIds.reasoning.add(chunk.id);
-    if (type === 'reasoning-delta' && !openIds.reasoning.has(chunk.id)) {
-      problems.push(
-        `${at}: reasoning-delta id '${chunk.id}' has no preceding reasoning-start`,
-      );
+    if (chunk.type === 'tool-call' && typeof chunk.input !== 'string') {
+      problems.push(`${at}: tool-call input must be stringified JSON`);
     }
-    if (type === 'reasoning-end') openIds.reasoning.delete(chunk.id);
-
-    if (type === 'tool-input-start') openIds['tool-input'].add(chunk.id);
-    if (type === 'tool-input-delta' && !openIds['tool-input'].has(chunk.id)) {
-      problems.push(
-        `${at}: tool-input-delta id '${chunk.id}' has no preceding tool-input-start`,
-      );
+    if (chunk.type === 'custom' && !String(chunk.kind).includes('.')) {
+      problems.push(`${at}: custom kind must use the provider.kind format`);
     }
-    if (type === 'tool-input-end') openIds['tool-input'].delete(chunk.id);
-
-    if (type === 'tool-call' && typeof chunk.input !== 'string') {
-      problems.push(
-        `${at}: tool-call 'input' must be a stringified JSON, got ${typeof chunk.input}`,
-      );
-    }
-
-    if (type === 'finish') {
+    if (chunk.type === 'finish') {
       seenFinish = true;
-      const fr = chunk.finishReason;
-      if (!fr || typeof fr !== 'object') {
+      const reason = chunk.finishReason;
+      if (!reason || typeof reason !== 'object') {
+        problems.push(`${at}: finishReason must be { unified, raw }`);
+      } else {
+        if (!VALID_UNIFIED.has(reason.unified)) {
+          problems.push(
+            `${at}: invalid unified finish reason '${reason.unified}'`,
+          );
+        }
+        if (!('raw' in reason))
+          problems.push(`${at}: finishReason is missing 'raw'`);
+      }
+      const usage = chunk.usage;
+      if (!usage?.inputTokens || !usage?.outputTokens) {
         problems.push(
-          `${at}: finishReason must be an object { unified, raw }, not a bare value`,
-        );
-      } else if (!VALID_UNIFIED.has(fr.unified)) {
-        problems.push(
-          `${at}: finishReason.unified '${fr.unified}' is not one of ${[...VALID_UNIFIED].join(', ')}`,
+          `${at}: usage must use nested V4 inputTokens/outputTokens`,
         );
       }
     }
-  });
-
-  if (!seenFinish) {
-    problems.push("stream: missing terminal 'finish' chunk");
-  }
-  for (const kind of ['text', 'reasoning', 'tool-input']) {
-    for (const id of openIds[kind]) {
-      problems.push(
-        `stream: ${kind} id '${id}' was never closed with ${kind}-end`,
-      );
-    }
   }
 
+  if (!seenFinish) problems.push("stream: missing terminal 'finish' chunk");
+  for (const [kind, ids] of Object.entries(open)) {
+    for (const id of ids)
+      problems.push(`stream: ${kind} '${id}' was never closed`);
+  }
   return problems;
 }
 
-const raw = await Promise.resolve(readInput());
 let chunks;
 try {
-  chunks = JSON.parse(raw);
-} catch (e) {
-  console.error('JSON parse error:', e.message);
+  chunks = JSON.parse(
+    readFileSync(argv[2] === '-' || !argv[2] ? 0 : argv[2], 'utf8'),
+  );
+} catch (error) {
+  console.error(`JSON parse error: ${error.message}`);
   exit(1);
 }
 
 const problems = validate(chunks);
 if (problems.length === 0) {
-  console.log('OK — stream chunks conform to the V3 protocol.');
+  console.log('OK — chunks conform to the AI SDK v7 V4 stream lifecycle.');
   exit(0);
 }
-for (const p of problems) console.error('✗', p);
+for (const problem of problems) console.error(`✗ ${problem}`);
 exit(1);

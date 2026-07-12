@@ -21,67 +21,25 @@ const testUsage = {
 } as const;
 
 function createRepairSequenceModel() {
-  const calls: Array<{ abortSignal: AbortSignal | undefined }> = [];
-  let callIndex = 0;
-
-  return {
-    calls,
-    model: new MockLanguageModelV4({
-      doGenerate: async ({ abortSignal }) => {
-        calls.push({ abortSignal });
-
-        if (callIndex++ === 0) {
-          return {
-            finishReason: { unified: 'tool-calls', raw: undefined },
-            usage: testUsage,
-            warnings: [],
-            content: [
-              {
-                type: 'tool-call' as const,
-                toolCallType: 'function' as const,
-                toolCallId: 'call-1',
-                toolName: 'lookup_order',
-                input: '{"orderId":42}',
-              },
-            ],
-          };
-        }
-
-        if (callIndex === 2) {
-          return {
-            finishReason: { unified: 'stop', raw: '' },
-            usage: testUsage,
-            warnings: [],
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({ orderId: '42' }),
-              },
-            ],
-          };
-        }
-
+  const model = new MockLanguageModelV4({
+    doGenerate: async () => {
+      if (model.doGenerateCalls.length === 1) {
         return {
-          finishReason: { unified: 'stop', raw: '' },
+          finishReason: { unified: 'tool-calls', raw: undefined },
           usage: testUsage,
           warnings: [],
-          content: [{ type: 'text' as const, text: 'done' }],
+          content: [
+            {
+              type: 'tool-call' as const,
+              toolCallId: 'call-1',
+              toolName: 'lookup_order',
+              input: '{"orderId":42}',
+            },
+          ],
         };
-      },
-    }),
-  };
-}
+      }
 
-function createRepairStreamingModel() {
-  const repairCalls: Array<{ abortSignal: AbortSignal | undefined }> = [];
-  let streamCallIndex = 0;
-
-  return {
-    repairCalls,
-    model: new MockLanguageModelV4({
-      doGenerate: async ({ abortSignal }) => {
-        repairCalls.push({ abortSignal });
-
+      if (model.doGenerateCalls.length === 2) {
         return {
           finishReason: { unified: 'stop', raw: '' },
           usage: testUsage,
@@ -93,53 +51,75 @@ function createRepairStreamingModel() {
             },
           ],
         };
-      },
-      doStream: async () => {
-        if (streamCallIndex++ === 0) {
-          return {
-            stream: simulateReadableStream({
-              chunks: [
-                {
-                  type: 'tool-call' as const,
-                  id: 'tc-1',
-                  toolCallId: 'call_1',
-                  toolName: 'lookup_order',
-                  input: '{"orderId":42}',
-                },
-                {
-                  type: 'finish' as const,
-                  finishReason: { unified: 'tool-calls', raw: '' },
-                  usage: testUsage,
-                },
-              ],
-            }),
-            rawCall: { rawPrompt: undefined, rawSettings: {} },
-          };
-        }
+      }
 
+      return {
+        finishReason: { unified: 'stop', raw: '' },
+        usage: testUsage,
+        warnings: [],
+        content: [{ type: 'text' as const, text: 'done' }],
+      };
+    },
+  });
+  return model;
+}
+
+function createRepairStreamingModel() {
+  const model = new MockLanguageModelV4({
+    doGenerate: {
+      finishReason: { unified: 'stop', raw: '' },
+      usage: testUsage,
+      warnings: [],
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({ orderId: '42' }),
+        },
+      ],
+    },
+    doStream: async () => {
+      if (model.doStreamCalls.length === 1) {
         return {
           stream: simulateReadableStream({
             chunks: [
-              { type: 'text-start' as const, id: 'text-2' },
-              { type: 'text-delta' as const, id: 'text-2', delta: 'done' },
-              { type: 'text-end' as const, id: 'text-2' },
+              {
+                type: 'tool-call' as const,
+                toolCallId: 'call_1',
+                toolName: 'lookup_order',
+                input: '{"orderId":42}',
+              },
               {
                 type: 'finish' as const,
-                finishReason: { unified: 'stop', raw: '' },
+                finishReason: { unified: 'tool-calls', raw: '' },
                 usage: testUsage,
               },
             ],
           }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
         };
-      },
-    }),
-  };
+      }
+
+      return {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'text-start' as const, id: 'text-2' },
+            { type: 'text-delta' as const, id: 'text-2', delta: 'done' },
+            { type: 'text-end' as const, id: 'text-2' },
+            {
+              type: 'finish' as const,
+              finishReason: { unified: 'stop', raw: '' },
+              usage: testUsage,
+            },
+          ],
+        }),
+      };
+    },
+  });
+  return model;
 }
 
 describe('repair tool calls', () => {
   it('passes the request abort signal to the repair call', async () => {
-    const { model, calls } = createRepairSequenceModel();
+    const model = createRepairSequenceModel();
     const abortController = new AbortController();
     const assistant = agent({
       name: 'assistant',
@@ -162,12 +142,15 @@ describe('repair tool calls', () => {
       },
     );
 
-    assert.ok(calls.length >= 2);
-    assert.strictEqual(calls[1]?.abortSignal, abortController.signal);
+    assert.ok(model.doGenerateCalls.length >= 2);
+    assert.strictEqual(
+      model.doGenerateCalls[1]?.abortSignal,
+      abortController.signal,
+    );
   });
 
   it('passes the request abort signal to the repair call during streaming', async () => {
-    const { model, repairCalls } = createRepairStreamingModel();
+    const model = createRepairStreamingModel();
     const abortController = new AbortController();
     const assistant = agent({
       name: 'assistant',
@@ -197,6 +180,9 @@ describe('repair tool calls', () => {
     }
 
     assert.strictEqual(text, 'done');
-    assert.strictEqual(repairCalls[0]?.abortSignal, abortController.signal);
+    assert.strictEqual(
+      model.doGenerateCalls[0]?.abortSignal,
+      abortController.signal,
+    );
   });
 });

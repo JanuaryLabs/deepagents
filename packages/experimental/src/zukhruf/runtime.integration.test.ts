@@ -91,7 +91,6 @@ function scriptedModel(
             },
           }),
         ),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
       };
     },
   });
@@ -151,7 +150,6 @@ function slowModel(track: ModelTrack) {
             },
           ],
         }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
       };
     },
   });
@@ -234,7 +232,6 @@ function approvalSetup() {
       }
       return {
         stream: simulateReadableStream({ chunks }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
       };
     },
   });

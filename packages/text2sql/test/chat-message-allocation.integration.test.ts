@@ -45,24 +45,28 @@ const sandbox = await createBashTool({
 
 function createMockModel(text = 'SELECT COUNT(*) FROM users') {
   return new MockLanguageModelV4({
-    doStream: async () =>
-      ({
-        stream: simulateReadableStream({
-          chunks: [
-            { type: 'text-start', id: 'text-1' },
-            { type: 'text-delta', id: 'text-1', delta: text },
-            { type: 'text-end', id: 'text-1' },
-            {
-              type: 'finish',
-              finishReason: { unified: 'stop', raw: '' },
-              usage: {
-                inputTokens: { total: 10 },
-                outputTokens: { total: 5 },
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks: [
+          { type: 'text-start', id: 'text-1' },
+          { type: 'text-delta', id: 'text-1', delta: text },
+          { type: 'text-end', id: 'text-1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: '' },
+            usage: {
+              inputTokens: {
+                total: 10,
+                noCache: 10,
+                cacheRead: 0,
+                cacheWrite: 0,
               },
+              outputTokens: { total: 5, text: 5, reasoning: 0 },
             },
-          ],
-        }),
-      }) as any,
+          },
+        ],
+      }),
+    }),
   });
 }
 

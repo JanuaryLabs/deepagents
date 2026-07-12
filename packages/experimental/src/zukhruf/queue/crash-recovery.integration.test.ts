@@ -64,7 +64,6 @@ function fastModel(calls: string[]) {
             },
           ],
         }),
-        rawCall: { rawPrompt: undefined, rawSettings: {} },
       };
     },
   });

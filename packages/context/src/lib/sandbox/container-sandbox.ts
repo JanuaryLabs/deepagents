@@ -142,16 +142,34 @@ export abstract class ContainerSandboxStrategy<
       // parsing as running), so we never attach to a broken one.
       if (this.engine.isNameConflict(this.engine.errorMessage(error))) {
         await this.cleanupCreatedVolumes();
-        const raced = await this.inspectContainer(containerId);
-        if (raced === 'running') {
-          return { containerId, attached: true };
-        }
-        if (raced === 'stopped') {
-          await this.startStoppedContainer(containerId, image);
-          return { containerId, attached: true };
+        const raced = await this.waitForRacedContainer(containerId, image);
+        if (raced) {
+          return raced;
         }
       }
       throw error;
+    }
+  }
+
+  private async waitForRacedContainer(
+    containerId: string,
+    image: string,
+  ): Promise<{ containerId: string; attached: true } | undefined> {
+    const timeoutAt = Date.now() + 1_000;
+
+    while (true) {
+      const state = await this.inspectContainer(containerId);
+      if (state === 'running') {
+        return { containerId, attached: true };
+      }
+      if (state === 'stopped') {
+        await this.startStoppedContainer(containerId, image);
+        return { containerId, attached: true };
+      }
+      if (Date.now() >= timeoutAt) {
+        return undefined;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
 

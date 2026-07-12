@@ -304,13 +304,9 @@ describe('bash toolkit', () => {
         };
       },
     });
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
-    const model = new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        prompts.push(options.prompt);
-        call++;
-        return call === 1
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doGenerate: async () => {
+        return model.doGenerateCalls.length === 1
           ? {
               finishReason: { unified: 'tool-calls' as const, raw: undefined },
               usage: testUsage,
@@ -355,7 +351,7 @@ describe('bash toolkit', () => {
         source: 'hook',
       },
     });
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doGenerateCalls[1].prompt), [
       {
         type: 'json',
         value: {

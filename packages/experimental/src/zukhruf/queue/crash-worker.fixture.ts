@@ -35,7 +35,7 @@ const usage = {
 } as const;
 
 const glacialModel = new MockLanguageModelV4({
-  doStream: async () => ({
+  doStream: {
     stream: simulateReadableStream({
       initialDelayInMs: 100,
       chunkDelayInMs: 500,
@@ -50,8 +50,7 @@ const glacialModel = new MockLanguageModelV4({
         { type: 'finish', finishReason: { unified: 'stop', raw: '' }, usage },
       ],
     }),
-    rawCall: { rawPrompt: undefined, rawSettings: {} },
-  }),
+  },
 });
 
 const declaration: AgentDeclaration = {

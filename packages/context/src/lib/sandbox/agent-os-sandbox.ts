@@ -14,6 +14,8 @@ const decoder = new TextDecoder();
 interface KernelExecOptions {
   env?: Record<string, string>;
   cwd?: string;
+  onStdout?: (data: Uint8Array) => void;
+  onStderr?: (data: Uint8Array) => void;
 }
 
 interface AgentOsInstance {
@@ -110,13 +112,19 @@ function startKernelProcess(
   command: string,
   options: KernelExecOptions,
 ): KernelProcess {
-  const { pid } = os.spawn('sh', ['-c', command], options);
-
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+  const onStdout = (chunk: Uint8Array) => stdout.write(chunk);
+  const onStderr = (chunk: Uint8Array) => stderr.write(chunk);
 
-  const unsubOut = os.onProcessStdout(pid, (chunk) => stdout.write(chunk));
-  const unsubErr = os.onProcessStderr(pid, (chunk) => stderr.write(chunk));
+  const { pid } = os.spawn('sh', ['-c', command], {
+    ...options,
+    onStdout,
+    onStderr,
+  });
+
+  const unsubOut = os.onProcessStdout(pid, onStdout);
+  const unsubErr = os.onProcessStderr(pid, onStderr);
 
   let killSignalled = false;
   const exit = os.waitProcess(pid).finally(() => {

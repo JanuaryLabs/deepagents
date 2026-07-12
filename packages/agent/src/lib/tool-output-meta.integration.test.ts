@@ -1,4 +1,7 @@
-import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
+import type {
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+} from '@ai-sdk/provider';
 import { type UIMessage, simulateReadableStream, tool } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
@@ -61,16 +64,12 @@ describe('host-only tool output metadata', () => {
       }),
     });
 
-    let capturedPrompt: LanguageModelV4Prompt = [];
     const model = new MockLanguageModelV4({
-      doGenerate: async (options) => {
-        capturedPrompt = options.prompt;
-        return {
-          finishReason: { unified: 'stop', raw: undefined },
-          usage: testUsage,
-          content: [{ type: 'text', text: 'The resource is ready.' }],
-          warnings: [],
-        };
+      doGenerate: {
+        finishReason: { unified: 'stop', raw: undefined },
+        usage: testUsage,
+        content: [{ type: 'text', text: 'The resource is ready.' }],
+        warnings: [],
       },
     });
 
@@ -135,7 +134,7 @@ describe('host-only tool output metadata', () => {
 
     await generate(assistant, messages, {});
 
-    assert.deepStrictEqual(toolResultOutputs(capturedPrompt), [
+    assert.deepStrictEqual(toolResultOutputs(model.doGenerateCalls[0].prompt), [
       { type: 'json', value: { status: 'ready' } },
       { type: 'text', value: 'plain text' },
       { type: 'json', value: ['first', 'second'] },
@@ -152,13 +151,10 @@ describe('host-only tool output metadata', () => {
         meta: { requestId: `request-${id}` },
       }),
     });
-    const prompts: LanguageModelV4Prompt[] = [];
-    let call = 0;
     const model = new MockLanguageModelV4({
-      doStream: async (options) => {
-        prompts.push(options.prompt);
-        call++;
-        const chunks: Record<string, unknown>[] =
+      doStream: async () => {
+        const call = model.doStreamCalls.length;
+        const chunks: LanguageModelV4StreamPart[] =
           call === 1
             ? [
                 {
@@ -184,8 +180,7 @@ describe('host-only tool output metadata', () => {
                 },
               ];
         return {
-          stream: simulateReadableStream({ chunks: chunks as never }),
-          rawCall: { rawPrompt: undefined, rawSettings: {} },
+          stream: simulateReadableStream({ chunks }),
         };
       },
     });
@@ -208,7 +203,7 @@ describe('host-only tool output metadata', () => {
         meta: { requestId: 'request-42' },
       },
     ]);
-    assert.deepStrictEqual(toolResultOutputs(prompts[1]), [
+    assert.deepStrictEqual(toolResultOutputs(model.doStreamCalls[1].prompt), [
       { type: 'json', value: { status: 'ready' } },
     ]);
   });
