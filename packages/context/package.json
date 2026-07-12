@@ -32,6 +32,16 @@
       "import": "./dist/lib/tracing/index.js",
       "default": "./dist/lib/tracing/index.js"
     },
+    "./telemetry": {
+      "types": "./dist/lib/telemetry/index.d.ts",
+      "import": "./dist/lib/telemetry/index.js",
+      "default": "./dist/lib/telemetry/index.js"
+    },
+    "./telemetry/file": {
+      "types": "./dist/lib/telemetry/file/index.d.ts",
+      "import": "./dist/lib/telemetry/file/index.js",
+      "default": "./dist/lib/telemetry/file/index.js"
+    },
     "./sandbox/strace": {
       "types": "./dist/lib/sandbox/strace/index.d.ts",
       "import": "./dist/lib/sandbox/strace/index.js",

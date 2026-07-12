@@ -1,0 +1,142 @@
+---
+title: Telemetry Logging
+description: Log every AI SDK lifecycle event to the console or a JSONL file
+---
+
+`@deepagents/context` provides two reusable AI SDK telemetry integrations:
+
+- `createConsoleTelemetry()` writes complete lifecycle events to a console-compatible logger.
+- `createFileTelemetry()` appends the same records to a JSONL file in Node.js.
+
+Both integrations cover operations, steps, model calls, tool executions,
+structured object steps, embeddings, reranking, aborts, and errors. They use
+the stable `onStepEnd` callback and intentionally omit deprecated
+`onStepFinish`, which would duplicate each step record.
+
+## Register globally
+
+Register integrations once at application startup. All AI SDK calls use the
+global integrations unless a call supplies its own `telemetry.integrations`.
+
+```typescript
+import { registerTelemetry } from 'ai';
+
+import { createConsoleTelemetry } from '@deepagents/context/telemetry';
+import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+import { createOpenAITracesIntegration } from '@deepagents/context/tracing';
+
+registerTelemetry(
+  createConsoleTelemetry(),
+  createFileTelemetry({ path: './logs/ai-telemetry.jsonl' }),
+  createOpenAITracesIntegration(),
+);
+```
+
+Per-call integrations take precedence over globally registered integrations.
+When overriding them, include every destination the call should receive:
+
+```typescript
+await generateText({
+  model,
+  prompt,
+  telemetry: {
+    functionId: 'support-agent',
+    integrations: [
+      createConsoleTelemetry(),
+      createFileTelemetry({ path: './logs/support.jsonl' }),
+    ],
+  },
+});
+```
+
+## Console telemetry
+
+```typescript
+import { createConsoleTelemetry } from '@deepagents/context/telemetry';
+
+const telemetry = createConsoleTelemetry({
+  pretty: true,
+  includeTimestamp: true,
+});
+```
+
+| Option             | Type                              | Default   | Description                                                     |
+| ------------------ | --------------------------------- | --------- | --------------------------------------------------------------- |
+| `pretty`           | `boolean`                         | `true`    | Indent records for interactive console use                      |
+| `includeTimestamp` | `boolean`                         | `true`    | Add an ISO timestamp to each record                             |
+| `logger`           | `Pick<Console, 'log' \| 'error'>` | `console` | Replace the output destination with a console-compatible logger |
+
+Normal lifecycle events use `logger.log`. The `onError` event uses
+`logger.error`. Logger failures are swallowed so observability cannot break
+the model operation being observed.
+
+## File telemetry
+
+The file integration is Node.js-only and has a separate subpath so importing
+browser-safe console telemetry never pulls in `node:fs`.
+
+```typescript
+import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+
+const telemetry = createFileTelemetry({
+  path: './logs/ai-telemetry.jsonl',
+  append: true,
+  includeTimestamp: true,
+  onWriteError(error) {
+    console.error('AI telemetry write failed', error);
+  },
+});
+```
+
+| Option             | Type                                            | Default  | Description                                                                               |
+| ------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `path`             | `string`                                        | required | Destination JSONL file                                                                    |
+| `append`           | `boolean`                                       | `true`   | Append to an existing file; set to `false` to truncate it when the integration is created |
+| `includeTimestamp` | `boolean`                                       | `true`   | Add an ISO timestamp to each record                                                       |
+| `onWriteError`     | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation                                   |
+
+Parent directories are created automatically. Writes from the same integration
+instance are serialized, so concurrent AI events cannot interleave and corrupt
+JSONL records.
+
+## Record format
+
+Both integrations emit the same record shape:
+
+```typescript
+interface TelemetryLogRecord {
+  timestamp?: string;
+  event: string;
+  data: unknown;
+}
+```
+
+The serializer preserves values that ordinary `JSON.stringify()` loses or
+rejects. It records `Error` details and causes, marks circular references, and
+represents `bigint`, `undefined`, functions, symbols, maps, sets, dates, URLs,
+regular expressions, array buffers, and typed arrays safely.
+
+## Sensitive data
+
+These integrations are designed to log complete event payloads. AI SDK
+telemetry includes prompts, model outputs, tool inputs, tool outputs, headers,
+and selected runtime or tool context. Treat console output and JSONL files as
+sensitive data, control access to them, and configure retention appropriately.
+
+Both integrations honor AI SDK's per-call recording controls. Sensitive input
+and output fields are replaced with `[Redacted]` while identifiers, timing,
+usage, and finish metadata remain available:
+
+```typescript
+await generateText({
+  model,
+  prompt,
+  telemetry: {
+    recordInputs: false,
+    recordOutputs: false,
+  },
+});
+```
+
+See [Tracing](/docs/context/tracing) to additionally export AI SDK operations
+to OpenAI's Traces API.

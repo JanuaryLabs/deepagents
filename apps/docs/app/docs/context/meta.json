@@ -49,6 +49,7 @@
     "subcommand",
     "architecture-sandbox",
     "---Observability---",
+    "telemetry",
     "tracing",
     "---Cost Estimation---",
     "cost-estimation",

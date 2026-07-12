@@ -12,6 +12,8 @@
         "additionalEntryPoints": [
           "packages/context/src/browser.ts",
           "packages/context/src/lib/tracing/index.ts",
+          "packages/context/src/lib/telemetry/index.ts",
+          "packages/context/src/lib/telemetry/file/index.ts",
           "packages/context/src/lib/sandbox/strace/index.ts"
         ],
         "assets": []
