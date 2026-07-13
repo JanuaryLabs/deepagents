@@ -184,15 +184,15 @@ engine.set(
 );
 ```
 
-Use `tool-output` when the reminder should follow a terminal tool outcome. Raw tool outputs are never wrapped or replaced. `prepareStep` appends the reminder after the tool result, and AI SDK v7 carries that message override into later steps. Provider adapters may serialize adjacent provider-neutral messages into their native compound wire format; the runtime does not contain provider-specific reminder handling.
+Use `tool-output` when the reminder should follow a terminal tool outcome. Raw tool outputs are never wrapped or replaced. `prepareStep` appends a synthetic user message after the tool result, and AI SDK v7 carries that message override into later steps. Provider adapters may serialize adjacent provider-neutral messages into their native compound wire format; the runtime does not contain provider-specific reminder handling.
 
 Use `steer` when the agent needs a hidden nudge during a multi-step turn without waiting for the next user message. Steer reminders do not run before the initial generation: context needed there belongs on a `user` reminder. A predicate that stays true fires at every eligible continuation boundary; compose `once(id)` when it should latch after the first fire.
 
 For streamed chat turns, the engine persists the same
-`assistant/tool result → synthetic reminder → assistant` split the model saw.
-Later top-level requests replay that exact prefix, preserving provider prompt
-cache stability. Tool-output and steer reminders that fire at the same boundary
-are merged into one synthetic user message.
+`assistant/tool result → synthetic user message → assistant` split the model
+saw. Later top-level requests replay that exact prefix, preserving provider
+prompt cache stability. Tool-output and steer reminders that fire at the same
+boundary are merged into one synthetic user message.
 
 `once(id)` works on `user`, `tool-output`, and `steer`. Its id is persisted only when the enclosing reminder actually fires, and the latch survives engine restarts.
 
@@ -238,7 +238,7 @@ The engine populates these fields when it resolves reminder text. During tool-ou
 
 ## Stripping Reminders
 
-User reminders carry range metadata so they can be stripped. Mid-loop reminders use a whole-message synthetic marker:
+User reminders carry range metadata so they can be stripped. Tool-output and steer reminders use a whole-message synthetic marker:
 
 ```ts
 type SyntheticReminderMetadata = {
@@ -261,4 +261,4 @@ const visibleMessages = messages
   .map(stripReminders);
 ```
 
-`synthesizeReminderMessage(text, firedAt, onceIds?)` builds the same synthetic carrier for advanced host integrations. Normal `agent()` + `chat()` users do not need to call it: the agent creates carriers and `chat()` persists the matching assistant/reminder split. Direct AI SDK integrations that call `createPrepareStep()` own assistant persistence and must pair the hook with `writeAssistantSegment()` if they need prompt/store parity.
+`synthesizeReminderMessage(text, firedAt, onceIds?)` builds the same synthetic user message for advanced host integrations. Normal `agent()` + `chat()` users do not need to call it: the agent creates the messages and `chat()` persists the matching assistant/reminder split. Direct AI SDK integrations that call `createPrepareStep()` own assistant persistence and must pair the hook with `writeAssistantSegment()` if they need prompt/store parity.

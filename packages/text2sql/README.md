@@ -188,8 +188,8 @@ instructions with your own domain fragments as needed.
 model-only tool-output reminder before the next generation when no prior
 `sql validate <db> "..."` used the same configured adapter name and exact SQL
 text. The raw SQL command result remains unchanged. During streamed `chat()`
-turns, the reminder is persisted as a separate synthetic context message for
-replay and prompt caching; bare `createPrepareStep()` integrations and
+turns, the reminder is persisted as a synthetic user message for replay and
+prompt caching; bare `createPrepareStep()` integrations and
 `agent.generate()` own persistence of their generated assistant history.
 
 ## Advanced: SQL CLI in Sandboxes

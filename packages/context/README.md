@@ -365,8 +365,8 @@ page for the full catalog.
 - Reminder ranges are local to a message part, so filter by `partIndex` before stripping a specific part's text.
 
 Tool outputs stay raw. When a tool-output reminder fires, `prepareStep` appends
-a separate synthetic user message after the tool result. The carrier is stored
-with minimal metadata:
+a synthetic user message after the tool result. The message is stored with
+minimal metadata:
 
 ```ts
 type SyntheticReminderMetadata = {
@@ -376,12 +376,13 @@ type SyntheticReminderMetadata = {
 };
 ```
 
-During streamed `chat()` turns, persisting that carrier preserves the exact
-`tool result → reminder → next assistant` prefix across later requests for
-prompt caching. Multiple tool-output and steer reminders firing at one boundary
-share one synthetic message. `once(id)` is durable for all three reminder
-targets. Bare `createPrepareStep()` integrations and `agent.generate()` inject
-the reminder but own persistence of their generated assistant history.
+During streamed `chat()` turns, persisting that synthetic user message preserves
+the exact `tool result → synthetic user message → next assistant` prefix across
+later requests for prompt caching. Multiple tool-output and steer reminders
+firing at one boundary share one synthetic message. `once(id)` is durable for
+all three reminder targets. Bare `createPrepareStep()` integrations and
+`agent.generate()` inject the reminder but own persistence of their generated
+assistant history.
 
 ## Renderers
 
