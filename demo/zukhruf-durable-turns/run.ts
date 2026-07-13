@@ -12,7 +12,7 @@ import declaration from './agent.ts';
 
 const input =
   process.argv.slice(2).join(' ') ||
-  'List the numbers 1 through 20, one per line, each with a one-word note.';
+  'Use the specialist to list the numbers 1 through 20, one per line, each with a one-word note.';
 
 const boss = new PgBoss({
   db: fromPglite(new PGlite('./zukhruf.queue')),

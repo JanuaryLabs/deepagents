@@ -10,6 +10,7 @@
     "@deepagents/context": "4.3.0",
     "@deepagents/experimental": "4.3.0",
     "@electric-sql/pglite": "^0.5.3",
+    "just-bash": "^3.0.1",
     "pg-boss": "^12.24.1"
   }
 }
