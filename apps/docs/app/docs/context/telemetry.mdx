@@ -32,8 +32,8 @@ registerTelemetry(
 );
 ```
 
-Per-call integrations take precedence over globally registered integrations.
-When overriding them, include every destination the call should receive:
+Per-call integrations replace the globally registered integrations for that
+call. When overriding them, include every destination the call should receive:
 
 ```typescript
 await generateText({
