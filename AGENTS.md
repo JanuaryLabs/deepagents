@@ -7,6 +7,7 @@
 ## Testing
 
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.
+- **No test-only side doors to internal classes.** Never add package `imports` aliases, extra build entry points, or `internal.ts` re-exports so tests can construct something the public barrel deliberately hides. If a test can't reach behavior through the public surface, rewrite the test to drive the public API (e.g. `AgentRuntime.deliver`/`work`), not the internals — test as a user would use it.
 
 ### Running Tests
 

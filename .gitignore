@@ -77,11 +77,8 @@ local_cache/
 
 **/.vitepress/cache/
 deepsearch.sqlite*
-zukhruf.sqlite*
-zukhruf.streams.sqlite*
+zukhruf*.sqlite*
 zukhruf.queue/
-zukhruf-research.sqlite*
-zukhruf-research.streams.sqlite*
 zukhruf-research.queue/
 animated-svg.sqlite*
 animated-svg.streams.sqlite*
@@ -106,3 +103,5 @@ harvard-metrics
 runs
 jobs
 test-results/
+# Local agent backlog database (AGENT_BACKLOG_DIR in .claude/settings.local.json)
+.claude/agent-backlog/
