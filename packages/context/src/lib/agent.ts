@@ -26,7 +26,11 @@ import z from 'zod';
 
 import { withHostOnlyToolMetadata } from '@deepagents/agent';
 
-import { type ContextEngine, XmlRenderer } from '../index.ts';
+import {
+  type ContextEngine,
+  type PrepareStepInputProvider,
+  XmlRenderer,
+} from '../index.ts';
 import {
   type AdvisorResult,
   type AgentModel,
@@ -70,7 +74,12 @@ export interface CreateAgent<CIn, COut = CIn> {
   toolChoice?: ToolChoice<Record<string, COut>>;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
-  logging?: boolean;
+  /**
+   * Ends the agent loop. Defaults to {@link DEFAULT_STOP_WHEN}. Raise it for a
+   * long agentic run that would otherwise stop mid-task; lower it to bound cost
+   * on an untrusted prompt.
+   */
+  stopWhen?: Parameters<typeof streamText>[0]['stopWhen'];
   /**
    * Guardrails to apply during streaming.
    * Each guardrail inspects text chunks and can trigger self-correction retries.
@@ -80,7 +89,15 @@ export interface CreateAgent<CIn, COut = CIn> {
    * Maximum number of retry attempts when guardrails fail (default: 3).
    */
   maxGuardrailRetries?: number;
+  /** Supplies durable user input before sampling and at safe step boundaries. */
+  prepareStepInput?: PrepareStepInputProvider;
 }
+
+/**
+ * Default ceiling for the agent loop. Kept in one place so the entry points
+ * cannot drift; callers override it with `stopWhen` on `agent()`.
+ */
+export const DEFAULT_STOP_WHEN = isStepCount(200);
 
 class Agent<CIn, COut = CIn> {
   #options: CreateAgent<CIn, COut>;
@@ -133,8 +150,10 @@ class Agent<CIn, COut = CIn> {
         ignoreIncompleteToolCalls: true,
         tools: this.tools,
       }),
-      stopWhen: isStepCount(200),
-      prepareStep: this.#options.context.createPrepareStep({ steer: false }),
+      stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
+      prepareStep: this.#options.context.createPrepareStep({
+        steer: false,
+      }),
       tools: this.tools,
       runtimeContext: contextVariables as any,
       toolsContext: createToolsContext(this.tools, contextVariables) as any,
@@ -143,15 +162,6 @@ class Agent<CIn, COut = CIn> {
         config?.abortSignal,
       ),
       toolChoice: this.#options.toolChoice,
-      onStepEnd: (step) => {
-        if (!this.#options.logging) return;
-        const toolCall = step.toolCalls.at(-1);
-        if (toolCall) {
-          console.log(
-            `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
-          );
-        }
-      },
     });
   }
 
@@ -187,7 +197,9 @@ class Agent<CIn, COut = CIn> {
       throw new Error(`Agent ${this.#options.name} is missing a model.`);
     }
 
-    const prepareStep = this.#options.context.createPrepareStep();
+    const prepareStep = this.#options.context.createPrepareStep({
+      additionalInput: this.#options.prepareStepInput,
+    });
     const result = await this.#createRawStream(
       contextVariables,
       config,
@@ -232,7 +244,6 @@ class Agent<CIn, COut = CIn> {
       sandbox: this.#options.sandbox,
     });
 
-    const runId = generateId();
     return streamText({
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
@@ -244,22 +255,13 @@ class Agent<CIn, COut = CIn> {
         tools: this.tools,
       }),
       repairToolCall: createRepairToolCall(model, config?.abortSignal),
-      stopWhen: isStepCount(200),
+      stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep: prepareStep ?? context.createPrepareStep(),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
       runtimeContext: contextVariables as any,
       toolsContext: createToolsContext(this.tools, contextVariables) as any,
       toolChoice: this.#options.toolChoice,
-      onStepEnd: (step) => {
-        if (!this.#options.logging) return;
-        const toolCall = step.toolCalls.at(-1);
-        if (toolCall) {
-          console.log(
-            `Debug: (${runId}) ${chalk.bold.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
-          );
-        }
-      },
     });
   }
 
@@ -338,6 +340,11 @@ class Agent<CIn, COut = CIn> {
             attempt++;
             let guardrailFailed = false;
             let failureFeedback = '';
+            // A guardrail typically rejects a text-delta, by which point the
+            // enclosing text-start has already been forwarded. Track the open
+            // part so the rejection can close it instead of orphaning it in a
+            // permanent `state: 'streaming'`.
+            let openTextId: string | undefined;
 
             const uiStream =
               currentResult === result
@@ -345,6 +352,9 @@ class Agent<CIn, COut = CIn> {
                 : currentResult.toUIMessageStream(options);
 
             for await (const part of uiStream) {
+              if (part.type === 'text-start') openTextId = chunkId(part);
+              if (part.type === 'text-end') openTextId = undefined;
+
               const checkResult = runGuardrailChain(
                 part,
                 this.#guardrails,
@@ -393,7 +403,7 @@ class Agent<CIn, COut = CIn> {
               return;
             }
 
-            writeText(writer, failureFeedback);
+            writeText(writer, failureFeedback, openTextId);
 
             stepSaved = Promise.withResolvers<void>();
             writer.write({ type: 'finish-step' as const });
@@ -683,7 +693,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
           ignoreIncompleteToolCalls: true,
           tools,
         }),
-        stopWhen: isStepCount(200),
+        stopWhen: DEFAULT_STOP_WHEN,
         repairToolCall: createRepairToolCall(
           options.model,
           config?.abortSignal,
@@ -732,7 +742,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
           ignoreIncompleteToolCalls: true,
           tools,
         }),
-        stopWhen: isStepCount(200),
+        stopWhen: DEFAULT_STOP_WHEN,
         experimental_transform: config?.transform ?? smoothStream(),
         runtimeContext: contextVariables as any,
         toolsContext: createToolsContext(tools ?? {}, contextVariables) as any,
@@ -749,12 +759,38 @@ function createToolsContext<C>(tools: ToolSet, context: C) {
   );
 }
 
-function writeText(writer: UIMessageStreamWriter, text: string) {
-  const feedbackPartId = generateId();
-  writer.write({
-    id: feedbackPartId,
-    type: 'text-start',
-  });
+/**
+ * The stream chunk type is generic (`InferUIMessageChunk<UI_MESSAGE>`), so a
+ * `type` check does not narrow it enough to reach `id`.
+ */
+function chunkId(chunk: unknown): string | undefined {
+  if (typeof chunk !== 'object' || chunk === null || !('id' in chunk)) {
+    return undefined;
+  }
+  const { id } = chunk as { id: unknown };
+  return typeof id === 'string' ? id : undefined;
+}
+
+/**
+ * Emit `text` as a completed text part.
+ *
+ * When `openPartId` is given, the feedback continues that already-open part and
+ * closes it — a guardrail rejects mid-text, so its `text-start` is already on
+ * the wire. Opening a second part instead would strand the first one in
+ * `state: 'streaming'` forever in the persisted message.
+ */
+function writeText(
+  writer: UIMessageStreamWriter,
+  text: string,
+  openPartId?: string,
+) {
+  const feedbackPartId = openPartId ?? generateId();
+  if (openPartId === undefined) {
+    writer.write({
+      id: feedbackPartId,
+      type: 'text-start',
+    });
+  }
   writer.write({
     id: feedbackPartId,
     type: 'text-delta',

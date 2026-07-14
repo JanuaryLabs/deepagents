@@ -29,6 +29,7 @@ interface WhenContext {
   messageCount: number;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
+  lastAssistantReplies?: UIMessage[];
   toolOutcome?: ToolOutcome;
   firedOnceIds?: ReadonlySet<string>;
   onceCollector?: Set<string>;
@@ -47,13 +48,25 @@ interface WhenContext {
 | `branch`                | Active branch name (e.g. `"main"`)                                                                                  |
 | `elapsed`               | Milliseconds since the last persisted user message                                                                  |
 | `messageCount`          | Total message count across all roles                                                                                |
-| `lastAssistantMessage`  | The last persisted assistant `UIMessage`                                                                            |
-| `lastAssistantMessages` | Assistant-message history for windowed predicates such as `withinLastN()`                                           |
+| `lastAssistantMessage`  | The current assistant **segment** — only the parts produced since the last reminder fired (see below)               |
+| `lastAssistantMessages` | Every assistant **segment** in the chain; read this for any history-derived counter (e.g. a tool-failure streak)     |
+| `lastAssistantReplies`  | One entry per assistant **reply**, with its carved segments merged back; what the window combinators count           |
 | `toolOutcome`           | The terminal outcome currently being evaluated for a `tool-output` reminder; undefined for user and steer reminders |
 | `firedOnceIds`          | Ids already latched by `once()` this conversation across all reminder targets                                       |
 | `onceCollector`         | Per-evaluation buffer `once()` appends to; the engine commits it only if the reminder fires                         |
 
-`currentMessage` lets a predicate read metadata the user attached to _this_ turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. `toolOutcome` describes the terminal tool result being considered before the next model generation; `lastAssistantMessage` and `lastAssistantMessages` describe persisted history. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
+`currentMessage` lets a predicate read metadata the user attached to _this_ turn — e.g., `currentMessage.metadata.locale.timeZone` set on turn 1, before any prior `lastMessage` exists. `toolOutcome` describes the terminal tool result being considered before the next model generation; `lastAssistantMessage` and `lastAssistantMessages` describe assistant history. The `firedOnceIds`/`onceCollector` fields back the `once()` latch and are managed by the engine — predicates compose `once(id)` rather than reading them directly.
+
+Predicates are evaluated against the chain as it stands **at each boundary**, so a `steer` or `tool-output` predicate sees what the model did earlier in the same turn.
+
+<Callout type="warn">
+  When a `steer` or `tool-output` reminder fires, the engine carves the assistant
+  message at that boundary to preserve the prompt prefix. `lastAssistantMessage`
+  therefore holds only the parts produced *since the last fire* — a counter derived
+  from it silently resets to 1 every time the reminder fires. Derive counters from
+  `lastAssistantMessages`, which keeps every segment. `toolFailureStreak()` below
+  does exactly this.
+</Callout>
 
 ## Turn-Based Predicates
 
@@ -282,6 +295,43 @@ toolCallCount('bash', { gte: 3 });
 toolCallCount('sql', { eq: 1 });
 ```
 
+Counts calls in the current assistant segment. To count across a whole turn that a firing reminder has carved into segments, use `toolFailedStreak` below or read `ctx.lastAssistantMessages` directly.
+
+### toolFailedStreak(name, spec)
+
+Gates on a run of **consecutive** failures of `name`, counting back from the newest result. A success ends the run, so the streak resets on its own.
+
+```ts
+import { reminder, toolFailedStreak } from '@deepagents/context';
+
+engine.set(
+  reminder('`bash` keeps failing — change the command, do not retry it.', {
+    when: toolFailedStreak('bash', { gte: 3 }),
+    target: 'tool-output',
+  }),
+);
+```
+
+### toolFailureStreak(ctx, name)
+
+The number behind `toolFailedStreak` — call it from a text factory to escalate the wording as the run grows. Both walk `lastAssistantMessages`, so they keep counting across the segments a firing reminder creates.
+
+```ts
+import { reminder, toolFailedStreak, toolFailureStreak } from '@deepagents/context';
+
+engine.set(
+  reminder(
+    (ctx) => {
+      const failures = toolFailureStreak(ctx, 'bash');
+      return failures > 3
+        ? `\`bash\` has failed ${failures} times in a row. Stop and explain the blocker.`
+        : `\`bash\` failed ${failures} times in a row. Change the command.`;
+    },
+    { when: toolFailedStreak('bash', { gte: 1 }), target: 'tool-output' },
+  ),
+);
+```
+
 ## Durable Fire-Once Predicate
 
 ### once(id)
@@ -372,7 +422,9 @@ Seasons follow meteorological boundaries: Winter (Dec-Feb), Spring (Mar-May), Su
 
 ## History Window Combinators
 
-These helpers scan multiple assistant replies by rebinding only `lastAssistantMessage`. Fields such as `content`, `turn`, `usage`, and `elapsed` stay fixed from the outer `WhenContext`.
+These helpers scan multiple assistant **replies** by rebinding only `lastAssistantMessage`. Fields such as `content`, `turn`, `usage`, and `elapsed` stay fixed from the outer `WhenContext`.
+
+`n` counts replies, not stored assistant messages. One reply is everything the assistant produced in answer to a single user message — a firing `steer`/`tool-output` reminder carves that reply into several stored messages, and these combinators merge them back before matching. So registering an unrelated reminder never changes what `n` means.
 
 ### withinLastN(n, predicate)
 

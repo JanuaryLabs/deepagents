@@ -595,7 +595,7 @@ describe('User Chat Management', () => {
       });
     });
 
-    it('should preserve userId when ContextEngine reconnects', async () => {
+    it('should reject a ContextEngine reconnecting with a different userId', async () => {
       await withSqlServerContainer(async (container) => {
         const store = new SqlServerContextStore({
           pool: container.connectionString,
@@ -615,10 +615,12 @@ describe('User Chat Management', () => {
             chatId: 'reconnect-ss-chat',
             userId: 'different-ss-user',
           });
-          await engine2.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
+          const sandbox = await createVirtualAgentSandbox();
+          await assert.rejects(
+            () => engine2.resolve({ renderer, sandbox }),
+            /belongs to user "original-ss-user", not "different-ss-user"/,
+            'reconnecting with a different userId must be rejected, not silently allowed',
+          );
 
           const storedChat = await store.getChat('reconnect-ss-chat');
           assert.ok(storedChat);

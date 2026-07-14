@@ -108,6 +108,20 @@
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
     },
+    "typecheck": {
+      "outputs": [
+        "{projectRoot}/**/*.d.ts",
+        "{projectRoot}/**/*.d.cts",
+        "{projectRoot}/**/*.d.mts",
+        "{projectRoot}/**/*.d.ts.map",
+        "{projectRoot}/**/*.d.cts.map",
+        "{projectRoot}/**/*.d.mts.map",
+        "{projectRoot}/tsconfig.tsbuildinfo",
+        "{projectRoot}/dist/spec/**/*.d.ts",
+        "{projectRoot}/dist/tsconfig.lib.tsbuildinfo",
+        "{projectRoot}/dist/tsconfig.spec.tsbuildinfo"
+      ]
+    },
     "dev": {
       "dependsOn": ["^build"]
     },

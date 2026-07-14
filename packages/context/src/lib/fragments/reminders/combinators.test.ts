@@ -87,7 +87,7 @@ function assistantTextOnly(text: string): UIMessage {
 }
 
 describe('withinLastN', () => {
-  it('fires when match is anywhere in the last N assistant messages', async () => {
+  it('fires when match is anywhere in the last N assistant replies', async () => {
     const history: UIMessage[] = [
       assistantTextOnly('thinking'),
       assistantWithTool('bash'),
@@ -96,9 +96,7 @@ describe('withinLastN', () => {
     ];
     const pred = withinLastN(3, toolCalled('bash'));
     assert.strictEqual(
-      await pred(
-        wctx({ turn: 5, content: '', lastAssistantMessages: history }),
-      ),
+      await pred(wctx({ turn: 5, content: '', lastAssistantReplies: history })),
       true,
     );
   });
@@ -112,9 +110,7 @@ describe('withinLastN', () => {
     ];
     const pred = withinLastN(3, toolCalled('bash'));
     assert.strictEqual(
-      await pred(
-        wctx({ turn: 5, content: '', lastAssistantMessages: history }),
-      ),
+      await pred(wctx({ turn: 5, content: '', lastAssistantReplies: history })),
       false,
     );
   });
@@ -128,17 +124,17 @@ describe('withinLastN', () => {
     const pred = withinLastN(3, not(anyToolCalled()));
     assert.strictEqual(
       await pred(
-        wctx({ turn: 5, content: '', lastAssistantMessages: mostlyTools }),
+        wctx({ turn: 5, content: '', lastAssistantReplies: mostlyTools }),
       ),
       true,
     );
   });
 
-  it('returns false when lastAssistantMessages is undefined or empty', async () => {
+  it('returns false when lastAssistantReplies is undefined or empty', async () => {
     const pred = withinLastN(3, toolCalled('bash'));
     assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), false);
     assert.strictEqual(
-      await pred(wctx({ turn: 1, content: '', lastAssistantMessages: [] })),
+      await pred(wctx({ turn: 1, content: '', lastAssistantReplies: [] })),
       false,
     );
   });
@@ -150,15 +146,11 @@ describe('withinLastN', () => {
     ];
     const pred = and(afterTurn(2), withinLastN(2, toolCalled('bash')));
     assert.strictEqual(
-      await pred(
-        wctx({ turn: 3, content: '', lastAssistantMessages: history }),
-      ),
+      await pred(wctx({ turn: 3, content: '', lastAssistantReplies: history })),
       true,
     );
     assert.strictEqual(
-      await pred(
-        wctx({ turn: 1, content: '', lastAssistantMessages: history }),
-      ),
+      await pred(wctx({ turn: 1, content: '', lastAssistantReplies: history })),
       false,
     );
   });
@@ -172,7 +164,7 @@ describe('withinLastN', () => {
       const pred = withinLastN(n, toolCalled('bash'));
       assert.strictEqual(
         await pred(
-          wctx({ turn: 5, content: '', lastAssistantMessages: history }),
+          wctx({ turn: 5, content: '', lastAssistantReplies: history }),
         ),
         false,
         `n=${n}`,
@@ -191,7 +183,7 @@ describe('withinLastN', () => {
         wctx({
           turn: 5,
           content: 'no match here',
-          lastAssistantMessages: history,
+          lastAssistantReplies: history,
         }),
       ),
       false,
@@ -209,7 +201,7 @@ describe('everyOfLastN', () => {
     ];
     const pred = everyOfLastN(3, not(anyToolCalled()));
     assert.strictEqual(
-      await pred(wctx({ turn: 5, content: '', lastAssistantMessages: streak })),
+      await pred(wctx({ turn: 5, content: '', lastAssistantReplies: streak })),
       true,
     );
   });
@@ -223,7 +215,7 @@ describe('everyOfLastN', () => {
     ];
     const pred = everyOfLastN(3, not(anyToolCalled()));
     assert.strictEqual(
-      await pred(wctx({ turn: 5, content: '', lastAssistantMessages: broken })),
+      await pred(wctx({ turn: 5, content: '', lastAssistantReplies: broken })),
       false,
     );
   });
@@ -236,12 +228,12 @@ describe('everyOfLastN', () => {
     const pred = everyOfLastN(3, not(anyToolCalled()));
     assert.strictEqual(
       await pred(
-        wctx({ turn: 5, content: '', lastAssistantMessages: tooShort }),
+        wctx({ turn: 5, content: '', lastAssistantReplies: tooShort }),
       ),
       false,
     );
     assert.strictEqual(
-      await pred(wctx({ turn: 1, content: '', lastAssistantMessages: [] })),
+      await pred(wctx({ turn: 1, content: '', lastAssistantReplies: [] })),
       false,
     );
     assert.strictEqual(await pred(wctx({ turn: 1, content: '' })), false);
@@ -257,7 +249,7 @@ describe('everyOfLastN', () => {
       const pred = everyOfLastN(n, not(anyToolCalled()));
       assert.strictEqual(
         await pred(
-          wctx({ turn: 5, content: '', lastAssistantMessages: history }),
+          wctx({ turn: 5, content: '', lastAssistantReplies: history }),
         ),
         false,
         `n=${n}`,

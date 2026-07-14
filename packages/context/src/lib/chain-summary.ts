@@ -15,7 +15,24 @@ export interface ChainSummary {
   lastMessage?: UIMessage;
   lastAssistantMessage?: UIMessage;
   lastAssistantMessages?: UIMessage[];
+  /**
+   * One entry per assistant REPLY: the segments a reply was carved into by
+   * firing reminders, merged back together. A reply is everything the assistant
+   * produced in answer to one real user message (synthetic reminder users do
+   * not open a new reply). Window predicates count these, so their answer does
+   * not change when an unrelated reminder starts firing.
+   */
+  lastAssistantReplies?: UIMessage[];
   firedOnceIds: Set<string>;
+}
+
+/** Merge the segments of one reply back into the message the user would see. */
+function mergeReply(segments: UIMessage[]): UIMessage {
+  const [first] = segments;
+  return {
+    ...first,
+    parts: segments.flatMap((segment) => segment.parts),
+  };
 }
 
 export class ChainSummaryBuilder {
@@ -25,6 +42,8 @@ export class ChainSummaryBuilder {
   #lastMessage?: UIMessage;
   #lastAssistantMessage?: UIMessage;
   #lastAssistantMessages: UIMessage[] = [];
+  #replies: UIMessage[][] = [];
+  #replyClosed = true;
   #firedOnceIds = new Set<string>();
 
   ingestStored(msg: MessageData): void {
@@ -37,6 +56,13 @@ export class ChainSummaryBuilder {
       );
       this.#lastAssistantMessage = message;
       this.#lastAssistantMessages.push(message);
+      // Segments produced after the same real user message belong to one reply.
+      const open = this.#replies.at(-1);
+      if (open && !this.#replyClosed) open.push(message);
+      else {
+        this.#replies.push([message]);
+        this.#replyClosed = false;
+      }
       return;
     }
 
@@ -66,6 +92,9 @@ export class ChainSummaryBuilder {
     this.#turn++;
     this.#lastMessageAt = msg.createdAt;
     this.#lastMessage = message;
+    // The next assistant segment opens a NEW reply. Synthetic reminder users
+    // return above, so a mid-turn reminder never splits one reply into two.
+    this.#replyClosed = true;
   }
 
   ingestPending(fragment: ContextFragment): void {
@@ -84,6 +113,7 @@ export class ChainSummaryBuilder {
       lastMessage: this.#lastMessage,
       lastAssistantMessage: this.#lastAssistantMessage,
       lastAssistantMessages: this.#lastAssistantMessages,
+      lastAssistantReplies: this.#replies.map(mergeReply),
       firedOnceIds: this.#firedOnceIds,
     };
   }

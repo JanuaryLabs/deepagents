@@ -15,6 +15,15 @@ export interface ReminderContext {
   elapsed?: number;
   messageCount?: number;
   lastAssistantMessage?: UIMessage;
+  /**
+   * Every assistant segment in the chain. A firing steer/tool-output reminder
+   * carves the assistant message at its boundary, so `lastAssistantMessage`
+   * only holds the parts since the last fire — read this when deriving a
+   * counter from history (e.g. a tool-failure streak).
+   */
+  lastAssistantMessages?: UIMessage[];
+  /** One entry per assistant REPLY, with its carved segments merged back. */
+  lastAssistantReplies?: UIMessage[];
   toolOutcome?: ToolOutcome;
 }
 
@@ -66,7 +75,14 @@ export interface WhenContext {
   elapsed?: number;
   messageCount: number;
   lastAssistantMessage?: UIMessage;
+  /** Every assistant SEGMENT — a firing reminder carves a reply into several. */
   lastAssistantMessages?: UIMessage[];
+  /**
+   * One entry per assistant REPLY, with its carved segments merged back
+   * together. Window predicates (`withinLastN`, `everyOfLastN`) count these, so
+   * their answer does not shift when an unrelated reminder starts firing.
+   */
+  lastAssistantReplies?: UIMessage[];
   /** The terminal tool outcome currently being evaluated. */
   toolOutcome?: ToolOutcome;
   /**
@@ -94,6 +110,7 @@ export type BaseWhenCtx = Omit<
   | 'currentMessage'
   | 'lastAssistantMessage'
   | 'lastAssistantMessages'
+  | 'lastAssistantReplies'
 >;
 
 export type WhenPredicate = (ctx: WhenContext) => boolean | Promise<boolean>;

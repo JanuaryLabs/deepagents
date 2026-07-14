@@ -141,3 +141,36 @@ export function toolCallCount(
     return checkCount(count, spec);
   };
 }
+
+/**
+ * How many times `name` has failed in a row, counting back from the newest
+ * result. A success ends the run.
+ *
+ * Reads `lastAssistantMessages` (every assistant segment), NOT
+ * `lastAssistantMessage`: a firing reminder carves the assistant message at its
+ * boundary, so the single current message only holds the parts since the last
+ * fire and a streak read from it would reset to 1 on every fire.
+ */
+export function toolFailureStreak(
+  ctx: { lastAssistantMessages?: UIMessage[] },
+  name: ToolNameSpec,
+): number {
+  const parts = (ctx.lastAssistantMessages ?? []).flatMap((message) =>
+    toolPartsOf(message).filter((part) => matchesName(name, toolNameOf(part))),
+  );
+  let streak = 0;
+  for (const part of parts.toReversed()) {
+    if (part.state !== 'output-error') break;
+    streak++;
+  }
+  return streak;
+}
+
+/** Gate on a run of consecutive failures, e.g. `toolFailedStreak('bash', { gte: 3 })`. */
+export function toolFailedStreak(
+  name: ToolNameSpec,
+  spec: CountSpec,
+): WhenPredicate {
+  assertCountSpec(spec);
+  return (ctx) => checkCount(toolFailureStreak(ctx, name), spec);
+}

@@ -220,19 +220,15 @@ function toolOutcomesFromStep<TOOLS extends Record<string, Tool>>(
   return outcomes;
 }
 
-interface ReminderFire {
-  /** Step index the reminder fired after. */
-  afterStep: number;
-  synth: UIMessage & { role: 'user' };
-}
+export type PrepareStepInputProvider = () =>
+  | Array<UIMessage & { role: 'user' }>
+  | undefined
+  | Promise<Array<UIMessage & { role: 'user' }> | undefined>;
 
-interface SteerWhenBase {
-  base: BaseWhenCtx;
-  content: string;
-  currentMessage: UIMessage;
-  lastAssistantMessage?: UIMessage;
-  lastAssistantMessages?: UIMessage[];
-  chainFiredOnceIds: ReadonlySet<string>;
+interface StepInputFire {
+  /** Step index the input was injected after. */
+  afterStep: number;
+  messages: Array<UIMessage & { role: 'user' }>;
 }
 
 /**
@@ -247,8 +243,7 @@ interface SteerWhenBase {
 interface ReminderSession {
   /** Durable once-ids fired in this stream. */
   firedOnceIds: Set<string>;
-  fired: ReminderFire[];
-  whenBase?: SteerWhenBase;
+  fired: StepInputFire[];
   /** Id of the open (still-growing) assistant segment. */
   currentSegId?: string;
   /** Part index in the cumulative response where the open segment starts. */
@@ -381,15 +376,21 @@ export class ContextEngine {
       id: this.#chatId,
       userId: this.#userId,
     });
+    if (this.#chatData.userId !== this.#userId) {
+      throw new Error(
+        `chat "${this.#chatId}" belongs to user "${this.#chatData.userId}", not "${this.#userId}"`,
+      );
+    }
 
     // Merge initial metadata if provided (handles both new and existing chats)
     if (this.#initialMetadata) {
-      this.#chatData = await this.#store.updateChat(this.#chatId, {
-        metadata: {
-          ...this.#chatData.metadata,
-          ...this.#initialMetadata,
-        },
-      });
+      const initialMetadata = this.#initialMetadata;
+      this.#chatData = await this.#store.updateChat(
+        this.#chatId,
+        ({ metadata }) => ({
+          metadata: { ...metadata, ...initialMetadata },
+        }),
+      );
       // Clear after use to prevent memory leak
       this.#initialMetadata = undefined;
     }
@@ -582,12 +583,21 @@ export class ContextEngine {
    * Return the model-ready conversation: persisted chain plus pending fragments,
    * with empty assistant placeholders filtered out.
    *
+   * A pending fragment that carries the id of an already-stored message is an
+   * UPDATE to that message, not a new one — the store upserts by id, and this
+   * must agree. Both chat() and the guardrail-retry path call
+   * writeAssistantSegment for the same step, so the streamed assistant is
+   * routinely persisted while a fragment for it is still pending; appending
+   * blindly duplicated it in the prompt and broke store/prompt parity on the
+   * next turn.
+   *
    * For id-lookup use `headMessage()` instead — that one keeps placeholders.
    */
   public async getMessages(): Promise<UIMessage[]> {
     await this.#ensureInitialized();
 
     const messages: UIMessage[] = [];
+    const indexById = new Map<string, number>();
 
     if (this.#branch?.headMessageId) {
       const chain = await this.#store.getMessageChain(
@@ -596,7 +606,7 @@ export class ContextEngine {
       for (const msg of chain) {
         const data = requireUIMessage(msg.data, `Stored message "${msg.id}"`);
         if (isEmptyAssistantPlaceholder(data)) continue;
-        messages.push(data);
+        indexById.set(data.id, messages.push(data) - 1);
       }
     }
 
@@ -609,7 +619,13 @@ export class ContextEngine {
         `Pending fragment "${fragment.name}"`,
       );
       if (isEmptyAssistantPlaceholder(encoded)) continue;
-      messages.push(encoded);
+
+      const stored = indexById.get(encoded.id);
+      if (stored === undefined) {
+        indexById.set(encoded.id, messages.push(encoded) - 1);
+      } else {
+        messages[stored] = encoded;
+      }
     }
 
     return messages.length === 0 ? [] : validateUIMessages({ messages });
@@ -766,7 +782,12 @@ export class ContextEngine {
    */
   public createPrepareStep<
     TOOLS extends Record<string, Tool> = Record<string, Tool>,
-  >(options: { steer?: boolean } = {}): PrepareStepFunction<TOOLS> {
+  >(
+    options: {
+      steer?: boolean;
+      additionalInput?: PrepareStepInputProvider;
+    } = {},
+  ): PrepareStepFunction<TOOLS> {
     const enableSteer = options.steer ?? true;
     const session: ReminderSession = {
       firedOnceIds: new Set(),
@@ -790,19 +811,36 @@ export class ContextEngine {
       }
       previousStepNumber = stepNumber;
       const cumulativeStepNumber = stepOffset + stepNumber;
-      const toolReminders = await this.#evaluateToolOutputReminders(
-        toolOutcomesFromStep(steps.at(-1)?.content ?? []),
-        session,
-      );
+
       // Steer is mid-loop only: never fire before the model has produced a step
       // with content, so its synthetic user is preceded by an assistant turn.
       const priorStep = stepNumber >= 1 ? steps[stepNumber - 1] : undefined;
-      const canFire = enableSteer && (priorStep?.content?.length ?? 0) > 0;
+      const hasSafeBoundary = (priorStep?.content?.length ?? 0) > 0;
+      const canFire = enableSteer && hasSafeBoundary;
+      const steerConfigs = canFire ? this.#remindersFor('steer') : [];
+      const outcomes = toolOutcomesFromStep(steps.at(-1)?.content ?? []);
 
-      if (canFire) {
-        const configs = this.#remindersFor('steer');
+      // One chain read per boundary, shared by both targets. It must be read
+      // HERE — not cached across the stream — so both see the segments the
+      // model produced earlier in this same turn.
+      const needsChain =
+        steerConfigs.length > 0 ||
+        (outcomes.length > 0 && this.#remindersFor('tool-output').length > 0);
+      const chain = needsChain ? await this.#getChainContext() : undefined;
+
+      const toolReminders = chain
+        ? await this.#evaluateToolOutputReminders(outcomes, session, chain)
+        : { texts: [], onceIds: [] };
+      // Host input is valid before any sampling request, including the first
+      // request of an approval continuation. Steer reminders remain mid-loop
+      // only because they require a completed assistant step.
+      const additionalInput = await options.additionalInput?.();
+      let reminderInput: (UIMessage & { role: 'user' }) | undefined;
+
+      if (canFire && chain) {
+        const configs = steerConfigs;
         if (configs.length > 0) {
-          const whenCtx = await this.#steerWhenCtx(session);
+          const whenCtx = this.#steerWhenCtx(chain, session);
           const matched = await evaluateFiredReminders(configs, whenCtx);
           if (matched.length > 0) {
             const onceIds = [
@@ -812,7 +850,7 @@ export class ContextEngine {
               ]),
             ];
             for (const id of onceIds) session.firedOnceIds.add(id);
-            const synth = synthesizeReminderMessage(
+            reminderInput = synthesizeReminderMessage(
               [
                 ...(toolReminders.texts.length > 0
                   ? [toolReminders.texts.join('\n')]
@@ -822,36 +860,32 @@ export class ContextEngine {
               Date.now(),
               onceIds,
             );
-            const synthModel = await convertToModelMessages([synth] as never, {
-              ignoreIncompleteToolCalls: true,
-            });
-            session.fired.push({
-              afterStep: cumulativeStepNumber - 1,
-              synth,
-            });
-
-            return {
-              messages: [...(messages as ModelMessage[]), ...synthModel],
-            };
           }
         }
       }
 
-      if (toolReminders.texts.length > 0) {
-        const synth = synthesizeReminderMessage(
+      if (!reminderInput && toolReminders.texts.length > 0) {
+        reminderInput = synthesizeReminderMessage(
           toolReminders.texts.join('\n'),
           Date.now(),
           toolReminders.onceIds,
         );
-        const synthModel = await convertToModelMessages([synth] as never, {
+      }
+
+      const inputs = [
+        ...(additionalInput ?? []),
+        ...(reminderInput ? [reminderInput] : []),
+      ];
+      if (inputs.length > 0) {
+        const inputModel = await convertToModelMessages(inputs as never, {
           ignoreIncompleteToolCalls: true,
         });
         session.fired.push({
           afterStep: cumulativeStepNumber - 1,
-          synth,
+          messages: inputs,
         });
         return {
-          messages: [...(messages as ModelMessage[]), ...synthModel],
+          messages: [...(messages as ModelMessage[]), ...inputModel],
         };
       }
 
@@ -911,7 +945,7 @@ export class ContextEngine {
           parts: message.parts.slice(session.currentSegStart, boundary),
         } as UIMessage),
       );
-      this.set(user(fire.synth));
+      for (const input of fire.messages) this.set(user(input));
       session.currentSegId = generateId();
       session.currentSegStart = boundary;
       session.materialized++;
@@ -964,6 +998,7 @@ export class ContextEngine {
       currentMessage,
       lastAssistantMessage: chain.lastAssistantMessage,
       lastAssistantMessages: chain.lastAssistantMessages,
+      lastAssistantReplies: chain.lastAssistantReplies,
     };
   }
 
@@ -1016,67 +1051,45 @@ export class ContextEngine {
     pending[fragmentIndex] = user(carrier);
   }
 
-  async #steerWhenCtx(session: ReminderSession): Promise<WhenContext> {
-    await this.#ensureInitialized();
-    if (!session.whenBase) {
-      const chain = await this.#getChainContext();
-      const base = this.#buildBaseWhenCtx(chain);
-      const currentMessage = chain.lastMessage;
-      if (!currentMessage) {
-        throw new Error(
-          'steer reminders require a user message earlier in the turn',
-        );
-      }
-      session.whenBase = {
-        base,
-        content: extractPlainText(currentMessage),
-        currentMessage,
-        lastAssistantMessage: chain.lastAssistantMessage,
-        lastAssistantMessages: chain.lastAssistantMessages,
-        chainFiredOnceIds: chain.firedOnceIds,
-      };
+  /**
+   * Steer predicates run against the chain as it stands AT THIS BOUNDARY.
+   *
+   * writeAssistantSegment persists each assistant segment before the next
+   * prepareStep runs, so re-reading the chain is what lets a steer reminder
+   * observe the turn as it unfolds. Caching this across the stream froze
+   * lastAssistantMessage(s) at the first boundary and made every
+   * history-derived steer predicate (toolCallCount, everyOfLastN, a tool first
+   * called after step 0) silently blind to the rest of its own turn.
+   *
+   * `elapsed` still measures from the last real user message: synthetic steer
+   * nudges do not advance it (chain-summary excludes them), so a raw
+   * elapsedExceeds keeps firing every step once crossed — by design; compose
+   * once() for control.
+   */
+  #steerWhenCtx(chain: ChainSummary, session: ReminderSession): WhenContext {
+    const currentMessage = chain.lastMessage;
+    if (!currentMessage) {
+      throw new Error(
+        'steer reminders require a user message earlier in the turn',
+      );
     }
 
-    const {
-      base,
-      content,
-      currentMessage,
-      lastAssistantMessage,
-      lastAssistantMessages,
-      chainFiredOnceIds,
-    } = session.whenBase;
-
-    // elapsed measures from the last real user message; synthetic steer nudges
-    // do not advance it (chain-summary excludes them). Within a stream the
-    // reference is frozen at stream start, so a raw elapsedExceeds keeps firing
-    // every step once crossed — that is by design; compose once() for control.
-    const elapsed =
-      base.lastMessageAt !== undefined
-        ? Date.now() - base.lastMessageAt
-        : undefined;
-
     return {
-      ...base,
-      elapsed,
-      content,
-      currentMessage,
-      lastAssistantMessage,
-      lastAssistantMessages,
-      firedOnceIds: new Set([...chainFiredOnceIds, ...session.firedOnceIds]),
+      ...this.#buildWhenCtx(chain, currentMessage),
+      firedOnceIds: new Set([...chain.firedOnceIds, ...session.firedOnceIds]),
     };
   }
 
   async #evaluateToolOutputReminders(
     outcomes: ToolOutcome[],
     session: ReminderSession,
+    chain: ChainSummary,
   ): Promise<{ texts: string[]; onceIds: string[] }> {
     const configs = this.#remindersFor('tool-output');
     if (configs.length === 0 || outcomes.length === 0) {
       return { texts: [], onceIds: [] };
     }
 
-    await this.#ensureInitialized();
-    const chain = await this.#getChainContext();
     const currentMessage = chain.lastMessage;
     if (!currentMessage) return { texts: [], onceIds: [] };
 
@@ -1451,20 +1464,16 @@ export class ContextEngine {
   ): Promise<void> {
     await this.#ensureInitialized();
 
-    const storeUpdates: Partial<Pick<ChatData, 'title' | 'metadata'>> = {};
-
-    if (updates.title !== undefined) {
-      storeUpdates.title = updates.title;
-    }
-    if (updates.metadata !== undefined) {
-      // Merge with existing metadata
-      storeUpdates.metadata = {
-        ...this.#chatData?.metadata,
-        ...updates.metadata,
-      };
-    }
-
-    this.#chatData = await this.#store.updateChat(this.#chatId, storeUpdates);
+    this.#chatData = await this.#store.updateChat(
+      this.#chatId,
+      ({ metadata }) => ({
+        title: updates.title,
+        metadata:
+          updates.metadata === undefined
+            ? undefined
+            : { ...metadata, ...updates.metadata },
+      }),
+    );
   }
 
   /**
@@ -1483,22 +1492,21 @@ export class ContextEngine {
   public async trackUsage(usage: LanguageModelUsage): Promise<void> {
     await this.#ensureInitialized();
 
-    // Read fresh data from store to prevent race conditions with concurrent calls
-    const freshChatData = await this.#store.getChat(this.#chatId);
-
-    const storedUsage = freshChatData?.metadata?.usage;
-    const currentUsage = isLanguageModelUsage(storedUsage)
-      ? storedUsage
-      : undefined;
-    const updatedUsage = mergeLanguageModelUsage(currentUsage, usage);
-
-    // Update chat metadata with accumulated usage
-    this.#chatData = await this.#store.updateChat(this.#chatId, {
-      metadata: {
-        ...freshChatData?.metadata,
-        usage: updatedUsage,
+    this.#chatData = await this.#store.updateChat(
+      this.#chatId,
+      ({ metadata }) => {
+        const storedUsage = metadata?.usage;
+        const currentUsage = isLanguageModelUsage(storedUsage)
+          ? storedUsage
+          : undefined;
+        return {
+          metadata: {
+            ...metadata,
+            usage: mergeLanguageModelUsage(currentUsage, usage),
+          },
+        };
       },
-    });
+    );
   }
 
   /**

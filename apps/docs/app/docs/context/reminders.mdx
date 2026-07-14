@@ -188,6 +188,8 @@ Use `tool-output` when the reminder should follow a terminal tool outcome. Raw t
 
 Use `steer` when the agent needs a hidden nudge during a multi-step turn without waiting for the next user message. Steer reminders do not run before the initial generation: context needed there belongs on a `user` reminder. A predicate that stays true fires at every eligible continuation boundary; compose `once(id)` when it should latch after the first fire.
 
+A steer predicate is evaluated against the chain **as it stands at that boundary**, so it observes what the model did earlier in the same turn — a tool it called at step 3, a streak of failures, a segment count. That is what makes predicates like `toolCallCount('bash', { gte: 2 })` or `toolFailedStreak('bash', { gte: 3 })` usable as steer triggers.
+
 For streamed chat turns, the engine persists the same
 `assistant/tool result → synthetic user message → assistant` split the model
 saw. Later top-level requests replay that exact prefix, preserving provider
@@ -229,10 +231,23 @@ interface ReminderContext {
   branch?: string; // Active branch name
   elapsed?: number; // Milliseconds since last persisted user message
   messageCount?: number; // Total message count across all roles
-  lastAssistantMessage?: UIMessage; // Last persisted assistant message
+  lastAssistantMessage?: UIMessage; // Current assistant segment (see below)
+  lastAssistantMessages?: UIMessage[]; // Every assistant segment in the chain
+  lastAssistantReplies?: UIMessage[]; // One entry per reply, segments merged back
   toolOutcome?: ToolOutcome; // Current terminal outcome for tool-output
 }
 ```
+
+<Callout type="warn">
+  Derive counters from `lastAssistantMessages`, not `lastAssistantMessage`. When a
+  `steer` or `tool-output` reminder fires, the engine carves the assistant message
+  at that boundary (this is what preserves the prompt prefix — see [Reminder
+  Targets](#reminder-targets)), so `lastAssistantMessage` afterwards holds only the
+  parts produced *since the last fire*. A "this tool failed N times in a row"
+  counter read from it silently resets to 1 on every fire. `lastAssistantMessages`
+  keeps every segment, so it counts correctly — that is what
+  [`toolFailureStreak()`](/docs/context/predicates) reads.
+</Callout>
 
 The engine populates these fields when it resolves reminder text. During tool-output evaluation, both the predicate and a dynamic text factory can read `toolOutcome`. A reminder gated by a `when` predicate receives the richer `WhenContext` (see [Predicates](/docs/context/predicates)); a plain `(ctx) => string` factory on a user reminder receives at least `content`.
 

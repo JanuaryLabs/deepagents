@@ -890,7 +890,7 @@ describe('User Chat Management', () => {
       });
     });
 
-    it('should preserve userId when ContextEngine reconnects to existing chat', async () => {
+    it('should reject a ContextEngine reconnecting with a different userId', async () => {
       await withSqliteContainer(async (store) => {
         // First engine creates the chat
         const engine1 = new ContextEngine({
@@ -908,12 +908,14 @@ describe('User Chat Management', () => {
           chatId: 'reconnect-chat',
           userId: 'different-user', // Different userId!
         });
-        await engine2.resolve({
-          renderer,
-          sandbox: await createVirtualAgentSandbox(),
-        });
+        const sandbox = await createVirtualAgentSandbox();
+        await assert.rejects(
+          () => engine2.resolve({ renderer, sandbox }),
+          /belongs to user "original-user", not "different-user"/,
+          'reconnecting with a different userId must be rejected, not silently allowed',
+        );
 
-        // The stored chat should still have original userId
+        // The stored chat still belongs to its original owner
         const storedChat = await store.getChat('reconnect-chat');
         assert.ok(storedChat);
         assert.strictEqual(
