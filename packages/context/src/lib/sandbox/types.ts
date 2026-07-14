@@ -1,7 +1,5 @@
 import type { Tool } from 'ai';
 
-import type { SkillPathMapping } from '../skills/types.ts';
-
 export interface CommandResult {
   stdout: string;
   stderr: string;
@@ -97,18 +95,6 @@ export interface SandboxReadinessOptions {
 }
 
 /**
- * Declarative skill upload: a host directory whose contents are copied into
- * the sandbox at startup. The factory also parses each skill's frontmatter
- * and exposes the result on `sandbox.skills`.
- */
-export interface SkillUploadInput {
-  /** Host directory containing skill subdirectories (each with a SKILL.md). */
-  host: string;
-  /** Destination inside the sandbox (e.g. `/workspace/skills`). */
-  sandbox: string;
-}
-
-/**
  * Input schema exposed by the bash tool. `reasoning` is required for an
  * auditable explanation of every model-initiated command.
  */
@@ -189,13 +175,5 @@ export interface BashToolkit {
   sandbox: DisposableSandbox;
 }
 
-/**
- * A sandbox that owns its skills. The factory uploads files + parses
- * frontmatter once; `skills` is then the single source of truth for
- * the `skills()` fragment. The `bash` tool requires a `reasoning` input on
- * every call.
- */
-export interface AgentSandbox extends BashToolkit {
-  /** Discovered skills — empty array if none were configured. */
-  skills: SkillPathMapping[];
-}
+/** Bash/read/write tools and their underlying sandbox for use by an agent. */
+export type AgentSandbox = BashToolkit;

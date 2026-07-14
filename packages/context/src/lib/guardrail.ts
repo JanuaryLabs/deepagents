@@ -34,7 +34,7 @@
  * });
  * ```
  */
-import type { SkillPathMapping } from './skills/types.ts';
+import type { AvailableSkill } from './skills/types.ts';
 import type { StreamPart } from './stream/types.ts';
 
 export type { StreamPart } from './stream/types.ts';
@@ -58,7 +58,7 @@ export interface GuardrailContext {
   /** Names of tools available to the agent */
   availableTools: string[];
   /** Skills available in context (for detecting skill/tool confusion) */
-  availableSkills: SkillPathMapping[];
+  availableSkills: AvailableSkill[];
 }
 
 /**

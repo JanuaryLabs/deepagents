@@ -360,8 +360,7 @@ describe('Guardrail System', () => {
           {
             name: 'test-skill',
             description: 'Test skill',
-            host: '/skills/test-skill/SKILL.md',
-            sandbox: '/skills/test-skill/SKILL.md',
+            path: '/skills/test-skill/SKILL.md',
           },
         ],
       });

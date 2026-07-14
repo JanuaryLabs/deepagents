@@ -175,9 +175,13 @@ independent systems explicitly at the call site:
 1. createDockerSandbox(sandboxOptions)
    └─ Returns: DisposableSandbox { executeCommand, spawn, readFile, writeFiles, dispose }
 
-2. createBashTool({ sandbox, skills, ...bashOptions })
-   └─ Returns: { bash, tools, sandbox, skills }
+2. createBashTool({ sandbox, ...bashOptions })
+   └─ Returns: { bash, tools, sandbox }
 ```
+
+Skill provisioning and discovery are application concerns. After making files
+available through the backend, pass explicit `AvailableSkill[]` metadata to the
+`skills()` context fragment; `createBashTool` does not inspect those files.
 
 Any `DisposableSandbox` matches what `createBashTool` expects from its
 `sandbox` parameter (`executeCommand(command, options?) → { stdout, stderr,

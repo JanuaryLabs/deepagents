@@ -50,7 +50,7 @@ import {
 } from './resolvers/index.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { SavePipeline, type SaveResult } from './save/save-pipeline.ts';
-import type { SkillPathMapping } from './skills/types.ts';
+import type { AvailableSkill } from './skills/types.ts';
 import { InMemoryContextStore } from './store/memory.store.ts';
 import {
   type BranchData,
@@ -167,15 +167,14 @@ function mergeLanguageModelUsage(
   };
 }
 
-function isSkillPathMapping(value: unknown): value is SkillPathMapping {
+function isAvailableSkill(value: unknown): value is AvailableSkill {
   return (
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
     typeof (value as Record<string, unknown>).name === 'string' &&
     typeof (value as Record<string, unknown>).description === 'string' &&
-    typeof (value as Record<string, unknown>).host === 'string' &&
-    typeof (value as Record<string, unknown>).sandbox === 'string'
+    typeof (value as Record<string, unknown>).path === 'string'
   );
 }
 
@@ -1534,34 +1533,23 @@ export class ContextEngine {
     return child;
   }
 
-  /**
-   * Extract skill mounts from available_skills fragments.
-   * Returns unified mount array where entries with `name` are individual skills.
-   *
-   * @example
-   * ```ts
-   * const context = new ContextEngine({ store, chatId, userId })
-   *   .set(skills({ paths: [{ host: './skills', sandbox: '/skills' }] }));
-   *
-   * const { mounts } = context.getSkillMounts();
-   * // mounts: [{ name: 'bi-dashboards', host: './skills/bi-dashboards/SKILL.md', sandbox: '/skills/bi-dashboards/SKILL.md' }]
-   *
-   * // Extract skills only (entries with name)
-   * const skills = mounts.filter(m => m.name);
-   * ```
-   */
-  public getSkillMounts() {
+  /** Return the explicit skills from the first available_skills fragment. */
+  public getAvailableSkills(): AvailableSkill[] {
     for (const fragment of this.#fragments) {
-      const mounts = fragment.metadata?.mounts;
+      const skills = fragment.metadata?.skills;
       if (
         fragment.name === 'available_skills' &&
-        Array.isArray(mounts) &&
-        mounts.every(isSkillPathMapping)
+        Array.isArray(skills) &&
+        skills.every(isAvailableSkill)
       ) {
-        return { mounts };
+        return skills.map(({ name, description, path }) => ({
+          name,
+          description,
+          path,
+        }));
       }
     }
-    return { mounts: [] };
+    return [];
   }
 
   /**

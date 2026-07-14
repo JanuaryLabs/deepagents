@@ -1,40 +1,49 @@
 import dedent from 'dedent';
 
 import type { ContextFragment } from '../fragments.ts';
-import type { AgentSandbox } from '../sandbox/types.ts';
+import type { AvailableSkill } from './types.ts';
 
 /**
- * Create a context fragment containing available skills metadata from a
- * sandbox.
+ * Create a context fragment from skills the application has made available.
  *
  * Follows Anthropic's progressive disclosure pattern:
  * - At startup: only skill metadata (name, description, path) is injected
  * - At runtime: LLM reads full SKILL.md using file tools when relevant
  *
- * @param sandbox - An AgentSandbox whose `.skills` has been populated by
- * `createBashTool`.
+ * Provisioning and discovery belong to the application. This fragment only
+ * renders the explicit model-facing metadata it receives.
  *
  * @example
  * ```ts
- * const sandbox = await createBashTool({
- *   skills: [{ host: './skills', sandbox: '/skills/skills' }],
- * });
- * context.set(role('You are a helpful assistant.'), skills(sandbox));
+ * const availableSkills = [{
+ *   name: 'deploy',
+ *   description: 'Deploy services to production.',
+ *   path: '/skills/deploy/SKILL.md',
+ * }];
+ * context.set(role('You are a helpful assistant.'), skills(availableSkills));
  * ```
  */
-export function skills(sandbox: AgentSandbox): ContextFragment {
-  const mounts = sandbox.skills ?? [];
+export function skills(availableSkills: AvailableSkill[]): ContextFragment {
+  const skillSnapshot = availableSkills.map(({ name, description, path }) => ({
+    name,
+    description,
+    path,
+  }));
 
-  if (mounts.length === 0) {
-    return { name: 'available_skills', data: [], metadata: { mounts: [] } };
+  if (skillSnapshot.length === 0) {
+    return {
+      name: 'available_skills',
+      data: [],
+      metadata: { skills: skillSnapshot },
+    };
   }
 
-  const skillFragments: ContextFragment[] = mounts.map((mount) => ({
+  const skillFragments: ContextFragment[] = skillSnapshot.map((skill) => ({
     name: 'skill',
     data: {
-      name: mount.name,
-      path: mount.sandbox,
-      description: mount.description,
+      name: skill.name,
+      path: skill.path,
+      description: skill.description,
     },
   }));
 
@@ -44,7 +53,7 @@ export function skills(sandbox: AgentSandbox): ContextFragment {
       { name: 'instructions', data: SKILLS_INSTRUCTIONS } as ContextFragment,
       ...skillFragments,
     ],
-    metadata: { mounts },
+    metadata: { skills: skillSnapshot },
   };
 }
 

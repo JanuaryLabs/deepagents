@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  type AvailableSkill,
   type ClassifierMatch,
   type ClassifierOptions,
   ContextEngine,
@@ -12,18 +13,16 @@ import {
   skillsReminder,
   user,
 } from '@deepagents/context';
-import type { SkillMetadata } from '@deepagents/context';
 
-function makeSkill(name: string, description: string): SkillMetadata {
+function makeSkill(name: string, description: string): AvailableSkill {
   return {
     name,
     description,
-    path: `/skills/${name}`,
-    skillMdPath: `/skills/${name}/SKILL.md`,
+    path: `/skills/${name}/SKILL.md`,
   };
 }
 
-const testSkills: SkillMetadata[] = [
+const testSkills: AvailableSkill[] = [
   makeSkill(
     'deploy-helper',
     'Assists with deployment workflows and CI/CD pipelines',
@@ -129,11 +128,11 @@ describe('skillsReminder', () => {
   });
 
   it('accepts a custom classifier implementing IClassifier', async () => {
-    const customClassifier: IClassifier<SkillMetadata> = {
+    const customClassifier: IClassifier<AvailableSkill> = {
       match(
         _query: string,
         _options?: ClassifierOptions,
-      ): ClassifierMatch<SkillMetadata>[] {
+      ): ClassifierMatch<AvailableSkill>[] {
         return [
           {
             item: makeSkill('custom-skill', 'A custom matched skill'),

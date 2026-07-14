@@ -15,5 +15,4 @@ export * from './microsandbox-sandbox.ts';
 export * from './shell-quote.ts';
 export * from './subcommand.ts';
 export * from './types.ts';
-export * from './upload-skills.ts';
 export * from './virtual-sandbox.ts';

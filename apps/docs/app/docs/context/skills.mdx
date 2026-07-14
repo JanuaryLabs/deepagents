@@ -1,284 +1,178 @@
 ---
 title: Skills
-description: Progressive disclosure of agent capabilities through discoverable SKILL.md files
+description: Progressive disclosure from an application-owned catalog of SKILL.md files
 ---
 
-Skills are modular instruction packages that extend an agent's capabilities. They follow Anthropic's progressive disclosure pattern: at startup only metadata (name and description) is loaded into context, and the LLM reads the full instructions from disk only when a skill is relevant.
+Skills are modular instruction packages that an application makes available to
+an agent. The system prompt contains only each skill's name, description, and
+model-visible `SKILL.md` path. When a skill applies, the model reads the full
+instructions through its file tools.
 
-## How Progressive Disclosure Works
+## Ownership
 
-```
-Startup:
-  skills/
-    deploy/SKILL.md     →  { name: "deploy", description: "Deploy to production" }
-    refactor/SKILL.md   →  { name: "refactor", description: "Refactor code" }
+The application owns both provisioning and discovery:
 
-  Only name + description injected into system prompt.
+| Responsibility | Owner |
+| --- | --- |
+| Put skill files in a filesystem the agent can read | Application |
+| Discover skills or read a catalog/manifest | Application |
+| Construct `AvailableSkill[]` | Application |
+| Render the explicit catalog into context | `skills()` fragment |
+| Read a selected `SKILL.md` at runtime | Model through its file tools |
 
-Runtime:
-  User says "deploy the app"
-  → LLM matches "deploy" skill
-  → LLM reads /skills/deploy/SKILL.md for full instructions
-  → LLM follows the workflow
-```
+`createBashTool()` does not upload, mount, discover, or expose skills. The
+`skills()` fragment does not inspect a sandbox or filesystem. This keeps the
+context layer independent from local directories, GCS, container volumes, and
+provider-specific upload APIs.
 
-This keeps the system prompt small while making dozens of skills discoverable.
+## AvailableSkill
 
-## The SKILL.md Format
-
-Each skill lives in its own directory and is defined by a `SKILL.md` file with YAML frontmatter:
-
-```markdown title="skills/deploy/SKILL.md"
----
-name: deploy
-description: Deploy services to production with zero-downtime rollouts
----
-
-## Workflow
-
-1. Run pre-deploy checks
-2. Build the container image
-3. Push to registry
-4. Roll out with health checks
-
-## Output
-
-Return a summary of what was deployed and the health check results.
-```
-
-import { File, Files, Folder } from 'fumadocs-ui/components/files';
-
-<Files>
-  <Folder name="skills" defaultOpen>
-    <Folder name="deploy" defaultOpen>
-      <File name="SKILL.md" />
-      <Folder name="scripts">
-        <File name="health-check.sh" />
-      </Folder>
-    </Folder>
-    <Folder name="refactor" defaultOpen>
-      <File name="SKILL.md" />
-      <Folder name="references">
-        <File name="patterns.md" />
-      </Folder>
-    </Folder>
-  </Folder>
-</Files>
-
-The frontmatter requires exactly two fields:
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `name` | `string` | Unique skill identifier |
-| `description` | `string` | Short description shown to the LLM for matching |
-
-The body after the frontmatter contains the full instructions the LLM reads at runtime.
-
-## Discovering Skills
-
-`discoverSkillsInDirectory()` scans a directory for subdirectories containing `SKILL.md` files and returns their metadata:
+The caller describes each available skill with one model-facing type:
 
 ```typescript
-import { discoverSkillsInDirectory } from '@deepagents/context';
-
-const skills = discoverSkillsInDirectory('./skills');
-// [
-//   { name: 'deploy', description: 'Deploy to production', path: './skills/deploy', skillMdPath: './skills/deploy/SKILL.md' },
-//   { name: 'refactor', description: 'Refactor code', path: './skills/refactor', skillMdPath: './skills/refactor/SKILL.md' },
-// ]
+interface AvailableSkill {
+  name: string;
+  description: string;
+  /** Path to SKILL.md as seen by the model's file tools. */
+  path: string;
+}
 ```
 
-Tilde paths (`~/`) are expanded to the user's home directory. Directories without a `SKILL.md` are silently skipped. Invalid `SKILL.md` files log a warning and are excluded.
-
-## Loading Individual Skills
-
-`loadSkillMetadata()` loads metadata from a single `SKILL.md` path. It parses only the frontmatter -- the body is never loaded into memory:
+`path` is the runtime-visible file path, not a host-side source path. For
+example, if a GCS-backed volume is mounted at `/skills`, the catalog might be:
 
 ```typescript
-import { loadSkillMetadata } from '@deepagents/context';
+import type { AvailableSkill } from '@deepagents/context';
 
-const skill = loadSkillMetadata('./skills/deploy/SKILL.md');
-// { name: 'deploy', description: 'Deploy to production', path: './skills/deploy', skillMdPath: './skills/deploy/SKILL.md' }
+const availableSkills: AvailableSkill[] = [
+  {
+    name: 'deploy',
+    description: 'Deploy services with safe rollout checks.',
+    path: '/skills/deploy/SKILL.md',
+  },
+  {
+    name: 'data-analysis',
+    description: 'Analyze datasets and summarize findings.',
+    path: '/skills/data-analysis/SKILL.md',
+  },
+];
 ```
 
-## Parsing Frontmatter
+GCS is storage, not an implicit skills registry. Your application can build
+this array from a GCS manifest, a database, configuration, or its own scan of
+the mounted filesystem. The context package does not choose one of those
+sources.
 
-`parseFrontmatter()` parses a `SKILL.md` string into its frontmatter and body:
+## Provision the Files
+
+Provisioning happens before the fragment is created. A container application
+can mount a volume when it creates the sandbox backend:
 
 ```typescript
-import { parseFrontmatter } from '@deepagents/context';
+const backend = await createDockerSandbox({
+  volumes: [
+    {
+      type: 'bind',
+      hostPath: '/mnt/gcs/agent-skills',
+      containerPath: '/skills',
+      readOnly: true,
+    },
+  ],
+});
 
-const content = `---
-name: deploy
-description: Deploy to production
----
-
-## Workflow
-1. Build
-2. Push
-3. Roll out`;
-
-const { frontmatter, body } = parseFrontmatter(content);
-// frontmatter: { name: 'deploy', description: 'Deploy to production' }
-// body: '## Workflow\n1. Build\n2. Push\n3. Roll out'
+const sandbox = await createBashTool({ sandbox: backend });
 ```
 
-Throws if the frontmatter is missing or lacks the required `name` and `description` fields.
+The same boundary applies to other runtimes: the application may use a native
+volume, image layer, remote sandbox API, or a generic file-copy step. Whatever
+mechanism it uses must make every supplied `AvailableSkill.path` readable by
+the model's tools.
 
-## The skills() Fragment
+## Add the Catalog to Context
 
-The `skills()` fragment is a thin projection of `sandbox.skills`. The **sandbox** is now the single source of truth: you declare skill directories when you build the sandbox, and the factory (a) uploads the files into the sandbox filesystem and (b) parses each `SKILL.md` frontmatter into `sandbox.skills`. The fragment just renders that array into the system prompt.
+Pass the explicit array to `skills()`:
 
 ```typescript
 import {
   ContextEngine,
-  SqliteContextStore,
-  createBashTool,
+  InMemoryContextStore,
   role,
   skills,
 } from '@deepagents/context';
 
-const sandbox = await createBashTool({
-  skills: [{ host: './skills', sandbox: '/skills' }],
-});
-
-const store = new SqliteContextStore('./chat.db');
 const context = new ContextEngine({
-  store,
+  store: new InMemoryContextStore(),
   chatId: 'chat-001',
   userId: 'user-001',
 }).set(
   role('You are a helpful assistant.'),
-  skills(sandbox),
+  skills(availableSkills),
 );
 ```
 
-### Filtering
+The fragment renders:
 
-Filtering now happens at the sandbox level: pass only the host directories you want, or pre-filter the skills array before building the sandbox. The old `include` / `exclude` options on `skills()` have been removed because they could declare a skill that wasn't actually uploaded.
+1. instructions explaining progressive disclosure and trigger rules; and
+2. one `skill` entry per supplied item, containing `name`, `description`, and
+   `path`.
 
-### Generated Fragment
+It does not check that paths exist. File accessibility remains the
+application's responsibility.
 
-The `skills()` function returns an `available_skills` fragment containing:
+## Read the Catalog from Context
 
-1. An `instructions` fragment with guidance on how the LLM should discover and use skills
-2. One `skill` fragment per discovered skill with `name`, `path`, and `description`
-
-The instructions tell the LLM to:
-- Match user requests to skill names or descriptions
-- Read the `SKILL.md` file on demand (progressive disclosure)
-- Load only the specific reference files needed, not everything
-- Prefer running existing scripts over rewriting code
-- Announce which skills are being used and why
-- Understand that there is no separate skill tool, invoke action, command, or API -- using a skill means reading its `SKILL.md` and following the workflow defined there
-
-The instructions also embed correct/incorrect usage examples so the LLM avoids a common misunderstanding: if a user says "use the onboarding skill", the correct behavior is to read the onboarding `SKILL.md` and follow it, not to claim a separate skill tool needs to be called, invoked, or activated first.
-
-## Extracting Available Skills
-
-Two ways to reach skill metadata after a sandbox has been built:
-
-- **`sandbox.skills`** — the discovered mounts, directly on the sandbox. This is the source of truth.
-- **`ContextEngine.getSkillMounts()`** — reads the same data from the `available_skills` fragment after you've called `set(skills(sandbox))`. Used by the agent framework to populate `GuardrailContext.availableSkills`, enabling guardrails to detect when the LLM confuses skills with tools.
+`ContextEngine.getAvailableSkills()` returns the catalog stored by the first
+`available_skills` fragment:
 
 ```typescript
-const sandbox = await createBashTool({
-  skills: [{ host: './skills', sandbox: '/skills' }],
-});
-const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' })
-  .set(skills(sandbox));
-
-const { mounts } = context.getSkillMounts();
-// [
-//   {
-//     name: 'deploy',
-//     description: 'Deploy to production',
-//     host: './skills/deploy/SKILL.md',
-//     sandbox: '/skills/deploy/SKILL.md',
-//   },
-// ]
+const catalog = context.getAvailableSkills();
+// [{ name: 'deploy', description: '...', path: '/skills/deploy/SKILL.md' }]
 ```
 
-Each entry is a `SkillPathMapping`:
+The agent uses this same catalog for `GuardrailContext.availableSkills`, so a
+guardrail that corrects skill/tool confusion refers to the exact path shown to
+the model.
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `name` | `string` | Skill name |
-| `description` | `string` | Skill description |
-| `host` | `string` | Path to the `SKILL.md` on the host |
-| `sandbox` | `string` | Path to the `SKILL.md` inside the sandbox |
+## Parse Frontmatter Content
 
-## Skill Classifier
-
-The skill classifier ranks skills against user messages using BM25 text similarity. Instead of relying on the LLM to pattern-match skill names at inference time, the classifier scores each skill's name and description against the user's input and surfaces the top matches as a soft nudge in the prompt.
-
-### BM25SkillClassifier
-
-The default implementation indexes skill metadata (name + description) into a BM25 corpus and ranks matches by relevance score:
+`parseFrontmatter()` remains available as a host-neutral utility. It parses a
+string that your application has already read; it does not read a path or
+discover directories.
 
 ```typescript
-import { BM25SkillClassifier, discoverSkillsInDirectory } from '@deepagents/context';
+import { parseFrontmatter } from '@deepagents/context';
 
-const skills = discoverSkillsInDirectory('./skills');
-const classifier = new BM25SkillClassifier(skills);
+const source = `---
+name: deploy
+description: Deploy services safely
+---
 
-const matches = classifier.match('deploy my docker container', { topN: 3 });
-// [
-//   { item: { name: 'deploy-helper', ... }, score: 0.82 },
-//   { item: { name: 'docker-expert', ... }, score: 0.71 },
-// ]
+## Workflow
+1. Validate
+2. Roll out`;
+
+const { frontmatter, body } = parseFrontmatter(source);
 ```
 
-### SkillClassifierOptions
+Your discovery code can combine the parsed `name` and `description` with the
+runtime path it assigned to build an `AvailableSkill`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `topN` | `number` | `5` | Maximum number of matches to return |
-| `threshold` | `number` | `0` | Minimum score to include a match |
+## Skill Reminders
 
-### skillsReminder()
+The baseline `skills()` fragment lists the entire explicit catalog.
+`skillsReminder()` is separate: it ranks the same `AvailableSkill[]` against a
+user message and repeats the most relevant entries as a reminder. See
+[Skill Reminders](/docs/context/skill-reminders).
 
-`skillsReminder()` bridges the classifier with the [reminder system](/docs/context/reminders). It matches user messages against skills and injects relevant matches as a `<system-reminder>`. See [Skill Reminders](/docs/context/skill-reminders) for full usage, custom classifiers, and related predicates.
+## Provider-Native Skills
 
-## Types
-
-```typescript
-interface SkillMetadata {
-  name: string;
-  description: string;
-  path: string;
-  skillMdPath: string;
-}
-
-interface SkillPathMapping {
-  name: string;
-  description: string;
-  host: string;
-  sandbox: string;
-}
-
-interface ParsedSkillMd {
-  frontmatter: { name: string; description: string; [key: string]: unknown };
-  body: string;
-}
-
-interface ISkillClassifier {
-  match(query: string, options?: SkillClassifierOptions): SkillMatch[];
-}
-
-interface SkillMatch {
-  item: SkillMetadata;
-  score: number;
-}
-
-interface SkillClassifierOptions {
-  topN?: number;
-  threshold?: number;
-}
-```
+AI providers may offer APIs that upload file content into a provider-managed
+skill store. That is a separate deployment model. Files already exposed to an
+agent through a mounted volume do not need to be uploaded by this fragment or
+by `createBashTool()`.
 
 ## Next Steps
 
-- [Fragments](/docs/context/fragments) - How fragments work
-- [Context Engine](/docs/context/context-engine) - Managing fragments with ContextEngine
-- [Agent Wrapper](/docs/context/agent) - Running agents in sandboxed containers
+- [Sandbox](/docs/context/sandbox) — choose and provision a runtime filesystem
+- [Skill Reminders](/docs/context/skill-reminders) — surface relevant skills per query
+- [Guardrails](/docs/context/guardrails) — inspect available skills during streaming

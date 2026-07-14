@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  type AvailableSkill,
   XmlRenderer,
   applyUserRemindersToMessage,
   fromFragment,
@@ -10,6 +11,7 @@ import {
   identity,
   isSyntheticReminderMessage,
   render,
+  skills,
   stripReminders,
   stripTextByRanges,
   synthesizeReminderMessage,
@@ -29,6 +31,22 @@ describe('browser export path', () => {
     assert.ok(output.includes('<instructions>'));
     assert.ok(output.includes('<identity>'));
     assert.ok(output.includes('<term>'));
+  });
+
+  it('renders caller-owned skills through the browser entrypoint', () => {
+    const availableSkills: AvailableSkill[] = [
+      {
+        name: 'deploy',
+        description: 'Deploy services to production.',
+        path: '/skills/deploy/SKILL.md',
+      },
+    ];
+
+    const output = render('instructions', skills(availableSkills));
+
+    assert.ok(output.includes('<available_skills>'));
+    assert.ok(output.includes('<name>deploy</name>'));
+    assert.ok(output.includes('<path>/skills/deploy/SKILL.md</path>'));
   });
 
   it('supports reminder metadata helpers through browser entrypoint', () => {

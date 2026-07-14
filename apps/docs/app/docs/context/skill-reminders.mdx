@@ -16,14 +16,12 @@ const skills = [
   {
     name: 'deploy-helper',
     description: 'Assists with deployment workflows and CI/CD pipelines',
-    path: '/skills/deploy-helper',
-    skillMdPath: '/skills/deploy-helper/SKILL.md',
+    path: '/skills/deploy-helper/SKILL.md',
   },
   {
     name: 'docker-expert',
     description: 'Docker containerization and multi-stage builds',
-    path: '/skills/docker-expert',
-    skillMdPath: '/skills/docker-expert/SKILL.md',
+    path: '/skills/docker-expert/SKILL.md',
   },
 ];
 
@@ -46,33 +44,34 @@ The reminder self-gates: when no skills match (score below threshold or unrelate
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `skillsOrClassifier` | `SkillMetadata[] \| IClassifier<SkillMetadata>` | Array of skills or a custom classifier |
+| `skillsOrClassifier` | `AvailableSkill[] \| IClassifier<AvailableSkill>` | Array of skills or a custom classifier |
 | `options.topN` | `number` | Max results to return (default: `5`) |
 | `options.threshold` | `number` | Minimum score to include (default: `0`) |
 
-## SkillMetadata
+## AvailableSkill
 
-Each skill needs four fields:
+Each skill needs three model-facing fields:
 
 ```ts
-interface SkillMetadata {
-  name: string;        // Skill name from frontmatter
-  description: string; // Skill description from frontmatter
-  path: string;        // Full path to the skill directory
-  skillMdPath: string; // Full path to the SKILL.md file
+interface AvailableSkill {
+  name: string;        // Skill name shown to the model
+  description: string; // Description used for matching
+  path: string;        // Model-visible path to SKILL.md
 }
 ```
 
-Use the `skills()` fragment helper or `loadSkillMetadata()` from the [Skills](/docs/context/skills) module to populate these from SKILL.md files automatically.
+The application provisions and discovers skills, then passes the same array to
+`skills()` and `skillsReminder()`. See [Skills](/docs/context/skills) for the
+ownership boundary.
 
 ## Custom Classifiers
 
-The classifier system is generic. `skillsReminder` accepts any `IClassifier<SkillMetadata>`, so you can replace BM25 with embeddings, an LLM call, or any other matching strategy.
+The classifier system is generic. `skillsReminder` accepts any `IClassifier<AvailableSkill>`, so you can replace BM25 with embeddings, an LLM call, or any other matching strategy.
 
 ```ts
-import { user, skillsReminder, type IClassifier, type ClassifierMatch, type SkillMetadata } from '@deepagents/context';
+import { user, skillsReminder, type IClassifier, type ClassifierMatch, type AvailableSkill } from '@deepagents/context';
 
-const classifier: IClassifier<SkillMetadata> = {
+const classifier: IClassifier<AvailableSkill> = {
   match(query, options) {
     // Your matching logic — embeddings, LLM-based, regex, etc.
     return [
@@ -86,7 +85,7 @@ engine.set(skillsReminder(classifier, { topN: 5 }), user('anything'));
 
 ### IClassifier Interface
 
-`IClassifier<T>` is a generic interface exported from the package root. The skills module uses `IClassifier<SkillMetadata>` as its concrete type.
+`IClassifier<T>` is a generic interface exported from the package root. The skills module uses `IClassifier<AvailableSkill>` as its concrete type.
 
 ```ts
 interface IClassifier<T> {
@@ -115,7 +114,7 @@ const classifier = new BM25Classifier(skills);
 const matches = classifier.match('optimize SQL queries', { topN: 3 });
 ```
 
-When used with `skillsReminder`, this is equivalent to passing the skills array directly (which creates a `BM25Classifier<SkillMetadata>` internally).
+When used with `skillsReminder`, this is equivalent to passing the skills array directly (which creates a `BM25Classifier<AvailableSkill>` internally).
 
 You can reuse a single classifier instance across multiple `skillsReminder()` calls to avoid rebuilding the corpus.
 

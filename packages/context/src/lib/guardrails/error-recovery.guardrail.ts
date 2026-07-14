@@ -84,7 +84,7 @@ export const errorRecoveryGuardrail: Guardrail = {
       if (matchingSkill) {
         return logAndFail(
           `Skill confused as tool: ${toolName}`,
-          `"${toolName}" is a skill, not a tool. There is no separate invoke action for it. Read the skill at ${matchingSkill.sandbox} and follow the instructions there.`,
+          `"${toolName}" is a skill, not a tool. There is no separate invoke action for it. Read the skill at ${matchingSkill.path} and follow the instructions there.`,
         );
       }
 

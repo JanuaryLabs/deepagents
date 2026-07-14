@@ -5,7 +5,8 @@
  * specialized knowledge, workflows, and tools. They use progressive
  * disclosure to minimize context window usage:
  *
- * 1. At startup: only skill metadata (name + description) is loaded
+ * 1. At startup: the application supplies skill metadata (name, description,
+ *    and model-visible path)
  * 2. At runtime: LLM reads full SKILL.md using file tools when relevant
  * 3. As needed: LLM navigates to references/, scripts/, assets/
  *
@@ -13,25 +14,25 @@
  * ```ts
  * import { skills } from '@deepagents/context';
  *
- * // Add skills metadata to context with sandbox path mapping
+ * const availableSkills = [{
+ *   name: 'deploy',
+ *   description: 'Deploy services to production.',
+ *   path: '/skills/deploy/SKILL.md',
+ * }];
+ *
  * const context = new ContextEngine({ userId: 'demo-user', store, chatId: 'demo' })
  *   .set(
  *     role('You are a helpful assistant.'),
- *     skills({
- *       paths: [
- *         { host: './skills', sandbox: '/skills/local' },
- *         { host: '~/.deepagents/skills', sandbox: '/skills/global' }
- *       ]
- *     }),
+ *     skills(availableSkills),
  *   );
  *
- * // LLM sees sandbox paths and reads full content when needed
+ * // LLM sees the supplied paths and reads full content when needed
  * ```
  *
  * @module
  */
 
 export * from './fragments.ts';
-export * from './loader.ts';
+export * from './frontmatter.ts';
 export * from './skill-reminder.ts';
 export * from './types.ts';

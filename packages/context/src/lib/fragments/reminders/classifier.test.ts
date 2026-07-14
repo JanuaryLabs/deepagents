@@ -1,19 +1,17 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { BM25Classifier } from '@deepagents/context';
-import type { SkillMetadata } from '@deepagents/context';
+import { type AvailableSkill, BM25Classifier } from '@deepagents/context';
 
-function makeSkill(name: string, description: string): SkillMetadata {
+function makeSkill(name: string, description: string): AvailableSkill {
   return {
     name,
     description,
-    path: `/skills/${name}`,
-    skillMdPath: `/skills/${name}/SKILL.md`,
+    path: `/skills/${name}/SKILL.md`,
   };
 }
 
-const testSkills: SkillMetadata[] = [
+const testSkills: AvailableSkill[] = [
   makeSkill(
     'deploy-helper',
     'Assists with deployment workflows and CI/CD pipelines',

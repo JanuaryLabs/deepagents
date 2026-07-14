@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import { printer } from '@deepagents/agent';
 
 import {
+  type AvailableSkill,
   type ContextFragment,
   InMemoryContextStore,
   XmlRenderer,
@@ -31,6 +32,14 @@ import { ContextEngine } from './lib/engine.ts';
 
 // Create a shared store for persistence
 const store = new InMemoryContextStore();
+
+const availableSkills: AvailableSkill[] = [
+  {
+    name: 'presenterm',
+    description: 'Create and deliver terminal-based presentations.',
+    path: '/skills/presenterm/SKILL.md',
+  },
+];
 
 async function createAgentSandbox() {
   // File-change tracking is always on via strace, so the backend must host it —
@@ -515,21 +524,17 @@ async function demonstrateSearch() {
  * Example: Skills System (Anthropic-style progressive disclosure)
  *
  * Demonstrates how to use the skills system:
- * 1. Create a registry with skill directories
- * 2. Discover skills (loads metadata only - name + description)
- * 3. Add skills fragment to context (metadata injected into system prompt)
- * 4. LLM reads full SKILL.md content when relevant using file tools
+ * 1. Provision skill files in the sandbox (application responsibility)
+ * 2. Discover or load skill metadata (application responsibility)
+ * 3. Pass explicit metadata to the skills fragment
+ * 4. Let the LLM read full SKILL.md content through its file tools
  */
 async function demonstrateSkills() {
   const skillSandbox = await createBashTool({
     sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
-    skills: [
-      {
-        host: 'packages/context/src/skills',
-        sandbox: '/skills/skills',
-      },
-    ],
   });
+  // The application must separately ensure `availableSkills[*].path` is
+  // readable in this sandbox, for example through a GCS-backed volume.
 
   const skillStore = new InMemoryContextStore();
   const context = new ContextEngine({
@@ -538,7 +543,7 @@ async function demonstrateSkills() {
     chatId: 'skill-demo',
   }).set(
     role('You are a helpful assistant with access to specialized skills.'),
-    skills(skillSandbox),
+    skills(availableSkills),
   );
 
   // Resolve to see what the LLM receives
@@ -603,12 +608,6 @@ async function createSkillAwareAgent() {
 
   const skillSandbox = await createBashTool({
     sandbox: await createDockerSandbox({ installers: [pkg(['strace'])] }),
-    skills: [
-      {
-        host: 'packages/context/src/skills',
-        sandbox: '/skills/skills',
-      },
-    ],
     onBeforeBashCall: ({ command }) => {
       console.log(chalk.blue(`[Bash Tool] Executing: ${command}`));
       return { command };
@@ -631,7 +630,7 @@ async function createSkillAwareAgent() {
     role(
       `You are a helpful assistant with access to specialized skills. your main tool is bash tool to read files and execute commands on the user's behalf.`,
     ),
-    skills(skillSandbox),
+    skills(availableSkills),
   );
   const skillAwareAgent = agent({
     name: 'skill_agent',
@@ -782,12 +781,6 @@ async function createDockerSkillAgent() {
   });
   const dockerSandbox = await createBashTool({
     sandbox: dockerBackend,
-    skills: [
-      {
-        host: 'packages/context/src/skills',
-        sandbox: '/skills/skills',
-      },
-    ],
     onBeforeBashCall: ({ command }) => {
       console.log(chalk.blue(`[Docker Agent] ${command}`));
       return { command };
@@ -799,7 +792,7 @@ async function createDockerSkillAgent() {
       userId: 'demo-user',
       store: new InMemoryContextStore(),
       chatId: 'docker-skill-agent',
-    }).set(role(`You are a system admin.`), skills(dockerSandbox));
+    }).set(role(`You are a system admin.`), skills(availableSkills));
 
     // Create the agent
     const dockerAgent = agent({

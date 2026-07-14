@@ -5,18 +5,18 @@ description: Convenience wrapper that combines ContextEngine with the AI SDK int
 
 The `agent()` function combines a `ContextEngine` and an AI SDK model into a single object with `generate()`, `stream()`, `clone()`, `asTool()`, and `asAdvisor()` methods. It resolves context, repairs tool calls when needed, and can retry streamed output through guardrails without extra orchestration in your app.
 
-Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `readFile`, and `writeFile` tools plus a `skills` array. The sandbox is created externally and passed in; the agent does not create or dispose it.
+Every agent requires a **sandbox** — an `AgentSandbox` that provides `bash`, `readFile`, and `writeFile` tools. The sandbox is created externally and passed in; the agent does not create or dispose it. Skills are declared separately on the context with `skills(availableSkills)`.
 
 ## Sandbox Options
 
-| Approach                                                     | When to use                                 | Docker? | Supports `skills` |
-| ------------------------------------------------------------ | ------------------------------------------- | ------- | ----------------- |
-| `createVirtualSandbox()` + `createBashTool()`                | Local dev, tests, lightweight tasks         | No      | Yes               |
-| `createDockerSandbox()` + `createBashTool()`                 | Real binaries in isolated Docker containers | Yes     | Yes               |
-| `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes                   | No      | Yes               |
-| `createBashTool({ sandbox: e2bSandbox })`                    | Other cloud sandboxes via adapter           | No      | Yes               |
+| Approach                                                     | When to use                                 | Docker? |
+| ------------------------------------------------------------ | ------------------------------------------- | ------- |
+| `createVirtualSandbox()` + `createBashTool()`                | Local dev, tests, lightweight tasks         | No      |
+| `createDockerSandbox()` + `createBashTool()`                 | Real binaries in isolated Docker containers | Yes     |
+| `createDaytonaSandbox(client, options)` + `createBashTool()` | Managed Daytona sandboxes                   | No      |
+| `createBashTool({ sandbox: e2bSandbox })`                    | Other cloud sandboxes via adapter           | No      |
 
-`createBashTool` is owned by `@deepagents/context`; it adds the AI SDK tools to an explicit backend, supports skill uploads, and returns an `AgentSandbox`.
+`createBashTool` is owned by `@deepagents/context`; it adds AI SDK bash and file tools to an explicit backend and returns an `AgentSandbox`. It has no skills-specific behavior.
 
 ```typescript
 import { InMemoryFs } from 'just-bash';
@@ -32,14 +32,11 @@ const sandbox = await createBashTool({
 ```typescript
 import { createBashTool, createDockerSandbox, pkg } from '@deepagents/context';
 
-// Docker with skills: pick the backend, then layer the bash tool.
+// Pick the backend, then layer the bash tool.
 const backend = await createDockerSandbox({
   installers: [pkg(['curl', 'jq'])],
 });
-const sandbox = await createBashTool({
-  sandbox: backend,
-  skills: [{ host: './skills', sandbox: '/workspace/skills' }],
-});
+const sandbox = await createBashTool({ sandbox: backend });
 // Don't forget: await sandbox.sandbox.dispose() when done
 ```
 
@@ -194,7 +191,7 @@ const assistant = agent({
 | Option                | Type              | Default     | Description                                                                                                                                                                                                                   |
 | --------------------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`                | `string`          | required    | Identifier for logging and error messages                                                                                                                                                                                     |
-| `sandbox`             | `AgentSandbox`    | required    | Sandbox providing bash, readFile, writeFile tools plus `skills` — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
+| `sandbox`             | `AgentSandbox`    | required    | Sandbox providing bash, readFile, and writeFile tools — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
 | `context`             | `ContextEngine`   | `undefined` | Engine that resolves system prompt and messages                                                                                                                                                                               |
 | `model`               | `LanguageModelV4` | `undefined` | AI SDK model to use for generation                                                                                                                                                                                            |
 | `tools`               | `ToolSet`         | `{}`        | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict)                                                                                                                      |

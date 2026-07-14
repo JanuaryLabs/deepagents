@@ -1,30 +1,11 @@
-/**
- * Skill metadata parsed from SKILL.md frontmatter.
- * This is what gets loaded into context at startup.
- * Full skill content is read by LLM when needed (progressive disclosure).
- */
-export interface SkillMetadata {
-  /** Skill name from frontmatter */
+/** Model-facing metadata for a skill the application has made available. */
+export interface AvailableSkill {
+  /** Skill name shown to the model. */
   name: string;
-  /** Skill description from frontmatter */
+  /** Short description used to decide when the skill applies. */
   description: string;
-  /** Full path to the skill directory */
+  /** Path to the SKILL.md file as seen by the model's file tools. */
   path: string;
-  /** Full path to the SKILL.md file */
-  skillMdPath: string;
-}
-
-/**
- * Individual skill mount emitted by sandbox factories and consumed by the
- * `skills()` fragment.
- */
-export interface SkillPathMapping {
-  name: string;
-  description: string;
-  /** Host filesystem path to SKILL.md */
-  host: string;
-  /** Sandbox path to SKILL.md */
-  sandbox: string;
 }
 
 /**

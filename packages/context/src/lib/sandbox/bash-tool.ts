@@ -16,11 +16,9 @@ import type {
   CreateBashToolOptions,
   DisposableSandbox,
   ReadFileTool,
-  SkillUploadInput,
   WrappedBashTool,
   WriteFileTool,
 } from './types.ts';
-import { uploadSkills } from './upload-skills.ts';
 
 const DEFAULT_DESTINATION = '/workspace';
 const DEFAULT_MAX_FILES = 1_000;
@@ -108,12 +106,6 @@ const EXTENSION_FORMATS: Record<string, keyof typeof FORMAT_TOOLS> = {
   '.cfg': 'ini',
   '.conf': 'ini',
 };
-
-/** Options added by DeepAgents to the owned bash toolkit. */
-export interface CreateBashToolWithSkillsOptions extends CreateBashToolOptions {
-  /** Skill directories copied into the sandbox before the toolkit is returned. */
-  skills?: SkillUploadInput[];
-}
 
 /** Catch structured bash errors without spreading class-based sandboxes. */
 function withBashExceptionCatch(sandbox: DisposableSandbox): DisposableSandbox {
@@ -311,7 +303,7 @@ function createBashDescription(options: {
  * SDK tool calls into that backend contract.
  */
 export async function createBashTool(
-  options: CreateBashToolWithSkillsOptions,
+  options: CreateBashToolOptions,
 ): Promise<AgentSandbox> {
   const destination = options.destination ?? DEFAULT_DESTINATION;
   const initialFiles = await listInitialFiles(options);
@@ -430,9 +422,8 @@ export async function createBashTool(
     },
   });
 
-  const skills = await uploadSkills(options.sandbox, options.skills ?? []);
   const tools = withHostOnlyToolMetadata({ bash, readFile, writeFile });
-  return { bash: tools.bash, tools, sandbox, skills };
+  return { bash: tools.bash, tools, sandbox };
 }
 
 export { DEFAULT_MAX_OUTPUT_LENGTH };

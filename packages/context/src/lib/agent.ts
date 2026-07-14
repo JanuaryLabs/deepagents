@@ -324,10 +324,9 @@ class Agent<CIn, COut = CIn> {
           let attempt = 0;
 
           // Create guardrail context with available tools and skills
-          const { mounts } = context.getSkillMounts();
           const guardrailContext: GuardrailContext = {
             availableTools: Object.keys(this.tools),
-            availableSkills: mounts,
+            availableSkills: context.getAvailableSkills(),
           };
 
           while (attempt < maxRetries) {

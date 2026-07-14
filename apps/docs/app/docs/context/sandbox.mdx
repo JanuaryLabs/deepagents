@@ -31,8 +31,9 @@ All AI-agent-facing surfaces compose the same way: pick a backend factory
 (`createDockerSandbox` / `createAppleContainerSandbox` /
 `createMicrosandboxSandbox` / `createDaytonaSandbox` /
 `createAgentOsSandbox` / `createVirtualSandbox`), then wrap it with
-`createBashTool({ sandbox })` to get the bash tool, file tools, and skills
-upload. For per-command file-change tracking, first decorate a real backend
+`createBashTool({ sandbox })` to get the bash tool and file tools. Skill
+provisioning and discovery remain the application's responsibility. For
+per-command file-change tracking, first decorate a real backend
 with `withStraceFileChanges(...)`, then pass that tracked backend into
 `createBashTool`.
 
@@ -66,6 +67,7 @@ The fastest path for giving an AI agent a bash tool that runs in Docker:
 import { groq } from '@ai-sdk/groq';
 import { printer } from '@deepagents/agent';
 import {
+  type AvailableSkill,
   ContextEngine,
   InMemoryContextStore,
   agent,
@@ -80,15 +82,17 @@ import {
 const backend = await createDockerSandbox({
   installers: [pkg(['curl', 'jq'])],
 });
-const sandbox = await createBashTool({
-  sandbox: backend,
-  skills: [
-    { host: './skills', sandbox: '/workspace/skills' },
-  ],
-});
+const sandbox = await createBashTool({ sandbox: backend });
 
-// `sandbox.skills` is populated from on-disk SKILL.md frontmatter, and the
-// skill files are already uploaded into the container at `/workspace/skills`.
+// The application separately mounts or copies these files into the backend
+// and builds the catalog from its own manifest, database, or discovery logic.
+const availableSkills: AvailableSkill[] = [
+  {
+    name: 'deploy',
+    description: 'Deploy services safely.',
+    path: '/workspace/skills/deploy/SKILL.md',
+  },
+];
 
 try {
   const context = new ContextEngine({
@@ -99,7 +103,7 @@ try {
 
   context.set(
     role('You are a helpful assistant with bash access.'),
-    skills(sandbox),
+    skills(availableSkills),
     user('Use the most relevant skill to help me.'),
   );
 

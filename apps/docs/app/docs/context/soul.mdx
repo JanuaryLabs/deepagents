@@ -39,14 +39,14 @@ context.set(soul());
 
 ## Combining with Other Fragments
 
-The soul protocol works alongside other fragments. A typical setup pairs it with `role()` for base instructions and `skills()` for tool discovery:
+The soul protocol works alongside other fragments. A typical setup pairs it with `role()` for base instructions and an explicit `skills()` catalog:
 
 ```typescript
 import {
+  type AvailableSkill,
   ContextEngine,
   InMemoryContextStore,
   XmlRenderer,
-  createBashTool,
   soul,
   role,
   hint,
@@ -56,9 +56,13 @@ import {
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 
-const sandbox = await createBashTool({
-  skills: [{ host: './skills', sandbox: '/workspace/skills' }],
-});
+const availableSkills: AvailableSkill[] = [
+  {
+    name: 'typescript',
+    description: 'Apply project-specific TypeScript practices.',
+    path: '/workspace/skills/typescript/SKILL.md',
+  },
+];
 
 const store = new InMemoryContextStore();
 const context = new ContextEngine({
@@ -71,7 +75,7 @@ context.set(
   soul(),
   role('You are a personal coding assistant.'),
   hint('Prefer TypeScript examples over JavaScript'),
-  skills(sandbox),
+  skills(availableSkills),
 );
 
 context.set(user('Hello, I am Sarah. I work on backend systems.'));
