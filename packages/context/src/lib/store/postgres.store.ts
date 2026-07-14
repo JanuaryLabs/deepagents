@@ -7,6 +7,7 @@ import type {
   BranchInfo,
   ChatData,
   ChatInfo,
+  ChatUpdater,
   CheckpointData,
   CheckpointInfo,
   DeleteChatOptions,
@@ -254,45 +255,67 @@ export class PostgresContextStore extends ContextStore {
 
   async updateChat(
     chatId: string,
-    updates: Partial<Pick<ChatData, 'title' | 'metadata'>>,
+    update: ChatUpdater,
   ): Promise<StoredChatData> {
-    const setClauses: string[] = [
-      'updatedAt = (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT',
-    ];
-    const params: unknown[] = [];
-    let paramIndex = 1;
+    return this.#useTransaction(async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ${this.#t('chats')} WHERE id = $1 FOR UPDATE`,
+        [chatId],
+      );
+      const row = result.rows[0] as
+        | {
+            id: string;
+            userid: string;
+            title: string | null;
+            metadata: Record<string, unknown> | null;
+            createdat: string;
+            updatedat: string;
+          }
+        | undefined;
+      if (!row) {
+        throw new Error(`updateChat: chat "${chatId}" not found`);
+      }
 
-    if (updates.title !== undefined) {
-      setClauses.push(`title = $${paramIndex++}`);
-      params.push(updates.title ?? null);
-    }
-    if (updates.metadata !== undefined) {
-      setClauses.push(`metadata = $${paramIndex++}`);
-      params.push(JSON.stringify(updates.metadata));
-    }
+      const current: StoredChatData = {
+        id: row.id,
+        userId: row.userid,
+        title: row.title ?? undefined,
+        metadata: row.metadata ?? undefined,
+        createdAt: Number(row.createdat),
+        updatedAt: Number(row.updatedat),
+      };
+      const updates = update(current);
+      if (updates === undefined) return current;
 
-    params.push(chatId);
-    const rows = await this.#query<{
-      id: string;
-      userid: string;
-      title: string | null;
-      metadata: Record<string, unknown> | null;
-      createdat: string;
-      updatedat: string;
-    }>(
-      `UPDATE ${this.#t('chats')} SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-      params,
-    );
+      const setClauses = [
+        'updatedAt = (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT',
+      ];
+      const params: unknown[] = [];
+      let paramIndex = 1;
+      if (updates.title !== undefined) {
+        setClauses.push(`title = $${paramIndex++}`);
+        params.push(updates.title);
+      }
+      if (updates.metadata !== undefined) {
+        setClauses.push(`metadata = $${paramIndex++}`);
+        params.push(JSON.stringify(updates.metadata));
+      }
+      params.push(chatId);
 
-    const row = rows[0];
-    return {
-      id: row.id,
-      userId: row.userid,
-      title: row.title ?? undefined,
-      metadata: row.metadata ?? undefined,
-      createdAt: Number(row.createdat),
-      updatedAt: Number(row.updatedat),
-    };
+      const updated = await client.query(
+        `UPDATE ${this.#t('chats')} SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+        params,
+      );
+      const next = updated.rows[0] as typeof row;
+      return {
+        id: next.id,
+        userId: next.userid,
+        title: next.title ?? undefined,
+        metadata: next.metadata ?? undefined,
+        createdAt: Number(next.createdat),
+        updatedAt: Number(next.updatedat),
+      };
+    });
   }
 
   async listChats(options?: ListChatsOptions): Promise<ChatInfo[]> {

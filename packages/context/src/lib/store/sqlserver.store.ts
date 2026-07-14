@@ -7,6 +7,7 @@ import type {
   BranchInfo,
   ChatData,
   ChatInfo,
+  ChatUpdater,
   CheckpointData,
   CheckpointInfo,
   DeleteChatOptions,
@@ -316,45 +317,73 @@ export class SqlServerContextStore extends ContextStore {
 
   async updateChat(
     chatId: string,
-    updates: Partial<Pick<ChatData, 'title' | 'metadata'>>,
+    update: ChatUpdater,
   ): Promise<StoredChatData> {
-    const setClauses: string[] = [
-      "updatedAt = DATEDIFF_BIG(ms, '1970-01-01', GETUTCDATE())",
-    ];
-    const params: unknown[] = [];
-    let paramIndex = 0;
+    return this.#useTransaction(async (transaction) => {
+      const mssql = SqlServerContextStore.#requireMssql();
+      const read = transaction.request();
+      read.input('chatId', mssql.NVarChar, chatId);
+      const result = await read.query<{
+        id: string;
+        userId: string;
+        title: string | null;
+        metadata: string | null;
+        createdAt: number | string;
+        updatedAt: number | string;
+      }>(`
+        SELECT *
+        FROM ${this.#t('chats')} WITH (UPDLOCK, HOLDLOCK)
+        WHERE id = @chatId;
+      `);
+      const row = result.recordset[0];
+      if (!row) {
+        throw new Error(`updateChat: chat "${chatId}" not found`);
+      }
 
-    if (updates.title !== undefined) {
-      setClauses.push(`title = @p${paramIndex++}`);
-      params.push(updates.title ?? null);
-    }
-    if (updates.metadata !== undefined) {
-      setClauses.push(`metadata = @p${paramIndex++}`);
-      params.push(JSON.stringify(updates.metadata));
-    }
+      const current: StoredChatData = {
+        id: row.id,
+        userId: row.userId,
+        title: row.title ?? undefined,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        createdAt: Number(row.createdAt),
+        updatedAt: Number(row.updatedAt),
+      };
+      const updates = update(current);
+      if (updates === undefined) return current;
 
-    params.push(chatId);
-    const rows = await this.#query<{
-      id: string;
-      userId: string;
-      title: string | null;
-      metadata: string | null;
-      createdAt: number | string;
-      updatedAt: number | string;
-    }>(
-      `UPDATE ${this.#t('chats')} SET ${setClauses.join(', ')} OUTPUT INSERTED.* WHERE id = @p${paramIndex}`,
-      params,
-    );
+      const setClauses = [
+        "updatedAt = DATEDIFF_BIG(ms, '1970-01-01', GETUTCDATE())",
+      ];
+      let paramIndex = 0;
+      const write = transaction.request();
+      if (updates.title !== undefined) {
+        const name = `p${paramIndex++}`;
+        setClauses.push(`title = @${name}`);
+        write.input(name, mssql.NVarChar, updates.title);
+      }
+      if (updates.metadata !== undefined) {
+        const name = `p${paramIndex++}`;
+        setClauses.push(`metadata = @${name}`);
+        write.input(name, mssql.NVarChar, JSON.stringify(updates.metadata));
+      }
+      write.input('chatId', mssql.NVarChar, chatId);
 
-    const row = rows[0];
-    return {
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      createdAt: Number(row.createdAt),
-      updatedAt: Number(row.updatedAt),
-    };
+      const updated = await write.query<typeof row>(`
+        UPDATE ${this.#t('chats')}
+        SET ${setClauses.join(', ')}
+        OUTPUT INSERTED.*
+        WHERE id = @chatId;
+      `);
+      const next = updated.recordset[0];
+      return {
+        id: next.id,
+        userId: next.userId,
+        title: next.title ?? undefined,
+        metadata: next.metadata ? JSON.parse(next.metadata) : undefined,
+        createdAt: Number(next.createdAt),
+        updatedAt: Number(next.updatedAt),
+      };
+    });
   }
 
   async listChats(options?: ListChatsOptions): Promise<ChatInfo[]> {

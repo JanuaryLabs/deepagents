@@ -30,6 +30,10 @@ export interface StoredChatData extends ChatData {
   updatedAt: number;
 }
 
+export type ChatUpdate = Partial<Pick<ChatData, 'title' | 'metadata'>>;
+
+export type ChatUpdater = (chat: StoredChatData) => ChatUpdate | undefined;
+
 /**
  * Information about a chat for listing.
  */
@@ -249,13 +253,12 @@ export abstract class ContextStore {
   abstract getChat(chatId: string): Promise<StoredChatData | undefined>;
 
   /**
-   * Update chat metadata.
-   * Note: updatedAt is automatically managed by database triggers.
-   * Returns the updated chat data.
+   * Atomically read and update a chat while holding the store's write lock.
+   * Return `undefined` from the updater to leave the chat unchanged.
    */
   abstract updateChat(
     chatId: string,
-    updates: Partial<Pick<ChatData, 'title' | 'metadata'>>,
+    update: ChatUpdater,
   ): Promise<StoredChatData>;
 
   /**

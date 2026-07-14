@@ -108,10 +108,10 @@ describe('PostgreSQL ContextStore Integration', () => {
           const original = await store.getChat('chat-update-1');
           assert.ok(original, 'Chat should exist after creation');
 
-          const updated = await store.updateChat('chat-update-1', {
+          const updated = await store.updateChat('chat-update-1', () => ({
             title: 'Updated Title',
             metadata: { newKey: 'newValue' },
-          });
+          }));
 
           assert.strictEqual(updated.title, 'Updated Title');
           assert.deepStrictEqual(updated.metadata, { newKey: 'newValue' });
@@ -282,6 +282,36 @@ describe('PostgreSQL ContextStore Integration', () => {
           assert.deepStrictEqual(message.data, { text: 'Hello, world!' });
         } finally {
           await store.close();
+        }
+      }));
+
+    it('serializes concurrent chat updaters from independent stores', async () =>
+      await withPostgresContainer(async (container) => {
+        const first = new PostgresContextStore({
+          pool: container.connectionString,
+        });
+        const second = new PostgresContextStore({
+          pool: container.connectionString,
+        });
+        await first.initialize();
+        await second.initialize();
+        try {
+          await first.createChat({ id: 'chat-cas', userId: 'user-1' });
+          await Promise.all([
+            first.updateChat('chat-cas', (chat) => ({
+              metadata: { ...chat.metadata, firstKey: 'first' },
+            })),
+            second.updateChat('chat-cas', (chat) => ({
+              metadata: { ...chat.metadata, secondKey: 'second' },
+            })),
+          ]);
+          assert.deepStrictEqual((await first.getChat('chat-cas'))?.metadata, {
+            firstKey: 'first',
+            secondKey: 'second',
+          });
+        } finally {
+          await first.close();
+          await second.close();
         }
       }));
 

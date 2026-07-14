@@ -6,6 +6,7 @@ import type {
   BranchInfo,
   ChatData,
   ChatInfo,
+  ChatUpdater,
   CheckpointData,
   CheckpointInfo,
   DeleteChatOptions,
@@ -56,8 +57,13 @@ export class SqliteContextStore extends ContextStore {
    * Execute a function within a transaction.
    * Automatically commits on success or rolls back on error.
    */
-  #useTransaction<T>(fn: () => T): T {
-    this.#db.exec('BEGIN TRANSACTION');
+  #useTransaction<T>(
+    fn: () => T,
+    mode: 'deferred' | 'immediate' = 'deferred',
+  ): T {
+    this.#db.exec(
+      mode === 'immediate' ? 'BEGIN IMMEDIATE' : 'BEGIN TRANSACTION',
+    );
     try {
       const result = fn();
       this.#db.exec('COMMIT');
@@ -164,7 +170,7 @@ export class SqliteContextStore extends ContextStore {
     });
   }
 
-  async getChat(chatId: string): Promise<StoredChatData | undefined> {
+  #getChat(chatId: string): StoredChatData | undefined {
     const row = this.#db
       .prepare('SELECT * FROM chats WHERE id = ?')
       .get(chatId) as
@@ -192,44 +198,58 @@ export class SqliteContextStore extends ContextStore {
     };
   }
 
+  async getChat(chatId: string): Promise<StoredChatData | undefined> {
+    return this.#getChat(chatId);
+  }
+
   async updateChat(
     chatId: string,
-    updates: Partial<Pick<ChatData, 'title' | 'metadata'>>,
+    update: ChatUpdater,
   ): Promise<StoredChatData> {
-    const setClauses: string[] = ["updatedAt = strftime('%s', 'now') * 1000"];
-    const params: SQLInputValue[] = [];
+    return this.#useTransaction(() => {
+      const current = this.#getChat(chatId);
+      if (!current) {
+        throw new Error(`updateChat: chat "${chatId}" not found`);
+      }
 
-    if (updates.title !== undefined) {
-      setClauses.push('title = ?');
-      params.push(updates.title ?? null);
-    }
-    if (updates.metadata !== undefined) {
-      setClauses.push('metadata = ?');
-      params.push(JSON.stringify(updates.metadata));
-    }
+      const updates = update(current);
+      if (updates === undefined) return current;
 
-    params.push(chatId);
-    const row = this.#db
-      .prepare(
-        `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
-      )
-      .get(...params) as {
-      id: string;
-      userId: string;
-      title: string | null;
-      metadata: string | null;
-      createdAt: number;
-      updatedAt: number;
-    };
+      const setClauses: string[] = ["updatedAt = strftime('%s', 'now') * 1000"];
+      const params: SQLInputValue[] = [];
 
-    return {
-      id: row.id,
-      userId: row.userId,
-      title: row.title ?? undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
+      if (updates.title !== undefined) {
+        setClauses.push('title = ?');
+        params.push(updates.title);
+      }
+      if (updates.metadata !== undefined) {
+        setClauses.push('metadata = ?');
+        params.push(JSON.stringify(updates.metadata));
+      }
+
+      params.push(chatId);
+      const row = this.#db
+        .prepare(
+          `UPDATE chats SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+        )
+        .get(...params) as {
+        id: string;
+        userId: string;
+        title: string | null;
+        metadata: string | null;
+        createdAt: number;
+        updatedAt: number;
+      };
+
+      return {
+        id: row.id,
+        userId: row.userId,
+        title: row.title ?? undefined,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    }, 'immediate');
   }
 
   async listChats(options?: ListChatsOptions): Promise<ChatInfo[]> {

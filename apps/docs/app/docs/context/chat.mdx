@@ -265,7 +265,7 @@ console.log(context.chat?.metadata?.usage);
 // { inputTokens: 45, outputTokens: 120, totalTokens: 165 }
 ```
 
-Each call to `trackUsage()` adds to the running total. Concurrent calls are safe -- the method reads fresh data from the store before accumulating.
+Each call to `trackUsage()` adds to the running total. Concurrent calls are safe: the store runs the read, accumulation, and write as one transactional `updateChat` operation while holding the chat row's write lock.
 
 ## Multi-User Chat Patterns
 
