@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/context",
-  "version": "4.3.0",
+  "version": "5.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -60,7 +60,7 @@
   "dependencies": {
     "@ai-sdk/groq": "^4.0.7",
     "@ai-sdk/provider": "^4.0.3",
-    "@deepagents/agent": "4.3.0",
+    "@deepagents/agent": "5.0.0",
     "ai": "^7.0.20",
     "chalk": "^5.6.0",
     "dedent": "^1.7.0",

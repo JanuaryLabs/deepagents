@@ -1,14 +1,14 @@
 {
   "name": "@deepagents/demo-zukhruf-durable-turns",
-  "version": "4.3.0",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "description": "Runnable showcase for Zukhruf durable independent agents: detach and resume a root turn, spawn a separate specialist chat, and consume its asynchronous FINAL_ANSWER.",
   "dependencies": {
     "@ai-sdk/openai": "^4.0.11",
-    "@deepagents/agent": "4.3.0",
-    "@deepagents/context": "4.3.0",
-    "@deepagents/experimental": "4.3.0",
+    "@deepagents/agent": "5.0.0",
+    "@deepagents/context": "5.0.0",
+    "@deepagents/experimental": "5.0.0",
     "@electric-sql/pglite": "^0.5.3",
     "just-bash": "^3.0.1",
     "pg-boss": "^12.24.1"
