@@ -15,10 +15,15 @@ import {
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
+import {
+  type AgentDeclaration,
+  AgentRuntime,
+  PgBossTurnQueue,
+  SqliteApprovalMutex,
+  SqliteMailboxStore,
+} from '@deepagents/experimental/zukhruf';
 
-import type { AgentDeclaration } from '../agent.ts';
-import { createRuntime } from '../runtime.ts';
-import { PgBossTurnQueue } from './pg-boss.turn-queue.ts';
+const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 const connectionString = process.argv[2];
 if (!connectionString)
@@ -77,7 +82,13 @@ await streamStore.initialize();
 const store = new PostgresContextStore({ pool: connectionString });
 await store.initialize();
 
-const runtime = createRuntime(declaration, { store, streamStore, queue });
+const runtime = new AgentRuntime(declaration, {
+  store,
+  streamStore,
+  queue,
+  mailboxStore: new SqliteMailboxStore(':memory:'),
+  approvalMutex,
+});
 await runtime.work();
 console.log('WORKER READY');
 

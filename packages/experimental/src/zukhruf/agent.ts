@@ -1,4 +1,4 @@
-import type { ToolSet } from 'ai';
+import type { ToolSet, generateText } from 'ai';
 
 import type {
   AgentModel,
@@ -17,25 +17,35 @@ export interface SandboxContext {
 }
 
 export interface AgentDeclaration {
+  /**
+   * Stable declaration identity persisted in conversation metadata.
+   * It must be unique in one declaration graph and must not be renamed while
+   * conversations created from that graph still exist.
+   */
   name: string;
   model: AgentModel;
   sandbox: (context: SandboxContext) => Promise<AgentSandbox>;
   instructions: ContextFragment[];
   tools?: ToolSet;
+  subagents?: AgentDeclaration[];
+  telemetry?: Parameters<typeof generateText>[0]['telemetry'];
 }
 
-export function defineAgent(declaration: {
-  model: AgentModel;
-  sandbox: (context: SandboxContext) => Promise<AgentSandbox>;
-  instructions: ContextFragment[];
-  tools?: ToolSet;
-  name?: string;
-}): AgentDeclaration {
+export interface DefinedAgentDeclaration extends AgentDeclaration {
+  tools: ToolSet;
+  subagents: AgentDeclaration[];
+}
+
+export function defineAgent(
+  declaration: AgentDeclaration,
+): DefinedAgentDeclaration {
   return {
-    name: declaration.name ?? 'agent',
+    name: declaration.name,
     model: declaration.model,
     sandbox: declaration.sandbox,
     instructions: declaration.instructions,
-    tools: declaration.tools,
+    tools: declaration.tools ?? {},
+    subagents: declaration.subagents ?? [],
+    telemetry: declaration.telemetry,
   };
 }

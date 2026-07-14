@@ -21,16 +21,18 @@ fragments, the stream subsystem).
 
 ```ts
 import {
+  AgentRuntime,
   PgBossTurnQueue,
-  createRuntime,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
 ```
 
-The declaration layer (`defineAgent` / `defineInstructions` / `defineTool` /
-`defineSandbox`) is pure data with a types-only dependency on
-`@deepagents/context`; the runtime (`createRuntime`) is the only layer that
-touches engines, sandboxes, and durability. See
+The customer surface contains the pure declaration layer (`defineAgent` /
+`defineInstructions` / `defineTool` / `defineSandbox`), `AgentRuntime`, the domain values, and the
+store/queue ports and adapters. Declarations have a types-only dependency on `@deepagents/context`.
+`AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval, denial, and worker
+lifecycle. Its control plane, executor, status projector, mailbox coordinator, and injected
+collaboration-tool implementations are internal wiring. See
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md) for the decided semantics,
 [`TODO.md`](./src/zukhruf/TODO.md) for the convergence plan, and
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
@@ -38,5 +40,7 @@ touches engines, sandboxes, and durability. See
 Runnable end-to-end showcases live in
 [`demo/zukhruf-durable-turns`](../../demo/zukhruf-durable-turns) (the durable
 executor: enqueue, detach, resume, strict per-chat FIFO) and
+[`demo/zukhruf-mailbox`](../../demo/zukhruf-mailbox) (API-key-free host delivery,
+durable FIFO mail, and payload-free wakes) and
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (an agentic
 research bot: plan → web-search subagent → streamed report).

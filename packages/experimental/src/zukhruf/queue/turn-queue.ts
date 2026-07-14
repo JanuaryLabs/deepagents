@@ -22,6 +22,13 @@ export type TurnRef = {
        */
       kind: 'continuation';
     }
+  | {
+      /**
+       * A mailbox wake-up. The communication payload remains in MailboxStore;
+       * TurnQueue carries only the execution request and addressing.
+       */
+      kind: 'mailbox';
+    }
 );
 
 export interface ConsumeContext {
@@ -45,6 +52,8 @@ export interface ConsumeOptions {
   onOrphaned: (turn: TurnRef, error: string) => Promise<void>;
 }
 
+export type TurnActivity = 'idle' | 'queued' | 'running';
+
 /**
  * Durable holding pen for pending turns.
  *
@@ -59,8 +68,13 @@ export interface ConsumeOptions {
  *   run in the order they were pushed (strict FIFO per `chatId`) — this
  *   covers duplicates too: they can never run concurrently or out of order.
  * - Turns from different chats may run concurrently.
+ * - `getTurnActivity` distinguishes queued from active scheduler work for
+ *   status inspection; adapters must not silently fall back to stale history.
  * - A handler that throws (or a worker that dies mid-turn) does not retry:
  *   the turn surfaces once through `onOrphaned`, then the chat unblocks.
+ * - Mailbox payloads NEVER live here. A `{kind: 'mailbox'}` item is only a
+ *   durable wake request; the target MailboxStore remains the pending-input
+ *   authority.
  * - A parked turn (`context.park()`) is not delivered again until
  *   `resumeParked(chatId)`; revived turns keep their original FIFO order,
  *   and a `'continuation'` turn pushed for the chat outranks them.
@@ -70,6 +84,11 @@ export interface ConsumeOptions {
  */
 export abstract class TurnQueue {
   abstract push(turn: TurnRef): Promise<void>;
+
+  /** Whether this conversation currently has queued or active scheduler work. */
+  abstract getTurnActivity(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnActivity>;
 
   abstract consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,

@@ -14,11 +14,16 @@ import {
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
+import {
+  type AgentDeclaration,
+  AgentRuntime,
+  PgBossTurnQueue,
+  SqliteApprovalMutex,
+  SqliteMailboxStore,
+} from '@deepagents/experimental/zukhruf';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
 
-import type { AgentDeclaration } from '../agent.ts';
-import { createRuntime } from '../runtime.ts';
-import { PgBossTurnQueue } from './pg-boss.turn-queue.ts';
+const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 const usage = {
   inputTokens: {
@@ -141,10 +146,13 @@ describe(
         await queue.initialize();
 
         const calls: string[] = [];
-        const runtime = createRuntime(declaration(fastModel(calls)), {
+        const mailboxStore = new SqliteMailboxStore(':memory:');
+        const runtime = new AgentRuntime(declaration(fastModel(calls)), {
           store,
           streamStore,
           queue,
+          mailboxStore,
+          approvalMutex,
         });
         const conversation = { chatId: 'crash-chat', userId: 'u1' };
 
@@ -202,6 +210,7 @@ describe(
           child?.kill('SIGKILL');
           if (worker) await worker[Symbol.asyncDispose]();
           await boss.stop({ graceful: false });
+          mailboxStore.close();
           await streamStore.close();
           await store.close();
         }

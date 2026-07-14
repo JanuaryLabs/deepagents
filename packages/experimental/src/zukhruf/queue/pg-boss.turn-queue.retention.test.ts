@@ -3,10 +3,11 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import { PgBoss, fromPglite } from 'pg-boss';
 
+import {
+  PgBossTurnQueue,
+  type TurnRef,
+} from '@deepagents/experimental/zukhruf';
 import { timebox } from '@deepagents/test';
-
-import { PgBossTurnQueue } from './pg-boss.turn-queue.ts';
-import type { TurnRef } from './turn-queue.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

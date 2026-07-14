@@ -4,6 +4,7 @@ import { v7 as uuidv7 } from 'uuid';
 import {
   type ConsumeContext,
   type ConsumeOptions,
+  type TurnActivity,
   TurnQueue,
   type TurnRef,
 } from './turn-queue.ts';
@@ -95,6 +96,25 @@ export class PgBossTurnQueue extends TurnQueue {
     });
   }
 
+  override async getTurnActivity(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnActivity> {
+    const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
+      key: conversation.chatId,
+    });
+    const conversationJobs = jobs.filter(
+      (job) =>
+        job.data.userId === conversation.userId &&
+        (job.state === 'created' ||
+          job.state === 'retry' ||
+          job.state === 'active'),
+    );
+    if (conversationJobs.some((job) => job.state === 'active')) {
+      return 'running';
+    }
+    return conversationJobs.length > 0 ? 'queued' : 'idle';
+  }
+
   async consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
@@ -140,9 +160,18 @@ export class PgBossTurnQueue extends TurnQueue {
         pollingIntervalSeconds: this.#pollingIntervalSeconds,
       },
       async ([job]: JobWithMetadata<TurnRef>[]) => {
-        await options.onOrphaned(job.data, orphanError(job.output));
-        if (job.sourceId) {
-          await this.#boss.deleteJob(this.#queue, job.sourceId);
+        try {
+          await options.onOrphaned(
+            job.data,
+            PgBossTurnQueue.#orphanError(job.output),
+          );
+        } finally {
+          // The failed source job owns the strict-FIFO key. Reconciliation may
+          // retry through this DLQ job, but it must never retain that key and
+          // wedge every later turn in the conversation.
+          if (job.sourceId) {
+            await this.#boss.deleteJob(this.#queue, job.sourceId);
+          }
         }
       },
     );
@@ -167,11 +196,11 @@ export class PgBossTurnQueue extends TurnQueue {
       await this.#boss.resume(this.#queue, parked);
     }
   }
-}
 
-function orphanError(output: object | null | undefined): string {
-  if (output && 'message' in output && typeof output.message === 'string') {
-    return output.message;
+  static #orphanError(output: object | null | undefined): string {
+    if (output && 'message' in output && typeof output.message === 'string') {
+      return output.message;
+    }
+    return output ? JSON.stringify(output) : 'turn orphaned';
   }
-  return output ? JSON.stringify(output) : 'turn orphaned';
 }
