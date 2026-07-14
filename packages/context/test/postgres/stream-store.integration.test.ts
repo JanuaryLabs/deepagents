@@ -194,6 +194,69 @@ describe('PostgreSQL StreamStore Integration', () => {
       assert.ok(failed.finishedAt);
     }));
 
+  it('should not overwrite a committed cancellation with late terminal writes', async () =>
+    await withStore(async (store) => {
+      const stream = createStream();
+      await store.createStream(stream);
+      assert.equal(
+        (
+          await store.updateStream(stream.id, ({ status }) =>
+            status === 'queued'
+              ? { status: 'running', startedAt: Date.now() }
+              : undefined,
+          )
+        ).updated,
+        true,
+      );
+      assert.equal(
+        (
+          await store.updateStream(stream.id, ({ status }) => {
+            if (status !== 'queued' && status !== 'running') return undefined;
+            const now = Date.now();
+            return {
+              status: 'cancelled',
+              cancelRequestedAt: now,
+              finishedAt: now,
+            };
+          })
+        ).updated,
+        true,
+      );
+
+      await store.updateStreamStatus(stream.id, 'completed');
+      await store.updateStreamStatus(stream.id, 'failed', {
+        error: 'late failure',
+      });
+      await store.updateStreamStatus(stream.id, 'queued');
+      await store.appendChunks([
+        createChunk(stream.id, 0, {
+          type: 'error',
+          errorText: 'late error chunk',
+        }),
+      ]);
+
+      const cancelled = await store.getStream(stream.id);
+      assert.equal(cancelled?.status, 'cancelled');
+      assert.equal(cancelled?.error, null);
+    }));
+
+  it('allows exactly one caller to transition a queued stream', async () =>
+    await withStore(async (store) => {
+      const stream = createStream();
+      await store.createStream(stream);
+      const transition = () =>
+        store.updateStream(stream.id, ({ status }) =>
+          status === 'queued'
+            ? { status: 'running', startedAt: Date.now() }
+            : undefined,
+        );
+
+      const results = await Promise.all([transition(), transition()]);
+
+      assert.equal(results.filter(({ updated }) => updated).length, 1);
+      assert.equal(await store.getStreamStatus(stream.id), 'running');
+    }));
+
   it('should append and read JSONB chunks with ordering, paging, and multi-stream batches', async () =>
     await withStore(async (store) => {
       const streamA = createStream({ id: 'stream-a' });

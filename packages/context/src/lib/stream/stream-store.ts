@@ -23,6 +23,17 @@ export interface StreamData {
   error: string | null;
 }
 
+export type StreamUpdate = Partial<Omit<StreamData, 'id' | 'createdAt'>>;
+
+export type StreamUpdater = (
+  stream: Readonly<StreamData>,
+) => StreamUpdate | undefined;
+
+export interface StreamUpdateResult {
+  stream: StreamData;
+  updated: boolean;
+}
+
 export interface StreamChunkData {
   streamId: string;
   seq: number;
@@ -64,6 +75,20 @@ export abstract class StreamStore {
   async listRunningStreamIds(): Promise<string[]> {
     return this.listStreamIds({ status: 'running' });
   }
+
+  /**
+   * Atomically read and conditionally update a stream while holding the
+   * store's write lock for that stream. Concurrent calls for the same stream
+   * must observe one another's committed updates.
+   *
+   * The updater is synchronous and should be free of side effects. Return
+   * `undefined` to leave the stream unchanged. `updated` reports whether this
+   * caller persisted an update.
+   */
+  abstract updateStream(
+    streamId: string,
+    update: StreamUpdater,
+  ): Promise<StreamUpdateResult>;
 
   abstract updateStreamStatus(
     streamId: string,

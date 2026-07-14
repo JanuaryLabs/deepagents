@@ -6,6 +6,8 @@ import type {
   StreamChunkData,
   StreamData,
   StreamStatus,
+  StreamUpdateResult,
+  StreamUpdater,
 } from './stream-store.ts';
 import { collectStreamFailures } from './stream-store.ts';
 import { StreamStore } from './stream-store.ts';
@@ -159,6 +161,58 @@ export class SqliteStreamStore extends StreamStore {
     return rows.map((row) => row.id);
   }
 
+  async updateStream(
+    streamId: string,
+    update: StreamUpdater,
+  ): Promise<StreamUpdateResult> {
+    return this.#transaction(() => {
+      const current = this.#stmt('SELECT * FROM streams WHERE id = ?').get(
+        streamId,
+      ) as
+        | {
+            id: string;
+            status: StreamStatus;
+            createdAt: number;
+            startedAt: number | null;
+            finishedAt: number | null;
+            cancelRequestedAt: number | null;
+            error: string | null;
+          }
+        | undefined;
+      if (!current) {
+        throw new Error(`updateStream: stream "${streamId}" not found`);
+      }
+
+      const stream: StreamData = { ...current };
+      const updates = update(stream);
+      if (updates === undefined) return { stream, updated: false };
+
+      const setClauses: string[] = [];
+      const params: SQLInputValue[] = [];
+      const set = (column: string, value: SQLInputValue) => {
+        setClauses.push(`${column} = ?`);
+        params.push(value);
+      };
+
+      if (updates.status !== undefined) set('status', updates.status);
+      if (updates.startedAt !== undefined) set('startedAt', updates.startedAt);
+      if (updates.finishedAt !== undefined) {
+        set('finishedAt', updates.finishedAt);
+      }
+      if (updates.cancelRequestedAt !== undefined) {
+        set('cancelRequestedAt', updates.cancelRequestedAt);
+      }
+      if (updates.error !== undefined) set('error', updates.error);
+      if (setClauses.length === 0) return { stream, updated: false };
+
+      params.push(streamId);
+      const next = this.#stmt(
+        `UPDATE streams SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`,
+      ).get(...params) as unknown as typeof current;
+      return { stream: { ...next }, updated: true };
+    });
+  }
+
   async updateStreamStatus(
     streamId: string,
     status: StreamStatus,
@@ -168,29 +222,33 @@ export class SqliteStreamStore extends StreamStore {
     switch (status) {
       case 'running':
         this.#stmt(
-          'UPDATE streams SET status = ?, startedAt = ? WHERE id = ?',
+          `UPDATE streams SET status = ?, startedAt = ?
+            WHERE id = ? AND status = 'queued'`,
         ).run(status, now, streamId);
         break;
       case 'completed':
         this.#stmt(
-          'UPDATE streams SET status = ?, finishedAt = ? WHERE id = ?',
+          `UPDATE streams SET status = ?, finishedAt = ?
+            WHERE id = ? AND status IN ('queued', 'running')`,
         ).run(status, now, streamId);
         break;
       case 'failed':
         this.#stmt(
-          'UPDATE streams SET status = ?, finishedAt = ?, error = ? WHERE id = ?',
+          `UPDATE streams SET status = ?, finishedAt = ?, error = ?
+            WHERE id = ? AND status IN ('queued', 'running')`,
         ).run(status, now, options?.error ?? null, streamId);
         break;
       case 'cancelled':
         this.#stmt(
-          'UPDATE streams SET status = ?, cancelRequestedAt = ?, finishedAt = ? WHERE id = ?',
+          `UPDATE streams SET status = ?, cancelRequestedAt = ?, finishedAt = ?
+            WHERE id = ? AND status IN ('queued', 'running')`,
         ).run(status, now, now, streamId);
         break;
       default:
-        this.#stmt('UPDATE streams SET status = ? WHERE id = ?').run(
-          status,
-          streamId,
-        );
+        this.#stmt(
+          `UPDATE streams SET status = ?
+            WHERE id = ? AND status = 'queued'`,
+        ).run(status, streamId);
     }
   }
 
@@ -213,10 +271,16 @@ export class SqliteStreamStore extends StreamStore {
       const failedAt = Date.now();
       for (const failure of failures) {
         const result = this.#stmt(
-          'UPDATE streams SET status = ?, finishedAt = ?, error = ? WHERE id = ?',
+          `UPDATE streams SET status = ?, finishedAt = ?, error = ?
+            WHERE id = ? AND status IN ('queued', 'running')`,
         ).run('failed', failedAt, failure.error, failure.streamId);
         if (result.changes !== 1) {
-          throw new Error(`Stream "${failure.streamId}" not found`);
+          const existing = this.#stmt(
+            'SELECT id FROM streams WHERE id = ?',
+          ).get(failure.streamId);
+          if (!existing) {
+            throw new Error(`Stream "${failure.streamId}" not found`);
+          }
         }
       }
       this.#db.exec('COMMIT');

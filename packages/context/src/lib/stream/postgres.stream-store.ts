@@ -7,6 +7,8 @@ import type {
   StreamChunkData,
   StreamData,
   StreamStatus,
+  StreamUpdateResult,
+  StreamUpdater,
 } from './stream-store.ts';
 import { collectStreamFailures } from './stream-store.ts';
 import { StreamStore } from './stream-store.ts';
@@ -185,6 +187,54 @@ export class PostgresStreamStore extends StreamStore {
     return rows.map((row) => row.id);
   }
 
+  async updateStream(
+    streamId: string,
+    update: StreamUpdater,
+  ): Promise<StreamUpdateResult> {
+    return this.#useTransaction(async (client) => {
+      const selected = await client.query<StreamRow>(
+        `SELECT * FROM ${this.#t('streams')} WHERE id = $1 FOR UPDATE`,
+        [streamId],
+      );
+      const row = selected.rows[0];
+      if (!row) {
+        throw new Error(`updateStream: stream "${streamId}" not found`);
+      }
+
+      const stream = rowToStream(row);
+      const updates = update(stream);
+      if (updates === undefined) return { stream, updated: false };
+
+      const setClauses: string[] = [];
+      const params: unknown[] = [];
+      const set = (column: string, value: unknown) => {
+        params.push(value);
+        setClauses.push(`${column} = $${params.length}`);
+      };
+
+      if (updates.status !== undefined) set('status', updates.status);
+      if (updates.startedAt !== undefined) set('started_at', updates.startedAt);
+      if (updates.finishedAt !== undefined) {
+        set('finished_at', updates.finishedAt);
+      }
+      if (updates.cancelRequestedAt !== undefined) {
+        set('cancel_requested_at', updates.cancelRequestedAt);
+      }
+      if (updates.error !== undefined) set('error', updates.error);
+      if (setClauses.length === 0) return { stream, updated: false };
+
+      params.push(streamId);
+      const updated = await client.query<StreamRow>(
+        `UPDATE ${this.#t('streams')}
+            SET ${setClauses.join(', ')}
+          WHERE id = $${params.length}
+          RETURNING *`,
+        params,
+      );
+      return { stream: rowToStream(updated.rows[0]), updated: true };
+    });
+  }
+
   async updateStreamStatus(
     streamId: string,
     status: StreamStatus,
@@ -196,7 +246,7 @@ export class PostgresStreamStore extends StreamStore {
         await this.#query(
           `UPDATE ${this.#t('streams')}
            SET status = $1, started_at = $2
-           WHERE id = $3`,
+           WHERE id = $3 AND status = 'queued'`,
           [status, now, streamId],
         );
         break;
@@ -204,7 +254,7 @@ export class PostgresStreamStore extends StreamStore {
         await this.#query(
           `UPDATE ${this.#t('streams')}
            SET status = $1, finished_at = $2
-           WHERE id = $3`,
+           WHERE id = $3 AND status IN ('queued', 'running')`,
           [status, now, streamId],
         );
         break;
@@ -212,7 +262,7 @@ export class PostgresStreamStore extends StreamStore {
         await this.#query(
           `UPDATE ${this.#t('streams')}
            SET status = $1, finished_at = $2, error = $3
-           WHERE id = $4`,
+           WHERE id = $4 AND status IN ('queued', 'running')`,
           [status, now, options?.error ?? null, streamId],
         );
         break;
@@ -220,7 +270,7 @@ export class PostgresStreamStore extends StreamStore {
         await this.#query(
           `UPDATE ${this.#t('streams')}
            SET status = $1, cancel_requested_at = $2, finished_at = $3
-           WHERE id = $4`,
+           WHERE id = $4 AND status IN ('queued', 'running')`,
           [status, now, now, streamId],
         );
         break;
@@ -228,7 +278,7 @@ export class PostgresStreamStore extends StreamStore {
         await this.#query(
           `UPDATE ${this.#t('streams')}
            SET status = $1
-           WHERE id = $2`,
+           WHERE id = $2 AND status = 'queued'`,
           [status, streamId],
         );
     }
@@ -261,11 +311,17 @@ export class PostgresStreamStore extends StreamStore {
         const result = await client.query(
           `UPDATE ${this.#t('streams')}
            SET status = $1, finished_at = $2, error = $3
-           WHERE id = $4`,
+           WHERE id = $4 AND status IN ('queued', 'running')`,
           ['failed', failedAt, failure.error, failure.streamId],
         );
         if (result.rowCount !== 1) {
-          throw new Error(`Stream "${failure.streamId}" not found`);
+          const existing = await client.query<{ id: string }>(
+            `SELECT id FROM ${this.#t('streams')} WHERE id = $1`,
+            [failure.streamId],
+          );
+          if (existing.rowCount !== 1) {
+            throw new Error(`Stream "${failure.streamId}" not found`);
+          }
         }
       }
     });

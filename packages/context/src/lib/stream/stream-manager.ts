@@ -21,6 +21,8 @@ export interface PersistStreamOptions extends Pick<
   PersistedWriterOptions,
   'strategy' | 'flushSize'
 > {
+  /** @internal The caller already won the queued-to-running transition. */
+  preclaimed?: boolean;
   onCancelDetected?: (info: {
     streamId: string;
     latencyMs: number | null;
@@ -64,6 +66,10 @@ export class StreamManager {
   #changeSource: StreamChangeSource;
   #chunkPageSize: number;
   #onWatchEvent?: (event: StreamWatchTelemetryEvent) => void;
+  readonly #localCancellationListeners = new Map<
+    string,
+    Set<() => Promise<void>>
+  >();
 
   constructor(options: StreamManagerOptions) {
     this.#store = options.store;
@@ -91,7 +97,48 @@ export class StreamManager {
   }
 
   async cancel(streamId: string): Promise<void> {
-    await this.#store.updateStreamStatus(streamId, 'cancelled');
+    const now = Date.now();
+    const { updated } = await this.#store.updateStream(
+      streamId,
+      ({ status }) =>
+        status === 'queued' || status === 'running'
+          ? {
+              status: 'cancelled',
+              cancelRequestedAt: now,
+              finishedAt: now,
+            }
+          : undefined,
+    );
+    if (updated) {
+      await this.#signalLocalCancellation(streamId);
+    }
+  }
+
+  async claim(streamId: string): Promise<boolean> {
+    const { updated } = await this.#store.updateStream(
+      streamId,
+      ({ status }) =>
+        status === 'queued'
+          ? { status: 'running', startedAt: Date.now() }
+          : undefined,
+    );
+    return updated;
+  }
+
+  monitorCancellation(
+    streamId: string,
+    onCancelDetected: NonNullable<PersistStreamOptions['onCancelDetected']>,
+  ): AsyncDisposable {
+    const controller = new AbortController();
+    const watching = this.#runCancelWatcher(streamId, controller, {
+      onCancelDetected,
+    });
+    return {
+      [Symbol.asyncDispose]: async () => {
+        controller.abort();
+        await watching;
+      },
+    };
   }
 
   async listStreamIds(options?: ListStreamIdsOptions): Promise<string[]> {
@@ -103,12 +150,18 @@ export class StreamManager {
     streamId: string,
     options?: PersistStreamOptions,
   ): Promise<{ streamId: string }> {
-    const existing = await this.#store.getStream(streamId);
-    if (existing && isTerminal(existing.status)) {
+    const claimed = options?.preclaimed
+      ? (await this.#store.getStreamStatus(streamId)) === 'running'
+      : await this.claim(streamId);
+    if (!claimed) {
+      if (
+        options?.preclaimed &&
+        (await this.#store.getStreamStatus(streamId)) === 'cancelled'
+      ) {
+        await this.#notifyCancellation(streamId, options);
+      }
       return { streamId };
     }
-
-    await this.#store.updateStreamStatus(streamId, 'running');
 
     const ac = new AbortController();
     const cancelWatcher = this.#runCancelWatcher(streamId, ac, options);
@@ -167,6 +220,17 @@ export class StreamManager {
     ac: AbortController,
     options: PersistStreamOptions | undefined,
   ): Promise<void> {
+    let detected = false;
+    const detect = async () => {
+      if (detected) return;
+      detected = true;
+      await this.#notifyCancellation(streamId, options);
+      ac.abort();
+    };
+    const listeners =
+      this.#localCancellationListeners.get(streamId) ?? new Set();
+    listeners.add(detect);
+    this.#localCancellationListeners.set(streamId, listeners);
     try {
       for await (const change of this.#changeSource.subscribe(
         streamId,
@@ -179,29 +243,41 @@ export class StreamManager {
           return;
         }
         if (status === 'cancelled') {
-          const current = await this.#store.getStream(streamId);
-          const latencyMs =
-            current?.cancelRequestedAt != null
-              ? Math.max(0, Date.now() - current.cancelRequestedAt)
-              : null;
-          this.#emit({
-            type: 'persist:cancel-detected',
-            streamId,
-            latencyMs,
-          });
-          if (options?.onCancelDetected) {
-            try {
-              await options.onCancelDetected({ streamId, latencyMs });
-            } catch {
-              /* best-effort — never block cancellation */
-            }
-          }
-          ac.abort();
+          await detect();
           return;
         }
       }
     } catch {
       /* cancel watcher failed unexpectedly — persist continues without cancel-detection */
+    } finally {
+      listeners.delete(detect);
+      if (listeners.size === 0) {
+        this.#localCancellationListeners.delete(streamId);
+      }
+    }
+  }
+
+  async #signalLocalCancellation(streamId: string): Promise<void> {
+    const listeners = this.#localCancellationListeners.get(streamId);
+    if (!listeners) return;
+    await Promise.all([...listeners].map((listener) => listener()));
+  }
+
+  async #notifyCancellation(
+    streamId: string,
+    options: PersistStreamOptions | undefined,
+  ): Promise<void> {
+    const current = await this.#store.getStream(streamId);
+    const latencyMs =
+      current?.cancelRequestedAt != null
+        ? Math.max(0, Date.now() - current.cancelRequestedAt)
+        : null;
+    this.#emit({ type: 'persist:cancel-detected', streamId, latencyMs });
+    if (!options?.onCancelDetected) return;
+    try {
+      await options.onCancelDetected({ streamId, latencyMs });
+    } catch {
+      /* best-effort — never block cancellation */
     }
   }
 

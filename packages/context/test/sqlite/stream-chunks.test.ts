@@ -19,6 +19,8 @@ import {
   StreamManager,
   type StreamStatus,
   StreamStore,
+  type StreamUpdateResult,
+  type StreamUpdater,
   type StreamWatchTelemetryEvent,
   type WatchPollingConfig,
   createAdaptivePollingState,
@@ -124,12 +126,39 @@ class FlakyFlushStore extends StreamStore {
     return [this.#stream.id];
   }
 
+  async updateStream(
+    streamId: string,
+    update: StreamUpdater,
+  ): Promise<StreamUpdateResult> {
+    if (!this.#stream || this.#stream.id !== streamId) {
+      throw new Error(`updateStream: stream "${streamId}" not found`);
+    }
+    const updates = update({ ...this.#stream });
+    if (updates === undefined) {
+      return { stream: { ...this.#stream }, updated: false };
+    }
+    this.#stream = { ...this.#stream, ...updates };
+    return { stream: { ...this.#stream }, updated: true };
+  }
+
   async updateStreamStatus(
     streamId: string,
     status: StreamStatus,
     options?: { error?: string },
   ): Promise<void> {
     if (!this.#stream || this.#stream.id !== streamId) return;
+    if (status === 'running' && this.#stream.status !== 'queued') {
+      return;
+    }
+    if (
+      (status === 'completed' ||
+        status === 'failed' ||
+        status === 'cancelled') &&
+      this.#stream.status !== 'queued' &&
+      this.#stream.status !== 'running'
+    ) {
+      return;
+    }
     const now = Date.now();
     this.#stream.status = status;
     if (status === 'running') this.#stream.startedAt = now;
@@ -775,6 +804,36 @@ describe('Stream Chunks', () => {
         assert.strictEqual(updated.status, 'cancelled');
         assert.ok(typeof updated.cancelRequestedAt === 'number');
         assert.ok(typeof updated.finishedAt === 'number');
+      });
+    });
+  });
+
+  describe('updateStream', () => {
+    it('allows exactly one caller to transition a queued stream', async () => {
+      await withStreamStorePath(async (dbPath) => {
+        const first = new SqliteStreamStore(dbPath);
+        const second = new SqliteStreamStore(dbPath);
+        const stream = createStream();
+        try {
+          await first.createStream(stream);
+          const transition = (store: SqliteStreamStore) =>
+            store.updateStream(stream.id, ({ status }) =>
+              status === 'queued'
+                ? { status: 'running', startedAt: Date.now() }
+                : undefined,
+            );
+
+          const results = await Promise.all([
+            transition(first),
+            transition(second),
+          ]);
+
+          assert.equal(results.filter(({ updated }) => updated).length, 1);
+          assert.equal(await first.getStreamStatus(stream.id), 'running');
+        } finally {
+          first.close();
+          second.close();
+        }
       });
     });
   });
@@ -1691,6 +1750,55 @@ describe('Stream Chunks', () => {
         const updated = await store.getStream(stream.id);
         assert.ok(updated);
         assert.strictEqual(updated.status, 'cancelled');
+      });
+    });
+
+    it('should not let completion overwrite a cancellation that committed first', async () => {
+      await withStreamStore(async (store) => {
+        const watcherSleeping = Promise.withResolvers<void>();
+        const streams = makeManager(store, {
+          config: {
+            minMs: 1_000,
+            maxMs: 1_000,
+            multiplier: 2,
+            jitterRatio: 0,
+            statusCheckEvery: 1,
+          },
+          onPoll: (event) => {
+            if (event.type === 'idle') watcherSleeping.resolve();
+          },
+        });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+        let source!: ReadableStreamDefaultController<UIMessageChunk>;
+        const persist = streams.persist(
+          new ReadableStream<UIMessageChunk>({
+            start(controller) {
+              source = controller;
+            },
+          }),
+          streamId,
+        );
+        await waitForStatus(store, streamId, 'running');
+        await watcherSleeping.promise;
+
+        await streams.cancel(streamId);
+        source.close();
+        await persist;
+        await store.updateStreamStatus(streamId, 'failed', {
+          error: 'late failure',
+        });
+        await store.updateStreamStatus(streamId, 'queued');
+        await store.appendChunks([
+          {
+            streamId,
+            seq: 0,
+            data: { type: 'error', errorText: 'late error chunk' },
+            createdAt: Date.now(),
+          },
+        ]);
+
+        assert.equal(await store.getStreamStatus(streamId), 'cancelled');
       });
     });
   });
