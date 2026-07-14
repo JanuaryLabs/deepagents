@@ -93,6 +93,7 @@
     "demo/microsandbox-text2sql",
     "demo/mcp",
     "demo/zukhruf-durable-turns",
+    "demo/zukhruf-mailbox",
     "demo/zukhruf-research-bot"
   ],
   "nx": {

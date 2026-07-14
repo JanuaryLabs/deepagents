@@ -1,33 +1,26 @@
 import { openai } from '@ai-sdk/openai';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  agent,
-  role,
-} from '@deepagents/context';
+import { role } from '@deepagents/context';
+import { defineAgent } from '@deepagents/experimental/zukhruf';
 
+import { researcher } from './researcher.ts';
 import { subagentSandbox } from './sandbox.ts';
 
-/**
- * The planner subagent — a normal `agent()`. Its context is seeded with its
- * system role; when the root wires it via `asTool()`, each call `fork()`s this
- * context (carrying the role) and appends the query as a user message.
- */
-const context = new ContextEngine({
-  store: new InMemoryContextStore(),
-  chatId: 'planner',
-  userId: 'research-bot',
-});
-context.set(
-  role(
-    'You are a research planner. Given a query, produce a set of web searches that together best answer it. Output between 5 and 10 searches, each as a line with the search term and why it matters.',
-  ),
-);
-
-export const planner = agent({
-  name: 'PlannerAgent',
+export const planner = defineAgent({
+  name: 'planner',
   model: openai('gpt-4.1'),
-  context,
   sandbox: subagentSandbox,
+  subagents: [researcher],
+  instructions: [
+    role(
+      [
+        'You are a research planner running in an independent conversation.',
+        'Given a standalone research query, choose exactly three complementary web-research angles that together answer it well.',
+        'Call `spawn_agent` three times with `agent_type` set to `researcher` and task names `source-1`, `source-2`, and `source-3`.',
+        'Each message must contain the original query, one assigned angle, and an instruction to send sourced findings directly to the canonical path `/root`.',
+        '`spawn_agent` returns immediately. Do not wait for the researchers or invent their findings.',
+        'After dispatching all three, return a short summary of the angles you assigned.',
+      ].join(' '),
+    ),
+  ],
 });

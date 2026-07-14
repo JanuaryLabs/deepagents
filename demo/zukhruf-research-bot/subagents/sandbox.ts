@@ -1,12 +1,12 @@
 import { InMemoryFs } from 'just-bash';
 
-import { createBashTool, createVirtualSandbox } from '@deepagents/context';
+import { createVirtualSandbox } from '@deepagents/context';
+import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 /**
- * One in-memory sandbox shared by both subagents. `agent()` requires a
- * sandbox, but these subagents never touch a filesystem — this virtual one
- * (whose bash tools go unused) satisfies the contract with zero Docker cost.
+ * Each independent subagent chat gets its own lightweight sandbox instance.
+ * These agents use model-hosted tools and never touch a real filesystem.
  */
-export const subagentSandbox = await createBashTool({
-  sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-});
+export const subagentSandbox = defineSandbox(() =>
+  createVirtualSandbox({ fs: new InMemoryFs() }),
+);

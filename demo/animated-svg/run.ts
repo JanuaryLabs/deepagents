@@ -4,8 +4,10 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import { printer } from '@deepagents/agent';
 import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
+  AgentRuntime,
   PgBossTurnQueue,
-  createRuntime,
+  SqliteApprovalMutex,
+  SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
@@ -25,11 +27,17 @@ boss.on('error', (error) => console.error('[queue error]', error));
 await boss.start();
 const queue = new PgBossTurnQueue(boss, { pollingIntervalSeconds: 0.5 });
 await queue.initialize();
+const mailboxStore = new SqliteMailboxStore('./animated-svg.mailbox.sqlite');
+const approvalMutex = new SqliteApprovalMutex(
+  './animated-svg.approvals.sqlite',
+);
 
-const runtime = createRuntime(declaration, {
+const runtime = new AgentRuntime(declaration, {
   store: new SqliteContextStore('./animated-svg.sqlite'),
   streamStore: new SqliteStreamStore('./animated-svg.streams.sqlite'),
   queue,
+  mailboxStore,
+  approvalMutex,
 });
 
 const conversation = {
@@ -54,4 +62,6 @@ console.log(
 
 await worker[Symbol.asyncDispose]();
 await boss.stop({ graceful: false });
+mailboxStore.close();
+approvalMutex.close();
 process.exit(0);

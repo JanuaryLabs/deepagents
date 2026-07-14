@@ -1,33 +1,37 @@
 # demo-zukhruf-durable-turns
 
-The **durable-turns** showcase for the `zukhruf` harness
+The **durable-turns** showcase for the Zukhruf harness
 (`@deepagents/experimental/zukhruf`). The file layout _is_ the configuration:
 
-- `agent.ts` — the root declaration (model + sandbox + instructions) and the
-  `consult_specialist` subagent tool.
+- `agent.ts` — the root declaration and its permitted `specialist` subagent.
 - `instructions.ts` — the system prompt fragments.
 - `sandbox.ts` — the per-chat backend (Docker, named by `chatId`).
-- `subagents/specialist.ts` — a normal context-aware `agent()` exposed to the
-  root with `agent.asTool()`.
+- `subagents/specialist.ts` — an independent `defineAgent()` declaration with
+  its own durable chat, history, stream, mailbox, and TurnQueue key.
 - `subagents/sandbox.ts` — a lightweight in-memory sandbox for the specialist.
-- `run.ts` — the executor showcase: PGlite-backed pg-boss, in-process `work()`,
-  enqueue a delegated turn 1, detach mid-stream, enqueue turn 2 into the same
-  chat (waits — strict FIFO), `resume()` replays turn 1, then turn 2 streams.
+- `run.ts` — the executor showcase: PGlite-backed pg-boss, concurrent
+  in-process `work()`, detach/resume the root turn, wait for the independently
+  queued child completion, then enqueue a second root turn that drains it.
 - `files/` — the sandbox workspace seed.
 
-The specialist runs inside the parent turn as an AI SDK tool call. Its work is
-therefore covered by the parent turn's persisted stream; it is not enqueued as
-a separate Zukhruf turn. The root passes a standalone prompt because
-`asTool()` forks the specialist's own context rather than sharing the root
-conversation or Docker workspace.
+The root calls the implicit `spawn_agent` collaboration tool. It returns
+immediately after creating the specialist chat and enqueuing its first turn.
+The specialist runs independently and sends its terminal text back as
+queue-only `FINAL_ANSWER` mail. The demo waits until that completion is durable,
+then starts a second root turn. Normal mailbox draining makes the result part of
+the root's history before the model samples.
+
+The root and specialist deliberately use different sandboxes. The root keeps a
+per-chat Docker workspace, while the specialist gets a private in-memory
+sandbox and never inherits the root conversation or filesystem.
 
 ## Reserved declaration slots
 
 `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
 **reserved declaration-type slots** kept as structural stubs (each holds a
-`.gitkeep`). They mark the intended surface of a zukhruf deployable unit; the
-runtime does not wire them yet. `subagents/` now contains the specialist wired
-explicitly from `agent.ts`.
+`.gitkeep`). They mark the intended surface of a Zukhruf deployable unit; the
+runtime does not wire them yet. `subagents/` contains the specialist declaration
+referenced by the root's `subagents` array.
 
 ## Run
 

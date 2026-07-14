@@ -13,7 +13,7 @@ agent, one tool, one streaming turn.
 | `instructions({ purpose, routine })`         | `instructions.ts` → `defineInstructions(role(…))`                                                                      |
 | `tool({ … })`                                | `tools.ts` → `defineTool({ … })`                                                                                       |
 | (no sandbox)                                 | `sandbox.ts` → `defineSandbox(() => createVirtualSandbox(…))` — required by zukhruf, satisfied by an in-memory sandbox |
-| `execute(generator, prompt)` → `printer`     | `run.ts` → `createRuntime().enqueue(…)` → consume the durable stream                                                   |
+| `execute(generator, prompt)` → `printer`     | `run.ts` → `new AgentRuntime(declaration, options).enqueue(…)` → consume the durable stream                            |
 
 Nothing in `@deepagents/experimental` had to change: the example is a single
 streaming agent with a tool, which sits entirely inside zukhruf's boundary.

@@ -11,10 +11,5 @@ export default defineAgent({
   model: openai('gpt-5.4-mini'),
   sandbox,
   instructions,
-  tools: {
-    consult_specialist: specialist.asTool({
-      toolDescription:
-        'Delegate a self-contained analysis or writing task to the specialist. Pass all necessary context in `input`; the specialist does not inherit the parent conversation or Docker workspace.',
-    }),
-  },
+  subagents: [specialist],
 });

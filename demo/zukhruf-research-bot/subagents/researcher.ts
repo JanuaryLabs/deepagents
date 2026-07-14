@@ -1,37 +1,26 @@
 import { openai } from '@ai-sdk/openai';
 
-import {
-  ContextEngine,
-  InMemoryContextStore,
-  agent,
-  role,
-} from '@deepagents/context';
+import { role } from '@deepagents/context';
+import { defineAgent } from '@deepagents/experimental/zukhruf';
 
 import { subagentSandbox } from './sandbox.ts';
 
-/**
- * The research subagent — a normal `agent()` with the OpenAI hosted
- * `web_search` tool. The root wires it via `asTool()`; each call forks this
- * context and runs one search-and-summarize loop.
- */
-const context = new ContextEngine({
-  store: new InMemoryContextStore(),
-  chatId: 'researcher',
-  userId: 'research-bot',
-});
-context.set(
-  role(
-    'You are a research assistant. Given a search term, search the web and produce a concise summary of the results. Capture the main points succinctly — this feeds a report writer, so keep the essence and drop the fluff. Return only the summary.',
-  ),
-);
-
-export const researcher = agent({
-  name: 'ResearchAgent',
+export const researcher = defineAgent({
+  name: 'researcher',
   model: openai.responses('gpt-4.1'),
-  context,
   sandbox: subagentSandbox,
+  instructions: [
+    role(
+      [
+        'You are a focused web researcher running in an independent conversation.',
+        'Use `web_search` to investigate the assigned angle. Capture the important facts, disagreements, dates, and concrete source URLs succinctly.',
+        'Before finishing, call `send_message` with target `/root` and a concise markdown summary of your sourced findings.',
+        'Then return the same useful findings as your final answer to your parent planner.',
+        'Do not ask follow-up questions or discuss the delegation machinery.',
+      ].join(' '),
+    ),
+  ],
   tools: {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    web_search: (openai as any).tools.webSearch({ searchContextSize: 'low' }),
+    web_search: openai.tools.webSearch({ searchContextSize: 'low' }),
   },
 });

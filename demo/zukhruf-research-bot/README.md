@@ -1,44 +1,70 @@
 # demo-zukhruf-research-bot
 
-An **agentic research bot** on the `zukhruf` harness
-(`@deepagents/experimental/zukhruf`). It ports the multi-agent `research_bot`
-example onto zukhruf using the **subagents-as-tools** pattern: the pipeline
-stages are normal `agent()`s, and the root wires them in as tools via
-`agent.asTool()`.
+An asynchronous **multi-agent research bot** on the Zukhruf background agent
+runtime (`@deepagents/experimental/zukhruf`). It uses independent conversations
+and durable mailboxes instead of blocking `agent.asTool()` calls.
 
-- `agent.ts` — the root declaration (`gpt-5`) that plans, delegates, and writes.
-  It wires the subagents with `planner.asTool()` / `researcher.asTool()`.
-- `instructions.ts` — the orchestration prompt (plan → research each → write).
-- `sandbox.ts` — a **virtual** (in-memory) sandbox; the bot never touches a
-  filesystem, but zukhruf requires every agent to declare one.
-- `subagents/planner.ts` — a normal `agent()` (`gpt-4.1`) that returns a plan of
-  5–10 web searches.
-- `subagents/researcher.ts` — a normal `agent()` (`gpt-4.1` responses + the
-  OpenAI hosted `web_search` tool) that summarizes one search.
-- `subagents/sandbox.ts` — one in-memory sandbox shared by both subagents.
-- `run.ts` — enqueue the query, read a few chunks, **detach mid-research**,
-  then `resume()` and tail to the finished report.
+```text
+/root
+  └─ planner
+       ├─ source-1 (researcher)
+       ├─ source-2 (researcher)
+       └─ source-3 (researcher)
+```
 
-## How it maps to `research_bot`
+The root calls the implicit `spawn_agent` tool and immediately returns control
+to the user. Its planner runs in a separate chat, chooses three complementary
+research angles, and spawns three independent researcher chats. Each researcher
+uses OpenAI's hosted `web_search`, then calls `send_message` with the canonical
+target `/root`. Successful researcher turns also return `FINAL_ANSWER` to their
+direct parent planner.
 
-The original `research_bot` orchestrates in code (`plan → Promise.all(searches)
-→ write`). Here the **model** orchestrates instead: the root agent calls
-`plan_searches`, then calls `research` for each planned query, then writes the
-report itself as the streamed answer. The Planner and Research agents stay
-normal `agent()`s, wired into the root via `agent.asTool()`; the Writer folds
-into the root so the report streams natively as the durable turn.
+Nothing waits for a child agent. The interactive CLI keeps the worker alive
+while the user remains free to send more root turns. Every later root turn
+drains whatever researcher messages are durably queued at that point; findings
+that arrive afterward remain available for another turn.
 
-Each `asTool()` call `fork()`s the subagent's context — a fresh ephemeral
-in-memory `ContextEngine` per call — so the subagents need nothing from the
-root turn and the zukhruf runtime is unchanged.
+The root can call `list_agents` at any time to observe the complete tree. The
+tool reports canonical paths plus `pending_init`, `running`,
+`{ completed: string | null }`, `{ errored: string }`, `waiting_approval`, or
+`interrupted` state without waking agents or consuming mailbox content.
+
+The CLI renders the root turn stream only. Child chunks are not multiplexed
+into the root terminal; child progress is visible through `list_agents`, and
+their durable messages/results become visible to the root on later turns.
+
+## Files
+
+- `agent.ts` — the root declaration and its permitted planner subagent.
+- `instructions.ts` — root dispatch and report-synthesis behavior.
+- `subagents/planner.ts` — an independent planner declaration whose permitted
+  subagent is the researcher.
+- `subagents/researcher.ts` — an independent web researcher that sends sourced
+  findings directly to `/root`.
+- `sandbox.ts` and `subagents/sandbox.ts` — per-chat in-memory sandboxes.
+- `run.ts` — one concurrent worker plus an interactive root conversation.
 
 ## Run
 
 ```sh
-OPENAI_API_KEY=… node demo/zukhruf-research-bot/run.ts "Your research question here"
+OPENAI_API_KEY=… node demo/zukhruf-research-bot/run.ts \
+  "What are the most promising approaches to grid-scale energy storage in 2026?"
 ```
 
-Runs Docker-free (virtual sandbox, PGlite-backed queue). A single turn plans,
-runs several web searches, and writes a long report, so it takes a while — that
-is the point: it is a real long-running background turn that survives detach
-and resume.
+The first root response only confirms delegation. Leave the process running
+while the planner and researchers work. You can inspect progress without
+blocking:
+
+```text
+List the current agents and their statuses.
+```
+
+Then ask for the available results:
+
+```text
+Synthesize every researcher finding received so far into a detailed report.
+```
+
+The demo is Docker-free: the queue uses PGlite and every agent gets its own
+virtual sandbox. Each invocation starts a fresh root tree, avoiding agent-path
+collisions with earlier runs.
