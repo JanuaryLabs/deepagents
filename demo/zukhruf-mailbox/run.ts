@@ -77,6 +77,7 @@ await boss.start();
 
 const turnQueue = new PgBossTurnQueue(boss, {
   pollingIntervalSeconds: 0.5,
+  schema: 'pgboss',
 });
 await turnQueue.initialize();
 

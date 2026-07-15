@@ -69,6 +69,7 @@ async function runtimeHarness(
     options?.turnQueue?.(boss, mailboxStore) ??
     new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
+      schema: 'pgboss',
     });
   await turnQueue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
@@ -171,7 +172,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       readonly #mailbox: SqliteMailboxStore;
 
       constructor(boss: PgBoss, mailbox: SqliteMailboxStore) {
-        super(boss, { pollingIntervalSeconds: 0.5 });
+        super(boss, { pollingIntervalSeconds: 0.5, schema: 'pgboss' });
         this.#mailbox = mailbox;
       }
 

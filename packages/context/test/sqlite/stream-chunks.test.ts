@@ -250,6 +250,70 @@ const FAST_WATCH_POLLING: WatchPollingConfig = {
   statusCheckEvery: 1,
 };
 
+class FailFirstThenPollingChangeSource implements StreamChangeSource {
+  attempts = 0;
+  readonly firstFailure = Promise.withResolvers<void>();
+  readonly #delegate: PollingChangeSource;
+
+  constructor(store: StreamStore) {
+    this.#delegate = new PollingChangeSource({
+      reads: store,
+      config: FAST_WATCH_POLLING,
+    });
+  }
+
+  async *subscribe(
+    streamId: string,
+    signal: AbortSignal,
+  ): AsyncIterable<StreamChange> {
+    this.attempts++;
+    if (this.attempts === 1) {
+      this.firstFailure.resolve();
+      throw new Error('transient cancellation subscription failure');
+    }
+    yield* this.#delegate.subscribe(streamId, signal);
+  }
+}
+
+class AlwaysFailingChangeSource implements StreamChangeSource {
+  readonly attemptTimes: number[] = [];
+  readonly thirdAttempt = Promise.withResolvers<void>();
+
+  async *subscribe(): AsyncIterable<StreamChange> {
+    this.attemptTimes.push(Date.now());
+    if (this.attemptTimes.length === 3) this.thirdAttempt.resolve();
+    throw new Error('persistent cancellation subscription failure');
+  }
+}
+
+class YieldThenFailChangeSource implements StreamChangeSource {
+  readonly attemptTimes: number[] = [];
+  readonly thirdAttempt = Promise.withResolvers<void>();
+
+  async *subscribe(): AsyncIterable<StreamChange> {
+    this.attemptTimes.push(Date.now());
+    if (this.attemptTimes.length === 3) this.thirdAttempt.resolve();
+    yield { kind: 'tick' };
+    throw new Error('post-connect cancellation subscription failure');
+  }
+}
+
+class FailNextStreamReadStore extends SqliteStreamStore {
+  #failNextStreamRead = false;
+
+  failNextStreamRead(): void {
+    this.#failNextStreamRead = true;
+  }
+
+  override async getStream(streamId: string): Promise<StreamData | undefined> {
+    if (this.#failNextStreamRead) {
+      this.#failNextStreamRead = false;
+      throw new Error('transient cancellation telemetry read failure');
+    }
+    return super.getStream(streamId);
+  }
+}
+
 interface ManagerHelperOptions {
   config?: Partial<WatchPollingConfig>;
   chunkPageSize?: number;
@@ -450,22 +514,52 @@ describe('Stream Chunks', () => {
       const streamId = crypto.randomUUID();
       await streams.register(streamId);
 
+      const chunksBuffered = Promise.withResolvers<void>();
+      let pullCount = 0;
+      let closeSource!: () => void;
       const source = new ReadableStream({
         start(controller) {
-          controller.enqueue({ type: 'text-start', id: 'part-1' });
-          controller.enqueue({
-            type: 'text-delta',
-            id: 'part-1',
-            delta: 'hello',
-          });
+          closeSource = () => controller.close();
+        },
+        pull(controller) {
+          if (pullCount === 0) {
+            controller.enqueue({ type: 'text-start', id: 'part-1' });
+          } else if (pullCount === 1) {
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'part-1',
+              delta: 'hello',
+            });
+          } else {
+            chunksBuffered.resolve();
+          }
+          pullCount++;
         },
       });
 
       const persistPromise = streams.persist(source, streamId);
-      await waitForStatus(store, streamId, 'running');
-      void streams.cancel(streamId);
+      try {
+        await waitForStatus(store, streamId, 'running');
+        assert.equal(
+          await Promise.race([
+            chunksBuffered.promise.then(() => true),
+            sleep(2_000).then(() => false),
+          ]),
+          true,
+          'source chunks reach the persistence buffer before cancellation',
+        );
+        await streams.cancel(streamId);
 
-      await assert.rejects(() => persistPromise, /flush failed once/);
+        await assert.rejects(() => persistPromise, /flush failed once/);
+      } finally {
+        try {
+          closeSource();
+        } catch {
+          // persist may already have cancelled and closed the source.
+        }
+        await streams.cancel(streamId).catch(() => undefined);
+        await persistPromise.catch(() => undefined);
+      }
     });
 
     it('should keep adaptive jitter delay within configured bounds', () => {
@@ -1962,6 +2056,167 @@ describe('Stream Chunks', () => {
         );
         assert.strictEqual(calls[0].streamId, streamId);
         assert.strictEqual(typeof calls[0].latencyMs, 'number');
+      });
+    });
+
+    it('should recover after a transient source failure and detect remote cancellation', async () => {
+      await withStreamStore(async (store) => {
+        const changeSource = new FailFirstThenPollingChangeSource(store);
+        const workerStreams = new StreamManager({ store, changeSource });
+        const controllingStreams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await workerStreams.register(streamId);
+
+        let closeSource!: () => void;
+        const source = new ReadableStream({
+          start(controller) {
+            closeSource = () => controller.close();
+          },
+        });
+        let cancellationDetections = 0;
+        const persist = workerStreams.persist(source, streamId, {
+          onCancelDetected: () => {
+            cancellationDetections++;
+          },
+        });
+        try {
+          await waitForStatus(store, streamId, 'running');
+          assert.equal(
+            await Promise.race([
+              changeSource.firstFailure.promise.then(() => true),
+              sleep(2_000).then(() => false),
+            ]),
+            true,
+            'cancellation watcher subscribes',
+          );
+          await controllingStreams.cancel(streamId);
+          const stoppedAfterRemoteCancel = await Promise.race([
+            persist.then(() => true),
+            sleep(300).then(() => false),
+          ]);
+
+          assert.equal(
+            stoppedAfterRemoteCancel,
+            true,
+            'persist stops even when its first cancellation subscription fails',
+          );
+          assert.ok(changeSource.attempts >= 1);
+          assert.equal(cancellationDetections, 1);
+        } finally {
+          try {
+            closeSource();
+          } catch {
+            // persist may already have cancelled and closed the source.
+          }
+          await persist;
+        }
+      });
+    });
+
+    it('should abort persistence when cancellation telemetry cannot read the stream', async () => {
+      const store = new FailNextStreamReadStore(':memory:');
+      try {
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        let closeSource!: () => void;
+        const source = new ReadableStream({
+          start(controller) {
+            closeSource = () => controller.close();
+          },
+        });
+        const persist = streams.persist(source, streamId);
+        try {
+          await waitForStatus(store, streamId, 'running');
+          store.failNextStreamRead();
+
+          let cancelError: unknown;
+          try {
+            await streams.cancel(streamId);
+          } catch (error) {
+            cancelError = error;
+          }
+          const stoppedAfterCancel = await Promise.race([
+            persist.then(() => true),
+            sleep(300).then(() => false),
+          ]);
+
+          assert.equal(cancelError, undefined);
+          assert.equal(stoppedAfterCancel, true);
+          assert.equal(await store.getStreamStatus(streamId), 'cancelled');
+        } finally {
+          try {
+            closeSource();
+          } catch {
+            // persist may already have cancelled and closed the source.
+          }
+          await streams.cancel(streamId).catch(() => undefined);
+          await persist.catch(() => undefined);
+        }
+      } finally {
+        store.close();
+      }
+    });
+
+    it('should back off repeated cancellation-source failures and stop retrying on disposal', async () => {
+      await withStreamStore(async (store) => {
+        const changeSource = new AlwaysFailingChangeSource();
+        const streams = new StreamManager({ store, changeSource });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const watcher = streams.monitorCancellation(streamId, () => {});
+        try {
+          assert.equal(
+            await Promise.race([
+              changeSource.thirdAttempt.promise.then(() => true),
+              sleep(2_000).then(() => false),
+            ]),
+            true,
+            'watcher retries a repeatedly failing source',
+          );
+          await sleep(120);
+          assert.equal(
+            changeSource.attemptTimes.length,
+            3,
+            'adaptive delay prevents a fixed-rate retry loop',
+          );
+        } finally {
+          await watcher[Symbol.asyncDispose]();
+        }
+        const attemptsAtDisposal = changeSource.attemptTimes.length;
+        await sleep(150);
+        assert.equal(changeSource.attemptTimes.length, attemptsAtDisposal);
+      });
+    });
+
+    it('should preserve reconnect backoff when a failing source yields its initial tick', async () => {
+      await withStreamStore(async (store) => {
+        const changeSource = new YieldThenFailChangeSource();
+        const streams = new StreamManager({ store, changeSource });
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        const watcher = streams.monitorCancellation(streamId, () => {});
+        try {
+          assert.equal(
+            await Promise.race([
+              changeSource.thirdAttempt.promise.then(() => true),
+              sleep(2_000).then(() => false),
+            ]),
+            true,
+            'watcher reconnects after a source fails just after subscribing',
+          );
+          await sleep(120);
+          assert.equal(
+            changeSource.attemptTimes.length,
+            3,
+            'an initial tick cannot reset reconnect backoff',
+          );
+        } finally {
+          await watcher[Symbol.asyncDispose]();
+        }
       });
     });
 

@@ -370,7 +370,10 @@ async function harness(
   await boss.start();
   const queue =
     options?.queueFactory?.(boss) ??
-    new PgBossTurnQueue(boss, { pollingIntervalSeconds: 0.5 });
+    new PgBossTurnQueue(boss, {
+      pollingIntervalSeconds: 0.5,
+      schema: 'pgboss',
+    });
   await queue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -762,6 +765,7 @@ describe('zukhruf runtime — background executor', () => {
       queueFactory: (boss) =>
         new FailOnceContinuationQueue(boss, {
           pollingIntervalSeconds: 0.5,
+          schema: 'pgboss',
         }),
     });
     await using _worker = await h.runtime.work();
@@ -793,6 +797,7 @@ describe('zukhruf runtime — background executor', () => {
       queueFactory: (boss) =>
         new FailOnceResumeParkedQueue(boss, {
           pollingIntervalSeconds: 0.5,
+          schema: 'pgboss',
         }),
     });
     await using _worker = await h.runtime.work({ concurrency: 2 });

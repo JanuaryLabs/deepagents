@@ -25,7 +25,10 @@ const boss = new PgBoss({
 });
 boss.on('error', (error) => console.error('[queue error]', error));
 await boss.start();
-const queue = new PgBossTurnQueue(boss, { pollingIntervalSeconds: 0.5 });
+const queue = new PgBossTurnQueue(boss, {
+  pollingIntervalSeconds: 0.5,
+  schema: 'pgboss',
+});
 await queue.initialize();
 const mailboxStore = new SqliteMailboxStore(
   './zukhruf-research.mailbox.sqlite',

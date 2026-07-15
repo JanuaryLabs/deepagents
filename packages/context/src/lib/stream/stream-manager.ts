@@ -5,6 +5,12 @@ import {
   persistedWriter,
 } from '../stream-buffer.ts';
 import type { StreamChange, StreamChangeSource } from './change-source.ts';
+import {
+  DEFAULT_CANCEL_POLLING,
+  createAdaptivePollingState,
+  nextAdaptivePollingDelay,
+  resetAdaptivePolling,
+} from './polling-policy.ts';
 import type {
   ListStreamIdsOptions,
   StreamData,
@@ -224,31 +230,67 @@ export class StreamManager {
     const detect = async () => {
       if (detected) return;
       detected = true;
-      await this.#notifyCancellation(streamId, options);
       ac.abort();
+      await this.#notifyCancellation(streamId, options);
     };
+    const retryState = createAdaptivePollingState(DEFAULT_CANCEL_POLLING);
     const listeners =
       this.#localCancellationListeners.get(streamId) ?? new Set();
     listeners.add(detect);
     this.#localCancellationListeners.set(streamId, listeners);
     try {
-      for await (const change of this.#changeSource.subscribe(
-        streamId,
-        ac.signal,
-      )) {
-        if (change.kind === 'chunks') continue;
-        const status = await this.#store.getStreamStatus(streamId);
-        if (status === undefined) {
-          ac.abort();
-          return;
+      while (!ac.signal.aborted && !detected) {
+        try {
+          const initialStatus = await this.#store.getStreamStatus(streamId);
+          if (initialStatus === undefined) {
+            ac.abort();
+            return;
+          }
+          if (initialStatus === 'cancelled') {
+            await detect();
+            return;
+          }
+          if (isTerminal(initialStatus)) return;
+
+          const subscribedAt = Date.now();
+          let subscriptionStabilized = false;
+          for await (const change of this.#changeSource.subscribe(
+            streamId,
+            ac.signal,
+          )) {
+            if (
+              !subscriptionStabilized &&
+              Date.now() - subscribedAt >= DEFAULT_CANCEL_POLLING.maxMs
+            ) {
+              resetAdaptivePolling(retryState);
+              subscriptionStabilized = true;
+            }
+            if (change.kind === 'chunks') continue;
+            const status = await this.#store.getStreamStatus(streamId);
+            if (status === undefined) {
+              ac.abort();
+              return;
+            }
+            if (status === 'cancelled') {
+              await detect();
+              return;
+            }
+            if (isTerminal(status)) return;
+          }
+        } catch {
+          if (ac.signal.aborted || detected) return;
         }
-        if (status === 'cancelled') {
-          await detect();
+
+        // A notification source can fail or end during a reconnect. Keep the
+        // cancellation watcher alive for the lifetime of persist(). Reuse the
+        // bounded adaptive policy so a storage outage cannot create one fixed-
+        // rate retry loop per active stream.
+        if (
+          !(await waitForDelay(nextAdaptivePollingDelay(retryState), ac.signal))
+        ) {
           return;
         }
       }
-    } catch {
-      /* cancel watcher failed unexpectedly — persist continues without cancel-detection */
     } finally {
       listeners.delete(detect);
       if (listeners.size === 0) {
@@ -267,7 +309,12 @@ export class StreamManager {
     streamId: string,
     options: PersistStreamOptions | undefined,
   ): Promise<void> {
-    const current = await this.#store.getStream(streamId);
+    let current: StreamData | undefined;
+    try {
+      current = await this.#store.getStream(streamId);
+    } catch {
+      // Latency is telemetry only; a read failure must never suppress abort.
+    }
     const latencyMs =
       current?.cancelRequestedAt != null
         ? Math.max(0, Date.now() - current.cancelRequestedAt)
@@ -408,6 +455,21 @@ export class StreamManager {
       // swallow telemetry errors — watch must not be coupled to observer faults
     }
   }
+}
+
+function waitForDelay(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timeout = globalThis.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = () => {
+      globalThis.clearTimeout(timeout);
+      resolve(false);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 async function drainAvailable(

@@ -71,6 +71,13 @@ export class AgentStatusProjector {
       ? await this.#streams.store.getStream(streamId)
       : undefined;
     const activity = await this.#queue.getTurnActivity(thread.conversation);
+    const scheduledTurn =
+      activity === 'idle'
+        ? undefined
+        : await this.#queue.getCurrentTurn(thread.conversation);
+    const scheduledStream = scheduledTurn
+      ? await this.#streams.store.getStream(scheduledTurn.streamId)
+      : undefined;
     let status = AgentStatusProjector.#listedStatus(
       stream?.status,
       stream?.error,
@@ -81,8 +88,10 @@ export class AgentStatusProjector {
     }
     if (
       thread.conversation.chatId === currentTurn.chatId ||
-      activity === 'running' ||
-      (activity === 'queued' && stream !== undefined)
+      (thread.lastTurnId !== undefined &&
+        scheduledTurn?.streamId !== thread.lastTurnId &&
+        (scheduledStream?.status === 'queued' ||
+          scheduledStream?.status === 'running'))
     ) {
       status = 'running';
     }

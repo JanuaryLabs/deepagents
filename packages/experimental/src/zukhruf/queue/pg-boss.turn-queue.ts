@@ -11,12 +11,16 @@ import {
 
 export interface PgBossTurnQueueOptions {
   queue?: string;
+  /** Required for custom DB adapters; must match the PgBoss schema. */
+  schema?: string;
   /** Hard cap on one turn attempt; the job fails past this. */
   expireInSeconds?: number;
   /** Dead-worker detection window; must be >= 10 (pg-boss constraint). */
   heartbeatSeconds?: number;
   pollingIntervalSeconds?: number;
 }
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * TurnQueue on pg-boss.
@@ -37,22 +41,59 @@ export interface PgBossTurnQueueOptions {
  *   (`retentionSeconds`, which governs still-`created` jobs, can't be 0; its
  *   default 14d is never approached because a queued turn only waits behind one
  *   running turn.)
+ * - Interrupting an active turn aborts the adapter-local handler but leaves its
+ *   pg-boss row `active` until that handler exits. Cancelling the row itself
+ *   would surrender the strict-FIFO key early and let the successor overlap.
+ *   Cross-process handler abort comes from the runtime's durable stream
+ *   cancellation; this queue remains the scheduler-ordering authority.
  *
  * The `PgBoss` instance is borrowed: the caller `start()`s and `stop()`s it.
  */
 export class PgBossTurnQueue extends TurnQueue {
   #boss: PgBoss;
   #queue: string;
+  #schema: string;
+  #schemaConfigurationError?: string;
+  #table?: string;
   #expireInSeconds: number;
+  #cancelIntentTtlMs: number;
   #heartbeatSeconds: number;
   #pollingIntervalSeconds: number;
   #active = new Map<string, Set<AbortController>>();
+  #cancelIntents = new Map<string, number>();
+  #cancelIntentExpiryTimer?: ReturnType<typeof globalThis.setTimeout>;
 
   constructor(boss: PgBoss, options: PgBossTurnQueueOptions = {}) {
     super();
     this.#boss = boss;
     this.#queue = options.queue ?? 'zukhruf-turns';
+    const configuredSchema = (boss.getDb() as { config?: { schema?: unknown } })
+      .config?.schema;
+    const bossSchema =
+      typeof configuredSchema === 'string' ? configuredSchema : undefined;
+    this.#schema = options.schema ?? bossSchema ?? 'pgboss';
+    if (options.schema === undefined && bossSchema === undefined) {
+      this.#schemaConfigurationError =
+        'PgBossTurnQueue cannot read the schema from a custom PgBoss database adapter; pass the PgBoss schema in options.schema';
+    } else if (
+      options.schema !== undefined &&
+      bossSchema !== undefined &&
+      options.schema !== bossSchema
+    ) {
+      this.#schemaConfigurationError = `PgBossTurnQueue schema "${options.schema}" does not match the PgBoss schema "${bossSchema}"`;
+    }
     this.#expireInSeconds = options.expireInSeconds ?? 3600;
+    this.#cancelIntentTtlMs = this.#expireInSeconds * 1_000;
+    if (
+      !Number.isFinite(this.#expireInSeconds) ||
+      this.#expireInSeconds <= 0 ||
+      !Number.isSafeInteger(this.#cancelIntentTtlMs) ||
+      this.#cancelIntentTtlMs > Number.MAX_SAFE_INTEGER - Date.now()
+    ) {
+      throw new Error(
+        'PgBossTurnQueue expireInSeconds must be a finite positive duration',
+      );
+    }
     this.#heartbeatSeconds = options.heartbeatSeconds ?? 30;
     this.#pollingIntervalSeconds = options.pollingIntervalSeconds ?? 1;
   }
@@ -66,10 +107,14 @@ export class PgBossTurnQueue extends TurnQueue {
   }
 
   async initialize(): Promise<void> {
+    if (this.#schemaConfigurationError) {
+      throw new Error(this.#schemaConfigurationError);
+    }
     if (!(await this.#boss.getQueue(this.deadLetterQueue))) {
       await this.#boss.createQueue(this.deadLetterQueue);
     }
-    if (!(await this.#boss.getQueue(this.#queue))) {
+    let queue = await this.#boss.getQueue(this.#queue);
+    if (!queue) {
       await this.#boss.createQueue(this.#queue, {
         policy: 'key_strict_fifo',
         retryLimit: 0,
@@ -78,6 +123,31 @@ export class PgBossTurnQueue extends TurnQueue {
         deleteAfterSeconds: 0,
         deadLetter: this.deadLetterQueue,
       });
+      queue = await this.#boss.getQueue(this.#queue);
+    }
+    if (!queue) throw new Error(`Queue "${this.#queue}" was not initialized`);
+    this.#table = queue.table;
+    try {
+      const catalog = await this.#boss.getDb().executeSql(
+        `SELECT table_name AS "table"
+         FROM ${PgBossTurnQueue.#quoteIdentifier(this.#schema)}."queue"
+         WHERE name = $1`,
+        [this.#queue],
+      );
+      if (
+        catalog.rows.length !== 1 ||
+        (catalog.rows[0] as { table?: unknown }).table !== this.#table
+      ) {
+        throw new Error('queue catalog does not match');
+      }
+      await this.#boss
+        .getDb()
+        .executeSql(`SELECT 1 FROM ${this.#relation()} WHERE false`);
+    } catch (cause) {
+      throw new Error(
+        `PgBossTurnQueue schema "${this.#schema}" does not match the PgBoss queue; pass the PgBoss schema in options.schema`,
+        { cause },
+      );
     }
   }
 
@@ -134,33 +204,30 @@ export class PgBossTurnQueue extends TurnQueue {
   }
 
   override async cancel(streamId: string): Promise<void> {
-    for (const controller of this.#active.get(streamId) ?? []) {
-      controller.abort();
-    }
+    this.#rememberCancelIntent(streamId);
+    this.#abortLocal(streamId);
     const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
       data: { streamId },
     });
-    const interruptible = jobs.filter(
-      (job) =>
-        job.state === 'active' ||
-        job.state === 'created' ||
-        job.state === 'retry',
-    );
-    if (interruptible.length === 0) return;
-
-    await this.#boss.cancel(
-      this.#queue,
-      interruptible.map((job) => job.id),
-    );
-
-    // A queued job has no worker that will reach commit-driven GC. Delete it
-    // after cancellation so the exact interrupted turn cannot be resumed as
-    // if it had merely been parked for approval.
-    const queued = interruptible
+    // An active row must retain the strict-FIFO key until its handler exits.
+    // Delete only rows that are still queued at mutation time: a worker may
+    // claim one after findJobs() returns, and pg-boss's public cancel/delete
+    // methods do not provide the state predicate needed to close that race.
+    // Remote active handlers are stopped by the runtime's durable stream
+    // cancellation; their normal handler exit performs commit-driven GC.
+    const queued = jobs
       .filter((job) => job.state === 'created' || job.state === 'retry')
       .map((job) => job.id);
-    if (queued.length > 0) {
-      await this.#boss.deleteJob(this.#queue, queued);
+    if (queued.length > 0) await this.#deleteIfStillQueued(queued);
+
+    // Close the inverse race too: a local worker can claim after the first
+    // controller scan but before the state-conditional delete.
+    this.#abortLocal(streamId);
+    const remaining = await this.#boss.findJobs<TurnRef>(this.#queue, {
+      data: { streamId },
+    });
+    if (!remaining.some((job) => job.state === 'active')) {
+      this.#forgetCancelIntent(streamId);
     }
   }
 
@@ -180,6 +247,7 @@ export class PgBossTurnQueue extends TurnQueue {
         const active = this.#active.get(job.data.streamId) ?? new Set();
         active.add(localAbort);
         this.#active.set(job.data.streamId, active);
+        if (this.#hasCancelIntent(job.data.streamId)) localAbort.abort();
         try {
           await handler(job.data, {
             signal: AbortSignal.any([job.signal, localAbort.signal]),
@@ -196,6 +264,7 @@ export class PgBossTurnQueue extends TurnQueue {
           active.delete(localAbort);
           if (active.size === 0) {
             this.#active.delete(job.data.streamId);
+            this.#forgetCancelIntent(job.data.streamId);
           }
         }
         // Commit-driven GC. A handler that returns without parking has run its
@@ -255,6 +324,85 @@ export class PgBossTurnQueue extends TurnQueue {
     if (parked.length > 0) {
       await this.#boss.resume(this.#queue, parked);
     }
+  }
+
+  #abortLocal(streamId: string): void {
+    for (const controller of this.#active.get(streamId) ?? []) {
+      controller.abort();
+    }
+  }
+
+  #rememberCancelIntent(streamId: string): void {
+    this.#pruneCancelIntents();
+    this.#cancelIntents.set(streamId, Date.now() + this.#cancelIntentTtlMs);
+    this.#scheduleCancelIntentExpiry();
+  }
+
+  #hasCancelIntent(streamId: string): boolean {
+    this.#pruneCancelIntents();
+    return this.#cancelIntents.has(streamId);
+  }
+
+  #pruneCancelIntents(): void {
+    const now = Date.now();
+    for (const [streamId, expiresAt] of this.#cancelIntents) {
+      if (expiresAt <= now) this.#cancelIntents.delete(streamId);
+    }
+    this.#scheduleCancelIntentExpiry();
+  }
+
+  #forgetCancelIntent(streamId: string): void {
+    this.#cancelIntents.delete(streamId);
+    this.#scheduleCancelIntentExpiry();
+  }
+
+  #scheduleCancelIntentExpiry(): void {
+    if (this.#cancelIntentExpiryTimer !== undefined) {
+      globalThis.clearTimeout(this.#cancelIntentExpiryTimer);
+      this.#cancelIntentExpiryTimer = undefined;
+    }
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const expiresAt of this.#cancelIntents.values()) {
+      nextExpiry = Math.min(nextExpiry, expiresAt);
+    }
+    if (!Number.isFinite(nextExpiry)) return;
+
+    const timer = globalThis.setTimeout(
+      () => {
+        if (this.#cancelIntentExpiryTimer !== timer) return;
+        this.#cancelIntentExpiryTimer = undefined;
+        this.#pruneCancelIntents();
+      },
+      Math.min(MAX_TIMEOUT_MS, Math.max(1, nextExpiry - Date.now())),
+    );
+    this.#cancelIntentExpiryTimer = timer;
+    (timer as { unref?: () => void }).unref?.();
+  }
+
+  async #deleteIfStillQueued(ids: string[]): Promise<void> {
+    if (!this.#table) {
+      throw new Error('PgBossTurnQueue.initialize() must run before cancel()');
+    }
+    await this.#boss.getDb().executeSql(
+      `DELETE FROM ${this.#relation()}
+       WHERE name = $1
+         AND id = ANY($2::uuid[])
+         AND state IN ('created', 'retry')`,
+      [this.#queue, ids],
+    );
+  }
+
+  #relation(): string {
+    if (!this.#table) {
+      throw new Error(
+        'PgBossTurnQueue.initialize() must resolve its job table',
+      );
+    }
+    return `${PgBossTurnQueue.#quoteIdentifier(this.#schema)}.${PgBossTurnQueue.#quoteIdentifier(this.#table)}`;
+  }
+
+  static #quoteIdentifier(identifier: string): string {
+    return `"${identifier.replaceAll('"', '""')}"`;
   }
 
   static #orphanError(output: object | null | undefined): string {

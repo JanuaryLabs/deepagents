@@ -258,11 +258,15 @@ export class AgentControlPlane {
       // aborting scheduler delivery so a racing worker observes cancellation,
       // never an orphaned failure.
       await this.#streams.cancel(currentTurn.streamId);
-      await this.#queue.cancel(currentTurn.streamId);
+      // Terminal mail has a deterministic id, so retrying this projection is
+      // idempotent. Project before destructive queue cleanup: if mailbox
+      // delivery fails, the still-discoverable scheduler receipt lets a later
+      // interrupt_agent call retry instead of losing FINAL_ANSWER forever.
       await this.#statusProjector.projectTerminal(
         currentTurn,
         interruptedThread,
       );
+      await this.#queue.cancel(currentTurn.streamId);
     }
     return { previous_status: previous.agent_status };
   }

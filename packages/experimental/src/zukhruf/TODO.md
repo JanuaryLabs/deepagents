@@ -25,8 +25,9 @@
 - [ ] **Startup reconciliation sweep**: non-terminal stream rows with no live/queued job → `failed`
       (covers register→push orphans beyond the retried-ask self-heal).
 - [ ] **Host cancel, remaining queue fix**: `interrupt_agent` now cancels the exact queue job and
-      frees FIFO immediately, but `AgentObservation.cancel()` still cancels only the durable stream.
-      Wire that existing host-facing path to the new TurnQueue capability separately.
+      removes queued copies immediately while active work retains FIFO ownership through handler
+      exit, but `AgentObservation.cancel()` still cancels only the durable stream. Wire that
+      existing host-facing path to the TurnQueue capability separately.
 - [x] **Terminal stream transitions are monotonic**: completion, failure, error chunks, and
       cancellation update only queued/running rows. A committed cancellation cannot be overwritten
       by a late completion or failure.

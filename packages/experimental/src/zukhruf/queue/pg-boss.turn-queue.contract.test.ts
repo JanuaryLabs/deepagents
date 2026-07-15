@@ -1,7 +1,12 @@
 import { PGlite } from '@electric-sql/pglite';
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { PgBoss, fromPglite } from 'pg-boss';
+import {
+  type FindJobsOptions,
+  type JobWithMetadata,
+  PgBoss,
+  fromPglite,
+} from 'pg-boss';
 
 import type { TurnQueue, TurnRef } from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
@@ -121,14 +126,25 @@ export function turnQueueContract(
         started.resolve();
         await release.promise;
       }, noOrphans);
-      await started.promise;
-      assert.equal(await h.queue.getTurnActivity(conversation), 'running');
+      try {
+        assert.equal(
+          await Promise.race([
+            started.promise.then(() => true),
+            sleep(5_000).then(() => false),
+          ]),
+          true,
+          'active handler starts',
+        );
+        assert.equal(await h.queue.getTurnActivity(conversation), 'running');
 
-      release.resolve();
-      await waitForAsync(
-        async () => (await h.queue.getTurnActivity(conversation)) === 'idle',
-        'settled turn disappears from scheduler status',
-      );
+        release.resolve();
+        await waitForAsync(
+          async () => (await h.queue.getTurnActivity(conversation)) === 'idle',
+          'settled turn disappears from scheduler status',
+        );
+      } finally {
+        release.resolve();
+      }
     });
 
     it('finds and cancels every copy of the oldest queued stream id', async () => {
@@ -166,7 +182,7 @@ export function turnQueueContract(
       assert.deepStrictEqual(seen, [second]);
     });
 
-    it('cancelling an active turn aborts its handler and unblocks its successor', async () => {
+    it('cancelling an active turn aborts its handler without overlapping its successor', async () => {
       await using h = await makeQueue();
       const first = ref('interrupt-active', 1);
       const second = ref('interrupt-active', 2);
@@ -175,36 +191,88 @@ export function turnQueueContract(
 
       const started = Promise.withResolvers<void>();
       const aborted = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const successorStarted = Promise.withResolvers<void>();
       const seen: TurnRef[] = [];
-      await using _consumer = await h.queue.consume(async (turn, context) => {
-        if (turn.streamId !== first.streamId) {
-          seen.push(turn);
-          return;
-        }
-        started.resolve();
-        await new Promise<void>((resolve) => {
-          context.signal.addEventListener('abort', () => resolve(), {
-            once: true,
+      await using _consumer = await h.queue.consume(
+        async (turn, context) => {
+          if (turn.streamId !== first.streamId) {
+            seen.push(turn);
+            successorStarted.resolve();
+            return;
+          }
+          started.resolve();
+          await new Promise<void>((resolve) => {
+            context.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            });
           });
-        });
-        aborted.resolve();
-      }, noOrphans);
+          aborted.resolve();
+          await release.promise;
+        },
+        { ...noOrphans, concurrency: 2 },
+      );
 
-      await started.promise;
-      assert.deepStrictEqual(
-        await h.queue.getCurrentTurn({
+      try {
+        assert.equal(
+          await Promise.race([
+            started.promise.then(() => true),
+            sleep(5_000).then(() => false),
+          ]),
+          true,
+          'active handler starts',
+        );
+        assert.deepStrictEqual(
+          await h.queue.getCurrentTurn({
+            chatId: first.chatId,
+            userId: first.userId,
+          }),
+          first,
+        );
+        await h.queue.cancel(first.streamId);
+        assert.equal(
+          await Promise.race([
+            aborted.promise.then(() => true),
+            sleep(5_000).then(() => false),
+          ]),
+          true,
+          'active handler observes cancellation',
+        );
+        const overlapped = await Promise.race([
+          successorStarted.promise.then(() => true),
+          sleep(1_200).then(() => false),
+        ]);
+        const ownerWhileInterrupted = await h.queue.getCurrentTurn({
           chatId: first.chatId,
           userId: first.userId,
-        }),
-        first,
-      );
-      await h.queue.cancel(first.streamId);
-      await aborted.promise;
-      await waitFor(
-        () => seen.length === 1,
-        'successor runs after active abort',
-      );
-      assert.deepStrictEqual(seen, [second]);
+        });
+        release.resolve();
+        assert.equal(
+          overlapped,
+          false,
+          'strict FIFO key stays owned until the interrupted handler exits',
+        );
+        assert.deepStrictEqual(
+          ownerWhileInterrupted,
+          first,
+          'the active row remains the scheduler owner while its handler exits',
+        );
+        await waitFor(
+          () => seen.length === 1,
+          'successor runs after active abort',
+        );
+        assert.deepStrictEqual(seen, [second]);
+        await waitForAsync(
+          async () =>
+            (await h.queue.getTurnActivity({
+              chatId: first.chatId,
+              userId: first.userId,
+            })) === 'idle',
+          'interrupted and successor rows are commit-deleted',
+        );
+      } finally {
+        release.resolve();
+      }
     });
 
     it('a duplicate push never delivers concurrently, out of order, or not at all', async () => {
@@ -484,7 +552,10 @@ turnQueueContract('PgBossTurnQueue (pglite)', async () => {
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
-  const queue = new PgBossTurnQueue(boss, { pollingIntervalSeconds: 0.5 });
+  const queue = new PgBossTurnQueue(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
   await queue.initialize();
   return {
     queue,
@@ -493,4 +564,324 @@ turnQueueContract('PgBossTurnQueue (pglite)', async () => {
       await pglite.close();
     },
   };
+});
+
+it('does not delete or overlap a turn claimed after the cancellation snapshot', async () => {
+  const pglite = new PGlite();
+  const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
+  boss.on('error', () => {});
+  await boss.start();
+  const queue = new PgBossTurnQueue(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  await queue.initialize();
+
+  const first = ref('interrupt-claim-race', 1);
+  const second = ref('interrupt-claim-race', 2);
+  await queue.push(first);
+  await queue.push(second);
+
+  type FindTurns = (
+    name: string,
+    options?: FindJobsOptions,
+  ) => Promise<JobWithMetadata<TurnRef>[]>;
+  const mutableBoss = boss as unknown as { findJobs: FindTurns };
+  const originalFindJobs = mutableBoss.findJobs.bind(boss);
+  const snapshotTaken = Promise.withResolvers<void>();
+  const releaseSnapshot = Promise.withResolvers<void>();
+  mutableBoss.findJobs = async (name, options) => {
+    const jobs = await originalFindJobs(name, options);
+    if (
+      (options?.data as Partial<TurnRef> | undefined)?.streamId ===
+      first.streamId
+    ) {
+      snapshotTaken.resolve();
+      await releaseSnapshot.promise;
+    }
+    return jobs;
+  };
+
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const successorStarted = Promise.withResolvers<void>();
+  let lateActiveSignalAborted = false;
+  let worker: AsyncDisposable | undefined;
+  let cancelling: Promise<void> | undefined;
+  try {
+    cancelling = queue.cancel(first.streamId);
+    assert.equal(
+      await Promise.race([
+        snapshotTaken.promise.then(() => true),
+        sleep(5_000).then(() => false),
+      ]),
+      true,
+      'cancellation captures the queued snapshot',
+    );
+    worker = await queue.consume(
+      async (turn, context) => {
+        if (turn.streamId !== first.streamId) {
+          successorStarted.resolve();
+          return;
+        }
+        lateActiveSignalAborted = context.signal.aborted;
+        context.signal.addEventListener(
+          'abort',
+          () => {
+            lateActiveSignalAborted = true;
+          },
+          { once: true },
+        );
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      },
+      { ...noOrphans, concurrency: 2 },
+    );
+    assert.equal(
+      await Promise.race([
+        firstStarted.promise.then(() => true),
+        sleep(5_000).then(() => false),
+      ]),
+      true,
+      'worker claims the snapshotted turn',
+    );
+    releaseSnapshot.resolve();
+    assert.equal(
+      await Promise.race([
+        cancelling.then(() => true),
+        sleep(5_000).then(() => false),
+      ]),
+      true,
+      'state-conditional cancellation settles after the claim',
+    );
+
+    const overlapped = await Promise.race([
+      successorStarted.promise.then(() => true),
+      sleep(1_200).then(() => false),
+    ]);
+    releaseFirst.resolve();
+    assert.equal(
+      lateActiveSignalAborted,
+      true,
+      'the post-mutation active scan signals a locally claimed handler',
+    );
+    assert.equal(
+      overlapped,
+      false,
+      'a stale queued snapshot cannot delete the now-active FIFO owner',
+    );
+    const successorRan = await Promise.race([
+      successorStarted.promise.then(() => true),
+      sleep(5_000).then(() => false),
+    ]);
+    assert.equal(
+      successorRan,
+      true,
+      'the successor eventually becomes eligible',
+    );
+    await waitForAsync(
+      async () =>
+        (await queue.getTurnActivity({
+          chatId: first.chatId,
+          userId: first.userId,
+        })) === 'idle',
+      'claimed turn and successor finish commit-driven cleanup',
+    );
+  } finally {
+    releaseSnapshot.resolve();
+    releaseFirst.resolve();
+    mutableBoss.findJobs = originalFindJobs;
+    await cancelling?.catch(() => undefined);
+    await worker?.[Symbol.asyncDispose]();
+    await boss.stop({ graceful: false });
+    await pglite.close();
+  }
+});
+
+it('delivers cancellation to a local handler registered after cancel returns', async () => {
+  const pglite = new PGlite();
+  const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
+  boss.on('error', () => {});
+  await boss.start();
+  const queue = new PgBossTurnQueue(boss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  await queue.initialize();
+  const first = ref('late-registration', 1);
+  const second = ref('late-registration', 2);
+
+  type Work = (...args: unknown[]) => Promise<string>;
+  const mutableBoss = boss as unknown as { work: Work };
+  const originalWork = mutableBoss.work.bind(boss);
+  const claimed = Promise.withResolvers<void>();
+  const registerHandler = Promise.withResolvers<void>();
+  mutableBoss.work = async (...args) => {
+    const [name, options, candidate] = args;
+    const handler = candidate as (
+      jobs: Array<{ data: TurnRef }>,
+    ) => Promise<void>;
+    return originalWork(name, options, async (jobs: unknown) => {
+      const turns = jobs as Array<{ data: TurnRef }>;
+      if (name === queue.queue && turns[0]?.data.streamId === first.streamId) {
+        claimed.resolve();
+        await registerHandler.promise;
+      }
+      return handler(turns);
+    });
+  };
+
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const successorStarted = Promise.withResolvers<void>();
+  let firstSignalAborted = false;
+  let worker: AsyncDisposable | undefined;
+  let otherWorker: AsyncDisposable | undefined;
+  try {
+    worker = await queue.consume(
+      async (turn, context) => {
+        if (turn.streamId !== first.streamId) {
+          successorStarted.resolve();
+          return;
+        }
+        firstSignalAborted = context.signal.aborted;
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      },
+      { ...noOrphans, concurrency: 2 },
+    );
+    await queue.push(first);
+    await queue.push(second);
+    assert.equal(
+      await Promise.race([
+        claimed.promise.then(() => true),
+        sleep(5_000).then(() => false),
+      ]),
+      true,
+      'pg-boss claims the turn before adapter controller registration',
+    );
+    await queue.cancel(first.streamId);
+    otherWorker = await queue.consume(async () => {}, noOrphans);
+    await otherWorker[Symbol.asyncDispose]();
+    otherWorker = undefined;
+    registerHandler.resolve();
+    assert.equal(
+      await Promise.race([
+        firstStarted.promise.then(() => true),
+        sleep(5_000).then(() => false),
+      ]),
+      true,
+      'delayed handler registers',
+    );
+    assert.equal(
+      firstSignalAborted,
+      true,
+      'the cancellation tombstone aborts a late local registration',
+    );
+    const overlapped = await Promise.race([
+      successorStarted.promise.then(() => true),
+      sleep(1_200).then(() => false),
+    ]);
+    releaseFirst.resolve();
+    assert.equal(overlapped, false);
+    assert.equal(
+      await Promise.race([
+        successorStarted.promise.then(() => true),
+        sleep(5_000).then(() => false),
+      ]),
+      true,
+      'successor runs after the interrupted handler exits',
+    );
+    await waitForAsync(
+      async () =>
+        (await queue.getTurnActivity({
+          chatId: first.chatId,
+          userId: first.userId,
+        })) === 'idle',
+      'late-registration turn and successor clean up',
+    );
+  } finally {
+    registerHandler.resolve();
+    releaseFirst.resolve();
+    mutableBoss.work = originalWork;
+    await otherWorker?.[Symbol.asyncDispose]();
+    await worker?.[Symbol.asyncDispose]();
+    await boss.stop({ graceful: false });
+    await pglite.close();
+  }
+});
+
+it('fails fast when a custom-adapter schema is omitted and accepts it explicitly', async () => {
+  const pglite = new PGlite();
+  const schema = 'custom_pgboss';
+  const decoyBoss = new PgBoss({
+    db: fromPglite(pglite),
+    backend: 'pglite',
+  });
+  decoyBoss.on('error', () => {});
+  await decoyBoss.start();
+  const decoyQueue = new PgBossTurnQueue(decoyBoss, {
+    pollingIntervalSeconds: 0.5,
+    schema: 'pgboss',
+  });
+  await decoyQueue.initialize();
+  await decoyBoss.stop({ graceful: false });
+
+  const boss = new PgBoss({
+    db: fromPglite(pglite),
+    backend: 'pglite',
+    schema,
+  });
+  boss.on('error', () => {});
+  await boss.start();
+  try {
+    assert.throws(
+      () =>
+        new PgBossTurnQueue(boss, {
+          expireInSeconds: Number.POSITIVE_INFINITY,
+          pollingIntervalSeconds: 0.5,
+          schema,
+        }),
+      /expireInSeconds must be a finite positive duration/,
+    );
+    const mismatched = new PgBossTurnQueue(boss, {
+      pollingIntervalSeconds: 0.5,
+    });
+    await assert.rejects(
+      mismatched.initialize(),
+      /pass the PgBoss schema in options\.schema/,
+    );
+
+    type CreateQueue = (...args: unknown[]) => Promise<void>;
+    const mutableBoss = boss as unknown as { createQueue: CreateQueue };
+    const originalCreateQueue = mutableBoss.createQueue.bind(boss);
+    const createdQueues: string[] = [];
+    mutableBoss.createQueue = async (...args) => {
+      createdQueues.push(String(args[0]));
+      return originalCreateQueue(...args);
+    };
+    const queue = new PgBossTurnQueue(boss, {
+      pollingIntervalSeconds: 0.5,
+      schema,
+    });
+    try {
+      await queue.initialize();
+    } finally {
+      mutableBoss.createQueue = originalCreateQueue;
+    }
+    assert.deepStrictEqual(createdQueues, [queue.deadLetterQueue, queue.queue]);
+    const queued = ref('custom-schema', 1);
+    await queue.push(queued);
+    await queue.cancel(queued.streamId);
+    assert.equal(
+      await queue.getCurrentTurn({
+        chatId: queued.chatId,
+        userId: queued.userId,
+      }),
+      undefined,
+    );
+  } finally {
+    await boss.stop({ graceful: false });
+    await pglite.close();
+  }
 });

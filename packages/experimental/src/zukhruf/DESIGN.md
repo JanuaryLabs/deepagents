@@ -165,7 +165,13 @@ crashed handler/worker surfaces once through `onOrphaned` (no retry), then the c
 
 ### pg-boss implementation _(Built — `queue/pg-boss.turn-queue.ts`)_
 
-`PgBossTurnQueue(boss /* borrowed */, {queue?})` on pg-boss v12 (all semantics live-verified):
+`PgBossTurnQueue(boss /* borrowed */, {queue?, schema?})` on pg-boss v12 (all semantics live-verified):
+
+- **Schema is explicit for custom database adapters** — pg-boss does not expose the configured
+  schema through its custom-adapter interface. Callers using `fromPglite` or another custom adapter
+  must pass the same `schema` to `PgBossTurnQueue`; the built-in database path is read directly.
+  Initialization validates the queue catalog/table without creating transient probe queues, so
+  preprovisioned least-privilege deployments do not need catalog-write permission at startup.
 
 - **`key_strict_fifo` policy + `singletonKey = chatId`** — per-chat serialization is structural:
   1 active per key, unlimited queued, strict push order, failed job blocks the key.
@@ -405,8 +411,11 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   the caller turn. Zukhruf has no in-turn steer channel, so steer activity is intentionally absent.
 - `interrupt_agent` resolves canonical or relative paths, rejects root/self, returns the target's
   previous listed status, and leaves the target reusable. For a running or oldest queued turn it
-  first commits stream cancellation, then cancels every matching scheduler copy; an unstarted turn
-  is projected explicitly because no worker remains to send its idempotent `FINAL_ANSWER`.
+  first commits stream cancellation, projects its idempotent `FINAL_ANSWER`, then removes matching
+  scheduler copies that are still queued. Active work retains its strict-FIFO key until its handler
+  exits; local handlers are signalled by the adapter and remote handlers observe the durable stream
+  cancellation. Projection precedes destructive queue cleanup so a mailbox failure remains
+  retryable.
   Terminal and approval-paused targets are no-ops. This is the complete model-facing lifecycle
   surface: there are no close, shutdown, resume, or approval-as-denial tools.
 - Every genuinely terminal non-root turn is projected to its direct parent as idempotent queue-only
