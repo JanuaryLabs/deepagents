@@ -1,7 +1,10 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-import type { ListedAgent } from './agent-control-plane.ts';
+import {
+  type ListedAgent,
+  listedAgentSchema,
+} from './agent-status-projector.ts';
 import type { AgentToolContext } from './agent-tool-context.ts';
 
 const listAgentsInputSchema = z.object({
@@ -17,6 +20,10 @@ const listAgentsInputSchema = z.object({
 
 type ListAgentsInput = z.infer<typeof listAgentsInputSchema>;
 
+const listAgentsOutputSchema = z
+  .object({ agents: z.array(listedAgentSchema) })
+  .strict();
+
 export const listAgentsTool = tool<
   ListAgentsInput,
   { agents: ListedAgent[] },
@@ -25,6 +32,7 @@ export const listAgentsTool = tool<
   description:
     'List live agents in the current root thread tree. Optionally filter by task-path prefix.',
   inputSchema: listAgentsInputSchema,
+  outputSchema: listAgentsOutputSchema,
   execute: async ({ path_prefix }, { context }) =>
     context.controlPlane.listAgents(context.actor, path_prefix),
 });

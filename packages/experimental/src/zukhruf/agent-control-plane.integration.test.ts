@@ -657,14 +657,30 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
   assert.match(JSON.stringify(promptAfterSpawn), /\/root\/market_research/);
 
   const childChat = await store.getChat(childTurn.chatId);
-  assert.deepEqual(childChat?.metadata, {
-    zukhrufTreeId: 'root-chat',
-    zukhruf: {
-      path: '/root/market_research',
-      parentChatId: 'root-chat',
-      declarationName: 'researcher',
-    },
-  });
+  assert.equal(childChat?.metadata?.zukhrufTreeId, 'root-chat');
+  const childMetadata = childChat?.metadata?.zukhruf as
+    | {
+        path?: string;
+        parentChatId?: string;
+        declarationName?: string;
+        historyFork?: {
+          forkTurns?: string;
+          parentChatId?: string;
+          parentHeadMessageId?: string;
+          sourceMessageIds?: string[];
+        };
+      }
+    | undefined;
+  assert.equal(childMetadata?.path, '/root/market_research');
+  assert.equal(childMetadata?.parentChatId, 'root-chat');
+  assert.equal(childMetadata?.declarationName, 'researcher');
+  assert.equal(childMetadata?.historyFork?.forkTurns, 'all');
+  assert.equal(childMetadata?.historyFork?.parentChatId, 'root-chat');
+  assert.equal(
+    typeof childMetadata?.historyFork?.parentHeadMessageId,
+    'string',
+  );
+  assert.equal(childMetadata?.historyFork?.sourceMessageIds?.length, 1);
 
   await queue.runNext();
   assert.equal(childCalls.length, 1);
@@ -851,7 +867,8 @@ test('an approval-paused child sends one final answer only after continuation', 
     { id: 'list-paused-turn', input: 'List the agents' },
   );
   await queue.runNext();
-  assert.match(JSON.stringify(listedPrompt), /waiting_approval/);
+  assert.match(JSON.stringify(listedPrompt), /"agent_status":"running"/);
+  assert.doesNotMatch(JSON.stringify(listedPrompt), /waiting_approval/);
 
   await runtime.approve(
     { chatId: 'paused-child-chat', userId: 'user-1' },
@@ -2554,7 +2571,7 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
 
   const prompt = JSON.stringify(finalPrompt);
   assert.match(prompt, /"previous_status":\{"completed":"completed child"\}/);
-  assert.match(prompt, /"previous_status":"waiting_approval"/);
+  assert.match(prompt, /"previous_status":"running"/);
   assert.equal(
     await streamStore.getStreamStatus(completedTurn.id),
     'completed',

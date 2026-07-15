@@ -9,6 +9,7 @@ import {
 import { AgentControlPlane, type TurnInput } from './agent-control-plane.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
+import { AgentHistoryForker } from './agent-history-forker.ts';
 import { AgentStatusProjector } from './agent-status-projector.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
@@ -22,6 +23,10 @@ import type {
   InterAgentCommunication,
   MessageDeliveryMode,
 } from './mailbox/types.ts';
+import {
+  type MultiAgentV2HostConfig,
+  resolveMultiAgentV2HostConfig,
+} from './multi-agent-v2-config.ts';
 import type { TurnQueue, TurnRef } from './queue/turn-queue.ts';
 
 export interface AgentRuntimeOptions {
@@ -32,6 +37,8 @@ export interface AgentRuntimeOptions {
   mailboxStore: MailboxStore;
   /** Cross-process serialization for assistant-message approval transitions. */
   approvalMutex: ApprovalMutex;
+  /** Codex MultiAgentV2-compatible host guidance and tool configuration. */
+  multiAgentV2?: MultiAgentV2HostConfig;
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -102,6 +109,7 @@ export class AgentRuntime {
   readonly #executor: AgentTurnExecutor;
 
   constructor(root: AgentDeclaration, options: AgentRuntimeOptions) {
+    const multiAgentV2 = resolveMultiAgentV2HostConfig(options.multiAgentV2);
     const declarations = new AgentDeclarationRegistry(root);
     const directory = new AgentDirectory(options.store);
     const streams = new StreamManager({
@@ -127,6 +135,7 @@ export class AgentRuntime {
       directory,
       approvals,
     });
+    const historyForker = new AgentHistoryForker(options.store);
     const controlPlane = new AgentControlPlane({
       root,
       streams,
@@ -135,6 +144,7 @@ export class AgentRuntime {
       declarations,
       directory,
       statusProjector,
+      historyForker,
     });
 
     this.#store = options.store;
@@ -150,6 +160,7 @@ export class AgentRuntime {
       controlPlane,
       mailbox,
       approvals,
+      multiAgentV2,
     });
   }
 

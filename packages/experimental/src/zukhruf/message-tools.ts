@@ -15,7 +15,7 @@ const agentMessageInputSchema = z.object({
 });
 
 type AgentMessageInput = z.infer<typeof agentMessageInputSchema>;
-type AgentMessageOutput = { target: string };
+type AgentMessageOutput = string;
 
 export const sendMessageTool = tool<
   AgentMessageInput,
@@ -25,8 +25,10 @@ export const sendMessageTool = tool<
   description:
     'Queue a message for another agent. Address siblings with their canonical /root/... path.',
   inputSchema: agentMessageInputSchema,
-  execute: async (input, { context }) =>
-    context.controlPlane.sendMessage(context.actor, input),
+  execute: async (input, { context }) => {
+    await context.controlPlane.sendMessage(context.actor, input);
+    return '';
+  },
 });
 
 export const followupTaskTool = tool<
@@ -37,6 +39,8 @@ export const followupTaskTool = tool<
   description:
     'Send a follow-up task to an existing non-root agent and wake its thread.',
   inputSchema: agentMessageInputSchema,
-  execute: async (input, { context }) =>
-    context.controlPlane.followupTask(context.actor, input),
+  execute: async (input, { context }) => {
+    await context.controlPlane.followupTask(context.actor, input);
+    return '';
+  },
 });

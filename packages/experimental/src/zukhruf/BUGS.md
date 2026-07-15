@@ -1,4 +1,4 @@
-# zukhruf — Known Bugs
+# Zukhruf — Known Bugs
 
 > Tracked defects in the runtime. Each entry: symptom → cause → why nothing recovers it → repro → fix direction.
 

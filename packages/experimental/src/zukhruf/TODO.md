@@ -65,11 +65,10 @@
 - [x] Keep the assistant message as the sole durable decision record while the mutex protects its
       complete read–validate–rewrite transition. Concurrent decisions for different sibling tool
       calls are both retained, and the SQLite mutex excludes independent processes.
-- [x] Suppress child terminal projection while an approval remains unresolved, report
-      `waiting_approval`, and prove exactly one post-continuation `FINAL_ANSWER`.
+- [x] Suppress child terminal projection while an approval remains unresolved, report Codex V2's
+      model-facing `running`, and prove exactly one post-continuation `FINAL_ANSWER`.
 - [x] A failed or cancelled continuation overrides approval-pause projection: parents receive the
-      terminal result and `list_agents` reports `errored` or `interrupted`, never stale
-      `waiting_approval`.
+      terminal result and `list_agents` reports `errored` or `interrupted`, never stale `running`.
 - [x] A failed or cancelled continuation settles approved `approval-responded` parts to
       `output-error`, preserves denied siblings as `output-denied`, and resumes parked turns. The
       same reconciliation runs for normal settlement, orphan cleanup, and already-terminal replay,
@@ -108,12 +107,22 @@
       canonical paths, queued follow-ups, completion text, and the last persisted task without adding
       a registry.
 - [x] Model-facing `wait_agent` observes only the caller's durable mailbox without consuming it,
-      returns a bounded timeout result, releases across runtime instances, and aborts with its turn.
-      Live steer is intentionally absent because Zukhruf has no in-turn steer channel.
+      returns a host-configurable bounded timeout result, releases across runtime instances, and
+      aborts with its turn. Live steer is intentionally absent because Zukhruf has no in-turn steer
+      channel.
 - [x] Model-facing `interrupt_agent` resolves relative/canonical paths, rejects root/self, cancels
       running or oldest queued work across runtime instances, projects one terminal parent message,
       returns the previous status, and leaves the target reusable. Terminal and approval-paused
       targets no-op; no broader close/resume/shutdown lifecycle was added.
+- [x] Port Codex V2 host configuration for separate root/subagent guidance, spawn usage text,
+      validated OpenAI Responses tool namespaces, and wait bounds. Keep collaboration tools on the
+      direct model surface when `nonCodeModeOnly` is true.
+- [ ] Add a nested code-mode executor before accepting `nonCodeModeOnly: false`; current Zukhruf has
+      no `functions.exec`-equivalent surface, so the unsupported value fails explicitly.
+- [x] Match Codex V2 collaboration output/status contracts: canonical `{task_name}` spawn output,
+      empty send/follow-up success text, strict list/wait/interrupt output schemas, approval pauses
+      as `running`, and missing interrupt targets as `not_found`. `shutdown` is accepted by the
+      compatibility status schema but has no producer until Zukhruf gains a shutdown lifecycle.
 - [x] Mailbox consumption follows the simpler Codex queue shape: FIFO drain consumes pending mail;
       no claim/ack/lease/redelivery protocol or startup crash reconciliation.
 - [x] Migrate `demo/zukhruf-durable-turns` from blocking `agent.asTool()` composition to a durable

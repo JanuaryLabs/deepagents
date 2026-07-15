@@ -7,23 +7,21 @@ import {
   agent,
   assistant,
   chat,
+  role,
   user,
 } from '@deepagents/context';
 
 import type { AgentControlPlane } from './agent-control-plane.ts';
 import type { AgentToolContext } from './agent-tool-context.ts';
 import type { ApprovalController } from './approval-controller.ts';
-import { interruptAgentTool } from './interrupt-agent.ts';
-import { listAgentsTool } from './list-agents.ts';
+import { createCollaborationTools } from './collaboration-tools.ts';
 import type { MailboxCoordinator } from './mailbox/coordinator.ts';
 import type {
   ConversationId,
   InterAgentCommunication,
 } from './mailbox/types.ts';
-import { followupTaskTool, sendMessageTool } from './message-tools.ts';
+import type { ResolvedMultiAgentV2HostConfig } from './multi-agent-v2-config.ts';
 import type { ConsumeContext, TurnRef } from './queue/turn-queue.ts';
-import { spawnAgentTool } from './spawn-agent.ts';
-import { waitAgentTool } from './wait-agent.ts';
 
 export interface AgentTurnExecutorOptions {
   store: ContextStore;
@@ -31,6 +29,7 @@ export interface AgentTurnExecutorOptions {
   controlPlane: AgentControlPlane;
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
+  multiAgentV2: ResolvedMultiAgentV2HostConfig;
 }
 
 interface SamplingMailboxState {
@@ -44,6 +43,8 @@ export class AgentTurnExecutor {
   readonly #controlPlane: AgentControlPlane;
   readonly #mailbox: MailboxCoordinator;
   readonly #approvals: ApprovalController;
+  readonly #multiAgentV2: ResolvedMultiAgentV2HostConfig;
+  readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -51,6 +52,8 @@ export class AgentTurnExecutor {
     this.#controlPlane = options.controlPlane;
     this.#mailbox = options.mailbox;
     this.#approvals = options.approvals;
+    this.#multiAgentV2 = options.multiAgentV2;
+    this.#collaborationTools = createCollaborationTools(options.multiAgentV2);
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
@@ -78,7 +81,13 @@ export class AgentTurnExecutor {
     if (await this.#projectSkippedTerminalTurn(turn)) return;
 
     const { declaration, thread } = await this.#controlPlane.resolve(turn);
-    const engine = this.#engineFor(turn).set(...declaration.instructions);
+    const usageHint = thread.path.isRoot
+      ? this.#multiAgentV2.rootAgentUsageHintText
+      : this.#multiAgentV2.subagentUsageHintText;
+    const engine = this.#engineFor(turn).set(
+      ...declaration.instructions,
+      ...(usageHint === undefined ? [] : [role(usageHint)]),
+    );
 
     if (turn.kind === 'ask' || turn.kind === 'mailbox') {
       const head = (await engine.getMessages()).at(-1);
@@ -121,12 +130,7 @@ export class AgentTurnExecutor {
       context: engine,
       tools: {
         ...declaration.tools,
-        spawn_agent: spawnAgentTool,
-        send_message: sendMessageTool,
-        followup_task: followupTaskTool,
-        list_agents: listAgentsTool,
-        wait_agent: waitAgentTool,
-        interrupt_agent: interruptAgentTool,
+        ...this.#collaborationTools,
       },
       telemetry: declaration.telemetry,
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),

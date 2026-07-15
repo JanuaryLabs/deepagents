@@ -1,4 +1,5 @@
 import { type UIMessage, isTextUIPart } from 'ai';
+import { z } from 'zod';
 
 import {
   ContextEngine,
@@ -18,19 +19,27 @@ import {
 } from './mailbox/types.ts';
 import type { TurnQueue, TurnRef } from './queue/turn-queue.ts';
 
-export type ListedAgentStatus =
-  | 'pending_init'
-  | 'running'
-  | 'waiting_approval'
-  | 'interrupted'
-  | { completed: string | null }
-  | { errored: string };
+export const listedAgentStatusSchema = z.union([
+  z.enum(['pending_init', 'running', 'interrupted', 'shutdown', 'not_found']),
+  z.object({ completed: z.string().nullable() }).strict(),
+  z.object({ errored: z.string() }).strict(),
+]);
+
+export type ListedAgentStatus = z.infer<typeof listedAgentStatusSchema>;
 
 export interface ListedAgent {
   agent_name: string;
   agent_status: ListedAgentStatus;
   last_task_message: string | null;
 }
+
+export const listedAgentSchema = z
+  .object({
+    agent_name: z.string(),
+    agent_status: listedAgentStatusSchema,
+    last_task_message: z.string().nullable(),
+  })
+  .strict();
 
 export interface AgentStatusProjectorOptions {
   store: ContextStore;
@@ -84,7 +93,7 @@ export class AgentStatusProjector {
       head,
     );
     if (stream?.status === 'completed' && this.#approvals.isPaused(head)) {
-      status = 'waiting_approval';
+      status = 'running';
     }
     if (
       thread.conversation.chatId === currentTurn.chatId ||

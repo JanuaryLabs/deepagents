@@ -370,6 +370,17 @@ instead of introducing a Runner or separate thread database:
   the current agent may spawn. `AgentTurnExecutor` injects the direct AI SDK `spawn_agent`,
   `send_message`, `followup_task`, `list_agents`, `wait_agent`, and `interrupt_agent` tools for every
   turn.
+- `AgentRuntimeOptions.multiAgentV2` is the host configuration surface for Codex V2-compatible
+  collaboration guidance and tool exposure. Root and subagent usage hints are separate complete
+  overrides; empty strings disable them. The selected hint is injected as a non-persisted role
+  fragment, so forked transcript history never copies a parent's hint into a child. `usageHintText`
+  appends guidance to `spawn_agent`. `toolNamespace` applies a validated native OpenAI Responses
+  namespace to all six collaboration tools. Reserved, padded, non-ASCII, and over-64-character
+  namespaces fail during runtime construction.
+- Collaboration tools are direct-model-only by default, matching Codex V2's
+  `non_code_mode_only = true`. Zukhruf does not have a nested code-mode executor, so
+  `nonCodeModeOnly: false` fails explicitly instead of pretending the tools are reachable from an
+  execution surface that does not exist.
 - `new AgentRuntime(root, options)` recursively compiles declarations by unique canonical names
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.
@@ -380,7 +391,9 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   preserving concurrent host metadata; terminal reconciliation updates only the state it observes under the row lock, so
   duplicate or stale callbacks cannot rewind a successor.
   `spawn_agent` creates a separate child chat with its own path, parent, declaration name, context
-  history, stream, mailbox, and TurnQueue key.
+  history, stream, mailbox, and TurnQueue key. Its optional `fork_turns` string controls the initial
+  history snapshot: `all` (the default), `none`, or a positive number of recent user-turn
+  boundaries. The selected `agent_type` still determines the child declaration independently.
 - Reserved metadata fails closed. Every non-root thread must name an existing same-user,
   same-tree parent whose canonical path is the immediate ancestor; self-parenting and skipped
   ancestors are rejected before work is queued. Persisted paths must already be canonical rather
@@ -390,27 +403,36 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   receive no raw stores, queue callbacks, or `AsyncLocalStorage` state.
 - `spawn_agent` validates the selected direct subagent and derives deterministic child-chat and
   initial-turn IDs from the user, tree, and canonical path. Concurrent calls and queue retries
-  therefore converge on one durable child and one initial ask. It returns `{task_name, agent_path}`
-  without awaiting child execution. A queue-push gap can retry that same initial turn; once it is
-  terminal, reusing the path is rejected instead of reporting a no-op respawn as successful.
+  therefore converge on one durable child and one initial ask. It returns the Codex V2 shape
+  `{task_name}` where the value is the canonical `/root/...` child path, without awaiting child
+  execution. The history snapshot and cloned message IDs are persisted
+  deterministically before enqueue, so a queue-push gap retries the original snapshot instead of
+  copying newer parent state. Forked history keeps real user messages and final assistant content
+  while dropping synthetic reminders, inter-agent envelopes, reasoning, and tool traffic. Once the
+  initial turn is terminal, reusing the path is rejected instead of reporting a no-op respawn as
+  successful.
 - `send_message` resolves a target path and stores queue-only `MESSAGE` mail. `followup_task`
   resolves the same way, rejects `/root`, stores `NEW_TASK`, and requests a serialized mailbox turn
-  for the target. Mailbox wakes use the same conversation-scoped durable turn identity as asks, so
-  their owner can resume or cancel them. Cross-runtime races may enqueue duplicate empty wake
-  receipts; serialized execution and empty-drain handling make them harmless no-ops.
+  for the target. Both return Codex V2's empty success text. Mailbox wakes use the same
+  conversation-scoped durable turn identity as asks, so their owner can resume or cancel them.
+  Cross-runtime races may enqueue duplicate empty wake receipts; serialized execution and
+  empty-drain handling make them harmless no-ops.
 - `list_agents` scans only the caller's metadata-scoped tree, optionally resolves a path prefix
   relative to the caller, and combines each chat's canonical path and persisted context with the
-  TurnQueue's required `idle | queued | running` activity. An unstarted child stays `pending_init`;
-  an initialized child with a queued follow-up is `running`, and an unresolved approval is
-  `waiting_approval` only while its stream is the completed approval pause. A failed or cancelled
-  continuation reports `errored` or `interrupted`. Listing is observational and never wakes or
-  consumes an agent.
+  TurnQueue's required `idle | queued | running` activity. Its strict status schema matches Codex
+  V2: `pending_init | running | interrupted | shutdown | not_found | {completed} | {errored}`. An
+  unstarted child stays `pending_init`; an initialized child with a queued follow-up or unresolved
+  approval is `running`. A failed or cancelled continuation reports `errored` or `interrupted`.
+  `shutdown` remains a legal compatibility status even though Zukhruf has no shutdown lifecycle.
+  Listing is observational and never wakes or consumes an agent.
 - `wait_agent` waits only for pending mail addressed to the calling agent. It observes the durable
   mailbox without draining it, so the same mail enters the next model step. The tool returns
-  `{message, timed_out}`, bounds waits to 10 seconds–1 hour (30 seconds by default), and aborts with
-  the caller turn. Zukhruf has no in-turn steer channel, so steer activity is intentionally absent.
+  the strict Codex V2 `{message, timed_out}` shape. Host-configurable minimum, default, and maximum
+  waits default to 10 seconds, 30 seconds, and 1 hour respectively. It aborts with the caller turn.
+  Zukhruf has no in-turn steer channel, so steer activity is intentionally absent.
 - `interrupt_agent` resolves canonical or relative paths, rejects root/self, returns the target's
-  previous listed status, and leaves the target reusable. For a running or oldest queued turn it
+  previous listed status (`not_found` for a missing target), and leaves the target reusable. For a
+  running or oldest queued turn it
   first commits stream cancellation, projects its idempotent `FINAL_ANSWER`, then removes matching
   scheduler copies that are still queued. Active work retains its strict-FIFO key until its handler
   exits; local handlers are signalled by the adapter and remote handlers observe the durable stream

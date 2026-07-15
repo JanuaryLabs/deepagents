@@ -1,7 +1,10 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-import type { ListedAgentStatus } from './agent-control-plane.ts';
+import {
+  type ListedAgentStatus,
+  listedAgentStatusSchema,
+} from './agent-status-projector.ts';
 import type { AgentToolContext } from './agent-tool-context.ts';
 
 const interruptAgentInputSchema = z.object({
@@ -16,6 +19,10 @@ const interruptAgentInputSchema = z.object({
 
 type InterruptAgentInput = z.infer<typeof interruptAgentInputSchema>;
 
+const interruptAgentOutputSchema = z
+  .object({ previous_status: listedAgentStatusSchema })
+  .strict();
+
 export const interruptAgentTool = tool<
   InterruptAgentInput,
   { previous_status: ListedAgentStatus },
@@ -24,6 +31,7 @@ export const interruptAgentTool = tool<
   description:
     "Interrupt an agent's current turn, if any, and return its previous status. The agent remains available for messages and follow-up tasks.",
   inputSchema: interruptAgentInputSchema,
+  outputSchema: interruptAgentOutputSchema,
   execute: async (input, { context }) =>
     context.controlPlane.interruptAgent(context.actor, input),
 });

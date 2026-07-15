@@ -95,11 +95,19 @@ export class AgentDirectory {
 
   async resolve(thread: AgentThread, target: string): Promise<AgentThread> {
     const path = thread.path.resolve(target);
-    const match = (await this.listTree(thread)).find((candidate) =>
-      candidate.path.equals(path),
-    );
+    const match = await this.find(thread, target);
     if (match) return match;
     throw new Error(`agent path "${path}" does not exist in this tree`);
+  }
+
+  async find(
+    thread: AgentThread,
+    target: string,
+  ): Promise<AgentThread | undefined> {
+    const path = thread.path.resolve(target);
+    return (await this.listTree(thread)).find((candidate) =>
+      candidate.path.equals(path),
+    );
   }
 
   async createChild(options: {

@@ -408,7 +408,7 @@ The refactor is complete when:
 - Approval decisions use the assistant message as their sole durable record. A required
   Zukhruf-owned mutex serializes its read–validate–rewrite transition, sibling decisions wait for
   one another, and failed continuation handoffs remain repairable on completion or retry.
-- Approval-paused children report `waiting_approval` and project one final answer only after
+- Approval-paused children report model-facing `running` and project one final answer only after
   continuation. Failed or cancelled continuations project their terminal status instead of remaining
   visibly paused.
 - DLQ cleanup releases strict FIFO even when orphan projection fails.

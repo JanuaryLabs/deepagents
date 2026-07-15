@@ -14,7 +14,7 @@ for the public API and lifecycle mapping.
 
 ## `@deepagents/experimental/zukhruf`
 
-`zukhruf` is an internal DSL for **declaring** an agent, plus a **runtime** that
+Zukhruf is an internal DSL for **declaring** an agent, plus a **runtime** that
 executes that declaration as a **durable background agent** — built on
 `@deepagents/context` primitives (`agent()`, `ContextEngine`, `AgentSandbox`,
 fragments, the stream subsystem).
@@ -27,12 +27,14 @@ import {
 } from '@deepagents/experimental/zukhruf';
 ```
 
-The customer surface contains the pure declaration layer (`defineAgent` /
-`defineInstructions` / `defineTool` / `defineSandbox`), `AgentRuntime`, the domain values, and the
-store/queue ports and adapters. Declarations have a types-only dependency on `@deepagents/context`.
-`AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval, denial, and worker
-lifecycle. Its control plane, executor, status projector, mailbox coordinator, and injected
-collaboration-tool implementations are internal wiring. See
+The public experimental surface contains the pure declaration layer
+(`defineAgent` / `defineInstructions` / `defineTool` / `defineSandbox`),
+`AgentRuntime`, the domain values, and the store/queue ports and adapters.
+Declarations have a types-only dependency on `@deepagents/context`.
+`AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval,
+denial, and worker lifecycle. Its control plane, executor, status projector,
+mailbox coordinator, and injected collaboration-tool implementations are
+internal wiring. See
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md) for the decided semantics,
 [`TODO.md`](./src/zukhruf/TODO.md) for the convergence plan, and
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
@@ -42,5 +44,5 @@ Runnable end-to-end showcases live in
 executor: enqueue, detach, resume, strict per-chat FIFO) and
 [`demo/zukhruf-mailbox`](../../demo/zukhruf-mailbox) (API-key-free host delivery,
 durable FIFO mail, and payload-free wakes) and
-[`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (an agentic
-research bot: plan → web-search subagent → streamed report).
+[`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
+planner and researcher chats with mailbox-delivered findings).

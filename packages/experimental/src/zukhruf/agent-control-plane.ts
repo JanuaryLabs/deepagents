@@ -4,6 +4,7 @@ import type { StreamManager } from '@deepagents/context';
 
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
+import { AgentHistoryForker } from './agent-history-forker.ts';
 import {
   type AgentStatusProjector,
   type ListedAgent,
@@ -11,6 +12,7 @@ import {
 import type { AgentThread } from './agent-thread.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
 import type { AgentDeclaration } from './agent.ts';
+import type { ForkTurns } from './fork-turns.ts';
 import type { MailboxCoordinator } from './mailbox/coordinator.ts';
 import type { ConversationId, MessageDeliveryMode } from './mailbox/types.ts';
 import {
@@ -28,6 +30,7 @@ export interface AgentControlPlaneOptions {
   declarations: AgentDeclarationRegistry;
   directory: AgentDirectory;
   statusProjector: AgentStatusProjector;
+  historyForker: AgentHistoryForker;
 }
 
 export interface AgentActor {
@@ -46,11 +49,11 @@ export interface SpawnAgentInput {
   agentType: string;
   taskName: string;
   message: string;
+  forkTurns: ForkTurns;
 }
 
 export interface SpawnAgentOutput {
   task_name: string;
-  agent_path: string;
 }
 
 export type {
@@ -67,6 +70,7 @@ export class AgentControlPlane {
   readonly #declarations: AgentDeclarationRegistry;
   readonly #directory: AgentDirectory;
   readonly #statusProjector: AgentStatusProjector;
+  readonly #historyForker: AgentHistoryForker;
 
   constructor(options: AgentControlPlaneOptions) {
     this.#root = options.root;
@@ -76,6 +80,7 @@ export class AgentControlPlane {
     this.#declarations = options.declarations;
     this.#directory = options.directory;
     this.#statusProjector = options.statusProjector;
+    this.#historyForker = options.historyForker;
   }
 
   async resolve(conversation: ConversationId): Promise<{
@@ -181,11 +186,12 @@ export class AgentControlPlane {
         `spawn_agent: agent path "${childPath}" already finished with status "${status}"`,
       );
     }
+    await this.#historyForker.fork(actor.thread, child, input.forkTurns);
     await this.enqueue(child.conversation, {
       id: requestId,
       input: input.message,
     });
-    return { task_name: input.taskName, agent_path: childPath };
+    return { task_name: childPath };
   }
 
   async sendMessage(
@@ -234,7 +240,8 @@ export class AgentControlPlane {
     actor: AgentActor,
     input: { target: string },
   ): Promise<{ previous_status: ListedAgent['agent_status'] }> {
-    const target = await this.#directory.resolve(actor.thread, input.target);
+    const target = await this.#directory.find(actor.thread, input.target);
+    if (!target) return { previous_status: 'not_found' };
     if (target.path.isRoot) {
       throw new Error('interrupt_agent: the root agent cannot be interrupted');
     }

@@ -2,6 +2,7 @@ export * from './agent-thread.ts';
 export * from './agent.ts';
 export * from './agent-path.ts';
 export * from './agent-runtime.ts';
+export type { MultiAgentV2HostConfig } from './multi-agent-v2-config.ts';
 export * from './approval-mutex.ts';
 export type { TurnInput } from './agent-control-plane.ts';
 export * from './instructions.ts';
