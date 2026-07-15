@@ -46,6 +46,7 @@ export class PgBossTurnQueue extends TurnQueue {
   #expireInSeconds: number;
   #heartbeatSeconds: number;
   #pollingIntervalSeconds: number;
+  #active = new Map<string, Set<AbortController>>();
 
   constructor(boss: PgBoss, options: PgBossTurnQueueOptions = {}) {
     super();
@@ -115,6 +116,54 @@ export class PgBossTurnQueue extends TurnQueue {
     return conversationJobs.length > 0 ? 'queued' : 'idle';
   }
 
+  override async getCurrentTurn(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnRef | undefined> {
+    const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
+      key: conversation.chatId,
+    });
+    return jobs
+      .filter(
+        (job) =>
+          job.data.userId === conversation.userId &&
+          (job.state === 'active' ||
+            job.state === 'created' ||
+            job.state === 'retry'),
+      )
+      .sort(PgBossTurnQueue.#interruptOrder)[0]?.data;
+  }
+
+  override async cancel(streamId: string): Promise<void> {
+    for (const controller of this.#active.get(streamId) ?? []) {
+      controller.abort();
+    }
+    const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
+      data: { streamId },
+    });
+    const interruptible = jobs.filter(
+      (job) =>
+        job.state === 'active' ||
+        job.state === 'created' ||
+        job.state === 'retry',
+    );
+    if (interruptible.length === 0) return;
+
+    await this.#boss.cancel(
+      this.#queue,
+      interruptible.map((job) => job.id),
+    );
+
+    // A queued job has no worker that will reach commit-driven GC. Delete it
+    // after cancellation so the exact interrupted turn cannot be resumed as
+    // if it had merely been parked for approval.
+    const queued = interruptible
+      .filter((job) => job.state === 'created' || job.state === 'retry')
+      .map((job) => job.id);
+    if (queued.length > 0) {
+      await this.#boss.deleteJob(this.#queue, queued);
+    }
+  }
+
   async consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,
@@ -127,17 +176,28 @@ export class PgBossTurnQueue extends TurnQueue {
       },
       async ([job]) => {
         let parked = false;
-        await handler(job.data, {
-          signal: job.signal,
-          // Parking = self-cancel: a cancelled job stops blocking the chat's
-          // key and is revived (original created_on, so original order) by
-          // resumeParked(). The worker's completion of a cancelled job is a
-          // clean no-op (probe-verified).
-          park: async () => {
-            parked = true;
-            await this.#boss.cancel(this.#queue, job.id);
-          },
-        });
+        const localAbort = new AbortController();
+        const active = this.#active.get(job.data.streamId) ?? new Set();
+        active.add(localAbort);
+        this.#active.set(job.data.streamId, active);
+        try {
+          await handler(job.data, {
+            signal: AbortSignal.any([job.signal, localAbort.signal]),
+            // Parking = self-cancel: a cancelled job stops blocking the chat's
+            // key and is revived (original created_on, so original order) by
+            // resumeParked(). The worker's completion of a cancelled job is a
+            // clean no-op (probe-verified).
+            park: async () => {
+              parked = true;
+              await this.#boss.cancel(this.#queue, job.id);
+            },
+          });
+        } finally {
+          active.delete(localAbort);
+          if (active.size === 0) {
+            this.#active.delete(job.data.streamId);
+          }
+        }
         // Commit-driven GC. A handler that returns without parking has run its
         // turn to a terminal stream and committed to the chain (the permanent
         // record) — the job is spent, so delete it now instead of leaning on a
@@ -202,5 +262,16 @@ export class PgBossTurnQueue extends TurnQueue {
       return output.message;
     }
     return output ? JSON.stringify(output) : 'turn orphaned';
+  }
+
+  static #interruptOrder(
+    left: JobWithMetadata<TurnRef>,
+    right: JobWithMetadata<TurnRef>,
+  ): number {
+    if (left.state === 'active' && right.state !== 'active') return -1;
+    if (left.state !== 'active' && right.state === 'active') return 1;
+    if (left.priority !== right.priority) return right.priority - left.priority;
+    const created = left.createdOn.getTime() - right.createdOn.getTime();
+    return created || left.id.localeCompare(right.id);
   }
 }

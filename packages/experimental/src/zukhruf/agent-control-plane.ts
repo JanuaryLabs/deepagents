@@ -230,6 +230,50 @@ export class AgentControlPlane {
     return { agents };
   }
 
+  async interruptAgent(
+    actor: AgentActor,
+    input: { target: string },
+  ): Promise<{ previous_status: ListedAgent['agent_status'] }> {
+    const target = await this.#directory.resolve(actor.thread, input.target);
+    if (target.path.isRoot) {
+      throw new Error('interrupt_agent: the root agent cannot be interrupted');
+    }
+    if (target.path.equals(actor.thread.path)) {
+      throw new Error('interrupt_agent: an agent cannot interrupt itself');
+    }
+
+    const previous = await this.#statusProjector.projectListedAgent(
+      actor.turn,
+      target,
+    );
+    const currentTurn = await this.#queue.getCurrentTurn(target.conversation);
+    if (currentTurn) {
+      const interruptedThread =
+        (await this.#directory.recordLatestTurnIfCurrent(
+          target.conversation,
+          currentTurn.streamId,
+          target.lastTurnId,
+        )) ?? target;
+      // Stream state is the durable execution authority. Transition it before
+      // aborting scheduler delivery so a racing worker observes cancellation,
+      // never an orphaned failure.
+      await this.#streams.cancel(currentTurn.streamId);
+      await this.#queue.cancel(currentTurn.streamId);
+      await this.#statusProjector.projectTerminal(
+        currentTurn,
+        interruptedThread,
+      );
+    }
+    return { previous_status: previous.agent_status };
+  }
+
+  waitForMailbox(
+    actor: AgentActor,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<boolean> {
+    return this.#mailbox.waitForPending(actor.thread.conversation, options);
+  }
+
   async projectTerminal(turn: TurnRef, thread: AgentThread): Promise<void> {
     await this.#statusProjector.projectTerminal(turn, thread);
   }

@@ -13,6 +13,7 @@ import {
 import type { AgentControlPlane } from './agent-control-plane.ts';
 import type { AgentToolContext } from './agent-tool-context.ts';
 import type { ApprovalController } from './approval-controller.ts';
+import { interruptAgentTool } from './interrupt-agent.ts';
 import { listAgentsTool } from './list-agents.ts';
 import type { MailboxCoordinator } from './mailbox/coordinator.ts';
 import type {
@@ -22,6 +23,7 @@ import type {
 import { followupTaskTool, sendMessageTool } from './message-tools.ts';
 import type { ConsumeContext, TurnRef } from './queue/turn-queue.ts';
 import { spawnAgentTool } from './spawn-agent.ts';
+import { waitAgentTool } from './wait-agent.ts';
 
 export interface AgentTurnExecutorOptions {
   store: ContextStore;
@@ -123,6 +125,8 @@ export class AgentTurnExecutor {
         send_message: sendMessageTool,
         followup_task: followupTaskTool,
         list_agents: listAgentsTool,
+        wait_agent: waitAgentTool,
+        interrupt_agent: interruptAgentTool,
       },
       telemetry: declaration.telemetry,
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),

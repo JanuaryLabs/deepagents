@@ -116,6 +116,21 @@ class ManualTurnQueue extends TurnQueue {
       : 'idle';
   }
 
+  override async getCurrentTurn(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnRef | undefined> {
+    return this.pending.find(
+      (turn) =>
+        turn.chatId === conversation.chatId &&
+        turn.userId === conversation.userId,
+    );
+  }
+
+  override async cancel(streamId: string): Promise<void> {
+    const remaining = this.pending.filter((turn) => turn.streamId !== streamId);
+    this.pending.splice(0, this.pending.length, ...remaining);
+  }
+
   override async consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     options: ConsumeOptions,

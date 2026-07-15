@@ -362,7 +362,8 @@ instead of introducing a Runner or separate thread database:
 
 - `defineAgent({name, subagents})` requires a stable declaration name and declares which agent types
   the current agent may spawn. `AgentTurnExecutor` injects the direct AI SDK `spawn_agent`,
-  `send_message`, `followup_task`, and `list_agents` tools for every turn.
+  `send_message`, `followup_task`, `list_agents`, `wait_agent`, and `interrupt_agent` tools for every
+  turn.
 - `new AgentRuntime(root, options)` recursively compiles declarations by unique canonical names
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.
@@ -398,14 +399,24 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   `waiting_approval` only while its stream is the completed approval pause. A failed or cancelled
   continuation reports `errored` or `interrupted`. Listing is observational and never wakes or
   consumes an agent.
+- `wait_agent` waits only for pending mail addressed to the calling agent. It observes the durable
+  mailbox without draining it, so the same mail enters the next model step. The tool returns
+  `{message, timed_out}`, bounds waits to 10 seconds–1 hour (30 seconds by default), and aborts with
+  the caller turn. Zukhruf has no in-turn steer channel, so steer activity is intentionally absent.
+- `interrupt_agent` resolves canonical or relative paths, rejects root/self, returns the target's
+  previous listed status, and leaves the target reusable. For a running or oldest queued turn it
+  first commits stream cancellation, then cancels every matching scheduler copy; an unstarted turn
+  is projected explicitly because no worker remains to send its idempotent `FINAL_ANSWER`.
+  Terminal and approval-paused targets are no-ops. This is the complete model-facing lifecycle
+  surface: there are no close, shutdown, resume, or approval-as-denial tools.
 - Every genuinely terminal non-root turn is projected to its direct parent as idempotent queue-only
   `FINAL_ANSWER` mail. The envelope carries `completed | failed | cancelled` status metadata and a
   deterministic ID, and SQLite retains terminal-ID tombstones after FIFO consumption, so orphan
   recovery can retry without duplicating a delivered completion. Projection reads the assistant
   message whose id matches the terminal stream, never a newer conversation head. An approval pause is not terminal:
   projection waits for continuation, guaranteeing one final answer. A failed or cancelled
-  continuation overrides that pause and is projected immediately. `wait_agent`, interrupt
-  operations, and UI remain deferred.
+  continuation overrides that pause and is projected immediately. Child progress UI remains
+  deferred.
 
 ### Approval-resume _(Built)_
 
@@ -547,9 +558,9 @@ work({concurrency?}) → AsyncDisposable }`.
   durable thread identity, and ContextStore-backed tree discovery. `agent-status-projector.ts`
   translates transcript and stream state into agent-list status and terminal mail without leaking
   `ContextEngine` into `AgentControlPlane`. `spawn-agent.ts`, `message-tools.ts`, and
-  `list-agents.ts` are thin model-facing adapters over `AgentControlPlane`. These collaborators and
-  adapters are package-internal; the customer barrel exposes the runtime, DSL, domain values, and
-  store/queue ports and adapters.
+  `list-agents.ts`, `wait-agent.ts`, and `interrupt-agent.ts` are thin model-facing adapters over
+  `AgentControlPlane`. These collaborators and adapters are package-internal; the customer barrel
+  exposes the runtime, DSL, domain values, and store/queue ports and adapters.
 - `mailbox/` — caller-owned durable `MailboxStore` / `SqliteMailboxStore`, stable communication IDs,
   durable-before-wake delivery, FIFO drain, and a transactional begin/enqueue-active/end
   handoff keyed by the active turn's stream ID. This tiny activity record orders queue-only delivery
@@ -557,7 +568,10 @@ work({concurrency?}) → AsyncDisposable }`.
   queue, claim, acknowledgement, or lease protocol. Initial asks may consume only the leading
   queue-only prefix so an earlier trigger and everything after it retain FIFO order.
 - `queue/` — `TurnQueue` port + `PgBossTurnQueue`, including required durable
-  `getTurnActivity(): idle | queued | running` status inspection (see the executor section).
+  `getTurnActivity(): idle | queued | running` status inspection plus exact active/oldest-queued
+  lookup and stream cancellation. The latter two are architecture-forced adapter capabilities for
+  model-facing interruption: pg-boss must free a strict-FIFO key and signal an active worker, while
+  an actor host may absorb both capabilities (see the executor section).
 - `demo/zukhruf-durable-turns/agent.ts`, `instructions.ts`, and sandbox factories are pure
   declarations (no top-level await; importing spins no container or agent turn).
 - `demo/zukhruf-durable-turns/run.ts` — the **independent-agent showcase**: PGlite-backed pg-boss
@@ -572,7 +586,8 @@ work({concurrency?}) → AsyncDisposable }`.
   race, crash recovery and stale-orphan isolation, turn-specific terminal projection,
   mailbox FIFO and cross-worker safe-boundary delivery, concurrent/retryable spawn, canonical
   sibling messaging, genuine root/child/grandchild execution, follow-up ordering, root rejection,
-  queued/running/waiting-approval/terminal tree status, and idempotent
+  queued/running/waiting-approval/terminal tree status, caller-mailbox wait/timeout/cancellation,
+  queued and cross-runtime active interruption, target reuse, and idempotent
   success/failure/cancellation forwarding.
 - Backends switch by composition in the demo sandbox declarations
   (`defineSandbox(({chatId}) => createDockerSandbox({name: chatId}))` ↔ Daytona etc.);

@@ -45,6 +45,21 @@ class RecordingTurnQueue extends TurnQueue {
       : 'idle';
   }
 
+  override async getCurrentTurn(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnRef | undefined> {
+    return this.turns.find(
+      (turn) =>
+        turn.chatId === conversation.chatId &&
+        turn.userId === conversation.userId,
+    );
+  }
+
+  override async cancel(streamId: string): Promise<void> {
+    const remaining = this.turns.filter((turn) => turn.streamId !== streamId);
+    this.turns.splice(0, this.turns.length, ...remaining);
+  }
+
   override async consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     _options: ConsumeOptions,

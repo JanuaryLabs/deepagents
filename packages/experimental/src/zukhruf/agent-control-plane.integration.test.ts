@@ -68,6 +68,21 @@ class ControlledTurnQueue extends TurnQueue {
       : 'idle';
   }
 
+  override async getCurrentTurn(
+    conversation: ConversationId,
+  ): Promise<TurnRef | undefined> {
+    return this.turns.find(
+      (turn) =>
+        turn.chatId === conversation.chatId &&
+        turn.userId === conversation.userId,
+    );
+  }
+
+  override async cancel(streamId: string): Promise<void> {
+    const remaining = this.turns.filter((turn) => turn.streamId !== streamId);
+    this.turns.splice(0, this.turns.length, ...remaining);
+  }
+
   async runNext(): Promise<void> {
     const turn = this.turns.shift();
     assert.ok(turn, 'expected a queued turn');
@@ -108,7 +123,10 @@ class ControlledTurnQueue extends TurnQueue {
 
 class SharedTurnQueueState {
   readonly turns: TurnRef[] = [];
-  readonly running = new Set<string>();
+  readonly running = new Map<
+    string,
+    { turn: TurnRef; abort: AbortController }
+  >();
 }
 
 class SharedControlledTurnQueue extends TurnQueue {
@@ -153,6 +171,28 @@ class SharedControlledTurnQueue extends TurnQueue {
       : 'idle';
   }
 
+  override async getCurrentTurn(
+    conversation: ConversationId,
+  ): Promise<TurnRef | undefined> {
+    const key = SharedControlledTurnQueue.#key(conversation);
+    return (
+      this.#state.running.get(key)?.turn ??
+      this.#state.turns.find(
+        (turn) => SharedControlledTurnQueue.#key(turn) === key,
+      )
+    );
+  }
+
+  override async cancel(streamId: string): Promise<void> {
+    for (const active of this.#state.running.values()) {
+      if (active.turn.streamId === streamId) active.abort.abort();
+    }
+    const remaining = this.#state.turns.filter(
+      (turn) => turn.streamId !== streamId,
+    );
+    this.#state.turns.splice(0, this.#state.turns.length, ...remaining);
+  }
+
   async runNextFor(chatId: string): Promise<void> {
     const index = this.#state.turns.findIndex((turn) => turn.chatId === chatId);
     assert.notEqual(index, -1, `expected a queued turn for ${chatId}`);
@@ -162,10 +202,11 @@ class SharedControlledTurnQueue extends TurnQueue {
     assert.ok(this.#options, 'expected consumer options');
 
     const key = SharedControlledTurnQueue.#key(turn);
-    this.#state.running.add(key);
+    const abort = new AbortController();
+    this.#state.running.set(key, { turn, abort });
     try {
       await this.#handler(turn, {
-        signal: new AbortController().signal,
+        signal: abort.signal,
         park: async () => {
           throw new Error('turn unexpectedly parked');
         },
@@ -269,6 +310,15 @@ class CommitThenFailFirstMailboxStore extends SqliteMailboxStore {
       throw new Error('simulated crash after mailbox commit');
     }
     return result;
+  }
+}
+
+class WaitObservedMailboxStore extends SqliteMailboxStore {
+  readonly pendingChecked = Promise.withResolvers<void>();
+
+  override async hasPending(recipient: ConversationId): Promise<boolean> {
+    this.pendingChecked.resolve();
+    return super.hasPending(recipient);
   }
 }
 
@@ -1983,6 +2033,688 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
   assert.equal(completion.length, 1);
   assert.equal(completion[0]?.type, 'FINAL_ANSWER');
   assert.equal(completion[0]?.content, 'follow-up complete');
+});
+
+test('interrupt_agent cancels the oldest queued child turn and reports its prior status', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  let rootCalls = 0;
+  let promptAfterInterrupt: unknown;
+  const rootModel = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      rootCalls++;
+      if (rootCalls === 1) {
+        return toolCallResponse('interrupt_agent', 'interrupt-child', {
+          target: '/root/researcher',
+        });
+      }
+      if (rootCalls === 2) {
+        return toolCallResponse('list_agents', 'list-interrupted-child', {});
+      }
+      if (rootCalls === 4) {
+        return toolCallResponse('followup_task', 'reuse-child', {
+          target: '/root/researcher',
+          message: 'Start a fresh task',
+        });
+      }
+      if (rootCalls === 3) promptAfterInterrupt = prompt;
+      return textResponse('child interrupted');
+    },
+  });
+  const sandbox = async () => ({}) as AgentSandbox;
+  const researcherCalls: unknown[] = [];
+  const researcher = defineAgent({
+    name: 'researcher',
+    model: textModel('fresh task complete', researcherCalls),
+    sandbox,
+    instructions: [],
+  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: rootModel,
+      sandbox,
+      instructions: [],
+      subagents: [researcher],
+    }),
+    { store, streamStore, mailboxStore, queue, approvalMutex },
+  );
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'researcher-chat',
+      path: '/root/researcher',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+  ]);
+
+  const child = await runtime.enqueue(
+    { chatId: 'researcher-chat', userId: 'user-1' },
+    { id: 'child-turn', input: 'research this' },
+  );
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    { id: 'root-turn', input: 'stop the child' },
+  );
+  await using _worker = await runtime.work();
+  await queue.runNextFor('root-chat');
+
+  const prompt = JSON.stringify(promptAfterInterrupt);
+  assert.match(prompt, /"previous_status":"pending_init"/);
+  assert.match(prompt, /Message Type: FINAL_ANSWER/);
+  assert.match(prompt, /Agent was interrupted\./);
+  assert.equal(prompt.match(/Message Type: FINAL_ANSWER/g)?.length, 1);
+  assert.match(prompt, /"agent_status":"interrupted"/);
+  assert.equal(await streamStore.getStreamStatus(child.id), 'cancelled');
+  assert.equal(
+    queue.turns.some((turn) => turn.streamId === child.id),
+    false,
+  );
+  await queue.runNextFor('root-chat');
+  assert.equal(rootCalls, 3, 'the serialized terminal-mail fallback is empty');
+
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    { id: 'reuse-root-turn', input: 'assign fresh work' },
+  );
+  await queue.runNextFor('root-chat');
+  assert.equal(queue.turns.length, 1);
+  assert.equal(queue.turns[0]?.kind, 'mailbox');
+  assert.equal(queue.turns[0]?.chatId, 'researcher-chat');
+  await queue.runNextFor('researcher-chat');
+  assert.equal(
+    researcherCalls.length,
+    1,
+    'the interrupted agent remains reusable',
+  );
+});
+
+test('interrupt_agent aborts a running child across runtime instances', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queueState = new SharedTurnQueueState();
+  const rootQueue = new SharedControlledTurnQueue(queueState);
+  const childQueue = new SharedControlledTurnQueue(queueState);
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const childStarted = Promise.withResolvers<void>();
+  let childCalls = 0;
+  const childModel = new MockLanguageModelV4({
+    doStream: async () => {
+      childCalls++;
+      childStarted.resolve();
+      return {
+        stream: simulateReadableStream({
+          initialDelayInMs: 5_000,
+          chunks: [
+            { type: 'text-start', id: 'child-text' },
+            {
+              type: 'text-delta',
+              id: 'child-text',
+              delta: 'must not complete',
+            },
+            { type: 'text-end', id: 'child-text' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage,
+            },
+          ],
+        }),
+      };
+    },
+  });
+
+  let rootCalls = 0;
+  let promptAfterInterrupt: unknown;
+  const rootModel = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      rootCalls++;
+      if (rootCalls === 1) {
+        return toolCallResponse('interrupt_agent', 'interrupt-active-child', {
+          target: '/root/researcher',
+        });
+      }
+      promptAfterInterrupt = prompt;
+      return textResponse('active child interrupted');
+    },
+  });
+  const sandbox = async () => ({}) as AgentSandbox;
+  const researcher = defineAgent({
+    name: 'researcher',
+    model: childModel,
+    sandbox,
+    instructions: [],
+  });
+  const root = defineAgent({
+    name: 'root',
+    model: rootModel,
+    sandbox,
+    instructions: [],
+    subagents: [researcher],
+  });
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'researcher-chat',
+      path: '/root/researcher',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+  ]);
+  const rootRuntime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue: rootQueue,
+  });
+  const childRuntime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue: childQueue,
+  });
+  await using _rootWorker = await rootRuntime.work();
+  await using _childWorker = await childRuntime.work();
+
+  const child = await childRuntime.enqueue(
+    { chatId: 'researcher-chat', userId: 'user-1' },
+    { id: 'active-child-turn', input: 'start long research' },
+  );
+  const activeChild = childQueue.runNextFor('researcher-chat');
+  await childStarted.promise;
+  await rootRuntime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    { id: 'interrupting-root-turn', input: 'interrupt the child' },
+  );
+  await rootQueue.runNextFor('root-chat');
+  await activeChild;
+
+  const prompt = JSON.stringify(promptAfterInterrupt);
+  assert.match(prompt, /"previous_status":"running"/);
+  assert.match(prompt, /Message Type: FINAL_ANSWER/);
+  assert.match(prompt, /Agent was interrupted\./);
+  assert.equal(childCalls, 1);
+  assert.equal(await streamStore.getStreamStatus(child.id), 'cancelled');
+  assert.equal(
+    await mailboxStore.hasPending({ chatId: 'root-chat', userId: 'user-1' }),
+    false,
+    'terminal projection is delivered exactly once into the next root step',
+  );
+});
+
+test('interrupt_agent rejects root and self targets', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  let calls = 0;
+  let finalPrompt: unknown;
+  const caller = defineAgent({
+    name: 'caller',
+    model: new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        calls++;
+        if (calls === 1) {
+          return toolCallResponse('interrupt_agent', 'interrupt-root', {
+            target: '/root',
+          });
+        }
+        if (calls === 2) {
+          return toolCallResponse('interrupt_agent', 'interrupt-self', {
+            target: '/root/caller',
+          });
+        }
+        finalPrompt = prompt;
+        return textResponse('invalid targets rejected');
+      },
+    }),
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: textModel('root', []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+      subagents: [caller],
+    }),
+    { store, streamStore, mailboxStore, queue, approvalMutex },
+  );
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'caller-chat',
+      path: '/root/caller',
+      parentChatId: 'root-chat',
+      declarationName: 'caller',
+    },
+  ]);
+
+  await runtime.enqueue(
+    { chatId: 'caller-chat', userId: 'user-1' },
+    { id: 'invalid-interrupts', input: 'try invalid targets' },
+  );
+  await using _worker = await runtime.work();
+  await queue.runNextFor('caller-chat');
+
+  const prompt = JSON.stringify(finalPrompt);
+  assert.match(prompt, /root agent cannot be interrupted/);
+  assert.match(prompt, /agent cannot interrupt itself/);
+});
+
+test('interrupt_agent leaves terminal and approval-paused children unchanged', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const sandbox = async () => ({}) as AgentSandbox;
+  const completed = defineAgent({
+    name: 'completed',
+    model: textModel('completed child', []),
+    sandbox,
+    instructions: [],
+  });
+  const paused = defineAgent({
+    name: 'paused',
+    model: new MockLanguageModelV4({
+      doStream: async () =>
+        toolCallResponse('publish', 'publish-paused-result', {
+          report: 'ready',
+        }),
+    }),
+    sandbox,
+    instructions: [],
+    tools: {
+      publish: defineTool({
+        description: 'Publish a report',
+        inputSchema: z.object({ report: z.string() }),
+        needsApproval: true,
+        execute: async ({ report }) => report,
+      }),
+    },
+  });
+  let rootCalls = 0;
+  let finalPrompt: unknown;
+  const root = defineAgent({
+    name: 'root',
+    model: new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        rootCalls++;
+        if (rootCalls === 1) {
+          return toolCallResponse('interrupt_agent', 'interrupt-completed', {
+            target: '/root/completed',
+          });
+        }
+        if (rootCalls === 2) {
+          return toolCallResponse('interrupt_agent', 'interrupt-paused', {
+            target: '/root/paused',
+          });
+        }
+        finalPrompt = prompt;
+        return textResponse('terminal children unchanged');
+      },
+    }),
+    sandbox,
+    instructions: [],
+    subagents: [completed, paused],
+  });
+  const runtime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    queue,
+    approvalMutex,
+  });
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'completed-chat',
+      path: '/root/completed',
+      parentChatId: 'root-chat',
+      declarationName: 'completed',
+    },
+    {
+      id: 'paused-chat',
+      path: '/root/paused',
+      parentChatId: 'root-chat',
+      declarationName: 'paused',
+    },
+  ]);
+
+  const completedTurn = await runtime.enqueue(
+    { chatId: 'completed-chat', userId: 'user-1' },
+    { id: 'completed-turn', input: 'finish' },
+  );
+  const pausedTurn = await runtime.enqueue(
+    { chatId: 'paused-chat', userId: 'user-1' },
+    { id: 'paused-turn', input: 'prepare publication' },
+  );
+  await using _worker = await runtime.work();
+  await queue.runNextFor('completed-chat');
+  await queue.runNextFor('paused-chat');
+  await mailboxStore.drain({ chatId: 'root-chat', userId: 'user-1' });
+
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    { id: 'inspect-terminal-interrupts', input: 'interrupt terminal children' },
+  );
+  await queue.runNextFor('root-chat');
+
+  const prompt = JSON.stringify(finalPrompt);
+  assert.match(prompt, /"previous_status":\{"completed":"completed child"\}/);
+  assert.match(prompt, /"previous_status":"waiting_approval"/);
+  assert.equal(
+    await streamStore.getStreamStatus(completedTurn.id),
+    'completed',
+  );
+  assert.equal(await streamStore.getStreamStatus(pausedTurn.id), 'completed');
+  assert.equal(
+    await mailboxStore.hasPending({ chatId: 'root-chat', userId: 'user-1' }),
+    false,
+    'no new terminal projection is emitted for no-op interruptions',
+  );
+});
+
+test('wait_agent returns for pending caller mail without consuming it', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const conversation = { chatId: 'root-chat', userId: 'user-1' };
+  const prompts: unknown[] = [];
+  let runtime!: AgentRuntime;
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt);
+      calls++;
+      if (calls === 1) {
+        await runtime.deliver(
+          createInterAgentCommunication({
+            author: { chatId: 'child-chat', userId: 'user-1' },
+            recipient: conversation,
+            content: 'mail delivered before the wait tool executes',
+          }),
+          MessageDeliveryMode.QueueOnly,
+        );
+        return toolCallResponse('wait_agent', 'wait-for-caller-mail', {
+          timeout_ms: 10_000,
+        });
+      }
+      return textResponse('caller observed its pending mail');
+    },
+  });
+  const root = defineAgent({
+    name: 'root',
+    model,
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+  runtime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue,
+  });
+
+  await runtime.enqueue(conversation, {
+    id: 'wait-for-pending-mail',
+    input: 'Wait for an agent response',
+  });
+  await using _worker = await runtime.work();
+  await queue.runNext();
+
+  assert.equal(calls, 2);
+  const secondPrompt = JSON.stringify(prompts[1]);
+  assert.match(secondPrompt, /"timed_out":false/);
+  assert.match(secondPrompt, /mail delivered before the wait tool executes/);
+  assert.equal(
+    await mailboxStore.hasPending(conversation),
+    false,
+    'the next model step consumes mail that wait_agent left pending',
+  );
+});
+
+test('wait_agent is released by cross-runtime mail that reaches the next model step', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queueState = new SharedTurnQueueState();
+  const callerQueue = new SharedControlledTurnQueue(queueState);
+  const deliveryQueue = new SharedControlledTurnQueue(queueState);
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const conversation = { chatId: 'root-chat', userId: 'user-1' };
+  const waitRequested = Promise.withResolvers<void>();
+  const prompts: unknown[] = [];
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt);
+      calls++;
+      if (calls === 1) {
+        waitRequested.resolve();
+        return toolCallResponse('wait_agent', 'wait-for-cross-runtime-mail', {
+          timeout_ms: 10_000,
+        });
+      }
+      return textResponse('cross-runtime mail observed');
+    },
+  });
+  const root = defineAgent({
+    name: 'root',
+    model,
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+  const callerRuntime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue: callerQueue,
+  });
+  const deliveryRuntime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue: deliveryQueue,
+  });
+  await using _callerWorker = await callerRuntime.work();
+  await using _deliveryWorker = await deliveryRuntime.work();
+
+  await callerRuntime.enqueue(conversation, {
+    id: 'cross-runtime-wait',
+    input: 'Wait for the remote result',
+  });
+  const running = callerQueue.runNextFor(conversation.chatId);
+  await waitRequested.promise;
+  await deliveryRuntime.deliver(
+    createInterAgentCommunication({
+      author: { chatId: 'remote-child', userId: 'user-1' },
+      recipient: conversation,
+      content: 'mail from another runtime instance',
+    }),
+    MessageDeliveryMode.QueueOnly,
+  );
+  await running;
+
+  assert.equal(calls, 2);
+  const secondPrompt = JSON.stringify(prompts[1]);
+  assert.match(secondPrompt, /"timed_out":false/);
+  assert.match(secondPrompt, /mail from another runtime instance/);
+  assert.equal(await mailboxStore.hasPending(conversation), false);
+
+  await callerQueue.runNextFor(conversation.chatId);
+  assert.equal(
+    calls,
+    2,
+    'the serialized fallback is empty after safe-step delivery',
+  );
+});
+
+test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const realNow = Date.now.bind(Date);
+  let advanceWaitClock = false;
+  let clock = realNow();
+  t.mock.method(Date, 'now', () => {
+    if (!advanceWaitClock) return realNow();
+    clock += 10_000;
+    return clock;
+  });
+
+  const prompts: unknown[] = [];
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt);
+      calls++;
+      if (calls === 1) {
+        advanceWaitClock = true;
+        return toolCallResponse('wait_agent', 'wait-until-timeout', {
+          timeout_ms: 10_000,
+        });
+      }
+      advanceWaitClock = false;
+      return textResponse('continued after timeout');
+    },
+  });
+  const root = defineAgent({
+    name: 'root',
+    model,
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+  const runtime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue,
+  });
+
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    { id: 'bounded-wait', input: 'Wait briefly' },
+  );
+  await using _worker = await runtime.work();
+  await queue.runNext();
+
+  assert.equal(calls, 2);
+  assert.match(JSON.stringify(prompts[1]), /"timed_out":true/);
+});
+
+test('cancelling the caller aborts an active wait_agent call', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new WaitObservedMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () => {
+      calls++;
+      return toolCallResponse('wait_agent', 'cancel-active-wait', {
+        timeout_ms: 10_000,
+      });
+    },
+  });
+  const root = defineAgent({
+    name: 'root',
+    model,
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+  const runtime = new AgentRuntime(root, {
+    store,
+    streamStore,
+    mailboxStore,
+    approvalMutex,
+    queue,
+  });
+  const conversation = { chatId: 'root-chat', userId: 'user-1' };
+  const enqueued = await runtime.enqueue(conversation, {
+    id: 'cancel-wait',
+    input: 'Wait until cancelled',
+  });
+  await using _worker = await runtime.work();
+  const running = queue.runNext();
+  await mailboxStore.pendingChecked.promise;
+
+  await runtime.observe(conversation).cancel(enqueued.id);
+  await running;
+
+  assert.equal(calls, 1);
+  assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
 });
 
 test('send_message crosses runtime instances and reaches an active recipient at its next model step', async (t) => {

@@ -131,6 +131,82 @@ export function turnQueueContract(
       );
     });
 
+    it('finds and cancels every copy of the oldest queued stream id', async () => {
+      await using h = await makeQueue();
+      const first = ref('interrupt-queued', 1);
+      const second = ref('interrupt-queued', 2);
+      await h.queue.push(first);
+      await h.queue.push(first);
+      await h.queue.push(second);
+
+      assert.deepStrictEqual(
+        await h.queue.getCurrentTurn({
+          chatId: first.chatId,
+          userId: first.userId,
+        }),
+        first,
+      );
+      await h.queue.cancel(first.streamId);
+      assert.deepStrictEqual(
+        await h.queue.getCurrentTurn({
+          chatId: first.chatId,
+          userId: first.userId,
+        }),
+        second,
+      );
+
+      const seen: TurnRef[] = [];
+      await using _consumer = await h.queue.consume(async (turn) => {
+        seen.push(turn);
+      }, noOrphans);
+      await waitFor(
+        () => seen.length === 1,
+        'successor runs after cancellation',
+      );
+      assert.deepStrictEqual(seen, [second]);
+    });
+
+    it('cancelling an active turn aborts its handler and unblocks its successor', async () => {
+      await using h = await makeQueue();
+      const first = ref('interrupt-active', 1);
+      const second = ref('interrupt-active', 2);
+      await h.queue.push(first);
+      await h.queue.push(second);
+
+      const started = Promise.withResolvers<void>();
+      const aborted = Promise.withResolvers<void>();
+      const seen: TurnRef[] = [];
+      await using _consumer = await h.queue.consume(async (turn, context) => {
+        if (turn.streamId !== first.streamId) {
+          seen.push(turn);
+          return;
+        }
+        started.resolve();
+        await new Promise<void>((resolve) => {
+          context.signal.addEventListener('abort', () => resolve(), {
+            once: true,
+          });
+        });
+        aborted.resolve();
+      }, noOrphans);
+
+      await started.promise;
+      assert.deepStrictEqual(
+        await h.queue.getCurrentTurn({
+          chatId: first.chatId,
+          userId: first.userId,
+        }),
+        first,
+      );
+      await h.queue.cancel(first.streamId);
+      await aborted.promise;
+      await waitFor(
+        () => seen.length === 1,
+        'successor runs after active abort',
+      );
+      assert.deepStrictEqual(seen, [second]);
+    });
+
     it('a duplicate push never delivers concurrently, out of order, or not at all', async () => {
       await using h = await makeQueue();
       const ask = ref('dup', 1);

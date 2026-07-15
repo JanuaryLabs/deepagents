@@ -70,6 +70,9 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  * - Turns from different chats may run concurrently.
  * - `getTurnActivity` distinguishes queued from active scheduler work for
  *   status inspection; adapters must not silently fall back to stale history.
+ * - `getCurrentTurn` returns the active turn, or otherwise the oldest eligible
+ *   queued turn, for exact interruption. `cancel` removes that exact stream
+ *   from scheduling and aborts its handler when it is already active.
  * - A handler that throws (or a worker that dies mid-turn) does not retry:
  *   the turn surfaces once through `onOrphaned`, then the chat unblocks.
  * - Mailbox payloads NEVER live here. A `{kind: 'mailbox'}` item is only a
@@ -89,6 +92,14 @@ export abstract class TurnQueue {
   abstract getTurnActivity(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,
   ): Promise<TurnActivity>;
+
+  /** Active turn, or the oldest eligible queued turn, for a conversation. */
+  abstract getCurrentTurn(
+    conversation: Pick<TurnRef, 'chatId' | 'userId'>,
+  ): Promise<TurnRef | undefined>;
+
+  /** Cancel every scheduler copy of an exact stream id. */
+  abstract cancel(streamId: string): Promise<void>;
 
   abstract consume(
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,

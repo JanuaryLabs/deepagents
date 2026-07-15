@@ -52,6 +52,8 @@ test('the customer barrel hides runtime wiring and injected tool implementations
     'sendMessageTool',
     'followupTaskTool',
     'listAgentsTool',
+    'waitAgentTool',
+    'interruptAgentTool',
   ]) {
     assert.equal(internal in zukhruf, false, `${internal} is internal wiring`);
   }

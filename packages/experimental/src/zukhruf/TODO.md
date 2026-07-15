@@ -24,8 +24,9 @@
       metadata write and retries against the fresh snapshot.
 - [ ] **Startup reconciliation sweep**: non-terminal stream rows with no live/queued job → `failed`
       (covers register→push orphans beyond the retried-ask self-heal).
-- [ ] **Cancel, remaining queue fix**: cancel the queue job too (free the FIFO slot immediately,
-      not when its worker next observes it).
+- [ ] **Host cancel, remaining queue fix**: `interrupt_agent` now cancels the exact queue job and
+      frees FIFO immediately, but `AgentObservation.cancel()` still cancels only the durable stream.
+      Wire that existing host-facing path to the new TurnQueue capability separately.
 - [x] **Terminal stream transitions are monotonic**: completion, failure, error chunks, and
       cancellation update only queued/running rows. A committed cancellation cannot be overwritten
       by a late completion or failure.
@@ -105,7 +106,13 @@
       required TurnQueue activity, supports relative/absolute path-prefix filtering, and reports
       canonical paths, queued follow-ups, completion text, and the last persisted task without adding
       a registry.
-- [ ] Public `wait_agent` tool — define thread-activity semantics without consuming mailbox content.
+- [x] Model-facing `wait_agent` observes only the caller's durable mailbox without consuming it,
+      returns a bounded timeout result, releases across runtime instances, and aborts with its turn.
+      Live steer is intentionally absent because Zukhruf has no in-turn steer channel.
+- [x] Model-facing `interrupt_agent` resolves relative/canonical paths, rejects root/self, cancels
+      running or oldest queued work across runtime instances, projects one terminal parent message,
+      returns the previous status, and leaves the target reusable. Terminal and approval-paused
+      targets no-op; no broader close/resume/shutdown lifecycle was added.
 - [x] Mailbox consumption follows the simpler Codex queue shape: FIFO drain consumes pending mail;
       no claim/ack/lease/redelivery protocol or startup crash reconciliation.
 - [x] Migrate `demo/zukhruf-durable-turns` from blocking `agent.asTool()` composition to a durable
