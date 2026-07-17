@@ -17,7 +17,9 @@ to the user. Its planner runs in a separate chat, chooses three complementary
 research angles, and spawns three independent researcher chats. Each researcher
 uses OpenAI's hosted `web_search`, then calls `send_message` with the canonical
 target `/root`. Successful researcher turns also return `FINAL_ANSWER` to their
-direct parent planner.
+direct parent planner. Spawned agents inherit forked parent-turn history by
+default; `fork_turns` can choose all history, none, or a bounded number of recent
+user-turn boundaries.
 
 Nothing waits for a child agent. The interactive CLI keeps the worker alive
 while the user remains free to send more root turns. Every later root turn
@@ -26,8 +28,9 @@ that arrive afterward remain available for another turn.
 
 The root can call `list_agents` at any time to observe the complete tree. The
 tool reports canonical paths plus `pending_init`, `running`,
-`{ completed: string | null }`, `{ errored: string }`, `waiting_approval`, or
-`interrupted` state without waking agents or consuming mailbox content.
+`{ completed: string | null }`, `{ errored: string }`, or `interrupted` state
+without waking agents or consuming mailbox content. Agents paused on approval
+remain `running` until the continuation settles.
 
 The CLI renders the root turn stream only. Child chunks are not multiplexed
 into the root terminal; child progress is visible through `list_agents`, and

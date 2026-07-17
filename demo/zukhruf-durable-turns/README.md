@@ -16,6 +16,9 @@ The **durable-turns** showcase for the Zukhruf harness
 
 The root calls the implicit `spawn_agent` collaboration tool. It returns
 immediately after creating the specialist chat and enqueuing its first turn.
+By default, the child starts with the root's forked parent-turn history; hosts
+can pass `fork_turns` to choose `all`, `none`, or a positive count of recent
+user-turn boundaries.
 The specialist runs independently and sends its terminal text back as
 queue-only `FINAL_ANSWER` mail. The demo waits until that completion is durable,
 then starts a second root turn. Normal mailbox draining makes the result part of

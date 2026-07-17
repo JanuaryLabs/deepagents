@@ -32,9 +32,9 @@ The public experimental surface contains the pure declaration layer
 `AgentRuntime`, the domain values, and the store/queue ports and adapters.
 Declarations have a types-only dependency on `@deepagents/context`.
 `AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval,
-denial, and worker lifecycle. Its control plane, executor, status projector,
-mailbox coordinator, and injected collaboration-tool implementations are
-internal wiring. See
+denial, worker lifecycle, and model-facing collaboration for declared
+subagents. Its control plane, executor, status projector, mailbox coordinator,
+and injected collaboration-tool implementations are internal wiring. See
 [`src/zukhruf/DESIGN.md`](./src/zukhruf/DESIGN.md) for the decided semantics,
 [`TODO.md`](./src/zukhruf/TODO.md) for the convergence plan, and
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
@@ -46,3 +46,5 @@ executor: enqueue, detach, resume, strict per-chat FIFO) and
 durable FIFO mail, and payload-free wakes) and
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
 planner and researcher chats with mailbox-delivered findings).
+`spawn_agent` can fork all parent turns, no parent turns, or a bounded number of
+recent user-turn boundaries into a child chat through its `fork_turns` input.

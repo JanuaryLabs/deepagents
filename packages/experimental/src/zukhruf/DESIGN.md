@@ -385,11 +385,12 @@ instead of introducing a Runner or separate thread database:
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.
 - The first root execution initializes `{treeId, path: '/root', parentChatId: null,
-declarationName}` in existing chat metadata. Runtime execution also records `lastTurnId`, allowing a
-  queued cancellation or setup failure to remain observable before an assistant history head exists.
+declarationName}` in existing chat metadata. Runtime execution also records `lastTurnId`,
+  allowing a queued cancellation or setup failure to remain observable before an assistant history
+  head exists.
   Root initialization and latest-turn writes use the store's transactional `updateChat` updater,
-  preserving concurrent host metadata; terminal reconciliation updates only the state it observes under the row lock, so
-  duplicate or stale callbacks cannot rewind a successor.
+  preserving concurrent host metadata. Terminal reconciliation updates only the state it observes
+  under the row lock, so duplicate or stale callbacks cannot rewind a successor.
   `spawn_agent` creates a separate child chat with its own path, parent, declaration name, context
   history, stream, mailbox, and TurnQueue key. Its optional `fork_turns` string controls the initial
   history snapshot: `all` (the default), `none`, or a positive number of recent user-turn
