@@ -16,12 +16,12 @@ Without grounding, the AI would need to guess table names, column types, and rel
 
 ## Quick Start
 
-Each database adapter (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB) exports grounding factory functions. Import them and pass to your adapter:
+Each database adapter (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, and ClickHouse) exports grounding factory functions. Import them and pass to your adapter:
 
 Reuse the shared `model` setup from
 [Getting Started](/docs/text2sql/getting-started) in the examples below.
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="PostgreSQL">
 ```typescript
 import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
@@ -167,6 +167,33 @@ const text2sql = new Text2Sql({
         bigquery.indexes(),
         bigquery.constraints(),
         bigquery.rowCount(),
+      ],
+    }),
+  },
+  lock: new FileIndexLock(),
+});
+```
+</Tab>
+<Tab value="ClickHouse">
+```typescript
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { ClickHouse } from '@deepagents/text2sql/clickhouse';
+import * as clickhouse from '@deepagents/text2sql/clickhouse';
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: {
+    main: new ClickHouse({
+      defaultDatabase: 'analytics',
+      execute: query,
+      validate: async () => undefined,
+      grounding: [
+        clickhouse.tables(),
+        clickhouse.views(),
+        clickhouse.info(),
+        clickhouse.indexes(),
+        clickhouse.constraints(),
+        clickhouse.rowCount(),
       ],
     }),
   },
@@ -343,7 +370,7 @@ tables({
 
 For simple use cases, you can use a minimal grounding setup:
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="PostgreSQL">
 ```typescript
 import * as postgres from '@deepagents/text2sql/postgres';
@@ -394,6 +421,16 @@ grounding: [
 ]
 ```
 </Tab>
+<Tab value="ClickHouse">
+```typescript
+import * as clickhouse from '@deepagents/text2sql/clickhouse';
+
+grounding: [
+  clickhouse.tables(),
+  clickhouse.info(),
+]
+```
+</Tab>
 </Tabs>
 
 ## Empty Grounding
@@ -413,4 +450,5 @@ This is useful when providing custom introspection via the adapter's `introspect
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific configuration
 - [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific configuration
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific configuration
+- [ClickHouse Adapter](/docs/text2sql/clickhouse) - ClickHouse-specific configuration
 - [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

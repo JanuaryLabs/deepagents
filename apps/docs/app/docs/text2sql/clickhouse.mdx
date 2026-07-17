@@ -1,0 +1,135 @@
+---
+title: ClickHouse
+description: Configure Text2SQL with ClickHouse using server-assisted SQL policy checks
+---
+
+The ClickHouse adapter is client-independent: you provide one raw `execute(sql)`
+callback, and the adapter uses that callback for grounding, `EXPLAIN`-based SQL
+policy checks, and the final accepted `SELECT`.
+
+## Installation
+
+Install `@deepagents/text2sql` and the ClickHouse client you want to use:
+
+```bash
+npm install @deepagents/text2sql @clickhouse/client
+```
+
+## Basic Setup
+
+Reuse the shared `model` setup from
+[Getting Started](/docs/text2sql/getting-started).
+
+```typescript
+import { createClient } from '@clickhouse/client';
+
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { ClickHouse } from '@deepagents/text2sql/clickhouse';
+import * as clickhouse from '@deepagents/text2sql/clickhouse';
+
+const client = createClient({
+  url: process.env.CLICKHOUSE_URL,
+  username: process.env.CLICKHOUSE_USER,
+  password: process.env.CLICKHOUSE_PASSWORD,
+});
+
+const query = async (sql: string) => {
+  const result = await client.query({ query: sql, format: 'JSON' });
+  return result.json();
+};
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: {
+    main: new ClickHouse({
+      defaultDatabase: 'analytics',
+      execute: query,
+      validate: async () => undefined,
+      grounding: [
+        clickhouse.tables({ filter: ['analytics.users', 'analytics.orders'] }),
+        clickhouse.views(),
+        clickhouse.info(),
+        clickhouse.indexes(),
+        clickhouse.constraints(),
+        clickhouse.rowCount(),
+      ],
+    }),
+  },
+  lock: new FileIndexLock(),
+});
+```
+
+The raw callback must return rows as an array, `{ data: rows }`, or `{ rows }`.
+It must throw for ClickHouse exceptions, choose JSON through the client or
+protocol instead of appending `FORMAT JSON` to the SQL, and must not call the
+adapter's `execute()` method, which would recurse through policy analysis.
+
+## Required Database Role
+
+Use a dedicated user with one dedicated read-only role. The adapter checks the
+effective `readonly` setting on first use and fails closed unless ClickHouse
+reports `readonly = 1`.
+
+```sql
+CREATE ROLE deepagents_readonly;
+GRANT SELECT ON analytics.* TO deepagents_readonly;
+GRANT SELECT ON system.functions TO deepagents_readonly;
+GRANT SELECT ON system.data_skipping_indices TO deepagents_readonly;
+
+ALTER ROLE deepagents_readonly SETTINGS
+    readonly = 1,
+    max_execution_time = 30,
+    max_memory_usage = 2000000000,
+    max_rows_to_read = 100000000,
+    max_bytes_to_read = 5000000000,
+    max_result_rows = 100000,
+    max_threads = 4;
+
+CREATE USER deepagents
+IDENTIFIED WITH sha256_password BY 'replace-with-a-secret';
+
+GRANT deepagents_readonly TO deepagents;
+ALTER USER deepagents DEFAULT ROLE deepagents_readonly;
+```
+
+Server-assisted analysis is an additional boundary, not a replacement for
+ClickHouse RBAC and resource limits.
+
+## Policy Behavior
+
+Before the consumer validator or executor runs, the adapter:
+
+1. verifies effective `readonly = 1`;
+2. inspects `EXPLAIN AST` and requires one SELECT root;
+3. rejects `INTO OUTFILE`, table functions, dictionary and Join-engine lookup
+   functions, and non-system UDF origins;
+4. inspects `EXPLAIN QUERY TREE run_passes = 0` to retain unused CTEs;
+5. inspects the analyzed query tree to validate and resolve physical names; and
+6. compares discovered relations with grounded, database-qualified entities.
+
+Unknown EXPLAIN shapes, relation nodes, function origins, malformed SQL,
+multiple statements, and out-of-scope relations fail closed.
+
+## Available Grounding Functions
+
+Import these from `@deepagents/text2sql/clickhouse`:
+
+| Function | Description |
+|----------|-------------|
+| `tables()` | Discovers tables and columns from access-filtered ClickHouse metadata |
+| `views()` | Discovers views and their definitions |
+| `info()` | Emits ClickHouse dialect, version, and identifier guidance |
+| `constraints()` | Reports nullability, default expressions, and primary-key columns |
+| `indexes()` | Reports primary-key and data-skipping indexes |
+| `rowCount()` | Executes `count()` for each grounded table |
+
+ClickHouse primary keys organize data and do not imply uniqueness. ClickHouse
+does not expose conventional foreign-key relationships, so grounding does not
+synthesize join paths.
+
+## Compatibility Testing
+
+The real-server integration suite is pinned to the supported ClickHouse
+versions. When changing the adapter policy allowlist, capture the actual
+`EXPLAIN AST` and `EXPLAIN QUERY TREE` output on both pinned versions before
+documenting the behavior as supported.

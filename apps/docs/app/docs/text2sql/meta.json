@@ -10,6 +10,7 @@
     "sqlserver",
     "mysql",
     "bigquery",
+    "clickhouse",
     "spreadsheet",
     "---Guides---",
     "to-sql",

@@ -5,7 +5,7 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 ## Features
 
 - **Natural Language to SQL** - Convert questions to validated, executable queries
-- **Multi-Database Support** - PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, and BigQuery adapters
+- **Multi-Database Support** - PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, and ClickHouse adapters
 - **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
 - **Domain Knowledge** - Inject business terms, guardrails, and query patterns via fragments
 - **Conversational** - Multi-turn conversations with context persistence
@@ -24,6 +24,7 @@ npm install pg                       # PostgreSQL
 npm install mssql                    # SQL Server
 npm install mysql2                   # MySQL / MariaDB
 npm install @google-cloud/bigquery   # BigQuery
+npm install @clickhouse/client       # ClickHouse, or use your preferred client
 ```
 
 Requires Node.js LTS
@@ -276,7 +277,8 @@ starts with whitespace or SQL comments (`-- ...`, `/* ... */`). Before any
 adapter validator or executor runs, the dialect policy rejects write
 statements, multi-statement batches, parser failures, `SELECT INTO`, locking
 reads/hints, assignments, known state/file/extension/remote-access functions,
-BigQuery external queries, and qualified BigQuery persistent routines.
+BigQuery external queries, qualified BigQuery persistent routines, and
+ClickHouse table functions or unsafe UDF origins.
 
 This parser policy is one safety layer, not a database permission boundary.
 Static analysis cannot prove arbitrary unqualified user-defined functions are
@@ -532,6 +534,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 - [SQL Server](https://januarylabs.github.io/deepagents/docs/text2sql/sqlserver)
 - [MySQL / MariaDB](https://januarylabs.github.io/deepagents/docs/text2sql/mysql)
 - [BigQuery](https://januarylabs.github.io/deepagents/docs/text2sql/bigquery)
+- [ClickHouse](https://januarylabs.github.io/deepagents/docs/text2sql/clickhouse)
 
 ## Repository
 

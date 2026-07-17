@@ -20,6 +20,7 @@ npm install pg          # PostgreSQL
 npm install mssql       # SQL Server
 npm install mysql2      # MySQL / MariaDB
 npm install @google-cloud/bigquery   # BigQuery
+npm install @clickhouse/client       # ClickHouse, or use your preferred client
 # SQLite uses node:sqlite — no driver needed
 ```
 
@@ -40,7 +41,7 @@ const store = new SqliteContextStore('./agent.db');
 The adapter is the database the agent will query. Pick one. The adapter map
 key (`main` here) is the selector the CLI uses inside the sandbox.
 
-<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery']}>
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
@@ -132,6 +133,30 @@ const adapter = new BigQuery({
     await client.createQueryJob({ query: sql, dryRun: true, useQueryCache: false });
   },
   grounding: [bigquery.tables(), bigquery.info()],
+});
+```
+</Tab>
+<Tab value="ClickHouse">
+```typescript
+import { createClient } from '@clickhouse/client';
+
+import { ClickHouse } from '@deepagents/text2sql/clickhouse';
+import * as clickhouse from '@deepagents/text2sql/clickhouse';
+
+const client = createClient({
+  url: process.env.CLICKHOUSE_URL,
+  username: process.env.CLICKHOUSE_USER,
+  password: process.env.CLICKHOUSE_PASSWORD,
+});
+const query = async (sql: string) => {
+  const result = await client.query({ query: sql, format: 'JSON' });
+  return result.json();
+};
+const adapter = new ClickHouse({
+  defaultDatabase: 'analytics',
+  execute: query,
+  validate: async () => undefined,
+  grounding: [clickhouse.tables(), clickhouse.info()],
 });
 ```
 </Tab>

@@ -143,12 +143,16 @@ import {
 ### LLM-Based Scorers
 
 ```typescript
-import { factuality } from '@deepagents/evals/scorers';
+import { factuality, sql } from '@deepagents/evals/scorers';
 
 const fact = factuality({ model: 'gpt-4.1-mini' });
+const sqlEquivalence = sql({ model: 'gpt-4.1-mini' });
 ```
 
-`factuality` is backed by `autoevals` and expects an OpenAI-compatible model id.
+`factuality` compares factual content against the expected answer. `sql`
+compares submitted SQL with expert SQL for semantic equivalence while ignoring
+formatting, output column names, and result ordering. Both scorers expect an
+OpenAI-compatible model id.
 
 ### Combinators
 

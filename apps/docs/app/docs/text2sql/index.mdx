@@ -11,7 +11,7 @@ can stream user-facing answers grounded in validated query results.
 
 - **Natural Language to SQL**: Ask questions in plain English, get executable SQL
 - **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
-- **Multi-Database Support**: Works with PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, and BigQuery
+- **Multi-Database Support**: Works with PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, and ClickHouse
 - **Teachable**: Add domain knowledge through context fragments or low-level `toSql({ fragments })` calls
 - **Conversation Memory**: Multi-turn chat backed by your `ContextEngine` store
 - **Safe by Default**: Generates read-only queries with output limits
@@ -123,4 +123,5 @@ User Question
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific setup
 - [MySQL / MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific setup
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific setup
+- [ClickHouse Adapter](/docs/text2sql/clickhouse) - ClickHouse-specific setup
 - [Teach the System](/docs/text2sql/teach-the-system) - Add domain knowledge

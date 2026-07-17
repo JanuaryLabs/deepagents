@@ -1,8 +1,9 @@
 # ClickHouse adapter design
 
 This document records the decisions and evidence gathered while designing
-ClickHouse support for `@deepagents/text2sql`. It is an implementation handoff,
-not a statement that the adapter already exists.
+and implementing ClickHouse support for `@deepagents/text2sql`. See
+[`CLICKHOUSE-DEPLOYMENT.md`](./CLICKHOUSE-DEPLOYMENT.md) for the public API and
+deployment guide.
 
 ## Decision
 
