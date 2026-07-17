@@ -4,7 +4,13 @@ export class SqlServerSqlPolicyAnalyzer extends ParserSqlPolicyAnalyzer {
   protected readonly dialects = ['transactsql'] as const;
   protected override readonly readOnlyPolicy = {
     blockSelectInto: true,
+    blockServerQualifiedRelations: true,
     blockTableHints: true,
-    blockedFunctions: ['OPENDATASOURCE', 'OPENQUERY', 'OPENROWSET'],
+    blockedFunctions: [
+      'FN_GET_AUDIT_FILE',
+      'OPENDATASOURCE',
+      'OPENQUERY',
+      'OPENROWSET',
+    ],
   } as const;
 }

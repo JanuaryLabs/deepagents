@@ -16,6 +16,8 @@ export class MysqlSqlPolicyAnalyzer extends ParserSqlPolicyAnalyzer {
       'MASTER_POS_WAIT',
       'RELEASE_LOCK',
       'SLEEP',
+      'SOURCE_POS_WAIT',
+      'WAIT_FOR_EXECUTED_GTID_SET',
     ],
   } as const;
 }

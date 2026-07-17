@@ -24,10 +24,12 @@ type AstLike = Record<string, unknown>;
 
 export type ParserReadOnlyPolicy = {
   blockedFunctions?: readonly string[];
+  blockedFunctionPrefixes?: readonly string[];
   blockAssignments?: boolean;
   blockQualifiedFunctions?: boolean;
   blockLockingReads?: boolean;
   blockSelectInto?: boolean;
+  blockServerQualifiedRelations?: boolean;
   blockTableHints?: boolean;
 };
 
@@ -168,6 +170,13 @@ function containsBlockedOperation(
   }
   if (policy.blockLockingReads && node.locking_read != null) return true;
   if (policy.blockAssignments && node.type === 'assign') return true;
+  if (
+    policy.blockServerQualifiedRelations &&
+    isTableReferenceNode(node) &&
+    typeof node.server === 'string'
+  ) {
+    return true;
+  }
   if (policy.blockTableHints && node.table_hint != null) return true;
 
   if (node.type === 'function') {
@@ -187,6 +196,14 @@ function containsBlockedOperation(
     ) {
       return true;
     }
+    if (
+      functionIdentifier &&
+      policy.blockedFunctionPrefixes?.some((prefix) =>
+        functionIdentifier.parts.at(-1)?.startsWith(prefix.toLowerCase()),
+      )
+    ) {
+      return true;
+    }
   }
 
   return Object.values(node).some((value) =>
@@ -202,17 +219,26 @@ function readFunctionIdentifier(node: AstLike): { parts: string[] } | null {
     isAstLike(node.name.schema) &&
     typeof node.name.schema.value === 'string'
   ) {
-    parts.push(node.name.schema.value.toLowerCase());
+    appendIdentifierParts(parts, node.name.schema.value);
   }
 
   const names = Array.isArray(node.name.name) ? node.name.name : [];
   for (const name of names) {
     if (isAstLike(name) && typeof name.value === 'string') {
-      parts.push(name.value.toLowerCase());
+      appendIdentifierParts(parts, name.value);
     }
   }
 
   return parts.length > 0 ? { parts } : null;
+}
+
+function appendIdentifierParts(parts: string[], value: string): void {
+  parts.push(
+    ...value
+      .toLowerCase()
+      .split('.')
+      .filter((part) => part.length > 0),
+  );
 }
 
 function extractBaseEntityReferences(

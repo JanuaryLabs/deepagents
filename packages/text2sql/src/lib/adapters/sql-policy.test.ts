@@ -111,6 +111,8 @@ describe('dialect SQL policy analyzers', () => {
       'SELECT BENCHMARK(1000, 1 + 1)',
       'SELECT LAST_INSERT_ID(7)',
       'SELECT MASTER_POS_WAIT("log", 1)',
+      'SELECT SOURCE_POS_WAIT("binlog.000001", 1, 60)',
+      'SELECT WAIT_FOR_EXECUTED_GTID_SET("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:1", 60)',
     ];
 
     for (const sql of unsafeQueries) {
@@ -147,6 +149,15 @@ describe('dialect SQL policy analyzers', () => {
       'SELECT pg_notify("x", "y")',
       'SELECT lo_unlink(1)',
       'SELECT dblink_exec("conn", "DELETE FROM x")',
+      "SELECT dblink_connect('remote', 'dbname=remote')",
+      "SELECT dblink_disconnect('remote')",
+      'SELECT lo_get(1)',
+      'SELECT pg_advisory_xact_lock(1)',
+      'SELECT pg_cancel_backend(123)',
+      'SELECT * FROM pg_ls_logdir()',
+      'SELECT pg_reload_conf()',
+      'SELECT pg_rotate_logfile()',
+      'SELECT pg_terminate_backend(123)',
     ];
 
     for (const sql of unsafeQueries) {
@@ -174,6 +185,7 @@ describe('dialect SQL policy analyzers', () => {
       // Same structural hint and table-valued function operations in the AST.
       'SELECT * FROM users WITH (XLOCK)',
       'SELECT * FROM OPENROWSET("SQLNCLI", "Server=x", "SELECT * FROM secrets")',
+      'SELECT * FROM sys.fn_get_audit_file("C:\\\\audit\\\\*.sqlaudit", DEFAULT, DEFAULT)',
     ];
 
     for (const sql of unsafeQueries) {
@@ -190,6 +202,20 @@ describe('dialect SQL policy analyzers', () => {
         sql,
       );
     }
+  });
+
+  it('SQL Server rejects linked-server relations that share an allowed local suffix', async () => {
+    const sql = 'SELECT * FROM linked_server.database.dbo.users';
+    const violation = await new SqlServerSqlPolicyAnalyzer().analyze(sql, {
+      async resolveAllowedEntities() {
+        return ['database.users'];
+      },
+    });
+
+    assert.deepStrictEqual(violation, {
+      kind: 'read-only',
+      message: 'only SELECT or WITH queries allowed',
+    });
   });
 
   it('SQLite rejects SELECT functions that load executable extensions or access host files', async () => {
@@ -224,6 +250,7 @@ describe('dialect SQL policy analyzers', () => {
       'SELECT project.dataset.remote_function(secret) FROM users',
       // Persistent routines have the same qualified function structure.
       'SELECT dataset.user_defined_function(secret) FROM users',
+      'SELECT `project.dataset.remote_function`(secret) FROM users',
     ];
 
     for (const sql of unsafeQueries) {
