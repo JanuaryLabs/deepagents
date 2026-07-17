@@ -8,7 +8,7 @@ import {
   type TableIndex,
   type ValidateFunction,
 } from '../adapter.ts';
-import { SqlServerSqlPolicyAnalyzer } from '../sql-policy.ts';
+import { SqlServerSqlPolicyAnalyzer } from './sqlserver.sql-policy.ts';
 
 export type SqlServerAdapterOptions = {
   execute: ExecuteFunction;

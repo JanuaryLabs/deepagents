@@ -4,7 +4,7 @@ import {
   type GroundingFn,
   type ValidateFunction,
 } from '../adapter.ts';
-import { BigQuerySqlPolicyAnalyzer } from '../sql-policy.ts';
+import { BigQuerySqlPolicyAnalyzer } from './bigquery.sql-policy.ts';
 
 export type BigQueryAdapterOptions = {
   execute: ExecuteFunction;

@@ -271,9 +271,21 @@ blocks raw database access so read-only and scope checks stay behind
 metadata from the host adapter map without putting that concern into the real
 CLI.
 
-Read-only enforcement accepts a single `SELECT`/`WITH` statement even when it
-starts with whitespace or SQL comments (`-- ...`, `/* ... */`). It still
-rejects comment-only input, multi-statement batches, and write operations.
+Read-only enforcement parses a single `SELECT`/`WITH` statement even when it
+starts with whitespace or SQL comments (`-- ...`, `/* ... */`). Before any
+adapter validator or executor runs, the dialect policy rejects write
+statements, multi-statement batches, parser failures, `SELECT INTO`, locking
+reads/hints, assignments, known state/file/extension/remote-access functions,
+BigQuery external queries, and qualified BigQuery persistent routines.
+
+This parser policy is one safety layer, not a database permission boundary.
+Static analysis cannot prove arbitrary unqualified user-defined functions are
+side-effect free, and an otherwise valid `SELECT` can still consume excessive
+CPU, memory, bytes, locks, or time. Production connections must use a dedicated
+least-privilege identity with `SELECT` only on intended relations; disable or
+withhold extension, file, remote-query, and routine execution capabilities; and
+configure dialect-appropriate statement timeouts, byte/result limits, and
+compute/memory limits.
 
 ## Fragments
 

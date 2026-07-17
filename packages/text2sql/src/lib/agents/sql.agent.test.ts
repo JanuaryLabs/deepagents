@@ -12,7 +12,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { fragment } from '@deepagents/context';
-import { SQLValidationError, toSql } from '@deepagents/text2sql';
+import { Adapter, SQLValidationError, toSql } from '@deepagents/text2sql';
 import { tables } from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../../tests/sqlite.ts';
@@ -73,6 +73,47 @@ function createCapturingModel(responses: Array<MockModelResponse | Error>) {
     },
   });
   return model;
+}
+
+class ClickHouseFormatterAdapter extends Adapter {
+  override readonly formatterLanguage = 'clickhouse';
+  override readonly defaultSchema = undefined;
+  override readonly systemSchemas: string[] = [];
+  override grounding = [];
+
+  constructor() {
+    super({
+      async analyze() {
+        return null;
+      },
+    });
+  }
+
+  override executeImpl(): any[] {
+    return [];
+  }
+
+  override validateImpl(): void {}
+
+  override runQuery<Row>(): Row[] {
+    return [];
+  }
+
+  override quoteIdentifier(name: string): string {
+    return `\`${name.replaceAll('`', '``')}\``;
+  }
+
+  override escape(value: string): string {
+    return value.replaceAll('`', '``');
+  }
+
+  override buildSampleRowsQuery(
+    tableName: string,
+    _columns: string[] | undefined,
+    limit: number,
+  ): string {
+    return `SELECT * FROM ${this.quoteIdentifier(tableName)} LIMIT ${limit}`;
+  }
 }
 
 describe('toSql', () => {
@@ -614,14 +655,63 @@ describe('toSql', () => {
           }),
         (error: unknown) => {
           assert(SQLValidationError.isInstance(error));
-          assert.match(
-            (error as SQLValidationError).message,
-            /SQL_SCOPE_PARSE_ERROR/,
+          assert.deepStrictEqual(
+            JSON.parse((error as SQLValidationError).message),
+            {
+              error:
+                'SQL scope analysis failed before validation/execution: SQL response was fenced markdown, not executable SQL.',
+              error_type: 'SQL_SCOPE_PARSE_ERROR',
+              suggestion:
+                'Rewrite the query into simpler SQL that can be analyzed safely, or extend parser coverage for this dialect feature.',
+              sql_attempted: input,
+              parser_dialect: 'sqlite',
+              parser_error:
+                'SQL response was fenced markdown, not executable SQL.',
+            },
           );
           return true;
         },
       );
     }
+  });
+
+  it('does not require a formatter-to-policy mapping for fenced errors', async () => {
+    const input = '```SQL\nSELECT * FROM users\n```';
+    const model = createMockModel({
+      result: { sql: input, reasoning: 'test' },
+    });
+
+    await assert.rejects(
+      () =>
+        toSql({
+          input: 'query',
+          adapter: new ClickHouseFormatterAdapter(),
+          fragments: [],
+          model,
+          maxRetries: 1,
+        }),
+      (error: unknown) => {
+        assert(SQLValidationError.isInstance(error));
+        const payload = JSON.parse((error as SQLValidationError).message) as {
+          error_type?: unknown;
+          parser_dialect?: unknown;
+          sql_attempted?: unknown;
+        };
+        assert.deepStrictEqual(
+          {
+            error_type: payload.error_type,
+            parser_dialect: payload.parser_dialect,
+            sql_attempted: payload.sql_attempted,
+          },
+          {
+            error_type: 'SQL_SCOPE_PARSE_ERROR',
+            parser_dialect: 'clickhouse',
+            sql_attempted: input,
+          },
+        );
+        return true;
+      },
+    );
   });
 
   it('returns formatted SQL', async () => {

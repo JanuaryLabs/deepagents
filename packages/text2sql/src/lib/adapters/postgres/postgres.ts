@@ -8,7 +8,7 @@ import {
   type TableIndex,
   type ValidateFunction,
 } from '../adapter.ts';
-import { PostgresSqlPolicyAnalyzer } from '../sql-policy.ts';
+import { PostgresSqlPolicyAnalyzer } from './postgres.sql-policy.ts';
 
 export type PostgresAdapterOptions = {
   execute: ExecuteFunction;

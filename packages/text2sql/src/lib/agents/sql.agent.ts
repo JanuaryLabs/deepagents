@@ -30,10 +30,7 @@ import {
 } from '@deepagents/context';
 
 import type { Adapter } from '../adapters/adapter.ts';
-import {
-  type RuntimeScopeDialect,
-  buildScopeParseErrorPayload,
-} from '../adapters/runtime-scope.ts';
+import { buildScopeParseErrorPayload } from '../sql-scope-error.ts';
 import { SQLValidationError, UnanswerableSQLError } from './exceptions.ts';
 
 export interface ToSqlOptions {
@@ -62,14 +59,6 @@ export interface ToSqlResult {
 const RETRY_TEMPERATURES = [0, 0.2, 0.3];
 const SQL_AGENT_ROLE = 'Expert SQL query generator.';
 const SQL_AGENT_OBJECTIVE = 'Generate precise SQL grounded in provided schema.';
-const FORMATTER_SCOPE_DIALECTS = new Map<string, RuntimeScopeDialect>([
-  ['sqlite', 'sqlite'],
-  ['postgresql', 'postgresql'],
-  ['bigquery', 'bigquery'],
-  ['transactsql', 'transactsql'],
-  ['mysql', 'mysql'],
-]);
-
 const SQL_AGENT_POLICIES: ContextFragment[] = [
   fragment(
     'schema_mapping',
@@ -286,31 +275,6 @@ function extractSql(output: string): string {
   return match ? match[1].trim() : output.trim();
 }
 
-function scopeDialectFor(adapter: Adapter): RuntimeScopeDialect {
-  const dialect = FORMATTER_SCOPE_DIALECTS.get(adapter.formatterLanguage);
-  if (!dialect) {
-    throw new TypeError(
-      `No scope dialect mapping for formatter language "${adapter.formatterLanguage}".`,
-    );
-  }
-  return dialect;
-}
-
-function fencedMarkdownParseError(
-  sql: string,
-  adapter: Adapter,
-): SQLValidationError {
-  return new SQLValidationError(
-    JSON.stringify(
-      buildScopeParseErrorPayload(
-        sql,
-        scopeDialectFor(adapter),
-        new Error('SQL response was fenced markdown, not executable SQL.'),
-      ),
-    ),
-  );
-}
-
 export async function toSql(options: ToSqlOptions): Promise<ToSqlResult> {
   const { maxRetries = 3 } = options;
 
@@ -417,7 +381,17 @@ Question: ${options.input}
           rawSql.trimStart().startsWith('```') &&
           extractedSql === rawSql.trim()
         ) {
-          throw fencedMarkdownParseError(sql, options.adapter);
+          throw new SQLValidationError(
+            JSON.stringify(
+              buildScopeParseErrorPayload(
+                sql,
+                options.adapter.formatterLanguage,
+                new Error(
+                  'SQL response was fenced markdown, not executable SQL.',
+                ),
+              ),
+            ),
+          );
         }
 
         const validationError = await options.adapter.validate(sql);

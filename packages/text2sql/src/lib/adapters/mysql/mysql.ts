@@ -4,7 +4,7 @@ import {
   type GroundingFn,
   type ValidateFunction,
 } from '../adapter.ts';
-import { MysqlSqlPolicyAnalyzer } from '../sql-policy.ts';
+import { MysqlSqlPolicyAnalyzer } from './mysql.sql-policy.ts';
 
 export type MysqlAdapterOptions = {
   execute: ExecuteFunction;

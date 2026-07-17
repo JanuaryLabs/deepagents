@@ -1,3 +1,4 @@
+/** Live adapter contract tests for SQL policy enforcement. */
 import { BigQuery as BigQueryClient } from '@google-cloud/bigquery';
 import sql from 'mssql';
 import assert from 'node:assert';
@@ -54,16 +55,16 @@ function parseScopePayload(payload: string): SQLScopeErrorPayload {
   return JSON.parse(payload) as SQLScopeErrorPayload;
 }
 
-type RuntimeScopeProbe = {
+type PolicyProbe = {
   mock: {
     callCount(): number;
   };
 };
 
 type AdapterProbes = {
-  execute: RuntimeScopeProbe;
-  grounding: RuntimeScopeProbe;
-  validate: RuntimeScopeProbe;
+  execute: PolicyProbe;
+  grounding: PolicyProbe;
+  validate: PolicyProbe;
 };
 
 type AdapterFactoryResult = {
@@ -74,7 +75,7 @@ type AdapterFactoryResult = {
   probes: AdapterProbes;
 };
 
-type AdapterRuntime = {
+type AdapterPolicyTestEnvironment = {
   create: () => AdapterFactoryResult | Promise<AdapterFactoryResult>;
   createEmptyScope: () => AdapterFactoryResult | Promise<AdapterFactoryResult>;
   cleanup?: () => Promise<void>;
@@ -93,10 +94,10 @@ type AdapterQueries = {
 
 type AdapterCase = {
   name: string;
-  setup: () => Promise<AdapterRuntime | undefined>;
+  setup: () => Promise<AdapterPolicyTestEnvironment | undefined>;
 };
 
-type RuntimeScopeOptions = {
+type PolicyTestOptions = {
   tables?: string[];
   views?: string[];
   grounding?: GroundingFn[];
@@ -110,7 +111,7 @@ function isSqliteGroundingQuery(sql: string): boolean {
   );
 }
 
-const runtimeScopeSqliteDdl = `
+const policySqliteDdl = `
   CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL
@@ -145,7 +146,7 @@ const runtimeScopeSqliteDdl = `
   INSERT INTO users (id, name) VALUES (1, 'Ada');
 `;
 
-async function createRuntimeSqlite(options: RuntimeScopeOptions = {}) {
+async function createSqlitePolicyAdapter(options: PolicyTestOptions = {}) {
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
   const validateProbe = mock.fn();
@@ -158,7 +159,7 @@ async function createRuntimeSqlite(options: RuntimeScopeOptions = {}) {
   ];
   // eslint-disable-next-line prefer-const
   let db: Awaited<ReturnType<typeof init_db>>['db'] | undefined;
-  const initialized = await init_db(runtimeScopeSqliteDdl, {
+  const initialized = await init_db(policySqliteDdl, {
     grounding,
     execute: async (sql) => {
       if (!db) throw new Error('SQLite test database was not initialized.');
@@ -191,7 +192,7 @@ async function createRuntimeSqlite(options: RuntimeScopeOptions = {}) {
   };
 }
 
-const runtimeScopePostgresDdl = `
+const policyPostgresDdl = `
   DROP SCHEMA IF EXISTS private CASCADE;
   DROP VIEW IF EXISTS public.active_users;
   DROP TABLE IF EXISTS public.orders;
@@ -216,7 +217,7 @@ const runtimeScopePostgresDdl = `
   INSERT INTO public.users (id, name) VALUES (1, 'Ada');
 `;
 
-const runtimeScopeMysqlDdl = `
+const policyMysqlDdl = `
   DROP VIEW IF EXISTS active_users;
   DROP TABLE IF EXISTS orders;
   DROP TABLE IF EXISTS users;
@@ -242,7 +243,7 @@ const runtimeScopeMysqlDdl = `
   INSERT INTO users (id, name) VALUES (1, 'Ada');
 `;
 
-const runtimeScopeSqlServerDdl = [
+const policySqlServerDdl = [
   `
     DROP VIEW IF EXISTS dbo.active_users;
     DROP TABLE IF EXISTS audit.secrets;
@@ -274,7 +275,7 @@ const runtimeScopeSqlServerDdl = [
   "INSERT INTO dbo.users (id, name) VALUES (1, N'Ada');",
 ];
 
-const defaultRuntimeScopeQueries: AdapterQueries = {
+const defaultPolicyQueries: AdapterQueries = {
   executeResult: [{ id: 1, name: 'Ada' }],
   inScopeSql: 'SELECT * FROM users',
   inScopeViewSql: 'SELECT * FROM active_users',
@@ -304,7 +305,7 @@ function isBigQueryGroundingQuery(sqlText: string): boolean {
   return sqlText.includes('INFORMATION_SCHEMA.');
 }
 
-function createPostgresScope(pool: pg.Pool, options: RuntimeScopeOptions = {}) {
+function createPostgresScope(pool: pg.Pool, options: PolicyTestOptions = {}) {
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
   const validateProbe = mock.fn();
@@ -343,7 +344,7 @@ function createPostgresScope(pool: pg.Pool, options: RuntimeScopeOptions = {}) {
 
 function createMysqlScope(
   container: MysqlContainer,
-  options: RuntimeScopeOptions = {},
+  options: PolicyTestOptions = {},
 ) {
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
@@ -384,7 +385,7 @@ function createMysqlScope(
 
 function createSqlServerScope(
   pool: sql.ConnectionPool,
-  options: RuntimeScopeOptions = {},
+  options: PolicyTestOptions = {},
 ) {
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
@@ -468,7 +469,7 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
       // Ignore cleanup failure for a dataset that may not have been created.
     }
     console.log(
-      `Skipping BigQuery runtime scope tests: ${
+      `Skipping BigQuery SQL policy tests: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -488,7 +489,7 @@ async function startBigQueryRuntime(): Promise<BigQueryRuntime | undefined> {
 
 function createBigQueryScope(
   runtime: BigQueryRuntime,
-  options: RuntimeScopeOptions = {},
+  options: PolicyTestOptions = {},
 ) {
   const executeProbe = mock.fn();
   const groundingProbe = mock.fn();
@@ -548,9 +549,9 @@ const adapterCases: AdapterCase[] = [
   {
     name: 'sqlite',
     setup: async () => ({
-      create: () => createRuntimeSqlite(),
-      createEmptyScope: () => createRuntimeSqlite({ grounding: [] }),
-      queries: defaultRuntimeScopeQueries,
+      create: () => createSqlitePolicyAdapter(),
+      createEmptyScope: () => createSqlitePolicyAdapter({ grounding: [] }),
+      queries: defaultPolicyQueries,
     }),
   },
   {
@@ -562,7 +563,7 @@ const adapterCases: AdapterCase[] = [
         connectionString: container.connectionString,
       });
       try {
-        await pool.query(runtimeScopePostgresDdl);
+        await pool.query(policyPostgresDdl);
       } catch (error) {
         await pool.end();
         await container.cleanup();
@@ -577,7 +578,7 @@ const adapterCases: AdapterCase[] = [
           await container.cleanup();
         },
         queries: {
-          ...defaultRuntimeScopeQueries,
+          ...defaultPolicyQueries,
           outOfScopeSql: 'SELECT * FROM private.secrets',
         },
       };
@@ -589,7 +590,7 @@ const adapterCases: AdapterCase[] = [
       const container = await startMysqlContainer();
       if (!container) return undefined;
       try {
-        await container.query(runtimeScopeMysqlDdl);
+        await container.query(policyMysqlDdl);
       } catch (error) {
         await container.cleanup();
         throw error;
@@ -600,7 +601,7 @@ const adapterCases: AdapterCase[] = [
         createEmptyScope: () => createMysqlScope(container, { grounding: [] }),
         cleanup: container.cleanup,
         queries: {
-          ...defaultRuntimeScopeQueries,
+          ...defaultPolicyQueries,
           executeResult: [{ id: '1', name: 'Ada' }],
           outOfScopeSql: 'SELECT * FROM admin.secrets',
         },
@@ -615,7 +616,7 @@ const adapterCases: AdapterCase[] = [
       const pool = new sql.ConnectionPool(container.connectionString);
       try {
         await pool.connect();
-        for (const statement of runtimeScopeSqlServerDdl) {
+        for (const statement of policySqlServerDdl) {
           await pool.request().batch(statement);
         }
       } catch (error) {
@@ -632,7 +633,7 @@ const adapterCases: AdapterCase[] = [
           await container.cleanup();
         },
         queries: {
-          ...defaultRuntimeScopeQueries,
+          ...defaultPolicyQueries,
           inScopeSql: 'SELECT TOP 1 * FROM users',
           inScopeViewSql: 'SELECT TOP 1 * FROM active_users',
           outOfScopeSql: 'SELECT TOP 1 * FROM [audit].[secrets]',
@@ -653,7 +654,7 @@ const adapterCases: AdapterCase[] = [
         createEmptyScope: () => createBigQueryScope(runtime, { grounding: [] }),
         cleanup: runtime.cleanup,
         queries: {
-          ...defaultRuntimeScopeQueries,
+          ...defaultPolicyQueries,
           setOperationSql: 'SELECT * FROM users UNION ALL SELECT * FROM users',
         },
       };
@@ -662,8 +663,8 @@ const adapterCases: AdapterCase[] = [
 ];
 
 for (const adapterCase of adapterCases) {
-  describe(`${adapterCase.name} runtime scope`, () => {
-    let runtime: AdapterRuntime | undefined;
+  describe(`${adapterCase.name} SQL policy`, () => {
+    let runtime: AdapterPolicyTestEnvironment | undefined;
 
     before(async () => {
       runtime = await adapterCase.setup();
@@ -684,7 +685,7 @@ for (const adapterCase of adapterCases) {
 
     function skipUnavailableRuntime(t: TestContext): boolean {
       if (runtime) return false;
-      t.skip(`${adapterCase.name} runtime is unavailable`);
+      t.skip(`${adapterCase.name} test database is unavailable`);
       return true;
     }
 
@@ -906,9 +907,9 @@ for (const adapterCase of adapterCases) {
   });
 }
 
-describe('sqlite runtime scope traversal', () => {
+describe('sqlite SQL policy traversal', () => {
   it('uses the closest supported parser dialect for sqlite reserved identifiers', async () => {
-    const { adapter, probes } = await createRuntimeSqlite({
+    const { adapter, probes } = await createSqlitePolicyAdapter({
       tables: ['persist', 'integers'],
       views: [],
     });
@@ -926,7 +927,7 @@ describe('sqlite runtime scope traversal', () => {
   });
 
   it('parses sqlite-only syntax (json_each, dotted quoted identifiers)', async () => {
-    const { adapter, probes } = await createRuntimeSqlite({
+    const { adapter, probes } = await createSqlitePolicyAdapter({
       tables: ['BoardGames'],
       views: [],
     });
@@ -948,7 +949,7 @@ describe('sqlite runtime scope traversal', () => {
   });
 
   it('allows traversal-expanded grounded tables', async () => {
-    const { adapter, probes } = await createRuntimeSqlite({
+    const { adapter, probes } = await createSqlitePolicyAdapter({
       grounding: [sqliteTables({ filter: ['posts'], forward: true })],
     });
 
@@ -964,7 +965,7 @@ describe('sqlite runtime scope traversal', () => {
   });
 });
 
-describe('spreadsheet runtime scope', () => {
+describe('spreadsheet SQL policy', () => {
   const tempDirs: string[] = [];
 
   afterEach(async () => {
@@ -975,7 +976,7 @@ describe('spreadsheet runtime scope', () => {
     );
   });
 
-  it('enforces runtime scope through the inherited sqlite adapter', async () => {
+  it('enforces SQL policy through the inherited sqlite adapter', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'text2sql-scope-'));
     tempDirs.push(dir);
 
@@ -1013,7 +1014,7 @@ describe('spreadsheet runtime scope', () => {
 
 describe('scope enforcement edge cases', () => {
   async function createSqlite(tables: string[], views: string[] = []) {
-    return createRuntimeSqlite({ tables, views });
+    return createSqlitePolicyAdapter({ tables, views });
   }
 
   it('allows multiple allowed tables via JOIN', async () => {
@@ -1117,7 +1118,7 @@ describe('bigquery scope normalization', () => {
 
   function skipUnavailableRuntime(t: TestContext): boolean {
     if (runtime) return false;
-    t.skip('BigQuery runtime is unavailable');
+    t.skip('BigQuery test database is unavailable');
     return true;
   }
 

@@ -21,13 +21,16 @@ class PolicyWiringAdapter extends Adapter {
   override readonly defaultSchema = undefined;
   override readonly systemSchemas: string[] = [];
   override grounding = [];
+  executeCalls = 0;
   resolveScopeCalls = 0;
+  validateCalls = 0;
 
   constructor(policyAnalyzer: SqlPolicyAnalyzer) {
     super(policyAnalyzer);
   }
 
   override executeImpl(sql: string): any[] {
+    this.executeCalls++;
     return [{ sql }];
   }
 
@@ -36,7 +39,9 @@ class PolicyWiringAdapter extends Adapter {
     return [];
   }
 
-  override validateImpl(): void {}
+  override validateImpl(): void {
+    this.validateCalls++;
+  }
 
   override runQuery<Row>(): Row[] {
     return [];
@@ -98,6 +103,28 @@ describe('Adapter policy strategy wiring', () => {
       () => adapter.execute('DROP TABLE users'),
       isReadOnlyError,
     );
+    assert.strictEqual(adapter.resolveScopeCalls, 0);
+  });
+
+  it('fails closed when the asynchronous analyzer throws', async () => {
+    const policyError = new Error('policy analysis unavailable');
+    const adapter = new PolicyWiringAdapter({
+      async analyze() {
+        await Promise.resolve();
+        throw policyError;
+      },
+    });
+
+    await assert.rejects(
+      () => adapter.validate('SELECT 1'),
+      (error: unknown) => error === policyError,
+    );
+    await assert.rejects(
+      () => adapter.execute('SELECT 1'),
+      (error: unknown) => error === policyError,
+    );
+    assert.strictEqual(adapter.validateCalls, 0);
+    assert.strictEqual(adapter.executeCalls, 0);
     assert.strictEqual(adapter.resolveScopeCalls, 0);
   });
 });

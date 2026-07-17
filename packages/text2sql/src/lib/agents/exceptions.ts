@@ -56,7 +56,7 @@ export class UnanswerableSQLError extends Error {
 }
 
 /**
- * Error thrown when a query falls outside the grounded runtime scope.
+ * Error thrown when a query falls outside the grounded SQL scope.
  */
 export class SQLScopeError extends Error {
   [sqlScopeMarker]: true;

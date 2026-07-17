@@ -18,7 +18,7 @@ import { PostgresTableGrounding } from './table.postgres.grounding.ts';
 import { PostgresViewGrounding } from './view.postgres.grounding.ts';
 
 export * from './postgres.ts';
-export { PostgresSqlPolicyAnalyzer } from '../sql-policy.ts';
+export { PostgresSqlPolicyAnalyzer } from './postgres.sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
   return (adapter: Adapter) => new PostgresTableGrounding(adapter, config);

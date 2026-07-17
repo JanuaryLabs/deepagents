@@ -986,7 +986,7 @@ describe('sql binary', () => {
     assert.match(result.stderr, /only SELECT or WITH queries allowed/);
   });
 
-  it('validate: runtime scope enforcement rejects out-of-scope tables', async () => {
+  it('validate: SQL policy rejects out-of-scope tables', async () => {
     const cwd = makeTmpDir();
     const adaptersPath = writeAdaptersModule(
       cwd,

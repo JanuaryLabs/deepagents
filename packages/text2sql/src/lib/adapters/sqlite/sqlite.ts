@@ -4,7 +4,7 @@ import {
   type GroundingFn,
   type ValidateFunction,
 } from '../adapter.ts';
-import { SqliteSqlPolicyAnalyzer } from '../sql-policy.ts';
+import { SqliteSqlPolicyAnalyzer } from './sqlite.sql-policy.ts';
 
 const SQL_ERROR_MAP: Array<{
   pattern: RegExp;
