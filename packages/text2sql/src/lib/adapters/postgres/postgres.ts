@@ -8,6 +8,7 @@ import {
   type TableIndex,
   type ValidateFunction,
 } from '../adapter.ts';
+import { PostgresSqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export type PostgresAdapterOptions = {
   execute: ExecuteFunction;
@@ -123,7 +124,7 @@ export class Postgres extends Adapter {
   override readonly formatterLanguage = 'postgresql';
 
   constructor(options: PostgresAdapterOptions) {
-    super();
+    super(new PostgresSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('Postgres adapter requires an execute function.');
     }

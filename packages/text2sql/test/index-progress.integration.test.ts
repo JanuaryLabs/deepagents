@@ -39,6 +39,7 @@ import {
 import {
   Sqlite,
   type SqliteAdapterOptions,
+  SqliteSqlPolicyAnalyzer,
   columnStats,
   columnValues,
   constraints,
@@ -66,7 +67,7 @@ class TestAdapter extends Adapter {
       ctx: GroundingContext,
     ) => Promise<ContextFragment[]> | ContextFragment[],
   ) {
-    super();
+    super(new SqliteSqlPolicyAnalyzer());
     this.#introspect = introspect;
   }
 

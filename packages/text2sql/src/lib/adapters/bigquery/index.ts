@@ -14,6 +14,7 @@ import { BigQueryTableGrounding } from './table.bigquery.grounding.ts';
 import { BigQueryViewGrounding } from './view.bigquery.grounding.ts';
 
 export * from './bigquery.ts';
+export { BigQuerySqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
   return (adapter: Adapter) =>

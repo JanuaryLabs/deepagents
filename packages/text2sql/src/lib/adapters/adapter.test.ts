@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { Adapter, type SqlPolicyAnalyzer } from '@deepagents/text2sql';
 import { tables } from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../../tests/sqlite.ts';
@@ -14,6 +15,92 @@ function isReadOnlyError(error: unknown): error is Error {
     error.message === READ_ONLY_MESSAGE
   );
 }
+
+class PolicyWiringAdapter extends Adapter {
+  override readonly formatterLanguage = 'sqlite';
+  override readonly defaultSchema = undefined;
+  override readonly systemSchemas: string[] = [];
+  override grounding = [];
+  resolveScopeCalls = 0;
+
+  constructor(policyAnalyzer: SqlPolicyAnalyzer) {
+    super(policyAnalyzer);
+  }
+
+  override executeImpl(sql: string): any[] {
+    return [{ sql }];
+  }
+
+  override async resolveAllowedEntities(): Promise<string[]> {
+    this.resolveScopeCalls++;
+    return [];
+  }
+
+  override validateImpl(): void {}
+
+  override runQuery<Row>(): Row[] {
+    return [];
+  }
+
+  override quoteIdentifier(name: string): string {
+    return `"${name.replaceAll('"', '""')}"`;
+  }
+
+  override escape(value: string): string {
+    return value.replaceAll('"', '""');
+  }
+
+  override buildSampleRowsQuery(
+    tableName: string,
+    _columns: string[] | undefined,
+    limit: number,
+  ): string {
+    return `SELECT * FROM ${this.quoteIdentifier(tableName)} LIMIT ${limit}`;
+  }
+}
+
+describe('Adapter policy strategy wiring', () => {
+  it('delegates validate and execute policy to the injected analyzer', async () => {
+    const calls: Array<{ sql: string; allowedEntities: readonly string[] }> =
+      [];
+    const analyzer: SqlPolicyAnalyzer = {
+      async analyze(sql, context) {
+        const allowedEntities = await context.resolveAllowedEntities();
+        calls.push({ sql, allowedEntities });
+        return null;
+      },
+    };
+    const adapter = new PolicyWiringAdapter(analyzer);
+
+    assert.strictEqual(await adapter.validate('SELECT 1'), undefined);
+    assert.deepStrictEqual(await adapter.execute('SELECT 2'), [
+      { sql: 'SELECT 2' },
+    ]);
+    assert.deepStrictEqual(calls, [
+      { sql: 'SELECT 1', allowedEntities: [] },
+      { sql: 'SELECT 2', allowedEntities: [] },
+    ]);
+    assert.strictEqual(adapter.resolveScopeCalls, 1);
+  });
+
+  it('does not call adapter validation after the analyzer denies SQL', async () => {
+    const adapter = new PolicyWiringAdapter({
+      async analyze() {
+        return { kind: 'read-only', message: READ_ONLY_MESSAGE };
+      },
+    });
+
+    assert.strictEqual(
+      await adapter.validate('DROP TABLE users'),
+      READ_ONLY_MESSAGE,
+    );
+    await assert.rejects(
+      () => adapter.execute('DROP TABLE users'),
+      isReadOnlyError,
+    );
+    assert.strictEqual(adapter.resolveScopeCalls, 0);
+  });
+});
 
 describe('Adapter read-only enforcement', () => {
   it('validate allows line comments before SELECT', async () => {

@@ -18,6 +18,7 @@ import { MysqlTableGrounding } from './table.mysql.grounding.ts';
 import { MysqlViewGrounding } from './view.mysql.grounding.ts';
 
 export * from './mysql.ts';
+export { MysqlSqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
   return (adapter: Adapter) => new MysqlTableGrounding(adapter, config);

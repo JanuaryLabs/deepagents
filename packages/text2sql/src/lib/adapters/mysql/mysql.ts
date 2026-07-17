@@ -4,6 +4,7 @@ import {
   type GroundingFn,
   type ValidateFunction,
 } from '../adapter.ts';
+import { MysqlSqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export type MysqlAdapterOptions = {
   execute: ExecuteFunction;
@@ -96,7 +97,7 @@ export class Mysql extends Adapter {
   ];
 
   constructor(options: MysqlAdapterOptions) {
-    super();
+    super(new MysqlSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('Mysql adapter requires an execute function.');
     }

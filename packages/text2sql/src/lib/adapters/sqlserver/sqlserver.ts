@@ -8,6 +8,7 @@ import {
   type TableIndex,
   type ValidateFunction,
 } from '../adapter.ts';
+import { SqlServerSqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export type SqlServerAdapterOptions = {
   execute: ExecuteFunction;
@@ -134,7 +135,7 @@ export class SqlServer extends Adapter {
   override readonly formatterLanguage = 'transactsql';
 
   constructor(options: SqlServerAdapterOptions) {
-    super();
+    super(new SqlServerSqlPolicyAnalyzer());
     if (!options || typeof options.execute !== 'function') {
       throw new Error('SqlServer adapter requires an execute function.');
     }

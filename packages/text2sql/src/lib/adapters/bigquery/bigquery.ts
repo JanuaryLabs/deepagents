@@ -4,6 +4,7 @@ import {
   type GroundingFn,
   type ValidateFunction,
 } from '../adapter.ts';
+import { BigQuerySqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export type BigQueryAdapterOptions = {
   execute: ExecuteFunction;
@@ -59,7 +60,7 @@ export class BigQuery extends Adapter {
   override readonly formatterLanguage = 'bigquery';
 
   constructor(options: BigQueryAdapterOptions) {
-    super();
+    super(new BigQuerySqlPolicyAnalyzer());
 
     if (!options || typeof options.execute !== 'function') {
       throw new Error('BigQuery adapter requires an execute(sql) function.');

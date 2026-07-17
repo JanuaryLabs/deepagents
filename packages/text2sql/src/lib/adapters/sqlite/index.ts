@@ -18,6 +18,7 @@ import { SqliteTableGrounding } from './table.sqlite.grounding.ts';
 import { SqliteViewGrounding } from './view.sqlite.grounding.ts';
 
 export * from './sqlite.ts';
+export { SqliteSqlPolicyAnalyzer } from '../sql-policy.ts';
 
 export function tables(config: TableGroundingConfig = {}) {
   return (adapter: Adapter) => new SqliteTableGrounding(adapter, config);
