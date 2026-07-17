@@ -22,9 +22,15 @@ export {
   jsonMatch,
   levenshtein,
   regex,
+  sql,
   weighted,
 } from './scorers/index.ts';
-export type { Scorer, ScorerArgs, ScorerResult } from './scorers/index.ts';
+export type {
+  JudgeConfig,
+  Scorer,
+  ScorerArgs,
+  ScorerResult,
+} from './scorers/index.ts';
 
 export { RunStore } from './store/index.ts';
 export type {

@@ -35,12 +35,12 @@
     "!**/*.tsbuildinfo"
   ],
   "dependencies": {
-    "nano-spawn": "^2.0.0",
-    "mssql": "^12.5.2",
-    "p-retry": "^7.1.1"
+    "nano-spawn": "^2.1.0",
+    "mssql": "^12.7.0",
+    "p-retry": "^8.0.0"
   },
   "peerDependencies": {},
   "devDependencies": {
-    "@types/debug": "^4.1.12"
+    "@types/debug": "^4.1.13"
   }
 }

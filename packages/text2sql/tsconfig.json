@@ -4,18 +4,6 @@
   "include": [],
   "references": [
     {
-      "path": "../test"
-    },
-    {
-      "path": "../evals"
-    },
-    {
-      "path": "../context"
-    },
-    {
-      "path": "../agent"
-    },
-    {
       "path": "./tsconfig.lib.json"
     },
     {

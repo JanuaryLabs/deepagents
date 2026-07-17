@@ -194,7 +194,6 @@ export async function parse<T extends z.ZodRawShape>(
         errors: result.error.flatten((issue) => ({
           message: issue.message,
           code: issue.code,
-          fatal: issue.fatal,
           path: issue.path.join('.'),
         })).fieldErrors as Record<string, unknown>,
       },

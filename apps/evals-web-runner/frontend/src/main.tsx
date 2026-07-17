@@ -3,19 +3,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, redirect, RouterProvider } from 'react-router';
 
-import { queryClient } from './app/hooks/use-client.ts';
+import { queryClient } from './app/hooks/query-client.ts';
 import { Toaster } from './app/shadcn/index.ts';
 
-import ComparePage from './app/routes/compare/ComparePage.tsx';
-import DatasetDetail from './app/routes/datasets/DatasetDetail.tsx';
-import DatasetList from './app/routes/datasets/DatasetList.tsx';
-import NewEvalPage from './app/routes/evals/NewEvalPage.tsx';
 import Layout from './app/routes/Layout.tsx';
-import PromptsPage from './app/routes/prompts/PromptsPage.tsx';
-import RunDetail from './app/routes/runs/RunDetail.tsx';
-import RunList from './app/routes/runs/RunList.tsx';
-import SuiteDetail from './app/routes/suites/SuiteDetail.tsx';
-import SuiteList from './app/routes/suites/SuiteList.tsx';
 
 const router = createBrowserRouter(
   [
@@ -23,15 +14,67 @@ const router = createBrowserRouter(
       Component: Layout,
       children: [
         { index: true, loader: () => redirect('/suites') },
-        { path: 'suites', Component: SuiteList },
-        { path: 'suites/:id', Component: SuiteDetail },
-        { path: 'runs', Component: RunList },
-        { path: 'runs/:id', Component: RunDetail },
-        { path: 'compare', Component: ComparePage },
-        { path: 'datasets', Component: DatasetList },
-        { path: 'datasets/:name', Component: DatasetDetail },
-        { path: 'prompts', Component: PromptsPage },
-        { path: 'evals/new', Component: NewEvalPage },
+        {
+          path: 'suites',
+          lazy: async () => ({
+            Component: (await import('./app/routes/suites/SuiteList.tsx'))
+              .default,
+          }),
+        },
+        {
+          path: 'suites/:id',
+          lazy: async () => ({
+            Component: (await import('./app/routes/suites/SuiteDetail.tsx'))
+              .default,
+          }),
+        },
+        {
+          path: 'runs',
+          lazy: async () => ({
+            Component: (await import('./app/routes/runs/RunList.tsx')).default,
+          }),
+        },
+        {
+          path: 'runs/:id',
+          lazy: async () => ({
+            Component: (await import('./app/routes/runs/RunDetail.tsx')).default,
+          }),
+        },
+        {
+          path: 'compare',
+          lazy: async () => ({
+            Component: (await import('./app/routes/compare/ComparePage.tsx'))
+              .default,
+          }),
+        },
+        {
+          path: 'datasets',
+          lazy: async () => ({
+            Component: (await import('./app/routes/datasets/DatasetList.tsx'))
+              .default,
+          }),
+        },
+        {
+          path: 'datasets/:name',
+          lazy: async () => ({
+            Component: (await import('./app/routes/datasets/DatasetDetail.tsx'))
+              .default,
+          }),
+        },
+        {
+          path: 'prompts',
+          lazy: async () => ({
+            Component: (await import('./app/routes/prompts/PromptsPage.tsx'))
+              .default,
+          }),
+        },
+        {
+          path: 'evals/new',
+          lazy: async () => ({
+            Component: (await import('./app/routes/evals/NewEvalPage.tsx'))
+              .default,
+          }),
+        },
       ],
     },
   ],

@@ -1,16 +1,55 @@
 {
   "name": "frontend",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/playground/src",
+  "sourceRoot": "apps/evals-web-runner/frontend/src",
   "projectType": "application",
   "tags": [],
   "targets": {
-    "test": {
-      "executor": "@nx/vitest:test",
-      "outputs": ["{options.reportsDirectory}"],
+    "generate-sdk": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["backend"],
+          "target": "openapi"
+        }
+      ],
+      "inputs": [
+        "{workspaceRoot}/apps/evals-web-runner/generate-sdk.ts",
+        "{workspaceRoot}/.evals-sdk-it/openapi.json",
+        {
+          "externalDependencies": ["@sdk-it/spec", "@sdk-it/typescript"]
+        }
+      ],
+      "outputs": [
+        "{workspaceRoot}/.evals-sdk-it/package.json",
+        "{workspaceRoot}/.evals-sdk-it/tsconfig.json",
+        "{workspaceRoot}/.evals-sdk-it/src",
+        "{workspaceRoot}/.evals-sdk-it/dist"
+      ],
       "options": {
-        "reportsDirectory": "../../coverage/apps/frontend",
-        "passWithNoTests": true
+        "command": "node apps/evals-web-runner/generate-sdk.ts"
+      }
+    },
+    "build": {
+      "dependsOn": ["^build", "generate-sdk"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck", "generate-sdk"]
+    },
+    "dev": {
+      "dependsOn": ["^build", "generate-sdk"]
+    },
+    "serve": {
+      "dependsOn": ["generate-sdk"]
+    },
+    "test": {
+      "outputs": [
+        "{projectRoot}/{options.coverage.reportsDirectory}",
+        "{projectRoot}/test-output/vitest/coverage"
+      ],
+      "options": {
+        "passWithNoTests": true,
+        "coverage.reportsDirectory": "../../../coverage/apps/frontend"
       }
     }
   }

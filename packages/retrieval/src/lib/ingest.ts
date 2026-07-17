@@ -1,7 +1,7 @@
 import {
   MarkdownTextSplitter,
   RecursiveCharacterTextSplitter,
-} from 'langchain/text_splitter';
+} from '@langchain/textsplitters';
 
 import type { Connector } from './connectors/connector.js';
 import type { Splitter } from './pipeline.js';

@@ -1,9 +1,10 @@
 import { defaultTypesMap } from '@sdk-it/core';
 import { analyze } from '@sdk-it/generic';
 import { responseAnalyzer } from '@sdk-it/hono';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cwd } from 'node:process';
+import { fileURLToPath } from 'node:url';
 import type { OpenAPIObject } from 'openapi3-ts/oas31';
 
 const { paths, components, tags } = await analyze(
@@ -73,4 +74,11 @@ const spec: OpenAPIObject = {
   },
 };
 
-await writeFile('.evals-sdk-it/openapi.json', JSON.stringify(spec, null, 2));
+const outputDirectory = fileURLToPath(
+  new URL('../../../.evals-sdk-it/', import.meta.url),
+);
+await mkdir(outputDirectory, { recursive: true });
+await writeFile(
+  join(outputDirectory, 'openapi.json'),
+  JSON.stringify(spec, null, 2),
+);

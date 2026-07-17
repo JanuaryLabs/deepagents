@@ -105,3 +105,5 @@ jobs
 test-results/
 # Local agent backlog database (AGENT_BACKLOG_DIR in .claude/settings.local.json)
 .claude/agent-backlog/
+
+.claude/worktrees

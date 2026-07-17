@@ -7,6 +7,7 @@
   "targets": {
     "openapi": {
       "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/.evals-sdk-it/openapi.json"],
       "options": {
         "command": "node apps/evals-web-runner/backend/openapi.ts"
       }

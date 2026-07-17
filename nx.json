@@ -55,7 +55,6 @@
       "plugin": "@nx/vite/plugin",
       "options": {
         "buildTargetName": "build",
-        "testTargetName": "vite:test",
         "serveTargetName": "serve",
         "devTargetName": "dev",
         "previewTargetName": "preview",
@@ -64,6 +63,20 @@
         "buildDepsTargetName": "build-deps",
         "watchDepsTargetName": "watch-deps"
       }
+    },
+    {
+      "plugin": "@nx/vitest",
+      "options": {
+        "testTargetName": "vite:test"
+      }
+    },
+    {
+      "plugin": "@nx/vitest",
+      "options": {
+        "testTargetName": "test",
+        "testMode": "watch"
+      },
+      "include": ["apps/evals-web-runner/frontend/**/*"]
     }
   ],
   "workspaceLayout": {
@@ -157,10 +170,12 @@
         "file": false
       }
     },
-    "releaseTagPattern": "release/{version}",
     "version": {
       "preVersionCommand": "npx nx run-many -t build --prod --verbose",
       "conventionalCommits": true
+    },
+    "releaseTag": {
+      "pattern": "release/{version}"
     }
   },
   "sync": {
@@ -182,5 +197,6 @@
         "linter": "eslint"
       }
     }
-  }
+  },
+  "analytics": false
 }

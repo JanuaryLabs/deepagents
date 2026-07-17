@@ -10,9 +10,9 @@
   "dependencies": {
     "@deepagents/context": "5.0.0",
     "@deepagents/experimental": "5.0.0",
-    "@electric-sql/pglite": "^0.5.3",
-    "ai": "^7.0.20",
-    "just-bash": "^3.0.1",
-    "pg-boss": "^12.24.1"
+    "@electric-sql/pglite": "^0.5.4",
+    "ai": "^7.0.30",
+    "just-bash": "^3.1.0",
+    "pg-boss": "^12.26.1"
   }
 }

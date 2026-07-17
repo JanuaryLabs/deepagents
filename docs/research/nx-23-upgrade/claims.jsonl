@@ -1,0 +1,15 @@
+{"claim_id":"C01","claim":"Nx 23.1.0 was the latest stable release on 2026-07-17.","evidence_ids":["E01"],"confidence":"high"}
+{"claim_id":"C02","claim":"The repository's mixed Nx 21/22 starting graph was unsupported and is now aligned on 23.1.0.","evidence_ids":["E02","E09"],"confidence":"high"}
+{"claim_id":"C03","claim":"The upgrade automatically adopts graph, daemon, cache, TypeScript-config, and startup improvements from Nx 22 and 23.","evidence_ids":["E03","E04","E05","E06"],"confidence":"high"}
+{"claim_id":"C04","claim":"The repository now uses the latest stable direct dependency graph except for a deliberate TypeScript 6 compatibility hold; Vite is 8.1.5 and TypeScript is pinned to the latest 6.x release, 6.0.3.","evidence_ids":["E09","E13"],"confidence":"high"}
+{"claim_id":"C05","claim":"The fully refreshed workspace is build-, test-, typecheck-, and Nx-sync-compatible with the repository.","evidence_ids":["E10"],"confidence":"high"}
+{"claim_id":"C06","claim":"Frontend OpenAPI type drift was generated-artifact ordering debt, not a persistent toolchain incompatibility.","evidence_ids":["E10"],"confidence":"high"}
+{"claim_id":"C07","claim":"The frontend Vitest target is inferred and no longer carries the explicit executor removed in Nx 24.","evidence_ids":["E12"],"confidence":"high"}
+{"claim_id":"C08","claim":"Nx Cloud remote caching and task sandboxing merit a controlled pilot, not automatic enablement.","evidence_ids":["E07"],"confidence":"medium"}
+{"claim_id":"C09","claim":"ReleaseGraph and filtered release flows may benefit the multi-package release process.","evidence_ids":["E08"],"confidence":"medium"}
+{"claim_id":"C10","claim":"legacy-peer-deps has been removed; remaining strict peer failures are visible upstream metadata gaps that should be tracked without downgrading the verified latest graph.","evidence_ids":["E11"],"confidence":"high"}
+{"claim_id":"C11","claim":"The current Vite, TypeScript, React Router, Zod, LangChain, AI SDK, and ESLint releases contain concrete capabilities worth targeted repository pilots.","evidence_ids":["E13"],"confidence":"high"}
+{"claim_id":"C12","claim":"Remaining audit findings require reachability analysis and upstream/replacement work rather than npm's forced direct-package downgrades.","evidence_ids":["E14"],"confidence":"high"}
+{"claim_id":"C13","claim":"Docs typechecking now owns and caches its React Router generated-type prerequisite, so it passes from a cold generated state.","evidence_ids":["E15"],"confidence":"high"}
+{"claim_id":"C14","claim":"CI now rejects Nx synchronization drift before running affected lint, test, and build targets.","evidence_ids":["E16"],"confidence":"high"}
+{"claim_id":"C15","claim":"Every versioned GitHub Action reference in the repository uses its latest published major release line.","evidence_ids":["E17"],"confidence":"high"}

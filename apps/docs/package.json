@@ -11,26 +11,26 @@
     ]
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.6",
-    "@react-router/dev": "^7.13.1",
-    "@react-router/fs-routes": "^7.13.1",
-    "@react-router/node": "^7.13.1",
-    "@react-router/serve": "^7.13.1",
-    "hono": "^4.12.3",
-    "isbot": "^5.1.32",
-    "lucide-react": "^0.554.0",
-    "react-router": "^7.13.1",
-    "fumadocs-core": "^16.1.0",
-    "fumadocs-mdx": "^14.2.10",
-    "fumadocs-ui": "^16.1.0"
+    "@hono/node-server": "^2.0.10",
+    "@react-router/dev": "^8.2.0",
+    "@react-router/fs-routes": "^8.2.0",
+    "@react-router/node": "^8.2.0",
+    "@react-router/serve": "^8.2.0",
+    "hono": "^4.12.30",
+    "isbot": "^5.2.1",
+    "lucide-react": "^1.25.0",
+    "react-router": "^8.2.0",
+    "fumadocs-core": "^16.11.5",
+    "fumadocs-mdx": "^15.2.0",
+    "fumadocs-ui": "^16.11.5"
   },
   "devDependencies": {
-    "@react-router/dev": "^7.13.1",
-    "@types/node": "^24.10.1",
-    "@types/react": "19.2.05",
+    "@react-router/dev": "^8.2.0",
+    "@types/node": "^26.1.1",
+    "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "eslint-plugin-react": "7.35.0",
-    "eslint-plugin-react-hooks": "7.0.1"
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1"
   },
   "version": "5.0.0"
 }

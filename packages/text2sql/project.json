@@ -47,8 +47,10 @@
       }
     },
     "test": {
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/test-results/text2sql.xml"],
       "options": {
-        "command": "node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/text2sql.xml"
+        "command": "mkdir -p ../../test-results && node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/text2sql.xml"
       }
     },
     "eval": {

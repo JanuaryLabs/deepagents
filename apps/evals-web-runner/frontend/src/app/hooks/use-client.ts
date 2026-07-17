@@ -1,7 +1,6 @@
 import { Client, type Endpoints } from '@evals/client';
 import {
   type MutationFunctionContext,
-  QueryClient,
   type UseMutationOptions,
   type UseMutationResult,
   type UseQueryOptions,
@@ -11,15 +10,9 @@ import {
   useQuery,
 } from '@tanstack/react-query';
 
-export type { Endpoints };
+import { queryClient } from './query-client.ts';
 
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-    },
-  },
-});
+export type { Endpoints };
 
 // Get the API base URL from <base href> tag or VITE_API_URL
 // This enables deployment at any subpath (e.g., /platform)

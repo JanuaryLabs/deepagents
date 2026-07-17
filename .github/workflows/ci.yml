@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: lts/*
 
@@ -28,7 +28,10 @@ jobs:
         run: npm ci
 
       - name: Set SHAs for affected commands
-        uses: nrwl/nx-set-shas@v4
+        uses: nrwl/nx-set-shas@v5
+
+      - name: Check Nx workspace sync
+        run: npx nx sync:check
 
       - name: Lint affected
         run: npx nx affected -t lint
@@ -38,7 +41,7 @@ jobs:
         continue-on-error: true
 
       - name: Publish test results
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         if: always()
         with:
           report_paths: 'test-results/*.xml'

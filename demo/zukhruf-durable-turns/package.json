@@ -5,12 +5,12 @@
   "type": "module",
   "description": "Runnable showcase for Zukhruf durable independent agents: detach and resume a root turn, spawn a separate specialist chat, and consume its asynchronous FINAL_ANSWER.",
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.11",
+    "@ai-sdk/openai": "^4.0.15",
     "@deepagents/agent": "5.0.0",
     "@deepagents/context": "5.0.0",
     "@deepagents/experimental": "5.0.0",
-    "@electric-sql/pglite": "^0.5.3",
-    "just-bash": "^3.0.1",
-    "pg-boss": "^12.24.1"
+    "@electric-sql/pglite": "^0.5.4",
+    "just-bash": "^3.1.0",
+    "pg-boss": "^12.26.1"
   }
 }

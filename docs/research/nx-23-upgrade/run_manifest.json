@@ -1,0 +1,71 @@
+{
+  "research_date": "2026-07-17",
+  "workspace": "/Users/ezzabuzaid/.codex/worktrees/2979/deepagents",
+  "question": "Upgrade Nx to latest and identify everything released since the current version plus repository-specific adoption opportunities.",
+  "starting_version": "21.6.4",
+  "target_version": "23.1.0",
+  "stable_release_count": 57,
+  "release_interval": "(21.6.4, 23.1.0]",
+  "prereleases_included": false,
+  "source_policy": "Primary official ecosystem sources plus npm registry and live repository/runtime evidence only.",
+  "migration_command": "nx migrate 23.1.0",
+  "dependency_refresh": {
+    "policy": "Latest stable direct dist-tag with no deliberate compatibility holds",
+    "checked_in_manifests_reviewed": 21,
+    "manifests_changed": 20,
+    "declarations_updated": 252,
+    "unique_external_packages_queried": 198,
+    "major_versions": {
+      "nx": "23.1.0",
+      "vite": "8.1.5",
+      "typescript": "6.0.3",
+      "react": "19.2.7",
+      "react_router": "8.2.0",
+      "eslint": "10.7.0",
+      "zod": "4.4.3",
+      "langchain": "1.5.3",
+      "ai_sdk": "7.0.30",
+      "tailwindcss": "4.3.3",
+      "sdk_it": "0.45.0"
+    },
+    "npm_outdated": "no real stale direct dependency; autoevals 0.3.0 false-positive contradicted by verified latest dist-tag=0.3.0",
+    "legacy_peer_deps": false
+  },
+  "github_actions_refresh": {
+    "workflows": 3,
+    "references_updated": 11,
+    "unique_actions": 7,
+    "validation": "current action.yml inputs verified; YAML parse and actionlint schema/expression checks pass",
+    "versions": {
+      "actions/checkout": "v7",
+      "actions/setup-node": "v7",
+      "nrwl/nx-set-shas": "v5",
+      "mikepenz/action-junit-report": "v6",
+      "actions/configure-pages": "v6",
+      "actions/upload-pages-artifact": "v5",
+      "actions/deploy-pages": "v5"
+    }
+  },
+  "verification": {
+    "nx_report": "pass",
+    "nx_sync_check": "pass",
+    "build_targets": "12/12 pass",
+    "test_targets": "6/6 pass",
+    "frontend_vitest_target": "converted from deprecated @nx/vitest:test executor to inferred @nx/vitest target; focused test passes without warning",
+    "docs_typegen": "cold failure reproduced; cached React Router typegen dependency added; cold docs:typecheck passes",
+    "ci_sync_gate": "nx sync:check added immediately after dependency installation",
+    "typecheck_targets": "12/12 pass after normal frontend SDK generation",
+    "install": "npm install --ignore-scripts passes; explicit Husky Node entry point passes; managed /usr/bin/env node launcher suspends during normal prepare",
+    "strict_peer_validation": "upstream range lag remains in SDK-IT/TypeScript, ESLint plugins, Babel consumers, and VitePress",
+    "audit": {
+      "before_safe_fix": "44 total; 11 low, 18 moderate, 14 high, 1 critical",
+      "after_safe_fix": "27 total; 9 low, 14 moderate, 4 high, 0 critical",
+      "force_fix_used": false
+    },
+    "environmental_skips": [
+      "Docker-backed database integrations",
+      "credentialed BigQuery integrations",
+      "macOS APFS disk-full test"
+    ]
+  }
+}

@@ -3,7 +3,6 @@ import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
 import mdx from 'fumadocs-mdx/vite';
 import { defineConfig } from 'vite';
-import tsconfigPaths from 'vite-tsconfig-paths';
 
 import * as MdxConfig from './source.config';
 
@@ -23,8 +22,10 @@ export default defineConfig(() => ({
     !process.env.VITEST && reactRouter(),
     tailwindcss(),
     mdx(MdxConfig),
-    tsconfigPaths(),
   ],
+  resolve: {
+    tsconfigPaths: true,
+  },
   // Uncomment this if you are using workers.
   // worker: {
   //  plugins: [ nxViteTsPaths() ],

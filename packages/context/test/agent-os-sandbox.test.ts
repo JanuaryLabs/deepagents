@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { after, before, describe, it } from 'node:test';
+import { scheduler } from 'node:timers/promises';
 
 import {
   AgentOsCreationError,
@@ -112,19 +113,25 @@ describe('Agent OS Sandbox', async () => {
 
       it('returns a partial result when signal aborts mid-run', async () => {
         const controller = new AbortController();
-        setTimeout(() => controller.abort(), 100);
-
-        const start = Date.now();
-        const result = await sandbox.executeCommand(
-          'echo before; sleep 5; echo after',
+        const readyPath = '/tmp/execute-command-abort-ready';
+        const resultPromise = sandbox.executeCommand(
+          `echo before; printf ready > ${readyPath}; sleep 5; echo after`,
           { signal: controller.signal },
         );
-        const elapsed = Date.now() - start;
 
-        assert.ok(
-          elapsed < 500,
-          `aborted run took ${elapsed}ms, expected <500ms`,
-        );
+        const readinessTimeout = AbortSignal.timeout(5_000);
+        for (;;) {
+          readinessTimeout.throwIfAborted();
+          try {
+            if ((await sandbox.readFile(readyPath)) === 'ready') break;
+          } catch {
+            await scheduler.yield();
+          }
+        }
+
+        controller.abort();
+        const result = await resultPromise;
+
         assert.notStrictEqual(result.exitCode, 0);
         assert.match(result.stdout, /before/);
         assert.doesNotMatch(result.stdout, /after/);
@@ -237,13 +244,21 @@ describe('Agent OS Sandbox', async () => {
         const proc = sandbox.spawn!('echo before; sleep 5; echo after', {
           signal: controller.signal,
         });
-        setTimeout(() => controller.abort(), 100);
 
         const decoder = new TextDecoder();
-        const chunks: string[] = [];
-        for await (const chunk of proc.stdout) {
-          chunks.push(decoder.decode(chunk));
+        const reader = proc.stdout.getReader();
+        const first = await reader.read();
+        assert.strictEqual(first.done, false);
+        assert.match(decoder.decode(first.value), /before/);
+
+        controller.abort();
+        const remaining: string[] = [];
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          remaining.push(decoder.decode(chunk.value));
         }
+        reader.releaseLock();
         const exit = await proc.exit;
 
         assert.deepStrictEqual(exit, {
@@ -251,9 +266,7 @@ describe('Agent OS Sandbox', async () => {
           signal: 'SIGKILL',
           success: false,
         });
-        const combined = chunks.join('');
-        assert.match(combined, /before/);
-        assert.doesNotMatch(combined, /after/);
+        assert.doesNotMatch(remaining.join(''), /after/);
       });
     });
 

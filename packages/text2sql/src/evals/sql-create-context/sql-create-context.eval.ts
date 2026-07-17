@@ -1,4 +1,3 @@
-import { Sql } from 'autoevals';
 import { DatabaseSync } from 'node:sqlite';
 import OpenAI from 'openai';
 
@@ -10,6 +9,7 @@ import {
   evaluate,
   jsonReporter,
   parseRecordSelection,
+  sql,
 } from '@deepagents/evals';
 import { toSql } from '@deepagents/text2sql';
 import sqlite from '@deepagents/text2sql/sqlite';
@@ -28,6 +28,7 @@ const openai = new OpenAI({
   apiKey: geminiApiKey ?? 'missing-key',
   baseURL: GEMINI_OPENAI_BASE_URL,
 });
+const sqlJudge = sql({ model: SQL_JUDGE_MODEL, client: openai });
 
 const DATASET = Array.from(TESTS.rows).map((item) => ({
   input: {
@@ -138,27 +139,12 @@ const sqlSemanticMatch: Scorer = async ({ input, output, expected }) => {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const result = await Sql({
+      const result = await sqlJudge({
+        input: String(question),
         output,
         expected: String(expected),
-        input: String(question),
-        useCoT: true,
-        client: openai as never,
-        model: SQL_JUDGE_MODEL,
       });
-      const metadata = (result.metadata ?? {}) as Record<string, unknown>;
-      const rationale = metadata['rationale'];
-      const reason =
-        typeof rationale === 'string'
-          ? rationale
-          : Array.isArray(rationale)
-            ? rationale
-                .map((item) => (typeof item === 'string' ? item.trim() : ''))
-                .filter(Boolean)
-                .join(' | ') || undefined
-            : undefined;
-
-      return { score: result.score ?? 0, reason, metadata };
+      return result;
     } catch (error) {
       if (attempt === maxAttempts) {
         console.warn(

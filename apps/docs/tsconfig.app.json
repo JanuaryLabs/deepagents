@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "lib": ["DOM", "DOM.Iterable", "ES2019"],
+    "lib": ["DOM", "ES2019"],
     "types": ["@react-router/node", "vite/client", "node"],
     "esModuleInterop": true,
     "jsx": "react-jsx",
@@ -10,11 +10,10 @@
     "target": "ES2022",
     "allowJs": true,
     "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo",
-    "baseUrl": ".",
     "rootDirs": [".", ".react-router/types"],
     "paths": {
-      "fumadocs-mdx:collections/*": [".source/*"],
-      "~routes/*": [".react-router/types/app/*"]
+      "fumadocs-mdx:collections/*": ["./.source/*"],
+      "~routes/*": ["./.react-router/types/app/*"]
     }
   },
   "include": [

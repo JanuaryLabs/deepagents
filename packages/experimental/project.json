@@ -17,8 +17,10 @@
       }
     },
     "test": {
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/test-results/experimental.xml"],
       "options": {
-        "command": "node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/experimental.xml"
+        "command": "mkdir -p ../../test-results && node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/experimental.xml"
       }
     }
   }

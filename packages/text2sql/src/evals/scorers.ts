@@ -1,9 +1,14 @@
-import { Factuality, Levenshtein, Sql } from 'autoevals';
+import { factuality, levenshtein, sql } from '@deepagents/evals/scorers';
 import { createScorer } from 'evalite';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
   apiKey: process.env['OPENAI_API_KEY'],
+});
+const sqlJudge = sql({ model: 'gpt-4.1-nano', client: openai });
+const factualityJudge = factuality({
+  model: 'gpt-4.1-nano',
+  client: openai,
 });
 
 /**
@@ -14,30 +19,16 @@ export const sqlSemanticMatch = createScorer<unknown, string, string>({
   name: 'SQLSemanticMatch',
   description: 'Evaluates semantic equivalence of SQL queries using LLM judge',
   scorer: async ({ output, expected, input }) => {
-    const result = await Sql({
-      output: output,
-      useCoT: true,
-      expected: expected,
+    const result = await sqlJudge({
       input: typeof input === 'string' ? input : JSON.stringify(input),
-      client: openai as never,
-      model: 'gpt-4.1-nano',
+      output,
+      expected,
     });
-    const metadata = (result.metadata ?? {}) as Record<string, unknown>;
-    const rationale = metadata['rationale'];
-    const reason =
-      typeof rationale === 'string'
-        ? rationale
-        : Array.isArray(rationale)
-          ? rationale
-              .map((item) => (typeof item === 'string' ? item.trim() : ''))
-              .filter(Boolean)
-              .join(' | ') || undefined
-          : undefined;
 
     return {
-      score: result.score ?? 0,
-      reason,
-      metadata,
+      score: result.score,
+      reason: result.reason,
+      metadata: result.metadata,
     };
   },
 });
@@ -49,7 +40,8 @@ export const stringSimilarity = createScorer<unknown, string, string>({
   name: 'String Similarity',
   description: 'Measures string similarity using Levenshtein distance',
   scorer: async ({ output, expected }) => {
-    const result = await Levenshtein({
+    const result = await levenshtein({
+      input: undefined,
       output: String(output),
       expected: String(expected),
     });
@@ -84,18 +76,17 @@ export const teachingsQuality = createScorer<
 >({
   name: 'TeachingsQuality',
   description:
-    'Evaluates teachings quality using Factuality scorer from autoevals',
+    'Evaluates teachings quality using an LLM factuality judge',
   scorer: async ({ output, expected, input }) => {
-    const result = await Factuality({
-      output: output,
+    const result = await factualityJudge({
+      output,
       expected: JSON.stringify(expected),
       input: `Database schema:\n${input.schema}`,
-      client: openai as never,
-      model: 'gpt-4.1-nano',
     });
 
     return {
-      score: result.score ?? 0,
+      score: result.score,
+      reason: result.reason,
       metadata: result.metadata,
     };
   },

@@ -6,8 +6,11 @@
     "target": "ESNext",
     "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo",
     "jsx": "react-jsx",
-    "lib": ["ES2020", "DOM", "DOM.Iterable", "DOM.AsyncIterable", "ESNext"],
+    "lib": ["ES2020", "DOM", "ESNext"],
     "moduleResolution": "bundler",
+    "paths": {
+      "@evals/client": ["../../../.evals-sdk-it/dist/index.d.ts"]
+    },
     "types": [
       "node",
       "@nx/react/typings/cssmodule.d.ts",

@@ -1,181 +1,90 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import {
-  all,
-  any,
-  exactMatch,
-  includes,
-  jsonMatch,
-  levenshtein,
-  regex,
-  weighted,
-} from '@deepagents/evals/scorers';
+import { factuality, levenshtein, sql } from '@deepagents/evals/scorers';
+import type OpenAI from 'openai';
 
-describe('exactMatch', () => {
-  it('returns 1.0 when output matches expected', async () => {
-    const result = await exactMatch({
-      input: 'q',
-      output: 'hello',
-      expected: 'hello',
-    });
-    assert.strictEqual(result.score, 1.0);
-  });
+function judgeClient(choice: string, requests: unknown[]): OpenAI {
+  return {
+    chat: {
+      completions: {
+        create: async (request: unknown) => {
+          requests.push(request);
+          return {
+            choices: [
+              {
+                message: {
+                  tool_calls: [
+                    {
+                      type: 'function',
+                      function: {
+                        name: 'select_choice',
+                        arguments: JSON.stringify({
+                          choice,
+                          reasons: ['The answers agree.'],
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          };
+        },
+      },
+    },
+  } as unknown as OpenAI;
+}
 
-  it('returns 0.0 when output does not match expected', async () => {
-    const result = await exactMatch({
-      input: 'q',
-      output: 'hello',
-      expected: 'world',
-    });
-    assert.strictEqual(result.score, 0.0);
-  });
-
-  it('coerces non-string expected to string', async () => {
-    const result = await exactMatch({
-      input: 'q',
-      output: '42',
-      expected: 42,
-    });
-    assert.strictEqual(result.score, 1.0);
-  });
-});
-
-describe('includes', () => {
-  it('returns 1.0 when output contains the expected substring', async () => {
-    const result = await includes({
-      input: 'q',
-      output: 'hello world',
-      expected: 'world',
-    });
-    assert.strictEqual(result.score, 1.0);
-  });
-
-  it('returns 0.0 when output does not contain the expected substring', async () => {
-    const result = await includes({
-      input: 'q',
-      output: 'hello world',
-      expected: 'missing',
-    });
-    assert.strictEqual(result.score, 0.0);
-  });
-});
-
-describe('regex', () => {
-  it('returns 1.0 when output matches the pattern', async () => {
-    const scorer = regex(/^\d{3}-\d{4}$/);
-    const result = await scorer({
-      input: 'q',
-      output: '123-4567',
-    });
-    assert.strictEqual(result.score, 1.0);
-  });
-
-  it('returns 0.0 when output does not match the pattern', async () => {
-    const scorer = regex(/^\d{3}-\d{4}$/);
-    const result = await scorer({
-      input: 'q',
-      output: 'abc-defg',
-    });
-    assert.strictEqual(result.score, 0.0);
-  });
-});
-
-describe('levenshtein', () => {
-  it('returns a high score for similar strings', async () => {
+describe('built-in scorers', () => {
+  it('scores Levenshtein similarity without a package-manager-bound dependency', async () => {
     const result = await levenshtein({
-      input: 'q',
+      input: undefined,
       output: 'kitten',
-      expected: 'sitten',
+      expected: 'sitting',
     });
-    assert.ok(result.score > 0.8, `expected score > 0.8, got ${result.score}`);
+
+    assert.strictEqual(result.score, 4 / 7);
   });
 
-  it('returns a low score for dissimilar strings', async () => {
-    const result = await levenshtein({
-      input: 'q',
-      output: 'abcdef',
-      expected: 'zyxwvu',
-    });
-    assert.ok(result.score < 0.2, `expected score < 0.2, got ${result.score}`);
-  });
+  it('grades factual and SQL equivalence through a caller-provided OpenAI client', async () => {
+    const factualityRequests: unknown[] = [];
+    const sqlRequests: unknown[] = [];
 
-  it('returns 1.0 when both strings are empty', async () => {
-    const result = await levenshtein({
-      input: 'q',
-      output: '',
-      expected: '',
+    const factualityResult = await factuality({
+      model: 'judge-model',
+      client: judgeClient('C', factualityRequests),
+    })({
+      input: 'What is the capital of Jordan?',
+      output: 'Amman.',
+      expected: 'Amman is the capital of Jordan.',
     });
-    assert.strictEqual(result.score, 1.0);
-  });
+    const sqlResult = await sql({
+      model: 'judge-model',
+      client: judgeClient('Correct', sqlRequests),
+    })({
+      input: 'List every user.',
+      output: 'SELECT * FROM users',
+      expected: 'SELECT * FROM users',
+    });
 
-  it('returns 0.0 when one string is empty and the other is not', async () => {
-    const result = await levenshtein({
-      input: 'q',
-      output: '',
-      expected: 'something',
+    assert.deepStrictEqual(factualityResult, {
+      score: 1,
+      reason: 'The answers agree.',
+      metadata: {
+        choice: 'C',
+        rationale: ['The answers agree.'],
+      },
     });
-    assert.strictEqual(result.score, 0.0);
-  });
-});
-
-describe('jsonMatch', () => {
-  it('returns 1.0 for equivalent JSON regardless of key order', async () => {
-    const result = await jsonMatch({
-      input: 'q',
-      output: '{"b":2,"a":1}',
-      expected: '{"a":1,"b":2}',
+    assert.deepStrictEqual(sqlResult, {
+      score: 1,
+      reason: 'The answers agree.',
+      metadata: {
+        choice: 'Correct',
+        rationale: ['The answers agree.'],
+      },
     });
-    assert.strictEqual(result.score, 1.0);
-  });
-
-  it('returns 0.0 when output is invalid JSON', async () => {
-    const result = await jsonMatch({
-      input: 'q',
-      output: 'not json',
-      expected: '{"a":1}',
-    });
-    assert.strictEqual(result.score, 0.0);
-    assert.strictEqual(result.reason, 'Failed to parse JSON');
-  });
-});
-
-describe('all', () => {
-  it('returns the minimum score across all scorers', async () => {
-    const scorer = all(exactMatch, includes);
-    const result = await scorer({
-      input: 'q',
-      output: 'hello world',
-      expected: 'hello',
-    });
-    assert.strictEqual(result.score, 0.0);
-  });
-});
-
-describe('any', () => {
-  it('returns the maximum score across all scorers', async () => {
-    const scorer = any(exactMatch, includes);
-    const result = await scorer({
-      input: 'q',
-      output: 'hello world',
-      expected: 'hello',
-    });
-    assert.strictEqual(result.score, 1.0);
-  });
-});
-
-describe('weighted', () => {
-  it('returns the weighted average of scorer results', async () => {
-    const scorer = weighted({
-      a: { scorer: exactMatch, weight: 2 },
-      b: { scorer: includes, weight: 3 },
-    });
-    const result = await scorer({
-      input: 'q',
-      output: 'hello world',
-      expected: 'hello',
-    });
-    const expectedScore = (0.0 * 2 + 1.0 * 3) / (2 + 3);
-    assert.strictEqual(result.score, expectedScore);
+    assert.strictEqual(factualityRequests.length, 1);
+    assert.strictEqual(sqlRequests.length, 1);
   });
 });

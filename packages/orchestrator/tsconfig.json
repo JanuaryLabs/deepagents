@@ -4,18 +4,6 @@
   "include": [],
   "references": [
     {
-      "path": "../toolbox"
-    },
-    {
-      "path": "../retrieval"
-    },
-    {
-      "path": "../context"
-    },
-    {
-      "path": "../agent"
-    },
-    {
       "path": "./tsconfig.lib.json"
     },
     {
