@@ -17,7 +17,11 @@
         "{workspaceRoot}/apps/evals-web-runner/generate-sdk.ts",
         "{workspaceRoot}/.evals-sdk-it/openapi.json",
         {
-          "externalDependencies": ["@sdk-it/spec", "@sdk-it/typescript"]
+          "externalDependencies": [
+            "@sdk-it/spec",
+            "@sdk-it/typescript",
+            "typescript"
+          ]
         }
       ],
       "outputs": [

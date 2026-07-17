@@ -107,3 +107,8 @@ test-results/
 .claude/agent-backlog/
 
 .claude/worktrees
+
+# Legacy repo-local agent backlog artifacts (the CLI uses ~/.agent-backlog).
+/backlog.sqlite
+/backlog.sqlite-shm
+/backlog.sqlite-wal

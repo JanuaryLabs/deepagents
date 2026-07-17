@@ -24,7 +24,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/evals.xml"],
       "options": {
-        "command": "mkdir -p ../../test-results && node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/evals.xml"
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/evals.xml --test-force-exit"
       }
     }
   }

@@ -14,7 +14,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/agent.xml"],
       "options": {
-        "command": "mkdir -p ../../test-results && node --test --no-warnings --test-force-exit --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=../../test-results/agent.xml",
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/agent.xml --test-force-exit",
         "cwd": "{projectRoot}"
       }
     }

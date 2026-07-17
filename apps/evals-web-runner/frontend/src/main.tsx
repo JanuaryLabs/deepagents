@@ -1,12 +1,11 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, redirect, RouterProvider } from 'react-router';
+import { RouterProvider, createBrowserRouter, redirect } from 'react-router';
 
 import { queryClient } from './app/hooks/query-client.ts';
-import { Toaster } from './app/shadcn/index.ts';
-
 import Layout from './app/routes/Layout.tsx';
+import { Toaster } from './app/shadcn/index.ts';
 
 const router = createBrowserRouter(
   [
@@ -37,7 +36,8 @@ const router = createBrowserRouter(
         {
           path: 'runs/:id',
           lazy: async () => ({
-            Component: (await import('./app/routes/runs/RunDetail.tsx')).default,
+            Component: (await import('./app/routes/runs/RunDetail.tsx'))
+              .default,
           }),
         },
         {

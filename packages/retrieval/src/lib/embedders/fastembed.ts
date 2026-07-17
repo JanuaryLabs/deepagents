@@ -1,7 +1,7 @@
 import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 
-import { tensorToEmbeddings } from './huggingface.js';
 import type { Embedder } from '../stores/store.js';
+import { tensorToEmbeddings } from './huggingface.js';
 
 /**
  * Stable model identifiers retained from the former `fastembed` adapter.

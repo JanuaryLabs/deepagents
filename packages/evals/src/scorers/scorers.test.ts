@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import type OpenAI from 'openai';
 
 import { factuality, levenshtein, sql } from '@deepagents/evals/scorers';
-import type OpenAI from 'openai';
 
 function judgeClient(choice: string, requests: unknown[]): OpenAI {
   return {

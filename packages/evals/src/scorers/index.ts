@@ -90,7 +90,8 @@ class LevenshteinSimilarity {
 
     return (
       1 -
-      this.#distance(sourceCharacters, targetCharacters) / Math.max(maxLength, 1)
+      this.#distance(sourceCharacters, targetCharacters) /
+        Math.max(maxLength, 1)
     );
   }
 

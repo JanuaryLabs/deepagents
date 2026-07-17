@@ -1,6 +1,7 @@
-import { factuality, levenshtein, sql } from '@deepagents/evals/scorers';
 import { createScorer } from 'evalite';
 import OpenAI from 'openai';
+
+import { factuality, levenshtein, sql } from '@deepagents/evals/scorers';
 
 const openai = new OpenAI({
   apiKey: process.env['OPENAI_API_KEY'],
@@ -75,8 +76,7 @@ export const teachingsQuality = createScorer<
   TeachingsExpected
 >({
   name: 'TeachingsQuality',
-  description:
-    'Evaluates teachings quality using an LLM factuality judge',
+  description: 'Evaluates teachings quality using an LLM factuality judge',
   scorer: async ({ output, expected, input }) => {
     const result = await factualityJudge({
       output,
