@@ -96,7 +96,8 @@
     "demo/mcp",
     "demo/zukhruf-durable-turns",
     "demo/zukhruf-mailbox",
-    "demo/zukhruf-research-bot"
+    "demo/zukhruf-research-bot",
+    "demo/zukhruf-simple"
   ],
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.15",
