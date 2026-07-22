@@ -210,6 +210,29 @@ export class AgentRuntime {
         });
         stream = await this.#streams.store.getStream(turn.streamId);
       }
+      let declaration: AgentDeclaration | undefined;
+      if (
+        turn.kind === 'continuation' &&
+        turn.recoveryAttempt === undefined &&
+        stream?.status === 'failed'
+      ) {
+        try {
+          ({ declaration } = await this.#controlPlane.resolve(turn));
+        } catch {
+          // Default terminal reconciliation below remains the safe fallback.
+        }
+      }
+      if (
+        declaration !== undefined &&
+        (await this.#approvals.retryIdempotentContinuation(
+          turn,
+          turn.streamId,
+          declaration.tools ?? {},
+        ))
+      ) {
+        return;
+      }
+      stream = await this.#streams.store.getStream(turn.streamId);
       if (
         turn.kind === 'continuation' &&
         (stream?.status === 'completed' ||

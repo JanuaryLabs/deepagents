@@ -21,6 +21,8 @@ export type TurnRef = {
        * place by `approve()`/`deny()`.
        */
       kind: 'continuation';
+      /** Present only for the single automatic idempotent crash replay. */
+      recoveryAttempt?: 1;
     }
   | {
       /**

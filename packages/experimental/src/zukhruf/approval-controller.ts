@@ -2,6 +2,7 @@ import {
   type DynamicToolUIPart,
   type ToolUIPart,
   type UIMessage,
+  getToolName,
   isToolUIPart,
 } from 'ai';
 
@@ -15,6 +16,7 @@ import {
 import type { ApprovalMutex } from './approval-mutex.ts';
 import type { ConversationId } from './mailbox/types.ts';
 import type { TurnQueue } from './queue/turn-queue.ts';
+import type { ZukhrufToolSet } from './tool.ts';
 
 export interface ApprovalControllerOptions {
   store: ContextStore;
@@ -143,6 +145,54 @@ export class ApprovalController {
       );
     }
     await this.#queue.resumeParked(conversation.chatId);
+  }
+
+  async retryIdempotentContinuation(
+    conversation: ConversationId,
+    streamId: string,
+    tools: ZukhrufToolSet,
+  ): Promise<boolean> {
+    const retryable = await this.#mutex.runExclusive(
+      conversation.chatId,
+      async () => {
+        const head = (await this.#engineFor(conversation).getMessages()).at(-1);
+        if (head?.role !== 'assistant' || head.id !== streamId) return false;
+        const approved = head.parts.filter(
+          (part): part is ApprovalToolPart =>
+            isToolUIPart(part) &&
+            part.state === 'approval-responded' &&
+            part.approval.approved === true,
+        );
+        return (
+          approved.length > 0 &&
+          approved.every((part) => {
+            const tool = tools[getToolName(part)];
+            return (
+              tool?.recovery === 'idempotent' &&
+              typeof tool.execute === 'function'
+            );
+          })
+        );
+      },
+    );
+    if (!retryable) return false;
+
+    await this.#queue.push({
+      kind: 'continuation',
+      streamId,
+      chatId: conversation.chatId,
+      userId: conversation.userId,
+      recoveryAttempt: 1,
+    });
+    try {
+      await this.#streams.reopen(streamId);
+      return true;
+    } catch (error) {
+      const status = await this.#streams.store.getStreamStatus(streamId);
+      if (status === 'queued' || status === 'running') return true;
+      if (status === 'completed' || status === 'cancelled') return false;
+      throw error;
+    }
   }
 
   async #respond(

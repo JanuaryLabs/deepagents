@@ -73,7 +73,11 @@
       `output-error`, preserves denied siblings as `output-denied`, and resumes parked turns. The
       same reconciliation runs for normal settlement, orphan cleanup, and already-terminal replay,
       so later asks cannot remain stranded behind a dead approval.
-- [x] `defineTool` = AI SDK tool() passthrough; `AgentDeclaration.tools`.
+- [x] An orphaned approval continuation gets one automatic replay only when every approved tool
+      declares `recovery: 'idempotent'`; replay preserves the SDK `toolCallId`, while unsafe tools
+      retain the no-retry `output-error` behavior.
+- [x] `defineTool` preserves AI SDK tool() inference and adds the typed idempotent-recovery opt-in;
+      `AgentDeclaration.tools` carries the extended tool set.
 - [x] ~~Approval TTL / auto-deny — MANDATORY before production~~ **RESOLVED by Option A** (no TTL
       needed): the turns queue uses `deleteAfterSeconds: 0` so a parked (cancelled) job is never
       time-deleted, and **commit-driven GC** deletes a job only once its turn commits to the chain

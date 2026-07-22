@@ -1,10 +1,12 @@
-import type { ToolSet, generateText } from 'ai';
+import type { generateText } from 'ai';
 
 import type {
   AgentModel,
   AgentSandbox,
   ContextFragment,
 } from '@deepagents/context';
+
+import type { ZukhrufToolSet } from './tool.ts';
 
 /**
  * Sandboxes are per-chat: the factory receives the conversation identity so
@@ -26,13 +28,13 @@ export interface AgentDeclaration {
   model: AgentModel;
   sandbox: (context: SandboxContext) => Promise<AgentSandbox>;
   instructions: ContextFragment[];
-  tools?: ToolSet;
+  tools?: ZukhrufToolSet;
   subagents?: AgentDeclaration[];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
 }
 
 export interface DefinedAgentDeclaration extends AgentDeclaration {
-  tools: ToolSet;
+  tools: ZukhrufToolSet;
   subagents: AgentDeclaration[];
 }
 

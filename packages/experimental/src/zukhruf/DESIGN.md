@@ -506,10 +506,11 @@ surface; full history lives in the chain, which is the source of truth anyway.
   blocked backlog can still outlive its 14-day default; startup reconciliation for that remaining
   orphan case is tracked in BUGS.md and TODO.md. A gated follow-up becomes `cancelled`, not
   `created`.)
-- **Tool surface**: `defineTool` = pure passthrough of the AI SDK's `tool()`;
-  `AgentDeclaration.tools` merges over sandbox tools in `agent()`. Sandbox-bound approval tools
-  (e.g. approve-before-bash) remain deferred — they need per-turn tool factories. Regenerate
-  (attempt-level identity split, branches-as-attempts) stays deferred — see TODO.md.
+- **Tool surface**: `defineTool` preserves the AI SDK's `tool()` inference and adds the optional
+  `recovery: 'idempotent'` contract; `AgentDeclaration.tools` merges over sandbox tools in
+  `agent()`. Sandbox-bound approval tools (e.g. approve-before-bash) remain deferred — they need
+  per-turn tool factories. Regenerate (attempt-level identity split, branches-as-attempts) stays
+  deferred — see TODO.md.
 - **Still Open here**: an abandoned approval keeps its parked job forever (bounded by abandoned
   gated chats; folds into the per-chat GC item, not a time TTL); cancel-of-paused-turn semantics
   (paused stream is terminal, cancel no-ops — semantically it should probably mean deny).
@@ -519,11 +520,16 @@ surface; full history lives in the chain, which is the source of truth anyway.
   approval retry after the stream is terminal performs the same repair. The regression suite covers
   sibling approvals, mixed concurrent decisions, queue/revival failure, and child terminal
   projection.
-- **Failed or cancelled continuation recovery**: terminal reconciliation converts approved
-  `approval-responded` parts to `output-error`, preserves denied siblings as `output-denied`,
-  reports the terminal result, and resumes parked turns. The same class-owned transition runs after
-  persistence, during already-terminal replay, and from orphan cleanup. Later asks therefore do not
-  inherit a phantom approval gate, even when terminal projection itself must be retried.
+- **Idempotent continuation crash recovery**: when every approved tool in the continuation declares
+  `recovery: 'idempotent'`, orphan cleanup reopens the failed stream and schedules one recovery
+  attempt. The SDK reuses the persisted `toolCallId`, so the tool can pass it to its provider as the
+  idempotency key and recover the original result without repeating the external effect.
+- **Failed or cancelled continuation recovery**: non-opted-in continuations, cancelled
+  continuations, and a failed recovery attempt settle approved `approval-responded` parts to
+  `output-error`, preserve denied siblings as `output-denied`, report the terminal result, and
+  resume parked turns. The same class-owned transition runs after persistence, during
+  already-terminal replay, and from orphan cleanup. Later asks therefore do not inherit a phantom
+  approval gate, even when terminal projection itself must be retried.
 
 ## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
 
@@ -627,9 +633,9 @@ work({concurrency?}) → AsyncDisposable }`.
 
 ## Open (deliberately deferred)
 
-- **Post-crash continuation policy** — process-kill detection, stream failure, and chat unblocking
-  are built. Automatic retry versus resume-with-idempotent-tools versus exact resumption through a
-  tool-call journal remains deliberately deferred.
+- **Non-idempotent post-crash continuation recovery** — process-kill detection, one automatic replay
+  for opted-in idempotent approval tools, terminal failure, and chat unblocking are built. Provider
+  reconciliation and exact resumption through a tool-call journal remain deliberately deferred.
 - **Observe / reconnect UX** — how a reconnecting client discovers the in-flight turn (head message +
   stream status) and what it sees at each turn state; notifications when a turn finishes while away.
 - **General pause vs cancel** — approval parking is built, while arbitrary suspend/resume of a
