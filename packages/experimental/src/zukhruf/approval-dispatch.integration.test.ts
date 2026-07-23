@@ -31,10 +31,9 @@ import {
   SqliteMailboxStore,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
-import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
+import { withPostgresContainer } from '@deepagents/test';
 
 const fixture = new URL('./approval-dispatch.fixture.ts', import.meta.url);
-const docker = await isDockerAvailable();
 const usage = {
   inputTokens: {
     total: 1,
@@ -59,6 +58,7 @@ interface Scenario {
 
 interface RuntimeHost {
   runtime: AgentRuntime;
+  approvalJobs(chatId: string): Promise<Array<{ id: string; state: string }>>;
   close(): Promise<void>;
 }
 
@@ -76,8 +76,8 @@ interface DecisionResult {
 }
 
 test(
-  'conflicting approvals from independent processes produce one durable decision',
-  { skip: !docker, timeout: 45_000 },
+  'concurrent approve and deny from independent processes create one queued approval job and apply one winner',
+  { timeout: 45_000 },
   async () => {
     await withScenario(async (scenario) => {
       const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
@@ -91,6 +91,8 @@ test(
           userId: 'user-1',
         };
         await pauseForApproval(host.runtime, conversation);
+        await worker[Symbol.asyncDispose]();
+        worker = undefined;
 
         const approve = await startDecisionProcess(
           scenario,
@@ -105,15 +107,21 @@ test(
           runDecision(approve),
           runDecision(deny),
         ]);
-        assert.equal(
-          results.filter((result) => result.status === 'fulfilled').length,
-          1,
+        assert.deepEqual(
+          results.map((result) => result.status),
+          ['fulfilled', 'fulfilled'],
         );
-        assert.match(
-          results.find((result) => result.status === 'rejected')?.error ?? '',
-          /approval already answered with a different decision/,
+        const jobs = await host.approvalJobs(conversation.chatId);
+        assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.state, 'created');
+        assert.equal(
+          approvalPart(
+            await host.runtime.observe(conversation).engine.getMessages(),
+          )?.state,
+          'approval-requested',
         );
 
+        worker = await host.runtime.work();
         const messages = await waitForConversation(
           host.runtime,
           conversation,
@@ -124,14 +132,9 @@ test(
             ),
           'the winning approval continuation',
         );
-        const approveWon =
-          results.find((result) => result.decision === 'approve')?.status ===
-          'fulfilled';
-        assert.equal(
-          approvalPart(messages)?.state,
-          approveWon ? 'output-available' : 'output-denied',
-        );
-        assert.equal(track.toolRuns, approveWon ? 1 : 0);
+        const state = approvalPart(messages)?.state;
+        assert.ok(state === 'output-available' || state === 'output-denied');
+        assert.equal(track.toolRuns, state === 'output-available' ? 1 : 0);
         assert.deepEqual(track.calls, ['send it', 'send it']);
         assert.equal(
           messages.filter((message) => message.role === 'assistant').length,
@@ -148,8 +151,8 @@ test(
 );
 
 test(
-  'duplicate approvals from independent processes execute the tool exactly once',
-  { skip: !docker, timeout: 45_000 },
+  'duplicate approvals from independent processes create one queued approval job and execute once',
+  { timeout: 45_000 },
   async () => {
     await withScenario(async (scenario) => {
       const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
@@ -163,6 +166,8 @@ test(
           userId: 'user-1',
         };
         await pauseForApproval(host.runtime, conversation);
+        await worker[Symbol.asyncDispose]();
+        worker = undefined;
 
         const first = await startDecisionProcess(
           scenario,
@@ -185,7 +190,15 @@ test(
           results.map((result) => result.status),
           ['fulfilled', 'fulfilled'],
         );
-        assert.equal(new Set(results.map((result) => result.id)).size, 1);
+        assert.equal((await host.approvalJobs(conversation.chatId)).length, 1);
+        assert.equal(
+          approvalPart(
+            await host.runtime.observe(conversation).engine.getMessages(),
+          )?.state,
+          'approval-requested',
+        );
+
+        worker = await host.runtime.work();
         const messages = await waitForConversation(
           host.runtime,
           conversation,
@@ -210,8 +223,8 @@ test(
 );
 
 test(
-  'an approval accepted without a worker survives restart and preserves later-turn FIFO',
-  { skip: !docker, timeout: 45_000 },
+  'an approval stays queued and pending without a worker, then outranks later turns after restart',
+  { timeout: 45_000 },
   async () => {
     await withScenario(async (scenario) => {
       const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
@@ -244,6 +257,16 @@ test(
         });
         assert.deepEqual(track.calls, ['send it']);
         assert.equal(track.toolRuns, 0, 'nothing executes without a worker');
+        assert.equal(
+          approvalPart(
+            await firstHost.runtime.observe(conversation).engine.getMessages(),
+          )?.state,
+          'approval-requested',
+        );
+        assert.equal(
+          (await firstHost.approvalJobs(conversation.chatId)).length,
+          1,
+        );
 
         await firstHost.close();
         firstHost = undefined;
@@ -277,8 +300,127 @@ test(
 );
 
 test(
+  'retry after the approval job is deleted uses settled context and creates no new job',
+  { timeout: 45_000 },
+  async () => {
+    await withScenario(async (scenario) => {
+      const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
+      const host = await createHost(scenario, approvalDeclaration(track));
+      let worker: AsyncDisposable | undefined;
+      try {
+        worker = await host.runtime.work();
+        const conversation = {
+          chatId: `approval-retry-${crypto.randomUUID()}`,
+          userId: 'user-1',
+        };
+        const part = await pauseForApproval(host.runtime, conversation);
+        await worker[Symbol.asyncDispose]();
+        worker = undefined;
+
+        await host.runtime.approve(conversation, {
+          toolCallId: part.toolCallId,
+        });
+        assert.equal((await host.approvalJobs(conversation.chatId)).length, 1);
+
+        worker = await host.runtime.work();
+        const settled = await waitForConversation(
+          host.runtime,
+          conversation,
+          (messages) =>
+            track.calls.length === 2 &&
+            approvalPart(messages)?.state === 'output-available',
+          'the queued approval to settle',
+        );
+        await waitForApprovalJobCount(host, conversation.chatId, 0);
+
+        await host.runtime.approve(conversation, {
+          toolCallId: part.toolCallId,
+        });
+
+        assert.equal((await host.approvalJobs(conversation.chatId)).length, 0);
+        assert.deepEqual(
+          await host.runtime.observe(conversation).engine.getMessages(),
+          settled,
+        );
+        assert.equal(track.toolRuns, 1);
+        assert.deepEqual(track.calls, ['send it', 'send it']);
+      } finally {
+        await worker?.[Symbol.asyncDispose]();
+        await host.close();
+      }
+    });
+  },
+);
+
+test(
+  'sibling approvals create distinct jobs and the final sibling resumes the original turn once',
+  { timeout: 45_000 },
+  async () => {
+    await withScenario(async (scenario) => {
+      const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
+      const host = await createHost(scenario, approvalDeclaration(track));
+      let worker: AsyncDisposable | undefined;
+      try {
+        worker = await host.runtime.work();
+        const conversation = {
+          chatId: `sibling-approvals-${crypto.randomUUID()}`,
+          userId: 'user-1',
+        };
+        const parts = await pauseForApprovals(
+          host.runtime,
+          conversation,
+          'send both',
+        );
+        assert.equal(parts.length, 2);
+        await worker[Symbol.asyncDispose]();
+        worker = undefined;
+
+        await host.runtime.approve(conversation, {
+          toolCallId: parts[0]!.toolCallId,
+        });
+        await host.runtime.approve(conversation, {
+          toolCallId: parts[1]!.toolCallId,
+        });
+
+        const jobs = await host.approvalJobs(conversation.chatId);
+        assert.equal(jobs.length, 2);
+        assert.equal(new Set(jobs.map((job) => job.id)).size, 2);
+        assert.deepEqual(
+          approvalParts(
+            await host.runtime.observe(conversation).engine.getMessages(),
+          ).map((part) => part.state),
+          ['approval-requested', 'approval-requested'],
+        );
+
+        worker = await host.runtime.work();
+        const messages = await waitForConversation(
+          host.runtime,
+          conversation,
+          (current) =>
+            track.calls.length === 2 &&
+            approvalParts(current).every(
+              (part) => part.state === 'output-available',
+            ),
+          'both sibling approvals to settle',
+        );
+
+        assert.equal(track.toolRuns, 2);
+        assert.deepEqual(track.calls, ['send both', 'send both']);
+        assert.equal(
+          messages.filter((message) => message.role === 'assistant').length,
+          1,
+        );
+      } finally {
+        await worker?.[Symbol.asyncDispose]();
+        await host.close();
+      }
+    });
+  },
+);
+
+test(
   'a worker killed after an approved tool starts does not duplicate the tool or strand later turns',
-  { skip: !docker, timeout: 60_000 },
+  { timeout: 60_000 },
   async () => {
     await withScenario(async (scenario) => {
       const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
@@ -347,7 +489,7 @@ test(
 
 test(
   'an idempotent approved tool recovers automatically after its worker is killed',
-  { skip: !docker, timeout: 60_000 },
+  { timeout: 60_000 },
   async () => {
     await withScenario(async (scenario) => {
       const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
@@ -421,7 +563,7 @@ test(
 
 test(
   'an idempotent approved tool gets at most one automatic crash replay',
-  { skip: !docker, timeout: 90_000 },
+  { timeout: 90_000 },
   async () => {
     await withScenario(async (scenario) => {
       const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
@@ -534,14 +676,36 @@ function approvalDeclaration(
       const callsForInput = track.calls.filter((call) => call === input).length;
       const raw = JSON.stringify(prompt);
       let chunks: LanguageModelV4StreamPart[];
-      if (input === 'send it' && callsForInput === 1) {
+      if (
+        (input === 'send it' || input === 'send both') &&
+        callsForInput === 1
+      ) {
+        const toolCalls: LanguageModelV4StreamPart[] =
+          input === 'send both'
+            ? [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'approval-call-a',
+                  toolName: 'sendEmail',
+                  input: JSON.stringify({ to: 'a@b.c' }),
+                },
+                {
+                  type: 'tool-call',
+                  toolCallId: 'approval-call-b',
+                  toolName: 'sendEmail',
+                  input: JSON.stringify({ to: 'b@c.d' }),
+                },
+              ]
+            : [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'approval-call',
+                  toolName: 'sendEmail',
+                  input: JSON.stringify({ to: 'a@b.c' }),
+                },
+              ];
         chunks = [
-          {
-            type: 'tool-call',
-            toolCallId: 'approval-call',
-            toolName: 'sendEmail',
-            input: JSON.stringify({ to: 'a@b.c' }),
-          },
+          ...toolCalls,
           {
             type: 'finish',
             finishReason: { unified: 'tool-calls', raw: '' },
@@ -550,10 +714,10 @@ function approvalDeclaration(
         ];
       } else {
         const text =
-          input === 'send it'
+          input === 'send it' || input === 'send both'
             ? raw.includes('sent:')
-              ? 'done:send it'
-              : 'denied:send it'
+              ? `done:${input}`
+              : `denied:${input}`
             : `reply:${input}`;
         chunks = textResponse(text);
       }
@@ -627,6 +791,14 @@ async function createHost(
       queue,
       mailboxStore,
     }),
+    async approvalJobs(chatId) {
+      const jobs = await boss.findJobs<{ kind?: string }>(queue.queue, {
+        key: chatId,
+      });
+      return jobs
+        .filter((job) => job.data.kind === 'approval')
+        .map((job) => ({ id: job.id, state: job.state }));
+    },
     async close() {
       await boss.stop({ graceful: false });
       await store.close();
@@ -640,24 +812,34 @@ async function pauseForApproval(
   runtime: AgentRuntime,
   conversation: { chatId: string; userId: string },
 ) {
+  const parts = await pauseForApprovals(runtime, conversation, 'send it');
+  assert.equal(parts.length, 1);
+  return parts[0]!;
+}
+
+async function pauseForApprovals(
+  runtime: AgentRuntime,
+  conversation: { chatId: string; userId: string },
+  input: string,
+) {
   const turn = await runtime.enqueue(conversation, {
     id: crypto.randomUUID(),
-    input: 'send it',
+    input,
   });
   await collectText(turn.stream);
   const messages = await runtime.observe(conversation).engine.getMessages();
-  const part = approvalPart(messages);
-  assert.ok(part);
-  assert.equal(part.state, 'approval-requested');
-  return part;
+  const parts = approvalParts(messages);
+  assert.ok(parts.length > 0);
+  assert.ok(parts.every((part) => part.state === 'approval-requested'));
+  return parts;
 }
 
 function approvalPart(messages: UIMessage[]) {
-  for (const message of messages) {
-    const part = message.parts.find(isToolUIPart);
-    if (part) return part;
-  }
-  return undefined;
+  return approvalParts(messages)[0];
+}
+
+function approvalParts(messages: UIMessage[]) {
+  return messages.flatMap((message) => message.parts.filter(isToolUIPart));
 }
 
 function messageText(message: UIMessage | undefined): string {
@@ -694,6 +876,20 @@ async function waitForConversation(
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`timed out waiting for ${label}`);
+}
+
+async function waitForApprovalJobCount(
+  host: RuntimeHost,
+  chatId: string,
+  count: number,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await host.approvalJobs(chatId)).length === count) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${count} approval jobs`);
 }
 
 async function withScenario(
