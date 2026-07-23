@@ -6,7 +6,6 @@ import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
 
@@ -16,8 +15,9 @@ const input =
   process.argv.slice(2).join(' ') ||
   'Delegate to the specialist: list the numbers 1 through 20, one per line, each with a one-word note.';
 
+const database = new PGlite('./zukhruf.queue');
 const boss = new PgBoss({
-  db: fromPglite(new PGlite('./zukhruf.queue')),
+  db: fromPglite(database),
   backend: 'pglite',
 });
 boss.on('error', (error) => console.error('[queue error]', error));
@@ -25,17 +25,17 @@ await boss.start();
 const queue = new PgBossTurnQueue(boss, {
   pollingIntervalSeconds: 0.5,
   schema: 'pgboss',
+  withTransaction: (operation) =>
+    database.transaction((transaction) => operation(fromPglite(transaction))),
 });
 await queue.initialize();
 const mailboxStore = new SqliteMailboxStore('./zukhruf.mailbox.sqlite');
-const approvalMutex = new SqliteApprovalMutex('./zukhruf.approvals.sqlite');
 
 const runtime = new AgentRuntime(declaration, {
   store: new SqliteContextStore('./zukhruf.sqlite'),
   streamStore: new SqliteStreamStore('./zukhruf.streams.sqlite'),
   queue,
   mailboxStore,
-  approvalMutex,
 });
 
 const conversation = {
@@ -96,7 +96,6 @@ console.log(
 await worker[Symbol.asyncDispose]();
 await boss.stop({ graceful: false });
 mailboxStore.close();
-approvalMutex.close();
 process.exit(0);
 
 async function waitForSpecialistCompletion(): Promise<void> {

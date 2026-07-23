@@ -13,7 +13,6 @@ import {
   assistant,
 } from '@deepagents/context';
 
-import type { ApprovalMutex } from './approval-mutex.ts';
 import type { ConversationId } from './mailbox/types.ts';
 import type { TurnQueue } from './queue/turn-queue.ts';
 import type { ZukhrufToolSet } from './tool.ts';
@@ -22,7 +21,6 @@ export interface ApprovalControllerOptions {
   store: ContextStore;
   streams: StreamManager;
   queue: TurnQueue;
-  mutex: ApprovalMutex;
 }
 
 type ApprovalToolPart = DynamicToolUIPart | ToolUIPart;
@@ -38,13 +36,11 @@ export class ApprovalController {
   readonly #store: ContextStore;
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
-  readonly #mutex: ApprovalMutex;
 
   constructor(options: ApprovalControllerOptions) {
     this.#store = options.store;
     this.#streams = options.streams;
     this.#queue = options.queue;
-    this.#mutex = options.mutex;
   }
 
   isPaused(message: UIMessage | undefined): boolean {
@@ -74,7 +70,7 @@ export class ApprovalController {
     conversation: ConversationId,
     streamId: string,
   ): Promise<void> {
-    await this.#mutex.runExclusive(conversation.chatId, async () => {
+    await this.#queue.serialize(conversation.chatId, async () => {
       const engine = this.#engineFor(conversation);
       const head = (await engine.getMessages()).at(-1);
       if (head?.role !== 'assistant' || head.id !== streamId) return;
@@ -103,7 +99,7 @@ export class ApprovalController {
     streamId: string,
     error: string,
   ): Promise<void> {
-    await this.#mutex.runExclusive(conversation.chatId, async () => {
+    await this.#queue.serialize(conversation.chatId, async () => {
       const engine = this.#engineFor(conversation);
       const head = (await engine.getMessages()).at(-1);
       if (head?.role !== 'assistant' || head.id !== streamId) return;
@@ -152,7 +148,7 @@ export class ApprovalController {
     streamId: string,
     tools: ZukhrufToolSet,
   ): Promise<boolean> {
-    const retryable = await this.#mutex.runExclusive(
+    const retryable = await this.#queue.serialize(
       conversation.chatId,
       async () => {
         const head = (await this.#engineFor(conversation).getMessages()).at(-1);
@@ -201,7 +197,7 @@ export class ApprovalController {
     toolCallId: string,
     approval: { approved: true } | { approved: false; reason?: string },
   ) {
-    const result = await this.#mutex.runExclusive(
+    const result = await this.#queue.serialize(
       conversation.chatId,
       async () => {
         const engine = this.#engineFor(conversation);

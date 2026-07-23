@@ -14,7 +14,6 @@ import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   type TurnRef,
   createInterAgentCommunication,
@@ -78,18 +77,18 @@ await boss.start();
 const turnQueue = new PgBossTurnQueue(boss, {
   pollingIntervalSeconds: 0.5,
   schema: 'pgboss',
+  withTransaction: (operation) =>
+    pglite.transaction((transaction) => operation(fromPglite(transaction))),
 });
 await turnQueue.initialize();
 
 const streamStore = new SqliteStreamStore(':memory:');
 const mailboxStore = new SqliteMailboxStore(':memory:');
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 const runtime = new AgentRuntime(declaration, {
   store: new InMemoryContextStore(),
   streamStore,
   queue: turnQueue,
   mailboxStore,
-  approvalMutex,
 });
 
 let worker: AsyncDisposable | undefined;
@@ -171,7 +170,6 @@ try {
   await pglite.close();
   streamStore.close();
   mailboxStore.close();
-  approvalMutex.close();
 }
 
 function findMailboxMessages(value: unknown): string[] {

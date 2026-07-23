@@ -5,7 +5,6 @@ import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
 
@@ -16,18 +15,20 @@ const boss = new PgBoss({ db: fromPglite(database), backend: 'pglite' });
 boss.on('error', (error) => console.error('[queue error]', error));
 await boss.start();
 
-const queue = new PgBossTurnQueue(boss, { schema: 'pgboss' });
+const queue = new PgBossTurnQueue(boss, {
+  schema: 'pgboss',
+  withTransaction: (operation) =>
+    database.transaction((transaction) => operation(fromPglite(transaction))),
+});
 await queue.initialize();
 
 const streamStore = new SqliteStreamStore(':memory:');
 const mailboxStore = new SqliteMailboxStore(':memory:');
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 const runtime = new AgentRuntime(declaration, {
   store: new InMemoryContextStore(),
   streamStore,
   queue,
   mailboxStore,
-  approvalMutex,
 });
 
 try {
@@ -50,5 +51,4 @@ try {
   await database.close();
   streamStore.close();
   mailboxStore.close();
-  approvalMutex.close();
 }

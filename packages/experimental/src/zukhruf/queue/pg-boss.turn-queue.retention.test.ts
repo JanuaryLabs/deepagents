@@ -5,6 +5,7 @@ import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
   PgBossTurnQueue,
+  type PgBossTurnQueueOptions,
   type TurnRef,
 } from '@deepagents/experimental/zukhruf';
 import { timebox } from '@deepagents/test';
@@ -51,6 +52,10 @@ async function makeQueue() {
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
+    withTransaction: ((operation) =>
+      pglite.transaction((transaction) =>
+        operation(fromPglite(transaction)),
+      )) satisfies NonNullable<PgBossTurnQueueOptions['withTransaction']>,
   });
   await queue.initialize();
   return {

@@ -28,7 +28,6 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
@@ -55,7 +54,6 @@ interface Scenario {
   connectionString: string;
   queueName: string;
   mailboxPath: string;
-  approvalPath: string;
   markerPath: string;
 }
 
@@ -622,21 +620,18 @@ async function createHost(
   await store.initialize();
   await streamStore.initialize();
   const mailboxStore = new SqliteMailboxStore(scenario.mailboxPath);
-  const approvalMutex = new SqliteApprovalMutex(scenario.approvalPath);
   return {
     runtime: new AgentRuntime(declaration, {
       store,
       streamStore,
       queue,
       mailboxStore,
-      approvalMutex,
     }),
     async close() {
       await boss.stop({ graceful: false });
       await store.close();
       await streamStore.close();
       mailboxStore.close();
-      approvalMutex.close();
     },
   };
 }
@@ -711,7 +706,6 @@ async function withScenario(
         connectionString: container.connectionString,
         queueName: `approval-${crypto.randomUUID()}`,
         mailboxPath: join(directory, 'mailbox.sqlite'),
-        approvalPath: join(directory, 'approvals.sqlite'),
         markerPath: join(directory, 'tool-runs'),
       });
       return true;
@@ -736,7 +730,6 @@ async function startDecisionProcess(
     scenario.connectionString,
     scenario.queueName,
     scenario.mailboxPath,
-    scenario.approvalPath,
     JSON.stringify(conversation),
     decision,
     'approval-call',
@@ -754,7 +747,6 @@ async function startCrashWorker(
     scenario.connectionString,
     scenario.queueName,
     scenario.mailboxPath,
-    scenario.approvalPath,
     scenario.markerPath,
     ...(recovery ? [recovery] : []),
   ]);

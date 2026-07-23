@@ -8,7 +8,11 @@ import {
   fromPglite,
 } from 'pg-boss';
 
-import type { TurnQueue, TurnRef } from '@deepagents/experimental/zukhruf';
+import type {
+  PgBossTurnQueueOptions,
+  TurnQueue,
+  TurnRef,
+} from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
 
 /**
@@ -33,6 +37,13 @@ export interface TurnQueueHarness extends AsyncDisposable {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function pgliteTransaction(
+  pglite: PGlite,
+): NonNullable<PgBossTurnQueueOptions['withTransaction']> {
+  return (operation) =>
+    pglite.transaction((transaction) => operation(fromPglite(transaction)));
+}
 
 async function waitFor(
   condition: () => boolean,
@@ -96,6 +107,25 @@ export function turnQueueContract(
   makeQueue: () => Promise<TurnQueueHarness>,
 ) {
   describe(`TurnQueue contract — ${name}`, () => {
+    it('serializes caller-side control work without a consumer', async () => {
+      await using h = await makeQueue();
+      let active = 0;
+      let maxActive = 0;
+
+      await Promise.all(
+        [1, 2].map((attempt) =>
+          h.queue.serialize('control', async () => {
+            active++;
+            maxActive = Math.max(maxActive, active);
+            await sleep(25 * attempt);
+            active--;
+          }),
+        ),
+      );
+
+      assert.equal(maxActive, 1);
+    });
+
     it('delivers a turn pushed before any consumer existed, payload intact', async () => {
       await using h = await makeQueue();
       const pushed = ref('durable', 1);
@@ -555,6 +585,7 @@ turnQueueContract('PgBossTurnQueue (pglite)', async () => {
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
+    withTransaction: pgliteTransaction(pglite),
   });
   await queue.initialize();
   return {
@@ -574,6 +605,7 @@ it('does not delete or overlap a turn claimed after the cancellation snapshot', 
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
+    withTransaction: pgliteTransaction(pglite),
   });
   await queue.initialize();
 
@@ -706,6 +738,7 @@ it('delivers cancellation to a local handler registered after cancel returns', a
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
+    withTransaction: pgliteTransaction(pglite),
   });
   await queue.initialize();
   const first = ref('late-registration', 1);
@@ -823,6 +856,7 @@ it('fails fast when a custom-adapter schema is omitted and accepts it explicitly
   const decoyQueue = new PgBossTurnQueue(decoyBoss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
+    withTransaction: pgliteTransaction(pglite),
   });
   await decoyQueue.initialize();
   await decoyBoss.stop({ graceful: false });
@@ -863,6 +897,7 @@ it('fails fast when a custom-adapter schema is omitted and accepts it explicitly
     const queue = new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema,
+      withTransaction: pgliteTransaction(pglite),
     });
     try {
       await queue.initialize();

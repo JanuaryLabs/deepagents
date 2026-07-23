@@ -152,6 +152,7 @@ type TurnRef = {
 } & ({ kind: 'ask'; input } | { kind: 'continuation' } | { kind: 'mailbox' });
 abstract class TurnQueue {
   push(turn: TurnRef): Promise<void>;
+  serialize<T>(chatId: string, operation: () => Promise<T>): Promise<T>;
   consume(
     handler: (turn, { signal }) => Promise<void>,
     options: { concurrency?; onOrphaned(turn, error) },
@@ -162,16 +163,24 @@ abstract class TurnQueue {
 
 Contract: per chat at most ONE active handler, strict FIFO per chat, cross-chat concurrency; a
 crashed handler/worker surfaces once through `onOrphaned` (no retry), then the chat unblocks.
+`serialize` runs caller-side control work under the same implementation's cross-process per-chat
+coordination without requiring a worker; it does not turn control work into a queue job.
 
 ### pg-boss implementation _(Built — `queue/pg-boss.turn-queue.ts`)_
 
-`PgBossTurnQueue(boss /* borrowed */, {queue?, schema?})` on pg-boss v12 (all semantics live-verified):
+`PgBossTurnQueue(boss /* borrowed */, {queue?, schema?, withTransaction?})` on pg-boss v12 (all
+semantics live-verified):
 
 - **Schema is explicit for custom database adapters** — pg-boss does not expose the configured
   schema through its custom-adapter interface. Callers using `fromPglite` or another custom adapter
   must pass the same `schema` to `PgBossTurnQueue`; the built-in database path is read directly.
   Initialization validates the queue catalog/table without creating transient probe queues, so
   preprovisioned least-privilege deployments do not need catalog-write permission at startup.
+- **Caller-side serialization uses PostgreSQL transaction advisory locks** — `serialize(chatId)`
+  holds `pg_advisory_xact_lock` on the queue-namespaced chat key while the caller performs its
+  durable control mutation. The built-in pg-boss database supplies the pinned transaction;
+  custom adapters must pass `withTransaction` (PGlite uses its native transaction callback).
+  Process death releases the lock, and no turn worker is required.
 
 - **`key_strict_fifo` policy + `singletonKey = chatId`** — per-chat serialization is structural:
   1 active per key, unlimited queued, strict push order, failed job blocks the key.
@@ -466,13 +475,14 @@ surface; full history lives in the chain, which is the source of truth anyway.
 
 - **Identity: nothing new on the context-store port.** Stream id and assistant id stay fused, and under the
   at-least-once contract the port needs no dedup key at all — a continuation is just another push
-  (fresh v7 job id). The assistant message remains the sole durable approval record. Zukhruf's
-  required `ApprovalMutex` serializes the complete read–validate–rewrite transition; the SQLite
-  implementation excludes independent processes through a dedicated lock database. Repeated
-  identical decisions repair or reattach to the same continuation, a conflicting decision is
-  rejected, and decisions for different siblings are both preserved. A continuation is scheduled only after every sibling
-  approval has a response, and a duplicate continuation job is skipped by the terminal-stream check
-  after the first one completes.
+  (fresh v7 job id). The assistant message remains the sole durable approval record.
+  `TurnQueue.serialize` protects the complete read–validate–rewrite transition under the queue
+  implementation's per-chat cross-process coordination. Repeated identical decisions repair or
+  reattach to the same continuation, a conflicting decision is rejected, and decisions for
+  different siblings are both preserved. A continuation is scheduled only after every sibling
+  approval has a response, and a duplicate continuation job is skipped by the terminal-stream
+  check after the first one completes. Reopen, continuation push, and parked-turn revival remain
+  outside the serialized mutation so retries can repair partial handoffs.
 - **Mid-approval user messages: QUEUE BEHIND** _(decided, built)_. The FIFO alone can't enforce
   this (the paused turn's job completed, so the key unblocks), so gated turns **park**:
   `AgentTurnExecutor` sees a pending tool part at the chain head and calls `context.park()` — before

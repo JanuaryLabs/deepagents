@@ -17,7 +17,6 @@ import {
   type InterAgentCommunication,
   type MailboxEnqueueResult,
   MessageDeliveryMode,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -25,8 +24,6 @@ import {
   defineAgent,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 async function settleWithin<T>(
   promise: Promise<T>,
@@ -57,6 +54,13 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef): Promise<void> {
     this.turns.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async consume(
@@ -163,6 +167,13 @@ class SharedControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef): Promise<void> {
     this.#state.turns.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async consume(
@@ -475,7 +486,6 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -545,7 +555,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
   const first = await runtime.enqueue(conversation, {
@@ -568,8 +578,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
 
   const chat = await store.getChat(conversation.chatId);
   const metadata = chat?.metadata as
-    | { zukhruf?: { lastTurnId?: string } }
-    | undefined;
+    { zukhruf?: { lastTurnId?: string } } | undefined;
   assert.equal(metadata?.zukhruf?.lastTurnId, second.id);
   assert.equal(modelCalls.length, 2);
 });
@@ -635,7 +644,6 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -714,7 +722,6 @@ test('a completed child queues its final answer to the parent without waking it'
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -825,7 +832,7 @@ test('an approval-paused child sends one final answer only after continuation', 
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -934,7 +941,7 @@ test('a failed approval continuation reports failure instead of remaining paused
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -1046,7 +1053,7 @@ test('a cancelled approval continuation clears the gate and revives parked turns
         }),
       },
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const conversation = { chatId: 'cancelled-continuation', userId: 'user-1' };
   const initial = await runtime.enqueue(conversation, {
@@ -1142,7 +1149,7 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
         }),
       },
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const conversation = { chatId: 'failed-siblings', userId: 'user-1' };
   const initial = await runtime.enqueue(conversation, {
@@ -1192,7 +1199,6 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -1297,7 +1303,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -1369,8 +1375,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
 
     const chat = await store.getChat(child.chatId);
     const metadata = chat?.metadata as
-      | { zukhruf?: { lastTurnId?: string } }
-      | undefined;
+      { zukhruf?: { lastTurnId?: string } } | undefined;
     assert.deepStrictEqual(
       {
         successorActivityPreserved: queue.turns.some(
@@ -1417,7 +1422,6 @@ test('terminal child recovery does not duplicate a completion committed before a
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -1502,7 +1506,6 @@ test('a failed child asynchronously notifies its parent with the terminal status
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -1592,7 +1595,6 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -1682,7 +1684,6 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -1779,7 +1780,6 @@ test('a child cancelled while queued notifies its parent once without running th
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
   for (const chat of [
@@ -1893,7 +1893,6 @@ test('send_message resolves a canonical sibling path and queues mail without wak
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -2014,7 +2013,6 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -2125,7 +2123,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -2224,7 +2222,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -2351,14 +2349,12 @@ test('interrupt_agent aborts a running child across runtime instances without qu
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: rootQueue,
   });
   const childRuntime = new AgentRuntime(root, {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: childQueue,
   });
   await using _rootWorker = await rootRuntime.work();
@@ -2432,7 +2428,7 @@ test('interrupt_agent rejects root and self targets', async (t) => {
       instructions: [],
       subagents: [caller],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -2527,7 +2523,6 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
     streamStore,
     mailboxStore,
     queue,
-    approvalMutex,
   });
   await createAgentChats(store, [
     {
@@ -2596,7 +2591,6 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
 
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
   const prompts: unknown[] = [];
-  let runtime!: AgentRuntime;
   let calls = 0;
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
@@ -2624,11 +2618,10 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
     sandbox: async () => ({}) as AgentSandbox,
     instructions: [],
   });
-  runtime = new AgentRuntime(root, {
+  const runtime = new AgentRuntime(root, {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -2689,14 +2682,12 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: callerQueue,
   });
   const deliveryRuntime = new AgentRuntime(root, {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: deliveryQueue,
   });
   await using _callerWorker = await callerRuntime.work();
@@ -2777,7 +2768,6 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -2821,7 +2811,6 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
@@ -2932,14 +2921,12 @@ test('send_message crosses runtime instances and reaches an active recipient at 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: senderQueue,
   });
   const recipientRuntime = new AgentRuntime(root, {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: recipientQueue,
   });
   await using _senderWorker = await senderRuntime.work();
@@ -3054,14 +3041,12 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: senderQueue,
   });
   const recipientRuntime = new AgentRuntime(root, {
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue: recipientQueue,
   });
   await using _senderWorker = await senderRuntime.work();
@@ -3147,7 +3132,6 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3261,7 +3245,6 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3340,7 +3323,6 @@ test('list_agents reports the root tree with canonical paths and current statuse
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3458,7 +3440,6 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3565,7 +3546,6 @@ test('list_agents reports a completed child with its result and last task', asyn
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3670,7 +3650,6 @@ test('list_agents reports a completed child with a queued follow-up as running',
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3821,7 +3800,6 @@ test('nested agents run independently, consume sibling mail, and remain visible 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -3871,8 +3849,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
     reviewerHistory.flatMap((message) => {
       const communication = (
         message.metadata as
-          | { interAgentCommunication?: { content?: string } }
-          | undefined
+          { interAgentCommunication?: { content?: string } } | undefined
       )?.interAgentCommunication;
       return communication?.content ? [communication.content] : [];
     }),

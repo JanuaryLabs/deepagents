@@ -18,12 +18,9 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 const usage = {
   inputTokens: {
@@ -152,7 +149,6 @@ describe(
           streamStore,
           queue,
           mailboxStore,
-          approvalMutex,
         });
         const conversation = { chatId: 'crash-chat', userId: 'u1' };
 

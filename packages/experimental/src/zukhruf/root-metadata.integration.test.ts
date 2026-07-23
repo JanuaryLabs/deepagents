@@ -15,7 +15,6 @@ import {
   type ConsumeContext,
   type ConsumeOptions,
   MessageDeliveryMode,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -23,14 +22,19 @@ import {
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
 
-const approvalMutex = new SqliteApprovalMutex(':memory:');
-
 class RecordingTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
 
   override async push(turn: TurnRef): Promise<void> {
     this.turns.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async getTurnActivity(
@@ -176,7 +180,7 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
 
   const enqueued = await runtime.enqueue(
@@ -233,7 +237,7 @@ test('an existing chat can only be used by its stored owner', async (t) => {
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const intruder = { chatId: 'shared-chat', userId: 'bob' };
 
@@ -270,7 +274,7 @@ test('caller turn ids are scoped to their owning conversation', async (t) => {
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
 
   const alice = await runtime.enqueue(
@@ -302,7 +306,7 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const alice = await runtime.enqueue(
     { chatId: 'alice-chat', userId: 'alice' },
@@ -344,7 +348,7 @@ test('reserved but malformed agent metadata fails closed at enqueue', async (t) 
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
 
   await assert.rejects(
@@ -374,7 +378,7 @@ test('enqueue rejects an empty conversation before registering a stream', async 
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
 
   await assert.rejects(
@@ -421,7 +425,7 @@ test('root initialization preserves a concurrent host metadata write', async (t)
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   await runtime.enqueue(
     { chatId: 'root-cas', userId: 'user-1' },
@@ -477,7 +481,7 @@ test('a child must point to the immediate ancestor of its canonical path', async
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
 
   await assert.rejects(
@@ -508,7 +512,7 @@ test('host delivery rejects a recipient that does not own the stored chat', asyn
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const recipient = { chatId: 'shared-chat', userId: 'bob' };
 
@@ -545,7 +549,7 @@ test('explicit cancellation rejects a conversation that does not own the stored 
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const alice = await runtime.enqueue(
     { chatId: 'shared-chat', userId: 'alice' },
@@ -600,7 +604,7 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
       },
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const conversation = { chatId: 'cancel-setup', userId: 'user-1' };
   const enqueued = await runtime.enqueue(conversation, {
@@ -656,7 +660,7 @@ test('cancellation that wins the execution claim prevents model sampling', async
       },
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const conversation = { chatId: 'cancel-claim', userId: 'user-1' };
   const enqueued = await runtime.enqueue(conversation, {
@@ -707,7 +711,7 @@ test('cancellation after execution claim aborts pending provider setup', async (
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue, approvalMutex },
+    { store, streamStore, mailboxStore, queue },
   );
   const conversation = { chatId: 'cancel-provider', userId: 'user-1' };
   const enqueued = await runtime.enqueue(conversation, {

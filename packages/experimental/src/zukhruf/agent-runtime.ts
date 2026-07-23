@@ -15,7 +15,6 @@ import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
 import type { AgentDeclaration } from './agent.ts';
 import { ApprovalController } from './approval-controller.ts';
-import type { ApprovalMutex } from './approval-mutex.ts';
 import { MailboxCoordinator } from './mailbox/coordinator.ts';
 import type { MailboxStore } from './mailbox/store.ts';
 import type {
@@ -35,8 +34,6 @@ export interface AgentRuntimeOptions {
   queue: TurnQueue;
   /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
   mailboxStore: MailboxStore;
-  /** Cross-process serialization for assistant-message approval transitions. */
-  approvalMutex: ApprovalMutex;
   /** Codex MultiAgentV2-compatible host guidance and tool configuration. */
   multiAgentV2?: MultiAgentV2HostConfig;
 }
@@ -125,7 +122,6 @@ export class AgentRuntime {
       store: options.store,
       streams,
       queue: options.queue,
-      mutex: options.approvalMutex,
     });
     const statusProjector = new AgentStatusProjector({
       store: options.store,

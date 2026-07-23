@@ -18,13 +18,11 @@ import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
+  type PgBossTurnQueueOptions,
   SqliteMailboxStore,
   type TurnRef,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };
@@ -48,6 +46,7 @@ async function runtimeHarness(
     turnQueue?: (
       boss: PgBoss,
       mailboxStore: SqliteMailboxStore,
+      withTransaction: NonNullable<PgBossTurnQueueOptions['withTransaction']>,
     ) => PgBossTurnQueue;
   },
 ) {
@@ -61,15 +60,20 @@ async function runtimeHarness(
     instructions: [],
   };
   const pglite = new PGlite();
+  const withTransaction: NonNullable<
+    PgBossTurnQueueOptions['withTransaction']
+  > = (operation) =>
+    pglite.transaction((transaction) => operation(fromPglite(transaction)));
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const turnQueue =
-    options?.turnQueue?.(boss, mailboxStore) ??
+    options?.turnQueue?.(boss, mailboxStore, withTransaction) ??
     new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema: 'pgboss',
+      withTransaction,
     });
   await turnQueue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
@@ -78,7 +82,6 @@ async function runtimeHarness(
     streamStore,
     queue: turnQueue,
     mailboxStore,
-    approvalMutex,
   });
   return {
     runtime,
@@ -171,8 +174,16 @@ describe('zukhruf runtime mailbox delivery', () => {
     class DurabilityRecordingQueue extends PgBossTurnQueue {
       readonly #mailbox: SqliteMailboxStore;
 
-      constructor(boss: PgBoss, mailbox: SqliteMailboxStore) {
-        super(boss, { pollingIntervalSeconds: 0.5, schema: 'pgboss' });
+      constructor(
+        boss: PgBoss,
+        mailbox: SqliteMailboxStore,
+        withTransaction: NonNullable<PgBossTurnQueueOptions['withTransaction']>,
+      ) {
+        super(boss, {
+          pollingIntervalSeconds: 0.5,
+          schema: 'pgboss',
+          withTransaction,
+        });
         this.#mailbox = mailbox;
       }
 
@@ -184,8 +195,8 @@ describe('zukhruf runtime mailbox delivery', () => {
       }
     }
     await using h = await runtimeHarness(model, {
-      turnQueue: (boss, mailboxStore) =>
-        new DurabilityRecordingQueue(boss, mailboxStore),
+      turnQueue: (boss, mailboxStore, withTransaction) =>
+        new DurabilityRecordingQueue(boss, mailboxStore, withTransaction),
     });
     for (let index = 1; index <= 3; index++) {
       await h.runtime.deliver(

@@ -13,7 +13,6 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
@@ -26,6 +25,13 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef): Promise<void> {
     this.turns.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async getTurnActivity(
@@ -162,14 +168,12 @@ function harness(t: TestContext) {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
-  const approvalMutex = new SqliteApprovalMutex(':memory:');
   const queue = new ControlledTurnQueue();
   t.after(() => {
     streamStore.close();
     mailboxStore.close();
-    approvalMutex.close();
   });
-  return { store, streamStore, mailboxStore, approvalMutex, queue };
+  return { store, streamStore, mailboxStore, queue };
 }
 
 test('host config injects root guidance, spawn guidance, namespace, and wait bounds', async (t) => {
@@ -408,7 +412,6 @@ test('host config rejects invalid namespaces and wait bounds', () => {
     store: new InMemoryContextStore(),
     streamStore: new SqliteStreamStore(':memory:'),
     mailboxStore: new SqliteMailboxStore(':memory:'),
-    approvalMutex: new SqliteApprovalMutex(':memory:'),
     queue: new ControlledTurnQueue(),
   };
   try {
@@ -451,6 +454,5 @@ test('host config rejects invalid namespaces and wait bounds', () => {
   } finally {
     h.streamStore.close();
     h.mailboxStore.close();
-    h.approvalMutex.close();
   }
 });

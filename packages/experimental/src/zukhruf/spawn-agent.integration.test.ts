@@ -12,14 +12,11 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -34,6 +31,13 @@ class ControlledTurnQueue extends TurnQueue {
       throw new Error('queue unavailable');
     }
     this.turns.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async getTurnActivity(
@@ -194,7 +198,6 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
 
@@ -276,7 +279,6 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
     store,
     streamStore,
     mailboxStore,
-    approvalMutex,
     queue,
   });
   await using _worker = await runtime.work();

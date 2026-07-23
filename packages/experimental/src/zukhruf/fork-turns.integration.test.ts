@@ -13,14 +13,11 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -28,6 +25,13 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef): Promise<void> {
     this.turns.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async getTurnActivity(
@@ -231,7 +235,7 @@ async function spawnAfter(
       tools: options.tools,
       subagents: [worker],
     }),
-    { store, streamStore, mailboxStore, approvalMutex, queue },
+    { store, streamStore, mailboxStore, queue },
   );
   await using workerHandle = await runtime.work();
   void workerHandle;

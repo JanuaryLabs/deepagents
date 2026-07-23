@@ -2,6 +2,11 @@
 
 > Status: implemented; focused and package-level verification complete
 >
+> Superseded in part on 2026-07-22: the approval mutex described below was the
+> implemented 2026-07-14 design, but approval serialization now belongs to
+> `TurnQueue.serialize`; `ApprovalMutex` and its SQLite implementation were
+> removed. The original record remains below as historical evidence.
+>
 > This file is the durable execution record for removing the staged
 > `compareAndSetChatMetadata` and `compareAndSetMessageData` APIs without
 > regressing concurrent behavior.
@@ -193,3 +198,7 @@ in-process lock.
 - 2026-07-14: Full experimental suite passes 129/129. Full context suite passes
   1495/1499; its four failures are outside this change and the focused context
   concurrency suite passes 4/4. Both package typechecks pass.
+- 2026-07-22: The approval-mutex slice was superseded by generic queue-owned
+  per-chat serialization. `PgBossTurnQueue` now uses a PostgreSQL transaction
+  advisory lock; the separate SQLite coordination path and runtime option were
+  removed without changing approval or crash-recovery behavior.

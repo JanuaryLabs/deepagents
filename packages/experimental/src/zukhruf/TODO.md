@@ -60,11 +60,12 @@
 - [x] Runtime integration coverage for pause, approve, deny, queue-behind ordering, and concurrent/double approval.
 - [x] Make approval response → stream reopen → continuation push → parked-turn revival an
       idempotently repairable transition. A retry repairs failures after the durable response claim.
-- [x] Serialize concurrent approve-versus-deny with the required Zukhruf `ApprovalMutex` and wait for every approval in
-      the last step before scheduling one continuation.
-- [x] Keep the assistant message as the sole durable decision record while the mutex protects its
-      complete read–validate–rewrite transition. Concurrent decisions for different sibling tool
-      calls are both retained, and the SQLite mutex excludes independent processes.
+- [x] Serialize concurrent approve-versus-deny through generic `TurnQueue.serialize` and wait for
+      every approval in the last step before scheduling one continuation.
+- [x] Keep the assistant message as the sole durable decision record while queue-owned per-chat
+      coordination protects its complete read–validate–rewrite transition. Concurrent decisions
+      for different sibling tool calls are both retained, and PostgreSQL advisory locks exclude
+      independent processes without a separate coordination database.
 - [x] Suppress child terminal projection while an approval remains unresolved, report Codex V2's
       model-facing `running`, and prove exactly one post-continuation `FINAL_ANSWER`.
 - [x] A failed or cancelled continuation overrides approval-pause projection: parents receive the

@@ -40,10 +40,12 @@ and injected collaboration-tool implementations are internal wiring. See
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
 
 Runnable end-to-end showcases live in
+[`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete
+deployable unit),
 [`demo/zukhruf-durable-turns`](../../demo/zukhruf-durable-turns) (the durable
-executor: enqueue, detach, resume, strict per-chat FIFO) and
+executor: enqueue, detach, resume, strict per-chat FIFO),
 [`demo/zukhruf-mailbox`](../../demo/zukhruf-mailbox) (API-key-free host delivery,
-durable FIFO mail, and payload-free wakes) and
+durable FIFO mail, and payload-free wakes), and
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
 planner and researcher chats with mailbox-delivered findings).
 `spawn_agent` can fork all parent turns, no parent turns, or a bounded number of

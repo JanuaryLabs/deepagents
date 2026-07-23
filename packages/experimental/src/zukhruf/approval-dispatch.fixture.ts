@@ -18,15 +18,14 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   defineAgent,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 
-const [mode, connectionString, queueName, mailboxPath, approvalPath, ...rest] =
+const [mode, connectionString, queueName, mailboxPath, ...rest] =
   process.argv.slice(2);
-if (!mode || !connectionString || !queueName || !mailboxPath || !approvalPath) {
+if (!mode || !connectionString || !queueName || !mailboxPath) {
   throw new Error('approval dispatch fixture arguments are incomplete');
 }
 
@@ -177,21 +176,18 @@ async function createHost(
   await store.initialize();
   await streamStore.initialize();
   const mailboxStore = new SqliteMailboxStore(mailboxPath);
-  const approvalMutex = new SqliteApprovalMutex(approvalPath);
   return {
     runtime: new AgentRuntime(declaration, {
       store,
       streamStore,
       queue,
       mailboxStore,
-      approvalMutex,
     }),
     async close() {
       await boss.stop({ graceful: false });
       await store.close();
       await streamStore.close();
       mailboxStore.close();
-      approvalMutex.close();
     },
   };
 }

@@ -19,11 +19,8 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 const connectionString = process.argv[2];
 if (!connectionString)
@@ -87,7 +84,6 @@ const runtime = new AgentRuntime(declaration, {
   streamStore,
   queue,
   mailboxStore: new SqliteMailboxStore(':memory:'),
-  approvalMutex,
 });
 await runtime.work();
 console.log('WORKER READY');

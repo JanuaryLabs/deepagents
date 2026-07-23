@@ -20,15 +20,12 @@ import {
   type ConsumeContext,
   type ConsumeOptions,
   MessageDeliveryMode,
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
   createInterAgentCommunication,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
-
-const approvalMutex = new SqliteApprovalMutex(':memory:');
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };
@@ -102,6 +99,13 @@ class ManualTurnQueue extends TurnQueue {
       throw new Error('simulated queue push failure');
     }
     this.pending.push(turn);
+  }
+
+  override serialize<T>(
+    _chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return operation();
   }
 
   override async getTurnActivity(
@@ -195,7 +199,6 @@ function runtimeHarness(options?: {
       streamStore,
       queue,
       mailboxStore,
-      approvalMutex,
     },
   );
 
@@ -204,7 +207,6 @@ function runtimeHarness(options?: {
     queue,
     streamStore,
     mailboxStore,
-    approvalMutex,
     close() {
       mailboxStore.close();
       streamStore.close();
@@ -301,8 +303,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         history.flatMap((message) => {
           const content = (
             message.metadata as
-              | { interAgentCommunication?: { content?: string } }
-              | undefined
+              { interAgentCommunication?: { content?: string } } | undefined
           )?.interAgentCommunication?.content;
           return content ? [content] : [];
         }),
@@ -429,7 +430,6 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       store: contextStore,
       streamStore,
       mailboxStore,
-      approvalMutex,
       queue,
     };
     const agent = declaration(model);
@@ -504,7 +504,6 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       store: contextStore,
       streamStore,
       mailboxStore,
-      approvalMutex,
       queue,
     };
     const agent = declaration(model);
@@ -550,7 +549,6 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
       store: contextStore,
       streamStore,
       mailboxStore,
-      approvalMutex,
       queue,
     };
     const agent = declaration(textModel());
@@ -727,8 +725,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         history.flatMap((message) => {
           const content = (
             message.metadata as
-              | { interAgentCommunication?: { content?: string } }
-              | undefined
+              { interAgentCommunication?: { content?: string } } | undefined
           )?.interAgentCommunication?.content;
           return content ? [content] : [];
         }),

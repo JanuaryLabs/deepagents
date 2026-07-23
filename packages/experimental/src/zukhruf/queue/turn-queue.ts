@@ -92,6 +92,12 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
 export abstract class TurnQueue {
   abstract push(turn: TurnRef): Promise<void>;
 
+  /** Run caller-side control work under cross-process per-chat exclusion. */
+  abstract serialize<T>(
+    chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T>;
+
   /** Whether this conversation currently has queued or active scheduler work. */
   abstract getTurnActivity(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,

@@ -24,7 +24,7 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
+  type PgBossTurnQueueOptions,
   SqliteMailboxStore,
   type TurnRef,
   defineTool,
@@ -361,29 +361,35 @@ async function harness(
   model: AgentDeclaration['model'],
   tools?: ToolSet,
   options?: {
-    queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
+    queueFactory?: (
+      boss: PgBoss,
+      withTransaction: NonNullable<PgBossTurnQueueOptions['withTransaction']>,
+    ) => PgBossTurnQueue;
   },
 ) {
   const pglite = new PGlite();
+  const withTransaction: NonNullable<
+    PgBossTurnQueueOptions['withTransaction']
+  > = (operation) =>
+    pglite.transaction((transaction) => operation(fromPglite(transaction)));
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
   const queue =
-    options?.queueFactory?.(boss) ??
+    options?.queueFactory?.(boss, withTransaction) ??
     new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema: 'pgboss',
+      withTransaction,
     });
   await queue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
-  const approvalMutex = new SqliteApprovalMutex(':memory:');
   const runtime = new AgentRuntime(declaration(model, tools), {
     store: new InMemoryContextStore(),
     streamStore,
     queue,
     mailboxStore,
-    approvalMutex,
   });
   return {
     runtime,
@@ -395,7 +401,6 @@ async function harness(
       await pglite.close();
       streamStore.close();
       mailboxStore.close();
-      approvalMutex.close();
     },
   };
 }
@@ -762,10 +767,11 @@ describe('zukhruf runtime — background executor', () => {
   it('repairs a continuation handoff when approval is retried after queue failure', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools, {
-      queueFactory: (boss) =>
+      queueFactory: (boss, withTransaction) =>
         new FailOnceContinuationQueue(boss, {
           pollingIntervalSeconds: 0.5,
           schema: 'pgboss',
+          withTransaction,
         }),
     });
     await using _worker = await h.runtime.work();
@@ -794,10 +800,11 @@ describe('zukhruf runtime — background executor', () => {
   it('repairs parked-turn revival after the continuation already settled', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools, {
-      queueFactory: (boss) =>
+      queueFactory: (boss, withTransaction) =>
         new FailOnceResumeParkedQueue(boss, {
           pollingIntervalSeconds: 0.5,
           schema: 'pgboss',
+          withTransaction,
         }),
     });
     await using _worker = await h.runtime.work({ concurrency: 2 });
