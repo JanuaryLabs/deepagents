@@ -74,23 +74,21 @@ export class ApprovalController {
     const engine = this.#engineFor(conversation);
     const head = (await engine.getMessages()).at(-1);
     if (head?.role !== 'assistant' || head.id !== streamId) return;
-    const denied = head.parts.filter(
-      (part): part is ApprovalToolPart =>
+    const hasDenied = head.parts.some(
+      (part) =>
         isToolUIPart(part) &&
         part.state === 'approval-responded' &&
         part.approval.approved === false,
     );
-    if (denied.length === 0) return;
+    if (!hasDenied) return;
 
-    const deniedIds = new Set(denied.map((part) => part.toolCallId));
     const updated: UIMessage = {
       ...head,
       parts: head.parts.map((part) => {
         if (
           !isToolUIPart(part) ||
           part.state !== 'approval-responded' ||
-          part.approval.approved !== false ||
-          !deniedIds.has(part.toolCallId)
+          part.approval.approved !== false
         ) {
           return part;
         }
@@ -113,10 +111,10 @@ export class ApprovalController {
     const engine = this.#engineFor(conversation);
     const head = (await engine.getMessages()).at(-1);
     if (head?.role !== 'assistant' || head.id !== streamId) return;
-    const responded = head.parts.filter(
+    const hasResponded = head.parts.some(
       (part) => isToolUIPart(part) && part.state === 'approval-responded',
     );
-    if (responded.length === 0) return;
+    if (!hasResponded) return;
 
     const updated: UIMessage = {
       ...head,
@@ -156,10 +154,7 @@ export class ApprovalController {
       await this.settleFailedApprovals(
         conversation,
         streamId,
-        error ??
-          (status === 'cancelled'
-            ? 'approval continuation cancelled'
-            : 'approval continuation failed'),
+        error ?? `approval continuation ${status}`,
       );
     }
     await this.#queue.resumeParked(conversation.chatId);

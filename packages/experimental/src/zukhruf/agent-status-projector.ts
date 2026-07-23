@@ -79,11 +79,7 @@ export class AgentStatusProjector {
     const stream = streamId
       ? await this.#streams.store.getStream(streamId)
       : undefined;
-    const activity = await this.#queue.getTurnActivity(thread.conversation);
-    const scheduledTurn =
-      activity === 'idle'
-        ? undefined
-        : await this.#queue.getCurrentTurn(thread.conversation);
+    const scheduledTurn = await this.#queue.getCurrentTurn(thread.conversation);
     const scheduledStream = scheduledTurn
       ? await this.#streams.store.getStream(scheduledTurn.streamId)
       : undefined;
@@ -137,12 +133,12 @@ export class AgentStatusProjector {
       message?.role === 'assistant'
         ? AgentStatusProjector.#messageText(message)
         : '';
-    const content =
-      stream.status === 'failed'
-        ? `Agent failed: ${stream.error || 'unknown error'}`
-        : stream.status === 'cancelled'
-          ? 'Agent was interrupted.'
-          : text || 'Agent completed without a text response.';
+    let content = text || 'Agent completed without a text response.';
+    if (stream.status === 'failed') {
+      content = `Agent failed: ${stream.error || 'unknown error'}`;
+    } else if (stream.status === 'cancelled') {
+      content = 'Agent was interrupted.';
+    }
     const parent = await this.#directory.load({
       chatId: thread.parentChatId,
       userId: thread.conversation.userId,

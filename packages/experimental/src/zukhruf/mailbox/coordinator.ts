@@ -1,3 +1,5 @@
+import { setTimeout as delay } from 'node:timers/promises';
+
 import type { StreamManager } from '@deepagents/context';
 
 import { AgentTurnId } from '../agent-turn-id.ts';
@@ -92,10 +94,9 @@ export class MailboxCoordinator {
       if (await this.#store.hasPending(recipient)) return true;
       const remaining = deadline - Date.now();
       if (remaining <= 0) return false;
-      await MailboxCoordinator.#waitForDelay(
-        Math.min(WAIT_POLL_INTERVAL_MS, remaining),
-        options.signal,
-      );
+      await delay(Math.min(WAIT_POLL_INTERVAL_MS, remaining), undefined, {
+        signal: options.signal,
+      });
     }
   }
 
@@ -136,26 +137,5 @@ export class MailboxCoordinator {
 
   #conversationKey(conversation: ConversationId): string {
     return JSON.stringify([conversation.chatId, conversation.userId]);
-  }
-
-  static #waitForDelay(ms: number, signal?: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, ms);
-      const onAbort = () => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-        try {
-          signal?.throwIfAborted();
-        } catch (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      };
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
   }
 }

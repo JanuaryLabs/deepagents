@@ -113,12 +113,12 @@ export class AgentTurnExecutor {
       }
     }
 
-    const communications =
-      turn.kind === 'ask'
-        ? await this.#mailbox.drainLeadingQueueOnly(turn)
-        : turn.kind === 'mailbox'
-          ? await this.#mailbox.drain(turn)
-          : [];
+    let communications: InterAgentCommunication[] = [];
+    if (turn.kind === 'ask') {
+      communications = await this.#mailbox.drainLeadingQueueOnly(turn);
+    } else if (turn.kind === 'mailbox') {
+      communications = await this.#mailbox.drain(turn);
+    }
 
     if (turn.kind === 'mailbox' && communications.length === 0) {
       // Duplicate wakes are harmless scheduling receipts once mail is gone.
