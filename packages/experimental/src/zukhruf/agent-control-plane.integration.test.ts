@@ -52,15 +52,9 @@ class ControlledTurnQueue extends TurnQueue {
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
   #options?: ConsumeOptions;
 
-  override async push(turn: TurnRef): Promise<void> {
+  override async push(turn: TurnRef) {
     this.turns.push(turn);
-  }
-
-  override serialize<T>(
-    _chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    return operation();
+    return { jobId: turn.streamId, inserted: true };
   }
 
   override async consume(
@@ -165,15 +159,9 @@ class SharedControlledTurnQueue extends TurnQueue {
     this.#state = state;
   }
 
-  override async push(turn: TurnRef): Promise<void> {
+  override async push(turn: TurnRef) {
     this.#state.turns.push(turn);
-  }
-
-  override serialize<T>(
-    _chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    return operation();
+    return { jobId: turn.streamId, inserted: true };
   }
 
   override async consume(
@@ -1160,6 +1148,7 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
   await queue.runNext();
   await runtime.approve(conversation, { toolCallId: 'approved-sibling' });
   await runtime.deny(conversation, { toolCallId: 'denied-sibling' });
+  await queue.runNext();
   await queue.runNext();
 
   const message = (

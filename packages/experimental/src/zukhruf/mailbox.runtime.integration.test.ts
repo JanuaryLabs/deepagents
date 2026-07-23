@@ -18,7 +18,6 @@ import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  type PgBossTurnQueueOptions,
   SqliteMailboxStore,
   type TurnRef,
   createInterAgentCommunication,
@@ -46,7 +45,6 @@ async function runtimeHarness(
     turnQueue?: (
       boss: PgBoss,
       mailboxStore: SqliteMailboxStore,
-      withTransaction: NonNullable<PgBossTurnQueueOptions['withTransaction']>,
     ) => PgBossTurnQueue;
   },
 ) {
@@ -60,20 +58,15 @@ async function runtimeHarness(
     instructions: [],
   };
   const pglite = new PGlite();
-  const withTransaction: NonNullable<
-    PgBossTurnQueueOptions['withTransaction']
-  > = (operation) =>
-    pglite.transaction((transaction) => operation(fromPglite(transaction)));
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const turnQueue =
-    options?.turnQueue?.(boss, mailboxStore, withTransaction) ??
+    options?.turnQueue?.(boss, mailboxStore) ??
     new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema: 'pgboss',
-      withTransaction,
     });
   await turnQueue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
@@ -174,29 +167,24 @@ describe('zukhruf runtime mailbox delivery', () => {
     class DurabilityRecordingQueue extends PgBossTurnQueue {
       readonly #mailbox: SqliteMailboxStore;
 
-      constructor(
-        boss: PgBoss,
-        mailbox: SqliteMailboxStore,
-        withTransaction: NonNullable<PgBossTurnQueueOptions['withTransaction']>,
-      ) {
+      constructor(boss: PgBoss, mailbox: SqliteMailboxStore) {
         super(boss, {
           pollingIntervalSeconds: 0.5,
           schema: 'pgboss',
-          withTransaction,
         });
         this.#mailbox = mailbox;
       }
 
-      override async push(turn: TurnRef): Promise<void> {
+      override async push(turn: TurnRef) {
         if (turn.kind === 'mailbox') {
           wakePushObservations.push(await this.#mailbox.hasPending(researcher));
         }
-        await super.push(turn);
+        return super.push(turn);
       }
     }
     await using h = await runtimeHarness(model, {
-      turnQueue: (boss, mailboxStore, withTransaction) =>
-        new DurabilityRecordingQueue(boss, mailboxStore, withTransaction),
+      turnQueue: (boss, mailboxStore) =>
+        new DurabilityRecordingQueue(boss, mailboxStore),
     });
     for (let index = 1; index <= 3; index++) {
       await h.runtime.deliver(

@@ -1,10 +1,12 @@
-import type { Db, JobWithMetadata, PgBoss } from 'pg-boss';
+import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
 
+import { approvalJobId } from '../approval-job-id.ts';
 import {
   type ConsumeContext,
   type ConsumeOptions,
   type TurnActivity,
+  type TurnPushResult,
   TurnQueue,
   type TurnRef,
 } from './turn-queue.ts';
@@ -18,13 +20,7 @@ export interface PgBossTurnQueueOptions {
   /** Dead-worker detection window; must be >= 10 (pg-boss constraint). */
   heartbeatSeconds?: number;
   pollingIntervalSeconds?: number;
-  /** Required when PgBoss uses a custom database adapter. */
-  withTransaction?: <T>(
-    operation: (database: Pick<Db, 'executeSql'>) => Promise<T>,
-  ) => Promise<T>;
 }
-
-type PgBossTransaction = NonNullable<PgBossTurnQueueOptions['withTransaction']>;
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
@@ -65,7 +61,6 @@ export class PgBossTurnQueue extends TurnQueue {
   #cancelIntentTtlMs: number;
   #heartbeatSeconds: number;
   #pollingIntervalSeconds: number;
-  #withTransaction?: PgBossTransaction;
   #active = new Map<string, Set<AbortController>>();
   #cancelIntents = new Map<string, number>();
   #cancelIntentExpiryTimer?: ReturnType<typeof globalThis.setTimeout>;
@@ -74,17 +69,8 @@ export class PgBossTurnQueue extends TurnQueue {
     super();
     this.#boss = boss;
     this.#queue = options.queue ?? 'zukhruf-turns';
-    const database = boss.getDb() as Db & {
-      config?: { schema?: unknown };
-      withTransaction?: PgBossTransaction;
-    };
-    const databaseTransaction = database.withTransaction?.bind(database);
-    this.#withTransaction =
-      options.withTransaction ??
-      (databaseTransaction
-        ? (operation) => databaseTransaction(operation)
-        : undefined);
-    const configuredSchema = database.config?.schema;
+    const configuredSchema = (boss.getDb() as { config?: { schema?: unknown } })
+      .config?.schema;
     const bossSchema =
       typeof configuredSchema === 'string' ? configuredSchema : undefined;
     this.#schema = options.schema ?? bossSchema ?? 'pgboss';
@@ -125,11 +111,6 @@ export class PgBossTurnQueue extends TurnQueue {
   async initialize(): Promise<void> {
     if (this.#schemaConfigurationError) {
       throw new Error(this.#schemaConfigurationError);
-    }
-    if (!this.#withTransaction) {
-      throw new Error(
-        'PgBossTurnQueue requires options.withTransaction when PgBoss uses a custom database adapter',
-      );
     }
     if (!(await this.#boss.getQueue(this.deadLetterQueue))) {
       await this.#boss.createQueue(this.deadLetterQueue);
@@ -172,39 +153,30 @@ export class PgBossTurnQueue extends TurnQueue {
     }
   }
 
-  async push(turn: TurnRef): Promise<void> {
+  async push(turn: TurnRef): Promise<TurnPushResult> {
     // pg-boss fetches `ORDER BY priority desc, created_on, id`. A monotonic
     // UUIDv7 job id makes the id tiebreak follow push order, so FIFO survives
     // created_on timestamp ties (millisecond-resolution clocks like PGlite).
-    // Every push creates a job — delivery is at-least-once; turn-level dedup
-    // lives in the consumer (the runtime skips terminal streams).
-    // Continuations outrank waiting turns: revived parked jobs keep their
-    // original (older) created_on, so priority is what puts the continuation
-    // first.
-    await this.#boss.send(this.#queue, turn, {
-      id: uuidv7(),
+    // Non-approval pushes create new jobs for at-least-once delivery. Approval
+    // pushes use the persisted approval id, so pg-boss's id uniqueness makes
+    // concurrent commands converge on the first inserted decision.
+    // Approval and recovery jobs outrank waiting turns: revived parked jobs
+    // keep their original (older) created_on, so priority is what puts the
+    // command/recovery first.
+    const jobId =
+      turn.kind === 'approval'
+        ? approvalJobId(turn, turn.approvalId)
+        : uuidv7();
+    const inserted = await this.#boss.send(this.#queue, turn, {
+      id: jobId,
       singletonKey: turn.chatId,
-      priority: turn.kind === 'continuation' ? 1 : 0,
+      priority:
+        turn.kind === 'approval' || turn.kind === 'continuation' ? 1 : 0,
     });
-  }
-
-  override serialize<T>(
-    chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    const withTransaction = this.#withTransaction;
-    if (!withTransaction) {
-      throw new Error(
-        'PgBossTurnQueue.serialize() requires options.withTransaction when PgBoss uses a custom database adapter',
-      );
+    if (inserted === null && turn.kind !== 'approval') {
+      throw new Error(`PgBossTurnQueue job id collision: ${jobId}`);
     }
-    return withTransaction(async (database) => {
-      await database.executeSql(
-        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        [`${this.#queue}:${chatId}`],
-      );
-      return operation();
-    });
+    return { jobId, inserted: inserted !== null };
   }
 
   override async getTurnActivity(

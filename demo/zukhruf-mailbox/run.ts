@@ -77,8 +77,6 @@ await boss.start();
 const turnQueue = new PgBossTurnQueue(boss, {
   pollingIntervalSeconds: 0.5,
   schema: 'pgboss',
-  withTransaction: (operation) =>
-    pglite.transaction((transaction) => operation(fromPglite(transaction))),
 });
 await turnQueue.initialize();
 

@@ -14,6 +14,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { Client } from 'pg';
 import { PgBoss } from 'pg-boss';
 import { z } from 'zod';
 
@@ -72,6 +73,8 @@ interface DecisionResult {
   decision: 'approve' | 'deny';
   status: 'fulfilled' | 'rejected';
   id?: string;
+  jobId?: string;
+  approvalStatus?: 'queued' | 'already-queued' | 'already-applied';
   error?: string;
 }
 
@@ -111,8 +114,14 @@ test(
           results.map((result) => result.status),
           ['fulfilled', 'fulfilled'],
         );
+        assert.deepEqual(
+          results.map((result) => result.approvalStatus).sort(),
+          ['already-queued', 'queued'],
+        );
+        assert.equal(results[0]?.jobId, results[1]?.jobId);
         const jobs = await host.approvalJobs(conversation.chatId);
         assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.id, results[0]?.jobId);
         assert.equal(jobs[0]?.state, 'created');
         assert.equal(
           approvalPart(
@@ -190,7 +199,14 @@ test(
           results.map((result) => result.status),
           ['fulfilled', 'fulfilled'],
         );
-        assert.equal((await host.approvalJobs(conversation.chatId)).length, 1);
+        assert.deepEqual(
+          results.map((result) => result.approvalStatus).sort(),
+          ['already-queued', 'queued'],
+        );
+        assert.equal(results[0]?.jobId, results[1]?.jobId);
+        const jobs = await host.approvalJobs(conversation.chatId);
+        assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.id, results[0]?.jobId);
         assert.equal(
           approvalPart(
             await host.runtime.observe(conversation).engine.getMessages(),
@@ -252,9 +268,10 @@ test(
           id: crypto.randomUUID(),
           input: 'third',
         });
-        await firstHost.runtime.approve(conversation, {
+        const queued = await firstHost.runtime.approve(conversation, {
           toolCallId: part.toolCallId,
         });
+        assert.equal(queued.status, 'queued');
         assert.deepEqual(track.calls, ['send it']);
         assert.equal(track.toolRuns, 0, 'nothing executes without a worker');
         assert.equal(
@@ -280,6 +297,7 @@ test(
             track.calls.length === 4 &&
             messageText(current.at(-1)) === 'reply:third',
           'the restarted worker to finish the continuation and backlog',
+          30_000,
         );
         assert.deepEqual(track.calls, [
           'send it',
@@ -317,9 +335,10 @@ test(
         await worker[Symbol.asyncDispose]();
         worker = undefined;
 
-        await host.runtime.approve(conversation, {
+        const queued = await host.runtime.approve(conversation, {
           toolCallId: part.toolCallId,
         });
+        assert.equal(queued.status, 'queued');
         assert.equal((await host.approvalJobs(conversation.chatId)).length, 1);
 
         worker = await host.runtime.work();
@@ -333,10 +352,12 @@ test(
         );
         await waitForApprovalJobCount(host, conversation.chatId, 0);
 
-        await host.runtime.approve(conversation, {
+        const applied = await host.runtime.approve(conversation, {
           toolCallId: part.toolCallId,
         });
 
+        assert.equal(applied.status, 'already-applied');
+        assert.equal(applied.jobId, queued.jobId);
         assert.equal((await host.approvalJobs(conversation.chatId)).length, 0);
         assert.deepEqual(
           await host.runtime.observe(conversation).engine.getMessages(),
@@ -375,12 +396,15 @@ test(
         await worker[Symbol.asyncDispose]();
         worker = undefined;
 
-        await host.runtime.approve(conversation, {
+        const first = await host.runtime.approve(conversation, {
           toolCallId: parts[0]!.toolCallId,
         });
-        await host.runtime.approve(conversation, {
+        const second = await host.runtime.approve(conversation, {
           toolCallId: parts[1]!.toolCallId,
         });
+        assert.equal(first.status, 'queued');
+        assert.equal(second.status, 'queued');
+        assert.notEqual(first.jobId, second.jobId);
 
         const jobs = await host.approvalJobs(conversation.chatId);
         assert.equal(jobs.length, 2);
@@ -477,6 +501,98 @@ test(
           'the recovery worker never reruns the tool',
         );
       } finally {
+        await firstWorker?.[Symbol.asyncDispose]();
+        await recoveryWorker?.[Symbol.asyncDispose]();
+        if (crashedWorker) await stopFixtureProcess(crashedWorker);
+        await firstHost?.close();
+        await recoveryHost?.close();
+      }
+    });
+  },
+);
+
+test(
+  'an approval claimed before its decision is persisted survives worker death',
+  { timeout: 60_000 },
+  async () => {
+    await withScenario(async (scenario) => {
+      const track = { calls: [], toolRuns: 0 } satisfies ApprovalTrack;
+      const declaration = approvalDeclaration(track);
+      let firstHost: RuntimeHost | undefined;
+      let recoveryHost: RuntimeHost | undefined;
+      let firstWorker: AsyncDisposable | undefined;
+      let recoveryWorker: AsyncDisposable | undefined;
+      let crashedWorker: FixtureProcess | undefined;
+      let messageLock: Client | undefined;
+      try {
+        firstHost = await createHost(scenario, declaration);
+        firstWorker = await firstHost.runtime.work();
+        const conversation = {
+          chatId: `approval-pre-persist-crash-${crypto.randomUUID()}`,
+          userId: 'user-1',
+        };
+        const part = await pauseForApproval(firstHost.runtime, conversation);
+        const paused = (
+          await firstHost.runtime.observe(conversation).engine.getMessages()
+        ).at(-1);
+        assert.ok(paused);
+        await firstWorker[Symbol.asyncDispose]();
+        firstWorker = undefined;
+
+        crashedWorker = await startCrashWorker(scenario);
+        messageLock = new Client({
+          connectionString: scenario.connectionString,
+        });
+        await messageLock.connect();
+        await messageLock.query('BEGIN');
+        const locked = await messageLock.query(
+          'SELECT id FROM "public"."messages" WHERE id = $1 FOR UPDATE',
+          [paused.id],
+        );
+        assert.equal(locked.rowCount, 1);
+
+        const queued = await firstHost.runtime.approve(conversation, {
+          toolCallId: part.toolCallId,
+        });
+        assert.equal(queued.status, 'queued');
+        await waitForApprovalJobState(firstHost, conversation.chatId, 'active');
+        crashedWorker.child.kill('SIGKILL');
+        await waitForExit(crashedWorker.child);
+        await messageLock.query('ROLLBACK');
+        await messageLock.end();
+        messageLock = undefined;
+
+        assert.equal(
+          approvalPart(
+            await firstHost.runtime.observe(conversation).engine.getMessages(),
+          )?.state,
+          'approval-requested',
+          'the killed worker did not persist the decision',
+        );
+        assert.equal(track.toolRuns, 0);
+
+        await firstHost.close();
+        firstHost = undefined;
+        recoveryHost = await createHost(scenario, declaration);
+        recoveryWorker = await recoveryHost.runtime.work();
+
+        const messages = await waitForConversation(
+          recoveryHost.runtime,
+          conversation,
+          (current) =>
+            track.calls.length === 2 &&
+            approvalPart(current)?.state === 'output-available',
+          'the claimed approval to recover without another caller retry',
+          45_000,
+        );
+        assert.equal(approvalPart(messages)?.state, 'output-available');
+        assert.equal(track.toolRuns, 1);
+        assert.deepEqual(track.calls, ['send it', 'send it']);
+      } finally {
+        if (messageLock) {
+          await messageLock.query('ROLLBACK');
+          await messageLock.end();
+        }
         await firstWorker?.[Symbol.asyncDispose]();
         await recoveryWorker?.[Symbol.asyncDispose]();
         if (crashedWorker) await stopFixtureProcess(crashedWorker);
@@ -890,6 +1006,21 @@ async function waitForApprovalJobCount(
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`timed out waiting for ${count} approval jobs`);
+}
+
+async function waitForApprovalJobState(
+  host: RuntimeHost,
+  chatId: string,
+  state: string,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const jobs = await host.approvalJobs(chatId);
+    if (jobs.some((job) => job.state === state)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for an approval job in ${state}`);
 }
 
 async function withScenario(

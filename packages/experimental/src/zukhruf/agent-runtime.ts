@@ -120,7 +120,6 @@ export class AgentRuntime {
     });
     const approvals = new ApprovalController({
       store: options.store,
-      streams,
       queue: options.queue,
     });
     const statusProjector = new AgentStatusProjector({
@@ -208,8 +207,8 @@ export class AgentRuntime {
       }
       let declaration: AgentDeclaration | undefined;
       if (
-        turn.kind === 'continuation' &&
-        turn.recoveryAttempt === undefined &&
+        (turn.kind === 'approval' ||
+          (turn.kind === 'continuation' && turn.recovery !== 'idempotent')) &&
         stream?.status === 'failed'
       ) {
         try {
@@ -228,9 +227,19 @@ export class AgentRuntime {
       ) {
         return;
       }
+      if (
+        (turn.kind === 'approval' || turn.kind === 'continuation') &&
+        stream?.status === 'completed' &&
+        (await this.#approvals.recoverUnstartedContinuation(
+          turn,
+          turn.streamId,
+        ))
+      ) {
+        return;
+      }
       stream = await this.#streams.store.getStream(turn.streamId);
       if (
-        turn.kind === 'continuation' &&
+        (turn.kind === 'approval' || turn.kind === 'continuation') &&
         (stream?.status === 'completed' ||
           stream?.status === 'failed' ||
           stream?.status === 'cancelled')
@@ -256,7 +265,7 @@ export class AgentRuntime {
       await this.#controlPlane.projectTerminal(turn, thread);
     } finally {
       try {
-        if (turn.kind === 'continuation') {
+        if (turn.kind === 'approval' || turn.kind === 'continuation') {
           await this.#queue.resumeParked(turn.chatId);
         }
       } finally {

@@ -2,10 +2,9 @@
 
 > Status: implemented; focused and package-level verification complete
 >
-> Superseded in part on 2026-07-22: the approval mutex described below was the
-> implemented 2026-07-14 design, but approval serialization now belongs to
-> `TurnQueue.serialize`; `ApprovalMutex` and its SQLite implementation were
-> removed. The original record remains below as historical evidence.
+> Updated on 2026-07-23: approval coordination is a queue-native command flow.
+> The API only reads ContextEngine and enqueues a deterministic approval job;
+> the worker owns the persisted decision and direct original-turn resumption.
 >
 > This file is the durable execution record for removing the staged
 > `compareAndSetChatMetadata` and `compareAndSetMessageData` APIs without
@@ -75,13 +74,14 @@ are safe.
 ### Approvals
 
 - The existing assistant message remains the canonical and model-facing state.
-- Approval handling updates that same assistant message ID immediately.
+- The API process never mutates the assistant message.
 - Repeated identical decisions are idempotent.
-- Concurrent conflicting decisions choose exactly one durable winner; the loser
-  receives a conflict error.
+- Concurrent conflicting commands address one deterministic job ID; the first
+  queued command becomes the durable winner.
+- A conflict is immediate only after the opposite decision is persisted.
 - Concurrent decisions for different sibling tool calls are both retained.
-- A continuation is scheduled only after every sibling approval is answered.
-- Exactly one continuation executes, and parked turns retain their order.
+- The final sibling approval job resumes the original turn exactly once.
+- Parked turns retain their order behind approval commands.
 - Queue/revival failures remain retry-repairable.
 - Failed or cancelled continuations settle approval parts and unblock the chat.
 - Coordination works across independent runtime processes, not only within one
@@ -113,25 +113,22 @@ The updater is synchronous so arbitrary asynchronous work is never performed
 while a database row lock is held. This is a generic atomic chat mutation, not
 a Zukhruf-specific primitive.
 
-### Zukhruf-owned approval mutex
+### Queue-native approval commands
 
 Delete `compareAndSetMessageData`. Approval decisions continue to live in the
-same assistant message. `ApprovalController` performs the complete
-read–validate–rewrite operation inside an application-owned mutex keyed by the
-conversation ID, so the chain head is read only after the lock is held.
+same assistant message, but only the turn worker mutates them.
 
-The first implementation is `SqliteApprovalMutex` in the Zukhruf package:
-
-- a local async gate serializes calls sharing the same mutex database path;
-- a SQLite `BEGIN IMMEDIATE` transaction serializes independent processes that
-  share the mutex database;
-- the lock is held only across the assistant read and blind in-place write;
-- process death releases the database lock;
-- the assistant message remains the durable source of truth, so a crash before
-  or after the write is repaired by the existing idempotent retry path.
-
-`AgentRuntimeOptions` requires the mutex. There is no optional fallback to an
-in-process lock.
+- The API reads `approval.id` from the persisted tool part.
+- The queue job ID is
+  `uuidv5("approval:" + approvalId, conversationNamespace)`.
+- `singletonKey = chatId` preserves conversation-wide serialization.
+- pg-boss job-ID uniqueness chooses the first concurrently queued decision.
+- Different sibling approval IDs create different jobs.
+- The worker rechecks ContextEngine before applying the decision.
+- `approval-responded` remains the permanent idempotency record after queue
+  cleanup.
+- The final sibling job reopens and resumes the original turn directly.
+- Recovery-only continuation jobs repair a worker crash after persistence.
 
 ## Execution tasks
 
@@ -157,14 +154,14 @@ in-process lock.
 - [x] Replace CAS-specific tests with public concurrent-update behavior tests.
 - [x] Run `nx run context:typecheck` and the focused context integration tests.
 
-### Slice 3 — Zukhruf approval mutex
+### Slice 3 — Zukhruf approval commands
 
-- [x] Add the minimal `ApprovalMutex` port under Zukhruf.
-- [x] Add `SqliteApprovalMutex` with same-process and cross-process exclusion.
-- [x] Require the mutex in `AgentRuntimeOptions` and all runtime compositions.
-- [x] Put approval read–validate–rewrite inside the mutex.
-- [x] Keep stream reopening, continuation scheduling, and parked-turn revival
-      outside the lock and retry-repairable.
+- [x] Add approval turns to `TurnQueue`.
+- [x] Derive deterministic queue identity from the persisted approval ID.
+- [x] Keep `AgentRuntimeOptions` free of a separate approval coordinator.
+- [x] Make API approval calls read-only except for queue insertion.
+- [x] Put approval read–validate–rewrite and direct resumption in the worker.
+- [x] Retain a recovery-only continuation path for crash reconciliation.
 - [x] Remove `compareAndSetMessageData` from `ContextStore` and all adapters.
 - [x] Remove message-CAS fixtures and adapter contract tests.
 - [x] Replace CAS-barrier runtime tests with public concurrent approval tests
@@ -175,7 +172,7 @@ in-process lock.
 
 - [x] Remove stale CAS language from `DESIGN.md`, `TODO.md`, and the completed
       runtime refactor plan.
-- [x] Update demos to construct the required approval mutex.
+- [x] Keep demos on the standard queue construction path.
 - [x] Verify no CAS symbols remain outside this historical plan with `rg`.
 - [x] Run `nx run context:test` (1495/1499 pass; four unrelated existing tests
       fail: one Agent OS abort timing assertion and three stored-owner
@@ -198,7 +195,6 @@ in-process lock.
 - 2026-07-14: Full experimental suite passes 129/129. Full context suite passes
   1495/1499; its four failures are outside this change and the focused context
   concurrency suite passes 4/4. Both package typechecks pass.
-- 2026-07-22: The approval-mutex slice was superseded by generic queue-owned
-  per-chat serialization. `PgBossTurnQueue` now uses a PostgreSQL transaction
-  advisory lock; the separate SQLite coordination path and runtime option were
-  removed without changing approval or crash-recovery behavior.
+- 2026-07-23: Caller-side approval coordination was replaced by deterministic
+  queue-native approval commands. Cross-process approval races now converge on
+  one pg-boss job, while ContextEngine remains the permanent result.

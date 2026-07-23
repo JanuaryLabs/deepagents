@@ -92,20 +92,14 @@ class ManualTurnQueue extends TurnQueue {
     options: ConsumeOptions;
   };
 
-  override async push(turn: TurnRef): Promise<void> {
+  override async push(turn: TurnRef) {
     this.attempted.push(turn);
     if (this.failPushes > 0) {
       this.failPushes--;
       throw new Error('simulated queue push failure');
     }
     this.pending.push(turn);
-  }
-
-  override serialize<T>(
-    _chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    return operation();
+    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(

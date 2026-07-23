@@ -26,15 +26,9 @@ class RecordingTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
 
-  override async push(turn: TurnRef): Promise<void> {
+  override async push(turn: TurnRef) {
     this.turns.push(turn);
-  }
-
-  override serialize<T>(
-    _chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    return operation();
+    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(

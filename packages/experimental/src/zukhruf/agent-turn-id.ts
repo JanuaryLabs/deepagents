@@ -18,7 +18,7 @@ export class AgentTurnId {
     if (!requestId.trim()) {
       throw new Error('turn id cannot be empty');
     }
-    const scope = AgentTurnId.#scope(conversation);
+    const scope = conversationNamespace(conversation);
     return new AgentTurnId(
       `${AgentTurnId.#prefix}:${scope}:${uuidv5(requestId, scope)}`,
     );
@@ -29,7 +29,7 @@ export class AgentTurnId {
   }
 
   static assertOwner(conversation: ConversationId, streamId: string): void {
-    const expectedPrefix = `${AgentTurnId.#prefix}:${AgentTurnId.#scope(conversation)}:`;
+    const expectedPrefix = `${AgentTurnId.#prefix}:${conversationNamespace(conversation)}:`;
     if (!streamId.startsWith(expectedPrefix)) {
       throw new Error(
         `stream "${streamId}" does not belong to conversation "${conversation.chatId}"`,
@@ -40,14 +40,14 @@ export class AgentTurnId {
   toString(): string {
     return this.#value;
   }
+}
 
-  static #scope(conversation: ConversationId): string {
-    if (!conversation.chatId.trim() || !conversation.userId.trim()) {
-      throw new Error('conversation requires non-empty chatId and userId');
-    }
-    return uuidv5(
-      JSON.stringify([conversation.userId, conversation.chatId]),
-      uuidv5.URL,
-    );
+export function conversationNamespace(conversation: ConversationId): string {
+  if (!conversation.chatId.trim() || !conversation.userId.trim()) {
+    throw new Error('conversation requires non-empty chatId and userId');
   }
+  return uuidv5(
+    JSON.stringify([conversation.userId, conversation.chatId]),
+    uuidv5.URL,
+  );
 }

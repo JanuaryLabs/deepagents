@@ -24,20 +24,14 @@ class ControlledTurnQueue extends TurnQueue {
   failNextChildPush = false;
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
 
-  override async push(turn: TurnRef): Promise<void> {
+  override async push(turn: TurnRef) {
     this.attemptedTurns.push(turn);
     if (this.failNextChildPush && turn.chatId !== 'root-chat') {
       this.failNextChildPush = false;
       throw new Error('queue unavailable');
     }
     this.turns.push(turn);
-  }
-
-  override serialize<T>(
-    _chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    return operation();
+    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(

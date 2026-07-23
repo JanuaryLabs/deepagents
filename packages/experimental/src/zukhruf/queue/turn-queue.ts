@@ -16,13 +16,17 @@ export type TurnRef = {
     }
   | {
       /**
-       * Re-execution of an existing (reopened) stream after a tool approval
-       * or denial. Carries no payload: the chain was already updated in
-       * place by `approve()`/`deny()`.
+       * Recovery-only re-execution of an existing stream. Normal approval
+       * responses resume directly inside their approval job.
        */
       kind: 'continuation';
-      /** Present only for the single automatic idempotent crash replay. */
-      recoveryAttempt?: 1;
+      recovery?: 'handoff' | 'idempotent';
+    }
+  | {
+      kind: 'approval';
+      toolCallId: string;
+      approvalId: string;
+      decision: { approved: true } | { approved: false; reason?: string };
     }
   | {
       /**
@@ -32,6 +36,13 @@ export type TurnRef = {
       kind: 'mailbox';
     }
 );
+
+export interface TurnPushResult {
+  jobId: string;
+  inserted: boolean;
+}
+
+export type ApprovalTurnRef = Extract<TurnRef, { kind: 'approval' }>;
 
 export interface ConsumeContext {
   signal: AbortSignal;
@@ -61,11 +72,14 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  *
  * Contract every implementation must honor:
  * - `push` is durable: a pushed turn survives process death until consumed.
- * - Delivery is AT-LEAST-ONCE: a pushed turn is delivered until settled, and
+ * - Delivery is AT-LEAST-ONCE: a pushed non-approval turn is delivered until settled, and
  *   duplicate pushes of the same `streamId` may each be delivered. Consumers
  *   MUST be idempotent on `streamId` (the zukhruf runtime skips turns whose
  *   stream row is terminal — a check that, unlike queue-side dedup, never
  *   expires with job retention).
+ * - Approval pushes use their persisted approval id as a deterministic job
+ *   identity. The first decision inserts; later decisions for that approval
+ *   report the existing job instead of adding a row.
  * - Per chat, at most ONE handler invocation is active at a time, and turns
  *   run in the order they were pushed (strict FIFO per `chatId`) — this
  *   covers duplicates too: they can never run concurrently or out of order.
@@ -84,19 +98,13 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  *   authority.
  * - A parked turn (`context.park()`) is not delivered again until
  *   `resumeParked(chatId)`; revived turns keep their original FIFO order,
- *   and a `'continuation'` turn pushed for the chat outranks them.
+ *   and approval/recovery turns pushed for the chat outrank them.
  *
  * On platforms with native per-conversation serialization (e.g. Durable
  * Objects) this port is absorbed by the host rather than implemented.
  */
 export abstract class TurnQueue {
-  abstract push(turn: TurnRef): Promise<void>;
-
-  /** Run caller-side control work under cross-process per-chat exclusion. */
-  abstract serialize<T>(
-    chatId: string,
-    operation: () => Promise<T>,
-  ): Promise<T>;
+  abstract push(turn: TurnRef): Promise<TurnPushResult>;
 
   /** Whether this conversation currently has queued or active scheduler work. */
   abstract getTurnActivity(

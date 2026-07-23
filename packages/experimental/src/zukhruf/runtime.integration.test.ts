@@ -24,7 +24,6 @@ import {
   type AgentDeclaration,
   AgentRuntime,
   PgBossTurnQueue,
-  type PgBossTurnQueueOptions,
   SqliteMailboxStore,
   type TurnRef,
   defineTool,
@@ -333,18 +332,6 @@ function declaration(
   };
 }
 
-class FailOnceContinuationQueue extends PgBossTurnQueue {
-  #shouldFail = true;
-
-  override async push(turn: TurnRef): Promise<void> {
-    if (turn.kind === 'continuation' && this.#shouldFail) {
-      this.#shouldFail = false;
-      throw new Error('simulated continuation queue outage');
-    }
-    await super.push(turn);
-  }
-}
-
 class FailOnceResumeParkedQueue extends PgBossTurnQueue {
   #shouldFail = true;
 
@@ -361,26 +348,18 @@ async function harness(
   model: AgentDeclaration['model'],
   tools?: ToolSet,
   options?: {
-    queueFactory?: (
-      boss: PgBoss,
-      withTransaction: NonNullable<PgBossTurnQueueOptions['withTransaction']>,
-    ) => PgBossTurnQueue;
+    queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
   },
 ) {
   const pglite = new PGlite();
-  const withTransaction: NonNullable<
-    PgBossTurnQueueOptions['withTransaction']
-  > = (operation) =>
-    pglite.transaction((transaction) => operation(fromPglite(transaction)));
   const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
   boss.on('error', () => {});
   await boss.start();
   const queue =
-    options?.queueFactory?.(boss, withTransaction) ??
+    options?.queueFactory?.(boss) ??
     new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema: 'pgboss',
-      withTransaction,
     });
   await queue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
@@ -431,6 +410,45 @@ async function waitForStatus(
     await sleep(25);
   }
   throw new Error(`timed out waiting for ${accept.join('/')} on ${id}`);
+}
+
+function messageText(message: UIMessage | undefined): string {
+  return (
+    message?.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('') ?? ''
+  );
+}
+
+async function waitForConversation(
+  runtime: AgentRuntime,
+  conversation: { chatId: string; userId: string },
+  predicate: (messages: UIMessage[]) => boolean,
+  label: string,
+  timeoutMs = 10_000,
+): Promise<UIMessage[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const messages = await runtime.observe(conversation).engine.getMessages();
+    if (predicate(messages)) return messages;
+    await sleep(25);
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+async function waitForText(
+  runtime: AgentRuntime,
+  conversation: { chatId: string; userId: string },
+  expected: string,
+): Promise<void> {
+  await waitForConversation(
+    runtime,
+    conversation,
+    (messages) =>
+      messages.some((message) => messageText(message).includes(expected)),
+    `"${expected}"`,
+  );
 }
 
 describe('zukhruf runtime — background executor', () => {
@@ -681,8 +699,9 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
     });
     assert.equal(resumed.id, ask.id, 'continuation reuses the turn id');
-    const { text } = await collectText(resumed.stream);
-    assert.equal(text, 'done:send it');
+    assert.equal(resumed.status, 'queued');
+    assert.match(resumed.jobId, /^[0-9a-f-]{36}$/);
+    await waitForText(h.runtime, conversation, 'done:send it');
 
     assert.equal(track.toolRuns, 1, 'tool executed exactly once');
     const messages = await h.runtime.observe(conversation).engine.getMessages();
@@ -694,7 +713,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
   });
 
-  it('waits for every sibling approval before scheduling one continuation', async () => {
+  it('waits for every sibling approval before resuming the original turn once', async () => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -702,7 +721,21 @@ describe('zukhruf runtime — background executor', () => {
     const ask = await h.runtime.enqueue(conversation, turn('send both'));
     await collectText(ask.stream);
 
-    await h.runtime.approve(conversation, { toolCallId: 'first-email' });
+    const first = await h.runtime.approve(conversation, {
+      toolCallId: 'first-email',
+    });
+    assert.equal(first.status, 'queued');
+    await waitForConversation(
+      h.runtime,
+      conversation,
+      (messages) =>
+        messages
+          .at(-1)
+          ?.parts.filter(isToolUIPart)
+          .map((part) => part.state)
+          .join(',') === 'approval-responded,approval-requested',
+      'the first sibling approval',
+    );
     assert.equal(
       await h.streamStore.getStreamStatus(ask.id),
       'completed',
@@ -718,11 +751,11 @@ describe('zukhruf runtime — background executor', () => {
       ['approval-responded', 'approval-requested'],
     );
 
-    const resumed = await h.runtime.deny(conversation, {
+    await h.runtime.deny(conversation, {
       toolCallId: 'second-email',
       reason: 'skip the second',
     });
-    assert.equal((await collectText(resumed.stream)).text, 'both approved');
+    await waitForText(h.runtime, conversation, 'both approved');
     assert.equal(track.toolRuns, 1, 'only the approved sibling executed');
     assert.equal(track.calls.length, 2, 'exactly one continuation was sampled');
   });
@@ -764,47 +797,13 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('repairs a continuation handoff when approval is retried after queue failure', async () => {
+  it('repairs parked-turn revival in the worker after the resumed turn settles', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools, {
-      queueFactory: (boss, withTransaction) =>
-        new FailOnceContinuationQueue(boss, {
-          pollingIntervalSeconds: 0.5,
-          schema: 'pgboss',
-          withTransaction,
-        }),
-    });
-    await using _worker = await h.runtime.work();
-    const conversation = { chatId: 'approval-handoff-retry', userId: 'u1' };
-    const ask = await h.runtime.enqueue(conversation, turn('send it'));
-    await collectText(ask.stream);
-    const { part } = await pausedToolCall(h.runtime, conversation);
-
-    await assert.rejects(
-      h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
-      /simulated continuation queue outage/,
-    );
-    assert.equal(await h.streamStore.getStreamStatus(ask.id), 'queued');
-
-    const repaired = await h.runtime.approve(conversation, {
-      toolCallId: part.toolCallId,
-    });
-    assert.equal(
-      await waitForStatus(h.streamStore, ask.id, ['completed'], 3_000),
-      'completed',
-    );
-    assert.equal((await collectText(repaired.stream)).text, 'done:send it');
-    assert.equal(track.toolRuns, 1, 'the repaired continuation executes once');
-  });
-
-  it('repairs parked-turn revival after the continuation already settled', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools, {
-      queueFactory: (boss, withTransaction) =>
+      queueFactory: (boss) =>
         new FailOnceResumeParkedQueue(boss, {
           pollingIntervalSeconds: 0.5,
           schema: 'pgboss',
-          withTransaction,
         }),
     });
     await using _worker = await h.runtime.work({ concurrency: 2 });
@@ -830,26 +829,15 @@ describe('zukhruf runtime — background executor', () => {
     }
     assert.equal(parkedState, 'cancelled', 'the follow-up is parked first');
 
-    await assert.rejects(
-      h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
-      /simulated parked-turn revival outage/,
-    );
-    const continuedDeadline = Date.now() + 3_000;
-    while (track.calls.length < 2 && Date.now() < continuedDeadline) {
-      await sleep(25);
-    }
-    assert.deepStrictEqual(track.calls.slice(0, 2), ['send it', 'send it']);
-    assert.equal(
-      await waitForStatus(h.streamStore, ask.id, ['completed'], 3_000),
-      'completed',
-      'the continuation is terminal before the explicit repair',
-    );
-
-    await h.runtime.approve(conversation, { toolCallId: part.toolCallId });
-    const revivedDeadline = Date.now() + 3_000;
+    const queued = await h.runtime.approve(conversation, {
+      toolCallId: part.toolCallId,
+    });
+    assert.equal(queued.status, 'queued');
+    const revivedDeadline = Date.now() + 5_000;
     while (track.calls.length < 3 && Date.now() < revivedDeadline) {
       await sleep(25);
     }
+    assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
     assert.deepStrictEqual(track.calls, [
       'send it',
       'send it',
@@ -868,12 +856,11 @@ describe('zukhruf runtime — background executor', () => {
     );
     const { part } = await pausedToolCall(h.runtime, conversation);
 
-    const resumed = await h.runtime.deny(conversation, {
+    await h.runtime.deny(conversation, {
       toolCallId: part.toolCallId,
       reason: 'not today',
     });
-    const { text } = await collectText(resumed.stream);
-    assert.equal(text, 'denied:send it');
+    await waitForText(h.runtime, conversation, 'denied:send it');
     assert.equal(track.toolRuns, 0, 'tool never executed');
 
     const final = (
@@ -910,15 +897,14 @@ describe('zukhruf runtime — background executor', () => {
       'gated turns parked — model untouched while approval pends',
     );
 
-    const resumed = await h.runtime.approve(conversation, {
+    await h.runtime.approve(conversation, {
       toolCallId: part.toolCallId,
     });
-    const [continuation, b, c] = await Promise.all([
-      collectText(resumed.stream),
+    const [, b, c] = await Promise.all([
+      waitForText(h.runtime, conversation, 'done:send it'),
       collectText(second.stream),
       collectText(third.stream),
     ]);
-    assert.equal(continuation.text, 'done:send it');
     assert.equal(b.text, 'reply:two');
     assert.equal(c.text, 'reply:three');
     assert.deepStrictEqual(
@@ -946,17 +932,17 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
     });
     assert.equal(again.id, first.id);
-
-    const [a, b] = await Promise.all([
-      collectText(first.stream),
-      collectText(again.stream),
-    ]);
-    assert.equal(a.text, 'done:send it');
-    assert.equal(b.text, 'done:send it');
+    assert.equal(again.jobId, first.jobId);
+    await waitForText(h.runtime, conversation, 'done:send it');
+    const applied = await h.runtime.approve(conversation, {
+      toolCallId: part.toolCallId,
+    });
+    assert.equal(applied.status, 'already-applied');
+    assert.equal(applied.jobId, first.jobId);
     assert.equal(track.toolRuns, 1, 'tool executed exactly once');
   });
 
-  it('a paused turn leaves no queue job, and approving cleans up the continuation too', async () => {
+  it('a paused turn leaves no queue job, and approving cleans up the approval job too', async () => {
     const { tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -976,10 +962,10 @@ describe('zukhruf runtime — background executor', () => {
       'the paused turn committed to the chain, so its job is gone — the pause lives only in the chain',
     );
 
-    const resumed = await h.runtime.approve(conversation, {
+    await h.runtime.approve(conversation, {
       toolCallId: part.toolCallId,
     });
-    await collectText(resumed.stream);
+    await waitForText(h.runtime, conversation, 'done:send it');
     await sleep(400);
 
     const afterApprove = await h.boss.findJobs(h.queue.queue, {
@@ -988,7 +974,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.deepStrictEqual(
       afterApprove.map((j) => j.state),
       [],
-      'the continuation job is deleted once it commits — nothing accumulates',
+      'the approval job is deleted once it commits — nothing accumulates',
     );
   });
 
@@ -1003,12 +989,11 @@ describe('zukhruf runtime — background executor', () => {
     );
     const { part } = await pausedToolCall(h.runtime, conversation);
 
-    const resumed = await h.runtime.deny(conversation, {
+    await h.runtime.deny(conversation, {
       toolCallId: part.toolCallId,
       reason: 'nope',
     });
-    const { text } = await collectText(resumed.stream);
-    assert.equal(text, 'denied:send it');
+    await waitForText(h.runtime, conversation, 'denied:send it');
     assert.equal(track.toolRuns, 0, 'tool never ran');
     await sleep(400);
 
@@ -1058,16 +1043,15 @@ describe('zukhruf runtime — background executor', () => {
       'parked follow-ups survive maintenance — no retention deadline',
     );
 
-    const resumed = await h.runtime.approve(conversation, {
+    await h.runtime.approve(conversation, {
       toolCallId: part.toolCallId,
     });
-    const [cont, b, c, d] = await Promise.all([
-      collectText(resumed.stream),
+    const [, b, c, d] = await Promise.all([
+      waitForText(h.runtime, conversation, 'done:send it'),
       collectText(second.stream),
       collectText(third.stream),
       collectText(fourth.stream),
     ]);
-    assert.equal(cont.text, 'done:send it');
     assert.equal(b.text, 'reply:two');
     assert.equal(c.text, 'reply:three');
     assert.equal(d.text, 'reply:four');
@@ -1138,10 +1122,10 @@ describe('zukhruf runtime — background executor', () => {
     // Approving revives every cancelled job for the chat — including the
     // user-cancelled follow-up — but executeTurn's terminal-stream check skips
     // it, so it never reaches the model and its job is cleaned up.
-    const resumed = await h.runtime.approve(conversation, {
+    await h.runtime.approve(conversation, {
       toolCallId: part.toolCallId,
     });
-    assert.equal((await collectText(resumed.stream)).text, 'done:send it');
+    await waitForText(h.runtime, conversation, 'done:send it');
     await sleep(600);
 
     assert.deepStrictEqual(
@@ -1181,10 +1165,10 @@ describe('zukhruf runtime — background executor', () => {
       'pause survived the cancel',
     );
 
-    const resumed = await h.runtime.approve(conversation, {
+    await h.runtime.approve(conversation, {
       toolCallId: part.toolCallId,
     });
-    assert.equal((await collectText(resumed.stream)).text, 'done:send it');
+    await waitForText(h.runtime, conversation, 'done:send it');
     assert.equal(track.toolRuns, 1, 'still approvable after the no-op cancel');
   });
 
@@ -1199,14 +1183,14 @@ describe('zukhruf runtime — background executor', () => {
     );
     const { part } = await pausedToolCall(h.runtime, conversation);
 
-    // Fire two approves in parallel: one wins manager.reopen, the other loses
-    // the race and reattaches in ApprovalController. Outcome is invariant.
+    // Both calls calculate the same deterministic approval job identity.
     const [a, b] = await Promise.all([
       h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
       h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
     ]);
     assert.equal(a.id, b.id, 'both approves resolve to the same turn');
-    await Promise.all([collectText(a.stream), collectText(b.stream)]);
+    assert.equal(a.jobId, b.jobId, 'both approves address the same queue job');
+    await waitForText(h.runtime, conversation, 'done:send it');
     await sleep(600);
 
     assert.equal(
@@ -1226,18 +1210,22 @@ describe('zukhruf runtime — background executor', () => {
     assert.deepStrictEqual(
       leftover.map((j) => j.state),
       [],
-      'no duplicate or leftover continuation jobs',
+      'no duplicate or leftover approval jobs',
     );
   });
 
-  it('serializes concurrent approve and deny so one durable decision wins', async () => {
+  it('queues concurrent approve and deny as the same command so one durable decision wins', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
-    await using _worker = await h.runtime.work();
     const conversation = { chatId: 'approval-decision-race', userId: 'u1' };
-    const ask = await h.runtime.enqueue(conversation, turn('send it'));
-    await collectText(ask.stream);
-    const { part } = await pausedToolCall(h.runtime, conversation);
+    let ask: Awaited<ReturnType<typeof h.runtime.enqueue>>;
+    let part: Awaited<ReturnType<typeof pausedToolCall>>['part'];
+    {
+      await using _worker = await h.runtime.work();
+      ask = await h.runtime.enqueue(conversation, turn('send it'));
+      await collectText(ask.stream);
+      ({ part } = await pausedToolCall(h.runtime, conversation));
+    }
 
     const outcomes = await Promise.allSettled([
       h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
@@ -1248,32 +1236,46 @@ describe('zukhruf runtime — background executor', () => {
     ]);
     assert.equal(
       outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
-      1,
+      2,
       outcomes
         .map((outcome) =>
           outcome.status === 'fulfilled'
-            ? 'fulfilled'
+            ? outcome.value.status
             : `rejected:${String(outcome.reason)}`,
         )
         .join(', '),
     );
-    const rejected = outcomes.find(
-      (outcome): outcome is PromiseRejectedResult =>
-        outcome.status === 'rejected',
+    const commands = outcomes.flatMap((outcome) =>
+      outcome.status === 'fulfilled' ? [outcome.value] : [],
     );
-    assert.match(
-      String(rejected?.reason),
-      /approval already answered with a different decision/,
-    );
+    assert.equal(commands[0]?.jobId, commands[1]?.jobId);
+    assert.deepStrictEqual(commands.map((command) => command.status).sort(), [
+      'already-queued',
+      'queued',
+    ]);
 
-    await waitForStatus(h.streamStore, ask.id, ['completed']);
+    {
+      await using _worker = await h.runtime.work();
+      await waitForConversation(
+        h.runtime,
+        conversation,
+        (messages) =>
+          messages
+            .at(-1)
+            ?.parts.some(
+              (candidate) =>
+                isToolUIPart(candidate) &&
+                candidate.toolCallId === part.toolCallId &&
+                candidate.state !== 'approval-requested',
+            ) === true,
+        'the queued decision',
+      );
+    }
     const final = (
       await h.runtime.observe(conversation).engine.getMessages()
     ).at(-1)!;
     const decided = final.parts.find(isToolUIPart)!;
-    const approveWon = outcomes[0].status === 'fulfilled';
-    assert.equal(decided.approval?.approved, approveWon);
-    assert.equal(track.toolRuns, approveWon ? 1 : 0);
+    assert.equal(track.toolRuns, decided.approval?.approved === true ? 1 : 0);
     assert.equal(track.calls.length, 2, 'the winning decision continued once');
   });
 

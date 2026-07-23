@@ -149,10 +149,14 @@ type TurnRef = {
   streamId;
   chatId;
   userId;
-} & ({ kind: 'ask'; input } | { kind: 'continuation' } | { kind: 'mailbox' });
+} & (
+  | { kind: 'ask'; input }
+  | { kind: 'approval'; toolCallId; approvalId; decision }
+  | { kind: 'continuation'; recovery }
+  | { kind: 'mailbox' }
+);
 abstract class TurnQueue {
-  push(turn: TurnRef): Promise<void>;
-  serialize<T>(chatId: string, operation: () => Promise<T>): Promise<T>;
+  push(turn: TurnRef): Promise<{ jobId: string; inserted: boolean }>;
   consume(
     handler: (turn, { signal }) => Promise<void>,
     options: { concurrency?; onOrphaned(turn, error) },
@@ -163,12 +167,12 @@ abstract class TurnQueue {
 
 Contract: per chat at most ONE active handler, strict FIFO per chat, cross-chat concurrency; a
 crashed handler/worker surfaces once through `onOrphaned` (no retry), then the chat unblocks.
-`serialize` runs caller-side control work under the same implementation's cross-process per-chat
-coordination without requiring a worker; it does not turn control work into a queue job.
+Approval commands use deterministic job identity from their persisted approval ID, so concurrent
+API processes converge on one queued command without mutating context themselves.
 
 ### pg-boss implementation _(Built — `queue/pg-boss.turn-queue.ts`)_
 
-`PgBossTurnQueue(boss /* borrowed */, {queue?, schema?, withTransaction?})` on pg-boss v12 (all
+`PgBossTurnQueue(boss /* borrowed */, {queue?, schema?})` on pg-boss v12 (all
 semantics live-verified):
 
 - **Schema is explicit for custom database adapters** — pg-boss does not expose the configured
@@ -176,14 +180,12 @@ semantics live-verified):
   must pass the same `schema` to `PgBossTurnQueue`; the built-in database path is read directly.
   Initialization validates the queue catalog/table without creating transient probe queues, so
   preprovisioned least-privilege deployments do not need catalog-write permission at startup.
-- **Caller-side serialization uses PostgreSQL transaction advisory locks** — `serialize(chatId)`
-  holds `pg_advisory_xact_lock` on the queue-namespaced chat key while the caller performs its
-  durable control mutation. The built-in pg-boss database supplies the pinned transaction;
-  custom adapters must pass `withTransaction` (PGlite uses its native transaction callback).
-  Process death releases the lock, and no turn worker is required.
-
 - **`key_strict_fifo` policy + `singletonKey = chatId`** — per-chat serialization is structural:
   1 active per key, unlimited queued, strict push order, failed job blocks the key.
+- **Approval IDs are queue IDs** — an approval job uses
+  `uuidv5("approval:" + approvalId, conversationNamespace)` and `singletonKey = chatId`.
+  pg-boss's job-ID uniqueness makes approve, deny, and duplicates for one approval converge on the
+  first inserted command. Different sibling approval IDs remain distinct jobs.
 - **`retryLimit: 0`** — the stale-turn decision in config: a crashed turn is never silently re-run
   (its bash already executed); it dead-letters instead.
 - **Heartbeats are the lease** — `heartbeatSeconds` + `work()`'s automatic heartbeat; the pg-boss
@@ -464,36 +466,42 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
 A `needsApproval` tool call ends the agent loop mid-answer (SDK-native — probe-verified through
 `agent()`/`chat()` with ZERO context-package changes). **The pause is pure data**: the assistant
 message commits with an `approval-requested` tool part (chain head) and the stream goes terminal —
-nothing is in-flight, so the pause survives crashes/restarts for free. `approve()` flips the part
-to `approval-responded {approved: true}`, persists in place (`engine.continue(assistant)`),
-reopens the stream, and pushes a continuation; on re-run **the AI SDK itself executes the tool**
-(`output-available`, real output) and generation continues into the same assistant message.
-`deny()` claims `{approved: false, reason}` durably, schedules the same continuation, and settles the
-part as `output-denied`; the tool never runs.
+nothing is in-flight, so the pause survives crashes/restarts for free.
+
+`approve()` and `deny()` are asynchronous command helpers. The API process reads the tool part,
+derives the deterministic job ID from `approval.id`, and queues `{kind: 'approval', ...decision}`.
+It never mutates ContextEngine or reopens the stream. The return value identifies the original turn
+and command:
+
+```ts
+{ id, jobId, status: 'queued' | 'already-queued' | 'already-applied' }
+```
+
+The worker re-reads the paused tool part, applies the winning decision, and persists
+`approval-responded`. It finishes immediately while sibling approvals remain. The final sibling's
+approval job reopens and resumes the original turn directly; normal approval does not create a
+separate continuation job. On re-run **the AI SDK itself executes an approved tool**
+(`output-available`, real output), while denial settles as `output-denied` and never executes it.
 Note: `reopenStream` wipes the prior chunk log (FK cascade) — each segment is a fresh streaming
 surface; full history lives in the chain, which is the source of truth anyway.
 
-- **Identity: nothing new on the context-store port.** Stream id and assistant id stay fused, and under the
-  at-least-once contract the port needs no dedup key at all — a continuation is just another push
-  (fresh v7 job id). The assistant message remains the sole durable approval record.
-  `TurnQueue.serialize` protects the complete read–validate–rewrite transition under the queue
-  implementation's per-chat cross-process coordination. Repeated identical decisions repair or
-  reattach to the same continuation, a conflicting decision is rejected, and decisions for
-  different siblings are both preserved. A continuation is scheduled only after every sibling
-  approval has a response, and a duplicate continuation job is skipped by the terminal-stream
-  check after the first one completes. Reopen, continuation push, and parked-turn revival remain
-  outside the serialized mutation so retries can repair partial handoffs.
+- **ContextEngine is permanent deduplication state.** While the part is
+  `approval-requested`, the API may enqueue the deterministic command. The same persisted decision
+  returns `already-applied`; the opposite persisted decision is a conflict. A queued opposite
+  command cannot report an immediate conflict because both decisions address the same job ID; the
+  worker's recheck makes the first queued command durable. After pg-boss deletes the command,
+  `approval-responded` still prevents retries from creating another job.
 - **Mid-approval user messages: QUEUE BEHIND** _(decided, built)_. The FIFO alone can't enforce
   this (the paused turn's job completed, so the key unblocks), so gated turns **park**:
   `AgentTurnExecutor` sees a pending tool part at the chain head and calls `context.park()` — before
   touching the chain or sandbox.
 - **Parking = park-as-cancelled** _(built; contract-tested)_: `park()` self-cancels the claimed job
-  (clean, no worker errors); cancelled jobs don't block the key, so the continuation runs;
-  `approve()/deny()` pushes the continuation at `priority: 1` (outranks parked rows' older
+  (clean, no worker errors); cancelled jobs don't block the key, so the approval command runs;
+  approval commands use `priority: 1` (outranks parked rows' older
   `created_on`) and `resumeParked(chatId)` revives parked jobs with their original `created_on` —
   FIFO order reassembles for free. No polling, no new storage. `park`/`resumeParked` are port
   surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by two contract tests
-  (no redelivery until revival + original order; continuation outranks revived turns).
+  (no redelivery until revival + original order; approval command outranks revived turns).
 - **Disambiguation**: parked turn = job `cancelled` + stream row `queued`; user-cancelled turn =
   stream row `cancelled` (its job is also `cancelled`). `resumeParked` revives **every** cancelled
   job for the chat without inspecting stream rows — a revived user-cancelled turn is harmless because
@@ -524,11 +532,11 @@ surface; full history lives in the chain, which is the source of truth anyway.
 - **Still Open here**: an abandoned approval keeps its parked job forever (bounded by abandoned
   gated chats; folds into the per-chat GC item, not a time TTL); cancel-of-paused-turn semantics
   (paused stream is terminal, cancel no-ops — semantically it should probably mean deny).
-- **Recoverable handoff**: response claim, stream reopen, continuation push, and parked-turn revival
-  are separate durable mutations, but the transition is retry-repairable from every injected
-  queue-failure boundary. Continuation completion always reconciles parked turns, and an identical
-  approval retry after the stream is terminal performs the same repair. The regression suite covers
-  sibling approvals, mixed concurrent decisions, queue/revival failure, and child terminal
+- **Recoverable handoff**: the approval job owns response persistence, stream reopening, direct
+  resumption, and parked-turn revival. A worker crash after `approval-responded` but before direct
+  resumption is detected from durable state and schedules a recovery-only continuation job.
+  Continuation completion always reconciles parked turns. The regression suite covers sibling
+  approvals, mixed concurrent decisions, worker crashes, queue/revival failure, and child terminal
   projection.
 - **Idempotent continuation crash recovery**: when every approved tool in the continuation declares
   `recovery: 'idempotent'`, orphan cleanup reopens the failed stream and schedules one recovery

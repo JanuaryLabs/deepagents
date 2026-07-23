@@ -7,12 +7,9 @@ import {
   PgBoss,
   fromPglite,
 } from 'pg-boss';
+import { v5 as uuidv5 } from 'uuid';
 
-import type {
-  PgBossTurnQueueOptions,
-  TurnQueue,
-  TurnRef,
-} from '@deepagents/experimental/zukhruf';
+import type { TurnQueue, TurnRef } from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
 
 /**
@@ -37,13 +34,6 @@ export interface TurnQueueHarness extends AsyncDisposable {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function pgliteTransaction(
-  pglite: PGlite,
-): NonNullable<PgBossTurnQueueOptions['withTransaction']> {
-  return (operation) =>
-    pglite.transaction((transaction) => operation(fromPglite(transaction)));
-}
 
 async function waitFor(
   condition: () => boolean,
@@ -91,12 +81,20 @@ function ref(chat: string, n: number): AskRef {
   };
 }
 
-function continuationRef(chat: string): TurnRef {
+type ApprovalRef = Extract<TurnRef, { kind: 'approval' }>;
+
+function approvalRef(
+  chat: string,
+  decision: ApprovalRef['decision'] = { approved: true },
+): ApprovalRef {
   return {
-    kind: 'continuation',
-    streamId: `turn/${chat}#continuation:${crypto.randomUUID()}`,
+    kind: 'approval',
+    streamId: `turn/${chat}#approval:${crypto.randomUUID()}`,
     chatId: chat,
     userId: 'u1',
+    toolCallId: 'tool-call-1',
+    approvalId: 'approval-1',
+    decision,
   };
 }
 
@@ -107,25 +105,6 @@ export function turnQueueContract(
   makeQueue: () => Promise<TurnQueueHarness>,
 ) {
   describe(`TurnQueue contract — ${name}`, () => {
-    it('serializes caller-side control work without a consumer', async () => {
-      await using h = await makeQueue();
-      let active = 0;
-      let maxActive = 0;
-
-      await Promise.all(
-        [1, 2].map((attempt) =>
-          h.queue.serialize('control', async () => {
-            active++;
-            maxActive = Math.max(maxActive, active);
-            await sleep(25 * attempt);
-            active--;
-          }),
-        ),
-      );
-
-      assert.equal(maxActive, 1);
-    });
-
     it('delivers a turn pushed before any consumer existed, payload intact', async () => {
       await using h = await makeQueue();
       const pushed = ref('durable', 1);
@@ -336,6 +315,39 @@ export function turnQueueContract(
       assert.equal(maxActive, 1, 'duplicates never run concurrently');
     });
 
+    it('deduplicates opposite commands for one persisted approval id', async () => {
+      await using h = await makeQueue();
+      const approve = approvalRef('approval-dedup');
+      const deny = {
+        ...approve,
+        decision: { approved: false, reason: 'no' },
+      } satisfies ApprovalRef;
+
+      const first = await h.queue.push(approve);
+      const second = await h.queue.push(deny);
+      const namespace = uuidv5(
+        JSON.stringify([approve.userId, approve.chatId]),
+        uuidv5.URL,
+      );
+      const expectedId = uuidv5(`approval:${approve.approvalId}`, namespace);
+      assert.deepStrictEqual(first, {
+        jobId: expectedId,
+        inserted: true,
+      });
+      assert.deepStrictEqual(second, {
+        jobId: expectedId,
+        inserted: false,
+      });
+
+      const seen: TurnRef[] = [];
+      await using _consumer = await h.queue.consume(async (turn) => {
+        seen.push(turn);
+      }, noOrphans);
+      await waitFor(() => seen.length === 1, 'the winning approval command');
+      await sleep(1_000);
+      assert.deepStrictEqual(seen, [approve]);
+    });
+
     it('turns in one chat run strictly FIFO, one at a time', async () => {
       await using h = await makeQueue();
       for (const n of [1, 2, 3]) await h.queue.push(ref('fifo', n));
@@ -529,7 +541,7 @@ export function turnQueueContract(
       );
     });
 
-    it('a continuation outranks revived parked turns of its chat', async () => {
+    it('an approval command outranks revived parked turns of its chat', async () => {
       await using h = await makeQueue();
       const ran: string[] = [];
 
@@ -542,7 +554,7 @@ export function turnQueueContract(
       await waitFor(() => parkCount === 1, 'turn parked');
       await gatekeeper[Symbol.asyncDispose]();
 
-      await h.queue.push(continuationRef('ranked'));
+      await h.queue.push(approvalRef('ranked'));
       await h.queue.resumeParked('ranked');
 
       await using _consumer = await h.queue.consume(async (turn) => {
@@ -552,8 +564,8 @@ export function turnQueueContract(
       await waitFor(() => ran.length === 2, 'both delivered');
       assert.deepStrictEqual(
         ran,
-        ['continuation', 'ask'],
-        'continuation runs before the revived (older created_on) parked turn',
+        ['approval', 'ask'],
+        'approval runs before the revived (older created_on) parked turn',
       );
     });
 
@@ -585,7 +597,6 @@ turnQueueContract('PgBossTurnQueue (pglite)', async () => {
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
-    withTransaction: pgliteTransaction(pglite),
   });
   await queue.initialize();
   return {
@@ -605,7 +616,6 @@ it('does not delete or overlap a turn claimed after the cancellation snapshot', 
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
-    withTransaction: pgliteTransaction(pglite),
   });
   await queue.initialize();
 
@@ -738,7 +748,6 @@ it('delivers cancellation to a local handler registered after cancel returns', a
   const queue = new PgBossTurnQueue(boss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
-    withTransaction: pgliteTransaction(pglite),
   });
   await queue.initialize();
   const first = ref('late-registration', 1);
@@ -856,7 +865,6 @@ it('fails fast when a custom-adapter schema is omitted and accepts it explicitly
   const decoyQueue = new PgBossTurnQueue(decoyBoss, {
     pollingIntervalSeconds: 0.5,
     schema: 'pgboss',
-    withTransaction: pgliteTransaction(pglite),
   });
   await decoyQueue.initialize();
   await decoyBoss.stop({ graceful: false });
@@ -897,7 +905,6 @@ it('fails fast when a custom-adapter schema is omitted and accepts it explicitly
     const queue = new PgBossTurnQueue(boss, {
       pollingIntervalSeconds: 0.5,
       schema,
-      withTransaction: pgliteTransaction(pglite),
     });
     try {
       await queue.initialize();

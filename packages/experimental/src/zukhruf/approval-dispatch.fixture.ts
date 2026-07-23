@@ -70,6 +70,8 @@ async function runDecision(args: string[]): Promise<void> {
         decision,
         status: 'fulfilled',
         id: turn.id,
+        jobId: turn.jobId,
+        approvalStatus: turn.status,
       });
     } catch (error) {
       await send({

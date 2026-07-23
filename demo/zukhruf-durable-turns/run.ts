@@ -25,8 +25,6 @@ await boss.start();
 const queue = new PgBossTurnQueue(boss, {
   pollingIntervalSeconds: 0.5,
   schema: 'pgboss',
-  withTransaction: (operation) =>
-    database.transaction((transaction) => operation(fromPglite(transaction))),
 });
 await queue.initialize();
 const mailboxStore = new SqliteMailboxStore('./zukhruf.mailbox.sqlite');

@@ -15,11 +15,7 @@ const boss = new PgBoss({ db: fromPglite(database), backend: 'pglite' });
 boss.on('error', (error) => console.error('[queue error]', error));
 await boss.start();
 
-const queue = new PgBossTurnQueue(boss, {
-  schema: 'pgboss',
-  withTransaction: (operation) =>
-    database.transaction((transaction) => operation(fromPglite(transaction))),
-});
+const queue = new PgBossTurnQueue(boss, { schema: 'pgboss' });
 await queue.initialize();
 
 const streamStore = new SqliteStreamStore(':memory:');

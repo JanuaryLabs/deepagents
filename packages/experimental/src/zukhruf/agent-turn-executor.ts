@@ -57,6 +57,22 @@ export class AgentTurnExecutor {
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
+    if (turn.kind === 'approval') {
+      if (!(await this.#approvals.applyDecision(turn))) return;
+      await this.#reopen(turn.streamId);
+      return this.execute(
+        {
+          kind: 'continuation',
+          streamId: turn.streamId,
+          chatId: turn.chatId,
+          userId: turn.userId,
+        },
+        context,
+      );
+    }
+    if (turn.kind === 'continuation' && turn.recovery !== undefined) {
+      await this.#reopen(turn.streamId);
+    }
     if (await this.#projectSkippedTerminalTurn(turn)) return;
 
     let parked = false;
@@ -208,6 +224,12 @@ export class AgentTurnExecutor {
       stream.status,
       stream.error,
     );
+  }
+
+  async #reopen(streamId: string): Promise<void> {
+    const status = await this.#streams.store.getStreamStatus(streamId);
+    if (status === 'queued' || status === 'running') return;
+    await this.#streams.reopen(streamId);
   }
 
   async #prepareChain(
