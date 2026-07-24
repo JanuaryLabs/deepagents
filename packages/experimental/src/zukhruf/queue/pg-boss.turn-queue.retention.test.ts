@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
-import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { type TestContext, describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -9,19 +10,16 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { timebox } from '@deepagents/test';
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function waitFor(
+function waitFor(
+  t: TestContext,
   condition: () => boolean,
   what: string,
   timeoutMs = 10_000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (condition()) return;
-    await sleep(25);
-  }
-  throw new Error(`timed out waiting for: ${what}`);
+): Promise<void> {
+  return t.waitFor(
+    () => assert.ok(condition(), `timed out waiting for: ${what}`),
+    { interval: 25, timeout: timeoutMs },
+  );
 }
 
 function ref(chat: string, n: number): TurnRef {
@@ -74,7 +72,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     );
   });
 
-  it('deletes a job the moment its turn commits — completed turns do not accumulate', async () => {
+  it('deletes a job the moment its turn commits — completed turns do not accumulate', async (t) => {
     await using h = await makeQueue();
     const seen: string[] = [];
     await using _consumer = await h.queue.consume(async (turn) => {
@@ -83,7 +81,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
 
     await h.queue.push(ref('c1', 1));
     await h.queue.push(ref('c1', 2));
-    await waitFor(() => seen.length === 2, 'both turns committed');
+    await waitFor(t, () => seen.length === 2, 'both turns committed');
     await sleep(300);
 
     const remaining = await h.boss.findJobs(h.queue.queue, { key: 'c1' });
@@ -94,7 +92,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     );
   });
 
-  it('keeps a parked turn through a maintenance pass, then revives and cleans it up', async () => {
+  it('keeps a parked turn through a maintenance pass, then revives and cleans it up', async (t) => {
     await using h = await makeQueue();
     let gateOpen = false;
     let parkCount = 0;
@@ -109,7 +107,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     }, noOrphans);
 
     await h.queue.push(ref('gchat', 1));
-    await waitFor(() => parkCount === 1, 'turn parked');
+    await waitFor(t, () => parkCount === 1, 'turn parked');
 
     const parked = await h.boss.findJobs(h.queue.queue, { key: 'gchat' });
     assert.deepStrictEqual(
@@ -130,7 +128,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
 
     gateOpen = true;
     await h.queue.resumeParked('gchat');
-    await waitFor(() => ran.length === 1, 'revived turn runs');
+    await waitFor(t, () => ran.length === 1, 'revived turn runs');
     await sleep(300);
     const done = await h.boss.findJobs(h.queue.queue, { key: 'gchat' });
     assert.deepStrictEqual(
@@ -140,7 +138,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     );
   });
 
-  it('deleteAfterSeconds:0 is load-bearing: a parked turn outlives a retention window that deletes a job without it', async () => {
+  it('deleteAfterSeconds:0 is load-bearing: a parked turn outlives a retention window that deletes a job without it', async (t) => {
     await using h = await makeQueue(); // our turns queue uses deleteAfterSeconds:0
 
     // A control queue whose terminal jobs DO expire, on a 1-second clock.
@@ -158,7 +156,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
       await ctx.park();
     }, noOrphans);
     await h.queue.push(ref('gchat', 1));
-    await waitFor(() => parkCount === 1, 'turn parked on the durable queue');
+    await waitFor(t, () => parkCount === 1, 'turn parked on the durable queue');
 
     // A cancelled control job that IS on a retention clock (deleteAfterSeconds:1).
     const controlId = await h.boss.send(

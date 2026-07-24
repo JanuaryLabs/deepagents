@@ -11,7 +11,7 @@ import {
   StreamManager,
   type StreamStatus,
 } from '@deepagents/context';
-import { withPostgresContainer } from '@deepagents/test';
+import { settleWithin, withPostgresContainer } from '@deepagents/test';
 
 const POSTGRES_18 = { image: 'postgres:18-alpine' };
 
@@ -96,19 +96,6 @@ function isTransientPostgresStartupError(error: unknown): boolean {
     maybeCode === 'ECONNREFUSED' ||
     maybeCode === '57P03'
   );
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  label: string,
-  timeoutMs = 5_000,
-): Promise<T> {
-  return await Promise.race([
-    promise,
-    sleep(timeoutMs).then(() => {
-      throw new Error(`${label} timed out after ${timeoutMs}ms`);
-    }),
-  ]);
 }
 
 async function waitForStatus(
@@ -471,7 +458,7 @@ describe('PostgreSQL StreamStore Integration', () => {
 
       await store.appendChunks([createChunk(stream.id, 1)]);
       await store.updateStreamStatus(stream.id, 'completed');
-      await withTimeout(consume, 'polling stream watch');
+      await settleWithin(consume, 'polling stream watch');
 
       assert.deepStrictEqual(received, [textDeltaChunk(0), textDeltaChunk(1)]);
     }));
@@ -511,7 +498,7 @@ describe('PostgreSQL StreamStore Integration', () => {
       });
 
       await waitForStatus(store, streamId, 'failed');
-      await withTimeout(persistPromise, 'persist error chunk');
+      await settleWithin(persistPromise, 'persist error chunk');
 
       const updated = await store.getStream(streamId);
       assert.ok(updated);

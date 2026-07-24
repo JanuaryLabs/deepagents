@@ -2,6 +2,7 @@ import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   type AgentModel,
@@ -612,7 +613,7 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
   await runtime.observe(conversation).cancel(enqueued.id);
   releaseSandbox.resolve();
   await running;
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await sleep(25);
 
   assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
   assert.equal(modelCalls, 0);
@@ -717,7 +718,7 @@ test('cancellation after execution claim aborts pending provider setup', async (
   await providerStarted.promise;
 
   await runtime.observe(conversation).cancel(enqueued.id);
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await sleep(25);
   const aborted = providerSignal?.aborted;
   releaseProvider.resolve();
   await running;

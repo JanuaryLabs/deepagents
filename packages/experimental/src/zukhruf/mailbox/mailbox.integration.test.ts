@@ -1,7 +1,7 @@
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -18,14 +18,14 @@ const reviewer = { chatId: 'reviewer', userId: 'user-1' };
 
 const holdWriteLock = `
   import { DatabaseSync } from 'node:sqlite';
+  import { setTimeout as sleep } from 'node:timers/promises';
 
   const database = new DatabaseSync(process.argv[1]);
   database.exec('BEGIN IMMEDIATE');
   process.stdout.write('locked\\n');
-  setTimeout(() => {
-    database.exec('COMMIT');
-    database.close();
-  }, 200);
+  await sleep(200);
+  database.exec('COMMIT');
+  database.close();
 `;
 
 function mail(content: string) {
@@ -146,8 +146,10 @@ describe('zukhruf mailbox', () => {
   });
 
   it('does not redeliver a consumed terminal id after store restart', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'zukhruf-mailbox-dedup-'));
-    const path = join(directory, 'mailbox.sqlite');
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-mailbox-dedup-'),
+    );
+    const path = join(directory.path, 'mailbox.sqlite');
     const completion = createInterAgentCommunication({
       id: 'child-completion:stream-consumed',
       type: InterAgentCommunicationType.FinalAnswer,
@@ -155,103 +157,93 @@ describe('zukhruf mailbox', () => {
       recipient: root,
       content: 'finished once',
     });
-    try {
-      {
-        using firstStore = new SqliteMailboxStore(path);
-        await firstStore.enqueue(completion);
-        assert.deepStrictEqual(
-          (await firstStore.drainLeadingQueueOnly(root)).map(
-            ({ content }) => content,
-          ),
-          ['finished once'],
-        );
-      }
-
-      using restartedStore = new SqliteMailboxStore(path);
-      await restartedStore.enqueue(completion);
-      assert.deepStrictEqual(await restartedStore.drain(root), []);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+    {
+      using firstStore = new SqliteMailboxStore(path);
+      await firstStore.enqueue(completion);
+      assert.deepStrictEqual(
+        (await firstStore.drainLeadingQueueOnly(root)).map(
+          ({ content }) => content,
+        ),
+        ['finished once'],
+      );
     }
+
+    using restartedStore = new SqliteMailboxStore(path);
+    await restartedStore.enqueue(completion);
+    assert.deepStrictEqual(await restartedStore.drain(root), []);
   });
 
   it('keeps pending mail across store re-instantiation', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'zukhruf-mailbox-'));
-    const path = join(directory, 'mailbox.sqlite');
-    try {
-      {
-        using firstStore = new SqliteMailboxStore(path);
-        await firstStore.enqueue(mail('survives restart'));
-      }
-
-      using secondStore = new SqliteMailboxStore(path);
-      assert.deepStrictEqual(
-        (await secondStore.drain(researcher)).map(
-          (communication) => communication.content,
-        ),
-        ['survives restart'],
-      );
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-mailbox-'),
+    );
+    const path = join(directory.path, 'mailbox.sqlite');
+    {
+      using firstStore = new SqliteMailboxStore(path);
+      await firstStore.enqueue(mail('survives restart'));
     }
+
+    using secondStore = new SqliteMailboxStore(path);
+    assert.deepStrictEqual(
+      (await secondStore.drain(researcher)).map(
+        (communication) => communication.content,
+      ),
+      ['survives restart'],
+    );
   });
 
   it('atomically hands active-turn mail off across store instances', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'zukhruf-mailbox-active-'));
-    const path = join(directory, 'mailbox.sqlite');
-    try {
-      using turnStore = new SqliteMailboxStore(path);
-      using senderStore = new SqliteMailboxStore(path);
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-mailbox-active-'),
+    );
+    const path = join(directory.path, 'mailbox.sqlite');
+    using turnStore = new SqliteMailboxStore(path);
+    using senderStore = new SqliteMailboxStore(path);
 
-      await turnStore.beginTurn(researcher, 'turn-1');
-      assert.deepStrictEqual(await senderStore.enqueue(mail('before end')), {
-        recipientActive: true,
-      });
-      assert.deepStrictEqual(await turnStore.endTurn(researcher, 'turn-1'), {
-        hasPending: true,
-        turnEnded: true,
-      });
+    await turnStore.beginTurn(researcher, 'turn-1');
+    assert.deepStrictEqual(await senderStore.enqueue(mail('before end')), {
+      recipientActive: true,
+    });
+    assert.deepStrictEqual(await turnStore.endTurn(researcher, 'turn-1'), {
+      hasPending: true,
+      turnEnded: true,
+    });
 
-      assert.deepStrictEqual(await senderStore.enqueue(mail('after end')), {
-        recipientActive: false,
-      });
-      assert.deepStrictEqual(await turnStore.endTurn(researcher, 'turn-1'), {
-        hasPending: true,
-        turnEnded: false,
-      });
-      assert.deepStrictEqual(
-        (await turnStore.drain(researcher)).map(({ content }) => content),
-        ['before end', 'after end'],
-      );
-      assert.deepStrictEqual(await turnStore.endTurn(researcher, 'turn-1'), {
-        hasPending: false,
-        turnEnded: false,
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    assert.deepStrictEqual(await senderStore.enqueue(mail('after end')), {
+      recipientActive: false,
+    });
+    assert.deepStrictEqual(await turnStore.endTurn(researcher, 'turn-1'), {
+      hasPending: true,
+      turnEnded: false,
+    });
+    assert.deepStrictEqual(
+      (await turnStore.drain(researcher)).map(({ content }) => content),
+      ['before end', 'after end'],
+    );
+    assert.deepStrictEqual(await turnStore.endTurn(researcher, 'turn-1'), {
+      hasPending: false,
+      turnEnded: false,
+    });
   });
 
   it('waits for cross-process writers while enqueueing and draining in FIFO order', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'zukhruf-mailbox-lock-'));
-    const path = join(directory, 'mailbox.sqlite');
-    try {
-      using store = new SqliteMailboxStore(path);
-      await store.enqueue(mail('one'));
-      await store.enqueue(mail('two'));
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-mailbox-lock-'),
+    );
+    const path = join(directory.path, 'mailbox.sqlite');
+    using store = new SqliteMailboxStore(path);
+    await store.enqueue(mail('one'));
+    await store.enqueue(mail('two'));
 
-      await runWhileWriteLocked(path, () => store.enqueue(mail('three')));
-      const messages = await runWhileWriteLocked(path, () =>
-        store.drain(researcher),
-      );
+    await runWhileWriteLocked(path, () => store.enqueue(mail('three')));
+    const messages = await runWhileWriteLocked(path, () =>
+      store.drain(researcher),
+    );
 
-      assert.deepStrictEqual(
-        messages.map(({ content }) => content),
-        ['one', 'two', 'three'],
-      );
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    assert.deepStrictEqual(
+      messages.map(({ content }) => content),
+      ['one', 'two', 'three'],
+    );
   });
 
   it('rejects empty communication addressing and content', () => {

@@ -10,10 +10,11 @@ import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { type ChildProcess, fork } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtempDisposable, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { Client } from 'pg';
 import { PgBoss } from 'pg-boss';
 import { z } from 'zod';
@@ -115,7 +116,7 @@ test(
           ['fulfilled', 'fulfilled'],
         );
         assert.deepEqual(
-          results.map((result) => result.approvalStatus).sort(),
+          results.map((result) => result.approvalStatus).toSorted(),
           ['already-queued', 'queued'],
         );
         assert.equal(results[0]?.jobId, results[1]?.jobId);
@@ -200,7 +201,7 @@ test(
           ['fulfilled', 'fulfilled'],
         );
         assert.deepEqual(
-          results.map((result) => result.approvalStatus).sort(),
+          results.map((result) => result.approvalStatus).toSorted(),
           ['already-queued', 'queued'],
         );
         assert.equal(results[0]?.jobId, results[1]?.jobId);
@@ -985,11 +986,11 @@ async function waitForConversation(
   label: string,
   timeoutMs = 15_000,
 ): Promise<UIMessage[]> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     const messages = await runtime.observe(conversation).engine.getMessages();
     if (predicate(messages)) return messages;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await sleep(25);
   }
   throw new Error(`timed out waiting for ${label}`);
 }
@@ -1000,10 +1001,10 @@ async function waitForApprovalJobCount(
   count: number,
   timeoutMs = 15_000,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     if ((await host.approvalJobs(chatId)).length === count) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await sleep(25);
   }
   throw new Error(`timed out waiting for ${count} approval jobs`);
 }
@@ -1014,11 +1015,11 @@ async function waitForApprovalJobState(
   state: string,
   timeoutMs = 15_000,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     const jobs = await host.approvalJobs(chatId);
     if (jobs.some((job) => job.state === state)) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await sleep(25);
   }
   throw new Error(`timed out waiting for an approval job in ${state}`);
 }
@@ -1026,25 +1027,19 @@ async function waitForApprovalJobState(
 async function withScenario(
   run: (scenario: Scenario) => Promise<void>,
 ): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-approval-dispatch-'));
-  try {
-    const result = await withPostgresContainer(async (container) => {
-      await run({
-        connectionString: container.connectionString,
-        queueName: `approval-${crypto.randomUUID()}`,
-        mailboxPath: join(directory, 'mailbox.sqlite'),
-        markerPath: join(directory, 'tool-runs'),
-      });
-      return true;
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), 'zukhruf-approval-dispatch-'),
+  );
+  const result = await withPostgresContainer(async (container) => {
+    await run({
+      connectionString: container.connectionString,
+      queueName: `approval-${crypto.randomUUID()}`,
+      mailboxPath: join(directory.path, 'mailbox.sqlite'),
+      markerPath: join(directory.path, 'tool-runs'),
     });
-    assert.equal(
-      result,
-      true,
-      'PostgreSQL integration environment unavailable',
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+    return true;
+  });
+  assert.equal(result, true, 'PostgreSQL integration environment unavailable');
 }
 
 async function startDecisionProcess(
@@ -1098,40 +1093,37 @@ async function runDecision(handle: FixtureProcess): Promise<DecisionResult> {
   return message;
 }
 
-function waitForFixtureMessage(
+async function waitForFixtureMessage(
   handle: FixtureProcess,
   type: string,
   timeoutMs = 15_000,
 ): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => finish(new Error(`timed out waiting for child message ${type}`)),
-      timeoutMs,
+  const result = Promise.withResolvers<Record<string, unknown>>();
+  using _timeout = setTimeout(
+    () =>
+      result.reject(new Error(`timed out waiting for child message ${type}`)),
+    timeoutMs,
+  );
+  const onMessage = (message: unknown) => {
+    if (isRecord(message) && message.type === type) result.resolve(message);
+  };
+  const onError = (error: Error) => result.reject(error);
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+    result.reject(
+      new Error(
+        `fixture exited before ${type}: code=${code} signal=${signal}\n${handle.stderr.join('')}`,
+      ),
     );
-    const onMessage = (message: unknown) => {
-      if (isRecord(message) && message.type === type)
-        finish(undefined, message);
-    };
-    const onError = (error: Error) => finish(error);
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
-      finish(
-        new Error(
-          `fixture exited before ${type}: code=${code} signal=${signal}\n${handle.stderr.join('')}`,
-        ),
-      );
-    const finish = (error?: Error, message?: Record<string, unknown>): void => {
-      clearTimeout(timer);
-      handle.child.off('message', onMessage);
-      handle.child.off('error', onError);
-      handle.child.off('exit', onExit);
-      if (error) reject(error);
-      else if (message) resolve(message);
-      else reject(new Error(`fixture returned no ${type} message`));
-    };
-    handle.child.on('message', onMessage);
-    handle.child.on('error', onError);
-    handle.child.on('exit', onExit);
-  });
+  handle.child.on('message', onMessage);
+  handle.child.on('error', onError);
+  handle.child.on('exit', onExit);
+  try {
+    return await result.promise;
+  } finally {
+    handle.child.off('message', onMessage);
+    handle.child.off('error', onError);
+    handle.child.off('exit', onExit);
+  }
 }
 
 async function stopFixtureProcess(handle: FixtureProcess): Promise<void> {

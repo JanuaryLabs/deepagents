@@ -215,7 +215,7 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
     /CHILD COLLABORATION GUIDANCE/,
   );
   const tools = functionTools(request.tools);
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+  assert.deepEqual(tools.map((tool) => tool.name).toSorted(), [
     'followup_task',
     'interrupt_agent',
     'list_agents',

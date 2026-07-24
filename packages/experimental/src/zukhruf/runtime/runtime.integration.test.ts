@@ -8,8 +8,9 @@ import {
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -38,8 +39,6 @@ const usage = {
   },
   outputTokens: { total: 2, text: 2, reasoning: undefined },
 } as const;
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const turn = (input: string) => ({ id: `ask:${crypto.randomUUID()}`, input });
 
@@ -403,8 +402,8 @@ async function waitForStatus(
   accept: string[],
   timeoutMs = 10_000,
 ) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     const status = await streamStore.getStreamStatus(id);
     if (status && accept.includes(status)) return status;
     await sleep(25);
@@ -428,8 +427,8 @@ async function waitForConversation(
   label: string,
   timeoutMs = 10_000,
 ): Promise<UIMessage[]> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     const messages = await runtime.observe(conversation).engine.getMessages();
     if (predicate(messages)) return messages;
     await sleep(25);
@@ -760,7 +759,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(track.calls.length, 2, 'exactly one continuation was sampled');
   });
 
-  it('persists concurrent decisions for different sibling approvals', async () => {
+  it('persists concurrent decisions for different sibling approvals', async (t) => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -778,8 +777,10 @@ describe('zukhruf runtime — background executor', () => {
         reason: 'skip the second',
       }),
     ]);
-    const deadline = Date.now() + 3_000;
-    while (track.calls.length < 2 && Date.now() < deadline) await sleep(25);
+    await t.waitFor(() => assert.equal(track.calls.length, 2), {
+      interval: 25,
+      timeout: 3_000,
+    });
 
     assert.equal(track.calls.length, 2, 'one continuation was sampled');
     assert.equal(track.toolRuns, 1, 'only the approved sibling executed');
@@ -797,7 +798,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('repairs parked-turn revival in the worker after the resumed turn settles', async () => {
+  it('repairs parked-turn revival in the worker after the resumed turn settles', async (t) => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools, {
       queueFactory: (boss) =>
@@ -815,9 +816,9 @@ describe('zukhruf runtime — background executor', () => {
       conversation,
       turn('after approval'),
     );
-    const parkedDeadline = Date.now() + 5_000;
+    const parkedDeadline = performance.now() + 5_000;
     let parkedState: string | undefined;
-    while (Date.now() < parkedDeadline) {
+    while (performance.now() < parkedDeadline) {
       const jobs = await h.boss.findJobs(h.queue.queue, {
         key: conversation.chatId,
       });
@@ -833,10 +834,10 @@ describe('zukhruf runtime — background executor', () => {
       toolCallId: part.toolCallId,
     });
     assert.equal(queued.status, 'queued');
-    const revivedDeadline = Date.now() + 5_000;
-    while (track.calls.length < 3 && Date.now() < revivedDeadline) {
-      await sleep(25);
-    }
+    await t.waitFor(() => assert.equal(track.calls.length, 3), {
+      interval: 25,
+      timeout: 5_000,
+    });
     assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
     assert.deepStrictEqual(track.calls, [
       'send it',
@@ -1249,10 +1250,10 @@ describe('zukhruf runtime — background executor', () => {
       outcome.status === 'fulfilled' ? [outcome.value] : [],
     );
     assert.equal(commands[0]?.jobId, commands[1]?.jobId);
-    assert.deepStrictEqual(commands.map((command) => command.status).sort(), [
-      'already-queued',
-      'queued',
-    ]);
+    assert.deepStrictEqual(
+      commands.map((command) => command.status).toSorted(),
+      ['already-queued', 'queued'],
+    );
 
     {
       await using _worker = await h.runtime.work();

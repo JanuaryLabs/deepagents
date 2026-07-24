@@ -1,10 +1,12 @@
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss } from 'pg-boss';
 
 import {
@@ -32,11 +34,7 @@ const usage = {
   outputTokens: { total: 2, text: 2, reasoning: undefined },
 } as const;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const fixture = fileURLToPath(
-  new URL('./crash-worker.fixture.ts', import.meta.url),
-);
+const fixture = join(import.meta.dirname, 'crash-worker.fixture.ts');
 
 function fastModel(calls: string[]) {
   return new MockLanguageModelV4({
@@ -89,8 +87,8 @@ async function waitForStatus(
   accept: string[],
   timeoutMs: number,
 ) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     const status = await streamStore.getStreamStatus(id);
     if (status && accept.includes(status)) return status;
     await sleep(200);
@@ -153,6 +151,7 @@ describe(
         const conversation = { chatId: 'crash-chat', userId: 'u1' };
 
         let child: ReturnType<typeof spawn> | undefined;
+        let childExit: Promise<unknown[]> | undefined;
         let worker: AsyncDisposable | undefined;
         try {
           const first = await runtime.enqueue(conversation, {
@@ -160,11 +159,17 @@ describe(
             input: 'a very long task',
           });
 
-          child = spawn('node', [fixture, container.connectionString], {
-            stdio: ['ignore', 'pipe', 'pipe'],
-          });
+          child = spawn(
+            process.execPath,
+            [fixture, container.connectionString],
+            {
+              stdio: ['ignore', 'pipe', 'pipe'],
+            },
+          );
           const childStderr: string[] = [];
-          child.stderr?.on('data', (d) => childStderr.push(String(d)));
+          child.stderr?.setEncoding('utf8');
+          child.stderr?.on('data', (data) => childStderr.push(data));
+          childExit = once(child, 'exit');
 
           try {
             await waitForStatus(streamStore, first.id, ['running'], 30_000);
@@ -175,6 +180,7 @@ describe(
           }
 
           child.kill('SIGKILL');
+          await childExit;
 
           worker = await runtime.work();
           await waitForStatus(streamStore, first.id, ['failed'], 120_000);
@@ -204,6 +210,7 @@ describe(
           );
         } finally {
           child?.kill('SIGKILL');
+          if (childExit) await childExit;
           if (worker) await worker[Symbol.asyncDispose]();
           await boss.stop({ graceful: false });
           mailboxStore.close();

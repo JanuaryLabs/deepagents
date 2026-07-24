@@ -1,6 +1,8 @@
 import { PGlite } from '@electric-sql/pglite';
-import assert from 'node:assert';
-import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { type TestContext, describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type FindJobsOptions,
   type JobWithMetadata,
@@ -33,19 +35,16 @@ export interface TurnQueueHarness extends AsyncDisposable {
   queue: TurnQueue;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function waitFor(
+function waitFor(
+  t: TestContext,
   condition: () => boolean,
   what: string,
   timeoutMs = 10_000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (condition()) return;
-    await sleep(25);
-  }
-  throw new Error(`timed out waiting for: ${what}`);
+): Promise<void> {
+  return t.waitFor(
+    () => assert.ok(condition(), `timed out waiting for: ${what}`),
+    { interval: 25, timeout: timeoutMs },
+  );
 }
 
 async function waitForAsync(
@@ -53,8 +52,8 @@ async function waitForAsync(
   what: string,
   timeoutMs = 10_000,
 ) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     if (await condition()) return;
     await sleep(25);
   }
@@ -105,7 +104,7 @@ export function turnQueueContract(
   makeQueue: () => Promise<TurnQueueHarness>,
 ) {
   describe(`TurnQueue contract — ${name}`, () => {
-    it('delivers a turn pushed before any consumer existed, payload intact', async () => {
+    it('delivers a turn pushed before any consumer existed, payload intact', async (t) => {
       await using h = await makeQueue();
       const pushed = ref('durable', 1);
       await h.queue.push(pushed);
@@ -116,7 +115,7 @@ export function turnQueueContract(
         seen.push(turn);
       }, noOrphans);
 
-      await waitFor(() => seen.length === 1, 'late consumer receives turn');
+      await waitFor(t, () => seen.length === 1, 'late consumer receives turn');
       assert.deepStrictEqual(seen[0], pushed);
     });
 
@@ -156,7 +155,7 @@ export function turnQueueContract(
       }
     });
 
-    it('finds and cancels every copy of the oldest queued stream id', async () => {
+    it('finds and cancels every copy of the oldest queued stream id', async (t) => {
       await using h = await makeQueue();
       const first = ref('interrupt-queued', 1);
       const second = ref('interrupt-queued', 2);
@@ -185,13 +184,14 @@ export function turnQueueContract(
         seen.push(turn);
       }, noOrphans);
       await waitFor(
+        t,
         () => seen.length === 1,
         'successor runs after cancellation',
       );
       assert.deepStrictEqual(seen, [second]);
     });
 
-    it('cancelling an active turn aborts its handler without overlapping its successor', async () => {
+    it('cancelling an active turn aborts its handler without overlapping its successor', async (t) => {
       await using h = await makeQueue();
       const first = ref('interrupt-active', 1);
       const second = ref('interrupt-active', 2);
@@ -211,11 +211,7 @@ export function turnQueueContract(
             return;
           }
           started.resolve();
-          await new Promise<void>((resolve) => {
-            context.signal.addEventListener('abort', () => resolve(), {
-              once: true,
-            });
-          });
+          await once(context.signal, 'abort');
           aborted.resolve();
           await release.promise;
         },
@@ -267,6 +263,7 @@ export function turnQueueContract(
           'the active row remains the scheduler owner while its handler exits',
         );
         await waitFor(
+          t,
           () => seen.length === 1,
           'successor runs after active abort',
         );
@@ -284,7 +281,7 @@ export function turnQueueContract(
       }
     });
 
-    it('a duplicate push never delivers concurrently, out of order, or not at all', async () => {
+    it('a duplicate push never delivers concurrently, out of order, or not at all', async (t) => {
       await using h = await makeQueue();
       const ask = ref('dup', 1);
       await h.queue.push(ask);
@@ -304,7 +301,7 @@ export function turnQueueContract(
         { ...noOrphans, concurrency: 4 },
       );
 
-      await waitFor(() => deliveries >= 1, 'turn delivered at least once');
+      await waitFor(t, () => deliveries >= 1, 'turn delivered at least once');
       await sleep(1500);
       // At-least-once: an implementation may dedup (1) or redeliver (2),
       // but never lose the turn, exceed the duplicate count, or interleave.
@@ -315,7 +312,7 @@ export function turnQueueContract(
       assert.equal(maxActive, 1, 'duplicates never run concurrently');
     });
 
-    it('deduplicates opposite commands for one persisted approval id', async () => {
+    it('deduplicates opposite commands for one persisted approval id', async (t) => {
       await using h = await makeQueue();
       const approve = approvalRef('approval-dedup');
       const deny = {
@@ -343,12 +340,12 @@ export function turnQueueContract(
       await using _consumer = await h.queue.consume(async (turn) => {
         seen.push(turn);
       }, noOrphans);
-      await waitFor(() => seen.length === 1, 'the winning approval command');
+      await waitFor(t, () => seen.length === 1, 'the winning approval command');
       await sleep(1_000);
       assert.deepStrictEqual(seen, [approve]);
     });
 
-    it('turns in one chat run strictly FIFO, one at a time', async () => {
+    it('turns in one chat run strictly FIFO, one at a time', async (t) => {
       await using h = await makeQueue();
       for (const n of [1, 2, 3]) await h.queue.push(ref('fifo', n));
 
@@ -362,7 +359,7 @@ export function turnQueueContract(
         { ...noOrphans, concurrency: 4 },
       );
 
-      await waitFor(() => events.length === 6, 'all three turns finished');
+      await waitFor(t, () => events.length === 6, 'all three turns finished');
       assert.deepStrictEqual(events, [
         'start input-1',
         'end input-1',
@@ -373,7 +370,7 @@ export function turnQueueContract(
       ]);
     });
 
-    it('turns in different chats can overlap', async () => {
+    it('turns in different chats can overlap', async (t) => {
       await using h = await makeQueue();
       const gate = Promise.withResolvers<void>();
       const outcome: Record<string, string> = {};
@@ -396,7 +393,11 @@ export function turnQueueContract(
         { ...noOrphans, concurrency: 2 },
       );
 
-      await waitFor(() => Boolean(outcome.a && outcome.b), 'both chats done');
+      await waitFor(
+        t,
+        () => Boolean(outcome.a && outcome.b),
+        'both chats done',
+      );
       assert.equal(
         outcome.a,
         'overlapped',
@@ -404,7 +405,7 @@ export function turnQueueContract(
       );
     });
 
-    it('caps active handlers at the consume concurrency', async () => {
+    it('caps active handlers at the consume concurrency', async (t) => {
       await using h = await makeQueue();
       for (const n of [1, 2, 3, 4, 5, 6]) {
         await h.queue.push(ref(`cap-${n}`, n));
@@ -424,14 +425,14 @@ export function turnQueueContract(
         { ...noOrphans, concurrency: 2 },
       );
 
-      await waitFor(() => done === 6, 'all six chats processed', 20_000);
+      await waitFor(t, () => done === 6, 'all six chats processed', 20_000);
       assert.ok(
         maxActive <= 2,
         `never more than the configured concurrency (saw ${maxActive})`,
       );
     });
 
-    it('a crashing handler surfaces exactly once via onOrphaned, then the chat unblocks', async () => {
+    it('a crashing handler surfaces exactly once via onOrphaned, then the chat unblocks', async (t) => {
       await using h = await makeQueue();
       const boom = ref('crash', 1);
       const next = ref('crash', 2);
@@ -453,6 +454,7 @@ export function turnQueueContract(
       );
 
       await waitFor(
+        t,
         () => invocations.includes(next.input) && orphans.length === 1,
         'orphan reported and chat unblocked',
         20_000,
@@ -468,7 +470,7 @@ export function turnQueueContract(
       assert.match(orphans[0].error, /kaput/);
     });
 
-    it('an orphan callback failure cannot keep the next same-chat turn blocked', async () => {
+    it('an orphan callback failure cannot keep the next same-chat turn blocked', async (t) => {
       await using h = await makeQueue();
       const boom = ref('orphan-callback-failure', 1);
       const next = ref('orphan-callback-failure', 2);
@@ -491,6 +493,7 @@ export function turnQueueContract(
       );
 
       await waitFor(
+        t,
         () => invocations.includes(next.input),
         'source acknowledgement unblocks the successor despite callback failure',
         5_000,
@@ -499,7 +502,7 @@ export function turnQueueContract(
       assert.deepStrictEqual(invocations, [boom.input, next.input]);
     });
 
-    it('a parked turn is not redelivered until resumeParked; revival preserves order', async () => {
+    it('a parked turn is not redelivered until resumeParked; revival preserves order', async (t) => {
       await using h = await makeQueue();
       let gateOpen = false;
       const parked: string[] = [];
@@ -519,7 +522,7 @@ export function turnQueueContract(
 
       await h.queue.push(ref('gated', 1));
       await h.queue.push(ref('gated', 2));
-      await waitFor(() => parked.length === 2, 'both turns parked');
+      await waitFor(t, () => parked.length === 2, 'both turns parked');
       await sleep(1500);
       assert.deepStrictEqual(
         parked,
@@ -533,7 +536,7 @@ export function turnQueueContract(
       assert.deepStrictEqual(ran, [], 'opening the gate alone revives nothing');
 
       await h.queue.resumeParked('gated');
-      await waitFor(() => ran.length === 2, 'parked turns revived');
+      await waitFor(t, () => ran.length === 2, 'parked turns revived');
       assert.deepStrictEqual(
         ran,
         ['input-1', 'input-2'],
@@ -541,7 +544,7 @@ export function turnQueueContract(
       );
     });
 
-    it('an approval command outranks revived parked turns of its chat', async () => {
+    it('an approval command outranks revived parked turns of its chat', async (t) => {
       await using h = await makeQueue();
       const ran: string[] = [];
 
@@ -551,7 +554,7 @@ export function turnQueueContract(
         await context.park();
       }, noOrphans);
       await h.queue.push(ref('ranked', 1));
-      await waitFor(() => parkCount === 1, 'turn parked');
+      await waitFor(t, () => parkCount === 1, 'turn parked');
       await gatekeeper[Symbol.asyncDispose]();
 
       await h.queue.push(approvalRef('ranked'));
@@ -561,7 +564,7 @@ export function turnQueueContract(
         ran.push(turn.kind);
       }, noOrphans);
 
-      await waitFor(() => ran.length === 2, 'both delivered');
+      await waitFor(t, () => ran.length === 2, 'both delivered');
       assert.deepStrictEqual(
         ran,
         ['approval', 'ask'],
@@ -569,7 +572,7 @@ export function turnQueueContract(
       );
     });
 
-    it('disposal stops delivery; a later consumer picks up the backlog', async () => {
+    it('disposal stops delivery; a later consumer picks up the backlog', async (t) => {
       await using h = await makeQueue();
       let executions = 0;
       const consumer = await h.queue.consume(async () => {
@@ -584,7 +587,11 @@ export function turnQueueContract(
       await using _revived = await h.queue.consume(async () => {
         executions++;
       }, noOrphans);
-      await waitFor(() => executions === 1, 'new consumer drains the backlog');
+      await waitFor(
+        t,
+        () => executions === 1,
+        'new consumer drains the backlog',
+      );
     });
   });
 }

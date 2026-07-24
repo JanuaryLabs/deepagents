@@ -8,6 +8,7 @@
 
 - Focus on **integration tests** that test entire flows, not unit tests for individual functions.
 - **No test-only side doors to internal classes.** Never add package `imports` aliases, extra build entry points, or `internal.ts` re-exports so tests can construct something the public barrel deliberately hides. If a test can't reach behavior through the public surface, rewrite the test to drive the public API (e.g. `AgentRuntime.deliver`/`work`), not the internals — test as a user would use it.
+- Before adding test utilities, read [TEST_PRIMITIVES.md](./TEST_PRIMITIVES.md). Prefer its native Node.js APIs; reserve `@deepagents/test` for domain-free primitives, not shared fixtures or product-specific harnesses.
 
 ### Running Tests
 

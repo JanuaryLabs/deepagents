@@ -2,8 +2,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -36,8 +37,6 @@ const usage = {
   },
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 } as const;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function runtimeHarness(
   model: AgentDeclaration['model'],
@@ -102,8 +101,8 @@ async function waitForStatus(
   id: string,
   expected: string,
 ): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + 5_000;
+  while (performance.now() < deadline) {
     if ((await store.getStreamStatus(id)) === expected) return;
     await sleep(20);
   }
@@ -142,7 +141,7 @@ describe('zukhruf runtime mailbox delivery', () => {
     );
   });
 
-  it('schedules one mailbox turn and makes all accumulated mail model-visible in FIFO order', async () => {
+  it('schedules one mailbox turn and makes all accumulated mail model-visible in FIFO order', async (t) => {
     const prompts: unknown[] = [];
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
@@ -229,9 +228,10 @@ describe('zukhruf runtime mailbox delivery', () => {
     );
 
     await using _worker = await h.runtime.work();
-    const deadline = Date.now() + 5_000;
-    while (prompts.length === 0 && Date.now() < deadline) await sleep(20);
-    assert.equal(prompts.length, 1);
+    await t.waitFor(() => assert.equal(prompts.length, 1), {
+      interval: 20,
+      timeout: 5_000,
+    });
 
     const renderedPrompt = JSON.stringify(prompts[0]);
     const positions = [1, 2, 3, 4].map((index) =>
@@ -239,7 +239,7 @@ describe('zukhruf runtime mailbox delivery', () => {
     );
     assert.ok(positions.every((position) => position >= 0));
     assert.deepStrictEqual(
-      [...positions].sort((a, b) => a - b),
+      positions.toSorted((a, b) => a - b),
       positions,
     );
     await waitForStatus(h.streamStore, wake!.streamId, 'completed');
@@ -290,7 +290,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       consumed.indexOf(`message ${index}`),
     );
     assert.deepStrictEqual(
-      [...historyPositions].sort((a, b) => a - b),
+      historyPositions.toSorted((a, b) => a - b),
       historyPositions,
       'consumed mail is durable model history in delivery order',
     );
@@ -302,7 +302,7 @@ describe('zukhruf runtime mailbox delivery', () => {
     assert.equal(await h.mailboxStore.hasPending(reviewer), false);
   });
 
-  it('serializes mail behind an active target and exposes it at the next supported turn boundary', async () => {
+  it('serializes mail behind an active target and exposes it at the next supported turn boundary', async (t) => {
     const firstStarted = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const prompts: unknown[] = [];
@@ -374,9 +374,10 @@ describe('zukhruf runtime mailbox delivery', () => {
     releaseFirst.resolve();
     await drainStream(running.stream);
 
-    const deadline = Date.now() + 5_000;
-    while (prompts.length < 2 && Date.now() < deadline) await sleep(20);
-    assert.equal(prompts.length, 2);
+    await t.waitFor(() => assert.equal(prompts.length, 2), {
+      interval: 20,
+      timeout: 5_000,
+    });
     assert.equal(maxActive, 1);
     const secondPrompt = JSON.stringify(prompts[1]);
     assert.ok(secondPrompt.includes('queued during active turn'));

@@ -24,27 +24,7 @@ import {
   defineAgent,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
-
-async function settleWithin<T>(
-  promise: Promise<T>,
-  label: string,
-  timeoutMs = 5_000,
-): Promise<T> {
-  let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timeout = globalThis.setTimeout(
-          () => reject(new Error(`timed out waiting for: ${label}`)),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) globalThis.clearTimeout(timeout);
-  }
-}
+import { settleWithin } from '@deepagents/test';
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];

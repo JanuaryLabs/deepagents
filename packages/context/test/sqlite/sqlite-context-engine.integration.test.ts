@@ -18,6 +18,7 @@ import {
   reminder,
   user,
 } from '@deepagents/context';
+import { settleWithin } from '@deepagents/test';
 
 async function createVirtualAgentSandbox() {
   return createBashTool({
@@ -109,28 +110,6 @@ async function withDiskImage<T>(
   }
 }
 
-async function withTimeout<T>(
-  label: string,
-  ms: number,
-  work: () => Promise<T>,
-) {
-  const start = Date.now();
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      const elapsed = Date.now() - start;
-      reject(new Error(`[timeout] ${label} after ${elapsed}ms`));
-    }, ms);
-  });
-  try {
-    return await Promise.race([work(), timeout]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
 const execFileAsync = promisify(execFile);
 
 function makeUserMessage(id: string, text: string) {
@@ -216,16 +195,20 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      const result = await withTimeout('resolve empty chat', 10000, async () =>
+      const result = await settleWithin(
         engine.resolve({
           renderer,
           sandbox: await createVirtualAgentSandbox(),
         }),
+        'resolve empty chat',
+        10_000,
       );
       assert.strictEqual(result.messages.length, 0);
 
-      const emptyResult = await withTimeout('save empty chat', 10000, () =>
+      const emptyResult = await settleWithin(
         engine.save(),
+        'save empty chat',
+        10_000,
       );
       assert.strictEqual(
         emptyResult.headMessageId,
@@ -246,14 +229,13 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      const result = await withTimeout(
+      const result = await settleWithin(
+        engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
         'resolve empty sqlite file',
-        10000,
-        async () =>
-          engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          }),
+        10_000,
       );
       assert.strictEqual(result.messages.length, 0);
     });
@@ -271,9 +253,7 @@ describe('Sqlite ContextEngine Integration', () => {
       engine.set(user(makeUserMessage('msg-1', 'Root')));
       engine.set(assistantText('Middle', { id: 'msg-2' }));
       engine.set(user(makeUserMessage('msg-3', 'Leaf')));
-      await withTimeout('save dangling chain setup', 10000, () =>
-        engine.save(),
-      );
+      await settleWithin(engine.save(), 'save dangling chain setup', 10_000);
 
       const db = new DatabaseSync(dbPath);
       db.exec('PRAGMA foreign_keys = OFF');
@@ -281,10 +261,8 @@ describe('Sqlite ContextEngine Integration', () => {
       db.prepare('DELETE FROM messages_fts WHERE messageId = ?').run('msg-2');
       db.close();
 
-      const result = await withTimeout(
-        'resolve dangling parent',
-        10000,
-        async () => {
+      const result = await settleWithin(
+        (async () => {
           try {
             return await engine.resolve({
               renderer,
@@ -293,7 +271,9 @@ describe('Sqlite ContextEngine Integration', () => {
           } catch (error) {
             return { error } as { error: unknown };
           }
-        },
+        })(),
+        'resolve dangling parent',
+        10_000,
       );
 
       if ('messages' in result) {
@@ -312,7 +292,7 @@ describe('Sqlite ContextEngine Integration', () => {
       });
 
       engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      await withTimeout('save branch setup', 10000, () => engine.save());
+      await settleWithin(engine.save(), 'save branch setup', 10_000);
 
       const db = new DatabaseSync(dbPath);
       db.prepare('DELETE FROM branches WHERE chatId = ?').run(
@@ -326,16 +306,20 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      await withTimeout('resolve missing branch', 10000, async () => {
-        try {
-          await nextEngine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          });
-        } catch {
-          // No hang is the requirement for this edge case.
-        }
-      });
+      await settleWithin(
+        (async () => {
+          try {
+            await nextEngine.resolve({
+              renderer,
+              sandbox: await createVirtualAgentSandbox(),
+            });
+          } catch {
+            // No hang is the requirement for this edge case.
+          }
+        })(),
+        'resolve missing branch',
+        10_000,
+      );
     });
   });
 
@@ -349,7 +333,7 @@ describe('Sqlite ContextEngine Integration', () => {
       });
 
       engine.set(user(makeUserMessage('msg-1', 'Hello')));
-      await withTimeout('save head setup', 10000, () => engine.save());
+      await settleWithin(engine.save(), 'save head setup', 10_000);
 
       const db = new DatabaseSync(dbPath);
       db.exec('PRAGMA foreign_keys = OFF');
@@ -365,14 +349,13 @@ describe('Sqlite ContextEngine Integration', () => {
         userId: 'user-1',
       });
 
-      const result = await withTimeout(
+      const result = await settleWithin(
+        nextEngine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
         'resolve missing head',
-        10000,
-        async () =>
-          nextEngine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          }),
+        10_000,
       );
       assert.strictEqual(result.messages.length, 0);
     });
@@ -390,7 +373,7 @@ describe('Sqlite ContextEngine Integration', () => {
       engine.set(
         user(makeUserMessage('msg-1', "let's create comprehensive report")),
       );
-      await withTimeout('save tool user message', 10000, () => engine.save());
+      await settleWithin(engine.save(), 'save tool user message', 10_000);
 
       const toolMessage = makeToolClarificationMessage('msg-2');
 
@@ -408,14 +391,13 @@ describe('Sqlite ContextEngine Integration', () => {
       }, /cannot be its own parent/);
 
       // The original message should still be accessible
-      const result = await withTimeout(
+      const result = await settleWithin(
+        engine.resolve({
+          renderer,
+          sandbox: await createVirtualAgentSandbox(),
+        }),
         'resolve after rejection',
-        10000,
-        async () =>
-          engine.resolve({
-            renderer,
-            sandbox: await createVirtualAgentSandbox(),
-          }),
+        10_000,
       );
       assert.strictEqual(result.messages.length, 1);
     });
@@ -425,8 +407,8 @@ describe('Sqlite ContextEngine Integration', () => {
     await withTempDb('corrupt-db', async (dbPath) => {
       await writeFile(dbPath, Buffer.from('not-a-database'));
 
-      await withTimeout('corrupt db open', 10000, async () => {
-        await assert.rejects(async () => {
+      await settleWithin(
+        assert.rejects(async () => {
           const store = new SqliteContextStore(dbPath);
           const engine = new ContextEngine({
             store,
@@ -437,8 +419,10 @@ describe('Sqlite ContextEngine Integration', () => {
             renderer,
             sandbox: await createVirtualAgentSandbox(),
           });
-        }, /database|file/i);
-      });
+        }, /database|file/i),
+        'corrupt db open',
+        10_000,
+      );
     });
   });
 
@@ -515,26 +499,25 @@ describe('Sqlite ContextEngine Integration', () => {
         for (let index = 0; index < totalMessages; index += 1) {
           engine.set(user(`message-${index}`));
           if ((index + 1) % batchSize === 0) {
-            await withTimeout(
+            await settleWithin(
+              engine.save(),
               `save batch ${(index + 1) / batchSize}`,
-              60000,
-              () => engine.save(),
+              60_000,
             );
           }
         }
 
         if (totalMessages % batchSize !== 0) {
-          await withTimeout('save final batch', 60000, () => engine.save());
+          await settleWithin(engine.save(), 'save final batch', 60_000);
         }
 
-        const result = await withTimeout(
+        const result = await settleWithin(
+          engine.resolve({
+            renderer,
+            sandbox: await createVirtualAgentSandbox(),
+          }),
           'resolve large chain',
-          120000,
-          async () =>
-            engine.resolve({
-              renderer,
-              sandbox: await createVirtualAgentSandbox(),
-            }),
+          120_000,
         );
         assert.strictEqual(result.messages.length, totalMessages);
       });
