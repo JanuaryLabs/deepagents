@@ -1,7 +1,7 @@
 import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
 
-import { approvalJobId } from '../approval-job-id.ts';
+import { approvalJobId } from '../runtime/approval-job-id.ts';
 import {
   type ConsumeContext,
   type ConsumeOptions,

@@ -1,5 +1,5 @@
+import type { ConversationId } from '../mailbox/types.ts';
 import { AgentPath } from './agent-path.ts';
-import type { ConversationId } from './mailbox/types.ts';
 
 export interface AgentThreadOptions {
   conversation: ConversationId;

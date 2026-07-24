@@ -185,13 +185,16 @@ same assistant message, but only the turn worker mutates them.
 
 - 2026-07-14: Plan created. Pre-change approval and usage races reproduced.
   Clean-break design selected: transactional `updateChat` plus a
-  Zukhruf-owned approval mutex around mutations of the same assistant message.
+  Zukhruf-owned approval mutex around mutations of the same assistant message
+  (superseded on 2026-07-23 by queue-native approval commands).
 - 2026-07-14: Transactional chat updater implemented in all three adapters;
   chat-specific CAS APIs and tests removed. Focused context concurrency tests
   pass 4/4.
-- 2026-07-14: Required Zukhruf approval mutex implemented; message CAS removed
+- 2026-07-14: Initial Zukhruf approval mutex implemented; message CAS removed
   from every context adapter. Approval runtime tests pass 29/29, and a separate
-  integration test proves SQLite exclusion across independent OS processes.
+  integration test proves SQLite exclusion across independent OS processes. This
+  mutex path was later removed when approval coordination moved into the turn
+  queue.
 - 2026-07-14: Full experimental suite passes 129/129. Full context suite passes
   1495/1499; its four failures are outside this change and the focused context
   concurrency suite passes 4/4. Both package typechecks pass.

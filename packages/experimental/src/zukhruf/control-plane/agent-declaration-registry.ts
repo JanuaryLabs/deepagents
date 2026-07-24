@@ -1,4 +1,4 @@
-import type { AgentDeclaration } from './agent.ts';
+import type { AgentDeclaration } from '../agent.ts';
 
 /** Immutable declaration lookup compiled once for one agent runtime. */
 export class AgentDeclarationRegistry {

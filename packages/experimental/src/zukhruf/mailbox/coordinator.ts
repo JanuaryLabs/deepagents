@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import type { StreamManager } from '@deepagents/context';
 
-import { AgentTurnId } from '../agent-turn-id.ts';
+import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import type { MailboxStore } from './store.ts';
 import {

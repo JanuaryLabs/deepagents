@@ -1,9 +1,9 @@
-export * from './agent-thread.ts';
 export * from './agent.ts';
-export * from './agent-path.ts';
-export * from './agent-runtime.ts';
+export * from './control-plane/agent-path.ts';
+export * from './control-plane/agent-thread.ts';
+export type { TurnInput } from './control-plane/agent-control-plane.ts';
+export * from './runtime/agent-runtime.ts';
 export type { MultiAgentV2HostConfig } from './multi-agent-v2-config.ts';
-export type { TurnInput } from './agent-control-plane.ts';
 export * from './instructions.ts';
 export * from './mailbox/sqlite.store.ts';
 export * from './mailbox/store.ts';

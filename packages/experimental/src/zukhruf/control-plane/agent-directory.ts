@@ -2,8 +2,8 @@ import { v5 as uuidv5 } from 'uuid';
 
 import type { ContextStore } from '@deepagents/context';
 
+import type { ConversationId } from '../mailbox/types.ts';
 import { AgentThread } from './agent-thread.ts';
-import type { ConversationId } from './mailbox/types.ts';
 
 /** ContextStore-backed directory of durable agent instances. */
 export class AgentDirectory {

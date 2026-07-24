@@ -1,8 +1,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
+import { forkTurnsError, parseForkTurns } from '../control-plane/fork-turns.ts';
 import type { AgentToolContext } from './agent-tool-context.ts';
-import { forkTurnsError, parseForkTurns } from './fork-turns.ts';
 
 const spawnAgentInputSchema = z.object({
   agent_type: z

@@ -11,17 +11,17 @@ import {
   user,
 } from '@deepagents/context';
 
-import type { AgentControlPlane } from './agent-control-plane.ts';
-import type { AgentToolContext } from './agent-tool-context.ts';
-import type { ApprovalController } from './approval-controller.ts';
-import { createCollaborationTools } from './collaboration-tools.ts';
-import type { MailboxCoordinator } from './mailbox/coordinator.ts';
+import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
+import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
+import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
+import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type {
   ConversationId,
   InterAgentCommunication,
-} from './mailbox/types.ts';
-import type { ResolvedMultiAgentV2HostConfig } from './multi-agent-v2-config.ts';
-import type { ConsumeContext, TurnRef } from './queue/turn-queue.ts';
+} from '../mailbox/types.ts';
+import type { ResolvedMultiAgentV2HostConfig } from '../multi-agent-v2-config.ts';
+import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
+import type { ApprovalController } from './approval-controller.ts';
 
 export interface AgentTurnExecutorOptions {
   store: ContextStore;

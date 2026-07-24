@@ -6,27 +6,30 @@ import {
   type StreamStore,
 } from '@deepagents/context';
 
-import { AgentControlPlane, type TurnInput } from './agent-control-plane.ts';
-import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
-import { AgentDirectory } from './agent-directory.ts';
-import { AgentHistoryForker } from './agent-history-forker.ts';
-import { AgentStatusProjector } from './agent-status-projector.ts';
-import { AgentTurnExecutor } from './agent-turn-executor.ts';
-import { AgentTurnId } from './agent-turn-id.ts';
-import type { AgentDeclaration } from './agent.ts';
-import { ApprovalController } from './approval-controller.ts';
-import { MailboxCoordinator } from './mailbox/coordinator.ts';
-import type { MailboxStore } from './mailbox/store.ts';
+import type { AgentDeclaration } from '../agent.ts';
+import {
+  AgentControlPlane,
+  type TurnInput,
+} from '../control-plane/agent-control-plane.ts';
+import { AgentDeclarationRegistry } from '../control-plane/agent-declaration-registry.ts';
+import { AgentDirectory } from '../control-plane/agent-directory.ts';
+import { AgentHistoryForker } from '../control-plane/agent-history-forker.ts';
+import { AgentStatusProjector } from '../control-plane/agent-status-projector.ts';
+import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
+import { MailboxCoordinator } from '../mailbox/coordinator.ts';
+import type { MailboxStore } from '../mailbox/store.ts';
 import type {
   ConversationId,
   InterAgentCommunication,
   MessageDeliveryMode,
-} from './mailbox/types.ts';
+} from '../mailbox/types.ts';
 import {
   type MultiAgentV2HostConfig,
   resolveMultiAgentV2HostConfig,
-} from './multi-agent-v2-config.ts';
-import type { TurnQueue, TurnRef } from './queue/turn-queue.ts';
+} from '../multi-agent-v2-config.ts';
+import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
+import { AgentTurnExecutor } from './agent-turn-executor.ts';
+import { ApprovalController } from './approval-controller.ts';
 
 export interface AgentRuntimeOptions {
   store: ContextStore;

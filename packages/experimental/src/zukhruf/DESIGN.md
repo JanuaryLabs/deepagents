@@ -72,7 +72,7 @@ crash, then reconnect and resume an in-progress turn without re-running the mode
 
 `@deepagents/context` ships the machinery (`StreamManager`, `StreamStore` [sqlite/postgres],
 `ChangeSource` [polling / postgres-notify], `stream-buffer`) but it is **not wired into `chat()`** —
-so `agent-runtime.ts` wires that composition and `AgentTurnExecutor` performs
+so `runtime/agent-runtime.ts` wires that composition and `AgentTurnExecutor` performs
 each model turn.
 
 Mechanism:
@@ -597,7 +597,7 @@ section). Still designed-not-built: the stacks (a real Node+Postgres bundle; the
 - `sandbox/define.ts` — `defineSandbox(createBackend, opts?) → () => Promise<AgentSandbox>`
   (backend-agnostic `createBashTool` wrapper; seam = `DisposableSandbox`; proven over docker + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
-- `agent-runtime.ts` —
+- `runtime/agent-runtime.ts` —
   `new AgentRuntime(rootDeclaration, {store, streamStore, queue, mailboxStore})` →
   `{ enqueue(conv, {id, input}) → {id, stream},
 deliver(communication, mode) → void,
@@ -610,10 +610,11 @@ work({concurrency?}) → AsyncDisposable }`.
   durable id. Instructions are seeded
   **unconditionally per turn** (the old `getTurnCount()===0` guard ran reopened conversations with
   an empty system prompt).
-- `agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted addressing,
-  durable thread identity, and ContextStore-backed tree discovery. `agent-status-projector.ts`
+- `control-plane/agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted
+  addressing, durable thread identity, and ContextStore-backed tree discovery.
+  `agent-status-projector.ts`
   translates transcript and stream state into agent-list status and terminal mail without leaking
-  `ContextEngine` into `AgentControlPlane`. `spawn-agent.ts`, `message-tools.ts`, and
+  `ContextEngine` into `AgentControlPlane`. `collaboration/spawn-agent.ts`, `message-tools.ts`,
   `list-agents.ts`, `wait-agent.ts`, and `interrupt-agent.ts` are thin model-facing adapters over
   `AgentControlPlane`. These collaborators and adapters are package-internal; the customer barrel
   exposes the runtime, DSL, domain values, and store/queue ports and adapters.

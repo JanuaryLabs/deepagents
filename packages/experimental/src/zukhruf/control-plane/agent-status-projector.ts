@@ -8,16 +8,16 @@ import {
   type StreamStatus,
 } from '@deepagents/context';
 
-import type { AgentDirectory } from './agent-directory.ts';
-import type { AgentThread } from './agent-thread.ts';
-import type { ApprovalController } from './approval-controller.ts';
-import type { MailboxCoordinator } from './mailbox/coordinator.ts';
+import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import {
   InterAgentCommunicationType,
   MessageDeliveryMode,
   createInterAgentCommunication,
-} from './mailbox/types.ts';
-import type { TurnQueue, TurnRef } from './queue/turn-queue.ts';
+} from '../mailbox/types.ts';
+import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
+import type { ApprovalController } from '../runtime/approval-controller.ts';
+import type { AgentDirectory } from './agent-directory.ts';
+import type { AgentThread } from './agent-thread.ts';
 
 export const listedAgentStatusSchema = z.union([
   z.enum(['pending_init', 'running', 'interrupted', 'shutdown', 'not_found']),

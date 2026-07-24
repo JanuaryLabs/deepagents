@@ -2,6 +2,15 @@ import { v5 as uuidv5 } from 'uuid';
 
 import type { StreamManager } from '@deepagents/context';
 
+import type { AgentDeclaration } from '../agent.ts';
+import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
+import type { ConversationId, MessageDeliveryMode } from '../mailbox/types.ts';
+import {
+  MessageDeliveryMode as DeliveryMode,
+  InterAgentCommunicationType,
+  createInterAgentCommunication,
+} from '../mailbox/types.ts';
+import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentHistoryForker } from './agent-history-forker.ts';
@@ -11,16 +20,7 @@ import {
 } from './agent-status-projector.ts';
 import type { AgentThread } from './agent-thread.ts';
 import { AgentTurnId } from './agent-turn-id.ts';
-import type { AgentDeclaration } from './agent.ts';
 import type { ForkTurns } from './fork-turns.ts';
-import type { MailboxCoordinator } from './mailbox/coordinator.ts';
-import type { ConversationId, MessageDeliveryMode } from './mailbox/types.ts';
-import {
-  MessageDeliveryMode as DeliveryMode,
-  InterAgentCommunicationType,
-  createInterAgentCommunication,
-} from './mailbox/types.ts';
-import type { TurnQueue, TurnRef } from './queue/turn-queue.ts';
 
 export interface AgentControlPlaneOptions {
   root: AgentDeclaration;

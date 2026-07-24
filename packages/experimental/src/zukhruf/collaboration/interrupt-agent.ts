@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   type ListedAgentStatus,
   listedAgentStatusSchema,
-} from './agent-status-projector.ts';
+} from '../control-plane/agent-status-projector.ts';
 import type { AgentToolContext } from './agent-tool-context.ts';
 
 const interruptAgentInputSchema = z.object({

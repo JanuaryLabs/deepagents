@@ -12,14 +12,14 @@ import {
   assistant,
 } from '@deepagents/context';
 
-import { approvalJobId } from './approval-job-id.ts';
-import type { ConversationId } from './mailbox/types.ts';
+import type { ConversationId } from '../mailbox/types.ts';
 import type {
   ApprovalTurnRef,
   TurnQueue,
   TurnRef,
-} from './queue/turn-queue.ts';
-import type { ZukhrufToolSet } from './tool.ts';
+} from '../queue/turn-queue.ts';
+import type { ZukhrufToolSet } from '../tool.ts';
+import { approvalJobId } from './approval-job-id.ts';
 
 export interface ApprovalControllerOptions {
   store: ContextStore;

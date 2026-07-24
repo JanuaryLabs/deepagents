@@ -1,9 +1,9 @@
 import type { Tool, ToolSet } from 'ai';
 
+import type { ResolvedMultiAgentV2HostConfig } from '../multi-agent-v2-config.ts';
 import { interruptAgentTool } from './interrupt-agent.ts';
 import { listAgentsTool } from './list-agents.ts';
 import { followupTaskTool, sendMessageTool } from './message-tools.ts';
-import type { ResolvedMultiAgentV2HostConfig } from './multi-agent-v2-config.ts';
 import { createSpawnAgentTool } from './spawn-agent.ts';
 import { createWaitAgentTool } from './wait-agent.ts';
 

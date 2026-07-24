@@ -1,6 +1,6 @@
 import { v5 as uuidv5 } from 'uuid';
 
-import type { ConversationId } from './mailbox/types.ts';
+import type { ConversationId } from '../mailbox/types.ts';
 
 /** Conversation-scoped durable identity for one caller-supplied turn key. */
 export class AgentTurnId {
