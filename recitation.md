@@ -10,6 +10,10 @@ The current design scope is the agent exported by `@deepagents/context`.
 Legacy `@deepagents/agent`, legacy `@deepagents/orchestrator`, and the old
 DeepPlan experiment are outside the design.
 
+Phases 1 through 4 are implemented. The remaining open concern is optional
+coordination for simultaneous writers; it is not part of the single-writer
+contract implemented here.
+
 ## Core idea
 
 Recitation is attention control. It brings the current plan back to the end of
@@ -43,6 +47,8 @@ Review
 - `@deepagents/context` agents require an `AgentSandbox`.
 - The agent automatically merges the sandbox's `bash`, `readFile`, and
   `writeFile` tools into its tool set.
+- Every `AgentSandbox` also exposes the portable underlying sandbox `readFile`
+  operation to host-side context features.
 - `reminder(..., { target: 'steer' })` is the existing mid-loop recitation
   mechanism. It injects a synthetic message at a safe model boundary and
   persists the same assistant/steer/assistant sequence the model saw.
@@ -52,6 +58,9 @@ Review
 - `toolCallCount()` can count completed tool calls in the assistant segment
   since the previous steer reminder. A firing steer reminder carves the
   assistant chain, so the count effectively restarts after recitation.
+- `plan.review()` edge-triggers its cadence predicate: a threshold that remains
+  true across the next streaming boundary produces one review, then re-arms
+  after the predicate becomes false or a new real user turn begins.
 - The current sandbox subcommand helper is specific to virtual Bash. It is not
   a portable command mechanism for every sandbox backend.
 
@@ -69,6 +78,7 @@ Use completed tool operations as the evidence cadence:
 ```ts
 context.set(
   plan.review({
+    sandbox,
     when: toolCallCount(() => true, { gte: 5 }),
   }),
 );
@@ -86,11 +96,23 @@ evidence does not need to trigger a plan review.
 Parallel tool calls count individually. That is consistent with the
 evidence-cadence definition.
 
+The cadence is edge-triggered by `plan.review()`. This prevents a `gte`
+threshold from immediately repeating while the preceding reminder split is
+still catching up with the streaming loop.
+
 ### Model-visible payload
 
-The recurring payload should be short:
+The recurring payload contains a compact projection of the current sandbox
+plan and ends with the fixed review question:
 
 ```text
+Current plan (revision 4)
+Objective: ...
+Success criteria: ...
+Active tasks: ...
+Ready tasks: ...
+Waiting tasks: ...
+
 Re-read the current plan and consider the evidence gathered since the previous
 review.
 
@@ -111,8 +133,7 @@ When recitation fires, the agent must:
 1. Obtain the current compact plan projection through the plan-state boundary.
 2. Compare it with evidence gathered since the previous review.
 3. Decide `continue`, `revise`, `replace`, `complete`, or `blocked`.
-4. Record the decision and its evidence through validated plan-state
-   operations.
+4. Record the decision and its evidence in the plan file.
 5. Apply any required revision before continuing work.
 6. Verify success criteria before claiming completion.
 
@@ -121,9 +142,10 @@ When recitation fires, the agent must:
 `plan.review()` should compose the existing steer reminder. It should not
 create a second reminder engine or a general recitation abstraction.
 
-The eventual plan-state provider may supply dynamic content to the reminder,
-but `plan.review()` must not know whether the state is stored as files, SQLite,
-or another backend.
+`plan.review()` receives the same `AgentSandbox` used by the agent. Its async
+reminder text reads the current plan file at the moment the reminder fires,
+validates it, derives the dependency projection, and returns the compact
+payload.
 
 ### Phase exit criteria
 
@@ -131,7 +153,9 @@ or another backend.
 - The exact recurring model-visible question is fixed.
 - Review decisions and required behavior are defined.
 - Recitation remains a composition of the current steer reminder.
-- No storage representation is embedded into the recitation contract.
+- The projection is loaded at fire time rather than frozen when the agent loop
+  begins.
+- A still-true cadence predicate cannot duplicate the same threshold crossing.
 
 ## Phase 2: Plan instructions
 
@@ -225,11 +249,18 @@ with concrete evidence.
 
 ### Goal
 
-Choose a portable authoritative state boundary that supports validated plan
-mutations and a dependency DAG across every supported sandbox.
+Keep one authoritative plan file in the agent's sandbox, validate it whenever
+it is recited, and derive its dependency graph without adding another model
+tool.
 
-This phase requires a dedicated storage brainstorm. The recitation design must
-not prejudge its result.
+The fixed path is:
+
+```text
+/workspace/.deepagents/plan.json
+```
+
+The agent edits this file directly using the sandbox tools already present on
+every `@deepagents/context` agent.
 
 ### DAG representation
 
@@ -247,9 +278,9 @@ T2.blocks includes T3
 Storing both representations as independent writable fields would allow them
 to disagree.
 
-### Required invariants
+### Read-time invariants
 
-The authoritative state boundary must enforce:
+Every recitation validates:
 
 - every blocker references an existing task;
 - a task cannot block itself;
@@ -257,63 +288,51 @@ The authoritative state boundary must enforce:
 - reverse `blocks` edges are derived consistently;
 - a task is ready only when every blocker is completed;
 - an active task must be ready;
-- status transitions are valid;
-- concurrent updates cannot silently overwrite a newer revision;
 - review decisions refer to the plan revision they evaluated;
+- completed tasks include evidence;
 - completion requires success-criteria evidence.
 
-### Mutation boundary
+The file schema also rejects duplicate task and success-criterion identifiers,
+duplicate blocker edges, invalid statuses, empty required text, and unknown
+fields.
 
-The agent must not edit authoritative plan state directly. Direct file editing
-cannot reliably preserve the DAG, revision, and lifecycle invariants.
+### Direct mutation boundary
 
-All mutations must pass through one validated boundary, regardless of the
-physical storage format.
+The model may edit the authoritative file directly. Validation is deliberately
+detective rather than preventative: an invalid edit produces an actionable
+steer reminder directing the agent to repair the file before continuing.
 
-### Rejected approaches
+The plan stores only canonical fields. `blocks`, ready work, and waiting work
+are derived on every read, so direct edits cannot create conflicting copies of
+those values.
 
-#### Direct model edits to JSON
+This design assumes one writer per plan. Direct file writes do not provide
+compare-and-swap semantics, so simultaneous agents writing the same path may
+overwrite one another.
 
-Rejected because the model could introduce invalid references, cycles, stale
-reverse edges, or lost updates.
+### Chosen representation
 
-#### One writable file per task
+Use one JSON file containing the plan metadata, criteria, constraints,
+assumptions, tasks, evidence, and last review.
 
-Rejected because cross-task dependency changes would not be atomic and graph
-validation would span multiple independently editable files.
+The revision changes when objective, criteria, constraints, assumptions, tasks,
+or dependencies change. Recording a review decision without changing the plan
+does not itself increment the revision.
 
-#### A sandbox `plan` subcommand as the universal interface
+One file keeps the dependency graph and revision together. One writable file
+per task remains rejected because graph-wide validation would span multiple
+independently written files.
 
-Rejected as the general solution because the current custom-subcommand
-mechanism only works with virtual Bash. Other sandbox backends do not share
-that command-registration surface.
+### No additional tool
 
-### Storage brainstorm questions
-
-The storage phase must compare at least these boundaries:
-
-1. A sandbox-backed store accessed through a portable host-side validated
-   operation.
-2. A single database file inside the sandbox with transactional mutations.
-3. An existing `@deepagents/context` persistence primitive adapted to plan
-   state.
-4. Engine-mediated mutations that do not expose another model tool.
-
-The comparison must answer:
-
-- How does the model request a validated mutation?
-- Does the approach work with every `AgentSandbox` implementation?
-- Can the state remain physically owned by the sandbox?
-- Are graph updates and plan revisions atomic?
-- Can recitation obtain a compact projection without loading all task detail?
-- Can multiple agents coordinate without lost updates?
-- Does the design add another AI SDK tool, and if so, is that tool necessary?
-- Can the same public contract support ephemeral and volume-backed sandboxes?
+No `plan` AI SDK tool or sandbox subcommand is added. The existing `bash`,
+`readFile`, and `writeFile` tools are sufficient now that bypassable direct
+edits are accepted.
 
 ### Persistence ownership
 
-DeepAgents owns correctness while the sandbox exists. The caller owns sandbox
-durability.
+DeepAgents owns the schema, read-time validation, and compact projection while
+the sandbox exists. The caller owns sandbox durability.
 
 If state must survive disposal, the caller supplies a persistent volume, bind
 mount, or backend-specific persistence mechanism. The plan system documents
@@ -321,10 +340,12 @@ this requirement but does not manage sandbox lifecycle.
 
 ### Phase exit criteria
 
-- One storage and mutation boundary works across supported sandboxes.
-- The agent cannot bypass validation.
-- DAG and revision invariants are enforced atomically.
-- Recitation receives a compact storage-independent projection.
+- One sandbox-owned file works across supported sandboxes.
+- The agent can edit the file using its existing tools.
+- Invalid JSON, schema violations, and invalid DAGs produce an actionable
+  recitation instead of being silently accepted.
+- Recitation receives a compact projection with derived readiness and reverse
+  edges.
 - Persistence responsibilities are documented at the sandbox boundary.
 
 ## Phase 4: End-to-end integration
@@ -343,7 +364,7 @@ ordinary user request
 plan instructions infer objective, criteria, constraints, and assumptions
         │
         ▼
-validated plan state is initialized
+sandbox plan file is initialized
         │
         ▼
 agent executes work and gathers evidence through tools
@@ -357,7 +378,7 @@ compact plan and review question are recited through target: "steer"
         ▼
 agent records continue/revise/replace/complete/blocked
         │
-        ├── revise/replace ──► validated plan mutation ──► continue
+        ├── revise/replace ──► rewrite and revalidate plan ──► continue
         └── complete ────────► success-criteria evidence check
 ```
 
@@ -383,12 +404,12 @@ Exercise the public `@deepagents/context` agent flow with integration tests:
 3. Execute five completed tool operations.
 4. Confirm that a steer recitation is injected and persisted.
 5. Introduce evidence that invalidates the current plan.
-6. Confirm that the agent records a revision through the validated state
-   boundary before continuing.
+6. Confirm that the agent records a revision in the plan file before
+   continuing.
 7. Confirm that dependency readiness reflects the revised DAG.
 8. Confirm that completion is refused without success-criteria evidence.
-9. Confirm that volume-backed state can be resumed while ephemeral state
-   follows the sandbox lifecycle selected by the caller.
+9. Confirm that a fresh context engine sharing the sandbox resumes the latest
+   plan. Durability after sandbox disposal remains the caller/backend contract.
 
 ### Phase exit criteria
 
@@ -398,32 +419,42 @@ Exercise the public `@deepagents/context` agent flow with integration tests:
 - DAG invariants remain valid throughout execution.
 - Completion is evidence-backed.
 
+### Implemented verification
+
+The public agent-flow integration test now proves that an agent:
+
+1. creates the sandbox plan from an ordinary request;
+2. encounters tool evidence that invalidates an assumption;
+3. receives the persisted steer review after the evidence cadence;
+4. records the evaluated revision and revises the plan before continuing;
+5. attempts an unsupported completion and receives an actionable repair
+   recitation;
+6. adds criterion evidence, completes the plan, and resumes that exact plan
+   from a fresh context engine sharing the sandbox.
+
 ## Decisions
 
 - Build one proper solution in phases, not multiple disposable versions.
 - Keep recitation separate from storage representation.
 - Use the existing steer reminder as the recitation mechanism.
 - Use completed tool calls as the current review cadence.
+- Edge-trigger the plan-review predicate so one threshold crossing produces one
+  recitation.
 - Keep planning intelligence in stable instructions, not the recurring
   reminder.
 - Infer plan fields from the request, workspace, and evidence.
 - Store `blockedBy` canonically and derive `blocks`.
-- Do not allow direct model edits to authoritative plan state.
+- Store the plan in one sandbox-owned JSON file.
+- Allow direct model edits and validate the resulting state when it is read.
+- Do not add another model tool for plan maintenance.
 - Do not use the virtual-Bash-only subcommand mechanism as the universal
   mutation interface.
 - Make sandbox durability the caller's responsibility.
 
 ## Open questions
 
-- What portable validated mutation boundary should authoritative plan state
-  use?
-- How should a review receive evidence gathered since the previous review
-  without coupling recitation to transcript parsing?
-- Should all completed tools count toward cadence, or should plan-maintenance
-  operations be excluded?
-- How should multiple agents share and revise one plan without losing updates?
-- What is the smallest compact plan projection that still supports a sound
-  review decision?
+- Should simultaneous writers ever be supported through an optional
+  compare-and-swap mutation path?
 
 ---
 
@@ -638,3 +669,9 @@ Selected response:
 User annotation:
 
 > that is on the user. they should use volumes or something to have it persisted
+
+---
+
+# Appendix C: Verbatim storage clarification
+
+> I do not mind if the agent can "Bypassable"

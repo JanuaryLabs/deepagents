@@ -9,6 +9,7 @@ export * from './lib/estimate.ts';
 export * from './lib/fragments.ts';
 export * from './lib/fragments/domain.ts';
 export * from './lib/fragments/message/user.ts';
+export * from './lib/fragments/plan.ts';
 export * from './lib/fragments/reminders/index.ts';
 export * from './lib/fragments/reasoning.ts';
 export * from './lib/fragments/socratic.ts';

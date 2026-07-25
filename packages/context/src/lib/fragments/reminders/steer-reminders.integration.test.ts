@@ -17,6 +17,7 @@ import { describe, it, mock } from 'node:test';
 import { z } from 'zod';
 
 import {
+  type AgentSandbox,
   ContextEngine,
   type Guardrail,
   InMemoryContextStore,
@@ -32,8 +33,10 @@ import {
   once,
   or,
   pass,
+  plan,
   reminder,
   stripReminders,
+  toolCallCount,
   toolOutput,
 } from '@deepagents/context';
 
@@ -97,10 +100,13 @@ async function makeAgent(
   context: ContextEngine,
   model: MockLanguageModelV4,
   name: string,
+  suppliedSandbox?: AgentSandbox,
 ) {
-  const sandbox = await createBashTool({
-    sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
-  });
+  const sandbox =
+    suppliedSandbox ??
+    (await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    }));
   return agent({ sandbox, name, context, model, tools: { noop: noopTool } });
 }
 
@@ -125,7 +131,208 @@ function rolesOf(modelMessages: { role: string }[]): string[] {
   return modelMessages.map((m) => m.role);
 }
 
+function planFile(tasks: unknown[]) {
+  return JSON.stringify({
+    revision: 3,
+    objective: {
+      text: 'Ship sandbox-backed plan recitation',
+      basis: 'explicit_requirement',
+      source: 'user request',
+    },
+    successCriteria: [
+      {
+        id: 'SC1',
+        text: 'The latest valid plan appears in the steer reminder',
+        basis: 'inference',
+        source: 'recitation.md',
+        evidence: [],
+      },
+    ],
+    constraints: [
+      {
+        text: 'Use the existing steer reminder',
+        basis: 'discovered_constraint',
+        source: 'packages/context',
+      },
+    ],
+    assumptions: [],
+    tasks,
+  });
+}
+
 describe('steer reminders integration (chat flow)', () => {
+  it('recites plan review at the five-tool persisted-history cadence', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'plan-review',
+      userId: 'u1',
+    });
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { text: 'done' },
+    ]);
+    const sandbox = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+    await sandbox.sandbox.writeFiles([
+      {
+        path: plan.path,
+        content: planFile([
+          {
+            id: 'T1',
+            title: 'Establish the review primitive',
+            status: 'completed',
+            blockedBy: [],
+            evidence: [
+              {
+                summary: 'Phase 1 integration test passes',
+                source: 'steer-reminders.integration.test.ts',
+              },
+            ],
+          },
+          {
+            id: 'T2',
+            title: 'Load the sandbox plan',
+            status: 'pending',
+            blockedBy: ['T1'],
+            evidence: [],
+          },
+          {
+            id: 'T3',
+            title: 'Complete end-to-end integration',
+            status: 'pending',
+            blockedBy: ['T2'],
+            evidence: [],
+          },
+        ]),
+      },
+    ]);
+    const chatAgent = await makeAgent(context, model, 'plan-review', sandbox);
+
+    context.set(
+      plan.review({
+        sandbox,
+        when: toolCallCount(() => true, { gte: 5 }),
+      }),
+    );
+
+    await context.continue(userMessage('run the task'));
+    await drain(await chat(chatAgent));
+
+    const reviewQuestion =
+      'Is the current plan still valid given the latest evidence?';
+    const prompts = model.doStreamCalls.map((call) =>
+      JSON.stringify(call.prompt),
+    );
+    assert.ok(
+      prompts.slice(0, 6).every((prompt) => !prompt.includes(reviewQuestion)),
+      'plan review must not fire before five tools reach persisted history',
+    );
+    assert.strictEqual(
+      prompts.findIndex((prompt) => prompt.includes(reviewQuestion)),
+      6,
+      `the next safe boundary must see the plan review; observed ${prompts.length} model calls`,
+    );
+
+    const syntheticReviews = (await storedEntries(store, 'plan-review'))
+      .filter(
+        (entry) =>
+          entry.name === 'user' &&
+          isSyntheticReminderMessage(entry.data as UIMessage),
+      )
+      .map((entry) => textOf(entry.data as UIMessage));
+    assert.strictEqual(syntheticReviews.length, 1);
+    assert.ok(syntheticReviews[0].includes(reviewQuestion));
+    assert.ok(
+      syntheticReviews[0].includes(
+        'Objective: Ship sandbox-backed plan recitation',
+      ),
+    );
+    assert.ok(
+      syntheticReviews[0].includes('T2: Load the sandbox plan; blocks T3'),
+    );
+    assert.ok(
+      syntheticReviews[0].includes(
+        'T3: Complete end-to-end integration; waiting for T2',
+      ),
+    );
+    assert.ok(
+      syntheticReviews[0].includes(
+        'Before claiming completion, verify the success criteria against evidence.',
+      ),
+    );
+  });
+
+  it('recites an actionable validation failure for a directly edited cyclic plan', async () => {
+    const store = new InMemoryContextStore();
+    const context = new ContextEngine({
+      store,
+      chatId: 'invalid-plan-review',
+      userId: 'u1',
+    });
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { text: 'done' },
+    ]);
+    const sandbox = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+    await sandbox.sandbox.writeFiles([
+      {
+        path: plan.path,
+        content: planFile([
+          {
+            id: 'T1',
+            title: 'First cyclic task',
+            status: 'pending',
+            blockedBy: ['T2'],
+            evidence: [],
+          },
+          {
+            id: 'T2',
+            title: 'Second cyclic task',
+            status: 'pending',
+            blockedBy: ['T1'],
+            evidence: [],
+          },
+        ]),
+      },
+    ]);
+    const chatAgent = await makeAgent(
+      context,
+      model,
+      'invalid-plan-review',
+      sandbox,
+    );
+
+    context.set(
+      plan.review({
+        sandbox,
+        when: toolCallCount(() => true, { gte: 1 }),
+      }),
+    );
+
+    await context.continue(userMessage('run the task'));
+    await drain(await chat(chatAgent));
+
+    const prompts = model.doStreamCalls.map((call) =>
+      JSON.stringify(call.prompt),
+    );
+    assert.ok(
+      prompts.some((prompt) =>
+        prompt.includes('dependency cycle: T1 -> T2 -> T1'),
+      ),
+      `expected a persisted cycle validation reminder; got ${JSON.stringify(prompts)}`,
+    );
+  });
+
   it('fires mid-loop: stored chain splits assistant and matches the model prompt (parity)', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({ store, chatId: 'mid', userId: 'u1' });
@@ -181,9 +388,11 @@ describe('steer reminders integration (chat flow)', () => {
     const storedModel = await convertToModelMessages(storedUi, {
       ignoreIncompleteToolCalls: true,
     });
-    const promptNoSystem = model.doStreamCalls
-      .at(-1)!
-      .prompt.filter((message) => message.role !== 'system');
+    const lastCall = model.doStreamCalls.at(-1);
+    assert.ok(lastCall);
+    const promptNoSystem = lastCall.prompt.filter(
+      (message) => message.role !== 'system',
+    );
     assert.deepStrictEqual(
       rolesOf(storedModel).slice(0, promptNoSystem.length),
       rolesOf(promptNoSystem),
