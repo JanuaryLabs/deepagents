@@ -40,6 +40,12 @@ import {
 } from '@deepagents/text2sql/postgres';
 import { Spreadsheet } from '@deepagents/text2sql/spreadsheet';
 import {
+  columnStats as sqliteColumnStats,
+  columnValues as sqliteColumnValues,
+  constraints as sqliteConstraints,
+  indexes as sqliteIndexes,
+  info as sqliteInfo,
+  rowCount as sqliteRowCount,
   tables as sqliteTables,
   views as sqliteViews,
 } from '@deepagents/text2sql/sqlite';
@@ -699,7 +705,7 @@ for (const adapterCase of adapterCases) {
       const result = await adapter.validate('SELECT 1');
 
       assert.strictEqual(result, undefined);
-      assert.ok(probes.grounding.mock.callCount() > 0);
+      assert.strictEqual(probes.grounding.mock.callCount(), 0);
       assert.strictEqual(probes.validate.mock.callCount(), 1);
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
@@ -900,7 +906,7 @@ for (const adapterCase of adapterCases) {
       assert.ok(typeof result === 'string');
       const payload = parseScopePayload(result);
       assert.strictEqual(payload.error_type, 'SQL_SCOPE_PARSE_ERROR');
-      assert.ok(probes.grounding.mock.callCount() > 0);
+      assert.strictEqual(probes.grounding.mock.callCount(), 0);
       assert.strictEqual(probes.validate.mock.callCount(), 0);
       assert.strictEqual(probes.execute.mock.callCount(), 0);
     });
@@ -1149,5 +1155,28 @@ describe('bigquery scope normalization', () => {
       `SELECT * FROM ${runtime.datasetId}.users`,
     );
     assert.strictEqual(result, undefined);
+  });
+});
+
+describe('scope resolution grounding cost (sqlite)', () => {
+  it('resolves the allowlist through entity-producing groundings only', async () => {
+    const { adapter, probes } = await createSqlitePolicyAdapter({
+      grounding: [
+        sqliteInfo(),
+        sqliteTables({ filter: ['users'] }),
+        sqliteViews({ filter: ['active_users'], includeDefinition: false }),
+        sqliteRowCount(),
+        sqliteConstraints(),
+        sqliteIndexes(),
+        sqliteColumnStats(),
+        sqliteColumnValues(),
+      ],
+    });
+
+    const result = await adapter.validate('SELECT id FROM users');
+
+    assert.strictEqual(result, undefined);
+    assert.ok(probes.grounding.mock.callCount() > 0);
+    assert.strictEqual(probes.execute.mock.callCount(), 0);
   });
 });

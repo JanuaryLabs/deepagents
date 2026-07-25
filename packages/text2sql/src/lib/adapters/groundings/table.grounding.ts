@@ -75,6 +75,10 @@ export abstract class TableGrounding extends AbstractGrounding {
     tableName: string,
   ): Promise<Relationship[]>;
 
+  override async contributeEntities(ctx: GroundingContext): Promise<void> {
+    await this.execute(ctx);
+  }
+
   /**
    * Execute the grounding process.
    * Writes discovered tables and relationships to the context.

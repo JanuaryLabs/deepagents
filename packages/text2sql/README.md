@@ -280,6 +280,13 @@ reads/hints, assignments, known state/file/extension/remote-access functions,
 BigQuery external queries, qualified BigQuery persistent routines, and
 ClickHouse table functions or unsafe UDF origins.
 
+Scope checks compare referenced base tables and views against the entities
+produced by `tables()` and `views()` groundings. Entity-free queries such as
+`SELECT 1` do not run grounding just to resolve an empty allowlist, and metadata
+groundings such as `indexes()`, `constraints()`, `rowCount()`,
+`columnStats()`, and `columnValues()` annotate schema context without expanding
+the validation allowlist.
+
 This parser policy is one safety layer, not a database permission boundary.
 Static analysis cannot prove arbitrary unqualified user-defined functions are
 side-effect free, and an otherwise valid `SELECT` can still consume excessive

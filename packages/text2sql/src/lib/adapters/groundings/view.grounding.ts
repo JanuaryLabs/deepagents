@@ -69,6 +69,10 @@ export abstract class ViewGrounding extends AbstractGrounding {
   /** Get full view metadata for a single view */
   protected abstract getView(viewName: string): Promise<View>;
 
+  override async contributeEntities(ctx: GroundingContext): Promise<void> {
+    await this.execute(ctx);
+  }
+
   /**
    * Execute the grounding process.
    * Writes discovered views to the context.

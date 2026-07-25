@@ -55,8 +55,7 @@ export interface AdapterInfo {
   details?: FragmentObject;
 }
 export type AdapterInfoProvider =
-  | AdapterInfo
-  | (() => Promise<AdapterInfo> | AdapterInfo);
+  AdapterInfo | (() => Promise<AdapterInfo> | AdapterInfo);
 
 /**
  * Abstract base class for database schema groundings.
@@ -84,6 +83,16 @@ export abstract class AbstractGrounding {
    * @param ctx - Shared context for accumulating schema data
    */
   abstract execute(ctx: GroundingContext): Promise<void>;
+
+  /**
+   * Populate ctx with the tables/views this grounding makes available for scope
+   * resolution. Annotators decorate entities other groundings produced and add
+   * no membership, so the default is a no-op; entity-producing groundings
+   * override it. This lets scope resolution skip the annotators' metadata scans.
+   *
+   * @param _ctx - Shared context for accumulating entity membership
+   */
+  async contributeEntities(_ctx: GroundingContext): Promise<void> {}
 }
 
 class SampleDataGrounding {

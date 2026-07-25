@@ -65,12 +65,7 @@ export interface TableIndex {
 export interface TableConstraint {
   name: string;
   type:
-    | 'CHECK'
-    | 'UNIQUE'
-    | 'NOT_NULL'
-    | 'DEFAULT'
-    | 'PRIMARY_KEY'
-    | 'FOREIGN_KEY';
+    'CHECK' | 'UNIQUE' | 'NOT_NULL' | 'DEFAULT' | 'PRIMARY_KEY' | 'FOREIGN_KEY';
   columns?: string[];
   definition?: string;
   defaultValue?: string;
@@ -108,8 +103,7 @@ export interface AdapterInfo {
 }
 
 export type AdapterInfoProvider =
-  | AdapterInfo
-  | (() => Promise<AdapterInfo> | AdapterInfo);
+  AdapterInfo | (() => Promise<AdapterInfo> | AdapterInfo);
 
 export type IntrospectionPhase =
   | 'info'
@@ -124,9 +118,7 @@ export type IntrospectionPhase =
   | 'relationships';
 
 export type IntrospectionProgressType =
-  | 'phase:start'
-  | 'phase:progress'
-  | 'phase:end';
+  'phase:start' | 'phase:progress' | 'phase:end';
 
 export interface IntrospectionProgress {
   type: IntrospectionProgressType;
@@ -211,14 +203,14 @@ export abstract class Adapter {
 
   /**
    * Resolve the allowed entity names (tables + views) from grounding config.
-   * Runs all configured groundings and returns the resolved set of names.
+   * Asks each grounding to contribute its entities; annotators contribute
+   * nothing, so their metadata scans are skipped.
    * Results are NOT cached — call once and store the result.
    */
   async resolveAllowedEntities(): Promise<string[]> {
     const ctx = createGroundingContext();
     for (const fn of this.grounding) {
-      const grounding = fn(this);
-      await grounding.execute(ctx);
+      await fn(this).contributeEntities(ctx);
     }
     return [...ctx.tables.map((t) => t.name), ...ctx.views.map((v) => v.name)];
   }
@@ -425,11 +417,7 @@ export abstract class Adapter {
     const targetCount = targetTable?.rowCount;
 
     let cardinality:
-      | 'one-to-one'
-      | 'one-to-many'
-      | 'many-to-one'
-      | 'many-to-many'
-      | undefined;
+      'one-to-one' | 'one-to-many' | 'many-to-one' | 'many-to-many' | undefined;
 
     if (sourceCount != null && targetCount != null && targetCount > 0) {
       const ratio = sourceCount / targetCount;

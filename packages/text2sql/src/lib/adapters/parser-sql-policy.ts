@@ -9,11 +9,7 @@ import type {
 } from './sql-policy.ts';
 
 export type ParserDialect =
-  | 'bigquery'
-  | 'mysql'
-  | 'postgresql'
-  | 'sqlite'
-  | 'transactsql';
+  'bigquery' | 'mysql' | 'postgresql' | 'sqlite' | 'transactsql';
 
 interface SqlEntityReference {
   db?: string | null;
@@ -58,8 +54,7 @@ export abstract class ParserSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
       return { kind: 'read-only', message: READ_ONLY_MESSAGE };
     }
 
-    const allowedEntities = await context.resolveAllowedEntities();
-    const scopeError = this.#checkScope(sql, allowedEntities);
+    const scopeError = await this.#checkScope(sql, context);
     return scopeError ? { kind: 'scope', payload: scopeError } : null;
   }
 
@@ -88,10 +83,10 @@ export abstract class ParserSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
     return null;
   }
 
-  #checkScope(
+  async #checkScope(
     sql: string,
-    allowedEntities: readonly string[],
-  ): SQLScopeErrorPayload | null {
+    context: SqlPolicyContext,
+  ): Promise<SQLScopeErrorPayload | null> {
     let references: SqlEntityReference[] | null = null;
     let lastError: unknown;
     let lastDialect = this.dialects[0]!;
@@ -111,6 +106,7 @@ export abstract class ParserSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
     }
     if (references.length === 0) return null;
 
+    const allowedEntities = await context.resolveAllowedEntities();
     const allowedQualified = new Set(
       allowedEntities.map((entity) => entity.toLowerCase()),
     );
