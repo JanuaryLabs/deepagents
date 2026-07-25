@@ -326,6 +326,12 @@ Groundings execute in the order you specify. Some groundings depend on others:
 4. **`indexes()`**, **`constraints()`**, **`rowCount()`** - run after `tables()`, annotate discovered tables
 5. **`columnStats()`**, **`columnValues()`** - run after `tables()`, annotate columns
 
+Policy scope checks use only entity-producing groundings (`tables()` and
+`views()`) to resolve the allowed table and view names. Metadata groundings such
+as `indexes()`, `constraints()`, `rowCount()`, `columnStats()`, and
+`columnValues()` annotate schema context during indexing, but they do not expand
+the allowlist used by `validate()` or `execute()`.
+
 ## Filtering Tables
 
 All filter options work the same way across `tables()` and `views()`:
