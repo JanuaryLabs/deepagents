@@ -1,5 +1,10 @@
+import fs from 'node:fs';
 import * as path from 'node:path';
 import XLSX from 'xlsx';
+
+// The `xlsx` package resolves to its pure-ESM `xlsx.mjs` build under Node, which
+// ships without a bound `fs`, so readFile/writeFile throw until one is wired in.
+XLSX.set_fs(fs);
 
 /**
  * Column type for SQLite.
