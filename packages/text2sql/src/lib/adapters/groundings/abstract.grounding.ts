@@ -1,15 +1,7 @@
-import type { FragmentObject } from '@deepagents/context';
-
-import type { Adapter, IntrospectionPhase } from '../adapter.ts';
+import type { Filter, IntrospectionPhase } from '../adapter.ts';
 import type { GroundingContext } from './context.ts';
 
-/**
- * Filter type for table names.
- * - string[]: explicit list of table names
- * - RegExp: pattern to match table names
- * - function: predicate to filter table names
- */
-export type Filter = string[] | RegExp | ((tableName: string) => boolean);
+export type { AdapterInfo, AdapterInfoProvider, Filter } from '../adapter.ts';
 
 /**
  * Per-entity column filter.
@@ -48,15 +40,6 @@ export function applyColumnFilter<
   return { ...entity, columns: filterColumns(entity.columns, filter) } as T;
 }
 
-export interface AdapterInfo {
-  dialect: string;
-  version?: string;
-  database?: string;
-  details?: FragmentObject;
-}
-export type AdapterInfoProvider =
-  AdapterInfo | (() => Promise<AdapterInfo> | AdapterInfo);
-
 /**
  * Abstract base class for database schema groundings.
  *
@@ -93,17 +76,4 @@ export abstract class AbstractGrounding {
    * @param _ctx - Shared context for accumulating entity membership
    */
   async contributeEntities(_ctx: GroundingContext): Promise<void> {}
-}
-
-class SampleDataGrounding {
-  // this will fetch sample data for tables matching the filter
-}
-
-class FunctionGrounding {
-  #filter: Filter;
-  #adapter: Adapter;
-  constructor(adapter: Adapter, filter: Filter) {
-    this.#filter = filter;
-    this.#adapter = adapter;
-  }
 }
