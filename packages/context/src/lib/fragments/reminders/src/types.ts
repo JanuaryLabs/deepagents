@@ -1,10 +1,12 @@
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 import type { ContextFragment } from '../../../fragments.ts';
+import type { AgentSandbox } from '../../../sandbox/types.ts';
 import type { StoredChatData } from '../../../store/store.ts';
 
 export interface ReminderContext {
   content: string;
+  sandbox?: AgentSandbox;
   turn?: number;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
@@ -54,8 +56,7 @@ export type ToolOutcome =
     };
 
 export type SyncReminderText =
-  | string
-  | ((ctx: ReminderContext) => string | ReminderResolution);
+  string | ((ctx: ReminderContext) => string | ReminderResolution);
 
 export type ReminderText =
   | string
@@ -66,6 +67,7 @@ export type ReminderText =
 export interface WhenContext {
   turn: number;
   content: string;
+  sandbox?: AgentSandbox;
   lastMessageAt?: number;
   lastMessage?: UIMessage;
   currentMessage: UIMessage;

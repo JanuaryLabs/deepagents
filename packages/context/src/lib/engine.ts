@@ -20,8 +20,11 @@ import {
 import {
   type ChatMessage,
   type ContextFragment,
+  type FragmentData,
   assistant,
   getFragmentData,
+  isFragment,
+  isFragmentObject,
   isMessageFragment,
   toMessageFragment,
 } from './fragments.ts';
@@ -118,6 +121,52 @@ function estimateMessageContent(data: unknown): string {
 
 function isLanguageModelUsage(value: unknown): value is LanguageModelUsage {
   return typeof value === 'object' && value !== null && 'totalTokens' in value;
+}
+
+function cloneFragmentData(
+  data: FragmentData,
+  seen: WeakMap<object, FragmentData>,
+): FragmentData {
+  if (typeof data !== 'object' || data === null) return data;
+
+  const existing = seen.get(data);
+  if (existing !== undefined) return existing;
+
+  if (isFragment(data)) {
+    const clone = { ...data };
+    seen.set(data, clone);
+    if ('data' in data) {
+      clone.data = cloneFragmentData(data.data, seen);
+    }
+    return clone;
+  }
+
+  if (Array.isArray(data)) {
+    const clone: FragmentData[] = [];
+    seen.set(data, clone);
+    clone.push(...data.map((item) => cloneFragmentData(item, seen)));
+    return clone;
+  }
+
+  if (isFragmentObject(data)) {
+    const clone: Record<string, FragmentData> = {};
+    seen.set(data, clone);
+    for (const [key, value] of Object.entries(data)) {
+      clone[key] = cloneFragmentData(value, seen);
+    }
+    return clone;
+  }
+
+  return data;
+}
+
+function cloneFragment(fragment: ContextFragment): ContextFragment {
+  const clone = { ...fragment };
+  const seen = new WeakMap<object, FragmentData>([[fragment, clone]]);
+  if ('data' in fragment) {
+    clone.data = cloneFragmentData(fragment.data, seen);
+  }
+  return clone;
 }
 
 function addUsageValue(
@@ -677,14 +726,14 @@ export class ContextEngine {
    * Add fragments to the context.
    *
    * - Message fragments (user/assistant) are queued for persistence
-   * - Non-message fragments (role/hint) are kept in memory for system prompt
+   * - Non-message fragments are cloned so lazy resolution stays engine-local
    */
   public set(...fragments: ContextFragment[]) {
     for (const fragment of fragments) {
       if (isMessageFragment(fragment)) {
         this.#pendingMessages.push(fragment);
       } else {
-        this.#fragments.push(fragment);
+        this.#fragments.push(cloneFragment(fragment));
       }
     }
     return this;
@@ -786,6 +835,7 @@ export class ContextEngine {
     options: {
       steer?: boolean;
       additionalInput?: PrepareStepInputProvider;
+      sandbox?: AgentSandbox;
     } = {},
   ): PrepareStepFunction<TOOLS> {
     const enableSteer = options.steer ?? true;
@@ -829,7 +879,12 @@ export class ContextEngine {
       const chain = needsChain ? await this.#getChainContext() : undefined;
 
       const toolReminders = chain
-        ? await this.#evaluateToolOutputReminders(outcomes, session, chain)
+        ? await this.#evaluateToolOutputReminders(
+            outcomes,
+            session,
+            chain,
+            options.sandbox,
+          )
         : { texts: [], onceIds: [] };
       // Host input is valid before any sampling request, including the first
       // request of an approval continuation. Steer reminders remain mid-loop
@@ -840,7 +895,7 @@ export class ContextEngine {
       if (canFire && chain) {
         const configs = steerConfigs;
         if (configs.length > 0) {
-          const whenCtx = this.#steerWhenCtx(chain, session);
+          const whenCtx = this.#steerWhenCtx(chain, session, options.sandbox);
           const matched = await evaluateFiredReminders(configs, whenCtx);
           if (matched.length > 0) {
             const onceIds = [
@@ -1066,7 +1121,11 @@ export class ContextEngine {
    * elapsedExceeds keeps firing every step once crossed — by design; compose
    * once() for control.
    */
-  #steerWhenCtx(chain: ChainSummary, session: ReminderSession): WhenContext {
+  #steerWhenCtx(
+    chain: ChainSummary,
+    session: ReminderSession,
+    sandbox?: AgentSandbox,
+  ): WhenContext {
     const currentMessage = chain.lastMessage;
     if (!currentMessage) {
       throw new Error(
@@ -1076,6 +1135,7 @@ export class ContextEngine {
 
     return {
       ...this.#buildWhenCtx(chain, currentMessage),
+      sandbox,
       firedOnceIds: new Set([...chain.firedOnceIds, ...session.firedOnceIds]),
     };
   }
@@ -1084,6 +1144,7 @@ export class ContextEngine {
     outcomes: ToolOutcome[],
     session: ReminderSession,
     chain: ChainSummary,
+    sandbox?: AgentSandbox,
   ): Promise<{ texts: string[]; onceIds: string[] }> {
     const configs = this.#remindersFor('tool-output');
     if (configs.length === 0 || outcomes.length === 0) {
@@ -1097,6 +1158,7 @@ export class ContextEngine {
     const onceIds = new Set<string>();
     for (const outcome of outcomes) {
       const whenCtx = this.#buildWhenCtx(chain, currentMessage);
+      whenCtx.sandbox = sandbox;
       whenCtx.toolOutcome = outcome;
       whenCtx.firedOnceIds = new Set([
         ...chain.firedOnceIds,

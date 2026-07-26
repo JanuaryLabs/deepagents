@@ -20,6 +20,7 @@ import {
   SqliteStreamStore,
   createBashTool,
   createVirtualSandbox,
+  fragment,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -348,6 +349,7 @@ async function harness(
   tools?: ToolSet,
   options?: {
     queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
+    declaration?: AgentDeclaration;
   },
 ) {
   const pglite = new PGlite();
@@ -363,12 +365,15 @@ async function harness(
   await queue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
-  const runtime = new AgentRuntime(declaration(model, tools), {
-    store: new InMemoryContextStore(),
-    streamStore,
-    queue,
-    mailboxStore,
-  });
+  const runtime = new AgentRuntime(
+    options?.declaration ?? declaration(model, tools),
+    {
+      store: new InMemoryContextStore(),
+      streamStore,
+      queue,
+      mailboxStore,
+    },
+  );
   return {
     runtime,
     streamStore,
@@ -451,6 +456,52 @@ async function waitForText(
 }
 
 describe('zukhruf runtime — background executor', () => {
+  it('resolves sandbox-bound instruction fragments with the agent sandbox', async () => {
+    const modelPrompts: string[] = [];
+    let sandboxCount = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        modelPrompts.push(JSON.stringify(prompt));
+        return { stream: buildStream(['ok'], 0) };
+      },
+    });
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = async () => {
+      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+      await backend.writeFiles([
+        {
+          path: '/workspace/README.md',
+          content: `sandbox-${++sandboxCount}`,
+        },
+      ]);
+      return createBashTool({ sandbox: backend });
+    };
+    agentDeclaration.instructions = [
+      fragment('files', async ({ sandbox }) =>
+        sandbox!.sandbox.readFile('/workspace/README.md'),
+      ),
+    ];
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const result = await h.runtime.enqueue(
+      { chatId: 'sandbox-instructions', userId: 'u1' },
+      turn('hi'),
+    );
+
+    assert.equal((await collectText(result.stream)).text, 'ok');
+    const second = await h.runtime.enqueue(
+      { chatId: 'sandbox-instructions', userId: 'u1' },
+      turn('again'),
+    );
+    assert.equal((await collectText(second.stream)).text, 'ok');
+    assert.match(modelPrompts[0], /sandbox-1/);
+    assert.match(modelPrompts[1], /sandbox-2/);
+  });
+
   it('a detached reader reconnects via resume() and receives the full turn', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));

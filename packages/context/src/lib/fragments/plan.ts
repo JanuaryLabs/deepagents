@@ -370,11 +370,8 @@ function onRisingEdgeWithinTurn(predicate: WhenPredicate): WhenPredicate {
   };
 }
 
-function review(options: {
-  sandbox: AgentSandbox;
-  when: WhenPredicate;
-}): ContextFragment {
-  return reminder(() => resolvePlanReview(options.sandbox), {
+function review(options: { when: WhenPredicate }): ContextFragment {
+  return reminder(({ sandbox }) => resolvePlanReview(sandbox!), {
     when: onRisingEdgeWithinTurn(options.when),
     target: 'steer',
   });

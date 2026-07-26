@@ -217,7 +217,6 @@ describe('steer reminders integration (chat flow)', () => {
 
     context.set(
       plan.review({
-        sandbox,
         when: toolCallCount(() => true, { gte: 5 }),
       }),
     );
@@ -314,7 +313,6 @@ describe('steer reminders integration (chat flow)', () => {
 
     context.set(
       plan.review({
-        sandbox,
         when: toolCallCount(() => true, { gte: 1 }),
       }),
     );

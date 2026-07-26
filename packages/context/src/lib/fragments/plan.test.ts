@@ -86,8 +86,6 @@ const discoverEnvironment = tool({
 
 describe('plan instructions', () => {
   it('renders stable planning rules without baking in the recurring review', async () => {
-    await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
-    const sandbox = await createBashTool({ sandbox: backend });
     const context = new ContextEngine({
       store: new InMemoryContextStore(),
       chatId: 'plan-instructions',
@@ -95,7 +93,6 @@ describe('plan instructions', () => {
     }).set(
       plan.instructions(),
       plan.review({
-        sandbox,
         when: () => true,
       }),
     );
@@ -291,7 +288,6 @@ describe('plan instructions', () => {
     }).set(
       plan.instructions(),
       plan.review({
-        sandbox,
         when: toolCallCount(() => true, { gte: 5 }),
       }),
     );
@@ -380,7 +376,6 @@ describe('plan instructions', () => {
     }).set(
       plan.instructions(),
       plan.review({
-        sandbox,
         when: toolCallCount(() => true, { gte: 5 }),
       }),
     );

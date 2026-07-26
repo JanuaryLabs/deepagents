@@ -78,7 +78,6 @@ Use completed tool operations as the evidence cadence:
 ```ts
 context.set(
   plan.review({
-    sandbox,
     when: toolCallCount(() => true, { gte: 5 }),
   }),
 );
@@ -142,10 +141,9 @@ When recitation fires, the agent must:
 `plan.review()` should compose the existing steer reminder. It should not
 create a second reminder engine or a general recitation abstraction.
 
-`plan.review()` receives the same `AgentSandbox` used by the agent. Its async
-reminder text reads the current plan file at the moment the reminder fires,
-validates it, derives the dependency projection, and returns the compact
-payload.
+The reminder callback receives the same `AgentSandbox` used by the agent. It
+reads the current plan file when the reminder fires, validates it, derives the
+dependency projection, and returns the compact payload.
 
 ### Phase exit criteria
 

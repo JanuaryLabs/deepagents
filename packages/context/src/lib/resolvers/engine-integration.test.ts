@@ -97,6 +97,35 @@ describe('engine + resolver chain integration', () => {
     assert.strictEqual(capturedSandbox, sandbox);
   });
 
+  it('resolves a shared lazy fragment independently in each engine', async () => {
+    const firstSandbox = await createVirtualAgentSandbox();
+    const secondSandbox = await createVirtualAgentSandbox();
+    const shared = fragment('sandbox', async ({ sandbox }) =>
+      sandbox === firstSandbox ? 'first' : 'second',
+    );
+    const first = newEngine().set(shared);
+    const second = newEngine().set(shared);
+
+    assert.match(
+      (
+        await first.resolve({
+          renderer: new XmlRenderer(),
+          sandbox: firstSandbox,
+        })
+      ).systemPrompt,
+      /first/,
+    );
+    assert.match(
+      (
+        await second.resolve({
+          renderer: new XmlRenderer(),
+          sandbox: secondSandbox,
+        })
+      ).systemPrompt,
+      /second/,
+    );
+  });
+
   it('rejects when a loader throws', async () => {
     const engine = newEngine();
     engine.set(

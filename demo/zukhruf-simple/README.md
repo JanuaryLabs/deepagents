@@ -3,7 +3,7 @@
 The smallest complete Zukhruf deployable unit.
 
 - `agent.ts` declares the agent.
-- `instructions.ts` declares its behavior.
+- `instructions.ts` declares its behavior and plan recitation.
 - `sandbox.ts` declares its per-chat sandbox.
 - `run.ts` provides the runtime, durable queue, and stores.
 - `channels/`, `connections/`, `schedules/`, `skills/`, `subagents/`, and

@@ -153,6 +153,7 @@ class Agent<CIn, COut = CIn> {
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
       prepareStep: this.#options.context.createPrepareStep({
         steer: false,
+        sandbox: this.#options.sandbox,
       }),
       tools: this.tools,
       runtimeContext: contextVariables as any,
@@ -199,6 +200,7 @@ class Agent<CIn, COut = CIn> {
 
     const prepareStep = this.#options.context.createPrepareStep({
       additionalInput: this.#options.prepareStepInput,
+      sandbox: this.#options.sandbox,
     });
     const result = await this.#createRawStream(
       contextVariables,
@@ -256,7 +258,9 @@ class Agent<CIn, COut = CIn> {
       }),
       repairToolCall: createRepairToolCall(model, config?.abortSignal),
       stopWhen: this.#options.stopWhen ?? DEFAULT_STOP_WHEN,
-      prepareStep: prepareStep ?? context.createPrepareStep(),
+      prepareStep:
+        prepareStep ??
+        context.createPrepareStep({ sandbox: this.#options.sandbox }),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
       runtimeContext: contextVariables as any,
@@ -712,8 +716,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       config?: {
         abortSignal?: AbortSignal;
         transform?:
-          | StreamTextTransform<ToolSet>
-          | StreamTextTransform<ToolSet>[];
+          StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
       },
     ) {
       if (!options.context) {
