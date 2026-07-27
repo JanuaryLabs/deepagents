@@ -297,6 +297,26 @@ toolCallCount('sql', { eq: 1 });
 
 Counts calls in the current assistant segment. To count across a whole turn that a firing reminder has carved into segments, use `toolFailedStreak` below or read `ctx.lastAssistantMessages` directly.
 
+### everyNToolCalls(n)
+
+Matches after `n` terminal tool outcomes in the current assistant segment.
+This is the usual cadence helper for steer reminders that should review work
+after a fixed amount of tool activity.
+
+```ts
+import { everyNToolCalls, reminder } from '@deepagents/context';
+
+reminder('Review the plan before taking another action.', {
+  when: everyNToolCalls(5),
+  target: 'steer',
+});
+```
+
+The helper counts `output-available`, `output-error`, and `output-denied`.
+When a steer or tool-output reminder fires, the engine persists the reminder
+boundary with a fresh assistant segment, so the count restarts before the model
+continues.
+
 ### toolFailedStreak(name, spec)
 
 Gates on a run of **consecutive** failures of `name`, counting back from the newest result. A success ends the run, so the streak resets on its own.

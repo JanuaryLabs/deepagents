@@ -143,6 +143,26 @@ export function toolCallCount(
 }
 
 /**
+ * Match after `n` terminal tool outcomes in the current assistant segment.
+ *
+ * Steer and tool-output reminders carve the assistant reply when they fire, so
+ * the segment count restarts before delivery. The predicate itself is
+ * stateless: identical context produces an identical result.
+ */
+export function everyNToolCalls(n: number): WhenPredicate {
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error('everyNToolCalls(n) requires a positive integer');
+  }
+
+  return (ctx) =>
+    toolPartsOf(ctx.lastAssistantMessage).filter((part) =>
+      ['output-available', 'output-error', 'output-denied'].includes(
+        part.state,
+      ),
+    ).length >= n;
+}
+
+/**
  * How many times `name` has failed in a row, counting back from the newest
  * result. A success ends the run.
  *

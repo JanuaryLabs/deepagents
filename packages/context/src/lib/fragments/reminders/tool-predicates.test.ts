@@ -7,11 +7,13 @@ import { describe, it } from 'node:test';
 import {
   ContextEngine,
   InMemoryContextStore,
+  type WhenContext,
   XmlRenderer,
   anyToolCalled,
   assistant,
   createBashTool,
   createVirtualSandbox,
+  everyNToolCalls,
   reminder,
   toolCall,
   toolCallCount,
@@ -60,6 +62,17 @@ function toolPart(init: ToolPartInit): ToolUIPart {
         input: init.input,
         errorText: init.errorText ?? '',
       };
+    case 'output-denied':
+      return {
+        ...base,
+        state: 'output-denied',
+        input: init.input,
+        approval: {
+          id: generateId(),
+          approved: false,
+          reason: 'blocked by policy',
+        },
+      };
     default:
       throw new Error(`unsupported state: ${init.state}`);
   }
@@ -75,6 +88,42 @@ function assistantWithTools(parts: ToolPartInit[], text?: string): UIMessage {
     role: 'assistant',
     parts: messageParts,
   };
+}
+
+function whenContextWithTools(
+  parts: ToolPartInit[],
+  chat: WhenContext['chat'],
+  turn = 1,
+): WhenContext {
+  const message = assistantWithTools(parts);
+
+  return {
+    turn,
+    content: '',
+    currentMessage: message,
+    chat,
+    branch: 'main',
+    messageCount: 1,
+    lastAssistantMessage: message,
+    lastAssistantMessages: [message],
+    lastAssistantReplies: [message],
+  };
+}
+
+function whenContext(
+  completedToolCalls: number,
+  chat: WhenContext['chat'],
+  turn = 1,
+): WhenContext {
+  return whenContextWithTools(
+    Array.from({ length: completedToolCalls }, (_, index) => ({
+      name: `tool-${index}`,
+      state: 'output-available',
+      output: { ok: true },
+    })),
+    chat,
+    turn,
+  );
 }
 
 async function setupTurn(
@@ -475,6 +524,64 @@ describe('toolCallCount', () => {
       () => toolCallCount('bash', {}),
       /at least one of gte\/lte\/eq/,
     );
+  });
+});
+
+describe('everyNToolCalls', () => {
+  it('does not count input-available before a tool reaches a terminal outcome', async () => {
+    const predicate = everyNToolCalls(1);
+
+    assert.equal(
+      await predicate(
+        whenContextWithTools(
+          [{ name: 'bash', state: 'input-available', input: { cmd: 'pwd' } }],
+          {} as WhenContext['chat'],
+        ),
+      ),
+      false,
+    );
+  });
+
+  it('counts available, error, and denied terminal outcomes', async () => {
+    const predicate = everyNToolCalls(3);
+
+    assert.equal(
+      await predicate(
+        whenContextWithTools(
+          [
+            {
+              name: 'first',
+              state: 'output-available',
+              output: { ok: true },
+            },
+            {
+              name: 'second',
+              state: 'output-error',
+              errorText: 'failed',
+            },
+            { name: 'third', state: 'output-denied' },
+          ],
+          {} as WhenContext['chat'],
+        ),
+      ),
+      true,
+    );
+  });
+
+  it('is stateless and rearms when reminder delivery resets the segment', async () => {
+    const predicate = everyNToolCalls(3);
+    const chat = {} as WhenContext['chat'];
+
+    assert.equal(await predicate(whenContext(2, chat)), false);
+    assert.equal(await predicate(whenContext(3, chat)), true);
+    assert.equal(await predicate(whenContext(3, chat)), true);
+    assert.equal(await predicate(whenContext(0, chat)), false);
+    assert.equal(await predicate(whenContext(4, chat)), true);
+  });
+
+  it('validates the cadence at builder time', () => {
+    assert.throws(() => everyNToolCalls(0), /positive integer/);
+    assert.throws(() => everyNToolCalls(1.5), /positive integer/);
   });
 });
 

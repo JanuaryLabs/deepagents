@@ -188,7 +188,7 @@ Use `tool-output` when the reminder should follow a terminal tool outcome. Raw t
 
 Use `steer` when the agent needs a hidden nudge during a multi-step turn without waiting for the next user message. Steer reminders do not run before the initial generation: context needed there belongs on a `user` reminder. A predicate that stays true fires at every eligible continuation boundary; compose `once(id)` when it should latch after the first fire.
 
-A steer predicate is evaluated against the chain **as it stands at that boundary**, so it observes what the model did earlier in the same turn — a tool it called at step 3, a streak of failures, a segment count. That is what makes predicates like `toolCallCount('bash', { gte: 2 })` or `toolFailedStreak('bash', { gte: 3 })` usable as steer triggers.
+A steer predicate is evaluated against the chain **as it stands at that boundary**, so it observes what the model did earlier in the same turn — a tool it called at step 3, a streak of failures, a segment count. That is what makes predicates like `everyNToolCalls(5)`, `toolCallCount('bash', { gte: 2 })`, or `toolFailedStreak('bash', { gte: 3 })` usable as steer triggers.
 
 For streamed chat turns, the engine persists the same
 `assistant/tool result → synthetic user message → assistant` split the model

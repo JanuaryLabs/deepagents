@@ -342,37 +342,9 @@ function instructions(): ContextFragment {
   return fragment('plan_instructions', PLAN_INSTRUCTIONS);
 }
 
-/**
- * A cadence predicate such as `toolCallCount(..., { gte: 5 })` remains true
- * until the reminder split reaches persisted history. Plan review is a
- * threshold event, so fire once for that true run and re-arm after the
- * predicate becomes false. A new real user turn always starts re-armed.
- */
-function onRisingEdgeWithinTurn(predicate: WhenPredicate): WhenPredicate {
-  let currentTurn: number | undefined;
-  let matched = false;
-
-  return async (context) => {
-    if (context.turn !== currentTurn) {
-      currentTurn = context.turn;
-      matched = false;
-    }
-
-    const next = await predicate(context);
-    if (!next) {
-      matched = false;
-      return false;
-    }
-    if (matched) return false;
-
-    matched = true;
-    return true;
-  };
-}
-
 function review(options: { when: WhenPredicate }): ContextFragment {
   return reminder(({ sandbox }) => resolvePlanReview(sandbox!), {
-    when: onRisingEdgeWithinTurn(options.when),
+    when: options.when,
     target: 'steer',
   });
 }

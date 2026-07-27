@@ -27,6 +27,7 @@ import {
   createBashTool,
   createVirtualSandbox,
   elapsedExceeds,
+  everyNToolCalls,
   everyNTurns,
   fail,
   isSyntheticReminderMessage,
@@ -217,7 +218,7 @@ describe('steer reminders integration (chat flow)', () => {
 
     context.set(
       plan.review({
-        when: toolCallCount(() => true, { gte: 5 }),
+        when: everyNToolCalls(5),
       }),
     );
 

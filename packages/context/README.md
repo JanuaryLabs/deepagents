@@ -322,8 +322,10 @@ describe already persisted calls.
 import {
   anyToolCalled,
   elapsedExceeds,
+  everyNToolCalls,
   everyOfLastN,
   not,
+  plan,
   reminder,
   toolCalled,
   toolOutput,
@@ -353,11 +355,28 @@ engine.set(
 );
 ```
 
-Other exported helpers include `toolCallCount(...)`,
+Other exported helpers include `everyNToolCalls(...)`, `toolCallCount(...)`,
 `lastAssistantLength(...)`, `withinLastN(...)`, `everyOfLastN(...)`, and
 `elapsedExceeds(...)`. See the
 [Predicates](https://januarylabs.github.io/deepagents/docs/context/predicates)
 page for the full catalog.
+
+### Plan Recitation
+
+`plan.instructions()` teaches a sandbox-backed agent to maintain its
+authoritative plan at `/workspace/.deepagents/plan.json`. `plan.review(...)`
+composes a steer reminder that reads and validates that plan when the predicate
+fires, then recites the compact plan projection and asks whether the plan is
+still valid given the latest evidence.
+
+```ts
+engine.set(
+  plan.instructions(),
+  plan.review({
+    when: everyNToolCalls(5),
+  }),
+);
+```
 
 - `stripTextByRanges(text, ranges)` removes offset spans from text and returns the remaining visible content.
 - `stripReminders(message)` strips inline/part reminders and model-only synthetic reminder payloads from a `UIMessage`.

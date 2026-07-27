@@ -274,39 +274,22 @@ export type PrepareStepInputProvider = () =>
   | undefined
   | Promise<Array<UIMessage & { role: 'user' }> | undefined>;
 
-interface StepInputFire {
-  /** Step index the input was injected after. */
-  afterStep: number;
-  messages: Array<UIMessage & { role: 'user' }>;
-}
-
 /**
  * Per-stream reminder state. The session object is closure-local to each
  * createPrepareStep() call; only the `#currentReminderSession` pointer lives on
- * the engine so writeAssistantSegment can persist the model-visible splits.
+ * the engine so prepareStep can persist model-visible splits before delivery
+ * and writeAssistantSegment can fill their reserved assistant segments.
  *
- * Guardrail retries reuse the same prepare hook and session so local step
- * numbers can be mapped onto one cumulative UI message.
+ * Guardrail retries reuse the same prepare hook and session.
  * Running two concurrent streams on ONE engine instance is unsupported.
  */
 interface ReminderSession {
   /** Durable once-ids fired in this stream. */
   firedOnceIds: Set<string>;
-  fired: StepInputFire[];
   /** Id of the open (still-growing) assistant segment. */
   currentSegId?: string;
   /** Part index in the cumulative response where the open segment starts. */
   currentSegStart: number;
-  /** How many fired reminders have been split into the chain. */
-  materialized: number;
-}
-
-function stepStartPartIndices(parts: UIMessage['parts']): number[] {
-  const indices: number[] = [];
-  for (let i = 0; i < parts.length; i++) {
-    if (parts[i].type === 'step-start') indices.push(i);
-  }
-  return indices;
 }
 
 /**
@@ -549,7 +532,9 @@ export class ContextEngine {
    * Count user turns in the conversation and return the previous saved user message context.
    * Includes persisted messages and pending messages in the turn count.
    */
-  async #getChainContext(): Promise<ChainSummary> {
+  async #getChainContext(
+    pending: ContextFragment[] = this.#pendingMessages,
+  ): Promise<ChainSummary> {
     await this.#ensureInitialized();
 
     const builder = new ChainSummaryBuilder();
@@ -559,8 +544,7 @@ export class ContextEngine {
       );
       for (const msg of chain) builder.ingestStored(msg);
     }
-    for (const fragment of this.#pendingMessages)
-      builder.ingestPending(fragment);
+    for (const fragment of pending) builder.ingestPending(fragment);
     return builder.build();
   }
 
@@ -803,13 +787,16 @@ export class ContextEngine {
     }
 
     const pending = this.#pendingMessages;
-    const pipeline = new SavePipeline(this.#asSavePipelineEngine(), pending);
-    await pipeline.applyUpdateBranching(options?.branch ?? true);
-    await this.#foldUserReminders(pending);
-    const result = await pipeline.persist();
-
     this.#pendingMessages = [];
-    return result;
+    const pipeline = new SavePipeline(this.#asSavePipelineEngine(), pending);
+    try {
+      await pipeline.applyUpdateBranching(options?.branch ?? true);
+      await this.#foldUserReminders(pending);
+      return await pipeline.persist();
+    } catch (error) {
+      this.#pendingMessages.unshift(...pending);
+      throw error;
+    }
   }
 
   #currentReminderSession: ReminderSession | undefined;
@@ -825,9 +812,10 @@ export class ContextEngine {
    * latch is desired. AI SDK v7 carries prepared message overrides forward to
    * subsequent steps.
    *
-   * writeAssistantSegment persists the matching
-   * `[assistant, reminder, assistant]` split so later requests reproduce the
-   * exact prompt prefix the model saw.
+   * Each injected input is persisted with a following assistant placeholder
+   * before prepareStep returns. writeAssistantSegment fills that placeholder,
+   * so process loss cannot make a delivered reminder eligible again and later
+   * requests reproduce the exact prompt prefix the model saw.
    */
   public createPrepareStep<
     TOOLS extends Record<string, Tool> = Record<string, Tool>,
@@ -841,27 +829,11 @@ export class ContextEngine {
     const enableSteer = options.steer ?? true;
     const session: ReminderSession = {
       firedOnceIds: new Set(),
-      fired: [],
       currentSegStart: 0,
-      materialized: 0,
     };
     this.#currentReminderSession = session;
-    // Guardrail retries reuse this hook while AI SDK step numbers restart at
-    // zero. Translate each retry-local number into the cumulative UI message's
-    // step coordinates so persisted reminder boundaries remain exact.
-    let stepOffset = 0;
-    let previousStepNumber: number | undefined;
 
     return async ({ steps, stepNumber, messages }) => {
-      if (
-        previousStepNumber !== undefined &&
-        stepNumber <= previousStepNumber
-      ) {
-        stepOffset += previousStepNumber + 1;
-      }
-      previousStepNumber = stepNumber;
-      const cumulativeStepNumber = stepOffset + stepNumber;
-
       // Steer is mid-loop only: never fire before the model has produced a step
       // with content, so its synthetic user is preceded by an assistant turn.
       const priorStep = stepNumber >= 1 ? steps[stepNumber - 1] : undefined;
@@ -935,10 +907,36 @@ export class ContextEngine {
         const inputModel = await convertToModelMessages(inputs as never, {
           ignoreIncompleteToolCalls: true,
         });
-        session.fired.push({
-          afterStep: cumulativeStepNumber - 1,
-          messages: inputs,
-        });
+        const head = await this.headMessage();
+        if (head?.name !== 'assistant') {
+          throw new Error(
+            'createPrepareStep: expected an assistant message at chain head.',
+          );
+        }
+        const currentSegmentId = session.currentSegId ?? head.id;
+        const currentSegment = await this.#store.getMessage(currentSegmentId);
+        if (!currentSegment || currentSegment.name !== 'assistant') {
+          throw new Error(
+            'createPrepareStep: expected the open assistant segment to be persisted.',
+          );
+        }
+        const currentMessage = requireUIMessage(
+          currentSegment.data,
+          `Stored assistant message "${currentSegment.id}"`,
+        );
+        const nextSegmentId = generateId();
+        for (const input of inputs) this.set(user(input));
+        this.set(
+          assistant({
+            id: nextSegmentId,
+            role: 'assistant',
+            parts: [],
+          }),
+        );
+        await this.save({ branch: false });
+        session.currentSegId = nextSegmentId;
+        session.currentSegStart += currentMessage.parts.length;
+
         return {
           messages: [...(messages as ModelMessage[]), ...inputModel],
         };
@@ -949,22 +947,15 @@ export class ContextEngine {
   }
 
   /**
-   * Persist the streamed assistant message, carving it at reminder boundaries.
+   * Persist the streamed assistant message into its reserved segment.
    *
    * Called from chat()'s onStepEnd/onEnd (and the guardrail path) with the
-   * cumulative response message. Segment boundaries come from the `step-start`
-   * markers in the message itself — no cross-track store read — so the carve is
-   * race-free. Idempotent: finalized segments keep stable ids; the open segment
-   * is updated in place. With no fired reminder it degrades to a plain in-place
-   * write of the whole message to the reserved head.
+   * cumulative response message. prepareStep has already persisted reminder
+   * boundaries and reserved the open segment id, so this only updates that
+   * segment in place with the cumulative prefix removed. With no fired reminder
+   * it writes the whole message to the original reserved head.
    */
-  public async writeAssistantSegment(
-    message: UIMessage,
-    options: {
-      /** Materialize reminders sent without a following step marker. */
-      final?: boolean;
-    } = {},
-  ): Promise<void> {
+  public async writeAssistantSegment(message: UIMessage): Promise<void> {
     const head = await this.headMessage();
     if (head?.name !== 'assistant') {
       throw new Error(
@@ -973,44 +964,11 @@ export class ContextEngine {
     }
 
     const session = this.#currentReminderSession;
-    if (!session || session.fired.length === 0) {
-      this.set(assistant({ ...message, id: head.id } as UIMessage));
-      await this.save({ branch: false });
-      return;
-    }
-
-    if (session.currentSegId === undefined) {
-      session.currentSegId = head.id;
-      session.currentSegStart = 0;
-    }
-
-    const stepStarts = stepStartPartIndices(message.parts);
-
-    while (session.materialized < session.fired.length) {
-      const fire = session.fired[session.materialized];
-      const boundary =
-        stepStarts[fire.afterStep + 1] ??
-        (options.final ? message.parts.length : undefined);
-      if (boundary === undefined) break; // the post-reminder step has not started
-
-      this.set(
-        assistant({
-          id: session.currentSegId,
-          role: 'assistant',
-          parts: message.parts.slice(session.currentSegStart, boundary),
-        } as UIMessage),
-      );
-      for (const input of fire.messages) this.set(user(input));
-      session.currentSegId = generateId();
-      session.currentSegStart = boundary;
-      session.materialized++;
-    }
-
     this.set(
       assistant({
         ...message,
-        id: session.currentSegId,
-        parts: message.parts.slice(session.currentSegStart),
+        id: session?.currentSegId ?? head.id,
+        parts: message.parts.slice(session?.currentSegStart ?? 0),
       } as UIMessage),
     );
     await this.save({ branch: false });
@@ -1078,7 +1036,7 @@ export class ContextEngine {
       `Pending user fragment "${fragment.name}"`,
     );
 
-    const chain = await this.#getChainContext();
+    const chain = await this.#getChainContext(pending);
     const matched = await evaluateFiredReminders(configs, {
       ...this.#buildWhenCtx(chain, message),
       firedOnceIds: chain.firedOnceIds,

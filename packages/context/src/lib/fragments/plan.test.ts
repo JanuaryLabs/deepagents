@@ -17,9 +17,9 @@ import {
   chat,
   createBashTool,
   createVirtualSandbox,
+  everyNToolCalls,
   isSyntheticReminderMessage,
   plan,
-  toolCallCount,
 } from '@deepagents/context';
 
 const testUsage = {
@@ -288,7 +288,7 @@ describe('plan instructions', () => {
     }).set(
       plan.instructions(),
       plan.review({
-        when: toolCallCount(() => true, { gte: 5 }),
+        when: everyNToolCalls(5),
       }),
     );
     const chatAgent = agent({
@@ -376,7 +376,7 @@ describe('plan instructions', () => {
     }).set(
       plan.instructions(),
       plan.review({
-        when: toolCallCount(() => true, { gte: 5 }),
+        when: everyNToolCalls(5),
       }),
     );
     const resumedAgent = agent({

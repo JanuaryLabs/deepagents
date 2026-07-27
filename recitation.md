@@ -55,12 +55,11 @@ Review
 - `WhenContext` does not currently expose a model step number.
 - `everyNTurns()` is not a useful cadence for a long agent loop occurring
   inside one user turn.
-- `toolCallCount()` can count completed tool calls in the assistant segment
-  since the previous steer reminder. A firing steer reminder carves the
-  assistant chain, so the count effectively restarts after recitation.
-- `plan.review()` edge-triggers its cadence predicate: a threshold that remains
-  true across the next streaming boundary produces one review, then re-arms
-  after the predicate becomes false or a new real user turn begins.
+- `everyNToolCalls()` fires once after the configured number of completed tool
+  outcomes in the assistant segment. It is stateless and counts
+  `output-available`, `output-error`, and `output-denied`. A firing reminder is
+  persisted with a fresh assistant segment before delivery, so the count resets
+  durably before the model can continue.
 - The current sandbox subcommand helper is specific to virtual Bash. It is not
   a portable command mechanism for every sandbox backend.
 
@@ -78,7 +77,7 @@ Use completed tool operations as the evidence cadence:
 ```ts
 context.set(
   plan.review({
-    when: toolCallCount(() => true, { gte: 5 }),
+    when: everyNToolCalls(5),
   }),
 );
 ```
@@ -95,9 +94,10 @@ evidence does not need to trigger a plan review.
 Parallel tool calls count individually. That is consistent with the
 evidence-cadence definition.
 
-The cadence is edge-triggered by `plan.review()`. This prevents a `gte`
-threshold from immediately repeating while the preceding reminder split is
-still catching up with the streaming loop.
+The cadence is a stateless level predicate over the current assistant segment.
+The context engine persists the reminder boundary before delivery, so the next
+evaluation sees a fresh segment instead of repeating the same threshold.
+`plan.review()` remains a simple consumer of any caller-supplied predicate.
 
 ### Model-visible payload
 
