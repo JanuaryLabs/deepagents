@@ -436,8 +436,8 @@ The public agent-flow integration test now proves that an agent:
 - Keep recitation separate from storage representation.
 - Use the existing steer reminder as the recitation mechanism.
 - Use completed tool calls as the current review cadence.
-- Edge-trigger the plan-review predicate so one threshold crossing produces one
-  recitation.
+- Persist the reminder boundary before delivery so one threshold crossing
+  produces one recitation.
 - Keep planning intelligence in stable instructions, not the recurring
   reminder.
 - Infer plan fields from the request, workspace, and evidence.

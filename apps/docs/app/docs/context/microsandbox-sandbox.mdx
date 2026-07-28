@@ -166,10 +166,11 @@ node demo/microsandbox-text2sql/bootstrap.ts
 node demo/microsandbox-text2sql/demo-microsandbox.ts
 ```
 
-`bootstrap.ts` builds the shared daemon image with Docker, saves it, and loads it
-into the local Microsandbox image cache with `msb image load`. The demo then
-uses `createMicrosandboxSandbox({ image, configure })` with `pullPolicy('never')`
-so a missing local image fails clearly instead of trying a registry pull.
+`bootstrap.ts` exports the shared daemon image from Buildx as an OCI archive and
+loads it directly into the local Microsandbox cache with the SDK's
+`Image.load()`. The demo then uses
+`createMicrosandboxSandbox({ image, configure })` with `pullPolicy('never')` so a
+missing local image fails clearly instead of trying a registry pull.
 
 ## Error Handling
 

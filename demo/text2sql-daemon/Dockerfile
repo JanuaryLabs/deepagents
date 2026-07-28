@@ -1,8 +1,8 @@
 # Self-contained image for the text2sql demo daemon. Shared by the backend
 # demos: the plain-Docker demo builds it on the fly (createDockerSandbox passes
 # this Dockerfile + the repo root as context), the Daytona demo boots a
-# prebuilt registry tag of it, and the microsandbox demo loads a `docker save`
-# archive of it. Build standalone from the repo root with:
+# prebuilt registry tag of it, and the microsandbox demo loads an OCI archive
+# of it. Build standalone from the repo root with:
 #
 #   docker build -f demo/text2sql-daemon/Dockerfile -t deepagents-text2sql .
 #

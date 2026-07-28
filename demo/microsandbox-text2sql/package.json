@@ -10,7 +10,7 @@
     "@deepagents/context": "5.0.0",
     "@deepagents/demo-text2sql-daemon": "5.0.0",
     "@deepagents/text2sql": "5.0.0",
-    "microsandbox": "^0.6.6",
+    "microsandbox": "^0.6.7",
     "nano-spawn": "^2.1.0"
   }
 }

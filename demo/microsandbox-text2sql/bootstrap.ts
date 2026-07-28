@@ -1,8 +1,8 @@
+import { Image } from 'microsandbox';
 import spawn from 'nano-spawn';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtempDisposable } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 
 import { demoImage } from './image.ts';
 
@@ -12,19 +12,12 @@ import { demoImage } from './image.ts';
 //
 //   node demo/microsandbox-text2sql/bootstrap.ts
 //
-// microsandbox has no Dockerfile build of its own — it boots OCI images. The
-// bridge is `docker save` -> `msb image load`, which accepts a Docker/OCI
-// archive. The image must match the host architecture (microVMs run the host
-// arch), so the build pins --platform; override via DEEPAGENTS_DEMO_PLATFORM
-// (e.g. linux/amd64) on non-Apple-silicon hosts. Unlike the Daytona
-// bootstrap, no --provenance/--sbom stripping is needed: msb's loader picks
-// the platform manifest and ignores attestation entries (verified against
-// 0.6.4 with the containerd image store, where attestations survive save).
+// Buildx emits an OCI archive that the SDK imports directly. The image must
+// match the host architecture (microVMs run the host arch), so override
+// DEEPAGENTS_DEMO_PLATFORM on non-Apple-silicon hosts.
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, '..', '..');
-const dockerfile = resolve(here, '..', 'text2sql-daemon', 'Dockerfile');
-
+const repoRoot = resolve(import.meta.dirname, '..', '..');
+const dockerfile = resolve(repoRoot, 'demo', 'text2sql-daemon', 'Dockerfile');
 const platform = process.env.DEEPAGENTS_DEMO_PLATFORM ?? 'linux/arm64';
 
 async function run(command: string, args: string[]): Promise<void> {
@@ -36,27 +29,26 @@ async function run(command: string, args: string[]): Promise<void> {
   await subprocess;
 }
 
+await using archiveDirectory = await mkdtempDisposable(
+  join(tmpdir(), 'deepagents-msb-image-'),
+);
+const archive = join(archiveDirectory.path, 'image.tar');
+
 await run('docker', [
   'buildx',
   'build',
   '--platform',
   platform,
-  '--load',
   '-f',
   dockerfile,
   '-t',
   demoImage,
+  '--output',
+  `type=oci,dest=${archive}`,
   repoRoot,
 ]);
 
-const archiveDir = await mkdtemp(join(tmpdir(), 'deepagents-msb-image-'));
-const archive = join(archiveDir, 'image.tar');
-try {
-  await run('docker', ['save', demoImage, '-o', archive]);
-  await run('msb', ['image', 'load', '--input', archive]);
-} finally {
-  await rm(archiveDir, { recursive: true, force: true });
-}
+await Image.load(archive, { tag: demoImage });
 
 console.log(
   `\n[bootstrap] loaded ${demoImage} (${platform}) into the microsandbox image cache`,

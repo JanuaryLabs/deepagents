@@ -1,5 +1,5 @@
 import { openai } from '@ai-sdk/openai';
-import { Destination, Rule } from 'microsandbox';
+import { NetworkPolicy } from 'microsandbox';
 
 import { input, printer } from '@deepagents/agent';
 import {
@@ -56,19 +56,9 @@ const backend = await createMicrosandboxSandbox({
       // The image was loaded into the local cache by bootstrap.ts; a registry
       // pull of this name would fail confusingly, so forbid it outright.
       .pullPolicy('never')
-      // Default egress is public-only, which blocks the host-side Postgres.
-      // Extend it with the `host` destination group instead of allowing the
-      // whole private range.
+      // Reach host-side Postgres without opening the whole private network.
       .network((network) =>
-        network.policy({
-          defaultEgress: 'deny',
-          defaultIngress: 'allow',
-          rules: [
-            Rule.allowDns(),
-            Rule.allowEgress(Destination.group('public')),
-            Rule.allowEgress(Destination.group('host')),
-          ],
-        }),
+        network.policy(NetworkPolicy.fromProfiles(['public', 'host'])),
       ),
 });
 
