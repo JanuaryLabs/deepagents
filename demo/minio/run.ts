@@ -10,7 +10,7 @@ const bucket = process.env.MINIO_BUCKET ?? 'agent-storage';
 
 // The `agent-storage` rclone volume is created by `docker compose up` (its
 // driver_opts carry the MinIO config); run.ts just attaches to it.
-const sandbox = await timed('createDockerSandbox', () =>
+await using sandbox = await timed('createDockerSandbox', () =>
   createDockerSandbox({
     name: `minio-demo`,
     image: 'alpine:latest',

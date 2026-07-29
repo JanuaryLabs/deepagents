@@ -20,11 +20,18 @@ const input =
   process.argv.slice(2).join(' ') ||
   'Delegate to the specialist: list the numbers 1 through 20, one per line, each with a one-word note.';
 
-const database = new PGlite('./zukhruf.queue');
-const boss = new PgBoss({
-  db: fromPglite(database),
-  backend: 'pglite',
-});
+await using resources = new AsyncDisposableStack();
+
+const database = resources.adopt(new PGlite('./zukhruf.queue'), (database) =>
+  database.close(),
+);
+const boss = resources.adopt(
+  new PgBoss({
+    db: fromPglite(database),
+    backend: 'pglite',
+  }),
+  (boss) => boss.stop({ graceful: false }),
+);
 boss.on('error', (error) => console.error('[queue error]', error));
 await boss.start();
 const queue = new PgBossTurnQueue(boss, {
@@ -32,8 +39,13 @@ const queue = new PgBossTurnQueue(boss, {
   schema: 'pgboss',
 });
 await queue.initialize();
-const mailboxStore = new SqliteMailboxStore('./zukhruf.mailbox.sqlite');
-const streamStore = new SqliteStreamStore('./zukhruf.streams.sqlite');
+const mailboxStore = resources.use(
+  new SqliteMailboxStore('./zukhruf.mailbox.sqlite'),
+);
+const streamStore = resources.adopt(
+  new SqliteStreamStore('./zukhruf.streams.sqlite'),
+  (store) => store.close(),
+);
 const streams = new StreamManager({
   store: streamStore,
   changeSource: new PollingChangeSource({ reads: streamStore }),
@@ -50,7 +62,7 @@ const conversation = {
   chatId: `cli-${crypto.randomUUID()}`,
   userId: process.env.USER ?? 'local',
 };
-const worker = await runtime.work({ concurrency: 4 });
+resources.use(await runtime.work({ concurrency: 4 }));
 
 const first = await runtime.enqueue(conversation, {
   id: crypto.randomUUID(),
@@ -100,12 +112,6 @@ await printer.readableStream(second.stream);
 console.log(
   `\n[done] root and specialist used independent histories, streams, mailboxes, and queue keys. Root container "sandbox-${conversation.chatId}" remains attached to its chat.\n`,
 );
-
-await worker[Symbol.asyncDispose]();
-await boss.stop({ graceful: false });
-mailboxStore.close();
-streamStore.close();
-process.exit(0);
 
 async function waitForSpecialistCompletion(): Promise<void> {
   const deadline = Date.now() + 120_000;

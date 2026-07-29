@@ -23,11 +23,19 @@ const initialQuery =
   process.argv.slice(2).join(' ') ||
   'What are the most promising approaches to grid-scale energy storage in 2026?';
 
-const database = new PGlite('./zukhruf-research.queue');
-const boss = new PgBoss({
-  db: fromPglite(database),
-  backend: 'pglite',
-});
+await using resources = new AsyncDisposableStack();
+
+const database = resources.adopt(
+  new PGlite('./zukhruf-research.queue'),
+  (database) => database.close(),
+);
+const boss = resources.adopt(
+  new PgBoss({
+    db: fromPglite(database),
+    backend: 'pglite',
+  }),
+  (boss) => boss.stop({ graceful: false }),
+);
 boss.on('error', (error) => console.error('[queue error]', error));
 await boss.start();
 const queue = new PgBossTurnQueue(boss, {
@@ -35,10 +43,13 @@ const queue = new PgBossTurnQueue(boss, {
   schema: 'pgboss',
 });
 await queue.initialize();
-const mailboxStore = new SqliteMailboxStore(
-  './zukhruf-research.mailbox.sqlite',
+const mailboxStore = resources.use(
+  new SqliteMailboxStore('./zukhruf-research.mailbox.sqlite'),
 );
-const streamStore = new SqliteStreamStore('./zukhruf-research.streams.sqlite');
+const streamStore = resources.adopt(
+  new SqliteStreamStore('./zukhruf-research.streams.sqlite'),
+  (store) => store.close(),
+);
 const streams = new StreamManager({
   store: streamStore,
   changeSource: new PollingChangeSource({ reads: streamStore }),
@@ -55,33 +66,28 @@ const conversation = {
   chatId: `research-cli-${crypto.randomUUID()}`,
   userId: process.env.USER ?? 'local',
 };
-const worker = await runtime.work({ concurrency: 4 });
-const terminal = createInterface({ input: stdin, output: stdout });
+resources.use(await runtime.work({ concurrency: 4 }));
+const terminal = resources.adopt(
+  createInterface({ input: stdin, output: stdout }),
+  (terminal) => terminal.close(),
+);
 
-try {
-  await runTurn(initialQuery);
-  console.log(
-    styleText(
-      'dim',
-      [
-        'researchers keep working in the background; findings arrive on later turns.',
-        'try: "Synthesize every researcher finding received so far." — /exit to quit',
-      ].join('\n'),
-    ),
-  );
+await runTurn(initialQuery);
+console.log(
+  styleText(
+    'dim',
+    [
+      'researchers keep working in the background; findings arrive on later turns.',
+      'try: "Synthesize every researcher finding received so far." — /exit to quit',
+    ].join('\n'),
+  ),
+);
 
-  while (true) {
-    const input = (await terminal.question('\nresearch> ')).trim();
-    if (input === '/exit') break;
-    if (!input) continue;
-    await runTurn(input);
-  }
-} finally {
-  terminal.close();
-  await worker[Symbol.asyncDispose]();
-  await boss.stop({ graceful: false });
-  mailboxStore.close();
-  streamStore.close();
+while (true) {
+  const input = (await terminal.question('\nresearch> ')).trim();
+  if (input === '/exit') break;
+  if (!input) continue;
+  await runTurn(input);
 }
 
 async function runTurn(input: string): Promise<void> {

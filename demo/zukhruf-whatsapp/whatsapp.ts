@@ -64,12 +64,8 @@ class ReplyInbox {
  * `reply_to_group`; ordinary assistant text remains private to that agent.
  */
 export class WhatsAppGroup implements AsyncDisposable {
-  readonly #boss: PgBoss;
-  readonly #database: PGlite;
-  readonly #streamStore: SqliteStreamStore;
-  readonly #mailboxStore: SqliteMailboxStore;
+  readonly #resources: AsyncDisposableStack;
   readonly #participants: RunningParticipant[];
-  readonly #workers: AsyncDisposable[];
   readonly #replies: ReplyInbox;
   readonly #onMessage?: WhatsAppGroupOptions['onMessage'];
   readonly #messages: WhatsAppMessage[] = [];
@@ -78,21 +74,13 @@ export class WhatsAppGroup implements AsyncDisposable {
   private constructor(
     options: WhatsAppGroupOptions,
     resources: {
-      boss: PgBoss;
-      database: PGlite;
-      streamStore: SqliteStreamStore;
-      mailboxStore: SqliteMailboxStore;
+      resources: AsyncDisposableStack;
       participants: RunningParticipant[];
-      workers: AsyncDisposable[];
       replies: ReplyInbox;
     },
   ) {
-    this.#boss = resources.boss;
-    this.#database = resources.database;
-    this.#streamStore = resources.streamStore;
-    this.#mailboxStore = resources.mailboxStore;
+    this.#resources = resources.resources;
     this.#participants = resources.participants;
-    this.#workers = resources.workers;
     this.#replies = resources.replies;
     this.#onMessage = options.onMessage;
   }
@@ -100,101 +88,94 @@ export class WhatsAppGroup implements AsyncDisposable {
   static async create(options: WhatsAppGroupOptions): Promise<WhatsAppGroup> {
     WhatsAppGroup.#validate(options);
 
-    const database = new PGlite();
-    const boss = new PgBoss({ db: fromPglite(database), backend: 'pglite' });
+    await using resources = new AsyncDisposableStack();
+    const database = resources.adopt(new PGlite(), (database) =>
+      database.close(),
+    );
+    const boss = resources.adopt(
+      new PgBoss({ db: fromPglite(database), backend: 'pglite' }),
+      (boss) => boss.stop({ graceful: false }),
+    );
     boss.on('error', (error) => console.error('[queue error]', error));
-    const streamStore = new SqliteStreamStore(':memory:');
+    const streamStore = resources.adopt(
+      new SqliteStreamStore(':memory:'),
+      (store) => store.close(),
+    );
     const streams = new StreamManager({
       store: streamStore,
       changeSource: new PollingChangeSource({ reads: streamStore }),
     });
-    const mailboxStore = new SqliteMailboxStore(':memory:');
+    const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
     const store = new InMemoryContextStore();
     const replies = new ReplyInbox();
     const participants: RunningParticipant[] = [];
-    const workers: AsyncDisposable[] = [];
 
-    try {
-      await boss.start();
-      for (const [index, participant] of options.participants.entries()) {
-        const queue = new PgBossTurnQueue(boss, {
-          queue: `zukhruf-whatsapp-${index}`,
-          pollingIntervalSeconds: 0.5,
-          schema: 'pgboss',
-        });
-        await queue.initialize();
+    await boss.start();
+    for (const [index, participant] of options.participants.entries()) {
+      const queue = new PgBossTurnQueue(boss, {
+        queue: `zukhruf-whatsapp-${index}`,
+        pollingIntervalSeconds: 0.5,
+        schema: 'pgboss',
+      });
+      await queue.initialize();
 
-        const runtime = new AgentRuntime(
-          defineAgent({
-            name: participant.name,
-            model: participant.model,
-            sandbox: defineSandbox(() =>
-              createVirtualSandbox({ fs: new InMemoryFs() }),
-            ),
-            instructions: [
-              role(
-                [
-                  `You are ${participant.name} in a WhatsApp-style group chat. ${participant.specialty}`,
-                  'Every turn is a notification containing new public group messages.',
-                  'Read them and decide autonomously whether your specialty gives you something useful and non-duplicative to add.',
-                  'If yes, call reply_to_group with the concise message you want everyone to see.',
-                  'If no, do not call reply_to_group. Do not reply merely to agree, repeat, acknowledge, or announce silence.',
-                  'Your ordinary assistant text is private and never appears in the group.',
-                ].join(' '),
-              ),
-            ],
-            tools: {
-              reply_to_group: defineTool({
-                description:
-                  'Post one useful contribution to the public group chat.',
-                inputSchema: z.object({
-                  message: z.string().trim().min(1),
-                }),
-                execute: async ({ message }) => {
-                  replies.post(participant.name, message);
-                  return { posted: true };
-                },
-              }),
-            },
-          }),
-          {
-            store,
-            streams,
-            queue,
-            mailboxStore,
-          },
-        );
-
-        participants.push({
+      const runtime = new AgentRuntime(
+        defineAgent({
           name: participant.name,
-          conversation: {
-            chatId: `whatsapp-${index}`,
-            userId: options.userId,
+          model: participant.model,
+          sandbox: defineSandbox(() =>
+            createVirtualSandbox({ fs: new InMemoryFs() }),
+          ),
+          instructions: [
+            role(
+              [
+                `You are ${participant.name} in a WhatsApp-style group chat. ${participant.specialty}`,
+                'Every turn is a notification containing new public group messages.',
+                'Read them and decide autonomously whether your specialty gives you something useful and non-duplicative to add.',
+                'If yes, call reply_to_group with the concise message you want everyone to see.',
+                'If no, do not call reply_to_group. Do not reply merely to agree, repeat, acknowledge, or announce silence.',
+                'Your ordinary assistant text is private and never appears in the group.',
+              ].join(' '),
+            ),
+          ],
+          tools: {
+            reply_to_group: defineTool({
+              description:
+                'Post one useful contribution to the public group chat.',
+              inputSchema: z.object({
+                message: z.string().trim().min(1),
+              }),
+              execute: async ({ message }) => {
+                replies.post(participant.name, message);
+                return { posted: true };
+              },
+            }),
           },
-          runtime,
-        });
-        workers.push(await runtime.work());
-      }
+        }),
+        {
+          store,
+          streams,
+          queue,
+          mailboxStore,
+        },
+      );
 
-      return new WhatsAppGroup(options, {
-        boss,
-        database,
-        streamStore,
-        mailboxStore,
-        participants,
-        workers,
-        replies,
+      participants.push({
+        name: participant.name,
+        conversation: {
+          chatId: `whatsapp-${index}`,
+          userId: options.userId,
+        },
+        runtime,
       });
-    } catch (error) {
-      await WhatsAppGroup.#disposeResources({
-        boss,
-        database,
-        streamStore,
-        mailboxStore,
-        workers,
-      });
-      throw error;
+      resources.use(await runtime.work());
     }
+
+    return new WhatsAppGroup(options, {
+      resources: resources.move(),
+      participants,
+      replies,
+    });
   }
 
   async send(content: string): Promise<readonly WhatsAppMessage[]> {
@@ -237,13 +218,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   async [Symbol.asyncDispose](): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    await WhatsAppGroup.#disposeResources({
-      boss: this.#boss,
-      database: this.#database,
-      streamStore: this.#streamStore,
-      mailboxStore: this.#mailboxStore,
-      workers: this.#workers,
-    });
+    await this.#resources.disposeAsync();
   }
 
   async #publish(messages: WhatsAppMessage[]): Promise<void> {
@@ -286,21 +261,5 @@ export class WhatsAppGroup implements AsyncDisposable {
       }
       names.add(participant.name);
     }
-  }
-
-  static async #disposeResources(resources: {
-    boss: PgBoss;
-    database: PGlite;
-    streamStore: SqliteStreamStore;
-    mailboxStore: SqliteMailboxStore;
-    workers: AsyncDisposable[];
-  }): Promise<void> {
-    for (const worker of resources.workers.toReversed()) {
-      await worker[Symbol.asyncDispose]();
-    }
-    await resources.boss.stop({ graceful: false });
-    await resources.database.close();
-    resources.streamStore.close();
-    resources.mailboxStore.close();
   }
 }
