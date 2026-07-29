@@ -24,6 +24,7 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   defineAgent,
+  renderTurn,
 } from '@deepagents/experimental/zukhruf';
 ```
 
@@ -45,8 +46,12 @@ deployable unit),
 [`demo/zukhruf-durable-turns`](../../demo/zukhruf-durable-turns) (the durable
 executor: enqueue, detach, resume, strict per-chat FIFO),
 [`demo/zukhruf-mailbox`](../../demo/zukhruf-mailbox) (API-key-free host delivery,
-durable FIFO mail, and payload-free wakes), and
+durable FIFO mail, and payload-free wakes),
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
-planner and researcher chats with mailbox-delivered findings).
+planner and researcher chats with mailbox-delivered findings),
+[`demo/zukhruf-group-chat`](../../demo/zukhruf-group-chat) (managed group-chat
+orchestration over a shared transcript), and
+[`demo/zukhruf-whatsapp`](../../demo/zukhruf-whatsapp) (manager-free group
+notifications where specialists volunteer public replies).
 `spawn_agent` can fork all parent turns, no parent turns, or a bounded number of
 recent user-turn boundaries into a child chat through its `fork_turns` input.

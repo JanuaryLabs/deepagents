@@ -41,6 +41,12 @@
     },
     {
       "path": "./packages/experimental"
+    },
+    {
+      "path": "./demo/zukhruf-group-chat"
+    },
+    {
+      "path": "./demo/zukhruf-whatsapp"
     }
   ]
 }

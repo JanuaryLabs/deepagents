@@ -95,9 +95,11 @@
     "demo/microsandbox-text2sql",
     "demo/mcp",
     "demo/zukhruf-durable-turns",
+    "demo/zukhruf-group-chat",
     "demo/zukhruf-mailbox",
     "demo/zukhruf-research-bot",
-    "demo/zukhruf-simple"
+    "demo/zukhruf-simple",
+    "demo/zukhruf-whatsapp"
   ],
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.15",
