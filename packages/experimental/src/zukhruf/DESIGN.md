@@ -670,7 +670,7 @@ work({concurrency?}) → AsyncDisposable }`.
   race, crash recovery and stale-orphan isolation, turn-specific terminal projection,
   mailbox FIFO and cross-worker safe-boundary delivery, concurrent/retryable spawn, canonical
   sibling messaging, genuine root/child/grandchild execution, follow-up ordering, root rejection,
-  queued/running/waiting-approval/terminal tree status, caller-mailbox wait/timeout/cancellation,
+  queued/running/approval-paused-as-running/terminal tree status, caller-mailbox wait/timeout/cancellation,
   queued and cross-runtime active interruption, target reuse, and idempotent
   success/failure/cancellation forwarding.
 - Backends switch by composition in the demo sandbox declarations

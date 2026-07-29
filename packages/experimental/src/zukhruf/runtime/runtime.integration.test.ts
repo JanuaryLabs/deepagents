@@ -32,6 +32,7 @@ import {
   type TurnRef,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+import { settleWithin } from '@deepagents/test';
 
 const usage = {
   inputTokens: {
@@ -355,7 +356,11 @@ async function harness(
   },
 ) {
   const pglite = new PGlite();
-  const boss = new PgBoss({ db: fromPglite(pglite), backend: 'pglite' });
+  const boss = new PgBoss({
+    db: fromPglite(pglite),
+    backend: 'pglite',
+    maintenanceIntervalSeconds: 1,
+  });
   boss.on('error', () => {});
   await boss.start();
   const queue =
@@ -1061,6 +1066,49 @@ describe('zukhruf runtime — background executor', () => {
       [],
       'denied continuation commits and its job is deleted',
     );
+  });
+
+  it('re-executes a queued turn after pg-boss retention deletes its job', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await h.boss.updateQueue(h.queue.queue, { retentionSeconds: 1 });
+
+    const queued = await h.runtime.enqueue(
+      { chatId: 'retained-turn', userId: 'u1' },
+      turn('reexecute me'),
+    );
+    await t.waitFor(
+      async () => {
+        await h.boss.supervise(h.queue.queue);
+        assert.deepStrictEqual(
+          await h.boss.findJobs(h.queue.queue, {
+            data: { streamId: queued.id },
+          }),
+          [],
+        );
+      },
+      { interval: 100, timeout: 5_000 },
+    );
+
+    await using _worker = await h.runtime.work();
+    const reader = queued.stream.getReader();
+    try {
+      let text = '';
+      await settleWithin(
+        (async () => {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) return;
+            if (value.type === 'text-delta') text += value.delta;
+          }
+        })(),
+        'retained turn re-executes',
+        2_000,
+      );
+      assert.equal(text, 'reply:reexecute me');
+    } finally {
+      await reader.cancel();
+    }
   });
 
   it('parked follow-ups survive a maintenance pass while gated, then revive in order and leave no jobs behind', async () => {
