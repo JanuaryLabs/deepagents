@@ -405,6 +405,46 @@ export function turnQueueContract(
       );
     });
 
+    it('one busy chat does not block a ready turn in another chat', async (t) => {
+      await using h = await makeQueue();
+      const active = ref('busy-chat', 1);
+      const blockedSuccessor = ref('busy-chat', 2);
+      const independent = ref('independent-chat', 3);
+      const releaseActive = Promise.withResolvers<void>();
+      const started: TurnRef[] = [];
+      let successorsQueued = false;
+
+      await h.queue.push(active);
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          started.push(turn);
+          if (turn.streamId !== active.streamId) return;
+
+          await h.queue.push(blockedSuccessor);
+          await h.queue.push(independent);
+          successorsQueued = true;
+          await releaseActive.promise;
+        },
+        { ...noOrphans, concurrency: 4 },
+      );
+
+      try {
+        await waitFor(t, () => successorsQueued, 'successors are queued');
+        await waitFor(
+          t,
+          () => started.some((turn) => turn.streamId === independent.streamId),
+          'ready turn in the independent chat',
+          3_000,
+        );
+        assert.deepStrictEqual(
+          started.map((turn) => turn.streamId),
+          [active.streamId, independent.streamId],
+        );
+      } finally {
+        releaseActive.resolve();
+      }
+    });
+
     it('caps active handlers at the consume concurrency', async (t) => {
       await using h = await makeQueue();
       for (const n of [1, 2, 3, 4, 5, 6]) {

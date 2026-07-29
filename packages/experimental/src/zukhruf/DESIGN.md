@@ -182,6 +182,9 @@ semantics live-verified):
   preprovisioned least-privilege deployments do not need catalog-write permission at startup.
 - **`key_strict_fifo` policy + `singletonKey = chatId`** — per-chat serialization is structural:
   1 active per key, unlimited queued, strict push order, failed job blocks the key.
+- **`group.id = chatId` + global `groupConcurrency: 1`** — pg-boss filters active chats before
+  selecting the next job, so a blocked same-chat successor cannot starve ready turns from other
+  chats.
 - **Approval IDs are queue IDs** — an approval job uses
   `uuidv5("approval:" + approvalId, conversationNamespace)` and `singletonKey = chatId`.
   pg-boss's job-ID uniqueness makes approve, deny, and duplicates for one approval converge on the
@@ -667,9 +670,10 @@ work({concurrency?}) → AsyncDisposable }`.
   into the observe/reconnect UX item.
 
 _Resolved by the executor build:_ **mid-turn message contract** → queue (strict FIFO per chat,
-structural via `key_strict_fifo`); **sandbox lifetime** → per-chat, named by chatId, attach-or-create;
-**workspace durability** → the per-chat container persists, so the FS survives across turns, workers,
-and restarts (durable volumes only needed once containers are reclaimed).\_
+structural via `key_strict_fifo`, with grouped claims preventing cross-chat starvation);
+**sandbox lifetime** → per-chat, named by chatId, attach-or-create; **workspace durability** → the
+per-chat container persists, so the FS survives across turns, workers, and restarts (durable volumes
+only needed once containers are reclaimed).\_
 
 ## Principles carried throughout
 

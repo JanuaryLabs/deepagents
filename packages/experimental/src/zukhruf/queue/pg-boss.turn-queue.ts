@@ -28,8 +28,11 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
  * TurnQueue on pg-boss.
  *
  * - `key_strict_fifo` policy with `singletonKey = chatId` gives the per-chat
- *   serialization contract structurally: one active turn per chat, strict
- *   push order, cross-chat concurrency.
+ *   serialization contract structurally: one active turn per chat and strict
+ *   push order.
+ * - `group.id = chatId` with global `groupConcurrency: 1` excludes an active
+ *   chat before pg-boss selects the next job, so its queued successor cannot
+ *   block ready turns from other chats.
  * - `retryLimit: 0` — a crashed turn is never silently re-run (its bash
  *   already executed). It dead-letters instead.
  * - A failed job blocks its chat's key until acknowledged; the dead-letter
@@ -170,6 +173,7 @@ export class PgBossTurnQueue extends TurnQueue {
     const inserted = await this.#boss.send(this.#queue, turn, {
       id: jobId,
       singletonKey: turn.chatId,
+      group: { id: turn.chatId },
       priority:
         turn.kind === 'approval' || turn.kind === 'continuation' ? 1 : 0,
     });
@@ -251,6 +255,7 @@ export class PgBossTurnQueue extends TurnQueue {
       this.#queue,
       {
         localConcurrency: options.concurrency ?? 1,
+        groupConcurrency: 1,
         pollingIntervalSeconds: this.#pollingIntervalSeconds,
       },
       async ([job]) => {
