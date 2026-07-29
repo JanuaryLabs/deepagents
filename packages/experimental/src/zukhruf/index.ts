@@ -10,5 +10,6 @@ export * from './mailbox/store.ts';
 export * from './mailbox/types.ts';
 export * from './queue/pg-boss.turn-queue.ts';
 export * from './queue/turn-queue.ts';
+export * from './render-turn.ts';
 export * from './sandbox/define.ts';
 export * from './tool.ts';

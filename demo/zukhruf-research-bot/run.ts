@@ -9,10 +9,10 @@ import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
+  renderTurn,
 } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
-import { renderTurn } from './render.ts';
 
 const initialQuery =
   process.argv.slice(2).join(' ') ||
