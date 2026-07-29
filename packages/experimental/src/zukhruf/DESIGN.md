@@ -390,7 +390,9 @@ instead of introducing a Runner or separate thread database:
   fragment, so forked transcript history never copies a parent's hint into a child. `usageHintText`
   appends guidance to `spawn_agent`. `toolNamespace` applies a validated native OpenAI Responses
   namespace to all six collaboration tools. Reserved, padded, non-ASCII, and over-64-character
-  namespaces fail during runtime construction.
+  namespaces fail during runtime construction. Current upstream Codex also injects a dedicated
+  subagent developer instruction and inherits the spawning turn's ready-step environment. Zukhruf
+  does not yet expose equivalents; they are tracked in TODO.md.
 - Collaboration tools are direct-model-only by default, matching Codex V2's
   `non_code_mode_only = true`. Zukhruf does not have a nested code-mode executor, so
   `nonCodeModeOnly: false` fails explicitly instead of pretending the tools are reachable from an
@@ -434,8 +436,9 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   empty-drain handling make them harmless no-ops.
 - `list_agents` scans only the caller's metadata-scoped tree, optionally resolves a path prefix
   relative to the caller, and combines each chat's canonical path and persisted context with the
-  TurnQueue's required `idle | queued | running` activity. Its strict status schema matches Codex
-  V2: `pending_init | running | interrupted | shutdown | not_found | {completed} | {errored}`. An
+  TurnQueue's required `idle | queued | running` activity. Its status union and strict item shape
+  match Codex V2: each item contains only `agent_name` and `agent_status`, where status is
+  `pending_init | running | interrupted | shutdown | not_found | {completed} | {errored}`. An
   unstarted child stays `pending_init`; an initialized child with a queued follow-up or unresolved
   approval is `running`. A failed or cancelled continuation reports `errored` or `interrupted`.
   `shutdown` remains a legal compatibility status even though Zukhruf has no shutdown lifecycle.
@@ -463,6 +466,27 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   projection waits for continuation, guaranteeing one final answer. A failed or cancelled
   continuation overrides that pause and is projected immediately. Child progress UI remains
   deferred.
+
+### MultiAgentV2 parity boundary
+
+Parity means matching Codex's model-facing collaboration contract where the same capability exists,
+not copying its process-local implementation:
+
+- **Intentional Zukhruf divergences:** a spawn selects a declared `agent_type`; path segments use
+  Zukhruf's persisted-name rules; `wait_agent` is always present and has no steer channel; queue-only
+  mail that misses the final sampling boundary schedules a serialized fallback turn; interrupted
+  children project one idempotent terminal result.
+- **Zukhruf advantages to preserve:** durable cross-runtime mailbox delivery, durable whole-tree
+  identity and listing, deterministic terminal tombstones, and queue-backed wait/interrupt/follow-up
+  behavior.
+- **Parity work:** current spawn context inheritance, dedicated child lifecycle/activity events, and
+  a host-facing child progress surface.
+- **Production hardening:** bounded tree residency/concurrency, startup orphan reconciliation,
+  external-Postgres multi-worker evidence, sandbox reclamation, queued observer visibility, and
+  blocking CI.
+
+The checked and ordered work lives in TODO.md. Capability differences are not bugs unless they
+contradict this boundary or a shipped contract.
 
 ### Approval-resume _(Built)_
 
@@ -663,6 +687,12 @@ work({concurrency?}) → AsyncDisposable }`.
 - **General pause vs cancel** — approval parking is built, while arbitrary suspend/resume of a
   running model turn remains undecided. Cancel is terminal for queued/running streams.
 - **Per-turn bounds** — step / token / wall-clock / no-progress caps as automatic terminals.
+- **Multi-agent capacity / residency** — there is no per-tree agent cap or Codex-style LRU unloading
+  for idle terminal/interrupted children. Worker concurrency limits execution but does not bound
+  persisted tree growth or loaded resources.
+- **Child lifecycle / progress** — Zukhruf has generic model telemetry and durable status listing,
+  but no dedicated spawn/message/interrupt lifecycle event contract or host UI projection for
+  bounded child activity.
 - **Per-chat sandbox GC** — sandboxes are per-chat, named by chatId, and never disposed by the
   runtime. Nothing reclaims a dead chat's container yet (chat deletion hook? idle TTL? host policy?).
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at

@@ -27,19 +27,14 @@ export const listedAgentStatusSchema = z.union([
 
 export type ListedAgentStatus = z.infer<typeof listedAgentStatusSchema>;
 
-export interface ListedAgent {
-  agent_name: string;
-  agent_status: ListedAgentStatus;
-  last_task_message: string | null;
-}
-
 export const listedAgentSchema = z
   .object({
     agent_name: z.string(),
     agent_status: listedAgentStatusSchema,
-    last_task_message: z.string().nullable(),
   })
   .strict();
+
+export type ListedAgent = z.infer<typeof listedAgentSchema>;
 
 export interface AgentStatusProjectorOptions {
   store: ContextStore;
@@ -104,9 +99,6 @@ export class AgentStatusProjector {
     return {
       agent_name: thread.path.toString(),
       agent_status: status,
-      last_task_message: thread.path.isRoot
-        ? 'Main thread'
-        : AgentStatusProjector.#lastUserMessage(messages),
     };
   }
 
@@ -197,16 +189,6 @@ export class AgentStatusProjector {
       case undefined:
         return 'pending_init';
     }
-  }
-
-  static #lastUserMessage(messages: UIMessage[]): string | null {
-    for (let index = messages.length - 1; index >= 0; index--) {
-      const message = messages[index];
-      if (message?.role === 'user') {
-        return AgentStatusProjector.#messageText(message) || null;
-      }
-    }
-    return null;
   }
 
   static #messageText(message: UIMessage): string {

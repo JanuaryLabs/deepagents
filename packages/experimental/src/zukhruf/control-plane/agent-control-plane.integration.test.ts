@@ -3246,7 +3246,7 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
   );
 });
 
-test('list_agents reports the root tree with canonical paths and current statuses', async (t) => {
+test('list_agents returns exact Codex items with canonical paths and current statuses', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -3344,10 +3344,9 @@ test('list_agents reports the root tree with canonical paths and current statuse
   const prompt = JSON.stringify(promptAfterList);
   assert.match(prompt, /"agent_name":"\/root"/);
   assert.match(prompt, /"agent_status":"running"/);
-  assert.match(prompt, /"last_task_message":"Main thread"/);
   assert.match(prompt, /"agent_name":"\/root\/researcher"/);
   assert.match(prompt, /"agent_status":"pending_init"/);
-  assert.match(prompt, /"last_task_message":null/);
+  assert.doesNotMatch(prompt, /"last_task_message"/);
 });
 
 test('list_agents resolves a relative path prefix and returns only that subtree', async (t) => {
@@ -3469,7 +3468,7 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
   assert.doesNotMatch(prompt, /\/root\/reviewer/);
 });
 
-test('list_agents reports a completed child with its result and last task', async (t) => {
+test('list_agents reports a completed child with its result', async (t) => {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
@@ -3570,7 +3569,6 @@ test('list_agents reports a completed child with its result and last task', asyn
   const prompt = JSON.stringify(promptAfterList);
   assert.match(prompt, /"agent_name":"\/root\/researcher"/);
   assert.match(prompt, /"agent_status":\{"completed":"verified result"\}/);
-  assert.match(prompt, /"last_task_message":"Verify the storage claim"/);
 });
 
 test('list_agents reports a completed child with a queued follow-up as running', async (t) => {

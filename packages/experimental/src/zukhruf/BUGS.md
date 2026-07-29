@@ -1,6 +1,8 @@
 # Zukhruf — Known Bugs
 
-> Tracked defects in the runtime. Each entry: symptom → cause → why nothing recovers it → repro → fix direction.
+> Tracked defects in the runtime. Each entry: symptom → cause → why nothing recovers it → repro →
+> fix direction. Codex parity work and intentional divergences belong in TODO.md and DESIGN.md, not
+> in this defect ledger.
 
 ## 1. `watch()` stream hangs forever when a pending turn's queue job is deleted by retention
 

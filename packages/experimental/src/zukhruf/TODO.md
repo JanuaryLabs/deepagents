@@ -109,8 +109,9 @@
       parent with completed, failed, or cancelled status.
 - [x] `list_agents` derives the current tree from ContextStore metadata, persisted stream state, and
       required TurnQueue activity, supports relative/absolute path-prefix filtering, and reports
-      canonical paths, queued follow-ups, completion text, and the last persisted task without adding
-      a registry.
+      canonical paths, queued follow-ups, and completion text without adding a registry. Its strict
+      Codex-compatible items contain only `agent_name` and `agent_status`; the integration test
+      rejects the removed `last_task_message` field.
 - [x] Model-facing `wait_agent` observes only the caller's durable mailbox without consuming it,
       returns a host-configurable bounded timeout result, releases across runtime instances, and
       aborts with its turn. Live steer is intentionally absent because Zukhruf has no in-turn steer
@@ -122,18 +123,28 @@
 - [x] Port Codex V2 host configuration for separate root/subagent guidance, spawn usage text,
       validated OpenAI Responses tool namespaces, and wait bounds. Keep collaboration tools on the
       direct model surface when `nonCodeModeOnly` is true.
+- [ ] Add explicit spawn-context contracts for dedicated subagent developer instructions and the
+      current turn's host execution context/environment. Reuse existing Zukhruf declaration,
+      instruction-fragment, sandbox, and fork-snapshot primitives; do not copy Codex's Rust
+      `TurnContext` representation.
 - [ ] Add a nested code-mode executor before accepting `nonCodeModeOnly: false`; current Zukhruf has
       no `functions.exec`-equivalent surface, so the unsupported value fails explicitly.
-- [x] Match Codex V2 collaboration output/status contracts: canonical `{task_name}` spawn output,
-      empty send/follow-up success text, strict list/wait/interrupt output schemas, approval pauses
-      as `running`, and missing interrupt targets as `not_found`. `shutdown` is accepted by the
-      compatibility status schema but has no producer until Zukhruf gains a shutdown lifecycle.
+- [x] Match the implemented Codex V2 collaboration output/status contracts: canonical
+      `{task_name}` spawn output, empty send/follow-up success text, strict list/wait/interrupt
+      output schemas, approval pauses as `running`, and missing interrupt targets as `not_found`.
+      `shutdown` is accepted by the compatibility status schema but has no producer until Zukhruf
+      gains a shutdown lifecycle.
 - [x] Mailbox consumption follows the simpler Codex queue shape: FIFO drain consumes pending mail;
       no claim/ack/lease/redelivery protocol or startup crash reconciliation.
 - [x] Migrate `demo/zukhruf-durable-turns` from blocking `agent.asTool()` composition to a durable
       independent specialist chat and asynchronous `FINAL_ANSWER` consumption.
 - [ ] `TurnRef.input: string` → rich message (UIMessage-shaped: parts, attachments-as-references) + host context (agentId, modelId, surface context, tools, elements).
 - [ ] Port stays payload-opaque: contract requires JSON-round-trip fidelity only.
+- [ ] Add dedicated child lifecycle/activity events for spawn, message/follow-up, interrupt, and
+      terminal completion. Keep mailbox storage transport-only; expose events through the existing
+      telemetry/host boundary rather than restoring the removed mailbox activity subscription.
+- [ ] Add a bounded host-facing child progress projection after lifecycle events exist. It must not
+      inject progress into the parent model mailbox or make UI concerns part of the runtime core.
 - [x] Multi-agent shape: public `defineAgent({name, subagents})` with a required stable name, one
       runtime/TurnQueue, internal declaration lookup, deterministic path-derived child identities,
       and dynamic chat topology persisted in existing `ContextStore` metadata.
@@ -143,6 +154,9 @@
 
 - [x] Keep runtime-owned wiring classes and injected collaboration-tool implementations internal.
       Customers compose through `AgentRuntime`, the DSL, and the store/queue adapters.
+- [ ] Add a host-configurable per-tree agent/residency limit that counts the root, rejects unbounded
+      growth deterministically, and unloads only idle terminal/interrupted children with no pending
+      mail. Reuse persisted ContextStore history for reload; do not add close/resume model tools.
 - [ ] Per-chat sandbox GC policy (nothing reclaims dead chats' containers).
 - [ ] Queued-turn visibility for observers (resume() can't see unstarted turns).
 - [ ] CI: affected tests run, but `continue-on-error: true` means failures do not block merging.
