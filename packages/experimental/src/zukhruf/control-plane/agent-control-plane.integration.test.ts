@@ -7,7 +7,10 @@ import { z } from 'zod';
 import {
   type AgentSandbox,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
+  type StreamStore,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -25,6 +28,13 @@ import {
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import { settleWithin } from '@deepagents/test';
+
+function streamsFor(store: StreamStore): StreamManager {
+  return new StreamManager({
+    store,
+    changeSource: new PollingChangeSource({ reads: store }),
+  });
+}
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -452,7 +462,7 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -523,7 +533,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
   const first = await runtime.enqueue(conversation, {
@@ -610,7 +620,7 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -688,7 +698,7 @@ test('a completed child queues its final answer to the parent without waking it'
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -800,7 +810,7 @@ test('an approval-paused child sends one final answer only after continuation', 
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -909,7 +919,7 @@ test('a failed approval continuation reports failure instead of remaining paused
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -1021,7 +1031,7 @@ test('a cancelled approval continuation clears the gate and revives parked turns
         }),
       },
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'cancelled-continuation', userId: 'user-1' };
   const initial = await runtime.enqueue(conversation, {
@@ -1117,7 +1127,7 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
         }),
       },
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'failed-siblings', userId: 'user-1' };
   const initial = await runtime.enqueue(conversation, {
@@ -1166,7 +1176,7 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1272,7 +1282,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -1389,7 +1399,7 @@ test('terminal child recovery does not duplicate a completion committed before a
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1473,7 +1483,7 @@ test('a failed child asynchronously notifies its parent with the terminal status
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1562,7 +1572,7 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1651,7 +1661,7 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1747,7 +1757,7 @@ test('a child cancelled while queued notifies its parent once without running th
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1860,7 +1870,7 @@ test('send_message resolves a canonical sibling path and queues mail without wak
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -1980,7 +1990,7 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -2092,7 +2102,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -2191,7 +2201,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
       instructions: [],
       subagents: [researcher],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -2316,13 +2326,13 @@ test('interrupt_agent aborts a running child across runtime instances without qu
   ]);
   const rootRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: rootQueue,
   });
   const childRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: childQueue,
   });
@@ -2397,7 +2407,7 @@ test('interrupt_agent rejects root and self targets', async (t) => {
       instructions: [],
       subagents: [caller],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await createAgentChats(store, [
     {
@@ -2489,7 +2499,7 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -2589,7 +2599,7 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -2649,13 +2659,13 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
   });
   const callerRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: callerQueue,
   });
   const deliveryRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: deliveryQueue,
   });
@@ -2735,7 +2745,7 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -2778,7 +2788,7 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -2888,13 +2898,13 @@ test('send_message crosses runtime instances and reaches an active recipient at 
 
   const senderRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: senderQueue,
   });
   const recipientRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: recipientQueue,
   });
@@ -3008,13 +3018,13 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
 
   const senderRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: senderQueue,
   });
   const recipientRuntime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue: recipientQueue,
   });
@@ -3099,7 +3109,7 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -3212,7 +3222,7 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -3290,7 +3300,7 @@ test('list_agents reports the root tree with canonical paths and current statuse
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -3407,7 +3417,7 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -3513,7 +3523,7 @@ test('list_agents reports a completed child with its result and last task', asyn
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -3617,7 +3627,7 @@ test('list_agents reports a completed child with a queued follow-up as running',
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -3767,7 +3777,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });

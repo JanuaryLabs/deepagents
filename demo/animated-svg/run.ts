@@ -2,7 +2,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import { printer } from '@deepagents/agent';
-import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
+import {
+  PollingChangeSource,
+  SqliteContextStore,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
@@ -31,10 +36,15 @@ const queue = new PgBossTurnQueue(boss, {
 });
 await queue.initialize();
 const mailboxStore = new SqliteMailboxStore('./animated-svg.mailbox.sqlite');
+const streamStore = new SqliteStreamStore('./animated-svg.streams.sqlite');
+const streams = new StreamManager({
+  store: streamStore,
+  changeSource: new PollingChangeSource({ reads: streamStore }),
+});
 
 const runtime = new AgentRuntime(declaration, {
   store: new SqliteContextStore('./animated-svg.sqlite'),
-  streamStore: new SqliteStreamStore('./animated-svg.streams.sqlite'),
+  streams,
   queue,
   mailboxStore,
 });
@@ -62,4 +72,5 @@ console.log(
 await worker[Symbol.asyncDispose]();
 await boss.stop({ graceful: false });
 mailboxStore.close();
+streamStore.close();
 process.exit(0);

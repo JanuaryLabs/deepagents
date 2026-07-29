@@ -1,7 +1,12 @@
 import { PGlite } from '@electric-sql/pglite';
 import { PgBoss, fromPglite } from 'pg-boss';
 
-import { InMemoryContextStore, SqliteStreamStore } from '@deepagents/context';
+import {
+  InMemoryContextStore,
+  PollingChangeSource,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
@@ -19,10 +24,14 @@ const queue = new PgBossTurnQueue(boss, { schema: 'pgboss' });
 await queue.initialize();
 
 const streamStore = new SqliteStreamStore(':memory:');
+const streams = new StreamManager({
+  store: streamStore,
+  changeSource: new PollingChangeSource({ reads: streamStore }),
+});
 const mailboxStore = new SqliteMailboxStore(':memory:');
 const runtime = new AgentRuntime(declaration, {
   store: new InMemoryContextStore(),
-  streamStore,
+  streams,
   queue,
   mailboxStore,
 });

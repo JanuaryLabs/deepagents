@@ -11,8 +11,10 @@ import { PgBoss } from 'pg-boss';
 
 import {
   type AgentSandbox,
+  PollingChangeSource,
   PostgresContextStore,
   PostgresStreamStore,
+  StreamManager,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -142,9 +144,13 @@ describe(
 
         const calls: string[] = [];
         const mailboxStore = new SqliteMailboxStore(':memory:');
+        const streams = new StreamManager({
+          store: streamStore,
+          changeSource: new PollingChangeSource({ reads: streamStore }),
+        });
         const runtime = new AgentRuntime(declaration(fastModel(calls)), {
           store,
-          streamStore,
+          streams,
           queue,
           mailboxStore,
         });

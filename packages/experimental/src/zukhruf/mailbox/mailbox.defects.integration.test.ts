@@ -10,7 +10,10 @@ import {
   type AgentSandbox,
   InMemoryContextStore,
   type MessageData,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
+  type StreamStore,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -26,6 +29,13 @@ import {
   createInterAgentCommunication,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+
+function streamsFor(store: StreamStore): StreamManager {
+  return new StreamManager({
+    store,
+    changeSource: new PollingChangeSource({ reads: store }),
+  });
+}
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };
@@ -190,7 +200,7 @@ function runtimeHarness(options?: {
     declaration(options?.model ?? textModel(), options?.tools),
     {
       store: contextStore,
-      streamStore,
+      streams: streamsFor(streamStore),
       queue,
       mailboxStore,
     },
@@ -422,7 +432,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const queue = new ManualTurnQueue();
     const runtimeOptions = {
       store: contextStore,
-      streamStore,
+      streams: streamsFor(streamStore),
       mailboxStore,
       queue,
     };
@@ -496,7 +506,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const queue = new ManualTurnQueue();
     const runtimeOptions = {
       store: contextStore,
-      streamStore,
+      streams: streamsFor(streamStore),
       mailboxStore,
       queue,
     };
@@ -541,7 +551,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const queue = new ManualTurnQueue();
     const runtimeOptions = {
       store: contextStore,
-      streamStore,
+      streams: streamsFor(streamStore),
       mailboxStore,
       queue,
     };

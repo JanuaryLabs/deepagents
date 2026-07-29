@@ -4,7 +4,12 @@ import { createInterface } from 'node:readline/promises';
 import { styleText } from 'node:util';
 import { PgBoss, fromPglite } from 'pg-boss';
 
-import { SqliteContextStore, SqliteStreamStore } from '@deepagents/context';
+import {
+  PollingChangeSource,
+  SqliteContextStore,
+  SqliteStreamStore,
+  StreamManager,
+} from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
@@ -33,10 +38,15 @@ await queue.initialize();
 const mailboxStore = new SqliteMailboxStore(
   './zukhruf-research.mailbox.sqlite',
 );
+const streamStore = new SqliteStreamStore('./zukhruf-research.streams.sqlite');
+const streams = new StreamManager({
+  store: streamStore,
+  changeSource: new PollingChangeSource({ reads: streamStore }),
+});
 
 const runtime = new AgentRuntime(declaration, {
   store: new SqliteContextStore('./zukhruf-research.sqlite'),
-  streamStore: new SqliteStreamStore('./zukhruf-research.streams.sqlite'),
+  streams,
   queue,
   mailboxStore,
 });
@@ -71,6 +81,7 @@ try {
   await worker[Symbol.asyncDispose]();
   await boss.stop({ graceful: false });
   mailboxStore.close();
+  streamStore.close();
 }
 
 async function runTurn(input: string): Promise<void> {

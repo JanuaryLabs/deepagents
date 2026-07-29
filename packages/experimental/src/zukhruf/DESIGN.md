@@ -72,8 +72,8 @@ crash, then reconnect and resume an in-progress turn without re-running the mode
 
 `@deepagents/context` ships the machinery (`StreamManager`, `StreamStore` [sqlite/postgres],
 `ChangeSource` [polling / postgres-notify], `stream-buffer`) but it is **not wired into `chat()`** —
-so `runtime/agent-runtime.ts` wires that composition and `AgentTurnExecutor` performs
-each model turn.
+so the host composes a `StreamManager`, `AgentRuntime` borrows it, and `AgentTurnExecutor`
+performs each model turn.
 
 Mechanism:
 
@@ -285,8 +285,8 @@ turn cancelled while queued never enters the chain at all.
   (`container-sandbox.ts` probes `sandbox-<name>`, attaches/restarts/creates, TOCTOU-safe). The
   container engine is the registry (zero in-memory state); the workspace FS survives across turns,
   workers, and restarts. The runtime NEVER disposes it.
-- ChangeSource stays hardcoded to `PollingChangeSource` for now _(decided)_ — not a configurable
-  port yet.
+- The host selects the `StreamStore` and `ChangeSource` when constructing the borrowed
+  `StreamManager`; `AgentRuntime` neither initializes nor disposes them.
 
 ## Independent-thread mailbox foundation _(Built)_
 
@@ -601,7 +601,7 @@ section). Still designed-not-built: the stacks (a real Node+Postgres bundle; the
   (backend-agnostic `createBashTool` wrapper; seam = `DisposableSandbox`; proven over docker + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
 - `runtime/agent-runtime.ts` —
-  `new AgentRuntime(rootDeclaration, {store, streamStore, queue, mailboxStore})` →
+  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore})` →
   `{ enqueue(conv, {id, input}) → {id, stream},
 deliver(communication, mode) → void,
 approve(conv, {toolCallId}) / deny(conv, {toolCallId, reason?}) → {id, stream},

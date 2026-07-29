@@ -6,7 +6,10 @@ import test from 'node:test';
 import {
   type AgentSandbox,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
+  type StreamStore,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -17,6 +20,13 @@ import {
   type TurnRef,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+
+function streamsFor(store: StreamStore): StreamManager {
+  return new StreamManager({
+    store,
+    changeSource: new PollingChangeSource({ reads: store }),
+  });
+}
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -190,7 +200,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });
@@ -271,7 +281,7 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
   });
   const runtime = new AgentRuntime(root, {
     store,
-    streamStore,
+    streams: streamsFor(streamStore),
     mailboxStore,
     queue,
   });

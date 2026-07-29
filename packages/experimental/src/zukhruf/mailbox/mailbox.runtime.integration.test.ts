@@ -10,7 +10,10 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import {
   type AgentSandbox,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
+  type StreamStore,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -23,6 +26,13 @@ import {
   type TurnRef,
   createInterAgentCommunication,
 } from '@deepagents/experimental/zukhruf';
+
+function streamsFor(store: StreamStore): StreamManager {
+  return new StreamManager({
+    store,
+    changeSource: new PollingChangeSource({ reads: store }),
+  });
+}
 
 const root = { chatId: 'root', userId: 'user-1' };
 const researcher = { chatId: 'researcher', userId: 'user-1' };
@@ -71,7 +81,7 @@ async function runtimeHarness(
   const streamStore = new SqliteStreamStore(':memory:');
   const runtime = new AgentRuntime(declaration, {
     store: new InMemoryContextStore(),
-    streamStore,
+    streams: streamsFor(streamStore),
     queue: turnQueue,
     mailboxStore,
   });

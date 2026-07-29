@@ -6,7 +6,9 @@ import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -81,10 +83,14 @@ const turnQueue = new PgBossTurnQueue(boss, {
 await turnQueue.initialize();
 
 const streamStore = new SqliteStreamStore(':memory:');
+const streams = new StreamManager({
+  store: streamStore,
+  changeSource: new PollingChangeSource({ reads: streamStore }),
+});
 const mailboxStore = new SqliteMailboxStore(':memory:');
 const runtime = new AgentRuntime(declaration, {
   store: new InMemoryContextStore(),
-  streamStore,
+  streams,
   queue: turnQueue,
   mailboxStore,
 });

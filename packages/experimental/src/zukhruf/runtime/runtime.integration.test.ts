@@ -17,7 +17,9 @@ import { z } from 'zod';
 import {
   type AgentSandbox,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
   createBashTool,
   createVirtualSandbox,
   fragment,
@@ -364,12 +366,16 @@ async function harness(
     });
   await queue.initialize();
   const streamStore = new SqliteStreamStore(':memory:');
+  const streams = new StreamManager({
+    store: streamStore,
+    changeSource: new PollingChangeSource({ reads: streamStore }),
+  });
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const runtime = new AgentRuntime(
     options?.declaration ?? declaration(model, tools),
     {
       store: new InMemoryContextStore(),
-      streamStore,
+      streams,
       queue,
       mailboxStore,
     },

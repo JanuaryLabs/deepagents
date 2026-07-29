@@ -21,8 +21,10 @@ import { z } from 'zod';
 
 import {
   type AgentSandbox,
+  PollingChangeSource,
   PostgresContextStore,
   PostgresStreamStore,
+  StreamManager,
   createBashTool,
   createVirtualSandbox,
 } from '@deepagents/context';
@@ -901,10 +903,14 @@ async function createHost(
   await store.initialize();
   await streamStore.initialize();
   const mailboxStore = new SqliteMailboxStore(scenario.mailboxPath);
+  const streams = new StreamManager({
+    store: streamStore,
+    changeSource: new PollingChangeSource({ reads: streamStore }),
+  });
   return {
     runtime: new AgentRuntime(declaration, {
       store,
-      streamStore,
+      streams,
       queue,
       mailboxStore,
     }),

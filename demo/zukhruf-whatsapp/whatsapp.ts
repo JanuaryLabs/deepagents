@@ -7,7 +7,9 @@ import { z } from 'zod';
 import {
   type AgentModel,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
   createVirtualSandbox,
   role,
 } from '@deepagents/context';
@@ -102,6 +104,10 @@ export class WhatsAppGroup implements AsyncDisposable {
     const boss = new PgBoss({ db: fromPglite(database), backend: 'pglite' });
     boss.on('error', (error) => console.error('[queue error]', error));
     const streamStore = new SqliteStreamStore(':memory:');
+    const streams = new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    });
     const mailboxStore = new SqliteMailboxStore(':memory:');
     const store = new InMemoryContextStore();
     const replies = new ReplyInbox();
@@ -153,7 +159,7 @@ export class WhatsAppGroup implements AsyncDisposable {
           }),
           {
             store,
-            streamStore,
+            streams,
             queue,
             mailboxStore,
           },

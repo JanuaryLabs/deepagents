@@ -1,9 +1,7 @@
 import {
   ContextEngine,
   type ContextStore,
-  PollingChangeSource,
-  StreamManager,
-  type StreamStore,
+  type StreamManager,
 } from '@deepagents/context';
 
 import type { AgentDeclaration } from '../agent.ts';
@@ -33,7 +31,8 @@ import { ApprovalController } from './approval-controller.ts';
 
 export interface AgentRuntimeOptions {
   store: ContextStore;
-  streamStore: StreamStore;
+  /** Borrowed stream subsystem; the caller owns its store, change source, and lifecycle. */
+  streams: StreamManager;
   queue: TurnQueue;
   /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
   mailboxStore: MailboxStore;
@@ -112,10 +111,7 @@ export class AgentRuntime {
     const multiAgentV2 = resolveMultiAgentV2HostConfig(options.multiAgentV2);
     const declarations = new AgentDeclarationRegistry(root);
     const directory = new AgentDirectory(options.store);
-    const streams = new StreamManager({
-      store: options.streamStore,
-      changeSource: new PollingChangeSource({ reads: options.streamStore }),
-    });
+    const streams = options.streams;
     const mailbox = new MailboxCoordinator({
       store: options.mailboxStore,
       queue: options.queue,

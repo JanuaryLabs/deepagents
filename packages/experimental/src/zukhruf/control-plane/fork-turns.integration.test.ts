@@ -7,7 +7,10 @@ import { z } from 'zod';
 import {
   type AgentSandbox,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
+  type StreamStore,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -18,6 +21,13 @@ import {
   type TurnRef,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+
+function streamsFor(store: StreamStore): StreamManager {
+  return new StreamManager({
+    store,
+    changeSource: new PollingChangeSource({ reads: store }),
+  });
+}
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -229,7 +239,7 @@ async function spawnAfter(
       tools: options.tools,
       subagents: [worker],
     }),
-    { store, streamStore, mailboxStore, queue },
+    { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   await using workerHandle = await runtime.work();
   void workerHandle;

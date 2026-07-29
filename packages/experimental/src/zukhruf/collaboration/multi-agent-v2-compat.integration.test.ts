@@ -7,7 +7,10 @@ import test, { type TestContext } from 'node:test';
 import {
   type AgentSandbox,
   InMemoryContextStore,
+  PollingChangeSource,
   SqliteStreamStore,
+  StreamManager,
+  type StreamStore,
 } from '@deepagents/context';
 import {
   AgentRuntime,
@@ -18,6 +21,13 @@ import {
   type TurnRef,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+
+function streamsFor(store: StreamStore): StreamManager {
+  return new StreamManager({
+    store,
+    changeSource: new PollingChangeSource({ reads: store }),
+  });
+}
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -161,13 +171,14 @@ function functionTools(tools: unknown): LanguageModelV4FunctionTool[] {
 function harness(t: TestContext) {
   const store = new InMemoryContextStore();
   const streamStore = new SqliteStreamStore(':memory:');
+  const streams = streamsFor(streamStore);
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const queue = new ControlledTurnQueue();
   t.after(() => {
     streamStore.close();
     mailboxStore.close();
   });
-  return { store, streamStore, mailboxStore, queue };
+  return { store, streams, streamStore, mailboxStore, queue };
 }
 
 test('host config injects root guidance, spawn guidance, namespace, and wait bounds', async (t) => {
@@ -402,9 +413,10 @@ test('host config rejects invalid namespaces and wait bounds', () => {
     sandbox,
     instructions: [],
   });
+  const streamStore = new SqliteStreamStore(':memory:');
   const h = {
     store: new InMemoryContextStore(),
-    streamStore: new SqliteStreamStore(':memory:'),
+    streams: streamsFor(streamStore),
     mailboxStore: new SqliteMailboxStore(':memory:'),
     queue: new ControlledTurnQueue(),
   };
@@ -446,7 +458,7 @@ test('host config rejects invalid namespaces and wait bounds', () => {
       /defaultWaitTimeoutMs.*minWaitTimeoutMs/,
     );
   } finally {
-    h.streamStore.close();
+    streamStore.close();
     h.mailboxStore.close();
   }
 });
