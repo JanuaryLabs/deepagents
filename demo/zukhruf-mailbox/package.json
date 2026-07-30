@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/demo-zukhruf-mailbox",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
   "type": "module",
   "description": "Deterministic runnable demo of Zukhruf queue-only and trigger-turn mailbox delivery.",
@@ -8,8 +8,8 @@
     "start": "node run.ts"
   },
   "dependencies": {
-    "@deepagents/context": "5.0.0",
-    "@deepagents/experimental": "5.0.0",
+    "@deepagents/context": "6.0.0",
+    "@deepagents/experimental": "6.0.0",
     "@electric-sql/pglite": "^0.5.4",
     "ai": "^7.0.30",
     "just-bash": "^3.1.0",

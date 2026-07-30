@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/demo-zukhruf-simple",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
   "type": "module",
   "description": "Smallest complete Zukhruf agent declaration.",
@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.15",
-    "@deepagents/context": "5.0.0",
-    "@deepagents/experimental": "5.0.0",
+    "@deepagents/context": "6.0.0",
+    "@deepagents/experimental": "6.0.0",
     "@electric-sql/pglite": "^0.5.4",
     "just-bash": "^3.1.0",
     "pg-boss": "^12.26.1"

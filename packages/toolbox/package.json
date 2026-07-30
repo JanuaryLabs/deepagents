@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/toolbox",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -44,7 +44,7 @@
     "nano-spawn": "^2.1.0",
     "zod": "^4.4.3",
     "fast-glob": "^3.3.3",
-    "@deepagents/retrieval": "5.0.0"
+    "@deepagents/retrieval": "6.0.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.13"
