@@ -45,7 +45,7 @@
   "dependencies": {
     "@deepagents/context": "6.0.0",
     "ai": "^7.0.30",
-    "just-bash": "^3.1.0",
+    "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
     "tiny-tfidf": "^1.0.0",
     "uuid": "^14.0.1",
@@ -54,6 +54,6 @@
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.3",
     "@electric-sql/pglite": "^0.5.4",
-    "just-bash": "^3.1.0"
+    "just-bash": "^3.2.0"
   }
 }

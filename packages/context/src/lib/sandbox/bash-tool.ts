@@ -44,6 +44,7 @@ const KNOWN_TOOLS = new Set([
   'head',
   'html-to-markdown',
   'iconv',
+  'js-exec',
   'join',
   'jq',
   'node',
@@ -153,8 +154,7 @@ function makeTeeScriptPortable(script: string): string {
 }
 
 type InitialFile =
-  | { path: string; content: string }
-  | { path: string; sourcePath: string };
+  { path: string; content: string } | { path: string; sourcePath: string };
 
 async function listInitialFiles(
   options: CreateBashToolOptions,
@@ -223,6 +223,7 @@ async function createToolPrompt(
   const available = new Set(
     result.stdout.split('\n').filter((entry) => KNOWN_TOOLS.has(entry)),
   );
+  if (available.has('js-exec')) available.delete('node');
   if (available.size === 0) return '';
 
   const lines = [

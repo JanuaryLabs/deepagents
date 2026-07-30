@@ -1,4 +1,9 @@
-import { Bash, type CustomCommand, type IFileSystem } from 'just-bash';
+import {
+  Bash,
+  type BashOptions,
+  type CustomCommand,
+  type IFileSystem,
+} from 'just-bash';
 
 import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
 
@@ -6,6 +11,7 @@ export interface CreateVirtualSandboxOptions extends SandboxReadinessOptions {
   fs: IFileSystem;
   cwd?: string;
   env?: Record<string, string>;
+  javascript?: BashOptions['javascript'];
   customCommands?: CustomCommand[];
 }
 
@@ -16,6 +22,7 @@ export async function createVirtualSandbox(
     fs: options.fs,
     cwd: options.cwd,
     env: options.env,
+    javascript: options.javascript,
     customCommands: options.customCommands,
   });
 

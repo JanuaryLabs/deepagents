@@ -275,6 +275,20 @@ describe('bash toolkit', () => {
     assert.match(description, /For CSV\/TSV: xan, awk, cut/);
   });
 
+  it('advertises js-exec instead of node in JavaScript virtual sandboxes', async () => {
+    const { bash } = await createBashTool({
+      sandbox: await createVirtualSandbox({
+        fs: new InMemoryFs(),
+        javascript: true,
+      }),
+    });
+
+    const description = bash.description;
+    assert.ok(typeof description === 'string');
+    assert.match(description, /Available tools:.*\bjs-exec\b/);
+    assert.doesNotMatch(description, /Available tools:.*\bnode\b/);
+  });
+
   it('runs hooks around truncated output and merges their metadata', async () => {
     const backend = new RecordingSandbox();
     backend.result = {

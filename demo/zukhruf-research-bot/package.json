@@ -10,7 +10,7 @@
     "@deepagents/experimental": "6.0.0",
     "@electric-sql/pglite": "^0.5.4",
     "ai": "^7.0.30",
-    "just-bash": "^3.1.0",
+    "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
     "zod": "^4.4.3"
   }

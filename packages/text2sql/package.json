@@ -99,7 +99,7 @@
     "ai": "^7.0.30",
     "cac": "7.0.0",
     "dedent": "1.7.2",
-    "just-bash": "^3.1.0",
+    "just-bash": "^3.2.0",
     "nano-spawn": "^2.1.0",
     "node-sql-parser": "^5.4.0",
     "p-limit": "^7.3.0",

@@ -37,6 +37,18 @@ describe('createVirtualSandbox', () => {
     assert.strictEqual(result.stdout, '/workspace\nok\n');
   });
 
+  it('enables JavaScript when requested', async () => {
+    const sandbox = await createVirtualSandbox({
+      fs: new InMemoryFs(),
+      javascript: true,
+    });
+
+    const result = await sandbox.executeCommand('js-exec --version');
+
+    assert.strictEqual(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /^QuickJS /);
+  });
+
   it('runs the readiness hook against the sandbox before returning it', async () => {
     const sandbox = await createVirtualSandbox({
       fs: new InMemoryFs(),
