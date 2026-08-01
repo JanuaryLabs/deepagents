@@ -68,6 +68,12 @@
       "import": "./dist/lib/adapters/clickhouse/index.js",
       "default": "./dist/lib/adapters/clickhouse/index.js"
     },
+    "./posthog": {
+      "development": "./src/lib/adapters/posthog/index.ts",
+      "types": "./dist/lib/adapters/posthog/index.d.ts",
+      "import": "./dist/lib/adapters/posthog/index.js",
+      "default": "./dist/lib/adapters/posthog/index.js"
+    },
     "./synthesis": {
       "development": "./src/lib/synthesis/index.ts",
       "types": "./dist/lib/synthesis/index.d.ts",

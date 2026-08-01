@@ -23,12 +23,13 @@ npm install @clickhouse/client     # ClickHouse, or use your preferred client
 ```
 
 SQLite uses the built-in `node:sqlite` module and requires no additional driver.
+PostHog uses native `fetch` and also requires no additional client package.
 
 ## Basic Setup
 
 Text2SQL requires three components:
 
-1. **Adapter** - Connects to your database (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, or ClickHouse)
+1. **Adapter** - Connects to your data source (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, or PostHog)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Model** - Any Vercel AI SDK language model
 
@@ -64,7 +65,7 @@ exact value the model passes to `sql validate <db>` and `sql run <db>`. The
 agent instructions point the model at that label, so it never has to infer the
 name from the wrapper tag.
 
-<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse', 'PostHog']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
@@ -232,6 +233,34 @@ const adapter = new ClickHouse({
   execute: query,
   validate: async () => undefined,
   grounding: [clickhouse.tables(), clickhouse.info()],
+});
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: { main: adapter },
+  lock: new FileIndexLock(),
+});
+```
+</Tab>
+<Tab value="PostHog">
+```typescript
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import {
+  PostHog,
+  createPostHogTransport,
+  definitions,
+  info,
+  schema,
+} from '@deepagents/text2sql/posthog';
+
+const transport = createPostHogTransport({
+  host: process.env.POSTHOG_HOST!,
+  projectId: process.env.POSTHOG_PROJECT_ID!,
+  getAccessToken: () => getCurrentPostHogOAuthToken(),
+});
+const adapter = new PostHog({
+  transport,
+  grounding: [info(), schema(), definitions()],
 });
 
 const text2sql = new Text2Sql({
@@ -420,6 +449,7 @@ export GROQ_API_KEY=your-api-key
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific features
 - [ClickHouse Adapter](/docs/text2sql/clickhouse) - ClickHouse-specific features
+- [PostHog Adapter](/docs/text2sql/posthog) - PostHog HogQL setup and OAuth scopes
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific features
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific features
 - [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific features

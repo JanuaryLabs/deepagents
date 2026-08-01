@@ -1,0 +1,128 @@
+---
+title: PostHog
+description: Generate and safely execute HogQL through the PostHog Query API
+---
+
+The PostHog adapter lets Text2SQL answer flexible analytics questions without
+treating PostHog as a PostgreSQL database. Text2SQL generates HogQL, PostHog
+parses it, the adapter checks the referenced tables against grounded schema,
+and PostHog executes the accepted query.
+
+## Setup
+
+PostHog uses native `fetch`, so no additional client package is required.
+
+```typescript
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import {
+  PostHog,
+  createPostHogTransport,
+  definitions,
+  info,
+  schema,
+} from '@deepagents/text2sql/posthog';
+
+const transport = createPostHogTransport({
+  host: 'https://us.posthog.com', // EU or your self-hosted origin also works
+  projectId: process.env.POSTHOG_PROJECT_ID!,
+  getAccessToken: async () => getCurrentPostHogOAuthToken(),
+});
+
+const adapter = new PostHog({
+  transport,
+  grounding: [
+    info(),
+    schema(),
+    definitions(),
+  ],
+});
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: { posthog: adapter },
+  lock: new FileIndexLock(),
+});
+
+const hogql = await text2sql.toSql(
+  'How many signup events happened in the last 7 days?',
+  'posthog',
+);
+const result = await text2sql.run('posthog', hogql);
+```
+
+`host` must be the correct US, EU, or self-hosted PostHog origin. HTTPS is
+required except for loopback development servers. `getAccessToken()` runs
+before every request so your application can refresh OAuth tokens without
+putting token storage inside the adapter.
+
+## OAuth Permissions
+
+External applications should own OAuth registration, consent, encrypted token
+storage, and refresh. Request these read scopes:
+
+- `query:read`
+- `event_definition:read`
+- `property_definition:read`
+
+A personal API key with the same permissions can be returned by
+`getAccessToken()` for development and server-side installations.
+
+## Grounding
+
+```typescript
+const adapter = new PostHog({
+  transport,
+  grounding: [
+    info(),
+    schema({
+      filter: ['events', 'persons', 'revenue_orders'],
+      columns: { events: ['event', 'timestamp', 'properties'] },
+    }),
+    definitions({
+      events: /^(signup|purchase)$/,
+      properties: ['plan', 'country', 'amount'],
+      propertyTypes: ['event', 'person', 'session'],
+      groupTypeIndexes: [0],
+    }),
+  ],
+});
+```
+
+- `info()` teaches the model the HogQL and Query API constraints.
+- `schema()` reads PostHog's access-filtered `DatabaseSchemaQuery`, including
+  warehouse tables, queryable views, and complete warehouse join links.
+- `definitions()` reads event and property names, descriptions, types, tags,
+  and verification state. It never fetches event payloads or property values.
+- Hidden, stale, restricted, and system metadata is excluded by default.
+- Set `includeSystem: true` only when the OAuth identity should query PostHog
+  system tables.
+
+## Validation and Execution
+
+Every validation and execution independently sends a `HogQLMetadata` node to
+PostHog. Invalid metadata fails closed. Valid metadata returns the base table
+names, which must all exist in the configured `schema()` grounding. Execution
+then sends the exact generated SQL as a `HogQLQuery` and converts PostHog's
+column/row arrays into JavaScript objects.
+
+The adapter intentionally does not cache validation results. A direct
+`adapter.execute()` call remains protected even if the caller skipped
+`validate()`.
+
+PostHog's Query API returns at most 100 rows by default and up to 50,000 with
+an explicit `LIMIT`. It does not support programmatic `OFFSET`. Prefer bounded
+time ranges and use this adapter for interactive analytics.
+
+## Boundaries
+
+- **Implemented:** flexible HogQL questions over PostHog's Query API.
+- **Not implemented:** creating or calling saved PostHog Endpoint URLs.
+- **Not an export connector:** use PostHog batch exports for scheduled or bulk
+  extraction.
+- **Not Managed Warehouse SQL:** if your account has PostHog's separate managed
+  PostgreSQL-compatible connection, configure it through the PostgreSQL adapter.
+
+See PostHog's [API authentication](https://posthog.com/docs/api),
+[Query API](https://posthog.com/docs/api/queries),
+[event definitions](https://posthog.com/docs/api/event-definitions), and
+[property definitions](https://posthog.com/docs/api/property-definitions).

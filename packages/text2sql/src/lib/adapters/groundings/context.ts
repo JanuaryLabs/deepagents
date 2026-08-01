@@ -1,3 +1,5 @@
+import type { ContextFragment } from '@deepagents/context';
+
 import type {
   AdapterInfo,
   ColumnStats,
@@ -44,6 +46,9 @@ export interface GroundingContext {
   /** Database info collected by InfoGrounding */
   info?: AdapterInfo;
 
+  /** Adapter-specific fragments contributed during grounding. */
+  fragments?: ContextFragment[];
+
   /** Shared cache for cross-grounding deduplication. Keyed by `type:key`. */
   cache: Map<string, unknown>;
 
@@ -74,6 +79,7 @@ export function createGroundingContext(
     views: [],
     relationships: [],
     info: undefined,
+    fragments: [],
     cache: new Map(),
     onProgress: timestampProgress(options.onProgress),
   };

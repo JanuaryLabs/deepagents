@@ -5,7 +5,7 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 ## Features
 
 - **Natural Language to SQL** - Convert questions to validated, executable queries
-- **Multi-Database Support** - PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, and ClickHouse adapters
+- **Multi-Database Support** - PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL adapters
 - **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
 - **Domain Knowledge** - Inject business terms, guardrails, and query patterns via fragments
 - **Conversational** - Multi-turn conversations with context persistence
@@ -25,6 +25,7 @@ npm install mssql                    # SQL Server
 npm install mysql2                   # MySQL / MariaDB
 npm install @google-cloud/bigquery   # BigQuery
 npm install @clickhouse/client       # ClickHouse, or use your preferred client
+# PostHog uses native fetch and needs no additional client package
 ```
 
 Requires Node.js LTS
@@ -296,6 +297,10 @@ withhold extension, file, remote-query, and routine execution capabilities; and
 configure dialect-appropriate statement timeouts, byte/result limits, and
 compute/memory limits.
 
+The PostHog adapter does not pass HogQL through the local SQL parser. It asks
+PostHog to parse each query with `HogQLMetadata`, checks the returned base-table
+names against grounded schema, and only then sends a `HogQLQuery` for execution.
+
 ## Fragments
 
 Inject domain knowledge by setting fragments on the `ContextEngine` you build
@@ -542,6 +547,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 - [MySQL / MariaDB](https://januarylabs.github.io/deepagents/docs/text2sql/mysql)
 - [BigQuery](https://januarylabs.github.io/deepagents/docs/text2sql/bigquery)
 - [ClickHouse](https://januarylabs.github.io/deepagents/docs/text2sql/clickhouse)
+- [PostHog](https://januarylabs.github.io/deepagents/docs/text2sql/posthog)
 
 ## Repository
 

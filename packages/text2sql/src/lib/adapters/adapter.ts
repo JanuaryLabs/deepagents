@@ -115,7 +115,8 @@ export type IntrospectionPhase =
   | 'column_stats'
   | 'column_values'
   | 'low_cardinality'
-  | 'relationships';
+  | 'relationships'
+  | 'definitions';
 
 export type IntrospectionProgressType =
   'phase:start' | 'phase:progress' | 'phase:end';
@@ -271,6 +272,8 @@ export abstract class Adapter {
         this.#relationshipToFragment(rel, sourceTable, targetTable),
       );
     }
+
+    fragments.push(...(ctx.fragments ?? []));
 
     return fragments;
   }

@@ -11,6 +11,7 @@
     "mysql",
     "bigquery",
     "clickhouse",
+    "posthog",
     "spreadsheet",
     "---Guides---",
     "to-sql",

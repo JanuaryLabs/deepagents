@@ -24,6 +24,7 @@
           "packages/text2sql/src/lib/adapters/mysql/index.ts",
           "packages/text2sql/src/lib/adapters/bigquery/index.ts",
           "packages/text2sql/src/lib/adapters/clickhouse/index.ts",
+          "packages/text2sql/src/lib/adapters/posthog/index.ts",
           "packages/text2sql/src/lib/adapters/sqlserver/index.ts",
           "packages/text2sql/src/lib/adapters/spreadsheet/index.ts",
           "packages/text2sql/src/lib/synthesis/index.ts"

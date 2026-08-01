@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
 import { Adapter, type SqlPolicyAnalyzer } from '@deepagents/text2sql';
+import { createGroundingContext } from '@deepagents/text2sql/grounding';
 import { tables } from '@deepagents/text2sql/sqlite';
 
 import { init_db } from '../../tests/sqlite.ts';
@@ -65,6 +66,18 @@ class PolicyWiringAdapter extends Adapter {
 }
 
 describe('Adapter policy strategy wiring', () => {
+  it('accepts grounding contexts created before custom fragments existed', async () => {
+    const adapter = new PolicyWiringAdapter({
+      async analyze() {
+        return null;
+      },
+    });
+    const legacyContext = createGroundingContext();
+    delete legacyContext.fragments;
+
+    assert.deepStrictEqual(await adapter.introspect(legacyContext), []);
+  });
+
   it('delegates validate and execute policy to the injected analyzer', async () => {
     const calls: Array<{ sql: string; allowedEntities: readonly string[] }> =
       [];
