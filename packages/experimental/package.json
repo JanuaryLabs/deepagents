@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/experimental",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -43,7 +43,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@deepagents/context": "6.0.0",
+    "@deepagents/context": "6.1.0",
     "ai": "^7.0.30",
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
