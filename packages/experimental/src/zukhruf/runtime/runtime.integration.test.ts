@@ -9,6 +9,9 @@ import {
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtempDisposable, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { PgBoss, fromPglite } from 'pg-boss';
@@ -16,6 +19,7 @@ import { z } from 'zod';
 
 import {
   type AgentSandbox,
+  type DisposableSandbox,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
@@ -27,9 +31,11 @@ import {
 import {
   type AgentDeclaration,
   AgentRuntime,
+  AgentThread,
   PgBossTurnQueue,
   SqliteMailboxStore,
   type TurnRef,
+  defineSandbox,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import { settleWithin } from '@deepagents/test';
@@ -466,7 +472,241 @@ async function waitForText(
   );
 }
 
+describe('zukhruf runtime — setup failure durability', () => {
+  it('records a later turn before sandbox setup fails', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const model = scriptedModel(track);
+    const agentDeclaration = declaration(model);
+    let sandboxCalls = 0;
+    agentDeclaration.sandbox = async (): Promise<AgentSandbox> => {
+      if (++sandboxCalls === 2) throw new Error('sandbox setup failed');
+      return createBashTool({
+        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      });
+    };
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'sandbox-setup-failure', userId: 'u1' };
+    const first = await h.runtime.enqueue(conversation, turn('first'));
+    assert.equal((await collectText(first.stream)).text, 'reply:first');
+
+    const failed = await h.runtime.enqueue(conversation, turn('second'));
+    await waitForStatus(h.streamStore, failed.id, ['failed']);
+
+    const observer = h.runtime.observe(conversation);
+    const messages = await observer.engine.getMessages();
+    const thread = AgentThread.fromMetadata(
+      conversation,
+      observer.engine.chat?.metadata,
+    );
+    assert.equal(thread?.lastTurnId, failed.id);
+    assert.deepEqual(await observer.engine.headMessage(), {
+      id: failed.id,
+      name: 'assistant',
+    });
+    assert.ok(messages.some((message) => messageText(message) === 'second'));
+    assert.deepEqual(track.calls, ['first']);
+  });
+
+  it('records a turn before sandbox skill discovery fails', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const model = scriptedModel(track);
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = defineSandbox(async () => {
+      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+      await backend.writeFiles([
+        {
+          path: '/workspace/skills/broken/README.md',
+          content: 'SKILL.md is intentionally missing',
+        },
+      ]);
+      return backend;
+    });
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'skill-discovery-failure', userId: 'u1' };
+    const failed = await h.runtime.enqueue(conversation, turn('use a skill'));
+    await waitForStatus(h.streamStore, failed.id, ['failed']);
+
+    const observer = h.runtime.observe(conversation);
+    const messages = await observer.engine.getMessages();
+    const thread = AgentThread.fromMetadata(
+      conversation,
+      observer.engine.chat?.metadata,
+    );
+    assert.equal(thread?.lastTurnId, failed.id);
+    assert.deepEqual(await observer.engine.headMessage(), {
+      id: failed.id,
+      name: 'assistant',
+    });
+    assert.ok(
+      messages.some((message) => messageText(message) === 'use a skill'),
+    );
+    assert.deepEqual(track.calls, []);
+  });
+});
+
 describe('zukhruf runtime — background executor', () => {
+  it('discovers explicitly uploaded sandbox skills once per conversation', async () => {
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-skills-'),
+    );
+    const skillDirectory = join(directory.path, 'skills', 'forecast-sales');
+    await mkdir(join(skillDirectory, 'scripts'), { recursive: true });
+    const skillMd = [
+      '---',
+      'name: forecast-sales',
+      'description: Forecast sales from historical data.',
+      '---',
+      '',
+      '# Forecast sales',
+      '',
+      'Read the historical data before forecasting.',
+    ].join('\n');
+    await Promise.all([
+      writeFile(join(skillDirectory, 'SKILL.md'), skillMd),
+      writeFile(
+        join(skillDirectory, 'scripts', 'forecast.js'),
+        'console.log("forecast");',
+      ),
+    ]);
+
+    const modelPrompts: string[] = [];
+    const backends: DisposableSandbox[] = [];
+    let discoveryCount = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        modelPrompts.push(JSON.stringify(prompt));
+        return { stream: buildStream(['ok'], 0) };
+      },
+    });
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = defineSandbox(
+      async () => {
+        const backend = await createVirtualSandbox({
+          fs: new InMemoryFs(),
+        });
+        const executeCommand = backend.executeCommand.bind(backend);
+        backend.executeCommand = (command, options) => {
+          if (command.includes('/agent-workspace/skills')) discoveryCount++;
+          return executeCommand(command, options);
+        };
+        backends.push(backend);
+        return backend;
+      },
+      {
+        destination: '/agent-workspace',
+        uploadDirectory: {
+          source: directory.path,
+          include: 'skills/**/*',
+        },
+      },
+    );
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'native-skills', userId: 'u1' };
+    const first = await h.runtime.enqueue(
+      conversation,
+      turn('forecast next quarter'),
+    );
+    assert.equal((await collectText(first.stream)).text, 'ok');
+
+    const second = await h.runtime.enqueue(
+      conversation,
+      turn('forecast the following quarter'),
+    );
+    assert.equal((await collectText(second.stream)).text, 'ok');
+
+    assert.equal(modelPrompts.length, 2);
+    for (const prompt of modelPrompts) {
+      assert.match(prompt, /<available_skills>/);
+      assert.match(prompt, /Forecast sales from historical data/);
+      assert.match(prompt, /skills\/forecast-sales\/SKILL\.md/);
+    }
+    assert.equal(backends.length, 2);
+    for (const backend of backends) {
+      assert.equal(
+        await backend.readFile(
+          '/agent-workspace/skills/forecast-sales/SKILL.md',
+        ),
+        skillMd,
+      );
+      assert.equal(
+        await backend.readFile(
+          '/agent-workspace/skills/forecast-sales/scripts/forecast.js',
+        ),
+        'console.log("forecast");',
+      );
+    }
+    assert.equal(discoveryCount, 1);
+  });
+
+  it('discovers skills already installed in the configured sandbox', async () => {
+    const skillMd = [
+      '---',
+      'name: preinstalled',
+      'description: Use a skill installed by the sandbox provider.',
+      '---',
+      '',
+      '# Preinstalled',
+    ].join('\n');
+    const modelPrompts: string[] = [];
+    let discoveryCount = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        modelPrompts.push(JSON.stringify(prompt));
+        return { stream: buildStream(['ok'], 0) };
+      },
+    });
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = defineSandbox(async () => {
+      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+      await backend.writeFiles([
+        {
+          path: '/workspace/skills/preinstalled/SKILL.md',
+          content: skillMd,
+        },
+      ]);
+      const executeCommand = backend.executeCommand.bind(backend);
+      backend.executeCommand = (command, options) => {
+        if (command.includes('/workspace/skills')) discoveryCount++;
+        return executeCommand(command, options);
+      };
+      return backend;
+    });
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'preinstalled-skills', userId: 'u1' };
+    for (const input of ['use the skill', 'use it again']) {
+      const result = await h.runtime.enqueue(conversation, turn(input));
+      assert.equal((await collectText(result.stream)).text, 'ok');
+    }
+
+    assert.equal(discoveryCount, 1);
+    assert.equal(modelPrompts.length, 2);
+    for (const prompt of modelPrompts) {
+      assert.match(prompt, /<available_skills>/);
+      assert.match(prompt, /Use a skill installed by the sandbox provider/);
+      assert.match(prompt, /skills\/preinstalled\/SKILL\.md/);
+    }
+  });
+
   it('resolves sandbox-bound instruction fragments with the agent sandbox', async () => {
     const modelPrompts: string[] = [];
     let sandboxCount = 0;

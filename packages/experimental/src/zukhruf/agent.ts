@@ -18,6 +18,11 @@ export interface SandboxContext {
   userId: string;
 }
 
+export type ZukhrufSandbox = AgentSandbox & {
+  /** Absolute directory containing this conversation's files and skills. Omit to disable discovery. */
+  readonly workingDirectory?: string;
+};
+
 export interface AgentDeclaration {
   /**
    * Stable declaration identity persisted in conversation metadata.
@@ -26,7 +31,7 @@ export interface AgentDeclaration {
    */
   name: string;
   model: AgentModel;
-  sandbox: (context: SandboxContext) => Promise<AgentSandbox>;
+  sandbox: (context: SandboxContext) => Promise<ZukhrufSandbox>;
   instructions: ContextFragment[];
   tools?: ZukhrufToolSet;
   subagents?: AgentDeclaration[];

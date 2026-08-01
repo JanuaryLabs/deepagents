@@ -617,13 +617,25 @@ redundant queue onto a platform that already is one. The unifying abstraction is
 **Durable streams + reconnect AND the background executor are now built** (see the executor
 section). Still designed-not-built: the stacks (a real Node+Postgres bundle; the DO adapter).
 
-- `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, subagents?})` returns a
-  pure declaration with caller tools and a normalized subagent list. `sandbox` is
-  a factory `(ctx: {chatId, userId}) => Promise<AgentSandbox>` so each independent chat owns its
+- `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, subagents?})`
+  returns a pure declaration with caller tools and a normalized subagent list. `sandbox` is a
+  factory `(ctx: {chatId, userId}) => Promise<ZukhrufSandbox>` so each independent chat owns its
   backend. `name` is the stable declaration identity persisted in chat metadata.
-- `sandbox/define.ts` — `defineSandbox(createBackend, opts?) → () => Promise<AgentSandbox>`
-  (backend-agnostic `createBashTool` wrapper; seam = `DisposableSandbox`; proven over docker + virtual).
+- `sandbox/define.ts` — `defineSandbox(createBackend, opts?) → () => Promise<ZukhrufSandbox>`
+  (backend-agnostic `createBashTool` wrapper; seam = `DisposableSandbox`; exposes the configured
+  working directory to the runtime and leaves uploads explicit through the existing
+  `uploadDirectory` option; proven over docker + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
+- `runtime/agent-skills.ts` — discovers immediate `skills/<name>/SKILL.md` children from the
+  configured sandbox on the conversation's first executable turn, requires frontmatter names to
+  match their directories, and persists the ordered `{name, description, path}` catalog under the
+  chat's Zukhruf metadata. Later turns and process restarts reconstruct the same stable
+  `@deepagents/context` skills fragment from that snapshot without rediscovery. `path` remains an
+  explicit catalog field rather than being derived from `name`, so the durable format is not
+  coupled to today's single discovery root. The sandbox is authoritative: providers may preinstall
+  or mount skills, while host-directory users opt into `uploadDirectory`. The executor never copies
+  or persists `SKILL.md` bodies, scripts, references, or assets. Skills belong to one agent sandbox
+  and do not implicitly pass to subagents.
 - `runtime/agent-runtime.ts` —
   `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore})` →
   `{ enqueue(conv, {id, input}) → {id, stream},

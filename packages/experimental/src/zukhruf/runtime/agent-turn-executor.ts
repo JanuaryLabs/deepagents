@@ -1,6 +1,7 @@
 import type { UIMessage } from 'ai';
 
 import {
+  type AvailableSkill,
   ContextEngine,
   type ContextStore,
   type StreamManager,
@@ -11,6 +12,7 @@ import {
   user,
 } from '@deepagents/context';
 
+import type { ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
 import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
@@ -21,6 +23,11 @@ import type {
 } from '../mailbox/types.ts';
 import type { ResolvedMultiAgentV2HostConfig } from '../multi-agent-v2-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
+import {
+  type AgentSkills,
+  createAgentSkills,
+  discoverAgentSkills,
+} from './agent-skills.ts';
 import type { ApprovalController } from './approval-controller.ts';
 
 export interface AgentTurnExecutorOptions {
@@ -100,10 +107,7 @@ export class AgentTurnExecutor {
     const usageHint = thread.path.isRoot
       ? this.#multiAgentV2.rootAgentUsageHintText
       : this.#multiAgentV2.subagentUsageHintText;
-    const engine = this.#engineFor(turn).set(
-      ...declaration.instructions,
-      ...(usageHint === undefined ? [] : [role(usageHint)]),
-    );
+    const engine = this.#engineFor(turn);
 
     if (turn.kind === 'ask' || turn.kind === 'mailbox') {
       const head = (await engine.getMessages()).at(-1);
@@ -133,6 +137,13 @@ export class AgentTurnExecutor {
       chatId: turn.chatId,
       userId: turn.userId,
     });
+    const agentSkills = await this.#skillsFor(turn, sandbox, signal);
+    engine.set(
+      ...declaration.instructions,
+      ...agentSkills.fragments,
+      ...(usageHint === undefined ? [] : [role(usageHint)]),
+    );
+
     if (await this.#projectSkippedTerminalTurn(turn)) return;
     if (!(await this.#streams.claim(turn.streamId))) {
       await this.#projectSkippedTerminalTurn(turn);
@@ -273,6 +284,38 @@ export class AgentTurnExecutor {
         );
   }
 
+  async #skillsFor(
+    turn: TurnRef,
+    sandbox: ZukhrufSandbox,
+    signal: AbortSignal,
+  ): Promise<AgentSkills> {
+    const chat = await this.#store.getChat(turn.chatId);
+    const existing = readSkills(chat?.metadata);
+    if (existing !== undefined) return createAgentSkills(existing);
+    if (sandbox.workingDirectory === undefined) return createAgentSkills([]);
+
+    const discovered = await discoverAgentSkills(sandbox, signal);
+    let available = discovered.available;
+    await this.#store.updateChat(turn.chatId, ({ metadata }) => {
+      const persisted = readSkills(metadata);
+      if (persisted !== undefined) {
+        available = persisted;
+        return undefined;
+      }
+
+      const zukhruf = isRecord(metadata?.zukhruf) ? metadata.zukhruf : {};
+      return {
+        metadata: {
+          ...metadata,
+          zukhruf: { ...zukhruf, skills: available },
+        },
+      };
+    });
+    return available === discovered.available
+      ? discovered
+      : createAgentSkills(available);
+  }
+
   #engineFor({ chatId, userId }: ConversationId): ContextEngine {
     return new ContextEngine({ store: this.#store, chatId, userId });
   }
@@ -306,4 +349,30 @@ export class AgentTurnExecutor {
       typeof authorPath === 'string' ? authorPath : communication.author.chatId;
     return `Message Type: ${communication.type}\nTask name: ${taskName}\nSender: ${sender}\nPayload:\n${communication.content}`;
   }
+}
+
+function readSkills(
+  metadata: Record<string, unknown> | undefined,
+): readonly AvailableSkill[] | undefined {
+  const zukhruf = metadata?.zukhruf;
+  if (!isRecord(zukhruf) || !Object.hasOwn(zukhruf, 'skills')) {
+    return undefined;
+  }
+  if (!Array.isArray(zukhruf.skills) || !zukhruf.skills.every(isSkill)) {
+    throw new Error('AgentRuntime: stored skill catalog is invalid');
+  }
+  return zukhruf.skills;
+}
+
+function isSkill(value: unknown): value is AvailableSkill {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    typeof value.description === 'string' &&
+    typeof value.path === 'string'
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

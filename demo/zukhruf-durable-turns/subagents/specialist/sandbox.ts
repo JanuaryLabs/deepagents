@@ -8,6 +8,12 @@ import { defineSandbox } from '@deepagents/experimental/zukhruf';
  * in-memory sandbox satisfies the agent contract without creating a second
  * container or leaking filesystem state between parent and child.
  */
-export const subagentSandbox = defineSandbox(() =>
-  createVirtualSandbox({ fs: new InMemoryFs() }),
+export default defineSandbox(
+  () => createVirtualSandbox({ fs: new InMemoryFs() }),
+  {
+    uploadDirectory: {
+      source: import.meta.dirname,
+      include: 'skills/**/*',
+    },
+  },
 );

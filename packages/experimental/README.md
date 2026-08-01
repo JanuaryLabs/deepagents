@@ -40,6 +40,14 @@ and injected collaboration-tool implementations are internal wiring. See
 [`TODO.md`](./src/zukhruf/TODO.md) for the convergence plan, and
 [`BUGS.md`](./src/zukhruf/BUGS.md) for known residue.
 
+Zukhruf discovers immediate `skills/<name>/SKILL.md` children from each
+configured sandbox once per conversation. It persists only the ordered catalog
+(`name`, `description`, and model-visible `path`) in chat metadata so later turns
+and process restarts reconstruct the same prompt fragment without rediscovery.
+Skill bodies, scripts, references, and assets remain in the sandbox. Providers
+may preinstall or mount them, or opt into the existing `uploadDirectory` support
+when creating the sandbox.
+
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete
 deployable unit),

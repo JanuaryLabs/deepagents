@@ -6,9 +6,9 @@ The **durable-turns** showcase for the Zukhruf harness
 - `agent.ts` — the root declaration and its permitted `specialist` subagent.
 - `instructions.ts` — the system prompt fragments.
 - `sandbox.ts` — the per-chat backend (Docker, named by `chatId`).
-- `subagents/specialist.ts` — an independent `defineAgent()` declaration with
-  its own durable chat, history, stream, mailbox, and TurnQueue key.
-- `subagents/sandbox.ts` — a lightweight in-memory sandbox for the specialist.
+- `subagents/specialist/` — a self-contained independent `defineAgent()`
+  declaration with its own instructions, skills, sandbox, durable chat,
+  history, stream, mailbox, and TurnQueue key.
 - `run.ts` — the executor showcase: PGlite-backed pg-boss, concurrent
   in-process `work()`, detach/resume the root turn, wait for the independently
   queued child completion, then enqueue a second root turn that drains it.
@@ -30,11 +30,18 @@ sandbox and never inherits the root conversation or filesystem.
 
 ## Reserved declaration slots
 
-`channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
-**reserved declaration-type slots** kept as structural stubs (each holds a
-`.gitkeep`). They mark the intended surface of a Zukhruf deployable unit; the
-runtime does not wire them yet. `subagents/` contains the specialist declaration
-referenced by the root's `subagents` array.
+`skills/<name>/SKILL.md` is native inside the sandbox: Zukhruf discovers the
+sandbox's catalog once per conversation and exposes relative skill paths to the
+model. The sandbox provider owns how those files arrive. The specialist uses
+`uploadDirectory` explicitly for its demo-local `skills/`; production providers
+can preinstall or mount the same layout. The root has no skills, while the
+specialist owns `explain-fifo`. Chat metadata retains only each skill's name,
+description, and model-visible path; full skill files remain in the sandbox.
+
+`channels/`, `connections/`, and `schedules/` remain unwired structural stubs.
+`tools/` is reserved for declarations imported by `agent.ts`. Each directory
+under `subagents/` is another self-contained agent declaration with its own
+optional `skills/`.
 
 ## Run
 
