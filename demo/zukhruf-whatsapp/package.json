@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/demo-zukhruf-whatsapp",
-  "version": "6.1.0",
+  "version": "6.1.1",
   "private": true,
   "type": "module",
   "description": "WhatsApp-style Zukhruf group chat where every specialist sees each message and volunteers whether to reply.",
@@ -23,8 +23,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.15",
-    "@deepagents/context": "6.1.0",
-    "@deepagents/experimental": "6.1.0",
+    "@deepagents/context": "6.1.1",
+    "@deepagents/experimental": "6.1.1",
     "@electric-sql/pglite": "^0.5.4",
     "ai": "^7.0.30",
     "just-bash": "^3.2.0",
