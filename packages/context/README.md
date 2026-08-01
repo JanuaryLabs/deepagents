@@ -32,6 +32,8 @@ with `createVirtualSandbox()`, `createDockerSandbox()`,
 `createDaytonaSandbox(client, options)`, or `createAgentOsSandbox()` depending
 on whether commands should run in memory, Docker, Apple Container lightweight
 VMs, Microsandbox microVMs, managed Daytona sandboxes, or Agent OS.
+Virtual sandboxes can opt into in-process JavaScript execution with
+`createVirtualSandbox({ javascript: true, ... })`.
 
 See the docs for the full API surface:
 

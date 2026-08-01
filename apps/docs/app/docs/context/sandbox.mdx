@@ -24,7 +24,7 @@ bridges to combine approaches.
 | `createMicrosandboxSandbox` | Direct local microVM control with get-or-create named sandboxes | No |
 | `createDaytonaSandbox(client, options)` + `createBashTool` | Managed remote sandbox with caller-owned Daytona client | No |
 | `createAgentOsSandbox` | Lightweight WASM execution, no Docker needed | No |
-| `createVirtualSandbox` | In-process bash with a virtual filesystem | No |
+| `createVirtualSandbox` | In-process bash with a virtual filesystem and optional JavaScript command support | No |
 | `createBinaryBridges` | Bridge specific host binaries into just-bash virtual FS | No |
 
 All AI-agent-facing surfaces compose the same way: pick a backend factory
@@ -36,6 +36,10 @@ provisioning and discovery remain the application's responsibility. For
 per-command file-change tracking, first decorate a real backend
 with `withStraceFileChanges(...)`, then pass that tracked backend into
 `createBashTool`.
+
+`uploadDirectory` accepts one source or an array of sources. Each source may
+set its own sandbox `destination`; otherwise it uploads under the Bash working
+directory.
 
 All backends expose the buffered command + file API (`executeCommand`,
 `readFile`, `writeFiles`, `dispose`). Backends that can stream real processes,
@@ -82,15 +86,21 @@ import {
 const backend = await createDockerSandbox({
   installers: [pkg(['curl', 'jq'])],
 });
-const sandbox = await createBashTool({ sandbox: backend });
+const sandbox = await createBashTool({
+  sandbox: backend,
+  uploadDirectory: {
+    source: '/opt/agent-skills/deploy',
+    destination: '/skills/deploy',
+  },
+});
 
-// The application separately mounts or copies these files into the backend
-// and builds the catalog from its own manifest, database, or discovery logic.
+// The application owns the source and builds this catalog from its own
+// manifest, database, or discovery logic.
 const availableSkills: AvailableSkill[] = [
   {
     name: 'deploy',
     description: 'Deploy services safely.',
-    path: '/workspace/skills/deploy/SKILL.md',
+    path: '/skills/deploy/SKILL.md',
   },
 ];
 
@@ -255,6 +265,8 @@ console.log(result.stdout); // hello
 
 The virtual backend uses `just-bash`, so command execution and file IO stay
 in-process while still exercising the same `createBashTool` path used by agents.
+Pass `javascript: true` when the virtual sandbox should expose `js-exec` for
+JavaScript execution without bridging a host `node` binary.
 
 When you want command groups such as `sql run`, `tool validate`, or
 `marker remind` inside a virtual sandbox, pass `customCommands` to

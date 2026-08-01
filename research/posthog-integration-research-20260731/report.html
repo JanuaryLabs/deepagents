@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostHog as a SQL Data Source - Deep Research Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #1a1a1a;
+            background: #ffffff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+        }
+
+        .header {
+            background: #003d5c;
+            color: white;
+            padding: 25px 40px;
+            border-bottom: 3px solid #002840;
+        }
+
+        .header h1 {
+            font-size: 26px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .header-meta {
+            font-size: 13px;
+            color: #b8d4e6;
+            display: flex;
+            gap: 25px;
+        }
+
+        .metrics-dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0;
+            border-bottom: 2px solid #003d5c;
+        }
+
+        .metric {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-right: 1px solid #d1d5db;
+            text-align: center;
+        }
+
+        .metric:last-child {
+            border-right: none;
+        }
+
+        .metric-number {
+            font-size: 32px;
+            font-weight: 700;
+            color: #003d5c;
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: #4a5568;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+
+        .content {
+            padding: 30px 40px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #003d5c;
+            margin: 32px 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #003d5c;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            line-height: 1.3;
+        }
+
+        .subsection-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin: 24px 0 12px 0;
+            line-height: 1.4;
+        }
+
+        .executive-summary {
+            background: #f8f9fa;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #003d5c;
+        }
+
+        .executive-summary p {
+            margin-bottom: 12px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        p {
+            margin-bottom: 14px;
+            line-height: 1.7;
+            text-align: left;
+        }
+
+        /* Better paragraph spacing in content sections */
+        .content > p,
+        .section p {
+            margin-bottom: 16px;
+        }
+
+        .findings-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .finding-card {
+            background: #f8f9fa;
+            padding: 18px;
+            border-left: 3px solid #003d5c;
+        }
+
+        .finding-card h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #003d5c;
+            margin-bottom: 10px;
+        }
+
+        .finding-card p {
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 13px;
+        }
+
+        .data-table th {
+            background: #003d5c;
+            color: white;
+            padding: 10px 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .data-table td {
+            padding: 10px 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        ul, ol {
+            margin: 16px 0 16px 28px;
+            padding-left: 0;
+        }
+
+        li {
+            margin-bottom: 10px;
+            font-size: 14px;
+            line-height: 1.6;
+            padding-left: 8px;
+        }
+
+        /* Nested lists */
+        li ul, li ol {
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        /* Better bullet/number spacing */
+        ol {
+            list-style-position: outside;
+            padding-left: 0;
+        }
+
+        ul {
+            list-style-position: outside;
+            padding-left: 0;
+        }
+
+        .key-insight {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-left: 3px solid #003d5c;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .key-insight strong {
+            color: #003d5c;
+            font-weight: 600;
+        }
+
+        .citation {
+            color: #003d5c;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            position: relative;
+            padding: 2px 4px;
+            background: #f0f7fc;
+            border-radius: 2px;
+            transition: all 0.2s ease;
+        }
+
+        .citation:hover {
+            background: #003d5c;
+            color: white;
+        }
+
+        /* Attribution Gradients (2025 Enhancement) */
+        .citation-tooltip {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            margin-bottom: 8px;
+            background: white;
+            border: 2px solid #003d5c;
+            box-shadow: 0 4px 12px rgba(0, 61, 92, 0.15);
+            padding: 12px;
+            min-width: 300px;
+            max-width: 500px;
+            z-index: 1000;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .citation:hover .citation-tooltip {
+            display: block;
+        }
+
+        .tooltip-title {
+            font-weight: 700;
+            color: #003d5c;
+            margin-bottom: 8px;
+            font-size: 13px;
+            border-bottom: 1px solid #d1d5db;
+            padding-bottom: 6px;
+        }
+
+        .tooltip-source {
+            color: #4a5568;
+            margin-bottom: 8px;
+            font-style: italic;
+        }
+
+        .tooltip-claim {
+            background: #f8f9fa;
+            padding: 8px;
+            margin-top: 8px;
+            border-left: 3px solid #003d5c;
+            font-size: 11px;
+        }
+
+        .tooltip-claim-label {
+            font-weight: 600;
+            color: #003d5c;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .evidence-chain {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #d1d5db;
+        }
+
+        .evidence-chain-label {
+            font-weight: 600;
+            color: #003d5c;
+            font-size: 11px;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .evidence-step {
+            padding: 6px;
+            background: #f8f9fa;
+            margin-bottom: 4px;
+            font-size: 11px;
+            border-left: 2px solid #d1d5db;
+            padding-left: 8px;
+        }
+
+        .bibliography {
+            background: #f8f9fa;
+            padding: 30px;
+            margin-top: 40px;
+            border-left: 4px solid #003d5c;
+        }
+
+        .bibliography-content {
+            background: #f8f9fa;
+            padding: 20px 0;
+        }
+
+        .bib-entry {
+            margin-bottom: 18px;
+            padding-left: 50px;
+            text-indent: -50px;
+            line-height: 1.6;
+            font-size: 13px;
+        }
+
+        .bib-number {
+            color: #003d5c;
+            font-weight: 700;
+            margin-right: 8px;
+        }
+
+        .bib-entry a {
+            color: #003d5c;
+            word-wrap: break-word;
+            text-decoration: none;
+        }
+
+        .bib-entry a:hover {
+            text-decoration: underline;
+        }
+
+        .compact-list {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .compact-list li {
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .info-box {
+            background: white;
+            border: 1px solid #d1d5db;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .info-box h4 {
+            font-size: 13px;
+            font-weight: 700;
+            color: #003d5c;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .highlight-stat {
+            font-weight: 700;
+            color: #003d5c;
+        }
+
+        strong {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        @media print {
+            .container {
+                max-width: 100%;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .metrics-dashboard {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .findings-grid {
+                grid-template-columns: 1fr;
+            }
+            .compact-list {
+                grid-template-columns: 1fr;
+            }
+        }
+    
+@page {
+  size: A4;
+  margin: 20mm 16mm 20mm 16mm;
+  @top-center { content: "PostHog SQL Integration Research"; font-size: 8pt; color: #666; }
+  @bottom-center { content: counter(page); font-size: 8pt; color: #666; }
+}
+@page :first { @top-center { content: none; } }
+@media print {
+  body { font-size: 9.5pt; line-height: 1.5; }
+  .header h1 { font-size: 20pt; }
+  .header-meta, .metric-label { font-size: 8pt; }
+  .metric-number { font-size: 20pt; }
+  .metrics-dashboard { display: table; width: 100%; table-layout: fixed; page-break-inside: avoid; }
+  .metric { display: table-cell; width: 25%; padding: 9pt 6pt; }
+  .content { padding: 18pt 20pt; }
+  .section-title { font-size: 13pt; page-break-after: avoid; }
+  .subsection-title, h3, h4 { font-size: 10.5pt; page-break-after: avoid; }
+  p { orphans: 3; widows: 3; }
+  table, pre, blockquote, .executive-summary, .key-insight, .info-box { page-break-inside: avoid; }
+  table { font-size: 7.5pt; }
+  th, td { padding: 5pt 6pt; }
+  .bibliography { page-break-before: always; padding: 12pt; }
+  .bib-entry, .bibliography p { font-size: 7.5pt; line-height: 1.4; page-break-inside: avoid; }
+  .citation { font-size: 8pt; border-radius: 0; }
+}
+
+</style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>PostHog as a SQL Data Source</h1>
+            <div class="header-meta">
+                <span>2026-07-31</span>
+                <span>•</span>
+                <span>24 Sources</span>
+            </div>
+        </div>
+
+        
+<div class="metrics-dashboard">
+  <div class="metric"><span class="metric-number">2</span><span class="metric-label">SQL engines</span></div>
+  <div class="metric"><span class="metric-number">24</span><span class="metric-label">Verified sources</span></div>
+  <div class="metric"><span class="metric-number">3</span><span class="metric-label">Query API concurrency</span></div>
+  <div class="metric"><span class="metric-number">10s</span><span class="metric-label">Query execution cap</span></div>
+</div>
+
+
+        <div class="content">
+            <div class="section"><div class="executive-summary"><h2 class="section-title">Executive Summary</h2>
+
+<ul>
+<li><strong>Yes, PostHog can now behave like a normal SQL database—but only through its new Managed Warehouse beta.</strong> The managed warehouse exposes a TLS-secured PostgreSQL wire endpoint on port 5432, works with ordinary Postgres drivers and tools, and contains continuously replicated PostHog events, persons, and connected-source data. It is a dedicated DuckDB/DuckLake analytical system, not the same database used by PostHog Product Analytics. Access is waitlisted and the documented credential model is a single organization-level <code>root</code> user. [3][4][5]</li>
+</ul>
+
+<ul>
+<li><strong>The classic PostHog SQL path remains HogQL over HTTP.</strong> <code>POST /api/projects/:project_id/query/</code> accepts <code>HogQLQuery</code> requests and returns columns plus row arrays. This is proper for interactive, ad-hoc, and embedded analytics, but PostHog explicitly says it is not an export mechanism and discourages it for production applications. Current project-level limits include 2,400 requests/hour, 240/minute, three concurrent queries, and ten seconds of query execution. [1][2]</li>
+</ul>
+
+<ul>
+<li><strong>PostHog has split production workloads from free-form queries.</strong> Saved SQL and insights should become Endpoints for production or customer-facing traffic. Bulk or recurring data movement should use batch exports. [7][8][9][23]</li>
+</ul>
+
+<ul>
+<li><strong>For <code>@deepagents/text2sql</code>, the shortest correct path is not one new adapter.</strong> Reuse the existing Postgres adapter for Managed Warehouse. Add a dedicated PostHog/HogQL adapter only for customers without managed-warehouse access or where Product Analytics freshness is required. Do not disguise HogQL as Postgres or reuse the ClickHouse adapter: HogQL has an HTTP response contract, PostHog-specific virtual schema, and no documented ClickHouse-native validation surface. [1][4][19][20][22]</li>
+</ul>
+
+<ul>
+<li><strong>Authentication must follow the workload.</strong> Personal API keys are suitable only for an owner's scripts or internal service and must not reach a frontend. OAuth is the supported choice for an installable multi-customer product. Project secret keys currently support only <code>endpoint:read</code>, which makes them ideal for fixed production Endpoints but not free-form Query API execution. [10][11][12][13]</li>
+</ul>
+
+<p><strong>Primary recommendation:</strong> Implement a three-lane PostHog integration: Managed Warehouse through the existing Postgres adapter as the preferred direct-SQL lane; a narrow HogQL Query API adapter for exploratory live analytics; and Endpoints or batch exports as explicit promotion paths for production and bulk workloads.
+</p>
+
+<p><strong>Confidence:</strong> High for the product-surface conclusions because they are based on current official documentation and official source. Medium for exact Managed Warehouse driver compatibility inside this repository until a beta tenant is connected and the existing Postgres grounding and <code>EXPLAIN</code> paths are probed end to end.
+</p>
+
+</div>
+<div class="section"><h2 class="section-title">Introduction</h2>
+
+<p>The research question is whether PostHog can be treated as a SQL database rather than merely a REST API, which of its current integration surfaces are appropriate for production, and how each surface fits the existing <code>@deepagents/text2sql</code> contracts. The analysis includes PostHog Cloud, current beta products, agent access, bulk data movement, and the technical limits of direct self-hosted database access.
+</p>
+
+<h3 class="subsection-title">The Direct Answer</h3>
+
+<p>PostHog is not one database surface:
+</p>
+
+<table>
+<thead><tr>
+<th>Question</th>
+<th>Answer</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Can I connect <code>psql</code>, <code>node-postgres</code>, DBeaver, Metabase, or another Postgres client directly?</td>
+<td><strong>Yes, if your organization has Managed Warehouse beta access.</strong> It exposes a PostgreSQL wire endpoint over TLS. [4]</td>
+</tr>
+<tr>
+<td>Can I connect directly to normal PostHog Cloud Product Analytics as if it were Postgres or ClickHouse?</td>
+<td><strong>No.</strong> The supported free-form surface is HogQL through the HTTP Query API. [1][2]</td>
+</tr>
+<tr>
+<td>Can I run arbitrary SQL through PostHog's API?</td>
+<td><strong>Yes, within HogQL's supported ClickHouse-derived dialect and Query API operational limits.</strong> [1][2]</td>
+</tr>
+<tr>
+<td>Can I use the Query API as ETL or continuously export raw events?</td>
+<td><strong>No.</strong> PostHog may rate-limit or reject export-like traffic; use batch exports. [2][9]</td>
+</tr>
+<tr>
+<td>Can I serve fixed production analytics from PostHog?</td>
+<td><strong>Yes.</strong> Publish saved SQL or an insight as an Endpoint, optionally materialized. [7][8]</td>
+</tr>
+<tr>
+<td>Can an AI agent query PostHog without building this adapter?</td>
+<td><strong>Yes.</strong> PostHog's hosted MCP exposes SQL and schema capabilities, but it is an agent-tool integration rather than a database adapter. [14][15]</td>
+</tr>
+<tr>
+<td>Can I connect to underlying ClickHouse on self-hosted PostHog?</td>
+</tr>
+</tbody></table>
+
+<h3 class="subsection-title">Decision Matrix</h3>
+
+<table>
+<thead><tr>
+<th>Option</th>
+<th>SQL experience</th>
+<th>Freshness</th>
+<th>Production posture</th>
+<th>Auth model</th>
+<th>Best use</th>
+<th>Recommendation</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Managed Warehouse</td>
+<td>PostgreSQL wire; standard Postgres plus DuckDB analytics</td>
+<td>Continuously synced, not the Product Analytics query engine</td>
+<td>Beta; isolated analytical database</td>
+<td>Host/user/password, documented as organization <code>root</code></td>
+<td>BI, notebooks, scheduled jobs, <code>text2sql</code>, direct SQL</td>
+<td><strong>Preferred direct-SQL path when available</strong></td>
+</tr>
+<tr>
+<td>HogQL Query API</td>
+<td>Free-form HogQL over HTTP</td>
+<td>Queries live PostHog tables and warehouse catalog</td>
+<td>Ad-hoc/embedded only; discouraged for production</td>
+<td>Personal key or OAuth with query read</td>
+<td>Interactive NL-to-SQL and investigation</td>
+<td><strong>Supported fallback/live lane with hard guardrails</strong></td>
+</tr>
+<tr>
+<td>Endpoints</td>
+<td>Parameterized fixed query over HTTP</td>
+<td>Direct, cached, or materialized</td>
+<td>Designed for production/customer-facing use</td>
+<td>Project secret <code>endpoint:read</code>, personal key, or OAuth</td>
+<td>Stable application metrics and dashboards</td>
+<td><strong>Promotion target for repeated queries</strong></td>
+</tr>
+<tr>
+<td>Batch exports</td>
+<td>SQL only after data lands in destination</td>
+<td>Scheduled; five-minute to weekly intervals depending on configuration</td>
+<td>Reliable ETL with retries/backfills</td>
+<td>Destination credentials managed in PostHog</td>
+<td>Bulk history, warehouse ownership, large recurring jobs</td>
+<td><strong>Required for bulk/recurring export</strong></td>
+</tr>
+<tr>
+<td>PostHog MCP</td>
+<td>Agent tool calls, including SQL</td>
+<td>Live</td>
+<td>Hosted MCP; tool-level integration</td>
+<td>OAuth or personal key</td>
+<td>Coding agents, investigations, PostHog administration</td>
+<td><strong>Optional agent-layer integration</strong></td>
+</tr>
+<tr>
+<td>Self-hosted internal ClickHouse/Postgres</td>
+<td>Native database protocols</td>
+<td>Internal/live</td>
+<td>Unsupported physical-schema coupling</td>
+<td>Infrastructure credentials</td>
+<td>Operators debugging their own deployment</td>
+<td><strong>Do not ship as a product adapter</strong></td>
+</tr>
+<tr>
+<td>Capture SDK/API or real-time destinations</td>
+<td>Not SQL</td>
+<td>Near-real-time</td>
+<td>Supported ingestion/event delivery</td>
+<td>Project token or destination auth</td>
+<td>Writing events or reacting to events</td>
+<td><strong>Separate write/stream plane, not a query substitute</strong></td>
+</tr>
+</tbody></table>
+
+</div>
+<div class="section"><h2 class="section-title">Main Analysis</h2>
+
+<h3 class="subsection-title">Option 1: Managed Warehouse — The Real Direct-SQL Path</h3>
+
+<h4 class="subsubsection-title">What it is</h4>
+
+<p>Managed Warehouse is a new analytical database that PostHog provisions per organization. PostHog backfills historical events and persons, continually applies new PostHog data, and synchronizes connected sources into the same warehouse. Its compute is isolated per organization, its engine is DuckDB, and durable data is stored through DuckLake in columnar object storage. It supplements rather than replaces the ClickHouse-backed Product Analytics engine. [3]
+</p>
+
+<p>The external connection is genuinely PostgreSQL-compatible: a regional hostname under <code>dw.us.postwh.com</code> or <code>dw.eu.postwh.com</code>, port <code>5432</code>, database <code>ducklake</code>, user <code>root</code>, password, and mandatory TLS. PostHog documents compatibility with <code>psql</code>, pgAdmin, DBeaver, BI tools, JDBC, <code>node-postgres</code>, SQLAlchemy, and other standard drivers. Standard selects, joins, CTEs, window functions, prepared statements, transactions, and <code>COPY ... TO STDOUT</code> work; DuckDB-specific analytical features such as <code>DESCRIBE</code>, <code>SUMMARIZE</code>, and <code>QUALIFY</code> are also available. [4]
+</p>
+
+<p>The warehouse is not a read-only mirror. It permits <code>CREATE TABLE</code>, <code>CREATE VIEW</code>, <code>INSERT</code>, <code>UPDATE</code>, and <code>DELETE</code> for customer-owned derived data. PostHog warns that writes to PostHog-managed synchronized tables may be overwritten. It also documents that server-side PL/pgSQL functions, triggers, sequences, <code>LISTEN</code>/<code>NOTIFY</code>, and <code>CREATE ROLE</code> are unavailable. [4]
+</p>
+
+<h4 class="subsubsection-title">Fit with <code>@deepagents/text2sql</code></h4>
+
+<p>This option should reuse <code>@deepagents/text2sql/postgres</code>, not create a <code>posthog</code> adapter. The existing <code>Postgres</code> adapter already accepts an injected <code>execute(sql)</code> transport, formats PostgreSQL, queries standard <code>information_schema</code>, enforces read-only and allowed-entity policy before execution, and uses <code>EXPLAIN</code> as its default server validator. [19][20][21]
+</p>
+
+<p>That reuse has three advantages:
+</p>
+
+<ol>
+<li>The wire protocol and standard PostgreSQL query subset are the advertised contract, so the existing adapter represents the actual interface rather than an approximation. [4]</li>
+<li>The integration application can keep using its current Postgres client and return <code>result.rows</code> through the adapter's callback. <code>@deepagents/text2sql</code> does not need a new database dependency. [19][21]</li>
+<li>The adapter's policy blocks generated writes even though the warehouse credential itself is powerful. [20]</li>
+</ol>
+
+<p>The first live beta-tenant probe must verify four items before this is declared production-ready:
+</p>
+
+<ul>
+<li>The exact schema names returned by <code>information_schema.tables</code>; PostHog says event/person tables are named using the chosen project schema, for example <code>events_prod</code> and <code>persons_prod</code>, while imports live under a schema such as <code>posthog_data_imports_prod</code>. [3][4][5]</li>
+<li><code>EXPLAIN <generated SELECT></code> behavior through the PostgreSQL compatibility layer.</li>
+<li>Which existing grounding modules work without PostgreSQL system catalogs. <code>tables()</code>, <code>views()</code>, and ordinary <code>information_schema</code> queries are the safest starting set; index grounding uses <code>pg_catalog</code> and should remain disabled until proven against the beta endpoint. [19]</li>
+<li>Whether the current PostgreSQL parser accepts every query the model will generate. The generator should target conservative PostgreSQL, not DuckDB-only <code>FROM</code>-first syntax, <code>ASOF JOIN</code>, or other extensions. [4][20]</li>
+</ul>
+
+<h4 class="subsubsection-title">Security and operational limits</h4>
+
+<p>The documented credential model is materially weaker than a mature Postgres deployment: one warehouse covers the organization, the documented user is <code>root</code>, password reset immediately invalidates the prior password, and <code>CREATE ROLE</code> is absent. [4][5] This means:
+</p>
+
+<ul>
+<li>Keep the connection in a trusted backend or Electron main process with OS-backed secret storage; never expose it to a renderer, browser, or customer-supplied script.</li>
+<li>Do not use one root credential as a multi-tenant application authorization mechanism. Application authorization must still decide which organization, project schema, tables, and columns a caller may access.</li>
+<li>Restrict adapter grounding to explicit project and import schemas after discovery. Do not expose every organization's project schema merely because the wire credential can see it.</li>
+<li>Use a small connection pool and timeouts appropriate to workers that spin up on demand. Treat cold-start latency and sync lag as analytical-system characteristics, not transactional database behavior.</li>
+</ul>
+
+<p>Managed Warehouse is currently beta and waitlisted, and its layout is explicitly described as still settling. [3][5] It is therefore the cleanest long-term interface but cannot be the only integration lane today.
+</p>
+
+<p>PostHog currently advertises one million managed-warehouse rows per month free and <code>$0.000015</code> per row afterward, with lower rates at volume. Pricing is time-sensitive and should be read from PostHog at deployment time rather than hard-coded. [24]
+</p>
+
+<h3 class="subsection-title">Option 2: HogQL Query API — Live, Dynamic, but Not a Database Protocol</h3>
+
+<h4 class="subsubsection-title">Contract</h4>
+
+<p>HogQL is PostHog's wrapper over ClickHouse SQL with PostHog-specific property access, null behavior, relationships, and visualization integration. A query is sent as JSON to <code>POST /api/projects/:project_id/query/</code> with <code>kind: "HogQLQuery"</code>; the response includes a <code>columns</code> array, <code>types</code>, and <code>results</code> as arrays of values. The specific HogQL response remains public beta. [1]
+</p>
+
+<p>The adapter transport must convert the column-oriented wire shape into the row-object array required by <code>@deepagents/text2sql</code>:
+</p>
+
+<p><code>`</code>ts
+const rows = results.map((values) =>
+  Object.fromEntries(columns.map((column, index) => [column, values[index]])),
+);
+</p>
+<code>`</code>
+
+<p>Duplicate output aliases must be rejected or normalized before this conversion because object keys would otherwise overwrite each other. Empty results also require the adapter to retain <code>columns</code> separately if downstream presentation needs headers; the current <code>Text2Sql.run()</code> derives output columns from the first returned object. [1][21]
+</p>
+
+<h4 class="subsubsection-title">Schema discovery</h4>
+
+<p>PostHog now exposes a particularly useful SQL-native catalog. The access-controlled <code>system.information_schema</code> namespace provides virtual <code>tables</code>, <code>columns</code>, <code>relationships</code>, and <code>data_types</code> tables. It describes PostHog base tables, system tables, warehouse sources, and saved views without exposing inaccessible objects. [6] A HogQL grounding implementation should use that catalog instead of hard-coding only <code>events</code> and <code>persons</code>.
+</p>
+
+<p>Dynamic product taxonomy is a second layer. Event names and arbitrary event/person properties cannot be fully inferred from static columns because they live in property objects. PostHog documents REST event-definition and property-definition APIs, while its own MCP uses a structured <code>read_taxonomy</code> tool for events, event properties, entity properties, action properties, and sampled values. [10][17][18] A proper grounding design therefore combines:
+</p>
+
+<ol>
+<li><code>system.information_schema.tables</code> and <code>.columns</code> for relational structure.</li>
+<li><code>.relationships</code> for PostHog lazy joins and traversers.</li>
+<li>Event/property definitions for the project's semantic vocabulary.</li>
+<li>Sample values only on demand, with strict caps, because they may contain personal data.</li>
+</ol>
+
+<h4 class="subsubsection-title">Why it needs a dedicated adapter</h4>
+
+<p>It should not use the existing ClickHouse adapter. That adapter's security policy asks a native ClickHouse server for settings and uses <code>EXPLAIN AST</code>, <code>EXPLAIN QUERY TREE</code>, and <code>system.functions</code>; none of those operations is the documented HogQL Query API contract. [22] It should not use the Postgres adapter either: the grammar, property access, virtual relationships, HTTP transport, and response shape are not PostgreSQL. [1][6]
+</p>
+
+<p>The repository's parser policy has no ClickHouse or HogQL dialect; its supported parser dialects are BigQuery, MySQL, PostgreSQL, SQLite, and Transact-SQL. Falling back to first-keyword checks is insufficient for allowed-table scope enforcement because complex CTEs and subqueries still need reliable relation extraction. [20]
+</p>
+
+<p>The minimum dedicated adapter should preserve the repository's existing pattern:
+</p>
+
+<ul>
+<li>Accept injected <code>execute</code> and <code>validate</code> callbacks rather than owning OAuth, token refresh, or application storage.</li>
+<li>Provide PostHog-specific grounding using the virtual information schema and taxonomy endpoints.</li>
+<li>Use <code>sql-formatter</code>'s ClickHouse formatting only for display; formatting does not establish semantic safety.</li>
+<li>Map API errors into stable syntax, permission, rate-limit, timeout, and unknown categories.</li>
+<li>Require one statement, read-only intent, explicit table allowlists, a bounded <code>LIMIT</code>, and time filters for event scans.</li>
+</ul>
+
+<h4 class="subsubsection-title">Validation gap</h4>
+
+<p>No current public documentation found a parse-only or dry-run HogQL endpoint. The published Query API executes queries; unlike the Postgres and ClickHouse adapters, there is no documented safe server <code>EXPLAIN</code> contract for adapter validation. [1][2][19][22]
+</p>
+
+<p>This matters because the base adapter validates before execution. A naive HogQL validator would execute the query once to validate it and then execute it again to return rows. The smallest compatible design is a one-entry, exact-SQL result cache inside the PostHog adapter: <code>validateImpl()</code> makes the blocking Query API call, maps and stores a successful response, and the immediately following <code>executeImpl()</code> drains that response. This avoids duplicate execution without changing the shared adapter contract. If generation asks only for validated SQL without execution, the call still incurs a real query; that limitation must be explicit.
+</p>
+
+<p>A larger parser dependency should not be added until a real HogQL grammar is found and tested against PostHog extensions. A parser that accepts generic ClickHouse but misinterprets PostHog field traversers would create a false security boundary. The actual data boundary is the project-scoped PostHog API credential; local parsing is defense in depth and product-level table restriction, not a replacement for tenant authorization.
+</p>
+
+<h4 class="subsubsection-title">Hard runtime limits</h4>
+
+<p>The Query API defaults to 100 rows and allows an explicit <code>LIMIT</code> up to 50,000. It disallows <code>OFFSET</code> for programmatic requests and directs clients to keyset pagination on <code>events.timestamp</code> or <code>persons.id</code>. It may reject export-like usage without notice. [2]
+</p>
+
+<p>Current project-level limits are 2,400 requests/hour, 240/minute, three running queries, 60 threads per query, and ten seconds of execution time; queued requests may wait up to 30 seconds. Higher limits are not currently offered for this surface. [2] Therefore the adapter should:
+</p>
+
+<ul>
+<li>Default to blocking cached execution for interactive requests.</li>
+<li>Use meaningful <code>name</code> and <code>client_query_id</code> values for <code>query_log</code> traceability.</li>
+<li>Set a client timeout slightly above PostHog's queue plus execution envelope and propagate cancellation.</li>
+<li>Never automatically retry arbitrary timeouts; only retry 429 or transient transport failures when the response indicates it is safe, with bounded backoff.</li>
+<li>Require a recent time predicate for <code>events</code> unless the user explicitly approves a broader scan. PostHog itself says custom queries should almost always use short time ranges. [2]</li>
+<li>Treat asynchronous query polling and DELETE cancellation as a later capability only if real workloads exceed the blocking request flow; async modes exist, but they add state and do not raise the documented execution ceiling. [2]</li>
+</ul>
+
+<h3 class="subsection-title">Option 3: Endpoints — Productionize Known Queries</h3>
+
+<p>Endpoints turn a saved insight or SQL query into a named HTTP route with versioning, execution logs, OpenAPI, variables, caching, and optional materialization. [8] This is not a replacement for dynamic NL-to-SQL because the query is defined ahead of time. It is the correct target after a generated metric becomes stable and repeatedly consumed.
+</p>
+
+<p>PostHog's own comparison is unambiguous: Query API for ad-hoc exploration; Endpoints for production applications, customer-facing analytics, and high traffic; batch exports for third-party data export. It says it strongly discourages Query API usage and expects future pricing. [7]
+</p>
+
+<p>For this product, “promote to endpoint” should be a deliberate workflow rather than automatic behavior:
+</p>
+
+<ol>
+<li>A user explores with direct SQL or HogQL.</li>
+<li>The query is reviewed for semantics, cost, parameters, and data exposure.</li>
+<li>The user saves and versions it in PostHog.</li>
+<li>The application calls the stable route with a project secret carrying only <code>endpoint:read</code>. [8][12]</li>
+</ol>
+
+<p>Materialized endpoints currently support 1,200 requests/minute burst, 12,000/hour sustained, and ten concurrent requests; direct endpoints use standard API limits. [23] This is a meaningful production improvement over the Query API's three-query concurrency, but materialization trades freshness for predictable latency and cost.
+</p>
+
+<h3 class="subsection-title">Option 4: Batch Exports — Own and Query the Data Elsewhere</h3>
+
+<p>Batch exports are the supported path for recurring or bulk movement of events, persons, or sessions. They are built on Temporal, support automated and manual retries, and target Azure Blob Storage, BigQuery, Databricks, S3-compatible storage, Snowflake, Postgres, and Redshift. [9]
+</p>
+
+<p>This is often the strongest <code>text2sql</code> production architecture because it moves the query workload onto a database whose semantics, access controls, indexes, cost controls, and availability the application owns. The package can then use an existing Postgres, BigQuery, or other supported adapter without any HogQL grammar or API-limit special cases.
+</p>
+
+<p>Tradeoffs are data latency, duplicate handling, backfill operations, and schema evolution. PostHog warns that new model fields may be added over time and that database destinations do not automatically add those columns. [9] Export consumers must use stable event UUIDs for deduplication and treat schema changes as managed migrations.
+</p>
+
+<p>Choose batch exports when any of these become true:
+</p>
+
+<ul>
+<li>More than a few thousand rows are pulled on a schedule.</li>
+<li>Queries routinely approach ten seconds or require broad historical scans.</li>
+<li>Application SLAs cannot depend on Query API concurrency.</li>
+<li>Data must join with operational or customer data outside PostHog.</li>
+<li>The organization requires database-native users, roles, row-level security, or network controls unavailable in Managed Warehouse beta.</li>
+</ul>
+
+<h3 class="subsection-title">Option 5: MCP — Best for Agents, Not the Database Layer</h3>
+
+<p>PostHog hosts an MCP endpoint at <code>https://mcp.posthog.com/mcp</code> that supports compatible agents, regional routing, OAuth, SQL execution, data schema exploration, and many PostHog management operations. [14] Its official source exposes allowlists such as <code>?features=data_schema,sql</code> or <code>?tools=execute-sql</code>, which can narrow the agent surface. [15]
+</p>
+
+<p>The SQL tool forwards text to PostHog's <code>execute_sql</code> native tool and returns textual content. The schema tool forwards structured requests to <code>read_taxonomy</code>. [16][17][18] That is useful for a general DeepAgents PostHog toolset, but weaker as the <code>@deepagents/text2sql</code> execution substrate because:
+</p>
+
+<ul>
+<li>Results are agent-oriented text rather than the adapter's typed row-object contract.</li>
+<li>MCP introduces a protocol and SDK where the Query API is already a direct HTTP call.</li>
+<li>PostHog's SQL generation and taxonomy context overlap with this package's own NL-to-SQL and grounding responsibilities.</li>
+<li>The MCP can write across PostHog products unless tools/features and OAuth scopes are deliberately restricted. [14][15]</li>
+</ul>
+
+<p>Use MCP for broad agent workflows—inspect analytics, manage flags, investigate errors, or administer PostHog. Use the SQL adapter for deterministic application data access.
+</p>
+
+<h3 class="subsection-title">Option 6: Self-Hosted Internal Databases — Technically Possible, Strategically Wrong</h3>
+
+<p>A self-hosted operator controls PostHog's ClickHouse and PostgreSQL services. That makes direct connection physically possible, but those databases are implementation details: ClickHouse stores high-volume analytics data while PostgreSQL stores users, projects, saved insights, and other metadata. HogQL is the tenant-aware semantic layer over those internals.
+</p>
+
+<p>A direct internal connection would require the integration to reproduce PostHog's project filtering, person and property semantics, lazy relationships, schema migrations, and read-safety rules. It also bypasses PostHog API authorization and query logs. The surface will differ by PostHog version and deployment topology. This path is acceptable only for an operator-owned diagnostic tool pinned to a specific self-hosted release—not for a reusable <code>@deepagents/text2sql/posthog</code> package.
+</p>
+
+</div>
+<div class="section"><h2 class="section-title">Authentication Architecture</h2>
+
+<table>
+<thead><tr>
+<th>Scenario</th>
+<th>Credential</th>
+<th>Storage and boundary</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>One organization, Managed Warehouse</td>
+<td>Warehouse <code>root</code> password</td>
+<td>Backend secret manager or OS keychain; never renderer/browser</td>
+</tr>
+<tr>
+<td>One owner's internal Query API integration</td>
+<td>Personal API key with minimum project and <code>query:read</code> scope</td>
+<td>Backend only; rotate and audit owner lifecycle</td>
+</tr>
+<tr>
+<td>Installable product for many PostHog customers</td>
+<td>OAuth 2.0 with CIMD and least scopes</td>
+<td>Authorization code flow; encrypted refresh-token storage; bind token to discovered region/project</td>
+</tr>
+<tr>
+<td>Production fixed Endpoint</td>
+<td>Project secret key with <code>endpoint:read</code></td>
+<td>Server-side per project; preferred because it is not tied to an employee</td>
+</tr>
+<tr>
+<td>Agent/MCP</td>
+<td>OAuth preferred; personal key only for private use</td>
+<td>Restrict MCP tools/features and OAuth scope ceiling</td>
+</tr>
+</tbody></table>
+
+<p>Personal keys are tied to a user, can enable account-level access, are deleted when the user is deleted, and must not be used in a frontend. [11] OAuth is specifically documented for third-party apps, supports a region-agnostic authorization domain, CIMD, loopback redirects for native apps, scope ceilings, and short-lived access tokens plus refresh tokens. [13] Project secret keys are not user-bound but currently document only <code>endpoint:read</code>, so they cannot replace OAuth or personal keys for free-form Query API access. [12]
+</p>
+
+<p>For a desktop application, keep all PostHog and warehouse requests in the privileged main process. The renderer should send a connection identifier and a user request, never a token or arbitrary destination URL. Bind each stored secret to the approved PostHog origin and project ID to prevent an attacker from redirecting a valid bearer token to an arbitrary host.
+</p>
+
+</div>
+<div class="section"><h2 class="section-title">Synthesis</h2>
+
+<p>The evidence shows two different meanings of “PostHog as SQL.” Managed Warehouse is a synchronized analytical database with a standard wire protocol; HogQL is a live semantic query service over Product Analytics. They should be separate connection types because they differ in freshness, SQL dialect, authentication, data layout, and operational limits. Endpoints and batch exports are not secondary conveniences: they are the supported escalation paths when exploratory queries become production APIs or bulk pipelines. [2][3][4][7][8][9]
+</p>
+
+<h3 class="subsection-title">Recommended Product Architecture</h3>
+
+<p><code>`</code>text
+User question
+</p>
+<table>
+<thead><tr>
+</tr></thead>
+<tbody>
+</tbody></table>
+<p>    v
+Connection capability check
+</p>
+<table>
+<thead><tr>
+</tr></thead>
+<tbody>
+</tbody></table>
+<p>    +-- Managed Warehouse available? --> existing Postgres adapter --> PG wire/TLS
+</p>
+<table>
+<thead><tr>
+</tr></thead>
+<tbody>
+</tbody></table>
+<p>    +-- Live exploratory analytics? ---> dedicated PostHog adapter --> HogQL Query API
+</p>
+<table>
+<thead><tr>
+<th></th>
+</tr></thead>
+<tbody>
+<tr>
+</tr>
+<tr>
+</tr>
+<tr>
+</tr>
+</tbody></table>
+<p>    +-- Stable repeated query? --------> reviewed PostHog Endpoint
+</p>
+<table>
+<thead><tr>
+</tr></thead>
+<tbody>
+</tbody></table>
+<p>    +-- Bulk/recurring data? ----------> Batch Export --> existing DB adapter
+</p>
+<table>
+<thead><tr>
+</tr></thead>
+<tbody>
+</tbody></table>
+<p>    +-- Broad agent operations? -------> PostHog MCP (restricted tools)
+</p>
+<code>`</code>
+
+<p>The connection record should model a capability, not merely a brand:
+</p>
+
+<ul>
+<li><code>posthog-managed-warehouse</code>: ordinary PostgreSQL transport, beta capability flag, explicit accessible schemas.</li>
+<li><code>posthog-hogql</code>: region, project ID, injected authenticated transport, query limits, and grounding cache.</li>
+<li><code>posthog-endpoint</code>: endpoint name/version and variables, not arbitrary SQL.</li>
+<li><code>posthog-mcp</code>: agent tool connection, separate from database connections.</li>
+</ul>
+
+<p>This avoids presenting two incompatible engines as one “PostHog SQL” connection. A user should see whether they are querying a synchronized warehouse with PostgreSQL or live Product Analytics with HogQL.
+</p>
+
+</div>
+<div class="section"><h2 class="section-title">Recommendations</h2>
+
+<h3 class="subsection-title">Implementation Plan for <code>@deepagents/text2sql</code></h3>
+
+<h4 class="subsubsection-title">Phase 0 — Capability probe, no production code</h4>
+
+<p>Use a real Managed Warehouse beta tenant and a PostHog project test fixture to capture:
+</p>
+
+<ol>
+<li><code>SELECT version()</code>, <code>SELECT current_database()</code>, <code>information_schema.tables</code>, and <code>DESCRIBE events_<schema></code> from the managed endpoint.</li>
+<li>Existing Postgres <code>tables()</code>, <code>views()</code>, and default <code>EXPLAIN</code> validation through the package public API.</li>
+<li>Query API responses for empty results, duplicate aliases, nested property values, API errors, timeout, 429, and the four <code>system.information_schema</code> tables.</li>
+<li>OAuth <code>query:read</code> and project-secret <code>endpoint:read</code> against the correct regional hosts.</li>
+</ol>
+
+<p>These probes decide compatibility; they should become sanitized integration fixtures. No new abstraction is justified before them.
+</p>
+
+<h4 class="subsubsection-title">Phase 1 — Managed Warehouse support through existing Postgres</h4>
+
+<p>No package code may be necessary. Add documentation and an integration test using an injected Postgres executor. Start grounding with <code>info()</code>, <code>tables()</code>, and <code>views()</code> only. Add row counts, values, constraints, or indexes individually after the live endpoint proves the underlying catalog query.
+</p>
+
+<p>Product defaults:
+</p>
+
+<ul>
+<li>TLS required.</li>
+<li>Explicit schema/table allowlist after discovery.</li>
+<li>Read-only <code>@deepagents/text2sql</code> policy despite root credentials.</li>
+<li>PostgreSQL generation profile, excluding DuckDB-only syntax.</li>
+<li>Clear “synchronized analytical copy” freshness label.</li>
+</ul>
+
+<h4 class="subsubsection-title">Phase 2 — Dedicated HogQL adapter</h4>
+
+<p>Add a public <code>@deepagents/text2sql/posthog</code> export only if Managed Warehouse access is insufficient for actual users. Keep the surface minimal:
+</p>
+
+<p><code>`</code>ts
+type PostHogAdapterOptions = {
+  execute: (sql: string) => Promise<PostHogQueryResponse>;
+  grounding: GroundingFn[];
+};
+</p>
+<code>`</code>
+
+<p>The application owns fetch, OAuth, regions, retries, and token refresh; the adapter owns policy, grounding, response mapping, and error normalization. Use native <code>fetch</code> in the application—no PostHog SDK or MCP SDK is needed for a single JSON endpoint.
+</p>
+
+<p>Required integration checks:
+</p>
+
+<ul>
+<li>Public <code>Text2Sql.run()</code> flow, not internal-class tests.</li>
+<li>One API execution per successful <code>run()</code> despite validation.</li>
+<li>Scope violations are rejected before transport.</li>
+<li>Columns/results mapping, empty results, and duplicate aliases.</li>
+<li>Event/property grounding and information-schema relationship grounding.</li>
+<li>401/403/429/timeout/query-error classification without leaking tokens.</li>
+<li><code>LIMIT</code>, time-range, and no-<code>OFFSET</code> guardrails.</li>
+</ul>
+
+<h4 class="subsubsection-title">Phase 3 — Production promotion</h4>
+
+<p>Do not make arbitrary Query API calls the production dashboard backend. Add an explicit user workflow to save/review a stable query and publish an Endpoint. Use project secret keys for runtime execution. For bulk use, guide the operator to batch export and reconnect through the resulting database.
+</p>
+
+<h3 class="subsection-title">Failure Modes and Controls</h3>
+
+<table>
+<thead><tr>
+<th>Failure</th>
+<th>Consequence</th>
+<th>Control</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Treating HogQL as Postgres</td>
+<td>Invalid syntax, wrong properties, broken grounding</td>
+<td>Separate engine identity and adapter</td>
+</tr>
+<tr>
+<td>Reusing ClickHouse adapter</td>
+<td>Native settings/AST queries fail; false policy assumptions</td>
+<td>Dedicated HogQL policy and transport</td>
+</tr>
+<tr>
+<td>Query API used as ETL</td>
+<td>Rejection, rate limits, pipeline breakage</td>
+<td>Batch exports</td>
+</tr>
+<tr>
+<td>Root warehouse credential exposed</td>
+<td>Organization-wide analytical data and write access compromised</td>
+<td>Backend-only storage, app authorization, schema allowlist</td>
+</tr>
+<tr>
+<td>Personal key tied to departed user</td>
+<td>Integration stops when user is deleted</td>
+<td>OAuth for products; project secret for Endpoints</td>
+</tr>
+<tr>
+<td>Validation executes twice</td>
+<td>Double rate usage and cost</td>
+<td>Drain a one-entry validated-result cache</td>
+</tr>
+<tr>
+<td>No event time predicate</td>
+<td>Slow/costly event scans, ten-second failures</td>
+<td>Mandatory bounded time window by default</td>
+</tr>
+<tr>
+<td>Schema grounding samples PII</td>
+<td>Sensitive values enter model context</td>
+<td>Metadata first; sampled values opt-in and redacted</td>
+</tr>
+<tr>
+<td>Managed Warehouse sync mistaken for transactional state</td>
+<td>Stale operational decisions</td>
+<td>Freshness display and Product Analytics lane for live investigation</td>
+</tr>
+<tr>
+<td>Endpoint created automatically from generated SQL</td>
+<td>Stable route publishes unreviewed semantics/data</td>
+<td>Human review and explicit promotion</td>
+</tr>
+</tbody></table>
+
+<h3 class="subsection-title">Recommendation by User Goal</h3>
+
+<table>
+<thead><tr>
+<th>Goal</th>
+<th>Choose</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>“Treat PostHog exactly like another database in <code>text2sql</code>”</td>
+<td>Managed Warehouse + existing Postgres adapter</td>
+</tr>
+<tr>
+<td>“Ask live, changing questions over current PostHog analytics”</td>
+<td>Dedicated HogQL Query API adapter</td>
+</tr>
+<tr>
+<td>“Power a customer-facing dashboard/API”</td>
+<td>Endpoints, preferably materialized where freshness permits</td>
+</tr>
+<tr>
+<td>“Analyze all history or join in our warehouse”</td>
+<td>Batch export to Postgres/BigQuery/Snowflake/etc.</td>
+</tr>
+<tr>
+<td>“Let Codex/Claude manage and investigate PostHog”</td>
+<td>Restricted PostHog MCP</td>
+</tr>
+<tr>
+<td>“We self-host and can reach ClickHouse”</td>
+<td>Still use HogQL API unless building a version-pinned operator tool</td>
+</tr>
+</tbody></table>
+
+</div>
+<div class="section"><h2 class="section-title">Limitations and Open Questions</h2>
+
+<ol>
+<li>No Managed Warehouse credentials were available in this research run, so <code>EXPLAIN</code>, <code>information_schema</code>, pool behavior, and grounding compatibility were not executed against a live beta tenant.</li>
+<li>PostHog calls both Managed Warehouse and Endpoints beta products, and Managed Warehouse table layout is explicitly still settling. [3][5][8]</li>
+<li>No documented parse-only HogQL validation endpoint was found. A PostHog team confirmation or live probe may reveal an internal capability, but the public integration should not depend on it until documented.</li>
+<li>Managed Warehouse's advertised row pricing is current as of 2026-07-31 and can change. [24]</li>
+<li>The self-hosted direct-database conclusion is an architectural judgment: physical access is possible for the operator, but current supported user documentation points integrations to HogQL/API rather than promising the internal ClickHouse schema as a public contract.</li>
+</ol>
+
+<h3 class="subsection-title">Counterevidence Register</h3>
+
+<ul>
+<li><strong>“PostHog is not directly queryable” is no longer universally true.</strong> Managed Warehouse now supplies a real PostgreSQL endpoint. The conclusion is narrowed by its waitlisted beta status and by the fact that it is a synchronized analytical addition rather than the live Product Analytics database. [3][4][5]</li>
+<li><strong>The Query API is documented for embedded analytics but discouraged for production.</strong> These statements are not mutually exclusive: small interactive embedding remains supported, while stable customer-facing or high-traffic workloads are directed to Endpoints. [2][7]</li>
+<li><strong>Managed Warehouse advertises PostgreSQL compatibility but is not PostgreSQL internally.</strong> Standard queries and drivers are supported, while DuckDB extensions are added and PostgreSQL features such as PL/pgSQL, triggers, sequences, and roles are absent. [4]</li>
+</ul>
+
+</div>
+<div class="section"><h2 class="section-title">Appendix: Methodology</h2>
+
+<p>This deep research run inspected 20 current official PostHog documentation/source pages and four local <code>@deepagents/text2sql</code> implementation files. Product claims were taken from first-party documentation. Behavioral integration conclusions were checked against the repository's public adapter, execution, grounding, and SQL-policy contracts. No third-party tutorials were needed for the main conclusions.
+</p>
+
+<p>The search covered direct database protocols, HogQL Query API, Managed Warehouse, Endpoints, batch exports, OAuth and API keys, MCP, schema discovery, rate limits, response formats, and self-hosted architecture. Claims were stored against stable source IDs in <code>sources.jsonl</code> and <code>evidence.jsonl</code>. The report distinguishes documented facts from implementation recommendations and flags every conclusion that still requires a live tenant probe.
+</p>
+
+<h3 class="subsection-title">Claims-Evidence Table</h3>
+
+<table>
+<thead><tr>
+<th>Claim</th>
+<th>Evidence</th>
+<th>Confidence</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Managed Warehouse is a real PostgreSQL-wire analytical database</td>
+<td>[3][4][5]</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Query API is free-form HogQL but not a production/export substitute</td>
+<td>[1][2][7]</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Endpoints and batch exports are PostHog's production and bulk paths</td>
+<td>[7][8][9][23]</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Existing Postgres adapter is the correct Managed Warehouse integration</td>
+<td>[4][19][20][21]</td>
+<td>Medium pending live probe</td>
+</tr>
+<tr>
+<td>HogQL needs a dedicated adapter rather than ClickHouse/Postgres reuse</td>
+<td>[1][6][20][22]</td>
+<td>High</td>
+</tr>
+<tr>
+<td>OAuth is required for an installable third-party product</td>
+<td>[10][11][12][13]</td>
+<td>High</td>
+</tr>
+<tr>
+<td>MCP is suitable at the agent layer but not the row-oriented adapter layer</td>
+<td>[14][15][16][17][18][21]</td>
+<td>High</td>
+</tr>
+</tbody></table>
+
+<h3 class="subsection-title">Research Metadata</h3>
+
+<ul>
+<li>Mode: Deep</li>
+<li>Sources registered: 24</li>
+<li>Primary/official PostHog sources: 20</li>
+<li>Local implementation sources: 4</li>
+<li>Retrieval date: 2026-07-31</li>
+<li>Live credentialed PostHog probe: Not performed; credentials were not provided</li>
+</ul>
+
+
+</div>
+
+            <div class="bibliography">
+                <div class="section-title">Bibliography</div>
+                <div class="bibliography-content">
+
+<div class="bib-entry"><span class="bib-number">[1]</span> PostHog (2026). “SQL access in PostHog.” https://posthog.com/docs/sql (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[2]</span> PostHog (2026). “API queries.” https://posthog.com/docs/api/queries (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[3]</span> PostHog (2026). “Managed warehouse.” https://posthog.com/docs/data-warehouse/managed-warehouse (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[4]</span> PostHog (2026). “Connecting to the managed warehouse.” https://posthog.com/docs/data-warehouse/managed-warehouse/connect (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[5]</span> PostHog (2026). “Setting up the managed warehouse.” https://posthog.com/docs/data-warehouse/managed-warehouse/setup (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[6]</span> PostHog (2026). “Linking PostHog as a data warehouse source.” https://posthog.com/docs/data-warehouse/sources/posthog (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[7]</span> PostHog (2026). “Endpoints vs Query API.” https://posthog.com/docs/endpoints/endpoints-vs-query-api (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[8]</span> PostHog (2026). “Endpoints.” https://posthog.com/docs/endpoints (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[9]</span> PostHog (2026). “Batch exports.” https://posthog.com/docs/cdp/batch-exports (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[10]</span> PostHog (2026). “API overview.” https://posthog.com/docs/api (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[11]</span> PostHog (2026). “Personal API keys.” https://posthog.com/docs/api/personal-api-keys (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[12]</span> PostHog (2026). “Project secret API keys.” https://posthog.com/docs/api/project-secret-api-keys (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[13]</span> PostHog (2026). “OAuth integration.” https://posthog.com/docs/api/oauth (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[14]</span> PostHog (2026). “Model Context Protocol (MCP).” https://posthog.com/docs/model-context-protocol (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[15]</span> PostHog (2026). “PostHog MCP source and README.” https://github.com/PostHog/posthog/tree/master/services/mcp (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[16]</span> PostHog (2026). “MCP executeSql tool source.” https://raw.githubusercontent.com/PostHog/posthog/master/services/mcp/src/tools/posthogAiTools/executeSql.ts (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[17]</span> PostHog (2026). “MCP readDataSchema tool source.” https://raw.githubusercontent.com/PostHog/posthog/master/services/mcp/src/tools/posthogAiTools/readDataSchema.ts (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[18]</span> PostHog (2026). “MCP tool input schemas.” https://raw.githubusercontent.com/PostHog/posthog/master/services/mcp/src/schema/tool-inputs.ts (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[19]</span> DeepAgents (2026). “Postgres adapter implementation.” `packages/text2sql/src/lib/adapters/postgres/postgres.ts` (Inspected 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[20]</span> DeepAgents (2026). “Parser-backed SQL policy.” `packages/text2sql/src/lib/adapters/parser-sql-policy.ts` (Inspected 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[21]</span> DeepAgents (2026). “Adapter contract.” `packages/text2sql/src/lib/adapters/adapter.ts` (Inspected 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[22]</span> DeepAgents (2026). “ClickHouse SQL policy.” `packages/text2sql/src/lib/adapters/clickhouse/clickhouse.sql-policy.ts` (Inspected 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[23]</span> PostHog (2026). “Endpoints rate limits.” https://posthog.com/docs/endpoints/rate-limits (Retrieved 2026-07-31).</div>
+
+<div class="bib-entry"><span class="bib-number">[24]</span> PostHog (2026). “Product and pricing overview.” https://posthog.com/ (Retrieved 2026-07-31).</div>
+</div>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "version": "3.0.0",
+  "query": "What are all supported ways to integrate PostHog as a SQL-like data source, and what is the proper integration path for @deepagents/text2sql?",
+  "mode": "deep",
+  "started_at": "2026-07-31T23:19:02.589398+00:00",
+  "finished_at": "2026-08-01T07:49:46Z",
+  "assumptions": [
+    "No PostHog tenant credentials were available, so tenant-specific PostgreSQL-wire and HogQL behavior remains covered by the documented live-probe checklist rather than a credentialed probe."
+  ],
+  "provider_config": {
+    "primary": "web-search-and-official-source",
+    "scholarly": null
+  },
+  "report_dir": "/Users/ezzabuzaid/Desktop/January/deepagents/research/posthog-integration-research-20260731",
+  "artifact_paths": {
+    "sources": "sources.jsonl",
+    "evidence": "evidence.jsonl",
+    "claims": "claims.jsonl",
+    "report": "report.md",
+    "html": "report.html",
+    "pdf": "/Users/ezzabuzaid/Desktop/January/deepagents/output/pdf/posthog-sql-integration-research.pdf"
+  },
+  "continuation": null
+}
