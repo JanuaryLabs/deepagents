@@ -15,16 +15,13 @@
   "include": ["src/**/*.ts", "../../global.d.ts"],
   "references": [
     {
-      "path": "../test/tsconfig.lib.json"
-    },
-    {
-      "path": "../evals/tsconfig.lib.json"
-    },
-    {
       "path": "../context/tsconfig.lib.json"
     },
     {
       "path": "../agent/tsconfig.lib.json"
+    },
+    {
+      "path": "../evals/tsconfig.lib.json"
     }
   ]
 }
