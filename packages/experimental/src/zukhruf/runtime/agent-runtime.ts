@@ -50,11 +50,13 @@ export class AgentObservation {
   readonly #conversation: ConversationId;
   readonly #store: ContextStore;
   readonly #streams: StreamManager;
+  readonly #queue: TurnQueue;
 
   constructor(
     conversation: ConversationId,
     store: ContextStore,
     streams: StreamManager,
+    queue: TurnQueue,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -64,6 +66,7 @@ export class AgentObservation {
     this.#conversation = conversation;
     this.#store = store;
     this.#streams = streams;
+    this.#queue = queue;
   }
 
   async resume() {
@@ -85,8 +88,9 @@ export class AgentObservation {
     if (!id) return;
     AgentTurnId.assertOwner(this.#conversation, id);
     const status = await this.#streams.store.getStreamStatus(id);
-    if (status === 'queued' || status === 'running') {
+    if (status === 'queued' || status === 'running' || status === 'cancelled') {
       await this.#streams.cancel(id);
+      await this.#queue.cancel(id);
     }
   }
 
@@ -183,7 +187,12 @@ export class AgentRuntime {
   }
 
   observe(conversation: ConversationId): AgentObservation {
-    return new AgentObservation(conversation, this.#store, this.#streams);
+    return new AgentObservation(
+      conversation,
+      this.#store,
+      this.#streams,
+      this.#queue,
+    );
   }
 
   work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {

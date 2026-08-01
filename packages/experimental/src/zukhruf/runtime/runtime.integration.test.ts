@@ -653,6 +653,28 @@ describe('zukhruf runtime — background executor', () => {
     assert.deepStrictEqual(messages, [], 'nothing entered the chain');
   });
 
+  it('host cancel removes the queued turn and preserves its successor', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+
+    const conversation = { chatId: 'host-cancel-queued', userId: 'u1' };
+    const cancelled = await h.runtime.enqueue(conversation, turn('cancel me'));
+    const successor = await h.runtime.enqueue(conversation, turn('keep me'));
+
+    await h.runtime.observe(conversation).cancel(cancelled.id);
+
+    assert.equal(
+      await h.streamStore.getStreamStatus(cancelled.id),
+      'cancelled',
+    );
+    assert.equal(
+      (await h.queue.getCurrentTurn(conversation))?.streamId,
+      successor.id,
+      'only the cancelled stream receipts are removed',
+    );
+    assert.equal(await h.streamStore.getStreamStatus(successor.id), 'queued');
+  });
+
   it('enqueue is idempotent on the turn id — duplicates reattach, never re-run', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));

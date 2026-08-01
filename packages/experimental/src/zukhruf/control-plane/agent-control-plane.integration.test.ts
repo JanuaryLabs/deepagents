@@ -1797,7 +1797,6 @@ test('a child cancelled while queued notifies its parent once without running th
 
   await using _worker = await runtime.work();
   await queue.runNext();
-  await queue.runNext();
 
   assert.equal(childCalls.length, 0);
   const notifications = await mailboxStore.drain({
