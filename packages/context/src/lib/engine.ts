@@ -5,9 +5,11 @@ import {
   type PrepareStepFunction,
   type StepResult,
   type Tool,
+  type ToolUIPart,
   type UIMessage,
   convertToModelMessages,
   generateId,
+  isStaticToolUIPart,
   validateUIMessages,
 } from 'ai';
 
@@ -269,6 +271,69 @@ function toolOutcomesFromStep<TOOLS extends Record<string, Tool>>(
   return outcomes;
 }
 
+function terminalToolPartsFromStep<TOOLS extends Record<string, Tool>>(
+  content: StepResult<TOOLS>['content'],
+): ToolUIPart[] {
+  return content.flatMap((part): ToolUIPart[] => {
+    if (part.type === 'tool-result' && part.dynamic !== true) {
+      return [
+        {
+          type: `tool-${part.toolName}`,
+          toolCallId: part.toolCallId,
+          state: 'output-available',
+          input: part.input,
+          output: part.output === undefined ? null : part.output,
+        },
+      ];
+    }
+    if (part.type === 'tool-error' && part.dynamic !== true) {
+      return [
+        {
+          type: `tool-${part.toolName}`,
+          toolCallId: part.toolCallId,
+          state: 'output-error',
+          input: part.input,
+          errorText: getErrorMessage(part.error),
+        },
+      ];
+    }
+    if (
+      part.type === 'tool-approval-response' &&
+      part.approved === false &&
+      part.toolCall.dynamic !== true
+    ) {
+      return [
+        {
+          type: `tool-${part.toolCall.toolName}`,
+          toolCallId: part.toolCall.toolCallId,
+          state: 'output-denied',
+          input: part.toolCall.input,
+          approval: {
+            id: part.approvalId,
+            approved: false,
+            ...(part.reason === undefined ? {} : { reason: part.reason }),
+          },
+        },
+      ];
+    }
+    return [];
+  });
+}
+
+function mergeTerminalToolParts(
+  message: UIMessage,
+  liveParts: Map<string, ToolUIPart>,
+): UIMessage {
+  const remaining = new Map(liveParts);
+  const parts = message.parts.map((part) => {
+    if (!isStaticToolUIPart(part)) return part;
+    remaining.delete(part.toolCallId);
+    return part;
+  });
+  parts.push(...remaining.values());
+  return { ...message, parts };
+}
+
 export type PrepareStepInputProvider = () =>
   | Array<UIMessage & { role: 'user' }>
   | undefined
@@ -286,10 +351,19 @@ export type PrepareStepInputProvider = () =>
 interface ReminderSession {
   /** Durable once-ids fired in this stream. */
   firedOnceIds: Set<string>;
-  /** Id of the open (still-growing) assistant segment. */
-  currentSegId?: string;
-  /** Part index in the cumulative response where the open segment starts. */
-  currentSegStart: number;
+  /** Completed tool calls in the current assistant segment. */
+  terminalToolParts: Map<string, ToolUIPart>;
+  /** Immutable assistant segment boundaries, indexed by completed stream step. */
+  segments: Array<{
+    id: string;
+    startStep: number;
+  }>;
+  /** Step markers already present before this stream started. */
+  initialStepStarts: number | null;
+  /** Step offset accumulated across guardrail retry streams. */
+  stepOffset: number;
+  /** Last prepareStep index, used to detect a guardrail retry reset. */
+  lastStepNumber: number | null;
 }
 
 /**
@@ -829,15 +903,28 @@ export class ContextEngine {
     const enableSteer = options.steer ?? true;
     const session: ReminderSession = {
       firedOnceIds: new Set(),
-      currentSegStart: 0,
+      terminalToolParts: new Map(),
+      segments: [],
+      initialStepStarts: null,
+      stepOffset: 0,
+      lastStepNumber: null,
     };
     this.#currentReminderSession = session;
 
     return async ({ steps, stepNumber, messages }) => {
+      if (stepNumber === 0 && session.lastStepNumber !== null) {
+        session.stepOffset += session.lastStepNumber + 1;
+      }
+      session.lastStepNumber = stepNumber;
+      const completedSteps = session.stepOffset + stepNumber;
+
       // Steer is mid-loop only: never fire before the model has produced a step
       // with content, so its synthetic user is preceded by an assistant turn.
       const priorStep = stepNumber >= 1 ? steps[stepNumber - 1] : undefined;
       const hasSafeBoundary = (priorStep?.content?.length ?? 0) > 0;
+      for (const part of terminalToolPartsFromStep(priorStep?.content ?? [])) {
+        session.terminalToolParts.set(part.toolCallId, part);
+      }
       const canFire = enableSteer && hasSafeBoundary;
       const steerConfigs = canFire ? this.#remindersFor('steer') : [];
       const outcomes = toolOutcomesFromStep(steps.at(-1)?.content ?? []);
@@ -913,18 +1000,24 @@ export class ContextEngine {
             'createPrepareStep: expected an assistant message at chain head.',
           );
         }
-        const currentSegmentId = session.currentSegId ?? head.id;
+        const currentSegmentId = head.id;
         const currentSegment = await this.#store.getMessage(currentSegmentId);
         if (!currentSegment || currentSegment.name !== 'assistant') {
           throw new Error(
             'createPrepareStep: expected the open assistant segment to be persisted.',
           );
         }
-        const currentMessage = requireUIMessage(
+        requireUIMessage(
           currentSegment.data,
           `Stored assistant message "${currentSegment.id}"`,
         );
         const nextSegmentId = generateId();
+        if (session.segments.length === 0) {
+          session.segments.push({
+            id: currentSegmentId,
+            startStep: 0,
+          });
+        }
         for (const input of inputs) this.set(user(input));
         this.set(
           assistant({
@@ -934,8 +1027,11 @@ export class ContextEngine {
           }),
         );
         await this.save({ branch: false });
-        session.currentSegId = nextSegmentId;
-        session.currentSegStart += currentMessage.parts.length;
+        session.segments.push({
+          id: nextSegmentId,
+          startStep: completedSteps,
+        });
+        session.terminalToolParts.clear();
 
         return {
           messages: [...(messages as ModelMessage[]), ...inputModel],
@@ -964,14 +1060,90 @@ export class ContextEngine {
     }
 
     const session = this.#currentReminderSession;
-    this.set(
-      assistant({
-        ...message,
-        id: session?.currentSegId ?? head.id,
-        parts: message.parts.slice(session?.currentSegStart ?? 0),
-      } as UIMessage),
-    );
-    await this.save({ branch: false });
+    let id = head.id;
+    let parts = message.parts;
+
+    if (session) {
+      if (session.initialStepStarts === null) {
+        const initialId = session.segments[0]?.id ?? head.id;
+        const initial = await this.#store.getMessage(initialId);
+        if (!initial || initial.name !== 'assistant') {
+          throw new Error(
+            `writeAssistantSegment: initial segment "${initialId}" was not found`,
+          );
+        }
+        session.initialStepStarts = requireUIMessage(
+          initial.data,
+          `Stored assistant message "${initial.id}"`,
+        ).parts.filter((part) => part.type === 'step-start').length;
+      }
+
+      const streamStepStarts = message.parts.flatMap((part, index) =>
+        part.type === 'step-start' ? [index] : [],
+      );
+      const completedSteps =
+        streamStepStarts.length - session.initialStepStarts;
+      if (completedSteps < 0) {
+        throw new Error(
+          'writeAssistantSegment: response lost an existing step boundary',
+        );
+      }
+
+      const segmentIndex = session.segments.findLastIndex(
+        (candidate) => candidate.startStep < completedSteps,
+      );
+      if (segmentIndex >= 0) {
+        const segment = session.segments[segmentIndex];
+        id = segment.id;
+        if (segmentIndex > 0) {
+          const start =
+            streamStepStarts[session.initialStepStarts + segment.startStep];
+          if (start === undefined) {
+            throw new Error(
+              `writeAssistantSegment: response is missing step ${segment.startStep + 1}`,
+            );
+          }
+          parts = message.parts.slice(start);
+        }
+      } else {
+        const lastSegment = session.segments.at(-1);
+        if (lastSegment) {
+          id = lastSegment.id;
+          parts = [];
+        }
+      }
+    }
+
+    const fragment = assistant({
+      ...message,
+      id,
+      parts,
+    } as UIMessage);
+
+    if (!session) {
+      this.set(fragment);
+      await this.save({ branch: false });
+      return;
+    }
+
+    const stored = await this.#store.getMessage(id);
+    if (!stored) {
+      throw new Error(
+        `writeAssistantSegment: reserved segment "${id}" was not found`,
+      );
+    }
+    if (!fragment.codec) {
+      throw new Error('writeAssistantSegment: assistant codec is missing');
+    }
+
+    await this.#store.addMessages([
+      {
+        ...stored,
+        name: fragment.name,
+        type: fragment.type,
+        data: fragment.codec.encode(),
+      },
+    ]);
   }
 
   #remindersFor(target: ReminderTarget): ConditionalReminder[] {
@@ -1090,9 +1262,17 @@ export class ContextEngine {
         'steer reminders require a user message earlier in the turn',
       );
     }
+    const lastAssistantMessage = chain.lastAssistantMessage;
+    if (!lastAssistantMessage) {
+      throw new Error('steer reminders require a completed assistant step');
+    }
 
     return {
       ...this.#buildWhenCtx(chain, currentMessage),
+      lastAssistantMessage: mergeTerminalToolParts(
+        lastAssistantMessage,
+        session.terminalToolParts,
+      ),
       sandbox,
       firedOnceIds: new Set([...chain.firedOnceIds, ...session.firedOnceIds]),
     };

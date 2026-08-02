@@ -310,7 +310,7 @@ describe('plan instructions', () => {
     const firstReviewIndex = prompts.findIndex((prompt) =>
       prompt.includes('Current plan (revision 1)'),
     );
-    assert.equal(firstReviewIndex, 6);
+    assert.equal(firstReviewIndex, 5);
     const firstReview = prompts[firstReviewIndex];
     assert.match(firstReview, /targetEnvironment/);
     assert.match(firstReview, /linux/);
@@ -324,7 +324,7 @@ describe('plan instructions', () => {
     );
     assert.equal(
       revisedReviewIndex,
-      12,
+      10,
       'the revised plan must be recited at the next cadence, not immediately',
     );
     const revisedReview = prompts[revisedReviewIndex];

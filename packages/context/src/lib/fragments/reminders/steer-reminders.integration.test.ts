@@ -14,6 +14,7 @@ import {
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert';
 import { describe, it, mock } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 
 import {
@@ -21,8 +22,11 @@ import {
   ContextEngine,
   type Guardrail,
   InMemoryContextStore,
+  type MessageData,
+  type WhenPredicate,
   agent,
   and,
+  assistant,
   chat,
   createBashTool,
   createVirtualSandbox,
@@ -46,7 +50,10 @@ const testUsage = {
   outputTokens: { total: 5, text: 5, reasoning: 0 },
 } as const;
 
-type StepSpec = { tool: string } | { text: string };
+type StepSpec =
+  | { tool: string }
+  | { tool: string; reasoningItemId: string }
+  | { text: string };
 
 /**
  * A V4 mock that scripts one model step per spec: `{tool}` emits a tool call and
@@ -68,6 +75,21 @@ function scriptedModel(steps: StepSpec[]) {
         );
       }
       if ('tool' in spec) {
+        if (call === 1 && 'reasoningItemId' in spec) {
+          chunks.push(
+            {
+              type: 'reasoning-start',
+              id: 'reasoning',
+              providerMetadata: {
+                openai: {
+                  itemId: spec.reasoningItemId,
+                  reasoningEncryptedContent: null,
+                },
+              },
+            },
+            { type: 'reasoning-end', id: 'reasoning' },
+          );
+        }
         chunks.push({
           type: 'tool-call',
           toolCallId: `c${call}`,
@@ -97,6 +119,21 @@ const noopTool = tool({
   execute: async () => ({ ok: true }),
 });
 
+/** Simulates a slow persistence backend without reaching into engine internals. */
+class DelayedAssistantStore extends InMemoryContextStore {
+  override async addMessages(messages: MessageData[]): Promise<void> {
+    const message = messages[0];
+    if (
+      messages.length === 1 &&
+      message?.name === 'assistant' &&
+      (message.data as UIMessage).parts.length > 0
+    ) {
+      await sleep(50);
+    }
+    await super.addMessages(messages);
+  }
+}
+
 async function makeAgent(
   context: ContextEngine,
   model: MockLanguageModelV4,
@@ -119,6 +156,72 @@ async function storedEntries(store: InMemoryContextStore, chatId: string) {
   const branch = await store.getActiveBranch(chatId);
   assert.ok(branch?.headMessageId, 'expected a branch head');
   return store.getMessageChain(branch.headMessageId);
+}
+
+async function runDelayedChat(options: {
+  chatId: string;
+  toolCalls: number;
+  when: WhenPredicate;
+  reasoningItemId: string | null;
+  initialAssistantParts: UIMessage['parts'] | null;
+}) {
+  const store = new DelayedAssistantStore();
+  const context = new ContextEngine({
+    store,
+    chatId: options.chatId,
+    userId: 'u1',
+  });
+  const model = scriptedModel([
+    ...Array.from({ length: options.toolCalls }, (_, index): StepSpec =>
+      index === 0 && options.reasoningItemId !== null
+        ? { tool: 'noop', reasoningItemId: options.reasoningItemId }
+        : { tool: 'noop' },
+    ),
+    { text: 'done' },
+  ]);
+  let completedTools = 0;
+  const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+
+  try {
+    const sandbox = await createBashTool({ sandbox: backend });
+    const chatAgent = agent({
+      name: options.chatId,
+      context,
+      model,
+      sandbox,
+      tools: {
+        noop: tool({
+          description: 'A counted no-op tool.',
+          inputSchema: z.object({}),
+          execute: async () => {
+            completedTools += 1;
+            return { ok: true };
+          },
+        }),
+      },
+    });
+    const assistantId = await context.continue(
+      userMessage(`run ${options.toolCalls} tools`),
+    );
+    if (options.initialAssistantParts !== null) {
+      await context.continue(
+        assistant({
+          id: assistantId,
+          role: 'assistant',
+          parts: options.initialAssistantParts,
+        }),
+      );
+    }
+    context.set(reminder('DELAYED', { when: options.when, target: 'steer' }));
+    await drain(await chat(chatAgent));
+    return {
+      completedTools,
+      entries: await storedEntries(store, options.chatId),
+      prompts: model.doStreamCalls.map((call) => JSON.stringify(call.prompt)),
+    };
+  } finally {
+    await backend.dispose();
+  }
 }
 
 function textOf(message: UIMessage): string {
@@ -162,6 +265,112 @@ function planFile(tasks: unknown[]) {
 }
 
 describe('steer reminders integration (chat flow)', () => {
+  it('keeps everyNToolCalls cadence independent of delayed assistant persistence', async () => {
+    const { completedTools, entries, prompts } = await runDelayedChat({
+      chatId: 'delayed-cadence',
+      toolCalls: 12,
+      when: everyNToolCalls(5),
+      reasoningItemId: null,
+      initialAssistantParts: null,
+    });
+
+    assert.strictEqual(completedTools, 12);
+    const reminderCounts = prompts.map(
+      (prompt) =>
+        prompt.split('<system-reminder>DELAYED</system-reminder>').length - 1,
+    );
+    assert.deepStrictEqual(
+      reminderCounts.flatMap((count, index) =>
+        count > (reminderCounts[index - 1] ?? 0) ? [index] : [],
+      ),
+      [5, 10],
+      'everyNToolCalls(5) must fire on the next model call after tools 5 and 10',
+    );
+    const syntheticReminders = entries.filter(
+      (entry) =>
+        entry.name === 'user' &&
+        isSyntheticReminderMessage(entry.data as UIMessage),
+    );
+    assert.strictEqual(
+      syntheticReminders.length,
+      2,
+      'everyNToolCalls(5) must fire after 5 and 10 completed tools even when assistant persistence is slow',
+    );
+  });
+
+  it('persists cumulative assistant output in disjoint segments when assistant writes are delayed', async () => {
+    const reasoningItemId = 'rs_shared_across_delayed_segments';
+    const { completedTools, entries } = await runDelayedChat({
+      chatId: 'delayed-segments',
+      toolCalls: 4,
+      when: everyNTurns(1),
+      reasoningItemId,
+      initialAssistantParts: null,
+    });
+
+    assert.strictEqual(completedTools, 4);
+    const assistants = entries
+      .filter((entry) => entry.name === 'assistant')
+      .map((entry) => entry.data as UIMessage);
+    assert.deepStrictEqual(
+      assistants.map((message) => ({
+        tools: message.parts.flatMap((part) =>
+          isToolUIPart(part) ? [part.toolCallId] : [],
+        ),
+        reasoning: message.parts.flatMap((part) => {
+          const itemId =
+            'providerMetadata' in part
+              ? part.providerMetadata?.openai?.itemId
+              : undefined;
+          return typeof itemId === 'string' ? [itemId] : [];
+        }),
+        text: textOf(message),
+      })),
+      [
+        { tools: ['c1'], reasoning: [reasoningItemId], text: '' },
+        { tools: ['c2'], reasoning: [], text: '' },
+        { tools: ['c3'], reasoning: [], text: '' },
+        { tools: ['c4'], reasoning: [], text: '' },
+        { tools: [], reasoning: [], text: 'done' },
+      ],
+      'each assistant segment must contain exactly the output produced between its adjacent steer reminders',
+    );
+  });
+
+  it('preserves existing assistant parts while partitioning a delayed continuation', async () => {
+    const { completedTools, entries } = await runDelayedChat({
+      chatId: 'delayed-continuation',
+      toolCalls: 2,
+      when: everyNTurns(1),
+      reasoningItemId: null,
+      initialAssistantParts: [
+        { type: 'step-start' },
+        { type: 'text', text: 'existing' },
+      ],
+    });
+
+    assert.strictEqual(completedTools, 2);
+    assert.deepStrictEqual(
+      entries
+        .filter((entry) => entry.name === 'assistant')
+        .map((entry) => {
+          const message = entry.data as UIMessage;
+          return {
+            tools: message.parts.flatMap((part) =>
+              isToolUIPart(part) ? [part.toolCallId] : [],
+            ),
+            text: textOf(message),
+          };
+        }),
+      [
+        { tools: ['c1'], text: 'existing' },
+        { tools: ['c2'], text: '' },
+        { tools: [], text: 'done' },
+      ],
+      'the pre-existing prefix must remain once while new steps are split around steer reminders',
+    );
+  });
+
   it('recites plan review at the five-tool persisted-history cadence', async () => {
     const store = new InMemoryContextStore();
     const context = new ContextEngine({
@@ -231,12 +440,12 @@ describe('steer reminders integration (chat flow)', () => {
       JSON.stringify(call.prompt),
     );
     assert.ok(
-      prompts.slice(0, 6).every((prompt) => !prompt.includes(reviewQuestion)),
+      prompts.slice(0, 5).every((prompt) => !prompt.includes(reviewQuestion)),
       'plan review must not fire before five tools reach persisted history',
     );
     assert.strictEqual(
       prompts.findIndex((prompt) => prompt.includes(reviewQuestion)),
-      6,
+      5,
       `the next safe boundary must see the plan review; observed ${prompts.length} model calls`,
     );
 
