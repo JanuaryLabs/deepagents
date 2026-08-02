@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import { type UIMessage, generateId, tool } from 'ai';
+import { type UIMessage, generateId, toUIMessageStream, tool } from 'ai';
 import z from 'zod';
 
 import {
@@ -142,7 +142,9 @@ export async function generateOutline(state: OutlineAgentContext) {
     console.log(`\n=== Outline Iteration ${current_iteration + 1} ===\n`);
     const result = await execute(outlineAgent, messages, state);
     await Array.fromAsync(
-      result.toUIMessageStream({
+      toUIMessageStream({
+        stream: result.stream,
+        tools: outlineAgent.toToolset(),
         generateMessageId: generateId,
         originalMessages: messages,
         onEnd: async ({ responseMessage }: { responseMessage: UIMessage }) => {

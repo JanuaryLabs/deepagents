@@ -193,7 +193,7 @@ describe('host-only tool output metadata', () => {
 
     const result = await execute(assistant, 'Inspect resource 42.', {});
     const hostOutputs: unknown[] = [];
-    for await (const part of result.fullStream) {
+    for await (const part of result.stream) {
       if (part.type === 'tool-result') hostOutputs.push(part.output);
     }
 

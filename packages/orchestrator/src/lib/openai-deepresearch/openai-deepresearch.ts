@@ -1,4 +1,4 @@
-import { type UIMessage, generateId } from 'ai';
+import { type UIMessage, generateId, toUIMessageStream } from 'ai';
 
 import { execute, printer, user } from '@deepagents/agent';
 
@@ -53,7 +53,9 @@ async function startResearch(brief: string) {
   while (true) {
     const result = await execute(leadResearcherAgent, messages, state);
     await Array.fromAsync(
-      result.toUIMessageStream({
+      toUIMessageStream({
+        stream: result.stream,
+        tools: leadResearcherAgent.toToolset(),
         generateMessageId: generateId,
         originalMessages: messages,
         onEnd: async ({ responseMessage }: { responseMessage: UIMessage }) => {

@@ -19,6 +19,7 @@ import {
   isStepCount,
   smoothStream,
   streamText,
+  toUIMessageStream,
 } from 'ai';
 import chalk from 'chalk';
 import dedent from 'dedent';
@@ -108,14 +109,10 @@ export async function generate<O, CIn, COut = CIn>(
     toolsContext: toToolsContext(tools, contextVariables) as any,
     toolChoice: agent.toolChoice,
     output: agent.output ? Output.object({ schema: agent.output }) : undefined,
-    // onStepEnd: (step) => tagAgents(step, agent.handoff.name),
-    onStepEnd: (step) => {
-      const toolCall = step.toolCalls.at(-1);
-      if (toolCall) {
-        console.log(
-          `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
-        );
-      }
+    onToolExecutionStart: ({ toolCall }) => {
+      console.log(
+        `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
+      );
     },
     prepareStep: prepareStep(agent, agent.model, contextVariables),
     // onEnd: (result) => {
@@ -163,14 +160,10 @@ export async function execute<O, CIn, COut = CIn>(
       console.dir(error, { depth: null });
     },
     output: agent.output ? Output.object({ schema: agent.output }) : undefined,
-    // onStepEnd: (step) => tagAgents(step, agent.handoff.name),
-    onStepEnd: (step) => {
-      const toolCall = step.toolCalls.at(-1);
-      if (toolCall) {
-        console.log(
-          `Debug: (${runId}) ${chalk.bold.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
-        );
-      }
+    onToolExecutionStart: ({ toolCall }) => {
+      console.log(
+        `Debug: (${runId}) ${chalk.bold.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
+      );
     },
     prepareStep: prepareStep(agent, agent.model, contextVariables),
     // onEnd: (result) => {
@@ -222,6 +215,7 @@ export function swarm<CIn>(
   const originalMessages = Array.isArray(messages)
     ? messages
     : [messageToUiMessage(messages)];
+  const tools = agent.toToolset();
   return createUIMessageStream({
     originalMessages,
     generateId: generateId,
@@ -232,7 +226,9 @@ export function swarm<CIn>(
       const parts: UIMessagePart<UIDataTypes, UITools>[] = [];
 
       writer.merge(
-        stream.toUIMessageStream({
+        toUIMessageStream({
+          stream: stream.stream,
+          tools,
           sendFinish: false,
           sendStart: true,
           onEnd: (event) => {
@@ -271,7 +267,9 @@ export function swarm<CIn>(
         if (!stream) break;
 
         writer.merge(
-          stream.toUIMessageStream({
+          toUIMessageStream({
+            stream: stream.stream,
+            tools,
             sendFinish: false,
             sendStart: false,
             onEnd: (event) => {

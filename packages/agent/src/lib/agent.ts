@@ -36,8 +36,7 @@ export interface Handoff<CIn> {
   tools: ToolSet;
 }
 export type Handoffs<CIn, COut> = (
-  | Agent<unknown, CIn, COut>
-  | (() => Agent<unknown, CIn, COut>)
+  Agent<unknown, CIn, COut> | (() => Agent<unknown, CIn, COut>)
 )[];
 
 export type Runner<T, CIn> = (
@@ -254,9 +253,8 @@ export class Agent<Output = unknown, CIn = ContextVariables, COut = CIn> {
             output: this.output
               ? Output.object({ schema: this.output })
               : undefined,
-            onStepEnd: (step) => {
-              const toolCall = step.toolCalls.at(-1);
-              if (toolCall && this.logging) {
+            onToolExecutionStart: ({ toolCall }) => {
+              if (this.logging) {
                 console.log(
                   `Debug: ${chalk.yellow('ToolCalled')}: ${toolCall.toolName}(${JSON.stringify(toolCall.input)})`,
                 );
@@ -379,9 +377,7 @@ function flattenTools<T, R>(
 }
 
 export type Instruction<C> =
-  | string
-  | string[]
-  | ((contextVariables?: C) => string);
+  string | string[] | ((contextVariables?: C) => string);
 
 export interface PurposeRoutineInstructions {
   purpose: string | string[];

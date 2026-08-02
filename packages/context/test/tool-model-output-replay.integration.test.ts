@@ -248,7 +248,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     const result = await sut.stream({});
     const toolResults: unknown[] = [];
-    for await (const part of result.fullStream) {
+    for await (const part of result.stream) {
       if (part.type === 'tool-result') toolResults.push(part.output);
     }
 
@@ -509,7 +509,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
 
     const result = await extract.stream({});
     const hostOutputs: unknown[] = [];
-    for await (const part of result.fullStream) {
+    for await (const part of result.stream) {
       if (part.type === 'tool-result') hostOutputs.push(part.output);
     }
 

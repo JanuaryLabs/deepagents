@@ -7,6 +7,7 @@ import {
   ToolCallRepairError,
   type ToolSet,
   type UIMessage,
+  type UIMessageStreamOptions,
   createUIMessageStream,
   isToolUIPart,
 } from 'ai';
@@ -30,9 +31,8 @@ export interface ChatAgentLike<CIn> {
   ): Promise<StreamTextResult<ToolSet, any, any>>;
 }
 
-export type ChatMessageMetadata = NonNullable<
-  Parameters<StreamTextResult<ToolSet, any, any>['toUIMessageStream']>[0]
->['messageMetadata'];
+export type ChatMessageMetadata =
+  UIMessageStreamOptions<UIMessage>['messageMetadata'];
 
 export const defaultChatMessageMetadata: NonNullable<ChatMessageMetadata> = ({
   part,

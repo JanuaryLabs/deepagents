@@ -1,5 +1,5 @@
 import { groq } from '@ai-sdk/groq';
-import { type ToolExecutionOptions, tool } from 'ai';
+import { type ToolExecutionOptions, toUIMessageStream, tool } from 'ai';
 import dedent from 'dedent';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
@@ -189,7 +189,12 @@ async function runAdaptationCycle() {
 
     // Run executor
     const result$ = await stream(executor, [user(USER_TASK)], {});
-    const messages = await Array.fromAsync(result$.toUIMessageStream());
+    const messages = await Array.fromAsync(
+      toUIMessageStream({
+        stream: result$.stream,
+        tools: executor.toToolset(),
+      }),
+    );
     await result$.consumeStream();
 
     const reasoning = messages

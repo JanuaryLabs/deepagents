@@ -1,12 +1,15 @@
-import { type UIMessage, createUIMessageStream, generateId } from 'ai';
+import {
+  type UIMessage,
+  createUIMessageStream,
+  generateId,
+  toUIMessageStream,
+} from 'ai';
 
 import { Agent } from './agent.ts';
 import { execute } from './swarm.ts';
 
 export type Pipeable<I, O> =
-  | Agent<unknown, I, O>
-  | StreamFunction<I, O>
-  | StringFunction<I, O>;
+  Agent<unknown, I, O> | StreamFunction<I, O> | StringFunction<I, O>;
 
 type InitialState = { messages: UIMessage[] };
 
@@ -81,7 +84,9 @@ export function pipe(
           if (it instanceof Agent) {
             const result = await execute(it, state.messages, state);
             writer.merge(
-              result.toUIMessageStream({
+              toUIMessageStream({
+                stream: result.stream,
+                tools: it.toToolset(),
                 generateMessageId: generateId,
                 originalMessages: state.messages,
                 onEnd: async ({
