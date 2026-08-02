@@ -5,7 +5,10 @@
 
 ## 1. Evidence (no behavior changes)
 
-- [ ] Run the TurnQueue contract suite against **real Postgres** (withPostgresContainer), not just PGlite.
+- [ ] Run the TurnQueue contract suite against **real Postgres** (withPostgresContainer), not just
+      PGlite. Wired in `queue/pg-boss.turn-queue.contract.test.ts`; same-chat FIFO remains an
+      executable TODO because concurrent pg-boss workers may claim jobs out of order (`1, 3, 2`).
+      pg-boss 12.26.4 reproduces it.
 - [x] **Process-kill crash test** — SHIPPED (`queue/crash-recovery.integration.test.ts`, docker-gated): real child worker SIGKILLed mid-turn on real Postgres; heartbeat lapse → monitor fails job → DLQ → `onOrphaned` flips stream `failed` (with error) → chat unblocks → next turn runs; crashed turn never re-ran. ~16s.
 - [ ] Multi-process contract run: two workers on one Postgres — serialization + concurrency cap hold across processes. (The crash test partially covers this: parent + child workers shared one queue.)
 

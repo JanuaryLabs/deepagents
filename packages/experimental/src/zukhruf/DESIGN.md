@@ -247,15 +247,15 @@ duplicates reattach, a post-completion resubmit replays the finished stream
 (first input wins), and the register→push crack self-heals on retry — all backed by the store that
 is already the turn's permanent state machine.
 
-**The port contract is pinned by a behavioral test suite** (`queue/turn-queue.contract.ts`):
-durability across consumers, duplicate-push safety (at-least-once: never lost, never concurrent,
-never out of order), strict FIFO per chat, cross-chat overlap, concurrency cap, orphan-exactly-once
-
-- chat unblock, and dispose/backlog-pickup — instantiated per implementation
-  (`pg-boss.turn-queue.contract.test.ts` runs it on PGlite). Any new backend must pass it; a pg-boss
-  upgrade that changes semantics fails it. It already caught one real coupling: pg-boss fetch orders
-  by `created_on, id`, so same-millisecond pushes scrambled under random ids on ms-resolution clocks
-  (PGlite) — which is why job ids are monotonic UUIDv7.
+**The port contract is pinned by a behavioral test suite** in
+`queue/pg-boss.turn-queue.contract.test.ts`: durability across consumers, duplicate-push safety
+(at-least-once: never lost, never concurrent, never out of order), strict FIFO per chat,
+cross-chat overlap, concurrency cap, orphan-exactly-once chat unblock, and dispose/backlog-pickup.
+It runs against PGlite and, when Docker is available, real Postgres through `withPostgresContainer`.
+The real-Postgres same-chat FIFO case is currently an executable TODO because pg-boss workers can
+claim same-key jobs out of order (`1, 3, 2`) on pg-boss 12.26.4. The suite already caught one real
+coupling: pg-boss fetch orders by `created_on, id`, so same-millisecond pushes scrambled under
+random ids on ms-resolution clocks (PGlite) — which is why job ids are monotonic UUIDv7.
 
 **Identity invariant (and its tripwire).** The raw request key maps deterministically to one
 conversation-scoped durable id. That durable id carries two identities: the stream ("this
