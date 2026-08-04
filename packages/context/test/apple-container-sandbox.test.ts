@@ -15,7 +15,7 @@ import {
   useAppleContainerSandbox,
 } from '@deepagents/context';
 
-const ALPINE = 'docker.io/library/alpine:latest';
+const ALPINE = 'docker.io/library/bash:5.3-alpine3.24';
 
 /**
  * The Apple `container` backend only works on Apple silicon (macOS 26+) with
@@ -329,6 +329,19 @@ describe('Apple container sandbox (runtime)', async () => {
         const result = await sandbox.executeCommand('cat /etc/built-marker');
         assert.strictEqual(result.exitCode, 0);
         assert.strictEqual(result.stdout.trim(), 'built-by-dockerfile');
+      },
+    );
+  });
+
+  it('creates the workdir when Bash exists without sh', async () => {
+    await useAppleContainerSandbox(
+      {
+        dockerfile: `FROM ${ALPINE}\nRUN rm /bin/sh\n`,
+      },
+      async (sandbox) => {
+        const result = await sandbox.executeCommand('pwd');
+        assert.strictEqual(result.exitCode, 0, result.stderr);
+        assert.strictEqual(result.stdout.trim(), '/workspace');
       },
     );
   });

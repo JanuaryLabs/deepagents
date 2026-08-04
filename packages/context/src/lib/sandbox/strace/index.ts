@@ -9,9 +9,7 @@ import type { FileChange } from './file-change.ts';
 export type { FileChange, FileChangeOp } from './file-change.ts';
 
 export type StraceUnavailableReason =
-  | 'ptrace-blocked'
-  | 'strace-missing'
-  | 'trace-unparseable';
+  'ptrace-blocked' | 'strace-missing' | 'trace-unparseable';
 
 const REASON_HINT: Record<StraceUnavailableReason, string> = {
   'ptrace-blocked':
@@ -46,9 +44,9 @@ const STRACE_FLAGS = '-f -y -qq -e trace=%file,write,pwrite64,writev';
 
 /**
  * Wraps `command` so its filesystem syscalls are traced to `traceFile`. Both
- * the inner command and this wrapper are re-parsed by a shell (`sh -c`), so the
- * single-quoting via {@link shellQuote} composes with the backend's own
- * `sh -c`. strace propagates the traced command's exit code. The `mkdir -p`
+ * the inner command and this wrapper are parsed by Bash, so the single-quoting
+ * via {@link shellQuote} composes with the backend's own `bash -lc`. strace
+ * propagates the traced command's exit code. The `mkdir -p`
  * runs before strace (so it isn't traced) and self-heals the trace dir per
  * command — if it ever disappears mid-session, the next command recreates it
  * rather than strace failing to open `-o` and skipping the command entirely.
@@ -60,7 +58,7 @@ export function buildStraceCommand(
 ): string {
   return (
     `mkdir -p ${shellQuote(traceDir)} 2>/dev/null; ` +
-    `strace ${STRACE_FLAGS} -o ${shellQuote(traceFile)} -- sh -c ${shellQuote(command)}`
+    `strace ${STRACE_FLAGS} -o ${shellQuote(traceFile)} -- bash -lc ${shellQuote(command)}`
   );
 }
 
@@ -82,7 +80,7 @@ export function buildTracedCommand(
 ): string {
   return (
     `mkdir -p ${shellQuote(traceDir)} 2>/dev/null; ` +
-    `strace ${STRACE_FLAGS} -o ${shellQuote(traceFile)} -- sh -c ${shellQuote(command)}; ` +
+    `strace ${STRACE_FLAGS} -o ${shellQuote(traceFile)} -- bash -lc ${shellQuote(command)}; ` +
     `__dat_rc=$?; ` +
     `printf '\\n%s\\n' ${shellQuote(sentinel)}; ` +
     `base64 ${shellQuote(traceFile)} 2>/dev/null; ` +
@@ -191,7 +189,7 @@ const STRACE_ESCAPE: Record<string, number> = {
  */
 function decodeStraceString(s: string): string {
   const bytes: number[] = [];
-  for (let i = 0; i < s.length; ) {
+  for (let i = 0; i < s.length;) {
     if (s[i] === '\\' && i + 1 < s.length) {
       const octal = s.slice(i + 1, i + 4).match(/^[0-7]{1,3}/)?.[0];
       if (octal) {

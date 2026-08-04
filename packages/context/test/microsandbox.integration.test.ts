@@ -179,6 +179,13 @@ describe('Microsandbox Sandbox', async () => {
     });
 
     describe('failure modes', () => {
+      it('fails clearly when the image does not contain Bash', async () => {
+        await assert.rejects(
+          createMicrosandboxSandbox({ image: 'alpine' }),
+          /Bash is required to execute sandbox commands/,
+        );
+      });
+
       it('exit resolves with signal info when aborted mid-stream', async () => {
         await using sandbox = await createMicrosandboxSandbox();
         assert.ok(sandbox.spawn);
@@ -412,6 +419,56 @@ describe('Microsandbox Sandbox', async () => {
           assert.strictEqual(
             result.stdout.trim(),
             MICROSANDBOX_DEFAULT_DESTINATION,
+          );
+        } finally {
+          await backend.dispose();
+        }
+      });
+
+      it('executes Bash-only syntax through the public bash tool', async () => {
+        const backend = await createMicrosandboxSandbox();
+        try {
+          const { bash } = await createBashTool({
+            sandbox: backend,
+            destination: MICROSANDBOX_DEFAULT_DESTINATION,
+            promptOptions: { toolPrompt: '' },
+          });
+          const execute = bash.execute;
+          assert.ok(execute);
+
+          const result = await execute(
+            {
+              command: 'values=(one two); printf \'%s\\n\' "${values[1]}"',
+              reasoning: 'verify the Bash execution contract',
+            },
+            {
+              abortSignal: undefined,
+              context: {},
+              messages: [],
+              toolCallId: 'bash-array-contract',
+            },
+          );
+
+          assert.deepStrictEqual(result, {
+            stdout: 'two\n',
+            stderr: '',
+            exitCode: 0,
+          });
+
+          assert.deepStrictEqual(
+            await execute(
+              {
+                command: "printf '%s\\n' posix",
+                reasoning: 'verify POSIX commands still run under Bash',
+              },
+              {
+                abortSignal: undefined,
+                context: {},
+                messages: [],
+                toolCallId: 'posix-command-contract',
+              },
+            ),
+            { stdout: 'posix\n', stderr: '', exitCode: 0 },
           );
         } finally {
           await backend.dispose();

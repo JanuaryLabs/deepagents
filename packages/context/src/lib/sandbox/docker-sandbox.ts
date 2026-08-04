@@ -186,7 +186,7 @@ export interface DockerCommonOptions extends CommonSandboxOptions {
 }
 
 export interface RuntimeSandboxOptions extends DockerCommonOptions {
-  /** Docker image to use (default: `'alpine:latest'`). */
+  /** Docker image to use (default: `'bash:5.3-alpine3.24'`). */
   image?: string;
   /**
    * Ordered list of installers run after the container starts. Use
@@ -216,9 +216,7 @@ export interface ComposeSandboxOptions {
 }
 
 export type DockerSandboxOptions =
-  | RuntimeSandboxOptions
-  | DockerfileSandboxOptions
-  | ComposeSandboxOptions;
+  RuntimeSandboxOptions | DockerfileSandboxOptions | ComposeSandboxOptions;
 
 export function isDockerfileOptions(
   opts: DockerSandboxOptions,
@@ -454,7 +452,7 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
         flags.push('-e', `${key}=${value}`);
       }
     }
-    return ['exec', ...flags, containerId, 'sh', '-c', command];
+    return ['exec', ...flags, containerId, 'bash', '-lc', command];
   },
 
   inspectArgs(containerId: string): string[] {
@@ -508,7 +506,7 @@ export const dockerEngine: ContainerEngine<DockerCommonOptions> = {
 
   async ensureWorkdir(): Promise<void> {},
 
-  defaultImage: 'alpine:latest',
+  defaultImage: 'bash:5.3-alpine3.24',
 
   createInstallerContext,
 
@@ -653,8 +651,8 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
           'exec',
           '-T',
           this.service,
-          'sh',
-          '-c',
+          'bash',
+          '-lc',
           command,
         ],
         { signal: options?.signal },
@@ -684,8 +682,8 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
       '-T',
       ...buildDockerExecFlags(options),
       this.service,
-      'sh',
-      '-c',
+      'bash',
+      '-lc',
       command,
     ]);
     return toSandboxProcess(child, options?.signal);
@@ -715,7 +713,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
  * import { createDockerSandbox, pkg, urlBinary, npm } from '@deepagents/context';
  *
  * const sandbox = await createDockerSandbox({
- *   image: 'alpine:latest',
+ *   image: 'bash:5.3-alpine3.24',
  *   installers: [
  *     pkg(['curl', 'jq']),
  *     urlBinary({ name: 'presenterm', url: {...} }),
@@ -728,7 +726,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
  * ```ts
  * const sandbox = await createDockerSandbox({
  *   dockerfile: `
- *     FROM alpine:latest
+ *     FROM bash:5.3-alpine3.24
  *     RUN apk add --no-cache curl jq
  *   `,
  * });

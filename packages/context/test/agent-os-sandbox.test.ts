@@ -98,6 +98,14 @@ describe('Agent OS Sandbox', async () => {
         const lines = result.stdout.trim().split('\n');
         assert.deepStrictEqual(lines, ['line1', 'line2', 'line3']);
       });
+
+      it('executes Bash-only array syntax', async () => {
+        const result = await sandbox.executeCommand(
+          'values=(one two); printf \'%s\\n\' "${values[1]}"',
+        );
+        assert.strictEqual(result.exitCode, 0);
+        assert.strictEqual(result.stdout, 'two\n');
+      });
     });
 
     describe('abort signal', () => {

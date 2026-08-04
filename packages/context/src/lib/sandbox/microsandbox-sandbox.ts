@@ -17,7 +17,7 @@ import type {
 } from './types.ts';
 
 export const MICROSANDBOX_DEFAULT_DESTINATION = '/workspace';
-const MICROSANDBOX_DEFAULT_IMAGE = 'alpine';
+const MICROSANDBOX_DEFAULT_IMAGE = 'bash:5.3-alpine3.24';
 const MICROSANDBOX_MAX_NAME_BYTES = 128;
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 
@@ -35,7 +35,7 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
    * fully removed on `dispose()`.
    */
   name?: string;
-  /** OCI image to boot (default `'alpine'`). Ignored when attaching. */
+  /** OCI image to boot (default `'bash:5.3-alpine3.24'`). Ignored when attaching. */
   image?: string;
   /** Number of virtual CPUs. */
   cpus?: number;
@@ -60,8 +60,8 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
   /**
    * Escape hatch over the SDK builder for everything without a plain option
    * (volumes, network policy, secrets, user, idle timeout, …). Applied after
-   * the factory's own setters, so it can override them. Only runs on
-   * creation, not when attaching to an existing sandbox.
+   * the factory's own setters, except the required Bash shell which is applied
+   * last. Only runs on creation, not when attaching to an existing sandbox.
    */
   configure?: (builder: SandboxBuilder) => SandboxBuilder;
 }
@@ -145,8 +145,16 @@ export async function createMicrosandboxSandbox(
   let vm: MicrosandboxVm;
   try {
     vm = await acquireSandbox(sdk, { ...options, name, ephemeral, workdir });
-    await vm.fs().mkdir(workdir);
   } catch (error) {
+    throw normalizeMicrosandboxError(error, sdk);
+  }
+
+  try {
+    await vm.fs().mkdir(workdir);
+    await assertMicrosandboxBash(vm);
+  } catch (error) {
+    await vm.stop().catch(() => {});
+    if (ephemeral) await sdk.Sandbox.remove(name).catch(() => {});
     throw normalizeMicrosandboxError(error, sdk);
   }
 
@@ -245,7 +253,7 @@ function buildSandbox(
   },
 ): Promise<MicrosandboxVm> {
   // `workdir()` alone fails boot validation when the image lacks the
-  // directory (alpine has no /workspace), so patch it into the rootfs first.
+  // directory, so patch it into the rootfs first.
   let builder = sdk.Sandbox.builder(options.name)
     .image(options.image ?? MICROSANDBOX_DEFAULT_IMAGE)
     .patch((patch) => patch.mkdir(options.workdir))
@@ -256,7 +264,21 @@ function buildSandbox(
   if (options.memory !== undefined) builder = builder.memory(options.memory);
   if (options.env) builder = builder.envs(options.env);
   if (options.configure) builder = options.configure(builder);
-  return builder.create();
+  return builder.shell('bash').create();
+}
+
+async function assertMicrosandboxBash(vm: MicrosandboxVm): Promise<void> {
+  try {
+    const result = await vm.exec('bash', ['-lc', ':']);
+    if (result.code === 0) return;
+    throw new Error(result.stderr() || `exit code ${result.code}`);
+  } catch (error) {
+    const err = toError(error);
+    throw new MicrosandboxCreationError(
+      `Bash is required to execute sandbox commands but could not be started: ${err.message}`,
+      err,
+    );
+  }
 }
 
 function normalizeMicrosandboxError(
@@ -264,6 +286,7 @@ function normalizeMicrosandboxError(
   sdk: MicrosandboxSdk,
 ): Error {
   const err = toError(error);
+  if (err instanceof MicrosandboxSandboxError) return err;
   if (err instanceof sdk.LibkrunfwNotFoundError) {
     return new MicrosandboxNotAvailableError(err);
   }
@@ -420,7 +443,7 @@ async function pumpExecStream(args: {
   signal?.addEventListener('abort', abort, { once: true });
 
   try {
-    handle = await vm.execStreamWith('sh', (builder) => {
+    handle = await vm.execStreamWith('bash', (builder) => {
       builder.args(['-lc', command]).stdinNull();
       if (options.cwd) builder.cwd(options.cwd);
       if (options.env) builder.envs(options.env);

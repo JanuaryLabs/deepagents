@@ -22,6 +22,10 @@ export interface ExecuteCommandOptions {
 }
 
 export interface Sandbox {
+  /**
+   * Execute `command` with Bash semantics. Process-backed implementations must
+   * invoke `bash -lc` directly and fail clearly when Bash is unavailable.
+   */
   executeCommand(
     command: string,
     options?: ExecuteCommandOptions,
@@ -65,6 +69,7 @@ export interface SandboxProcess {
  * aggregates output and flushes on completion.
  */
 export interface DisposableSandbox extends Sandbox, AsyncDisposable {
+  /** Spawn `command` with the same Bash contract as {@link Sandbox.executeCommand}. */
   spawn?(command: string, options?: SpawnOptions): SandboxProcess;
   /**
    * Release the backend's external resources. Called explicitly, or

@@ -105,13 +105,20 @@ describe('Docker Sandbox', async () => {
         const sandbox = await createDockerSandbox();
 
         try {
-          // Alpine uses ash shell
+          // The official Bash image is Alpine-based.
           const result = await sandbox.executeCommand('cat /etc/os-release');
           assert.strictEqual(result.exitCode, 0);
           assert.match(result.stdout, /alpine/i);
         } finally {
           await sandbox.dispose();
         }
+      });
+
+      it('fails clearly when the image does not contain Bash', async () => {
+        await assert.rejects(
+          createDockerSandbox({ image: 'alpine:latest' }),
+          /Bash is required to execute sandbox commands/,
+        );
       });
 
       it('creates container with custom Debian image', async () => {
@@ -952,7 +959,7 @@ describe('Docker Sandbox', async () => {
       it('builds an image from an inline Dockerfile', async () => {
         const sandbox = await createDockerSandbox({
           dockerfile:
-            'FROM alpine:latest\nRUN echo inline-build > /built-marker\n',
+            'FROM bash:5.3-alpine3.24\nRUN echo inline-build > /built-marker\n',
         });
 
         try {
@@ -968,7 +975,7 @@ describe('Docker Sandbox', async () => {
         const dir = await mkdtemp(join(tmpdir(), 'sandbox-dockerfile-'));
         await writeFile(
           join(dir, 'Dockerfile'),
-          'FROM alpine:latest\nRUN echo file-build > /built-marker\n',
+          'FROM bash:5.3-alpine3.24\nRUN echo file-build > /built-marker\n',
         );
 
         try {
@@ -1141,7 +1148,7 @@ describe('Docker Sandbox', async () => {
           '-d',
           '--name',
           containerId,
-          'alpine:latest',
+          'bash:5.3-alpine3.24',
           'tail',
           '-f',
           '/dev/null',
@@ -1420,7 +1427,7 @@ describe('Docker Sandbox', async () => {
 
       it('skips ensureRuntime when node base image already has node+npm', async () => {
         const sandbox = await createDockerSandbox({
-          image: 'node:lts-alpine',
+          image: 'node:lts-bookworm-slim',
           installers: [npm('cowsay')],
         });
         try {
@@ -1711,7 +1718,7 @@ describe('Docker Sandbox', async () => {
             assert.deepStrictEqual(pkgErr.packages, [
               'nonexistent-package-xyz-12345',
             ]);
-            assert.strictEqual(pkgErr.image, 'alpine:latest');
+            assert.strictEqual(pkgErr.image, 'bash:5.3-alpine3.24');
             assert.strictEqual(pkgErr.packageManager, 'apk');
             return true;
           },

@@ -117,7 +117,7 @@ function startKernelProcess(
   const onStdout = (chunk: Uint8Array) => stdout.write(chunk);
   const onStderr = (chunk: Uint8Array) => stderr.write(chunk);
 
-  const { pid } = os.spawn('sh', ['-c', command], {
+  const { pid } = os.spawn('bash', ['-lc', command], {
     ...options,
     onStdout,
     onStderr,
@@ -178,7 +178,7 @@ function bindAbort(
  * Agent OS runs commands in an in-process WASM virtual machine — no Docker required.
  * Near-zero cold start (~6ms) with real WASM-compiled binaries (coreutils, grep, etc.).
  *
- * Internally, `executeCommand` lowers to `spawn('sh', ['-c', cmd])` so a single
+ * Internally, `executeCommand` lowers to `spawn('bash', ['-lc', cmd])` so a single
  * code path supports `AbortSignal` (the kernel's `exec(command)` does not return
  * a pid and so cannot be cancelled).
  *
@@ -222,6 +222,25 @@ export async function createAgentOsSandbox(
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     throw new AgentOsCreationError(err.message, err);
+  }
+
+  try {
+    const probe = startKernelProcess(os, ':', {});
+    const [, stderr, exitCode] = await Promise.all([
+      readAll(probe.stdout),
+      readAll(probe.stderr),
+      probe.exit,
+    ]);
+    if (exitCode !== 0) {
+      throw new Error(stderr.trim() || `exit code ${exitCode}`);
+    }
+  } catch (error) {
+    await os.dispose().catch(() => {});
+    const err = error instanceof Error ? error : new Error(String(error));
+    throw new AgentOsCreationError(
+      `Bash is required to execute sandbox commands but could not be started: ${err.message}`,
+      err,
+    );
   }
 
   const sandbox: DisposableSandbox = {

@@ -663,7 +663,7 @@ async function demonstrateDockerSandbox() {
   console.log('\n--- Low-level: createDockerSandbox() ---');
 
   const sandbox = await createDockerSandbox({
-    image: 'alpine:latest',
+    image: 'bash:5.3-alpine3.24',
     installers: [pkg(['curl', 'jq'])],
     volumes: [
       {

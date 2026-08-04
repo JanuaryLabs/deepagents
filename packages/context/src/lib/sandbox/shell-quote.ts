@@ -1,6 +1,6 @@
 /**
  * POSIX shell single-quote escape: wrap in `'...'`, replace any embedded
- * `'` with `'\''`. Safe for arbitrary content inside `sh -c`.
+ * `'` with `'\''`. Safe for arbitrary content as one shell word.
  *
  * Lives in its own zero-import module so lean consumers such as the
  * `./sandbox/strace` leaf entry can use it without dragging in the

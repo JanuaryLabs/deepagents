@@ -35,7 +35,7 @@ Starts a vanilla image and runs an ordered list of installers at startup. Best f
 import { createAppleContainerSandbox, pkg } from '@deepagents/context';
 
 await using sandbox = await createAppleContainerSandbox({
-  image: 'docker.io/library/alpine:latest',
+  image: 'docker.io/library/bash:5.3-alpine3.24',
   installers: [pkg(['curl', 'jq', 'python3'])],
   resources: { memory: '512M', cpus: 1 },
   // Override a host resolver that is unreachable from the container VM.
@@ -45,7 +45,7 @@ await using sandbox = await createAppleContainerSandbox({
 const { stdout } = await sandbox.executeCommand('python3 --version');
 ```
 
-**Default image:** `docker.io/library/alpine:latest`. Prefer fully-qualified refs — `container` resolves short names against configured registries.
+**Default image:** `docker.io/library/bash:5.3-alpine3.24`. Prefer fully-qualified refs — `container` resolves short names against configured registries.
 
 **Installers** are the same building blocks as the Docker sandbox — `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`, `githubRelease({...})` — running in array order against a shared `InstallerContext`. See [Installers](#installers).
 
@@ -91,7 +91,7 @@ Both strategies accept an optional `name` to reuse the same container across cal
 
 ```typescript
 await using sandbox = await createAppleContainerSandbox({
-  image: 'docker.io/library/node:lts-alpine',
+  image: 'docker.io/library/node:lts-bookworm-slim',
   name: 'analytics-indexer',
 });
 ```
@@ -118,7 +118,7 @@ Use `arch` to pick the image architecture — `'arm64'` (native) or `'amd64'` (e
 
 ```typescript
 await using sandbox = await createAppleContainerSandbox({
-  image: 'docker.io/library/alpine:latest',
+  image: 'docker.io/library/bash:5.3-alpine3.24',
   arch: 'amd64',
 });
 ```
@@ -228,7 +228,7 @@ The installer suite is shared with the Docker sandbox — `pkg([...])`, `urlBina
 import { createAppleContainerSandbox, pkg, npm } from '@deepagents/context';
 
 await using sandbox = await createAppleContainerSandbox({
-  image: 'docker.io/library/node:lts-alpine',
+  image: 'docker.io/library/node:lts-bookworm-slim',
   installers: [pkg(['curl', 'jq']), npm('prettier')],
 });
 ```

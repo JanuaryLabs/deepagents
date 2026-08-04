@@ -33,17 +33,15 @@ If the package or runtime is unavailable, `createMicrosandboxSandbox()` throws
 ```typescript
 import { createMicrosandboxSandbox } from '@deepagents/context';
 
-await using sandbox = await createMicrosandboxSandbox({
-  image: 'alpine',
-});
+await using sandbox = await createMicrosandboxSandbox();
 
 const result = await sandbox.executeCommand('echo "Hello from Microsandbox"');
 console.log(result.stdout);
 ```
 
-The default image is `alpine`. The default working directory is `/workspace`,
-and the factory creates it during boot because common images do not ship that
-directory.
+The default image is `bash:5.3-alpine3.24`. The default working directory is
+`/workspace`, and the factory creates it during boot because common images do
+not ship that directory.
 
 ## AI Agent Integration
 
@@ -56,7 +54,7 @@ import {
 
 const backend = await createMicrosandboxSandbox({
   name: 'chat-123',
-  image: 'node:lts-alpine',
+  image: 'node:lts-bookworm-slim',
 });
 
 const sandbox = await createBashTool({
@@ -75,7 +73,7 @@ Pass `name` when a chat or workflow should resume the same microVM:
 ```typescript
 const sandbox = await createMicrosandboxSandbox({
   name: 'analytics-session',
-  image: 'python:3.12-alpine',
+  image: 'python:3.12-slim',
 });
 ```
 
@@ -97,7 +95,7 @@ stops and removes the microVM.
 | Option | Type | Description |
 |--------|------|-------------|
 | `name` | `string` | Stable sandbox name for get-or-create reuse |
-| `image` | `string` | OCI image to boot; defaults to `alpine`; ignored when attaching to an existing sandbox |
+| `image` | `string` | OCI image to boot; defaults to `bash:5.3-alpine3.24`; ignored when attaching to an existing sandbox |
 | `cpus` | `number` | Number of virtual CPUs |
 | `memory` | `number` | Memory in MiB |
 | `env` | `Record<string, string>` | Environment variables baked into the sandbox at boot |

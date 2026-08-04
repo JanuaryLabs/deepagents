@@ -13,6 +13,7 @@ import {
   type Installer,
   bin,
   createDockerSandbox,
+  pkg,
 } from '@deepagents/context';
 
 async function isDockerAvailable(): Promise<boolean> {
@@ -51,7 +52,7 @@ describe('bin installer', async () => {
   ): Promise<void> {
     const sandbox = await createDockerSandbox({
       image: 'node:lts-alpine',
-      installers,
+      installers: [pkg(['bash']), ...installers],
       ...extra,
     });
     try {
@@ -125,7 +126,7 @@ describe('bin installer', async () => {
       await assert.rejects(
         createDockerSandbox({
           image: 'node:lts-alpine',
-          installers: [bin('/mnt/bin/noexec.js')],
+          installers: [pkg(['bash']), bin('/mnt/bin/noexec.js')],
           volumes: [{ ...tempMount, hostPath: nonExecDir }],
         }),
         (err) => {
@@ -148,7 +149,7 @@ describe('bin installer', async () => {
     await assert.rejects(
       createDockerSandbox({
         image: 'node:lts-alpine',
-        installers: [bin('/var/empty/does-not-exist.js')],
+        installers: [pkg(['bash']), bin('/var/empty/does-not-exist.js')],
       }),
       (err) => {
         assert.ok(err instanceof InstallError, 'expected InstallError');

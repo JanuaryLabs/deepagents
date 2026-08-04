@@ -118,6 +118,8 @@ export async function createDaytonaSandbox(
     throw normalizeDaytonaError(error, sdk);
   }
 
+  await assertDaytonaBash(sandbox, options.commandTimeout);
+
   const backend = createDaytonaSandboxMethods({
     sandbox,
     commandTimeout: options.commandTimeout,
@@ -135,6 +137,28 @@ export async function createDaytonaSandbox(
     }
   }
   return backend;
+}
+
+async function assertDaytonaBash(
+  sandbox: Sandbox,
+  commandTimeout: number | undefined,
+): Promise<void> {
+  try {
+    const result = await sandbox.process.executeCommand(
+      "bash -lc ':'",
+      undefined,
+      undefined,
+      commandTimeout,
+    );
+    if (result.exitCode === undefined || result.exitCode === 0) return;
+    throw new Error(result.result || `exit code ${result.exitCode}`);
+  } catch (error) {
+    const err = toError(error);
+    throw new DaytonaCreationError(
+      `Bash is required to execute sandbox commands but could not be started: ${err.message}`,
+      err,
+    );
+  }
 }
 
 const UNRECOVERABLE_SANDBOX_STATES = new Set<string>([
@@ -313,7 +337,7 @@ function createDaytonaSandboxMethods(args: {
       }
 
       const response = await sandbox.process.executeCommand(
-        command,
+        `bash -lc ${shellQuote(command)}`,
         undefined,
         undefined,
         commandTimeout,
@@ -608,7 +632,7 @@ function buildSessionCommand(command: string, options: SpawnOptions): string {
   const env = options.env ?? {};
   const entries = Object.entries(env);
   if (entries.length === 0) {
-    return `sh -lc ${shellQuote(`${cwdPrefix}${command}`)}`;
+    return `bash -lc ${shellQuote(`${cwdPrefix}${command}`)}`;
   }
 
   for (const [key] of entries) {
@@ -618,7 +642,7 @@ function buildSessionCommand(command: string, options: SpawnOptions): string {
   const exports = entries
     .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
     .join('; ');
-  return `sh -lc ${shellQuote(`${exports}; ${cwdPrefix}${command}`)}`;
+  return `bash -lc ${shellQuote(`${exports}; ${cwdPrefix}${command}`)}`;
 }
 
 function validateEnvKey(key: string): void {

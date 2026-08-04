@@ -210,6 +210,32 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
     });
   });
 
+  it('preserves Bash semantics through the public bash tool', async () => {
+    await withSandbox(async ({ bash }) => {
+      const execute = bash.execute;
+      assert.ok(execute);
+
+      const result = await execute(
+        {
+          command: 'values=(one two); printf \'%s\\n\' "${values[1]}"',
+          reasoning: 'verify traced commands retain Bash semantics',
+        },
+        {
+          abortSignal: undefined,
+          context: {},
+          messages: [],
+          toolCallId: 'traced-bash-array-contract',
+        },
+      );
+
+      assert.deepStrictEqual(result, {
+        stdout: 'two\n',
+        stderr: '',
+        exitCode: 0,
+      });
+    });
+  });
+
   it('reports write for a file written via writeFiles (not just bash)', async () => {
     await withSandbox(async (s, rec) => {
       await s.sandbox.writeFiles([

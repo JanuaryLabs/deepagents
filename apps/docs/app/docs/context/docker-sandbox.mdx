@@ -18,7 +18,7 @@ Starts a vanilla image and runs an ordered list of installers at container start
 import { createDockerSandbox, pkg } from '@deepagents/context';
 
 const sandbox = await createDockerSandbox({
-  image: 'alpine:latest',
+  image: 'bash:5.3-alpine3.24',
   installers: [pkg(['curl', 'jq', 'python3'])],
   volumes: [
     {
@@ -38,7 +38,7 @@ try {
 }
 ```
 
-**Default image:** `alpine:latest`
+**Default image:** `bash:5.3-alpine3.24`
 
 **Installers** are the unit of "put a tool in the container." Built-ins: `pkg([...])`, `urlBinary({...})`, `npm(...)`, `pip(...)`, `githubRelease({...})`. They run in array order and share state (architecture, package manager, idempotent tool ensures) via an `InstallerContext`.
 
@@ -118,7 +118,7 @@ container across calls:
 
 ```typescript
 const sandbox = await createDockerSandbox({
-  image: 'node:lts-alpine',
+  image: 'node:lts-bookworm-slim',
   name: 'analytics-indexer',
   installers: [pkg(['curl'])],
 });
@@ -155,7 +155,7 @@ is appended after the image in `docker run`:
 
 ```typescript
 const sandbox = await createDockerSandbox({
-  image: 'node:lts-alpine',
+  image: 'node:lts-bookworm-slim',
   command: null, // run the image CMD/ENTRYPOINT directly
 });
 ```
@@ -189,7 +189,7 @@ The sandbox runs untrusted code, so hardening lives in one place:
 
 ```typescript
 const sandbox = await createDockerSandbox({
-  image: 'alpine:latest',
+  image: 'bash:5.3-alpine3.24',
   security: {
     capDrop: ['ALL'],
     readOnly: true,
@@ -423,7 +423,7 @@ createDockerSandbox({
 
 // Or use a node base image and skip ensureRuntime:
 createDockerSandbox({
-  image: 'node:lts-alpine',
+  image: 'node:lts-bookworm-slim',
   installers: [npm('prettier')],
 });
 ```

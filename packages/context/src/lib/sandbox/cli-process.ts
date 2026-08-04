@@ -57,7 +57,7 @@ export function toSandboxProcess(
 
 /**
  * base64 chars per write chunk — a multiple of 4 so each chunk decodes to whole
- * bytes (and appends cleanly), keeping every `sh -c` argument well under the
+ * bytes (and appends cleanly), keeping every `bash -lc` argument well under the
  * shell's argument-length limit (ARG_MAX).
  */
 const BASE64_WRITE_CHUNK = 32_768;

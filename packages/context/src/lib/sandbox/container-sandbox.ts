@@ -82,6 +82,7 @@ export abstract class ContainerSandboxStrategy<
         await this.engine.ensureWorkdir(this.context.containerId, this.workdir);
         await this.configure();
       }
+      await this.assertBashAvailable();
     } catch (error) {
       if (acquired && !acquired.attached) {
         await this.stopContainer(acquired.containerId);
@@ -445,6 +446,16 @@ export abstract class ContainerSandboxStrategy<
         exitCode: err.exitCode ?? 1,
       };
     }
+  }
+
+  private async assertBashAvailable(): Promise<void> {
+    const result = await this.exec(':');
+    if (result.exitCode === 0) return;
+    const detail = result.stderr.trim() || result.stdout.trim();
+    throw this.engine.errors.generic(
+      `Bash is required to execute sandbox commands but could not be started${detail ? `: ${detail}` : '.'}`,
+      this.context.containerId,
+    );
   }
 
   protected spawnProcess(

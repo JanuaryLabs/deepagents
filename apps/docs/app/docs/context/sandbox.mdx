@@ -49,6 +49,10 @@ streaming stdio.
 Feature-detect it with `if (!sandbox.spawn) { ... }` when writing
 backend-agnostic code.
 
+`executeCommand` and `spawn` execute commands with Bash semantics. Process-backed
+environments must contain `bash`; factories fail with a clear error when Bash
+cannot be started. There is no POSIX `sh` fallback.
+
 Every backend is also `AsyncDisposable`: it implements `[Symbol.asyncDispose]`
 (which delegates to `dispose()`), so you can bind it with `await using` and let
 the sandbox release at scope exit instead of writing `try/finally`:
@@ -138,7 +142,7 @@ For direct container control without AI agent wiring:
 import { createDockerSandbox, pkg } from '@deepagents/context';
 
 const sandbox = await createDockerSandbox({
-  image: 'alpine:latest',
+  image: 'bash:5.3-alpine3.24',
   installers: [pkg(['curl', 'jq'])],
   volumes: [
     {

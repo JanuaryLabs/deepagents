@@ -72,8 +72,7 @@ export interface AppleContainerNamedVolume {
  * remote storage by bind-mounting a host directory instead.
  */
 export type AppleContainerVolume =
-  | AppleContainerBindVolume
-  | AppleContainerNamedVolume;
+  AppleContainerBindVolume | AppleContainerNamedVolume;
 
 export interface AppleContainerResources {
   /** `--memory` — e.g. `'1024M'`, `'2G'` (MB granularity). */
@@ -121,7 +120,7 @@ export interface AppleContainerCommonOptions {
 }
 
 export interface AppleContainerRuntimeOptions extends AppleContainerCommonOptions {
-  /** Image to run (default: `'docker.io/library/alpine:latest'`). */
+  /** Image to run (default: `'docker.io/library/bash:5.3-alpine3.24'`). */
   image?: string;
   /**
    * Ordered installers run after the container starts. Use `pkg([...])`,
@@ -141,8 +140,7 @@ export interface AppleContainerfileOptions extends AppleContainerCommonOptions {
 }
 
 export type AppleContainerSandboxOptions =
-  | AppleContainerRuntimeOptions
-  | AppleContainerfileOptions;
+  AppleContainerRuntimeOptions | AppleContainerfileOptions;
 
 export function isAppleContainerfileOptions(
   opts: AppleContainerSandboxOptions,
@@ -268,7 +266,7 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
         flags.push('--env', `${key}=${value}`);
       }
     }
-    return ['exec', ...flags, containerId, 'sh', '-c', command];
+    return ['exec', ...flags, containerId, 'bash', '-lc', command];
   },
 
   inspectArgs(containerId) {
@@ -309,10 +307,16 @@ export const appleEngine: ContainerEngine<AppleContainerCommonOptions> = {
     // `container exec --cwd <dir>` fails if <dir> is absent, so the workdir
     // can't be created from inside itself — bootstrap it from the image's
     // default cwd with a plain (no `--cwd`) exec.
-    await spawn(CLI, ['exec', containerId, 'sh', '-c', `mkdir -p ${workdir}`]);
+    await spawn(CLI, [
+      'exec',
+      containerId,
+      'bash',
+      '-lc',
+      `mkdir -p ${shellQuote(workdir)}`,
+    ]);
   },
 
-  defaultImage: 'docker.io/library/alpine:latest',
+  defaultImage: 'docker.io/library/bash:5.3-alpine3.24',
 
   createInstallerContext: createAppleInstallerContext,
 
@@ -531,7 +535,7 @@ function runStreamed(command: string, args: string[]): Promise<void> {
  * import { createAppleContainerSandbox, pkg } from '@deepagents/context';
  *
  * await using sandbox = await createAppleContainerSandbox({
- *   image: 'docker.io/library/alpine:latest',
+ *   image: 'docker.io/library/bash:5.3-alpine3.24',
  *   installers: [pkg(['curl', 'jq'])],
  * });
  * const { stdout } = await sandbox.executeCommand('echo hello');
@@ -541,7 +545,7 @@ function runStreamed(command: string, args: string[]): Promise<void> {
  * ```ts
  * await using sandbox = await createAppleContainerSandbox({
  *   dockerfile: `
- *     FROM docker.io/library/alpine:latest
+ *     FROM docker.io/library/bash:5.3-alpine3.24
  *     RUN apk add --no-cache curl
  *   `,
  * });
