@@ -317,8 +317,9 @@ points.
 For `target: 'tool-output'`, use `toolOutput(...)` or inspect
 `ctx.toolOutcome`. The outcome is available after a tool reaches
 `output-available`, `output-error`, or `output-denied`, but before the next model
-generation. Assistant-history predicates such as `toolCalled(...)` only
-describe already persisted calls.
+generation. Assistant-history predicates such as `toolCalled(...)` describe
+tool parts visible in the current assistant segment; use `toolOutput(...)` when
+you need the raw outcome currently being evaluated.
 
 ```ts
 import {

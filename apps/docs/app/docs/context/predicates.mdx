@@ -229,7 +229,7 @@ tool outputs are not terminal and are not evaluated.
 
 ## Assistant-History Tool Predicates
 
-These predicates inspect tool parts on `lastAssistantMessage`, so they describe completed tool calls already in conversation history. Use `toolOutput()` instead when a tool-output reminder needs the terminal outcome at the current step boundary.
+These predicates inspect tool parts on `lastAssistantMessage`, so they describe calls visible in the current assistant segment. During steer evaluation, the engine also includes terminal tool parts from the just-completed step. Use `toolOutput()` instead when a tool-output reminder needs the raw outcome currently being evaluated.
 
 ### toolCalled(name)
 

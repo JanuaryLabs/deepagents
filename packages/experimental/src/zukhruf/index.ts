@@ -8,6 +8,7 @@ export * from './instructions.ts';
 export * from './mailbox/sqlite.store.ts';
 export * from './mailbox/store.ts';
 export * from './mailbox/types.ts';
+export * from './protocol/session.ts';
 export * from './queue/pg-boss.turn-queue.ts';
 export * from './queue/turn-queue.ts';
 export * from './render-turn.ts';

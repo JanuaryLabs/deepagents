@@ -15,6 +15,10 @@ export class AgentDeclarationRegistry {
     return this.#declarations.get(name);
   }
 
+  values(): IterableIterator<AgentDeclaration> {
+    return this.#declarations.values();
+  }
+
   #register(
     declaration: AgentDeclaration,
     visited: Set<AgentDeclaration>,

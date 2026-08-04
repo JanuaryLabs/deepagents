@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { type TestContext, type TestOptions, suite, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
+  type ConstructorOptions,
   type FindJobsOptions,
   type JobWithMetadata,
   PgBoss,
@@ -11,7 +12,11 @@ import {
 } from 'pg-boss';
 import { v5 as uuidv5 } from 'uuid';
 
-import type { TurnQueue, TurnRef } from '@deepagents/experimental/zukhruf';
+import type {
+  PgBossTurnQueueOptions,
+  TurnQueue,
+  TurnRef,
+} from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
 
@@ -27,6 +32,19 @@ import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
  */
 interface TurnQueueHarness extends AsyncDisposable {
   queue: TurnQueue;
+}
+
+interface PostgresQueueHarness extends TurnQueueHarness {
+  connectionString: string;
+  queue: PgBossTurnQueue;
+}
+
+interface PostgresQueueHarnessOptions {
+  boss?: Pick<
+    ConstructorOptions,
+    'monitorIntervalSeconds' | 'superviseIntervalSeconds'
+  >;
+  queue?: PgBossTurnQueueOptions;
 }
 
 interface TurnQueueContract {
@@ -99,12 +117,13 @@ function approvalRef(
 }
 
 const noOrphans = { onOrphaned: async () => {} };
+const dockerAvailable = await isDockerAvailable();
 
 const turnQueueContracts = [
   {
     name: 'PgBossTurnQueue (postgres)',
     makeQueue: postgresQueueHarness,
-    skip: (await isDockerAvailable()) ? false : 'Docker is unavailable',
+    skip: dockerAvailable ? false : 'Docker is unavailable',
     sameChatFifoTodo:
       'pg-boss workers can claim same-key jobs out of FIFO order',
   },
@@ -674,21 +693,320 @@ for (const contract of turnQueueContracts) {
   );
 }
 
-async function postgresQueueHarness(): Promise<TurnQueueHarness> {
-  const ready = Promise.withResolvers<TurnQueueHarness>();
+suite(
+  'PgBossTurnQueue real PostgreSQL scheduler regressions',
+  { skip: dockerAvailable ? false : 'Docker is unavailable' },
+  () => {
+    test('preserves each chat insertion order under concurrent consumption', async (t) => {
+      await using h = await postgresQueueHarness();
+      const chatIds = Array.from(
+        { length: 8 },
+        (_, index) => `fifo-regression-${index}`,
+      );
+      const turnNumbers = [1, 2, 3, 4, 5];
+      const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
+
+      for (const chatId of chatIds) {
+        for (const turnNumber of turnNumbers) {
+          await h.queue.push(ref(chatId, turnNumber));
+        }
+      }
+
+      let deliveries = 0;
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          const chat = seen.get(turn.chatId);
+          assert.ok(chat, `unexpected chat: ${turn.chatId}`);
+          chat.push(inputOf(turn));
+          deliveries++;
+          await sleep(50);
+        },
+        { ...noOrphans, concurrency: 8 },
+      );
+
+      await waitFor(
+        t,
+        () => deliveries === chatIds.length * turnNumbers.length,
+        'all real-Postgres FIFO regression turns',
+        30_000,
+      );
+      const expected = turnNumbers.map((number) => `input-${number}`);
+      for (const chatId of chatIds) {
+        assert.deepStrictEqual(seen.get(chatId), expected, chatId);
+      }
+    });
+
+    test('preserves per-chat FIFO across independent consumer instances', async (t) => {
+      await using h = await postgresQueueHarness();
+      const peerBoss = new PgBoss({ connectionString: h.connectionString });
+      peerBoss.on('error', () => {});
+      let firstConsumer: AsyncDisposable | undefined;
+      let secondConsumer: AsyncDisposable | undefined;
+
+      try {
+        await peerBoss.start();
+        const peerQueue = new PgBossTurnQueue(peerBoss, {
+          pollingIntervalSeconds: 0.5,
+        });
+        await peerQueue.initialize();
+
+        const chatIds = Array.from(
+          { length: 8 },
+          (_, index) => `multi-consumer-fifo-${index}`,
+        );
+        const turnNumbers = [1, 2, 3, 4, 5];
+        const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
+        const active = new Map(chatIds.map((chatId) => [chatId, 0]));
+        const maxActive = new Map(chatIds.map((chatId) => [chatId, 0]));
+
+        for (const chatId of chatIds) {
+          for (const turnNumber of turnNumbers) {
+            await h.queue.push(ref(chatId, turnNumber));
+          }
+        }
+
+        let deliveries = 0;
+        const handle = async (turn: TurnRef) => {
+          const current = (active.get(turn.chatId) ?? 0) + 1;
+          active.set(turn.chatId, current);
+          maxActive.set(
+            turn.chatId,
+            Math.max(maxActive.get(turn.chatId) ?? 0, current),
+          );
+          try {
+            const chat = seen.get(turn.chatId);
+            assert.ok(chat, `unexpected chat: ${turn.chatId}`);
+            chat.push(inputOf(turn));
+            deliveries++;
+            await sleep(50);
+          } finally {
+            active.set(turn.chatId, current - 1);
+          }
+        };
+
+        firstConsumer = await h.queue.consume(handle, {
+          ...noOrphans,
+          concurrency: 4,
+        });
+        secondConsumer = await peerQueue.consume(handle, {
+          ...noOrphans,
+          concurrency: 4,
+        });
+
+        await waitFor(
+          t,
+          () => deliveries === chatIds.length * turnNumbers.length,
+          'all turns consumed across both PgBoss instances',
+          30_000,
+        );
+        const expected = turnNumbers.map((number) => `input-${number}`);
+        for (const chatId of chatIds) {
+          assert.deepStrictEqual(seen.get(chatId), expected, chatId);
+          assert.equal(
+            maxActive.get(chatId),
+            1,
+            `${chatId} never overlaps across consumer instances`,
+          );
+        }
+      } finally {
+        await firstConsumer?.[Symbol.asyncDispose]();
+        await secondConsumer?.[Symbol.asyncDispose]();
+        await peerBoss.stop({ graceful: false });
+      }
+    });
+
+    test('isolates a handler failure from another active chat', async (t) => {
+      await using h = await postgresQueueHarness();
+      const failing = ref('failure-isolation-a', 1);
+      const healthy = ref('failure-isolation-b', 1);
+      const failingStarted = Promise.withResolvers<void>();
+      const healthyStarted = Promise.withResolvers<void>();
+      const releaseHealthy = Promise.withResolvers<void>();
+      const completed: string[] = [];
+      const orphaned: string[] = [];
+
+      await h.queue.push(failing);
+      await h.queue.push(healthy);
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          if (turn.streamId === failing.streamId) {
+            failingStarted.resolve();
+            await healthyStarted.promise;
+            throw new Error('isolated failure');
+          }
+
+          healthyStarted.resolve();
+          await failingStarted.promise;
+          await releaseHealthy.promise;
+          completed.push(turn.streamId);
+        },
+        {
+          concurrency: 2,
+          onOrphaned: async (turn) => {
+            orphaned.push(turn.streamId);
+          },
+        },
+      );
+
+      try {
+        await Promise.all([failingStarted.promise, healthyStarted.promise]);
+        releaseHealthy.resolve();
+        await waitFor(
+          t,
+          () => completed.length === 1 && orphaned.length === 1,
+          'healthy completion and isolated orphan reconciliation',
+          20_000,
+        );
+        assert.deepStrictEqual(completed, [healthy.streamId]);
+        assert.deepStrictEqual(orphaned, [failing.streamId]);
+      } finally {
+        releaseHealthy.resolve();
+      }
+    });
+
+    test('heartbeats every concurrently active handler', async (t) => {
+      await using h = await postgresQueueHarness({
+        boss: { monitorIntervalSeconds: 2, superviseIntervalSeconds: 2 },
+        queue: { heartbeatSeconds: 10 },
+      });
+      const turns = [ref('heartbeat-a', 1), ref('heartbeat-b', 1)];
+      const release = Promise.withResolvers<void>();
+      const started = new Set<string>();
+      const completed: string[] = [];
+      const orphaned: string[] = [];
+
+      for (const turn of turns) await h.queue.push(turn);
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          started.add(turn.streamId);
+          await release.promise;
+          completed.push(turn.streamId);
+        },
+        {
+          concurrency: 2,
+          onOrphaned: async (turn) => {
+            orphaned.push(turn.streamId);
+          },
+        },
+      );
+
+      try {
+        await waitFor(
+          t,
+          () => started.size === 2,
+          'both heartbeat turns active',
+        );
+        await sleep(13_000);
+        assert.deepStrictEqual(
+          orphaned,
+          [],
+          'live handlers never appear orphaned',
+        );
+        for (const turn of turns) {
+          assert.equal(
+            await h.queue.getTurnActivity(turn),
+            'running',
+            `${turn.chatId} remains active past the heartbeat deadline`,
+          );
+        }
+
+        release.resolve();
+        await waitFor(
+          t,
+          () => completed.length === 2,
+          'both live handlers finish',
+        );
+      } finally {
+        release.resolve();
+      }
+    });
+
+    test('disposal returns during active work and stops new claims', async (t) => {
+      await using h = await postgresQueueHarness();
+      const active = ref('dispose-active', 1);
+      const queued = ref('dispose-queued', 1);
+      const activeStarted = Promise.withResolvers<void>();
+      const releaseActive = Promise.withResolvers<void>();
+      const seen: string[] = [];
+      let consumer: AsyncDisposable | undefined;
+      let disposing: Promise<void> | undefined;
+      let replacement: AsyncDisposable | undefined;
+
+      try {
+        await h.queue.push(active);
+        consumer = await h.queue.consume(async (turn) => {
+          seen.push(turn.streamId);
+          activeStarted.resolve();
+          await releaseActive.promise;
+        }, noOrphans);
+        await activeStarted.promise;
+        await h.queue.push(queued);
+
+        disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
+        assert.equal(
+          await Promise.race([
+            disposing.then(() => 'disposed'),
+            sleep(2_000).then(() => 'timed-out'),
+          ]),
+          'disposed',
+          'disposal does not wait for the active handler',
+        );
+        consumer = undefined;
+        await sleep(500);
+        assert.deepStrictEqual(
+          seen,
+          [active.streamId],
+          'the stopped consumer does not claim queued work',
+        );
+        assert.equal(
+          await h.queue.getTurnActivity(active),
+          'running',
+          'the active handler keeps its claim until it exits',
+        );
+
+        releaseActive.resolve();
+
+        replacement = await h.queue.consume(async (turn) => {
+          seen.push(turn.streamId);
+        }, noOrphans);
+        await waitFor(
+          t,
+          () => seen.length === 2,
+          'replacement consumes queued turn',
+        );
+        assert.deepStrictEqual(seen, [active.streamId, queued.streamId]);
+      } finally {
+        releaseActive.resolve();
+        await disposing;
+        await consumer?.[Symbol.asyncDispose]();
+        await replacement?.[Symbol.asyncDispose]();
+      }
+    });
+  },
+);
+
+async function postgresQueueHarness(
+  options: PostgresQueueHarnessOptions = {},
+): Promise<PostgresQueueHarness> {
+  const ready = Promise.withResolvers<PostgresQueueHarness>();
   const release = Promise.withResolvers<void>();
   let lifecycle!: Promise<void | undefined>;
 
   lifecycle = withPostgresContainer(async (container) => {
-    const boss = new PgBoss({ connectionString: container.connectionString });
+    const boss = new PgBoss({
+      connectionString: container.connectionString,
+      ...options.boss,
+    });
     boss.on('error', () => {});
     try {
       await boss.start();
       const queue = new PgBossTurnQueue(boss, {
         pollingIntervalSeconds: 0.5,
+        ...options.queue,
       });
       await queue.initialize();
       ready.resolve({
+        connectionString: container.connectionString,
         queue,
         async [Symbol.asyncDispose]() {
           release.resolve();

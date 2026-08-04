@@ -472,6 +472,42 @@ async function waitForText(
   );
 }
 
+describe('zukhruf runtime — host sessions', () => {
+  it('creates, describes, resumes, and cancels a session before a worker starts', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const model = scriptedModel(track);
+    await using h = await harness(model);
+    const conversation = { chatId: 'http-session', userId: 'user-1' };
+
+    assert.equal(await h.runtime.sessionExists(conversation), false);
+    await h.runtime.createSession(conversation);
+    assert.equal(await h.runtime.sessionExists(conversation), true);
+    assert.equal(
+      await h.runtime.sessionExists({ ...conversation, userId: 'user-2' }),
+      false,
+    );
+    assert.deepEqual(h.runtime.info, {
+      root: 'test-agent',
+      agents: [
+        {
+          name: 'test-agent',
+          model: { provider: model.provider, modelId: model.modelId },
+          tools: [],
+          subagents: [],
+        },
+      ],
+    });
+
+    const pending = await h.runtime.enqueue(conversation, {
+      id: 'message-1',
+      input: 'hello',
+    });
+    assert.ok(await h.runtime.observe(conversation).resume());
+    await h.runtime.observe(conversation).cancel();
+    assert.equal(await h.streamStore.getStreamStatus(pending.id), 'cancelled');
+  });
+});
+
 describe('zukhruf runtime — setup failure durability', () => {
   it('records a later turn before sandbox setup fails', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };

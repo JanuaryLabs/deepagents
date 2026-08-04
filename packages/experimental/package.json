@@ -45,6 +45,8 @@
   "dependencies": {
     "@deepagents/context": "6.1.1",
     "ai": "^7.0.30",
+    "fast-content-type-parse": "^3.0.0",
+    "hono": "^4.12.33",
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
     "tiny-tfidf": "^1.0.0",

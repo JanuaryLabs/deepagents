@@ -44,6 +44,19 @@ export interface AgentRuntimeWorkOptions {
   concurrency?: number;
 }
 
+export interface AgentRuntimeInfo {
+  readonly root: string;
+  readonly agents: readonly {
+    readonly name: string;
+    readonly model: {
+      readonly provider: string;
+      readonly modelId: string;
+    };
+    readonly tools: readonly string[];
+    readonly subagents: readonly string[];
+  }[];
+}
+
 /** Reconnect and cancellation view over one durable conversation. */
 export class AgentObservation {
   readonly engine: ContextEngine;
@@ -95,6 +108,16 @@ export class AgentObservation {
   }
 
   async #headStreamId(): Promise<string | undefined> {
+    const scheduled = await this.#queue.getCurrentTurn(this.#conversation);
+    if (scheduled) return scheduled.streamId;
+
+    const chat = await this.#store.getChat(this.#conversation.chatId);
+    if (!chat) return undefined;
+    if (chat.userId !== this.#conversation.userId) {
+      throw new Error(
+        `chat "${this.#conversation.chatId}" belongs to user "${chat.userId}", not "${this.#conversation.userId}"`,
+      );
+    }
     const head = await this.engine.headMessage();
     return head?.name === 'assistant' ? head.id : undefined;
   }
@@ -102,6 +125,8 @@ export class AgentObservation {
 
 /** Thin host-facing composition and lifecycle façade for a Zukhruf agent tree. */
 export class AgentRuntime {
+  readonly info: AgentRuntimeInfo;
+
   readonly #store: ContextStore;
   readonly #queue: TurnQueue;
   readonly #streams: StreamManager;
@@ -152,6 +177,18 @@ export class AgentRuntime {
     this.#directory = directory;
     this.#controlPlane = controlPlane;
     this.#approvals = approvals;
+    this.info = {
+      root: declarations.root.name,
+      agents: Array.from(declarations.values(), (declaration) => ({
+        name: declaration.name,
+        model: {
+          provider: declaration.model.provider,
+          modelId: declaration.model.modelId,
+        },
+        tools: Object.keys(declaration.tools ?? {}).sort(),
+        subagents: (declaration.subagents ?? []).map(({ name }) => name),
+      })),
+    };
     this.#executor = new AgentTurnExecutor({
       store: options.store,
       streams,
@@ -160,6 +197,16 @@ export class AgentRuntime {
       approvals,
       multiAgentV2,
     });
+  }
+
+  async createSession(conversation: ConversationId): Promise<void> {
+    await this.#controlPlane.resolve(conversation);
+  }
+
+  async sessionExists(conversation: ConversationId): Promise<boolean> {
+    const chat = await this.#store.getChat(conversation.chatId);
+    if (!chat || chat.userId !== conversation.userId) return false;
+    return (await this.#directory.load(conversation))?.path.isRoot ?? false;
   }
 
   async enqueue(conversation: ConversationId, turn: TurnInput) {
