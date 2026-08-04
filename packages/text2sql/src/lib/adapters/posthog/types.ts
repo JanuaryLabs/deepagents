@@ -1,8 +1,14 @@
 export type PostHogPropertyDefinitionType =
   'event' | 'person' | 'session' | 'group';
 
+export type PostHogQueryValues = Record<string, unknown>;
+
 export type PostHogQueryNode =
-  | { kind: 'HogQLQuery'; query: string }
+  | {
+      kind: 'HogQLQuery';
+      query: string;
+      values?: PostHogQueryValues;
+    }
   | { kind: 'HogQLMetadata'; language: 'hogQL'; query: string }
   | { kind: 'DatabaseSchemaQuery' };
 

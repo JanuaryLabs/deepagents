@@ -479,6 +479,10 @@ export abstract class Adapter {
   }
 
   async execute(sql: string): Promise<any[]> {
+    return this.executeImpl(await this.enforceExecutionPolicy(sql));
+  }
+
+  protected async enforceExecutionPolicy(sql: string): Promise<string> {
     const decoded = this.#decodeShellEscapes(sql);
     const violation = await this.#analyzePolicy(decoded);
     if (violation?.kind === 'read-only') {
@@ -487,7 +491,7 @@ export abstract class Adapter {
     if (violation?.kind === 'scope') {
       throw new SQLScopeError(violation.payload);
     }
-    return this.executeImpl(decoded);
+    return decoded;
   }
 
   abstract executeImpl(sql: string): Promise<any[]> | any[];

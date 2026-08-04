@@ -114,6 +114,51 @@ it('uses the native HTTP transport with rotating bearer tokens and local paginat
   }
 });
 
+it('sends named HogQL values unchanged in the query request body', async () => {
+  const bodies: unknown[] = [];
+  const server = await startServer(async (request, response) => {
+    const body = await readJsonBody(request);
+    bodies.push(body);
+    const query = (body as PostHogQueryRequest).query;
+    json(
+      response,
+      query.kind === 'HogQLMetadata'
+        ? validMetadata()
+        : { results: [[1]], columns: ['value'] },
+    );
+  });
+
+  try {
+    const adapter = new PostHog({
+      transport: createPostHogTransport({
+        host: server.origin,
+        projectId: 42,
+        getAccessToken: () => 'token',
+      }),
+    });
+    const sql = 'SELECT {needle} AS value';
+    const needle = "x' OR 1 = 1 --";
+
+    assert.deepEqual(await adapter.execute(sql, { needle }), [{ value: 1 }]);
+    assert.deepEqual(bodies, [
+      {
+        query: { kind: 'HogQLMetadata', language: 'hogQL', query: sql },
+        name: 'deepagents_text2sql_validate',
+      },
+      {
+        query: {
+          kind: 'HogQLQuery',
+          query: sql,
+          values: { needle },
+        },
+        name: 'deepagents_text2sql_execute',
+      },
+    ]);
+  } finally {
+    await server.close();
+  }
+});
+
 it('reports API failures without leaking the bearer token', async () => {
   const server = await startServer(async (_request, response) => {
     response.setHeader('retry-after', '2');
@@ -352,6 +397,37 @@ it('validates HogQL scope server-side and normalizes query rows', async () => {
   );
   assert.match(missingMetadata ?? '', /SQL_SCOPE_PARSE_ERROR/);
   assert.match(missingMetadata ?? '', /table_names/);
+});
+
+it('rejects out-of-scope parameterized HogQL before execution', async () => {
+  const queryKinds: string[] = [];
+  const transport: PostHogTransport = {
+    async query<T>(request: PostHogQueryRequest): Promise<T> {
+      queryKinds.push(request.query.kind);
+      if (request.query.kind === 'HogQLMetadata') {
+        return validMetadata(['secrets']) as T;
+      }
+      if (request.query.kind === 'DatabaseSchemaQuery') {
+        return schemaFixture() as T;
+      }
+      return { columns: [], results: [] } as T;
+    },
+    async listEventDefinitions() {
+      return [];
+    },
+    async listPropertyDefinitions() {
+      return [];
+    },
+  };
+  const adapter = new PostHog({ transport, grounding: [schema()] });
+
+  await assert.rejects(
+    adapter.execute('SELECT * FROM secrets WHERE value = {needle}', {
+      needle: "x' OR 1 = 1 --",
+    }),
+    { name: 'SQLScopeError' },
+  );
+  assert.deepEqual(queryKinds, ['HogQLMetadata', 'DatabaseSchemaQuery']);
 });
 
 it('propagates operational metadata failures', async () => {

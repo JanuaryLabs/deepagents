@@ -3,6 +3,7 @@ import { PostHogSqlPolicyAnalyzer } from './posthog.sql-policy.ts';
 import type {
   PostHogQueryRequest,
   PostHogQueryResponse,
+  PostHogQueryValues,
   PostHogTransport,
 } from './types.ts';
 
@@ -34,6 +35,17 @@ export class PostHog extends Adapter {
     super(new PostHogSqlPolicyAnalyzer(options.transport));
     this.transport = options.transport;
     this.grounding = options.grounding ?? [];
+  }
+
+  override async execute(
+    sql: string,
+    values?: PostHogQueryValues,
+  ): Promise<Record<string, unknown>[]> {
+    return this.#execute(
+      await this.enforceExecutionPolicy(sql),
+      'deepagents_text2sql_execute',
+      values,
+    );
   }
 
   override async executeImpl(sql: string): Promise<Record<string, unknown>[]> {
@@ -78,9 +90,14 @@ export class PostHog extends Adapter {
   async #execute(
     sql: string,
     name: string,
+    values?: PostHogQueryValues,
   ): Promise<Record<string, unknown>[]> {
     const response = await this.transport.query<PostHogQueryResponse>({
-      query: { kind: 'HogQLQuery', query: sql },
+      query: {
+        kind: 'HogQLQuery',
+        query: sql,
+        ...(values === undefined ? {} : { values }),
+      },
       name,
     });
     return rowsFromResponse(response);
