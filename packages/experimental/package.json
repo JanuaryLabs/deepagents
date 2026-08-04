@@ -1,6 +1,6 @@
 {
   "name": "@deepagents/experimental",
-  "version": "6.1.1",
+  "version": "6.1.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -43,7 +43,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@deepagents/context": "6.1.1",
+    "@deepagents/context": "6.1.2",
     "ai": "^7.0.30",
     "fast-content-type-parse": "^3.0.0",
     "hono": "^4.12.33",
