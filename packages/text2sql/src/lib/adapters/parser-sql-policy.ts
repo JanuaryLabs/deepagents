@@ -2,6 +2,7 @@ import nodeSqlParser from 'node-sql-parser';
 
 import type { SQLScopeErrorPayload } from '../agents/exceptions.ts';
 import { buildScopeParseErrorPayload } from '../sql-scope-error.ts';
+import { recoverPostgresTypedLiteralParserGap } from './postgres/postgres-parser-workaround.ts';
 import type {
   SqlPolicyAnalyzer,
   SqlPolicyContext,
@@ -75,7 +76,7 @@ export abstract class ParserSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
   #readParsedStatements(sql: string): AstLike[] | null {
     for (const dialect of this.dialects) {
       try {
-        return parseStatements(sql, dialect);
+        return this.#parseStatements(sql, dialect);
       } catch {
         // Parser coverage failures are handled by scope/adapter validation later.
       }
@@ -93,7 +94,7 @@ export abstract class ParserSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
 
     for (const dialect of this.dialects) {
       try {
-        references = extractBaseEntityReferences(sql, dialect);
+        references = extractBaseEntityReferences(this.#parseAst(sql, dialect));
         break;
       } catch (error) {
         lastDialect = dialect;
@@ -139,10 +140,32 @@ export abstract class ParserSqlPolicyAnalyzer implements SqlPolicyAnalyzer {
       ? null
       : buildOutOfScopePayload(sql, outOfScope, [...allowedEntities]);
   }
+
+  #parseStatements(sql: string, dialect: ParserDialect): AstLike[] {
+    return parseStatements(this.#parseAst(sql, dialect));
+  }
+
+  #parseAst(sql: string, dialect: ParserDialect): unknown {
+    let parserSql = sql;
+    const attempted = new Set([sql]);
+
+    while (true) {
+      try {
+        return parser.astify(parserSql, { database: dialect });
+      } catch (error) {
+        const recovered =
+          dialect === 'postgresql'
+            ? recoverPostgresTypedLiteralParserGap(parserSql, error)
+            : null;
+        if (!recovered || attempted.has(recovered)) throw error;
+        attempted.add(recovered);
+        parserSql = recovered;
+      }
+    }
+  }
 }
 
-function parseStatements(sql: string, dialect: ParserDialect): AstLike[] {
-  const ast = parser.astify(sql, { database: dialect });
+function parseStatements(ast: unknown): AstLike[] {
   const statements: unknown[] = Array.isArray(ast) ? ast : [ast];
   return statements.filter(isAstLike);
 }
@@ -237,11 +260,7 @@ function appendIdentifierParts(parts: string[], value: string): void {
   );
 }
 
-function extractBaseEntityReferences(
-  sql: string,
-  dialect: ParserDialect,
-): SqlEntityReference[] {
-  const ast = parser.astify(sql, { database: dialect });
+function extractBaseEntityReferences(ast: unknown): SqlEntityReference[] {
   const state: ScopeVisitState = {
     cteNames: new Set<string>(),
     references: new Map<string, SqlEntityReference>(),

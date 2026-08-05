@@ -335,6 +335,86 @@ describe('dialect SQL policy analyzers', () => {
   });
 });
 
+describe('PostgreSQL typed literals', () => {
+  const analyzer = new PostgresSqlPolicyAnalyzer();
+  const analyze = (sql: string, allowedEntities: string[] = []) =>
+    analyzer.analyze(sql, {
+      async resolveAllowedEntities() {
+        return allowedEntities;
+      },
+    });
+
+  it('accepts a TIMESTAMPTZ literal without entity references', async () => {
+    assert.strictEqual(await analyze("SELECT TIMESTAMPTZ 'epoch'"), null);
+  });
+
+  it('keeps TIMESTAMPTZ queries grounded to allowed relations', async () => {
+    assert.strictEqual(
+      await analyze("SELECT TIMESTAMPTZ 'epoch' FROM allowed_table", [
+        'allowed_table',
+      ]),
+      null,
+    );
+  });
+
+  it('rejects out-of-scope relations after recovering a TIMESTAMPTZ literal', async () => {
+    const sql = "SELECT TIMESTAMPTZ 'epoch' FROM forbidden_table";
+    const violation = await analyze(sql, ['allowed_table']);
+
+    assert.strictEqual(violation?.kind, 'scope');
+    if (violation?.kind !== 'scope') return;
+    assert.strictEqual(violation.payload.error_type, 'OUT_OF_SCOPE');
+    assert.deepStrictEqual(violation.payload.referenced_entities, [
+      'forbidden_table',
+    ]);
+    assert.strictEqual(violation.payload.sql_attempted, sql);
+  });
+
+  it('keeps invalid SQL and unsupported types fail closed', async () => {
+    for (const sql of [
+      "SELECT TIMESTAMPTZ 'epoch' FROM",
+      "SELECT custom_type 'value'",
+    ]) {
+      const violation = await analyze(sql, ['allowed_table']);
+      assert.strictEqual(violation?.kind, 'scope', sql);
+      if (violation?.kind !== 'scope') continue;
+      assert.strictEqual(violation.payload.error_type, 'SQL_SCOPE_PARSE_ERROR');
+      assert.strictEqual(violation.payload.sql_attempted, sql);
+    }
+  });
+
+  it('does not rewrite typed-literal text inside lexical boundaries', async () => {
+    const sql = String.raw`SELECT
+      'TIMESTAMPTZ ''epoch''' AS string_text,
+      E'TIMESTAMPTZ \'epoch\'',
+      $tag$TIMESTAMPTZ 'epoch'$tag$ AS dollar_text,
+      "TIMESTAMPTZ 'epoch'" AS quoted_identifier,
+      TiMeStAmPtZ 'epoch'
+      -- TIMESTAMPTZ 'epoch'
+      /* TIMESTAMPTZ 'epoch' */
+      FROM allowed_table`;
+    assert.strictEqual(await analyze(sql, ['allowed_table']), null);
+  });
+
+  it('accepts PostgreSQL general typed constants that the parser rejects', async () => {
+    const queries = [
+      "SELECT TIMETZ '04:05:06+01'",
+      "SELECT UUID 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'",
+      `SELECT JSONB '{"ok":true}'`,
+      "SELECT pg_catalog.timestamptz 'epoch'",
+      'SELECT UUID $$a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11$$',
+      "SELECT TIMESTAMPTZ 'epoch', UUID 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'",
+      "SELECT TIME(3) WITH TIME ZONE '04:05:06.123+01'",
+      "SELECT BIT VARYING '1001'",
+      "SELECT DOUBLE PRECISION '1.23'",
+    ];
+
+    for (const sql of queries) {
+      assert.strictEqual(await analyze(sql), null, sql);
+    }
+  });
+});
+
 describe('SQL policy public surface', () => {
   it('keeps implementation and concrete analyzers off the root export', () => {
     const internalOrDialectExports = [
