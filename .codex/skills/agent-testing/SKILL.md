@@ -1,6 +1,13 @@
 ---
 name: agent-testing
-description: Test code built on AI SDK v7 using its real `ai/test` utilities and V4 provider protocol. Use whenever writing, fixing, reviewing, or migrating tests around AI SDK agents, `generateText`, `streamText`, structured output, tools, embeddings, image/speech/transcription/reranking/video models, provider registries, or simulated streams. Trigger for phrases such as "test my agent", "mock the model", "fake the stream", "simulate a tool call", "test retry logic", "inspect the system prompt", "my streaming test hangs", or "empty result.text", even when the user does not explicitly name AI SDK. This skill is v7-only: remove V3 fixtures and custom helpers that duplicate `ai/test`.
+description: >-
+  Test code built on AI SDK v7 using its real `ai/test` utilities and V4
+  provider protocol. Use when writing, fixing, reviewing, or migrating tests
+  around AI SDK agents, generation, streaming, structured output, tools,
+  provider registries, model modalities, or simulated streams. Trigger for
+  requests to test an agent, mock a model, fake a stream, simulate a tool call,
+  test retry logic, inspect prompts, or debug hanging streams and empty output.
+  Remove V3 fixtures and custom helpers that duplicate public AI SDK APIs.
 ---
 
 # Test AI SDK v7 agents
@@ -93,9 +100,9 @@ See [references/stream-chunks.md](references/stream-chunks.md) for typed V4 chun
 
 Use TypeScript's `satisfies LanguageModelV4StreamPart[]` for compile-time field validation. When debugging chunks extracted as JSON, use [scripts/validate-chunks.mjs](scripts/validate-chunks.mjs) for lifecycle and ordering checks that the SDK silently ignores. Keep this script: v7 has stream construction and collection helpers, but no public semantic chunk validator.
 
-## Complete `ai/test` v7 catalog
+## Complete public test API catalog
 
-Read [references/test-api.md](references/test-api.md) when the task is not a basic language-model test. It covers:
+Read [references/test-api.md](references/test-api.md) when the task is not a basic language-model test or it consumes SDK streams/messages. It covers:
 
 - `MockLanguageModelV4`, `MockEmbeddingModelV4`, `MockImageModelV4`
 - `MockSpeechModelV4`, `MockTranscriptionModelV4`, `MockRerankingModelV4`, `MockVideoModelV4`
@@ -103,6 +110,8 @@ Read [references/test-api.md](references/test-api.md) when the task is not a bas
 - `mockValues`, `mockId`
 - `convertArrayToAsyncIterable`, `convertArrayToReadableStream`, `convertReadableStreamToArray`
 - `simulateReadableStream` from `ai`
+- `readUIMessageStream`, `isTextUIPart`, `toTextStream`, and `consumeStream` from `ai`, including their incompatible chunk and error boundaries
+- `timebox` from `@deepagents/test` for status, conversation, and other asynchronous polling
 
 ## Other references
 

@@ -1,6 +1,6 @@
 # AI SDK v7 test API
 
-Source of truth: `ai/test` exports and implementation, plus the V4 interfaces in `@ai-sdk/provider`.
+Source of truth: public `ai` and `ai/test` exports and implementations, plus the V4 interfaces in `@ai-sdk/provider`.
 
 ## Utility exports
 
@@ -21,6 +21,30 @@ import {
 - `convertArrayToReadableStream(values)` creates an immediate readable stream.
 - `convertReadableStreamToArray(stream)` drains and collects a stream without a local reader loop.
 - `simulateReadableStream({ chunks, initialDelayInMs, chunkDelayInMs })` simulates delayed or immediate chunks. Import it from `ai`; the `ai/test` export is deprecated.
+
+## Stream and UI-message exports
+
+```ts
+import {
+  consumeStream,
+  isTextUIPart,
+  readUIMessageStream,
+  toTextStream,
+} from 'ai';
+```
+
+- `readUIMessageStream({ stream, message, onError, terminateOnError })` reconstructs cumulative `UIMessage` snapshots from a `ReadableStream<UIMessageChunk>`. Keep the last yielded snapshot to inspect the final message. `terminateOnError` defaults to `false`; set it when processing errors must reject the consumer.
+- `isTextUIPart(part)` is the public type guard for narrowing a `UIMessagePart` before reading `part.text`.
+- `toTextStream({ stream })` accepts `ReadableStream<TextStreamPart>` and emits each text delta's `text`. It does not accept a UI-message stream, whose `text-delta` chunks carry `delta` instead.
+- `consumeStream({ stream, onError })` drains without collecting. It catches reader errors and calls `onError`; with no callback it resolves after the error. Do not use it when the test must inspect content or observe stream rejection.
+
+## Repository polling helper
+
+```ts
+import { timebox } from '@deepagents/test';
+```
+
+Use `timebox(probe, options)` for asynchronous status, conversation, or readiness polling. The probe throws until ready and its successful value becomes the result. Set `maxRetryTime` and `minTimeout` when the test owns a specific timeout or polling cadence. AI SDK does not provide status or conversation polling.
 
 ## V4 mock models
 
@@ -56,6 +80,7 @@ node -e "import('ai/test').then(m => console.log(Object.keys(m).sort()))"
 
 Then inspect:
 
+- `node_modules/ai/dist/index.d.ts` and `node_modules/ai/dist/index.js` for public stream/message helpers and their runtime error behavior.
 - `node_modules/ai/dist/test/index.d.ts` for the supported constructor surface.
 - `node_modules/ai/dist/test/index.js` when sequencing or capture behavior matters.
 - `node_modules/@ai-sdk/provider/dist/index.d.ts` for exact V4 result and chunk shapes.

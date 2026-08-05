@@ -1,6 +1,6 @@
 # Regression audit prompt
 
-Audit `.claude/skills/agent-testing` after its AI SDK v7 migration.
+Audit `.codex/skills/agent-testing` after its AI SDK v7 migration.
 
 Treat the installed packages—not memory, old documentation, or package manifests—as the source of truth. Inspect:
 

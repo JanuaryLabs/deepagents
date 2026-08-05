@@ -3,7 +3,10 @@ import { PGlite } from '@electric-sql/pglite';
 import {
   type ToolSet,
   type UIMessage,
+  type UIMessageChunk,
+  isTextUIPart,
   isToolUIPart,
+  readUIMessageStream,
   simulateReadableStream,
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -41,7 +44,7 @@ import {
   defineSandbox,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
-import { settleWithin } from '@deepagents/test';
+import { settleWithin, timebox } from '@deepagents/test';
 
 const usage = {
   inputTokens: {
@@ -408,17 +411,12 @@ async function harness(
   };
 }
 
-async function collectText(stream: ReadableStream) {
-  let text = '';
-  const types: string[] = [];
-  for await (const part of stream as ReadableStream<{
-    type: string;
-    delta?: string;
-  }>) {
-    types.push(part.type);
-    if (part.type === 'text-delta') text += part.delta ?? '';
+async function collectText(stream: ReadableStream<UIMessageChunk>) {
+  let message: UIMessage | undefined;
+  for await (const streamedMessage of readUIMessageStream({ stream })) {
+    message = streamedMessage;
   }
-  return { text, types };
+  return messageText(message);
 }
 
 async function waitForStatus(
@@ -427,19 +425,20 @@ async function waitForStatus(
   accept: string[],
   timeoutMs = 10_000,
 ) {
-  const deadline = performance.now() + timeoutMs;
-  while (performance.now() < deadline) {
-    const status = await streamStore.getStreamStatus(id);
-    if (status && accept.includes(status)) return status;
-    await sleep(25);
-  }
-  throw new Error(`timed out waiting for ${accept.join('/')} on ${id}`);
+  return timebox(
+    async () => {
+      const status = await streamStore.getStreamStatus(id);
+      if (status && accept.includes(status)) return status;
+      throw new Error(`timed out waiting for ${accept.join('/')} on ${id}`);
+    },
+    { maxRetryTime: timeoutMs, minTimeout: 25 },
+  );
 }
 
 function messageText(message: UIMessage | undefined): string {
   return (
     message?.parts
-      .filter((part) => part.type === 'text')
+      .filter(isTextUIPart)
       .map((part) => part.text)
       .join('') ?? ''
   );
@@ -452,13 +451,14 @@ async function waitForConversation(
   label: string,
   timeoutMs = 10_000,
 ): Promise<UIMessage[]> {
-  const deadline = performance.now() + timeoutMs;
-  while (performance.now() < deadline) {
-    const messages = await runtime.observe(conversation).engine.getMessages();
-    if (predicate(messages)) return messages;
-    await sleep(25);
-  }
-  throw new Error(`timed out waiting for ${label}`);
+  return timebox(
+    async () => {
+      const messages = await runtime.observe(conversation).engine.getMessages();
+      if (predicate(messages)) return messages;
+      throw new Error(`timed out waiting for ${label}`);
+    },
+    { maxRetryTime: timeoutMs, minTimeout: 25 },
+  );
 }
 
 async function waitForText(
@@ -531,7 +531,7 @@ describe('zukhruf runtime — setup failure durability', () => {
     void worker;
     const conversation = { chatId: 'sandbox-setup-failure', userId: 'u1' };
     const first = await h.runtime.enqueue(conversation, turn('first'));
-    assert.equal((await collectText(first.stream)).text, 'reply:first');
+    assert.equal(await collectText(first.stream), 'reply:first');
 
     const failed = await h.runtime.enqueue(conversation, turn('second'));
     await waitForStatus(h.streamStore, failed.id, ['failed']);
@@ -660,13 +660,13 @@ describe('zukhruf runtime — background executor', () => {
       conversation,
       turn('forecast next quarter'),
     );
-    assert.equal((await collectText(first.stream)).text, 'ok');
+    assert.equal(await collectText(first.stream), 'ok');
 
     const second = await h.runtime.enqueue(
       conversation,
       turn('forecast the following quarter'),
     );
-    assert.equal((await collectText(second.stream)).text, 'ok');
+    assert.equal(await collectText(second.stream), 'ok');
 
     assert.equal(modelPrompts.length, 2);
     for (const prompt of modelPrompts) {
@@ -734,7 +734,7 @@ describe('zukhruf runtime — background executor', () => {
     const conversation = { chatId: 'preinstalled-skills', userId: 'u1' };
     for (const input of ['use the skill', 'use it again']) {
       const result = await h.runtime.enqueue(conversation, turn(input));
-      assert.equal((await collectText(result.stream)).text, 'ok');
+      assert.equal(await collectText(result.stream), 'ok');
     }
 
     assert.equal(discoveryCount, 1);
@@ -782,12 +782,12 @@ describe('zukhruf runtime — background executor', () => {
       turn('hi'),
     );
 
-    assert.equal((await collectText(result.stream)).text, 'ok');
+    assert.equal(await collectText(result.stream), 'ok');
     const second = await h.runtime.enqueue(
       { chatId: 'sandbox-instructions', userId: 'u1' },
       turn('again'),
     );
-    assert.equal((await collectText(second.stream)).text, 'ok');
+    assert.equal(await collectText(second.stream), 'ok');
     assert.match(modelPrompts[0], /sandbox-1/);
     assert.match(modelPrompts[1], /sandbox-2/);
   });
@@ -819,7 +819,7 @@ describe('zukhruf runtime — background executor', () => {
 
     for (const input of ['first', 'second']) {
       const result = await h.runtime.enqueue(conversation, turn(input));
-      assert.equal((await collectText(result.stream)).text, 'ok');
+      assert.equal(await collectText(result.stream), 'ok');
     }
 
     assert.equal(modelInputs.length, 2);
@@ -841,7 +841,7 @@ describe('zukhruf runtime — background executor', () => {
 
     const resumed = await h.runtime.observe(conversation).resume();
     assert.ok(resumed, 'resume() should return the in-flight/finished turn');
-    const { text } = await collectText(resumed);
+    const text = await collectText(resumed);
     assert.equal(text, 'reply:hi');
 
     assert.equal(await h.streamStore.getStreamStatus(id), 'completed');
@@ -906,8 +906,8 @@ describe('zukhruf runtime — background executor', () => {
       collectText(first.stream),
       collectText(second.stream),
     ]);
-    assert.equal(a.text, 'reply:one');
-    assert.equal(b.text, 'reply:two');
+    assert.equal(a, 'reply:one');
+    assert.equal(b, 'reply:two');
     assert.equal(track.maxActive, 1, 'never two active turns in one chat');
     assert.deepStrictEqual(track.calls, ['one', 'two']);
 
@@ -941,11 +941,11 @@ describe('zukhruf runtime — background executor', () => {
       collectText(opening.stream),
     ]);
     assert.equal(
-      a.text,
+      a,
       'opened reply:gate-wait',
       'first turn finished only after the second started — chats overlap',
     );
-    assert.equal(b.text, 'reply:gate-open');
+    assert.equal(b, 'reply:gate-open');
   });
 
   it('cancel while queued skips execution entirely', async () => {
@@ -1005,15 +1005,15 @@ describe('zukhruf runtime — background executor', () => {
       collectText(first.stream),
       collectText(duplicate.stream),
     ]);
-    assert.equal(a.text, 'reply:once');
-    assert.equal(b.text, 'reply:once');
+    assert.equal(a, 'reply:once');
+    assert.equal(b, 'reply:once');
     assert.deepStrictEqual(track.calls, ['once'], 'model ran exactly once');
 
     const resubmit = await h.runtime.enqueue(conversation, {
       id: ask.id,
       input: 'a different input under the same id',
     });
-    const { text } = await collectText(resubmit.stream);
+    const text = await collectText(resubmit.stream);
     assert.equal(text, 'reply:once', 'post-completion resubmit replays');
     assert.deepStrictEqual(
       track.calls,
@@ -1072,7 +1072,7 @@ describe('zukhruf runtime — background executor', () => {
       conversation,
       turn('send it'),
     );
-    const { text } = await collectText(stream);
+    const text = await collectText(stream);
 
     assert.equal(text, 'working ');
     assert.equal(await h.streamStore.getStreamStatus(id), 'completed');
@@ -1304,8 +1304,8 @@ describe('zukhruf runtime — background executor', () => {
       collectText(second.stream),
       collectText(third.stream),
     ]);
-    assert.equal(b.text, 'reply:two');
-    assert.equal(c.text, 'reply:three');
+    assert.equal(b, 'reply:two');
+    assert.equal(c, 'reply:three');
     assert.deepStrictEqual(
       track.calls,
       ['send it', 'send it', 'two', 'three'],
@@ -1494,9 +1494,9 @@ describe('zukhruf runtime — background executor', () => {
       collectText(third.stream),
       collectText(fourth.stream),
     ]);
-    assert.equal(b.text, 'reply:two');
-    assert.equal(c.text, 'reply:three');
-    assert.equal(d.text, 'reply:four');
+    assert.equal(b, 'reply:two');
+    assert.equal(c, 'reply:three');
+    assert.equal(d, 'reply:four');
     assert.deepStrictEqual(
       track.calls,
       ['send it', 'send it', 'two', 'three', 'four'],
@@ -1754,7 +1754,7 @@ describe('zukhruf runtime — background executor', () => {
     const next = await h.runtime.enqueue(conversation, turn('after'));
 
     await waitForStatus(h.streamStore, crashed.id, ['failed']);
-    const { text } = await collectText(next.stream);
+    const text = await collectText(next.stream);
     assert.equal(text, 'reply:after', 'chat unblocked after the failure');
     assert.equal(await h.streamStore.getStreamStatus(crashed.id), 'failed');
   });
