@@ -27,6 +27,8 @@ import {
   createBashTool,
   createVirtualSandbox,
   fragment,
+  once,
+  reminder,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
@@ -35,6 +37,7 @@ import {
   PgBossTurnQueue,
   SqliteMailboxStore,
   type TurnRef,
+  defineAgent,
   defineSandbox,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
@@ -787,6 +790,41 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal((await collectText(second.stream)).text, 'ok');
     assert.match(modelPrompts[0], /sandbox-1/);
     assert.match(modelPrompts[1], /sandbox-2/);
+  });
+
+  it('folds a declaration user reminder into the first model prompt only', async () => {
+    const modelInputs: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        modelInputs.push(lastUserText(prompt));
+        return { stream: buildStream(['ok'], 0) };
+      },
+    });
+    const agentDeclaration = defineAgent({
+      ...declaration(model),
+      instructions: [
+        reminder('DECLARATION_REMINDER', {
+          target: 'user',
+          when: once('declaration-reminder'),
+        }),
+      ],
+    });
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: 'declaration-reminder', userId: 'u1' };
+
+    for (const input of ['first', 'second']) {
+      const result = await h.runtime.enqueue(conversation, turn(input));
+      assert.equal((await collectText(result.stream)).text, 'ok');
+    }
+
+    assert.equal(modelInputs.length, 2);
+    assert.match(modelInputs[0], /DECLARATION_REMINDER/);
+    assert.doesNotMatch(modelInputs[1], /DECLARATION_REMINDER/);
   });
 
   it('a detached reader reconnects via resume() and receives the full turn', async () => {

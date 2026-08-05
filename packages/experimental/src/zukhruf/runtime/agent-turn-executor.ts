@@ -107,7 +107,10 @@ export class AgentTurnExecutor {
     const usageHint = thread.path.isRoot
       ? this.#multiAgentV2.rootAgentUsageHintText
       : this.#multiAgentV2.subagentUsageHintText;
-    const engine = this.#engineFor(turn);
+    const engine = this.#engineFor(turn).set(
+      ...declaration.instructions,
+      ...(usageHint === undefined ? [] : [role(usageHint)]),
+    );
 
     if (turn.kind === 'ask' || turn.kind === 'mailbox') {
       const head = (await engine.getMessages()).at(-1);
@@ -138,11 +141,7 @@ export class AgentTurnExecutor {
       userId: turn.userId,
     });
     const agentSkills = await this.#skillsFor(turn, sandbox, signal);
-    engine.set(
-      ...declaration.instructions,
-      ...agentSkills.fragments,
-      ...(usageHint === undefined ? [] : [role(usageHint)]),
-    );
+    engine.set(...agentSkills.fragments);
 
     if (await this.#projectSkippedTerminalTurn(turn)) return;
     if (!(await this.#streams.claim(turn.streamId))) {
