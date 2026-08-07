@@ -30,7 +30,8 @@ import {
 
 The public experimental surface contains the pure declaration layer
 (`defineAgent` / `defineInstructions` / `defineTool` / `defineSandbox`),
-`AgentRuntime`, the domain values, and the store/queue ports and adapters.
+`AgentRuntime`, the Hono session protocol helper (`zukhruf(runtime)`), the
+domain values, and the store/queue ports and adapters.
 Declarations have a types-only dependency on `@deepagents/context`.
 `AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval,
 denial, worker lifecycle, and model-facing collaboration for declared
@@ -47,6 +48,11 @@ and process restarts reconstruct the same prompt fragment without rediscovery.
 Skill bodies, scripts, references, and assets remain in the sandbox. Providers
 may preinstall or mount them, or opt into the existing `uploadDirectory` support
 when creating the sandbox.
+
+`zukhruf(runtime)` mounts the HTTP session protocol under `/zukhruf/v1` for
+authenticated hosts: create or continue sessions with idempotent `POST` calls,
+cancel the active session turn, stream durable UI-message output, and read
+runtime info plus health checks.
 
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete

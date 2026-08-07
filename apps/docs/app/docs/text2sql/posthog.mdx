@@ -113,6 +113,12 @@ PostHog's Query API returns at most 100 rows by default and up to 50,000 with
 an explicit `LIMIT`. It does not support programmatic `OFFSET`. Prefer bounded
 time ranges and use this adapter for interactive analytics.
 
+Direct `adapter.execute(sql, values)` calls forward named HogQL values unchanged
+on the `HogQLQuery` request after policy validation. Keep generated model SQL
+literal-safe by default; use bound values for application-owned filters you add
+outside the model loop. If a shell or CLI escaped a dollar-prefixed PostHog
+property as `\$`, the adapter decodes it before both validation and execution.
+
 ## Boundaries
 
 - **Implemented:** flexible HogQL questions over PostHog's Query API.

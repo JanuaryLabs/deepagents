@@ -159,6 +159,44 @@ it('sends named HogQL values unchanged in the query request body', async () => {
   }
 });
 
+it('decodes shell-escaped dollar property names before validation and execution', async () => {
+  const queries: string[] = [];
+  const transport: PostHogTransport = {
+    async query<T>(request: PostHogQueryRequest): Promise<T> {
+      if (
+        request.query.kind === 'HogQLMetadata' ||
+        request.query.kind === 'HogQLQuery'
+      ) {
+        queries.push(request.query.query);
+      }
+      if (request.query.kind === 'DatabaseSchemaQuery') {
+        return schemaFixture() as T;
+      }
+      return (
+        request.query.kind === 'HogQLMetadata'
+          ? validMetadata(['events'])
+          : { columns: [], results: [] }
+      ) as T;
+    },
+    async listEventDefinitions() {
+      return [];
+    },
+    async listPropertyDefinitions() {
+      return [];
+    },
+  };
+  const adapter = new PostHog({ transport, grounding: [schema()] });
+
+  await adapter.execute(
+    "SELECT properties['\\$device_type'] AS device_type FROM events",
+  );
+
+  assert.deepEqual(queries, [
+    "SELECT properties['$device_type'] AS device_type FROM events",
+    "SELECT properties['$device_type'] AS device_type FROM events",
+  ]);
+});
+
 it('reports API failures without leaking the bearer token', async () => {
   const server = await startServer(async (_request, response) => {
     response.setHeader('retry-after', '2');

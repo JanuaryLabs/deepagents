@@ -452,7 +452,7 @@ export abstract class Adapter {
     return sql
       .replace(/\\n/g, '\n')
       .replace(/\\t/g, '\t')
-      .replace(/\\([().*])/g, '$1')
+      .replace(/\\([().*$])/g, '$1')
       .replace(/\\(?=$)/gm, '');
   }
 

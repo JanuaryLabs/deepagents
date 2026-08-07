@@ -300,6 +300,10 @@ compute/memory limits.
 The PostHog adapter does not pass HogQL through the local SQL parser. It asks
 PostHog to parse each query with `HogQLMetadata`, checks the returned base-table
 names against grounded schema, and only then sends a `HogQLQuery` for execution.
+Direct `adapter.execute(sql, values)` calls forward named HogQL values unchanged
+after validation, which is useful for application-owned filters added outside
+the model loop. Shell-escaped dollar-prefixed PostHog properties such as
+`properties['\$device_type']` are decoded before validation and execution.
 
 ## Fragments
 
