@@ -20,6 +20,8 @@ import {
   everyNToolCalls,
   isSyntheticReminderMessage,
   plan,
+  socraticPlan,
+  socraticPrompting,
 } from '@deepagents/context';
 
 const testUsage = {
@@ -132,6 +134,226 @@ describe('plan instructions', () => {
     assert.doesNotMatch(
       systemPrompt,
       /Is the current plan still valid given the latest evidence\?/,
+    );
+    assert.doesNotMatch(systemPrompt, /<socratic_inquiry>/);
+  });
+
+  it('renders the shared Socratic workflow and durable inquiry contract', async () => {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'socratic-plan-instructions',
+      userId: 'user',
+    }).set(socraticPlan.instructions());
+
+    const { systemPrompt } = await context.resolve({
+      renderer: new XmlRenderer(),
+    });
+
+    assert.match(systemPrompt, /<socratic_inquiry>/);
+    assert.match(systemPrompt, /Interrogate the domain/);
+    assert.match(systemPrompt, /Apply to the specific case/);
+    assert.match(systemPrompt, /Bridge and execute/);
+    assert.match(systemPrompt, /Applying to this task:/);
+    assert.match(systemPrompt, /Match inquiry depth to task complexity/);
+    assert.doesNotMatch(systemPrompt, /kind: &quot;socratic&quot;/);
+    assert.match(systemPrompt, /question, basis, source, answer/);
+    assert.match(systemPrompt, /inquiries:/);
+    assert.match(
+      systemPrompt,
+      /The only top-level keys are revision, objective, successCriteria, constraints, assumptions, inquiries, and lastReview/,
+    );
+    assert.doesNotMatch(systemPrompt, /- answer:/);
+    assert.match(systemPrompt, /- constraints:/);
+    assert.match(systemPrompt, /- assumptions:/);
+    assert.doesNotMatch(systemPrompt, /constraints and assumptions:/);
+    assert.match(
+      systemPrompt,
+      /Use basis values explicit_requirement, discovered_constraint, inference, or assumption/,
+    );
+    assert.match(
+      systemPrompt,
+      /nextQuestionId records the inquiry selected by that review/,
+    );
+    assert.match(systemPrompt, /Never store an answer as a bare string/);
+    assert.match(
+      systemPrompt,
+      /write the initial inquiry before substantive investigation/,
+    );
+    assert.match(
+      systemPrompt,
+      /Do not return a final answer until lastReview records a complete decision at the current revision/,
+    );
+    assert.match(systemPrompt, /Do not precompute every follow-up question/);
+  });
+
+  it('updates the public Socratic fragment from the same workflow', async () => {
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'socratic-prompting',
+      userId: 'user',
+    }).set(...socraticPrompting());
+
+    const { systemPrompt } = await context.resolve({
+      renderer: new XmlRenderer(),
+    });
+
+    assert.match(systemPrompt, /Skip Socratic inquiry for mechanical tasks/);
+    assert.match(systemPrompt, /Interrogate the domain/);
+    assert.match(systemPrompt, /Apply to the specific case/);
+    assert.match(systemPrompt, /Bridge and execute/);
+    assert.match(systemPrompt, /Applying to this task:/);
+  });
+
+  it('recites and validates a durable Socratic question-and-answer plan', async () => {
+    await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const sandbox = await createBashTool({ sandbox: backend });
+    const answer = {
+      text: 'The existing plan file and reminder can be reused.',
+      basis: 'discovered_constraint',
+      source: 'plan source inspection',
+      evidence: [
+        {
+          summary: 'plan.review reads and validates the sandbox plan file',
+          source: 'packages/context/src/lib/fragments/socratic-plan.ts',
+        },
+      ],
+    };
+    const socraticPlanState = {
+      revision: 1,
+      objective: {
+        question: 'How can planning become a durable Socratic inquiry?',
+        basis: 'explicit_requirement',
+        source: 'user request',
+        answer: null,
+      },
+      successCriteria: [
+        {
+          id: 'SC1',
+          question: 'Does the plan preserve questions, answers, and evidence?',
+          basis: 'inference',
+          source: 'user request',
+          answer: null,
+        },
+      ],
+      constraints: [
+        {
+          question: 'Which existing plan boundary must remain unchanged?',
+          basis: 'explicit_requirement',
+          source: 'user request',
+          answer,
+        },
+      ],
+      assumptions: [
+        {
+          question: 'Can the existing review cadence drive the inquiry?',
+          basis: 'assumption',
+          source: 'initial design',
+          answer: null,
+        },
+      ],
+      inquiries: [
+        {
+          id: 'Q1',
+          phase: 'domain',
+          question: 'What durable planning primitives already exist?',
+          basis: 'inference',
+          source: 'user request',
+          status: 'answered',
+          blockedBy: [],
+          answer,
+        },
+        {
+          id: 'Q2',
+          phase: 'case',
+          question: 'What must change for this specific plan?',
+          basis: 'inference',
+          source: 'answer to Q1',
+          status: 'answering',
+          blockedBy: ['Q1'],
+          answer: null,
+        },
+        {
+          id: 'Q3',
+          phase: 'bridge',
+          question: 'How should those answers be applied to this task?',
+          basis: 'inference',
+          source: 'answer to Q2',
+          status: 'open',
+          blockedBy: ['Q2'],
+          answer: null,
+        },
+      ],
+      lastReview: {
+        revision: 1,
+        decision: 'continue',
+        summary: 'The domain question is answered; apply it to this case.',
+        nextQuestionId: 'Q2',
+      },
+    };
+    await sandbox.sandbox.writeFiles([
+      { path: socraticPlan.path, content: JSON.stringify(socraticPlanState) },
+    ]);
+    const invalidPlan = {
+      ...socraticPlanState,
+      inquiries: [
+        { ...socraticPlanState.inquiries[0], answer: null },
+        ...socraticPlanState.inquiries.slice(1),
+      ],
+    };
+    const model = scriptedModel([
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      {
+        tool: 'writeFile',
+        input: {
+          path: socraticPlan.path,
+          content: JSON.stringify(invalidPlan),
+        },
+      },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { tool: 'noop' },
+      { text: 'The invalid answer state was detected.' },
+    ]);
+    const context = new ContextEngine({
+      store: new InMemoryContextStore(),
+      chatId: 'socratic-plan-review',
+      userId: 'user',
+    }).set(
+      socraticPlan.instructions(),
+      socraticPlan.review({ when: everyNToolCalls(5) }),
+    );
+    const chatAgent = agent({
+      sandbox,
+      name: 'socratic-plan-review',
+      context,
+      model,
+      tools: { noop },
+    });
+
+    await context.continue(userMessage('Work through this Socratically.'));
+    await drain(await chat(chatAgent));
+
+    const prompts = model.doStreamCalls.map((call) =>
+      JSON.stringify(call.prompt),
+    );
+    const review = prompts.find((prompt) =>
+      prompt.includes('Current Socratic plan (revision 1)'),
+    );
+    assert.ok(review, 'expected the Socratic plan to be recited');
+    assert.match(review, /Governing question:/);
+    assert.match(review, /Q1 \[domain\]: What durable planning primitives/);
+    assert.match(review, /Answer: The existing plan file and reminder/);
+    assert.match(review, /Next question: Q2/);
+    assert.ok(
+      prompts.some((prompt) =>
+        prompt.includes('is answered without an answer'),
+      ),
+      'expected an answered inquiry without an answer to be rejected',
     );
   });
 

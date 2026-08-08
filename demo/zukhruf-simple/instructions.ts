@@ -1,10 +1,16 @@
-import { everyNToolCalls, plan, role } from '@deepagents/context';
+import {
+  everyNToolCalls,
+  or,
+  role,
+  socraticPlan,
+  toolCalled,
+} from '@deepagents/context';
 import { defineInstructions } from '@deepagents/experimental/zukhruf';
 
 export default defineInstructions(
   role('You are a concise, helpful assistant.'),
-  plan.instructions(),
-  plan.review({
-    when: everyNToolCalls(5),
+  socraticPlan.instructions(),
+  socraticPlan.review({
+    when: or(everyNToolCalls(3), toolCalled('writeFile')),
   }),
 );

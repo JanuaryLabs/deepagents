@@ -13,6 +13,7 @@ export * from './lib/fragments/plan.ts';
 export * from './lib/fragments/reminders/index.ts';
 export * from './lib/fragments/reasoning.ts';
 export * from './lib/fragments/socratic.ts';
+export * from './lib/fragments/socratic-plan.ts';
 export * from './lib/fragments/user.ts';
 export * from './lib/guardrail.ts';
 export * from './lib/guardrails/error-recovery.guardrail.ts';

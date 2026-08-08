@@ -2,8 +2,9 @@
 
 The smallest complete Zukhruf deployable unit.
 
-- `agent.ts` declares the agent.
-- `instructions.ts` declares its behavior and plan recitation.
+- `agent.ts` declares the agent and writes its current AI trace to
+  `telemetry.jsonl`.
+- `instructions.ts` declares its behavior and Socratic plan recitation.
 - `sandbox.ts` declares its per-chat sandbox and explicitly uploads this demo's
   local `skills/` directory.
 - `skills/<name>/SKILL.md` declares skills discovered from that sandbox once per
@@ -14,6 +15,12 @@ The smallest complete Zukhruf deployable unit.
   slots. `subagents/` and `tools/` hold declarations imported by `agent.ts`.
 
 ```sh
-OPENAI_API_KEY=… npm start --workspace @deepagents/demo-zukhruf-simple -- \
-  "Explain Zukhruf in one sentence."
+node --env-file .env demo/zukhruf-simple/run.ts \
+  "Investigate the available Zukhruf skill and explain how its runtime works from sandbox evidence."
+```
+
+In another terminal, watch the model steps, tool calls, and recitations:
+
+```sh
+tail -f demo/zukhruf-simple/telemetry.jsonl
 ```

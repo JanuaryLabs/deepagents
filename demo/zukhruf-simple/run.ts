@@ -49,7 +49,9 @@ const turn = await runtime.enqueue(
   { chatId: crypto.randomUUID(), userId: 'demo' },
   {
     id: crypto.randomUUID(),
-    input: process.argv.slice(2).join(' ') || 'Say hello in one sentence.',
+    input:
+      process.argv.slice(2).join(' ') ||
+      'Investigate the available Zukhruf skill and explain how its runtime works from sandbox evidence.',
   },
 );
 

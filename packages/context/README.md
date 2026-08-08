@@ -381,6 +381,24 @@ engine.set(
 );
 ```
 
+Use `socraticPlan.instructions()` for a durable Socratic inquiry in
+the same plan file. This mode stores evidence-backed questions and answers,
+moves adaptively through domain, case, and bridge phases, and lets each review
+choose the highest-value unanswered question instead of precomputing a fixed
+question list.
+
+```ts
+engine.set(
+  socraticPlan.instructions(),
+  socraticPlan.review({ when: everyNToolCalls(5) }),
+);
+```
+
+The agent answers from source and runtime evidence, and asks the user only when
+the answer requires missing information or authority. The standalone
+`socraticPrompting()` fragment shares the inquiry workflow but does not persist
+plan state.
+
 - `stripTextByRanges(text, ranges)` removes offset spans from text and returns the remaining visible content.
 - `stripReminders(message)` strips inline/part reminders and model-only synthetic reminder payloads from a `UIMessage`.
 - `isSyntheticReminderMessage(message)` identifies stored model-only reminder carriers so a UI can omit them entirely.
