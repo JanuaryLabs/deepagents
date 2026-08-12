@@ -15,11 +15,12 @@ Database-specific drivers or client libraries are required. Install the ones
 that match your database:
 
 ```bash
-npm install pg        # PostgreSQL
-npm install mssql     # SQL Server
-npm install mysql2    # MySQL / MariaDB
-npm install @google-cloud/bigquery # BigQuery
-npm install @clickhouse/client     # ClickHouse, or use your preferred client
+npm install pg                       # PostgreSQL
+npm install mssql                    # SQL Server
+npm install mysql2                   # MySQL / MariaDB
+npm install @duckdb/node-api         # DuckDB
+npm install @google-cloud/bigquery   # BigQuery
+npm install @clickhouse/client       # ClickHouse, or use your preferred client
 ```
 
 SQLite uses the built-in `node:sqlite` module and requires no additional driver.
@@ -29,7 +30,7 @@ PostHog uses native `fetch` and also requires no additional client package.
 
 Text2SQL requires three components:
 
-1. **Adapter** - Connects to your data source (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, or PostHog)
+1. **Adapter** - Connects to your data source (PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, or PostHog)
 2. **Grounding** - Configures database introspection (see [Grounding](/docs/text2sql/grounding) for advanced options)
 3. **Model** - Any Vercel AI SDK language model
 
@@ -65,7 +66,7 @@ exact value the model passes to `sql validate <db>` and `sql run <db>`. The
 agent instructions point the model at that label, so it never has to infer the
 name from the wrapper tag.
 
-<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse', 'PostHog']}>
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse', 'PostHog']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
@@ -106,6 +107,34 @@ const adapter = new Postgres({
     return result.rows;
   },
   grounding: [postgres.tables(), postgres.info()],
+});
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: { main: adapter },
+  lock: new FileIndexLock(),
+});
+```
+
+</Tab>
+<Tab value="DuckDB">
+```typescript
+import { DuckDBInstance } from '@duckdb/node-api';
+
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { DuckDB } from '@deepagents/text2sql/duckdb';
+import * as duckdb from '@deepagents/text2sql/duckdb';
+
+const instance = await DuckDBInstance.create('./analytics.duckdb', {
+  access_mode: 'READ_ONLY',
+});
+const connection = await instance.connect();
+const adapter = new DuckDB({
+  execute: async (sql) => {
+    const reader = await connection.runAndReadAll(sql);
+    return reader.getRowObjectsJson();
+  },
+  grounding: [duckdb.tables(), duckdb.info()],
 });
 
 const text2sql = new Text2Sql({
@@ -447,6 +476,7 @@ export GROQ_API_KEY=your-api-key
 
 - [Grounding](/docs/text2sql/grounding) - Configure database introspection for richer context
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific features
+- [DuckDB Adapter](/docs/text2sql/duckdb) - Embedded analytics with native DuckDB policy analysis
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific features
 - [ClickHouse Adapter](/docs/text2sql/clickhouse) - ClickHouse-specific features
 - [PostHog Adapter](/docs/text2sql/posthog) - PostHog HogQL setup and OAuth scopes

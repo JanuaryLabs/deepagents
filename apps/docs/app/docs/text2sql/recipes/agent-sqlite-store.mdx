@@ -19,6 +19,7 @@ Add the driver for the database you want to query:
 npm install pg          # PostgreSQL
 npm install mssql       # SQL Server
 npm install mysql2      # MySQL / MariaDB
+npm install @duckdb/node-api         # DuckDB
 npm install @google-cloud/bigquery   # BigQuery
 npm install @clickhouse/client       # ClickHouse, or use your preferred client
 # SQLite uses node:sqlite — no driver needed
@@ -41,7 +42,7 @@ const store = new SqliteContextStore('./agent.db');
 The adapter is the database the agent will query. Pick one. The adapter map
 key (`main` here) is the selector the CLI uses inside the sandbox.
 
-<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+<Tabs groupId="database" items={['SQLite', 'PostgreSQL', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="SQLite">
 ```typescript
 import { DatabaseSync } from 'node:sqlite';
@@ -67,6 +68,26 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new Postgres({
   execute: async (sql) => (await pool.query(sql)).rows,
   grounding: [postgres.tables(), postgres.info()],
+});
+```
+</Tab>
+<Tab value="DuckDB">
+```typescript
+import { DuckDBInstance } from '@duckdb/node-api';
+
+import { DuckDB } from '@deepagents/text2sql/duckdb';
+import * as duckdb from '@deepagents/text2sql/duckdb';
+
+const instance = await DuckDBInstance.create('./analytics.duckdb', {
+  access_mode: 'READ_ONLY',
+});
+const connection = await instance.connect();
+const adapter = new DuckDB({
+  execute: async (sql) => {
+    const reader = await connection.runAndReadAll(sql);
+    return reader.getRowObjectsJson();
+  },
+  grounding: [duckdb.tables(), duckdb.info()],
 });
 ```
 </Tab>
@@ -291,4 +312,5 @@ for await (const chunk of await chat(ai)) {
 ## Next
 
 - [Build Conversations](/docs/text2sql/build-conversations) — title generation, indexing progress events, advanced wiring
+- [DuckDB Adapter](/docs/text2sql/duckdb) — DuckDB setup, grounding, and policy details
 - [Teach the System](/docs/text2sql/teach-the-system) — terms, hints, guardrails, examples

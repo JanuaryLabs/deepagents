@@ -16,12 +16,12 @@ Without grounding, the AI would need to guess table names, column types, and rel
 
 ## Quick Start
 
-Each database adapter (PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, and ClickHouse) exports grounding factory functions. Import them and pass to your adapter:
+Each database adapter (PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, and ClickHouse) exports grounding factory functions. Import them and pass to your adapter:
 
 Reuse the shared `model` setup from
 [Getting Started](/docs/text2sql/getting-started) in the examples below.
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="PostgreSQL">
 ```typescript
 import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
@@ -69,6 +69,43 @@ const text2sql = new Text2Sql({
         sqlite.rowCount(),
         sqlite.columnStats(),
         sqlite.columnValues(),
+      ],
+    }),
+  },
+  lock: new FileIndexLock(),
+});
+```
+</Tab>
+<Tab value="DuckDB">
+```typescript
+import { DuckDBInstance } from '@duckdb/node-api';
+
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { DuckDB } from '@deepagents/text2sql/duckdb';
+import * as duckdb from '@deepagents/text2sql/duckdb';
+
+const instance = await DuckDBInstance.create('./analytics.duckdb', {
+  access_mode: 'READ_ONLY',
+});
+const connection = await instance.connect();
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: {
+    main: new DuckDB({
+      execute: async (sql) => {
+        const reader = await connection.runAndReadAll(sql);
+        return reader.getRowObjectsJson();
+      },
+      grounding: [
+        duckdb.tables(),
+        duckdb.views(),
+        duckdb.info(),
+        duckdb.indexes(),
+        duckdb.constraints(),
+        duckdb.rowCount(),
+        duckdb.columnStats(),
+        duckdb.columnValues(),
       ],
     }),
   },
@@ -376,7 +413,7 @@ tables({
 
 For simple use cases, you can use a minimal grounding setup:
 
-<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
+<Tabs groupId="database" items={['PostgreSQL', 'SQLite', 'DuckDB', 'SQL Server', 'MySQL/MariaDB', 'BigQuery', 'ClickHouse']}>
 <Tab value="PostgreSQL">
 ```typescript
 import * as postgres from '@deepagents/text2sql/postgres';
@@ -394,6 +431,16 @@ import * as sqlite from '@deepagents/text2sql/sqlite';
 grounding: [
   sqlite.tables(),
   sqlite.info(),
+]
+```
+</Tab>
+<Tab value="DuckDB">
+```typescript
+import * as duckdb from '@deepagents/text2sql/duckdb';
+
+grounding: [
+  duckdb.tables(),
+  duckdb.info(),
 ]
 ```
 </Tab>
@@ -453,6 +500,7 @@ This is useful when providing custom introspection via the adapter's `introspect
 
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific configuration
 - [SQLite Adapter](/docs/text2sql/sqlite) - SQLite-specific configuration
+- [DuckDB Adapter](/docs/text2sql/duckdb) - DuckDB-specific configuration
 - [SQL Server Adapter](/docs/text2sql/sqlserver) - SQL Server-specific configuration
 - [MySQL/MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific configuration
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific configuration

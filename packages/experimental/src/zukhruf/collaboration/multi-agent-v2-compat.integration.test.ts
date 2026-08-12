@@ -3,6 +3,7 @@ import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   type AgentSandbox,
@@ -16,9 +17,11 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
+  MessageDeliveryMode,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
+  createInterAgentCommunication,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
 
@@ -251,8 +254,86 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
       properties?: { timeout_ms?: { minimum?: number; maximum?: number } };
     }
   ).properties?.timeout_ms;
-  assert.equal(timeoutSchema?.minimum, 111);
   assert.equal(timeoutSchema?.maximum, 333);
+});
+
+test('wait_agent clamps a below-minimum timeout and reports it to the model', async () => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const streams = streamsFor(streamStore);
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  const conversation = { chatId: 'root-chat', userId: 'user-1' };
+  let runtime: AgentRuntime;
+  let delivery: Promise<void> | undefined;
+  let promptAfterWait: unknown;
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      calls++;
+      if (calls === 1) {
+        delivery = sleep(10).then(() =>
+          runtime.deliver(
+            createInterAgentCommunication({
+              author: { chatId: 'child-chat', userId: 'user-1' },
+              recipient: conversation,
+              content: 'mail delivered after the requested deadline',
+            }),
+            MessageDeliveryMode.QueueOnly,
+          ),
+        );
+        return toolCallResponse('wait_agent', { timeout_ms: 1 });
+      }
+      promptAfterWait = prompt;
+      return textResponse('continued');
+    },
+  });
+
+  try {
+    runtime = new AgentRuntime(
+      defineAgent({
+        name: 'root',
+        model,
+        sandbox: async () => ({}) as AgentSandbox,
+        instructions: [],
+      }),
+      {
+        store,
+        streams,
+        mailboxStore,
+        queue,
+        multiAgentV2: {
+          minWaitTimeoutMs: 50,
+          defaultWaitTimeoutMs: 75,
+          maxWaitTimeoutMs: 100,
+        },
+      },
+    );
+    await runtime.enqueue(conversation, {
+      id: 'short-wait',
+      input: 'Wait briefly',
+    });
+    await using worker = await runtime.work();
+    void worker;
+    await queue.runNext();
+    await delivery;
+
+    assert.equal(calls, 2);
+    const serialized = JSON.stringify(promptAfterWait);
+    assert.match(serialized, /"timed_out":false/);
+    assert.match(serialized, /mail delivered after the requested deadline/);
+    assert.match(
+      serialized,
+      /Requested timeout of 1ms was clamped to the minimum of 50ms\./,
+    );
+  } finally {
+    try {
+      await delivery;
+    } finally {
+      streamStore.close();
+      mailboxStore.close();
+    }
+  }
 });
 
 test('subagent guidance replaces root guidance on a child turn', async (t) => {

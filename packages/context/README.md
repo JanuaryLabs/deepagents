@@ -381,11 +381,10 @@ engine.set(
 );
 ```
 
-Use `socraticPlan.instructions()` for a durable Socratic inquiry in
-the same plan file. This mode stores evidence-backed questions and answers,
-moves adaptively through domain, case, and bridge phases, and lets each review
-choose the highest-value unanswered question instead of precomputing a fixed
-question list.
+Use `socraticPlan.instructions()` when the work needs inquiry instead of a
+fixed checklist. It stores evidence-backed questions and answers in the same
+plan file, moves adaptively through domain, case, and bridge phases, and lets
+each review choose the highest-value unanswered question.
 
 ```ts
 engine.set(

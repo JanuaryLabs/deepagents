@@ -11,7 +11,7 @@ can stream user-facing answers grounded in validated query results.
 
 - **Natural Language to SQL**: Ask questions in plain English, get executable SQL
 - **Schema-Aware**: Automatically analyzes your database structure, relationships, and data patterns
-- **Multi-Database Support**: Works with PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL
+- **Multi-Database Support**: Works with PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL
 - **Teachable**: Add domain knowledge through context fragments or low-level `toSql({ fragments })` calls
 - **Conversation Memory**: Multi-turn chat backed by your `ContextEngine` store
 - **Safe by Default**: Generates read-only queries with output limits
@@ -59,14 +59,14 @@ front with `isValidAdapterName(name)` or `validateAdapterNames(names)`.
 
 ## Core Methods
 
-| API                                                    | Description                                                                                    |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `Text2Sql#toSql(input, adapterName)`                   | Generate SQL without executing, routed to one adapter                                          |
-| `Text2Sql#toPairs(adapterName, factory)`               | Generate training pairs from one configured adapter                                            |
-| `AdapterIndexer#index({ adapterNames?, onProgress? })` | Introspect adapters and return schema fragments — each prefixed with a `<database>` connection-name label — with optional progress events |
-| `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes |
-| `sqlValidateReminder()` / `SQL_VALIDATE_REMINDER` | Context reminder fragment that nudges the model to run `sql validate <db> "..."` before `sql run <db> "..."`; it is suppressed after a matching validate call |
-| `sql index [adapter ...]`                              | Index all adapters by default (or named subset), then write schema fragments + progress artifacts |
+| API                                                                                     | Description                                                                                                                                                   |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Text2Sql#toSql(input, adapterName)`                                                    | Generate SQL without executing, routed to one adapter                                                                                                         |
+| `Text2Sql#toPairs(adapterName, factory)`                                                | Generate training pairs from one configured adapter                                                                                                           |
+| `AdapterIndexer#index({ adapterNames?, onProgress? })`                                  | Introspect adapters and return schema fragments — each prefixed with a `<database>` connection-name label — with optional progress events                     |
+| `createSqlCommand(text2Sql, options?: CreateSqlCommandOptions): CreateSqlCommandResult` | Wrap a `Text2Sql` instance as a `customCommands` entry for just-bash (`sql run`, `sql validate`) in virtual sandboxes                                         |
+| `sqlValidateReminder()` / `SQL_VALIDATE_REMINDER`                                       | Context reminder fragment that nudges the model to run `sql validate <db> "..."` before `sql run <db> "..."`; it is suppressed after a matching validate call |
+| `sql index [adapter ...]`                                                               | Index all adapters by default (or named subset), then write schema fragments + progress artifacts                                                             |
 
 `CreateSqlCommandOptions` currently exposes `outputDir` (default `/sql`).
 `CreateSqlCommandResult` contains `command` (for `customCommands`) plus
@@ -121,6 +121,7 @@ User Question
 
 - [Getting Started](/docs/text2sql/getting-started) - Installation and first query
 - [PostgreSQL Adapter](/docs/text2sql/postgresql) - PostgreSQL-specific setup
+- [DuckDB Adapter](/docs/text2sql/duckdb) - Embedded analytics with native DuckDB SQL policy analysis
 - [MySQL / MariaDB Adapter](/docs/text2sql/mysql) - MySQL and MariaDB-specific setup
 - [BigQuery Adapter](/docs/text2sql/bigquery) - BigQuery-specific setup
 - [ClickHouse Adapter](/docs/text2sql/clickhouse) - ClickHouse-specific setup

@@ -16,7 +16,6 @@ export function createWaitAgentTool(options: {
     timeout_ms: z
       .number()
       .int()
-      .min(options.minTimeoutMs)
       .max(options.maxTimeoutMs)
       .optional()
       .describe('Maximum time to wait in milliseconds.'),
@@ -33,16 +32,25 @@ export function createWaitAgentTool(options: {
     inputSchema: waitAgentInputSchema,
     outputSchema: waitAgentOutputSchema,
     execute: async ({ timeout_ms }, { abortSignal, context }) => {
+      const timeoutMs = Math.max(
+        timeout_ms ?? options.defaultTimeoutMs,
+        options.minTimeoutMs,
+      );
       const received = await context.controlPlane.waitForMailbox(
         context.actor,
         {
-          timeoutMs: timeout_ms ?? options.defaultTimeoutMs,
+          timeoutMs,
           signal: abortSignal,
         },
       );
-      return received
-        ? { message: 'Wait completed.', timed_out: false }
-        : { message: 'Wait timed out.', timed_out: true };
+      const message = received ? 'Wait completed.' : 'Wait timed out.';
+      return {
+        message:
+          timeout_ms !== undefined && timeout_ms < timeoutMs
+            ? `${message}\n\nRequested timeout of ${timeout_ms}ms was clamped to the minimum of ${timeoutMs}ms.`
+            : message,
+        timed_out: !received,
+      };
     },
   });
 }

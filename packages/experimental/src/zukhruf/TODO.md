@@ -5,10 +5,9 @@
 
 ## 1. Evidence (no behavior changes)
 
-- [ ] Run the TurnQueue contract suite against **real Postgres** (withPostgresContainer), not just
-      PGlite. Wired in `queue/pg-boss.turn-queue.contract.test.ts`; same-chat FIFO remains an
-      executable TODO because concurrent pg-boss workers may claim jobs out of order (`1, 3, 2`).
-      pg-boss 12.26.4 reproduces it.
+- [ ] Fix same-chat FIFO in the **real Postgres** TurnQueue contract suite. The Docker-gated
+      `queue/pg-boss.turn-queue.contract.test.ts` cases are executable tests and currently reproduce
+      concurrent pg-boss workers claiming jobs out of order (`1, 3, 2`) on pg-boss 12.26.4.
 - [x] **Process-kill crash test** — SHIPPED (`queue/crash-recovery.integration.test.ts`, docker-gated): real child worker SIGKILLed mid-turn on real Postgres; heartbeat lapse → monitor fails job → DLQ → `onOrphaned` flips stream `failed` (with error) → chat unblocks → next turn runs; crashed turn never re-ran. ~16s.
 - [ ] Multi-process contract run: two workers on one Postgres — serialization + concurrency cap hold across processes. (The crash test partially covers this: parent + child workers shared one queue.)
 
@@ -27,10 +26,9 @@
       metadata write and retries against the fresh snapshot.
 - [ ] **Startup reconciliation sweep**: non-terminal stream rows with no live/queued job → `failed`
       (covers register→push orphans beyond the retried-ask self-heal).
-- [ ] **Host cancel, remaining queue fix**: `interrupt_agent` now cancels the exact queue job and
-      removes queued copies immediately while active work retains FIFO ownership through handler
-      exit, but `AgentObservation.cancel()` still cancels only the durable stream. Wire that
-      existing host-facing path to the TurnQueue capability separately.
+- [x] **Host cancel reaches the queue**: `interrupt_agent` and `AgentObservation.cancel()` cancel the
+      exact queue job as well as the durable stream. Queued copies are removed immediately while
+      active work retains FIFO ownership through handler exit.
 - [x] **Terminal stream transitions are monotonic**: completion, failure, error chunks, and
       cancellation update only queued/running rows. A committed cancellation cannot be overwritten
       by a late completion or failure.

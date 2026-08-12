@@ -1,0 +1,146 @@
+---
+title: DuckDB
+description: Configure Text2SQL with DuckDB and its native SQL policy analyzer
+---
+
+The DuckDB adapter is client-agnostic: provide an `execute(sql)` callback that
+returns rows. These examples use the DuckDB Node API.
+
+## Installation
+
+```bash
+npm install @deepagents/text2sql @duckdb/node-api
+```
+
+## Basic Setup
+
+Reuse the shared `model` setup from
+[Getting Started](/docs/text2sql/getting-started).
+
+```typescript
+import { DuckDBInstance } from '@duckdb/node-api';
+
+import { FileIndexLock, Text2Sql } from '@deepagents/text2sql';
+import { DuckDB } from '@deepagents/text2sql/duckdb';
+import * as duckdb from '@deepagents/text2sql/duckdb';
+
+const instance = await DuckDBInstance.create('./analytics.duckdb', {
+  access_mode: 'READ_ONLY',
+  enable_external_access: 'false',
+  autoinstall_known_extensions: 'false',
+  autoload_known_extensions: 'false',
+  allow_community_extensions: 'false',
+  memory_limit: '1GB',
+  threads: '4',
+});
+const connection = await instance.connect();
+await connection.run('SET lock_configuration = true');
+
+const execute = async (sql: string) => {
+  const reader = await connection.runAndReadAll(sql);
+  return reader.getRowObjectsJson();
+};
+
+const text2sql = new Text2Sql({
+  model,
+  adapters: {
+    main: new DuckDB({
+      execute,
+      grounding: [
+        duckdb.info(),
+        duckdb.tables(),
+        duckdb.views(),
+        duckdb.constraints(),
+        duckdb.indexes(),
+        duckdb.rowCount(),
+        duckdb.columnStats(),
+        duckdb.columnValues(),
+      ],
+    }),
+  },
+  lock: new FileIndexLock(),
+});
+```
+
+`getRowObjectsJson()` keeps nested DuckDB values JSON-safe. It represents values
+such as `BIGINT` and exact decimals as strings instead of losing precision. The
+callback may also return `{ rows }` or `{ data }`.
+
+## Catalog and Schema Scope
+
+By default, grounding includes only the connection's current catalog and
+schema. Table and view names are emitted as quoted `catalog.schema.entity`
+identifiers.
+
+Opt into additional attached catalogs or schemas explicitly:
+
+```typescript
+new DuckDB({
+  execute,
+  catalogs: ['warehouse', 'reference'],
+  schemas: ['main', 'analytics'],
+  grounding: [duckdb.tables(), duckdb.views()],
+});
+```
+
+`tables({ filter })` and `views({ filter })` narrow that configured scope. A
+filter never grants access to a catalog or schema omitted from the adapter
+options.
+
+## Available Grounding Functions
+
+| Function         | Description                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `tables()`       | Discovers qualified tables, columns, and optional foreign-key traversal from `duckdb_tables()` and `duckdb_columns()` |
+| `views()`        | Discovers views, columns, and definitions from the DuckDB catalog                                                     |
+| `info()`         | Reports the DuckDB version, current catalog/schema, and identifier syntax                                             |
+| `constraints()`  | Reports primary, foreign, unique, check, not-null, and default constraints                                            |
+| `indexes()`      | Reports explicit simple-column indexes                                                                                |
+| `rowCount()`     | Uses DuckDB's catalog estimate without scanning each table                                                            |
+| `columnStats()`  | Collects numeric, boolean, and temporal min/max, null fraction, and distinct count                                    |
+| `columnValues()` | Reports native enum labels and low-cardinality values                                                                 |
+
+Expression indexes remain valid in DuckDB but are omitted from grounding when
+their catalog expression cannot be represented as a simple column list.
+
+## Native SQL Policy
+
+DuckDB SQL is not passed through the shared SQL parser. Before validation or
+execution, the adapter uses DuckDB's `json_serialize_sql()` AST and
+`duckdb_functions()` metadata to:
+
+1. require exactly one serializable `SELECT`;
+2. inspect relations in joins, subqueries, and used or unused CTEs;
+3. compare fully resolved catalog/schema/table names with grounded entities;
+4. reject side-effecting or user-defined functions and macros; and
+5. reject arbitrary table functions.
+
+The adapter allows the pure table functions `range`, `generate_series`, and
+`unnest`. File readers, scanners, dynamic SQL functions, secret catalog
+functions, and extension-backed table functions are blocked.
+
+DuckDB-friendly syntax such as FROM-first queries, `SELECT * EXCLUDE`,
+`QUALIFY`, `ASOF JOIN`, explicit `PIVOT ... IN (...)`, and `UNPIVOT` is analyzed
+natively. Dynamic `PIVOT` without an explicit `IN` list is rejected because
+DuckDB rewrites it through an internal non-SELECT statement that cannot be
+safely serialized by this policy.
+
+## Production Security
+
+The adapter policy is not a replacement for DuckDB connection hardening.
+Untrusted DuckDB SQL can otherwise read files, access the network, load
+extensions, or consume excessive resources.
+
+- Open persistent databases with `access_mode: 'READ_ONLY'`.
+- Disable external access and automatic/community extension loading.
+- Set memory and thread limits appropriate for the workload.
+- Lock configuration only after all required settings are applied.
+- Implement query deadlines in the client and call `connection.interrupt()`
+  when a deadline expires.
+- If approved file analytics is required, configure narrow allowed paths and
+  expose those files through grounded views instead of allowing model-generated
+  `read_*` calls.
+
+Validation defaults to `EXPLAIN <sql>` after the native policy accepts the
+query. Supply `validate(sql)` when your execution environment needs a custom
+deadline or error mapping.
