@@ -5,7 +5,7 @@ AI-powered natural language to SQL. Ask questions in plain English, get executab
 ## Features
 
 - **Natural Language to SQL** - Convert questions to validated, executable queries
-- **Multi-Database Support** - PostgreSQL, SQLite, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL adapters
+- **Multi-Database Support** - PostgreSQL, SQLite, DuckDB, SQL Server, MySQL/MariaDB, BigQuery, ClickHouse, and PostHog HogQL adapters
 - **Schema-Aware** - Automatic introspection of tables, relationships, indexes, and constraints
 - **Domain Knowledge** - Inject business terms, guardrails, and query patterns via fragments
 - **Conversational** - Multi-turn conversations with context persistence
@@ -23,6 +23,7 @@ Install the database driver or client library that matches your adapter:
 npm install pg                       # PostgreSQL
 npm install mssql                    # SQL Server
 npm install mysql2                   # MySQL / MariaDB
+npm install @duckdb/node-api         # DuckDB
 npm install @google-cloud/bigquery   # BigQuery
 npm install @clickhouse/client       # ClickHouse, or use your preferred client
 # PostHog uses native fetch and needs no additional client package
@@ -297,6 +298,15 @@ withhold extension, file, remote-query, and routine execution capabilities; and
 configure dialect-appropriate statement timeouts, byte/result limits, and
 compute/memory limits.
 
+The DuckDB adapter uses DuckDB's native JSON AST instead of the shared SQL
+parser, so DuckDB-specific syntax is analyzed in its real grammar. It resolves
+every referenced relation to a quoted `catalog.schema.table`, rejects writes,
+multi-statement batches, side-effecting or user-defined functions and macros,
+and arbitrary table functions, then compares those relations with the tables
+and views produced by grounding. Production DuckDB connections must still be
+read-only, disable external access and automatic/community extension loading,
+set resource limits, and lock configuration after setup.
+
 The PostHog adapter does not pass HogQL through the local SQL parser. It asks
 PostHog to parse each query with `HogQLMetadata`, checks the returned base-table
 names against grounded schema, and only then sends a `HogQLQuery` for execution.
@@ -547,6 +557,7 @@ Full documentation available at [januarylabs.github.io/deepagents](https://janua
 - [Grounding](https://januarylabs.github.io/deepagents/docs/text2sql/grounding)
 - [PostgreSQL](https://januarylabs.github.io/deepagents/docs/text2sql/postgresql)
 - [SQLite](https://januarylabs.github.io/deepagents/docs/text2sql/sqlite)
+- [DuckDB](https://januarylabs.github.io/deepagents/docs/text2sql/duckdb)
 - [SQL Server](https://januarylabs.github.io/deepagents/docs/text2sql/sqlserver)
 - [MySQL / MariaDB](https://januarylabs.github.io/deepagents/docs/text2sql/mysql)
 - [BigQuery](https://januarylabs.github.io/deepagents/docs/text2sql/bigquery)

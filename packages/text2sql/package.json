@@ -74,6 +74,12 @@
       "import": "./dist/lib/adapters/posthog/index.js",
       "default": "./dist/lib/adapters/posthog/index.js"
     },
+    "./duckdb": {
+      "development": "./src/lib/adapters/duckdb/index.ts",
+      "types": "./dist/lib/adapters/duckdb/index.d.ts",
+      "import": "./dist/lib/adapters/duckdb/index.js",
+      "default": "./dist/lib/adapters/duckdb/index.js"
+    },
     "./synthesis": {
       "development": "./src/lib/synthesis/index.ts",
       "types": "./dist/lib/synthesis/index.d.ts",
@@ -120,6 +126,7 @@
     "@ai-sdk/openai": "^4.0.15",
     "@ai-sdk/react": "^4.0.33",
     "@deepagents/evals": "6.1.2",
+    "@duckdb/node-api": "^1.5.5-r.3",
     "@google-cloud/bigquery": "^8.3.1",
     "@types/proper-lockfile": "^4.1.4",
     "openai": "6.48.0"
