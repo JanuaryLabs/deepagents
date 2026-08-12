@@ -301,7 +301,7 @@ entry point. The store contract is deliberately small: begin/end the target's ac
 idempotent append, pending check, leading queue-only drain, and full FIFO drain. Mailbox lifetime
 remains caller-owned.
 
-The receive contract follows Codex MultiAgentV2:
+The receive contract follows Codex's multi-agent contract:
 
 1. validate and idempotently append the envelope to the target mailbox;
 2. for `queue-only`, request a fallback wake only when the same mailbox transaction observed an
@@ -384,7 +384,7 @@ instead of introducing a Runner or separate thread database:
   the current agent may spawn. `AgentTurnExecutor` injects the direct AI SDK `spawn_agent`,
   `send_message`, `followup_task`, `list_agents`, `wait_agent`, and `interrupt_agent` tools for every
   turn.
-- `AgentRuntimeOptions.multiAgentV2` is the host configuration surface for Codex V2-compatible
+- `AgentRuntimeOptions.multiAgent` is the host configuration surface for Codex-compatible
   collaboration guidance and tool exposure. Root and subagent usage hints are separate complete
   overrides; empty strings disable them. The selected hint is injected as a non-persisted role
   fragment, so forked transcript history never copies a parent's hint into a child. `usageHintText`
@@ -393,7 +393,7 @@ instead of introducing a Runner or separate thread database:
   namespaces fail during runtime construction. Current upstream Codex also injects a dedicated
   subagent developer instruction and inherits the spawning turn's ready-step environment. Zukhruf
   does not yet expose equivalents; they are tracked in TODO.md.
-- Collaboration tools are direct-model-only by default, matching Codex V2's
+- Collaboration tools are direct-model-only by default, matching Codex's
   `non_code_mode_only = true`. Zukhruf does not have a nested code-mode executor, so
   `nonCodeModeOnly: false` fails explicitly instead of pretending the tools are reachable from an
   execution surface that does not exist.
@@ -420,7 +420,7 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   receive no raw stores, queue callbacks, or `AsyncLocalStorage` state.
 - `spawn_agent` validates the selected direct subagent and derives deterministic child-chat and
   initial-turn IDs from the user, tree, and canonical path. Concurrent calls and queue retries
-  therefore converge on one durable child and one initial ask. It returns the Codex V2 shape
+  therefore converge on one durable child and one initial ask. It returns the Codex shape
   `{task_name}` where the value is the canonical `/root/...` child path, without awaiting child
   execution. The history snapshot and cloned message IDs are persisted
   deterministically before enqueue, so a queue-push gap retries the original snapshot instead of
@@ -430,14 +430,14 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   successful.
 - `send_message` resolves a target path and stores queue-only `MESSAGE` mail. `followup_task`
   resolves the same way, rejects `/root`, stores `NEW_TASK`, and requests a serialized mailbox turn
-  for the target. Both return Codex V2's empty success text. Mailbox wakes use the same
+  for the target. Both return Codex's empty success text. Mailbox wakes use the same
   conversation-scoped durable turn identity as asks, so their owner can resume or cancel them.
   Cross-runtime races may enqueue duplicate empty wake receipts; serialized execution and
   empty-drain handling make them harmless no-ops.
 - `list_agents` scans only the caller's metadata-scoped tree, optionally resolves a path prefix
   relative to the caller, and combines each chat's canonical path and persisted context with the
   TurnQueue's required `idle | queued | running` activity. Its status union and strict item shape
-  match Codex V2: each item contains only `agent_name` and `agent_status`, where status is
+  match Codex: each item contains only `agent_name` and `agent_status`, where status is
   `pending_init | running | interrupted | shutdown | not_found | {completed} | {errored}`. An
   unstarted child stays `pending_init`; an initialized child with a queued follow-up or unresolved
   approval is `running`. A failed or cancelled continuation reports `errored` or `interrupted`.
@@ -445,7 +445,7 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   Listing is observational and never wakes or consumes an agent.
 - `wait_agent` waits only for pending mail addressed to the calling agent. It observes the durable
   mailbox without draining it, so the same mail enters the next model step. The tool returns
-  the strict Codex V2 `{message, timed_out}` shape. Host-configurable minimum, default, and maximum
+  the strict Codex `{message, timed_out}` shape. Host-configurable minimum, default, and maximum
   waits default to 10 seconds, 30 seconds, and 1 hour respectively. It aborts with the caller turn.
   Zukhruf has no in-turn steer channel, so steer activity is intentionally absent.
 - `interrupt_agent` resolves canonical or relative paths, rejects root/self, returns the target's
@@ -467,7 +467,7 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   continuation overrides that pause and is projected immediately. Child progress UI remains
   deferred.
 
-### MultiAgentV2 parity boundary
+### Codex multi-agent parity boundary
 
 Parity means matching Codex's model-facing collaboration contract where the same capability exists,
 not copying its process-local implementation:
@@ -576,18 +576,160 @@ surface; full history lives in the chain, which is the source of truth anyway.
   already-terminal replay, and from orphan cleanup. Later asks therefore do not inherit a phantom
   approval gate, even when terminal projection itself must be retried.
 
+## Timed scheduling: one-shot wakes and model-facing tools _(Built)_
+
+Timed scheduling has three separate owners. Keeping them separate prevents a clock adapter from
+becoming a second turn queue or a prompt store:
+
+```text
+CronCreate / CronList / CronDelete ─┐
+                                    ├─ SchedulingCoordinator ─→ WakeScheduler
+ScheduleWakeup ─────────────────────┘                              │
+                                                                  └─ timed wake
+                                                                     → scheduled ask
+                                                                     → TurnQueue
+```
+
+- **`WakeScheduler`** is host infrastructure. It durably delivers an opaque one-shot wake at or
+  after a requested time. It knows no prompts, conversations, cron expressions, recurrence, or
+  model tools.
+- **`SchedulingCoordinator`** is the Zukhruf application layer. It owns conversation-scoped
+  definitions, cron calculation, dynamic-wake replacement, expiry, reconciliation, and conversion
+  of a fired occurrence into a normal Zukhruf ask.
+- **Scheduling tools** are the model-facing surface. They bind implicitly to the calling agent's
+  current conversation and are injected only when `AgentRuntime` is configured with scheduling.
+  The raw `WakeScheduler` is never exposed to the model.
+
+The portable one-shot port is intentionally smaller than cron:
+
+```ts
+interface Wake<T extends object> {
+  id: string;
+  runAt: Date;
+  data: T;
+}
+
+abstract class WakeScheduler<T extends object> {
+  abstract schedule(wake: Wake<T>): Promise<void>;
+  abstract cancel(id: string): Promise<void>;
+  abstract consume(
+    handler: (wake: Wake<T>) => Promise<void>,
+  ): Promise<AsyncDisposable>;
+}
+```
+
+Scheduling the same `id` and content is idempotent. Delivery is at-least-once: resolving the handler
+acknowledges the wake, while failure leaves it retryable. `cancel` is idempotent, but a wake already
+claimed may still call its handler. The handler must therefore reload authoritative application
+state before acting. The Node/Postgres adapter is `PgBossWakeScheduler` over pg-boss `sendAfter()`;
+it uses a dedicated queue and the public pg-boss API, not `node-cron`, custom SQL, or pg-boss's cron
+timekeeper. A Durable Object adapter can absorb the same one-shot contract with alarms later.
+
+The Node host initializes the adapter explicitly and passes it into the runtime; both the pg-boss
+instance and the configured timezone remain host-owned choices:
+
+```ts
+const wakes = new PgBossWakeScheduler<SchedulingWake>(boss);
+await wakes.initialize();
+const runtime = new AgentRuntime(root, {
+  store,
+  streams,
+  queue,
+  mailboxStore,
+  scheduling: { scheduler: wakes, timezone: 'UTC' },
+});
+await using worker = await runtime.work();
+```
+
+### Claude-compatible tool contract
+
+The fixed-schedule tools keep Claude Code's exact names and meaningful result shapes. Zukhruf omits
+Claude's host-specific `durable` flag: every definition is durable and conversation-scoped.
+
+```text
+CronCreate({cron, prompt, recurring?})
+  → {id, humanSchedule, recurring}
+
+CronList({})
+  → {jobs: [{id, cron, humanSchedule, prompt, recurring?}]}
+
+CronDelete({id})
+  → {id}
+
+ScheduleWakeup({delaySeconds, reason, prompt} | {stop: true})
+  → {scheduledFor, clampedDelaySeconds, wasClamped, stopped?, cancelledWakeups?}
+```
+
+- `CronCreate` accepts a standard five-field cron expression in the host-configured IANA timezone.
+  It waits for the next match; immediate execution is not part of this tool. `recurring` defaults to
+  `true`; `false` fires once and deletes the definition. A conversation may own at most 50 cron
+  definitions. Recurring definitions expire after seven days, after their final due occurrence.
+- `CronList` and `CronDelete` can see or mutate only the calling conversation's definitions. Public
+  cron IDs are eight characters; internal wake and turn IDs are deterministic UUIDs derived from
+  the conversation, public ID, definition generation, and intended fire time.
+- `ScheduleWakeup` requires `delaySeconds`, `reason`, and `prompt` unless `stop` is `true`. The delay
+  is rounded to a whole second and clamped to 60–3600 seconds. Each call replaces the current
+  conversation's previous dynamic wake. `stop: true` removes only that dynamic wake; fixed cron
+  definitions remain active. `reason` explains the timing decision but is not injected into the
+  later prompt.
+- Fixed and dynamic tools share the one-shot substrate. Cron recurrence is application behavior:
+  after one occurrence is durably handled, the coordinator calculates and arms the next one. No
+  recurrence exists in `WakeScheduler`.
+
+The host supplies an explicit IANA timezone; the resolved timezone is persisted with each cron
+definition so later host configuration changes do not reinterpret existing schedules. Cron syntax
+and occurrences come from the already-used `cron-parser`; a dedicated formatter supplies the full
+`humanSchedule` contract rather than a partial home-grown formatter. The initial implementation has
+no hidden jitter. It fires at the calculated minute subject to worker polling delay.
+
+### Durable state and firing
+
+`ContextStore` chat metadata is the source of truth, under `metadata.zukhruf.scheduling`. It stores
+cron definitions and at most one dynamic wake for that conversation. The existing atomic
+`ContextStore.updateChat` operation serializes concurrent create/delete/replace/claim transitions
+across processes. Wake jobs are reconstructable delivery receipts, never the permanent definition
+store.
+
+Creation persists the definition before arming its deterministic wake. Deletion removes or
+supersedes metadata before best-effort wake cancellation. `AgentRuntime.work()` starts the turn and
+wake consumers as one combined lifecycle, reconciles active metadata to missing wake receipts at
+startup, and re-runs reconciliation after wake failures. A stale, cancelled, duplicated, or racing
+wake reloads metadata and becomes a no-op when its definition generation or intended time no longer
+matches.
+
+A due occurrence remains scheduling metadata while its conversation is running, queued, or paused
+for approval. After the final waiting turn settles, the coordinator materializes exactly one
+catch-up occurrence through the existing enqueue path as an ordinary FIFO ask with
+`origin: 'scheduled'`. Scheduled provenance is durable and available to later authorization or
+telemetry policy; origin is not accepted from the public HTTP session input. The TurnQueue remains
+the only execution serializer: scheduled asks never enter an active model turn, already-waiting
+ordinary work runs first, and ordinary work arriving after materialization cannot overtake it.
+
+Wake delivery, settlement reconciliation, coordinator retries, and duplicate TurnQueue receipts are
+at-least-once. The deterministic occurrence turn id plus the StreamStore terminal check makes model execution
+idempotent. A busy window or downtime produces at most one catch-up occurrence, then advances to the
+next future match; it never expands every missed tick into a prompt backlog. Deleting a
+definition or stopping a dynamic wake prevents future occurrences but does not cancel a scheduled
+ask already enqueued or running. Normal turn cancellation remains a separate operation.
+
+The future `/loop` feature is deliberately **not** part of this design slice. It is a skill—an
+instruction layer that teaches the model how to compose `CronCreate` for fixed cadence and
+`ScheduleWakeup` for self-paced cadence. It adds no new scheduler primitive. Slash-command parsing,
+default loop prompts, and loop-specific UI remain future host behavior.
+
+The ordered implementation work and crash-boundary proofs live in `SCHEDULING_PLAN.md`.
+
 ## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
 
 A **stack** binds the runtime's needs to one platform (Cloudflare, Node+Postgres, …) and is the
 deploy target. Decision: **one runtime, swappable adapters** — write the orchestration once, supply
 platform adapters.
 
-For that to hold, the runtime must be **event-driven, not loop-driven**: a set of handlers
-(`onTurnQueued`, `onWake`, `onCancel`) the host adapter invokes, with **all continuation routed
-through a Scheduler port** and **zero in-memory continuation state** between calls (everything to
-resume a turn round-trips the store). The Scheduler port is the same "host-runtime wakeup" seam we
-keep `@deepagents/context` free of — it is the linchpin of portability, because "continue this work
-later" is the one thing every platform expresses differently.
+For that to hold, timed continuation must be **event-driven, not loop-state-driven**: the runtime
+persists application state, requests a one-shot wake, and reconstructs the action when the host
+delivers it. Queue-native approval continuation, mailbox wakes, and immediate asks continue through
+`TurnQueue`; only time-based application wakes use `WakeScheduler`. No continuation depends on
+in-memory timer state.
 
 **Compute is long-running only. Serverless is out.** A turn runs start-to-finish in one execution
 (Node/container process, or a Cloudflare Durable Object spanning long turns via alarms). Pure
@@ -602,20 +744,21 @@ Ports (the runtime's needs):
 | StreamStore           | Postgres                                 | DO storage                                    |
 | ChangeSource          | `LISTEN/NOTIFY`                          | **absorbed** (DO WebSocket)                   |
 | Queue (pending turns) | Postgres/PgBoss                          | **absorbed** (actor addressability)           |
-| Scheduler             | node-cron                                | **absorbed** (DO alarms)                      |
+| WakeScheduler         | pg-boss `sendAfter()`                    | **absorbed** (DO alarms)                      |
 | Compute / executor    | worker pool + per-conversation **lease** | one actor per `chatId` (serialization free)   |
 | Sandbox               | Docker                                   | gated — no Docker → Daytona/E2B/CF-containers |
 
 Key subtlety: on a Durable Object, several ports are not _implemented_ — they are **absorbed** by the
-platform (the actor _is_ the queue, change-source, scheduler, and per-conversation serializer). So
-the adapter seam must allow "this capability is provided intrinsically by the host," or we'd bolt a
-redundant queue onto a platform that already is one. The unifying abstraction is therefore a
-**per-conversation executor**: native as a DO, leased on Node.
+platform (the actor _is_ the queue, change-source, wake scheduler, and per-conversation serializer).
+So the adapter seam must allow "this capability is provided intrinsically by the host," or we'd
+bolt redundant infrastructure onto a platform that already provides it. The unifying abstraction is
+therefore a **per-conversation executor**: native as a DO, leased on Node.
 
 ## Built (implemented + verified)
 
-**Durable streams + reconnect AND the background executor are now built** (see the executor
-section). Still designed-not-built: the stacks (a real Node+Postgres bundle; the DO adapter).
+**Durable streams, reconnect, the background executor, and timed scheduling are now built** (see
+the executor and timed-scheduling sections). Still designed-not-built: the stacks (a real
+Node+Postgres bundle; the DO adapter).
 
 - `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, subagents?})`
   returns a pure declaration with caller tools and a normalized subagent list. `sandbox` is a
@@ -637,7 +780,7 @@ section). Still designed-not-built: the stacks (a real Node+Postgres bundle; the
   or persists `SKILL.md` bodies, scripts, references, or assets. Skills belong to one agent sandbox
   and do not implicitly pass to subagents.
 - `runtime/agent-runtime.ts` —
-  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore})` →
+  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, scheduling?})` →
   `{ enqueue(conv, {id, input}) → {id, stream},
 deliver(communication, mode) → void,
 approve(conv, {toolCallId}) / deny(conv, {toolCallId, reason?}) → {id, stream},
@@ -649,6 +792,11 @@ work({concurrency?}) → AsyncDisposable }`.
   durable id. Instructions are seeded
   **unconditionally per turn** (the old `getTurnCount()===0` guard ran reopened conversations with
   an empty system prompt).
+- `scheduling/` — the generic `WakeScheduler` port, public `PgBossWakeScheduler` adapter,
+  conversation metadata coordinator, and runtime-owned `CronCreate`, `CronList`, `CronDelete`, and
+  `ScheduleWakeup` tools. The adapter uses a borrowed pg-boss instance and one-shot `sendAfter()`;
+  the coordinator owns recurrence, replacement, expiry, catch-up, deterministic occurrence IDs,
+  deferred turn conversion, and startup/failure/settlement reconciliation.
 - `control-plane/agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted
   addressing, durable thread identity, and ContextStore-backed tree discovery.
   `agent-status-projector.ts`
@@ -684,7 +832,10 @@ work({concurrency?}) → AsyncDisposable }`.
   sibling messaging, genuine root/child/grandchild execution, follow-up ordering, root rejection,
   queued/running/approval-paused-as-running/terminal tree status, caller-mailbox wait/timeout/cancellation,
   queued and cross-runtime active interruption, target reuse, and idempotent
-  success/failure/cancellation forwarding.
+  success/failure/cancellation forwarding. Scheduling coverage exercises the public runtime and
+  adapter boundaries over PGlite, SQLite metadata restarts, and Docker-gated PostgreSQL, including
+  duplicate delivery, worker death, both dual-write gaps, conversation isolation, busy-window
+  coalescing and FIFO ordering, cancellation, expiry, catch-up, and spent-receipt cleanup.
 - Backends switch by composition in the demo sandbox declarations
   (`defineSandbox(({chatId}) => createDockerSandbox({name: chatId}))` ↔ Daytona etc.);
   `docker.ts`/`daytona.ts` deleted (no presets, no dispatcher flag).

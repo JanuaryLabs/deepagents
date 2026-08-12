@@ -42,11 +42,13 @@ test('defineAgent leaves collaboration-tool injection to turn execution', () => 
 test('the customer barrel hides runtime wiring and injected tool implementations', () => {
   for (const internal of [
     'AgentControlPlane',
+    'SchedulingCoordinator',
     'AgentDeclarationRegistry',
     'AgentDirectory',
     'AgentStatusProjector',
     'AgentTurnExecutor',
     'ApprovalController',
+    'resolveMultiAgentHostConfig',
     'MailboxCoordinator',
     'spawnAgentTool',
     'sendMessageTool',

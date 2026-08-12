@@ -67,7 +67,7 @@
       jobs and waiting for every sibling before resuming exactly once.
 - [x] Keep the assistant message as the permanent decision record after pg-boss deletes the job.
       API processes only read and queue; the worker rechecks and applies the winning command.
-- [x] Suppress child terminal projection while an approval remains unresolved, report Codex V2's
+- [x] Suppress child terminal projection while an approval remains unresolved, report Codex's
       model-facing `running`, and prove exactly one post-continuation `FINAL_ANSWER`.
 - [x] A failed or cancelled continuation overrides approval-pause projection: parents receive the
       terminal result and `list_agents` reports `errored` or `interrupted`, never stale `running`.
@@ -121,7 +121,7 @@
       running or oldest queued work across runtime instances, projects one terminal parent message,
       returns the previous status, and leaves the target reusable. Terminal and approval-paused
       targets no-op; no broader close/resume/shutdown lifecycle was added.
-- [x] Port Codex V2 host configuration for separate root/subagent guidance, spawn usage text,
+- [x] Port Codex host configuration for separate root/subagent guidance, spawn usage text,
       validated OpenAI Responses tool namespaces, and wait bounds. Keep collaboration tools on the
       direct model surface when `nonCodeModeOnly` is true.
 - [ ] Add explicit spawn-context contracts for dedicated subagent developer instructions and the
@@ -130,7 +130,7 @@
       `TurnContext` representation.
 - [ ] Add a nested code-mode executor before accepting `nonCodeModeOnly: false`; current Zukhruf has
       no `functions.exec`-equivalent surface, so the unsupported value fails explicitly.
-- [x] Match the implemented Codex V2 collaboration output/status contracts: canonical
+- [x] Match the implemented Codex collaboration output/status contracts: canonical
       `{task_name}` spawn output, empty send/follow-up success text, strict list/wait/interrupt
       output schemas, approval pauses as `running`, and missing interrupt targets as `not_found`.
       `shutdown` is accepted by the compatibility status schema but has no producer until Zukhruf

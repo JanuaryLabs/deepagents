@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai';
+import type { ToolSet, UIMessage } from 'ai';
 
 import {
   type AvailableSkill,
@@ -21,7 +21,7 @@ import type {
   ConversationId,
   InterAgentCommunication,
 } from '../mailbox/types.ts';
-import type { ResolvedMultiAgentV2HostConfig } from '../multi-agent-v2-config.ts';
+import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
 import {
   type AgentSkills,
@@ -36,7 +36,8 @@ export interface AgentTurnExecutorOptions {
   controlPlane: AgentControlPlane;
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
-  multiAgentV2: ResolvedMultiAgentV2HostConfig;
+  multiAgent: ResolvedMultiAgentHostConfig;
+  schedulingTools: ToolSet;
 }
 
 interface SamplingMailboxState {
@@ -50,8 +51,9 @@ export class AgentTurnExecutor {
   readonly #controlPlane: AgentControlPlane;
   readonly #mailbox: MailboxCoordinator;
   readonly #approvals: ApprovalController;
-  readonly #multiAgentV2: ResolvedMultiAgentV2HostConfig;
+  readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
+  readonly #schedulingTools: ToolSet;
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -59,8 +61,9 @@ export class AgentTurnExecutor {
     this.#controlPlane = options.controlPlane;
     this.#mailbox = options.mailbox;
     this.#approvals = options.approvals;
-    this.#multiAgentV2 = options.multiAgentV2;
-    this.#collaborationTools = createCollaborationTools(options.multiAgentV2);
+    this.#multiAgent = options.multiAgent;
+    this.#collaborationTools = createCollaborationTools(options.multiAgent);
+    this.#schedulingTools = options.schedulingTools;
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
@@ -105,8 +108,8 @@ export class AgentTurnExecutor {
 
     const { declaration, thread } = await this.#controlPlane.resolve(turn);
     const usageHint = thread.path.isRoot
-      ? this.#multiAgentV2.rootAgentUsageHintText
-      : this.#multiAgentV2.subagentUsageHintText;
+      ? this.#multiAgent.rootAgentUsageHintText
+      : this.#multiAgent.subagentUsageHintText;
     const engine = this.#engineFor(turn).set(
       ...declaration.instructions,
       ...(usageHint === undefined ? [] : [role(usageHint)]),
@@ -157,6 +160,7 @@ export class AgentTurnExecutor {
       tools: {
         ...declaration.tools,
         ...this.#collaborationTools,
+        ...this.#schedulingTools,
       },
       telemetry: declaration.telemetry,
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),
@@ -252,7 +256,7 @@ export class AgentTurnExecutor {
         ...communications.map((communication) =>
           user(this.#mailboxInputMessage(communication)),
         ),
-        user(turn.input),
+        this.#askInputMessage(turn),
         assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
       );
       await engine.save({ branch: true });
@@ -333,6 +337,25 @@ export class AgentTurnExecutor {
       ],
       metadata: { interAgentCommunication: communication },
     };
+  }
+
+  #askInputMessage(
+    turn: Extract<TurnRef, { kind: 'ask' }>,
+  ): ReturnType<typeof user> {
+    if (turn.origin !== 'scheduled') {
+      return user(turn.input);
+    }
+    return user({
+      id: turn.schedule.occurrenceId,
+      role: 'user',
+      parts: [{ type: 'text', text: turn.input }],
+      metadata: {
+        zukhruf: {
+          origin: 'scheduled',
+          schedule: turn.schedule,
+        },
+      },
+    });
   }
 
   #renderInterAgentCommunication(

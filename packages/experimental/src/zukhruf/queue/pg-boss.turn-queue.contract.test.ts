@@ -668,6 +668,30 @@ for (const contract of turnQueueContracts) {
         );
       });
 
+      test('settlement releases FIFO ownership before follow-up reconciliation', async (t) => {
+        await using h = await contract.makeQueue();
+        const first = ref('settlement', 1);
+        const second = ref('settlement', 2);
+        const settled: string[] = [];
+
+        await h.queue.push(first);
+        await h.queue.push(second);
+        await using _consumer = await h.queue.consume(async () => {}, {
+          ...noOrphans,
+          onSettled: async (turn) => {
+            settled.push(turn.streamId);
+            assert.notEqual(
+              await h.queue.getTurnActivity(turn),
+              'running',
+              'the completed job no longer owns the conversation',
+            );
+          },
+        });
+
+        await waitFor(t, () => settled.length === 2, 'both turns settle');
+        assert.deepStrictEqual(settled, [first.streamId, second.streamId]);
+      });
+
       test('disposal stops delivery; a later consumer picks up the backlog', async (t) => {
         await using h = await contract.makeQueue();
         let executions = 0;
@@ -990,9 +1014,7 @@ async function postgresQueueHarness(
 ): Promise<PostgresQueueHarness> {
   const ready = Promise.withResolvers<PostgresQueueHarness>();
   const release = Promise.withResolvers<void>();
-  let lifecycle!: Promise<void | undefined>;
-
-  lifecycle = withPostgresContainer(async (container) => {
+  const lifecycle = withPostgresContainer(async (container) => {
     const boss = new PgBoss({
       connectionString: container.connectionString,
       ...options.boss,

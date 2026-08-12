@@ -10,7 +10,11 @@ import {
   InterAgentCommunicationType,
   createInterAgentCommunication,
 } from '../mailbox/types.ts';
-import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
+import type {
+  ScheduledTurnMetadata,
+  TurnQueue,
+  TurnRef,
+} from '../queue/turn-queue.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentHistoryForker } from './agent-history-forker.ts';
@@ -104,6 +108,21 @@ export class AgentControlPlane {
     conversation: ConversationId,
     turn: TurnInput,
   ): Promise<string> {
+    return this.#enqueue(conversation, turn);
+  }
+
+  async enqueueScheduled(
+    conversation: ConversationId,
+    turn: TurnInput & { schedule: ScheduledTurnMetadata },
+  ): Promise<string> {
+    return this.#enqueue(conversation, turn, turn.schedule);
+  }
+
+  async #enqueue(
+    conversation: ConversationId,
+    turn: TurnInput,
+    schedule?: ScheduledTurnMetadata,
+  ): Promise<string> {
     if (!turn.id.trim()) {
       throw new Error(
         'enqueue: turn id is required — it names the ask, making retries idempotent',
@@ -112,13 +131,16 @@ export class AgentControlPlane {
     await this.#directory.assertOwnerIfExists(conversation);
     const streamId = AgentTurnId.fromRequest(conversation, turn.id).toString();
     await this.#streams.register(streamId);
-    await this.#queue.push({
+    const ask = {
       kind: 'ask',
       streamId,
       chatId: conversation.chatId,
       userId: conversation.userId,
       input: turn.input,
-    });
+    } as const;
+    await this.#queue.push(
+      schedule === undefined ? ask : { ...ask, origin: 'scheduled', schedule },
+    );
     return streamId;
   }
 

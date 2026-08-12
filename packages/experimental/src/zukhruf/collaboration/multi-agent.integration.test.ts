@@ -202,7 +202,7 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
     }),
     {
       ...h,
-      multiAgentV2: {
+      multiAgent: {
         rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
         subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
         usageHintText: 'Prefer delegation for independent work.',
@@ -302,7 +302,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
         streams,
         mailboxStore,
         queue,
-        multiAgentV2: {
+        multiAgent: {
           minWaitTimeoutMs: 50,
           defaultWaitTimeoutMs: 75,
           maxWaitTimeoutMs: 100,
@@ -360,7 +360,7 @@ test('subagent guidance replaces root guidance on a child turn', async (t) => {
     }),
     {
       ...h,
-      multiAgentV2: {
+      multiAgent: {
         rootAgentUsageHintText: 'ROOT COLLABORATION GUIDANCE',
         subagentUsageHintText: 'CHILD COLLABORATION GUIDANCE',
       },
@@ -506,7 +506,7 @@ test('host config rejects invalid namespaces and wait bounds', () => {
       () =>
         new AgentRuntime(declaration, {
           ...h,
-          multiAgentV2: { toolNamespace: 'functions' },
+          multiAgent: { toolNamespace: 'functions' },
         }),
       /reserved tool namespace/,
     );
@@ -514,7 +514,7 @@ test('host config rejects invalid namespaces and wait bounds', () => {
       () =>
         new AgentRuntime(declaration, {
           ...h,
-          multiAgentV2: { toolNamespace: ' agents ' },
+          multiAgent: { toolNamespace: ' agents ' },
         }),
       /cannot be empty or padded/,
     );
@@ -522,7 +522,7 @@ test('host config rejects invalid namespaces and wait bounds', () => {
       () =>
         new AgentRuntime(declaration, {
           ...h,
-          multiAgentV2: { nonCodeModeOnly: false },
+          multiAgent: { nonCodeModeOnly: false },
         }),
       /requires a nested code-mode executor/,
     );
@@ -530,7 +530,7 @@ test('host config rejects invalid namespaces and wait bounds', () => {
       () =>
         new AgentRuntime(declaration, {
           ...h,
-          multiAgentV2: {
+          multiAgent: {
             minWaitTimeoutMs: 50,
             defaultWaitTimeoutMs: 40,
             maxWaitTimeoutMs: 100,

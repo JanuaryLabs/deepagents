@@ -1,9 +1,17 @@
+export interface ScheduledTurnMetadata {
+  kind: 'cron' | 'dynamic';
+  definitionId?: string;
+  generation: number;
+  scheduledFor: number;
+  occurrenceId: string;
+}
+
 export type TurnRef = {
   streamId: string;
   chatId: string;
   userId: string;
 } & (
-  | {
+  | ({
       kind: 'ask';
       /**
        * The user message, carried by the queue until the turn executes. It
@@ -13,7 +21,10 @@ export type TurnRef = {
        * be THIS turn's placeholder).
        */
       input: string;
-    }
+    } & (
+      | { origin?: undefined; schedule?: undefined }
+      | { origin: 'scheduled'; schedule: ScheduledTurnMetadata }
+    ))
   | {
       /**
        * Recovery-only re-execution of an existing stream. Normal approval
@@ -63,6 +74,11 @@ export interface ConsumeOptions {
    * turn becomes eligible.
    */
   onOrphaned: (turn: TurnRef, error: string) => Promise<void>;
+  /**
+   * Runs after a non-parked turn releases its conversation's FIFO ownership.
+   * Implementations report failures without rolling back the settled turn.
+   */
+  onSettled?: (turn: TurnRef) => Promise<void>;
 }
 
 export type TurnActivity = 'idle' | 'queued' | 'running';
@@ -83,6 +99,8 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  * - Per chat, at most ONE handler invocation is active at a time, and turns
  *   run in the order they were pushed (strict FIFO per `chatId`) — this
  *   covers duplicates too: they can never run concurrently or out of order.
+ * - After a non-parked job releases its FIFO ownership, `consume` invokes the
+ *   optional `onSettled` hook before considering that delivery complete.
  * - Turns from different chats may run concurrently.
  * - `getTurnActivity` distinguishes queued from active scheduler work for
  *   status inspection; adapters must not silently fall back to stale history.

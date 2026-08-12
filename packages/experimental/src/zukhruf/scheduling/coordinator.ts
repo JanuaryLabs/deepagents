@@ -1,0 +1,610 @@
+import { CronExpressionParser } from 'cron-parser';
+import { v5 as uuidv5 } from 'uuid';
+import { z } from 'zod';
+
+import type { ContextStore } from '@deepagents/context';
+
+import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
+import { conversationNamespace } from '../control-plane/agent-turn-id.ts';
+import type { ConversationId } from '../mailbox/types.ts';
+import type { ScheduledTurnMetadata } from '../queue/turn-queue.ts';
+import type { Wake, WakeScheduler } from './wake-scheduler.ts';
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const CRON_LIFETIME_MS = 7 * DAY_MS;
+const MAX_CRON_JOBS = 50;
+
+const cronDefinitionSchema = z
+  .object({
+    id: z.string().length(8),
+    expression: z.string().min(1),
+    prompt: z.string(),
+    recurring: z.boolean(),
+    timezone: z.string().min(1),
+    createdAt: z.number().int().nonnegative(),
+    expiresAt: z.number().int().nonnegative(),
+    nextRunAt: z.number().int().nonnegative(),
+    generation: z.number().int().positive(),
+  })
+  .strict();
+
+const schedulingStateSchema = z
+  .object({
+    version: z.literal(1),
+    cron: z.record(z.string(), cronDefinitionSchema),
+    dynamic: z
+      .object({
+        prompt: z.string(),
+        reason: z.string(),
+        createdAt: z.number().int().nonnegative(),
+        nextRunAt: z.number().int().nonnegative(),
+        generation: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine(({ cron }, context) => {
+    for (const [id, definition] of Object.entries(cron)) {
+      if (id !== definition.id) {
+        context.addIssue({
+          code: 'custom',
+          message: `cron key "${id}" does not match definition id "${definition.id}"`,
+          path: ['cron', id, 'id'],
+        });
+      }
+    }
+  });
+
+type SchedulingStateV1 = z.infer<typeof schedulingStateSchema>;
+type CronDefinition = SchedulingStateV1['cron'][string];
+
+export interface SchedulingWake {
+  conversation: ConversationId;
+  kind: 'cron' | 'dynamic';
+  definitionId?: string;
+  generation: number;
+  scheduledFor: number;
+}
+
+const schedulingWakeSchema: z.ZodType<SchedulingWake> = z
+  .object({
+    conversation: z
+      .object({ chatId: z.string().min(1), userId: z.string().min(1) })
+      .strict(),
+    kind: z.enum(['cron', 'dynamic']),
+    definitionId: z.string().length(8).optional(),
+    generation: z.number().int().positive(),
+    scheduledFor: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((wake, context) => {
+    if ((wake.kind === 'cron') !== (wake.definitionId !== undefined)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'cron wakes require definitionId and dynamic wakes omit it',
+      });
+    }
+  });
+
+interface SchedulingCoordinatorOptions {
+  store: ContextStore;
+  scheduler: WakeScheduler<SchedulingWake>;
+  controlPlane: AgentControlPlane;
+  canMaterialize: (conversation: ConversationId) => Promise<boolean>;
+  timezone: string;
+}
+
+interface CronCreateInput {
+  cron: string;
+  prompt: string;
+  recurring?: boolean;
+}
+
+/** Conversation scheduling state, recurrence, recovery, and turn conversion. */
+export class SchedulingCoordinator {
+  readonly #store: ContextStore;
+  readonly #scheduler: WakeScheduler<SchedulingWake>;
+  readonly #controlPlane: AgentControlPlane;
+  readonly #canMaterialize: SchedulingCoordinatorOptions['canMaterialize'];
+  readonly timezone: string;
+
+  constructor(options: SchedulingCoordinatorOptions) {
+    this.#store = options.store;
+    this.#scheduler = options.scheduler;
+    this.#controlPlane = options.controlPlane;
+    this.#canMaterialize = options.canMaterialize;
+    this.timezone = SchedulingCoordinator.#resolveTimezone(options.timezone);
+  }
+
+  async createCron(
+    conversation: ConversationId,
+    input: CronCreateInput,
+    operationId: string,
+  ): Promise<CronDefinition> {
+    const expression = input.cron.trim();
+    const recurring = input.recurring ?? true;
+    const createdAt = Date.now();
+    const nextRunAt = this.#nextOccurrence(
+      expression,
+      this.timezone,
+      createdAt,
+    );
+    let definition!: CronDefinition;
+
+    await this.#update(conversation, (state) => {
+      let id: string | undefined;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const candidate = uuidv5(
+          attempt === 0 ? operationId : `${operationId}:${attempt}`,
+          conversationNamespace(conversation),
+        )
+          .replaceAll('-', '')
+          .slice(0, 8);
+        const existing = state.cron[candidate];
+        if (!existing) {
+          id = candidate;
+          break;
+        }
+        if (
+          existing.expression === expression &&
+          existing.prompt === input.prompt &&
+          existing.recurring === recurring &&
+          existing.timezone === this.timezone
+        ) {
+          definition = existing;
+          return state;
+        }
+      }
+      if (!id) throw new Error('CronCreate could not allocate a unique job id');
+      if (Object.keys(state.cron).length >= MAX_CRON_JOBS) {
+        throw new Error(
+          `CronCreate supports at most ${MAX_CRON_JOBS} active jobs per conversation`,
+        );
+      }
+      definition = {
+        id,
+        expression,
+        prompt: input.prompt,
+        recurring,
+        timezone: this.timezone,
+        createdAt,
+        expiresAt: recurring ? createdAt + CRON_LIFETIME_MS : nextRunAt,
+        nextRunAt,
+        generation: 1,
+      };
+      return { ...state, cron: { ...state.cron, [id]: definition } };
+    });
+    await this.#armCron(conversation, definition);
+    return definition;
+  }
+
+  async cronJobs(conversation: ConversationId): Promise<CronDefinition[]> {
+    const state = await this.#read(conversation);
+    return Object.values(state.cron).toSorted((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+  }
+
+  async deleteCron(conversation: ConversationId, id: string): Promise<void> {
+    let removed: CronDefinition | undefined;
+    await this.#update(conversation, (state) => {
+      removed = state.cron[id];
+      if (!removed) throw new Error(`CronDelete could not find job "${id}"`);
+      const cron = { ...state.cron };
+      delete cron[id];
+      return { ...state, cron };
+    });
+    try {
+      await this.#scheduler.cancel(this.#cronWake(conversation, removed!).id);
+    } catch {
+      // Metadata is authoritative; a claimed/stale receipt validates and no-ops.
+    }
+  }
+
+  async scheduleDynamic(
+    conversation: ConversationId,
+    input: { delaySeconds: number; reason: string; prompt: string },
+  ): Promise<{
+    scheduledFor: number;
+    clampedDelaySeconds: number;
+    wasClamped: boolean;
+  }> {
+    const rounded = Math.round(input.delaySeconds);
+    const clampedDelaySeconds = Math.min(3_600, Math.max(60, rounded));
+    const createdAt = Date.now();
+    const nextRunAt = createdAt + clampedDelaySeconds * 1_000;
+    const generation = SchedulingCoordinator.#randomGeneration();
+    let previous: SchedulingStateV1['dynamic'];
+    const dynamic = {
+      prompt: input.prompt,
+      reason: input.reason,
+      createdAt,
+      nextRunAt,
+      generation,
+    };
+    await this.#update(conversation, (state) => {
+      previous = state.dynamic;
+      return { ...state, dynamic };
+    });
+    await this.#scheduler.schedule(this.#dynamicWake(conversation, dynamic));
+    if (previous) {
+      try {
+        await this.#scheduler.cancel(
+          this.#dynamicWake(conversation, previous).id,
+        );
+      } catch {
+        // Replacement is committed; stale delivery validates and no-ops.
+      }
+    }
+    return {
+      scheduledFor: nextRunAt,
+      clampedDelaySeconds,
+      wasClamped: rounded !== clampedDelaySeconds,
+    };
+  }
+
+  async stopDynamic(conversation: ConversationId): Promise<number> {
+    let removed: SchedulingStateV1['dynamic'];
+    await this.#update(conversation, (state) => {
+      removed = state.dynamic;
+      if (!removed) return state;
+      const { dynamic: _, ...withoutDynamic } = state;
+      return withoutDynamic;
+    });
+    if (!removed) return 0;
+    try {
+      await this.#scheduler.cancel(this.#dynamicWake(conversation, removed).id);
+    } catch {
+      // Metadata is authoritative; stale delivery validates and no-ops.
+    }
+    return 1;
+  }
+
+  async work(): Promise<AsyncDisposable> {
+    const consumer = await this.#scheduler.consume(async (wake) => {
+      try {
+        await this.#handle(wake);
+      } catch (error) {
+        await this.reconcile();
+        throw error;
+      }
+    });
+    try {
+      await this.reconcile();
+      return consumer;
+    } catch (error) {
+      await consumer[Symbol.asyncDispose]();
+      throw error;
+    }
+  }
+
+  async reconcile(): Promise<void> {
+    const chats = await this.#store.listChats();
+    for (const chat of chats) {
+      if (!SchedulingCoordinator.#hasScheduling(chat.metadata)) continue;
+      const conversation = { chatId: chat.id, userId: chat.userId };
+      const state = this.#parse(chat.metadata);
+      for (const definition of Object.values(state.cron)) {
+        if (definition.nextRunAt > definition.expiresAt) {
+          await this.#expireCron(conversation, definition);
+        } else {
+          await this.#armCron(conversation, definition);
+        }
+      }
+      if (state.dynamic) {
+        await this.#scheduler.schedule(
+          this.#dynamicWake(conversation, state.dynamic),
+        );
+      }
+    }
+  }
+
+  async materializeDueIfEligible(conversation: ConversationId): Promise<void> {
+    try {
+      if (!(await this.#canMaterialize(conversation))) return;
+      const state = await this.#read(conversation);
+      const now = Date.now();
+      const due = [
+        ...Object.values(state.cron).map((definition) => ({
+          runAt: definition.nextRunAt,
+          wake: this.#cronWake(conversation, definition),
+        })),
+        ...(state.dynamic
+          ? [
+              {
+                runAt: state.dynamic.nextRunAt,
+                wake: this.#dynamicWake(conversation, state.dynamic),
+              },
+            ]
+          : []),
+      ]
+        .filter(({ runAt }) => runAt <= now)
+        .toSorted(
+          (left, right) =>
+            left.runAt - right.runAt ||
+            left.wake.id.localeCompare(right.wake.id),
+        )[0];
+      if (due) await this.#handle(due.wake);
+    } catch (error) {
+      await this.reconcile();
+      throw error;
+    }
+  }
+
+  async #handle(rawWake: Wake<SchedulingWake>): Promise<void> {
+    const wake = schedulingWakeSchema.parse(rawWake.data);
+    if (rawWake.runAt.getTime() !== wake.scheduledFor) {
+      throw new Error('Scheduling wake due time does not match its payload');
+    }
+    if (rawWake.id !== this.#wakeId(wake)) {
+      throw new Error(
+        `Scheduling wake id "${rawWake.id}" does not match its payload`,
+      );
+    }
+    const state = await this.#read(wake.conversation);
+    const prompt =
+      wake.kind === 'cron'
+        ? this.#matchingCron(state, wake)?.prompt
+        : this.#matchingDynamic(state, wake)?.prompt;
+    if (prompt === undefined) return;
+    if (!(await this.#canMaterialize(wake.conversation))) return;
+
+    const occurrenceId = this.#occurrenceId(wake);
+    const schedule: ScheduledTurnMetadata = {
+      kind: wake.kind,
+      ...(wake.definitionId === undefined
+        ? {}
+        : { definitionId: wake.definitionId }),
+      generation: wake.generation,
+      scheduledFor: wake.scheduledFor,
+      occurrenceId,
+    };
+    await this.#controlPlane.enqueueScheduled(wake.conversation, {
+      id: occurrenceId,
+      input: prompt,
+      schedule,
+    });
+
+    let successor: CronDefinition | undefined;
+    await this.#update(wake.conversation, (current) => {
+      if (wake.kind === 'dynamic') {
+        if (!this.#matchingDynamic(current, wake)) return current;
+        const { dynamic: _, ...withoutDynamic } = current;
+        return withoutDynamic;
+      }
+
+      const definition = this.#matchingCron(current, wake);
+      if (!definition) return current;
+      const cron = { ...current.cron };
+      if (!definition.recurring) {
+        delete cron[definition.id];
+        return { ...current, cron };
+      }
+      const nextRunAt = this.#nextOccurrence(
+        definition.expression,
+        definition.timezone,
+        Math.max(Date.now(), definition.nextRunAt),
+      );
+      if (nextRunAt > definition.expiresAt) {
+        delete cron[definition.id];
+        return { ...current, cron };
+      }
+      successor = {
+        ...definition,
+        nextRunAt,
+        generation: definition.generation + 1,
+      };
+      cron[definition.id] = successor;
+      return { ...current, cron };
+    });
+    if (successor) await this.#armCron(wake.conversation, successor);
+  }
+
+  #matchingCron(
+    state: SchedulingStateV1,
+    wake: SchedulingWake,
+  ): CronDefinition | undefined {
+    if (wake.kind !== 'cron' || wake.definitionId === undefined) return;
+    const definition = state.cron[wake.definitionId];
+    return definition?.generation === wake.generation &&
+      definition.nextRunAt === wake.scheduledFor
+      ? definition
+      : undefined;
+  }
+
+  #matchingDynamic(
+    state: SchedulingStateV1,
+    wake: SchedulingWake,
+  ): SchedulingStateV1['dynamic'] {
+    if (wake.kind !== 'dynamic') return;
+    return state.dynamic?.generation === wake.generation &&
+      state.dynamic.nextRunAt === wake.scheduledFor
+      ? state.dynamic
+      : undefined;
+  }
+
+  async #expireCron(
+    conversation: ConversationId,
+    expired: CronDefinition,
+  ): Promise<void> {
+    await this.#update(conversation, (state) => {
+      const current = state.cron[expired.id];
+      if (
+        current?.generation !== expired.generation ||
+        current.nextRunAt !== expired.nextRunAt
+      ) {
+        return state;
+      }
+      const cron = { ...state.cron };
+      delete cron[expired.id];
+      return { ...state, cron };
+    });
+  }
+
+  #armCron(
+    conversation: ConversationId,
+    definition: CronDefinition,
+  ): Promise<void> {
+    return this.#scheduler.schedule(this.#cronWake(conversation, definition));
+  }
+
+  #cronWake(
+    conversation: ConversationId,
+    definition: CronDefinition,
+  ): Wake<SchedulingWake> {
+    return this.#toWake({
+      conversation,
+      kind: 'cron',
+      definitionId: definition.id,
+      generation: definition.generation,
+      scheduledFor: definition.nextRunAt,
+    });
+  }
+
+  #dynamicWake(
+    conversation: ConversationId,
+    dynamic: NonNullable<SchedulingStateV1['dynamic']>,
+  ): Wake<SchedulingWake> {
+    return this.#toWake({
+      conversation,
+      kind: 'dynamic',
+      generation: dynamic.generation,
+      scheduledFor: dynamic.nextRunAt,
+    });
+  }
+
+  #toWake(data: SchedulingWake): Wake<SchedulingWake> {
+    return {
+      id: this.#wakeId(data),
+      runAt: new Date(data.scheduledFor),
+      data,
+    };
+  }
+
+  #wakeId(wake: SchedulingWake): string {
+    return uuidv5(
+      JSON.stringify([
+        'wake',
+        wake.kind,
+        wake.definitionId ?? null,
+        wake.generation,
+        wake.scheduledFor,
+      ]),
+      conversationNamespace(wake.conversation),
+    );
+  }
+
+  #occurrenceId(wake: SchedulingWake): string {
+    return uuidv5(
+      JSON.stringify([
+        'occurrence',
+        wake.kind,
+        wake.definitionId ?? null,
+        wake.generation,
+        wake.scheduledFor,
+      ]),
+      conversationNamespace(wake.conversation),
+    );
+  }
+
+  #nextOccurrence(expression: string, timezone: string, after: number): number {
+    if (expression.split(/\s+/).length !== 5) {
+      throw new Error('CronCreate requires exactly five cron fields');
+    }
+    const oneYearLater = new Date(after);
+    oneYearLater.setUTCFullYear(oneYearLater.getUTCFullYear() + 1);
+    try {
+      return CronExpressionParser.parse(expression, {
+        currentDate: new Date(after),
+        endDate: oneYearLater,
+        tz: timezone,
+      })
+        .next()
+        .getTime();
+    } catch (cause) {
+      throw new Error(
+        'CronCreate requires a valid five-field expression with a match in the next year',
+        { cause },
+      );
+    }
+  }
+
+  async #read(conversation: ConversationId): Promise<SchedulingStateV1> {
+    const chat = await this.#store.getChat(conversation.chatId);
+    if (!chat)
+      throw new Error(`Scheduling chat "${conversation.chatId}" not found`);
+    if (chat.userId !== conversation.userId) {
+      throw new Error(
+        `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
+      );
+    }
+    return this.#parse(chat.metadata);
+  }
+
+  async #update(
+    conversation: ConversationId,
+    update: (state: SchedulingStateV1) => SchedulingStateV1,
+  ): Promise<void> {
+    await this.#store.updateChat(conversation.chatId, (chat) => {
+      if (chat.userId !== conversation.userId) {
+        throw new Error(
+          `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
+        );
+      }
+      const state = update(this.#parse(chat.metadata));
+      const metadata = chat.metadata ?? {};
+      const zukhruf = SchedulingCoordinator.#record(metadata.zukhruf);
+      return {
+        metadata: {
+          ...metadata,
+          zukhruf: { ...zukhruf, scheduling: state },
+        },
+      };
+    });
+  }
+
+  #parse(metadata: Record<string, unknown> | undefined): SchedulingStateV1 {
+    if (metadata?.zukhruf === undefined) return { version: 1, cron: {} };
+    const zukhruf = SchedulingCoordinator.#record(metadata.zukhruf);
+    if (zukhruf.scheduling === undefined) return { version: 1, cron: {} };
+    const parsed = schedulingStateSchema.safeParse(zukhruf.scheduling);
+    if (!parsed.success) {
+      throw new Error('Invalid metadata.zukhruf.scheduling state', {
+        cause: parsed.error,
+      });
+    }
+    return parsed.data;
+  }
+
+  static #record(value: unknown): Record<string, unknown> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('Invalid metadata.zukhruf state');
+    }
+    return value as Record<string, unknown>;
+  }
+
+  static #hasScheduling(metadata: Record<string, unknown> | undefined) {
+    return (
+      typeof metadata?.zukhruf === 'object' &&
+      metadata.zukhruf !== null &&
+      !Array.isArray(metadata.zukhruf) &&
+      'scheduling' in metadata.zukhruf
+    );
+  }
+
+  static #resolveTimezone(timezone: string): string {
+    try {
+      return new Intl.DateTimeFormat('en', {
+        timeZone: timezone,
+      }).resolvedOptions().timeZone;
+    } catch (cause) {
+      throw new Error(`Invalid scheduling timezone "${timezone}"`, { cause });
+    }
+  }
+
+  static #randomGeneration(): number {
+    const [high, low] = crypto.getRandomValues(new Uint32Array(2));
+    return Number((BigInt(high) << 21n) | BigInt(low >>> 11)) || 1;
+  }
+}

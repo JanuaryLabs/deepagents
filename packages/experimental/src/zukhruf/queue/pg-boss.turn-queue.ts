@@ -295,6 +295,7 @@ export class PgBossTurnQueue extends TurnQueue {
         // pg-boss and the turn dead-letters.
         if (!parked) {
           await this.#boss.deleteJob(this.#queue, job.id);
+          await this.#notifySettled(options, job.data);
         }
       },
     );
@@ -318,6 +319,7 @@ export class PgBossTurnQueue extends TurnQueue {
           if (job.sourceId) {
             await this.#boss.deleteJob(this.#queue, job.sourceId);
           }
+          await this.#notifySettled(options, job.data);
         }
       },
     );
@@ -427,6 +429,17 @@ export class PgBossTurnQueue extends TurnQueue {
       return output.message;
     }
     return output ? JSON.stringify(output) : 'turn orphaned';
+  }
+
+  async #notifySettled(options: ConsumeOptions, turn: TurnRef): Promise<void> {
+    try {
+      await options.onSettled?.(turn);
+    } catch (error) {
+      await options.onOrphaned(
+        turn,
+        `turn follow-up reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   static #interruptOrder(

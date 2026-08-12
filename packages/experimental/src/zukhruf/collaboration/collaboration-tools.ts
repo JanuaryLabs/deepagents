@@ -1,6 +1,6 @@
 import type { Tool, ToolSet } from 'ai';
 
-import type { ResolvedMultiAgentV2HostConfig } from '../multi-agent-v2-config.ts';
+import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import { interruptAgentTool } from './interrupt-agent.ts';
 import { listAgentsTool } from './list-agents.ts';
 import { followupTaskTool, sendMessageTool } from './message-tools.ts';
@@ -10,7 +10,7 @@ import { createWaitAgentTool } from './wait-agent.ts';
 const NAMESPACE_DESCRIPTION = 'Tools for spawning and managing sub-agents.';
 
 export function createCollaborationTools(
-  config: ResolvedMultiAgentV2HostConfig,
+  config: ResolvedMultiAgentHostConfig,
 ): ToolSet {
   const tools: ToolSet = {
     spawn_agent: createSpawnAgentTool({
@@ -37,7 +37,7 @@ export function createCollaborationTools(
 
 function configureTool(
   collaborationTool: Tool,
-  config: ResolvedMultiAgentV2HostConfig,
+  config: ResolvedMultiAgentHostConfig,
 ): Tool {
   const openai = collaborationTool.providerOptions?.openai;
   return {

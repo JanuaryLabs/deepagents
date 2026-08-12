@@ -19,8 +19,8 @@ const RESERVED_TOOL_NAMESPACES = new Set([
   'web',
 ]);
 
-/** Host-level controls matching Codex MultiAgentV2 configuration. */
-export interface MultiAgentV2HostConfig {
+/** Host-level controls matching Codex multi-agent configuration. */
+export interface MultiAgentHostConfig {
   minWaitTimeoutMs?: number;
   defaultWaitTimeoutMs?: number;
   maxWaitTimeoutMs?: number;
@@ -40,7 +40,7 @@ export interface MultiAgentV2HostConfig {
   nonCodeModeOnly?: boolean;
 }
 
-export interface ResolvedMultiAgentV2HostConfig {
+export interface ResolvedMultiAgentHostConfig {
   minWaitTimeoutMs: number;
   defaultWaitTimeoutMs: number;
   maxWaitTimeoutMs: number;
@@ -48,12 +48,11 @@ export interface ResolvedMultiAgentV2HostConfig {
   rootAgentUsageHintText?: string;
   subagentUsageHintText?: string;
   toolNamespace?: string;
-  nonCodeModeOnly: boolean;
 }
 
-export function resolveMultiAgentV2HostConfig(
-  input: MultiAgentV2HostConfig = {},
-): ResolvedMultiAgentV2HostConfig {
+export function resolveMultiAgentHostConfig(
+  input: MultiAgentHostConfig = {},
+): ResolvedMultiAgentHostConfig {
   const minWaitTimeoutMs =
     input.minWaitTimeoutMs ?? DEFAULT_MIN_WAIT_TIMEOUT_MS;
   const defaultWaitTimeoutMs =
@@ -65,17 +64,17 @@ export function resolveMultiAgentV2HostConfig(
   assertTimeout('maxWaitTimeoutMs', maxWaitTimeoutMs);
   if (minWaitTimeoutMs > maxWaitTimeoutMs) {
     throw new Error(
-      'AgentRuntime: multiAgentV2.minWaitTimeoutMs must be at most maxWaitTimeoutMs',
+      'AgentRuntime: multiAgent.minWaitTimeoutMs must be at most maxWaitTimeoutMs',
     );
   }
   if (defaultWaitTimeoutMs < minWaitTimeoutMs) {
     throw new Error(
-      'AgentRuntime: multiAgentV2.defaultWaitTimeoutMs must be at least minWaitTimeoutMs',
+      'AgentRuntime: multiAgent.defaultWaitTimeoutMs must be at least minWaitTimeoutMs',
     );
   }
   if (defaultWaitTimeoutMs > maxWaitTimeoutMs) {
     throw new Error(
-      'AgentRuntime: multiAgentV2.defaultWaitTimeoutMs must be at most maxWaitTimeoutMs',
+      'AgentRuntime: multiAgent.defaultWaitTimeoutMs must be at most maxWaitTimeoutMs',
     );
   }
 
@@ -85,15 +84,14 @@ export function resolveMultiAgentV2HostConfig(
     (toolNamespace.length === 0 || toolNamespace.trim() !== toolNamespace)
   ) {
     throw new Error(
-      'AgentRuntime: multiAgentV2.toolNamespace cannot be empty or padded',
+      'AgentRuntime: multiAgent.toolNamespace cannot be empty or padded',
     );
   }
   if (toolNamespace !== undefined) validateToolNamespace(toolNamespace);
 
-  const nonCodeModeOnly = input.nonCodeModeOnly ?? true;
-  if (!nonCodeModeOnly) {
+  if (input.nonCodeModeOnly === false) {
     throw new Error(
-      'AgentRuntime: multiAgentV2.nonCodeModeOnly=false requires a nested code-mode executor, which Zukhruf does not provide',
+      'AgentRuntime: multiAgent.nonCodeModeOnly=false requires a nested code-mode executor, which Zukhruf does not provide',
     );
   }
   const tool = (name: string) =>
@@ -126,14 +124,13 @@ All agents share the same workspace, current working directory, and filesystem.`
         ? defaultSubagentUsageHint(tool, shared)
         : nonEmptyText(input.subagentUsageHintText),
     toolNamespace,
-    nonCodeModeOnly,
   };
 }
 
 function assertTimeout(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(
-      `AgentRuntime: multiAgentV2.${name} must be a non-negative safe integer`,
+      `AgentRuntime: multiAgent.${name} must be a non-negative safe integer`,
     );
   }
 }
@@ -147,7 +144,7 @@ function validateToolNamespace(namespace: string): void {
     RESERVED_TOOL_NAMESPACES.has(namespace)
   ) {
     throw new Error(
-      `AgentRuntime: multiAgentV2.toolNamespace "${namespace}" is a reserved tool namespace or invalid`,
+      `AgentRuntime: multiAgent.toolNamespace "${namespace}" is a reserved tool namespace or invalid`,
     );
   }
 }

@@ -22,10 +22,16 @@ import type {
   MessageDeliveryMode,
 } from '../mailbox/types.ts';
 import {
-  type MultiAgentV2HostConfig,
-  resolveMultiAgentV2HostConfig,
-} from '../multi-agent-v2-config.ts';
+  type MultiAgentHostConfig,
+  resolveMultiAgentHostConfig,
+} from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
+import {
+  SchedulingCoordinator,
+  type SchedulingWake,
+} from '../scheduling/coordinator.ts';
+import { createSchedulingTools } from '../scheduling/tools.ts';
+import type { WakeScheduler } from '../scheduling/wake-scheduler.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
 
@@ -36,8 +42,12 @@ export interface AgentRuntimeOptions {
   queue: TurnQueue;
   /** Durable pending inter-agent input. Distinct from the TurnQueue scheduler. */
   mailboxStore: MailboxStore;
-  /** Codex MultiAgentV2-compatible host guidance and tool configuration. */
-  multiAgentV2?: MultiAgentV2HostConfig;
+  /** Codex-compatible multi-agent host guidance and tool configuration. */
+  multiAgent?: MultiAgentHostConfig;
+  scheduling?: {
+    scheduler: WakeScheduler<SchedulingWake>;
+    timezone: string;
+  };
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -64,12 +74,14 @@ export class AgentObservation {
   readonly #store: ContextStore;
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
+  readonly #scheduling?: SchedulingCoordinator;
 
   constructor(
     conversation: ConversationId,
     store: ContextStore,
     streams: StreamManager,
     queue: TurnQueue,
+    scheduling?: SchedulingCoordinator,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -80,6 +92,7 @@ export class AgentObservation {
     this.#store = store;
     this.#streams = streams;
     this.#queue = queue;
+    this.#scheduling = scheduling;
   }
 
   async resume() {
@@ -104,6 +117,7 @@ export class AgentObservation {
     if (status === 'queued' || status === 'running' || status === 'cancelled') {
       await this.#streams.cancel(id);
       await this.#queue.cancel(id);
+      await this.#scheduling?.materializeDueIfEligible(this.#conversation);
     }
   }
 
@@ -135,9 +149,10 @@ export class AgentRuntime {
   readonly #controlPlane: AgentControlPlane;
   readonly #approvals: ApprovalController;
   readonly #executor: AgentTurnExecutor;
+  readonly #scheduling?: SchedulingCoordinator;
 
   constructor(root: AgentDeclaration, options: AgentRuntimeOptions) {
-    const multiAgentV2 = resolveMultiAgentV2HostConfig(options.multiAgentV2);
+    const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
     const declarations = new AgentDeclarationRegistry(root);
     const directory = new AgentDirectory(options.store);
     const streams = options.streams;
@@ -169,6 +184,17 @@ export class AgentRuntime {
       statusProjector,
       historyForker,
     });
+    const scheduling = options.scheduling
+      ? new SchedulingCoordinator({
+          store: options.store,
+          scheduler: options.scheduling.scheduler,
+          controlPlane,
+          canMaterialize: async (conversation) =>
+            (await options.queue.getTurnActivity(conversation)) === 'idle' &&
+            !(await approvals.isConversationPaused(conversation)),
+          timezone: options.scheduling.timezone,
+        })
+      : undefined;
 
     this.#store = options.store;
     this.#queue = options.queue;
@@ -177,6 +203,7 @@ export class AgentRuntime {
     this.#directory = directory;
     this.#controlPlane = controlPlane;
     this.#approvals = approvals;
+    this.#scheduling = scheduling;
     this.info = {
       root: declarations.root.name,
       agents: Array.from(declarations.values(), (declaration) => ({
@@ -195,7 +222,11 @@ export class AgentRuntime {
       controlPlane,
       mailbox,
       approvals,
-      multiAgentV2,
+      multiAgent,
+      schedulingTools:
+        scheduling === undefined
+          ? {}
+          : createSchedulingTools(scheduling, multiAgent.toolNamespace),
     });
   }
 
@@ -239,14 +270,31 @@ export class AgentRuntime {
       this.#store,
       this.#streams,
       this.#queue,
+      this.#scheduling,
     );
   }
 
-  work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {
-    return this.#queue.consume(this.#executor.execute.bind(this.#executor), {
-      concurrency: options?.concurrency,
-      onOrphaned: this.#onOrphaned.bind(this),
-    });
+  async work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {
+    const scheduling = this.#scheduling;
+    const workers = new AsyncDisposableStack();
+    workers.use(
+      await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
+        concurrency: options?.concurrency,
+        onOrphaned: this.#onOrphaned.bind(this),
+        onSettled:
+          scheduling === undefined
+            ? undefined
+            : ({ chatId, userId }) =>
+                scheduling.materializeDueIfEligible({ chatId, userId }),
+      }),
+    );
+    try {
+      if (scheduling) workers.use(await scheduling.work());
+      return workers;
+    } catch (error) {
+      await workers.disposeAsync();
+      throw error;
+    }
   }
 
   async #onOrphaned(turn: TurnRef, error: string): Promise<void> {

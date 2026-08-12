@@ -51,6 +51,12 @@ export class ApprovalController {
     );
   }
 
+  async isConversationPaused(conversation: ConversationId): Promise<boolean> {
+    return this.isPaused(
+      (await this.#engineFor(conversation).getMessages()).at(-1),
+    );
+  }
+
   approve(conversation: ConversationId, input: { toolCallId: string }) {
     return this.#respond('approve', conversation, input.toolCallId, {
       approved: true,

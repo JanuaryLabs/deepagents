@@ -21,7 +21,10 @@ export class AgentThread {
 
   constructor(options: AgentThreadOptions) {
     AgentThread.#assertTopology(options);
-    this.conversation = options.conversation;
+    this.conversation = {
+      chatId: options.conversation.chatId,
+      userId: options.conversation.userId,
+    };
     this.treeId = options.treeId;
     this.path = options.path;
     this.parentChatId = options.parentChatId;
