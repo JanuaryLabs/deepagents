@@ -1006,7 +1006,9 @@ describe('steer reminders integration (chat flow)', () => {
 
     await context.continue(userMessage('go'));
     await drain(
-      await chat(chatAgent, { transform: () => new TransformStream() }),
+      await chat(chatAgent, {
+        transform: () => new TransformStream(),
+      }),
     );
 
     const chain = await storedEntries(store, 'gr');
@@ -1088,7 +1090,9 @@ describe('steer reminders integration (chat flow)', () => {
 
     await context.continue(userMessage('run both tools'));
     await drain(
-      await chat(chatAgent, { transform: () => new TransformStream() }),
+      await chat(chatAgent, {
+        transform: () => new TransformStream(),
+      }),
     );
 
     const chain = await storedEntries(store, 'guardrail-tool-reminders');
@@ -1117,7 +1121,9 @@ describe('steer reminders integration (chat flow)', () => {
     const postRetryPrompt = structuredClone(model.doStreamCalls[3].prompt);
     await context.continue(userMessage('continue'));
     await drain(
-      await chat(chatAgent, { transform: () => new TransformStream() }),
+      await chat(chatAgent, {
+        transform: () => new TransformStream(),
+      }),
     );
     const resumedPrompt = model.doStreamCalls[4].prompt;
     assert.deepStrictEqual(

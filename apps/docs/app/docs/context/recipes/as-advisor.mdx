@@ -92,7 +92,7 @@ const migration = agent({
   },
 });
 
-const stream = await migration.stream({});
+const stream = await migration.stream();
 for await (const part of stream.toUIMessageStream()) {
   if (part.type === 'text-delta') {
     process.stdout.write(part.delta);

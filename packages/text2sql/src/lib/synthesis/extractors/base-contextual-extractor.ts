@@ -209,8 +209,7 @@ export abstract class BaseContextualExtractor extends PairProducer {
 
       // Use 'input' property (not 'args') to match useChat structure
       const toolInput = ('input' in part ? part.input : undefined) as
-        | DbQueryInput
-        | undefined;
+        DbQueryInput | undefined;
       if (!toolInput?.sql) {
         continue;
       }

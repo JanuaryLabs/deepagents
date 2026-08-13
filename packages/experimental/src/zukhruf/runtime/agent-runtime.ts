@@ -30,7 +30,6 @@ import {
   SchedulingCoordinator,
   type SchedulingWake,
 } from '../scheduling/coordinator.ts';
-import { createSchedulingTools } from '../scheduling/tools.ts';
 import type { WakeScheduler } from '../scheduling/wake-scheduler.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
@@ -223,10 +222,7 @@ export class AgentRuntime {
       mailbox,
       approvals,
       multiAgent,
-      schedulingTools:
-        scheduling === undefined
-          ? {}
-          : createSchedulingTools(scheduling, multiAgent.toolNamespace),
+      scheduling,
     });
   }
 

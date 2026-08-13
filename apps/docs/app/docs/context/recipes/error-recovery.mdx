@@ -89,7 +89,7 @@ const jokeAgent = agent({
 The guardrails apply when consuming via `toUIMessageStream()`:
 
 ```typescript
-const stream = await jokeAgent.stream({});
+const stream = await jokeAgent.stream();
 const response = stream.toUIMessageStream();
 ```
 

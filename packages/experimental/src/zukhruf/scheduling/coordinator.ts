@@ -283,6 +283,7 @@ export class SchedulingCoordinator {
     for (const chat of chats) {
       if (!SchedulingCoordinator.#hasScheduling(chat.metadata)) continue;
       const conversation = { chatId: chat.id, userId: chat.userId };
+      if (!(await this.#controlPlane.owns(conversation))) continue;
       const state = this.#parse(chat.metadata);
       for (const definition of Object.values(state.cron)) {
         if (definition.nextRunAt > definition.expiresAt) {
@@ -341,6 +342,7 @@ export class SchedulingCoordinator {
         `Scheduling wake id "${rawWake.id}" does not match its payload`,
       );
     }
+    if (!(await this.#controlPlane.owns(wake.conversation))) return;
     const state = await this.#read(wake.conversation);
     const prompt =
       wake.kind === 'cron'

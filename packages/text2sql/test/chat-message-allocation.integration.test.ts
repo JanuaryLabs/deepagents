@@ -162,7 +162,9 @@ describe('Text2Sql client message allocation', () => {
                 maxGuardrailRetries: 3,
               });
               writer.merge(
-                await chat(ai, { transform: () => new TransformStream() }),
+                await chat(ai, {
+                  transform: () => new TransformStream(),
+                }),
               );
             },
           });

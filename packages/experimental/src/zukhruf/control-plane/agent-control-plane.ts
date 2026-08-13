@@ -104,6 +104,17 @@ export class AgentControlPlane {
     return { declaration, thread };
   }
 
+  async owns(conversation: ConversationId): Promise<boolean> {
+    const thread = await this.#directory.load(conversation);
+    if (!thread || !this.#declarations.get(thread.declarationName))
+      return false;
+    const root = await this.#directory.load({
+      chatId: thread.treeId,
+      userId: thread.conversation.userId,
+    });
+    return root?.declarationName === this.#root.name;
+  }
+
   async enqueue(
     conversation: ConversationId,
     turn: TurnInput,

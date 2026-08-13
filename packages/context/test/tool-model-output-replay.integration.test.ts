@@ -135,7 +135,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { runSql: sqlTool },
     });
 
-    await sut.generate({});
+    await sut.generate();
 
     const [output] = toolResultOutputs(model.doGenerateCalls[0].prompt);
     assert.deepStrictEqual(output, {
@@ -182,7 +182,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { runSql: sqlTool },
     });
 
-    const result = await sut.generate({});
+    const result = await sut.generate();
 
     assert.deepStrictEqual(result.steps[0].toolResults[0].output, {
       rows: [{ id: 1 }],
@@ -246,7 +246,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { runSql: sqlTool },
     });
 
-    const result = await sut.stream({});
+    const result = await sut.stream();
     const toolResults: unknown[] = [];
     for await (const part of result.stream) {
       if (part.type === 'tool-result') toolResults.push(part.output);
@@ -386,7 +386,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { inspect: inspectTool },
     });
 
-    const result = await sut.generate({});
+    const result = await sut.generate();
     const hostOutputs = result.steps[0].toolResults
       .map((toolResult) => toolResult.output)
       .sort((left, right) =>
@@ -449,7 +449,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { runSql: sqlTool },
     });
 
-    assert.deepStrictEqual(await extract.generate({}), { count: 2 });
+    assert.deepStrictEqual(await extract.generate(), { count: 2 });
     assert.deepStrictEqual(toolResultOutputs(model.doGenerateCalls[1].prompt), [
       { type: 'json', value: { rows: [{ id: 1 }] } },
     ]);
@@ -507,7 +507,7 @@ describe('replaying history with a tool result carrying host-only meta', () => {
       tools: { runSql: sqlTool },
     });
 
-    const result = await extract.stream({});
+    const result = await extract.stream();
     const hostOutputs: unknown[] = [];
     for await (const part of result.stream) {
       if (part.type === 'tool-result') hostOutputs.push(part.output);

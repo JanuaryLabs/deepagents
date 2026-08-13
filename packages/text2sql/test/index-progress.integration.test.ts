@@ -229,7 +229,11 @@ function chatStream(args: {
         guardrails: [errorRecoveryGuardrail],
         maxGuardrailRetries: 3,
       });
-      writer.merge(await chat(ai, { transform: () => new TransformStream() }));
+      writer.merge(
+        await chat(ai, {
+          transform: () => new TransformStream(),
+        }),
+      );
     },
   });
 }

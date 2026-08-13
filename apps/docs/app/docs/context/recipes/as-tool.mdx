@@ -84,7 +84,7 @@ const writer = agent({
   },
 });
 
-const stream = await writer.stream({});
+const stream = await writer.stream();
 for await (const part of stream.toUIMessageStream()) {
   if (part.type === 'text-delta') {
     process.stdout.write(part.delta);

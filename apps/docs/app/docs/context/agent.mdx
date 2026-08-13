@@ -188,20 +188,20 @@ const assistant = agent({
 
 ## Configuration
 
-| Option                | Type              | Default     | Description                                                                                                                                                                                                                   |
-| --------------------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                | `string`          | required    | Identifier for logging and error messages                                                                                                                                                                                     |
-| `sandbox`             | `AgentSandbox`    | required    | Sandbox providing bash, readFile, and writeFile tools — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
-| `context`             | `ContextEngine`   | `undefined` | Engine that resolves system prompt and messages                                                                                                                                                                               |
-| `model`               | `LanguageModelV4` | `undefined` | AI SDK model to use for generation                                                                                                                                                                                            |
-| `tools`               | `ToolSet`         | `{}`        | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict)                                                                                                                      |
-| `toolChoice`          | `ToolChoice`      | `undefined` | Controls how the model selects tools                                                                                                                                                                                          |
-| `providerOptions`     | `object`          | `undefined` | Provider-specific options forwarded to the AI SDK                                                                                                                                                                             |
-| `telemetry`           | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                              |
-| `stopWhen`            | `StopCondition`   | `isStepCount(200)` | Ends the agent loop. Raise it for a long agentic run that would otherwise stop mid-task; lower it to bound cost on an untrusted prompt                                                                                 |
-| `guardrails`          | `Guardrail[]`     | `[]`        | Guardrails applied during streaming                                                                                                                                                                                           |
-| `maxGuardrailRetries` | `number`          | `3`         | Max retry attempts when a guardrail fails                                                                                                                                                                                     |
-| `logging`             | `boolean`         | `undefined` | Enable debug logging                                                                                                                                                                                                          |
+| Option                | Type              | Default            | Description                                                                                                                                                                                                         |
+| --------------------- | ----------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                | `string`          | required           | Identifier for logging and error messages                                                                                                                                                                           |
+| `sandbox`             | `AgentSandbox`    | required           | Sandbox providing bash, readFile, and writeFile tools — created via `createBashTool()` (optionally chained on top of `createDockerSandbox()` or `createDaytonaSandbox(client, options)`) from `@deepagents/context` |
+| `context`             | `ContextEngine`   | `undefined`        | Engine that resolves system prompt and messages                                                                                                                                                                     |
+| `model`               | `LanguageModelV4` | `undefined`        | AI SDK model to use for generation                                                                                                                                                                                  |
+| `tools`               | `ToolSet`         | `{}`               | Additional AI SDK tools — merged with sandbox tools (user tools override sandbox tools on name conflict).                                                                                                           |
+| `toolChoice`          | `ToolChoice`      | `undefined`        | Controls how the model selects tools                                                                                                                                                                                |
+| `providerOptions`     | `object`          | `undefined`        | Provider-specific options forwarded to the AI SDK                                                                                                                                                                   |
+| `telemetry`           | `object`          | `undefined`        | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText`                                                                                                                                    |
+| `stopWhen`            | `StopCondition`   | `isStepCount(200)` | Ends the agent loop. Raise it for a long agentic run that would otherwise stop mid-task; lower it to bound cost on an untrusted prompt                                                                              |
+| `guardrails`          | `Guardrail[]`     | `[]`               | Guardrails applied during streaming                                                                                                                                                                                 |
+| `maxGuardrailRetries` | `number`          | `3`                | Max retry attempts when a guardrail fails                                                                                                                                                                           |
+| `logging`             | `boolean`         | `undefined`        | Enable debug logging                                                                                                                                                                                                |
 
 ## Instance Properties
 
@@ -223,18 +223,18 @@ import { user } from '@deepagents/context';
 context.set(user('Explain closures in JavaScript'));
 await context.save();
 
-const result = await assistant.generate({});
+const result = await assistant.generate();
 console.log(result.text);
 ```
 
-`generate()` accepts two arguments:
+`generate()` accepts one options object:
 
-| Argument             | Type          | Description                                                    |
-| -------------------- | ------------- | -------------------------------------------------------------- |
-| `contextVariables`   | `CIn`         | Passed as AI SDK `runtimeContext` and as each tool's `context` |
-| `config.abortSignal` | `AbortSignal` | Cancel the request                                             |
+| Argument             | Type                  | Description                                      |
+| -------------------- | --------------------- | ------------------------------------------------ |
+| `toolsContext` | `InferToolSetContext` | Required only when a tool declares context; keyed by tool name |
+| `abortSignal`  | `AbortSignal`         | Cancel the request                                          |
 
-`config.abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
+`abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
 
 ## stream()
 
@@ -244,7 +244,7 @@ Resolves the context and returns a streaming result. When guardrails are configu
 context.set(user('Write a Python quicksort'));
 await context.save();
 
-const stream = await assistant.stream({});
+const stream = await assistant.stream();
 
 for await (const part of stream.toUIMessageStream()) {
   if (part.type === 'text-delta') {
@@ -253,16 +253,16 @@ for await (const part of stream.toUIMessageStream()) {
 }
 ```
 
-`stream()` accepts two arguments:
+`stream()` accepts one options object:
 
-| Argument             | Type                                           | Description                                                    |
-| -------------------- | ---------------------------------------------- | -------------------------------------------------------------- |
-| `contextVariables`   | `CIn`                                          | Passed as AI SDK `runtimeContext` and as each tool's `context` |
-| `config.abortSignal` | `AbortSignal`                                  | Cancel the request                                             |
-| `config.transform`   | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`)        |
-| `config.maxRetries`  | `number`                                       | Override `maxGuardrailRetries` for this call                   |
+| Argument             | Type                                           | Description                                             |
+| -------------------- | ---------------------------------------------- | ------------------------------------------------------- |
+| `toolsContext` | `InferToolSetContext`                          | Required only when a tool declares context              |
+| `abortSignal`  | `AbortSignal`                                  | Cancel the request                                      |
+| `transform`    | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |
+| `maxRetries`   | `number`                                       | Override `maxGuardrailRetries` for this call            |
 
-`config.abortSignal` is reused across repair attempts and guardrail retries, so cancelling a stream stops the active turn cleanly.
+`abortSignal` is reused across repair attempts and guardrail retries, so cancelling a stream stops the active turn cleanly.
 
 ## clone()
 
@@ -274,7 +274,7 @@ const creativeAssistant = assistant.clone({
   providerOptions: { temperature: 0.9 },
 });
 
-const result = await creativeAssistant.generate({});
+const result = await creativeAssistant.generate();
 ```
 
 ## asTool()
@@ -424,7 +424,7 @@ const extractor = structuredOutput({
 context.set(user('John is a 30-year-old software engineer.'));
 await context.save();
 
-const person = await extractor.generate({});
+const person = await extractor.generate();
 // { name: "John", age: 30, occupation: "software engineer" }
 ```
 
@@ -437,7 +437,7 @@ const person = await extractor.generate({});
 | `schema`          | `z.ZodType`       | required    | Zod schema for the output type                                                   |
 | `providerOptions` | `object`          | `undefined` | Provider-specific options                                                        |
 | `telemetry`       | `object`          | `undefined` | AI SDK telemetry settings forwarded unchanged to `generateText` and `streamText` |
-| `tools`           | `ToolSet`         | `undefined` | Tools available during generation                                                |
+| `tools`           | `ToolSet`         | `{}`        | Tools available during generation.                                                |
 
 ### structuredOutput Methods
 
@@ -446,7 +446,7 @@ const person = await extractor.generate({});
 `stream()` returns the full `StreamTextResult` with the structured output schema applied. Use this when you need to process stream parts before the final value.
 
 ```typescript
-const stream = await extractor.stream({});
+const stream = await extractor.stream();
 
 for await (const part of stream.toUIMessageStream()) {
   if (part.type === 'text-delta') {

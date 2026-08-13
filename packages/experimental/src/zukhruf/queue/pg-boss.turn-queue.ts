@@ -27,9 +27,12 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 /**
  * TurnQueue on pg-boss.
  *
- * - `key_strict_fifo` policy with `singletonKey = chatId` gives the per-chat
- *   serialization contract structurally: one active turn per chat and strict
- *   push order.
+ * - `key_strict_fifo` policy with `singletonKey = chatId` expresses the
+ *   per-chat serialization contract: one active turn per chat and strict push
+ *   order. pg-boss 12.26.x can violate that order under concurrent claims; see
+ *   timgit/pg-boss#871. Until its fix is released and adopted, the accepted
+ *   FIFO-safe boundary is one runtime instance at the default concurrency of
+ *   1—not per-chat workers, priority encoding, or private pg-boss SQL here.
  * - `group.id = chatId` with global `groupConcurrency: 1` excludes an active
  *   chat before pg-boss selects the next job, so its queued successor cannot
  *   block ready turns from other chats.

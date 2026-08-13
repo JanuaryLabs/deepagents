@@ -252,7 +252,7 @@ describe('asTool', () => {
       tools: { researcher: subTool },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     assert.ok(subModel.doGenerateCalls.length >= 1);
     const subPrompt = subModel.doGenerateCalls[0]!.prompt as Array<{
@@ -295,7 +295,7 @@ describe('asTool', () => {
       tools: { 'extractor-agent': subTool },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     const allToolResults = result.steps.flatMap((s) => s.toolResults);
     const extracted = allToolResults.find(
@@ -337,7 +337,7 @@ describe('asTool', () => {
       tools: { formatter: subTool },
     });
 
-    await callerAgent.generate({});
+    await callerAgent.generate();
 
     const subPrompt = subModel.doGenerateCalls[0]!.prompt as Array<{
       role: string;
@@ -382,7 +382,7 @@ describe('asTool', () => {
       tools: { 'failing-agent': subTool },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     const allToolResults = result.steps.flatMap((s) => s.toolResults);
     const errorResult = allToolResults.find(
@@ -390,9 +390,12 @@ describe('asTool', () => {
         typeof tr.output === 'string' && tr.output.includes('ErrorDetails'),
     );
     assert.ok(errorResult, 'Should have an error tool result');
-    assert.strictEqual(typeof errorResult.output, 'string');
+    const output = errorResult.output;
+    if (typeof output !== 'string') {
+      assert.fail('Error tool result should be a string');
+    }
     assert.ok(
-      errorResult.output.includes('Model API unavailable'),
+      output.includes('Model API unavailable'),
       'Error message should be preserved',
     );
   });
@@ -460,7 +463,7 @@ describe('asTool', () => {
       tools: { 'data-agent': subTool },
     });
 
-    await callerAgent.generate({});
+    await callerAgent.generate();
 
     assert.ok(lookupCalled, 'Sub-agent should have called the lookup tool');
   });
@@ -494,7 +497,7 @@ describe('asTool', () => {
       tools: { sub: subTool },
     });
 
-    await callerAgent.generate({}, { abortSignal: abortController.signal });
+    await callerAgent.generate({ abortSignal: abortController.signal });
 
     assert.strictEqual(
       subModel.doGenerateCalls[0]!.abortSignal,
@@ -531,7 +534,7 @@ describe('asTool', () => {
       tools: { worker: workerTool },
     });
 
-    await callerAgent.generate({});
+    await callerAgent.generate();
 
     const parentResult = await ctx.resolve({
       renderer: new XmlRenderer(),
@@ -572,7 +575,7 @@ describe('asAdvisor', () => {
       tools: { advisor: advisorTool },
     });
 
-    const result = await executorAgent.generate({});
+    const result = await executorAgent.generate();
 
     assert.strictEqual(advisorModel.doGenerateCalls.length, 1);
     const advisorPrompt = advisorModel.doGenerateCalls[0]!.prompt as Array<{
@@ -611,7 +614,7 @@ describe('asAdvisor', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({});
+    await executorAgent.generate();
 
     assert.strictEqual(advisorModel.doGenerateCalls.length, 2);
     assert.strictEqual(getUsage().calls, 2);
@@ -641,7 +644,7 @@ describe('asAdvisor', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({});
+    await executorAgent.generate();
 
     const usage = getUsage();
     assert.strictEqual(usage.calls, 3);
@@ -674,7 +677,7 @@ describe('asAdvisor', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({}, { abortSignal: abortController.signal });
+    await executorAgent.generate({ abortSignal: abortController.signal });
 
     assert.strictEqual(
       advisorModel.doGenerateCalls[0]!.abortSignal,
@@ -781,7 +784,7 @@ describe('asAdvisor error handling', () => {
       tools: { advisor: advisorTool },
     });
 
-    const result = await executorAgent.generate({});
+    const result = await executorAgent.generate();
 
     assert.strictEqual(result.text, 'Task complete.');
     assert.strictEqual(getUsage().calls, 0);
@@ -813,7 +816,7 @@ describe('asAdvisor error handling', () => {
       tools: { advisor: advisorTool },
     });
 
-    const result = await executorAgent.generate({});
+    const result = await executorAgent.generate();
 
     assert.strictEqual(result.text, 'Task complete.');
     assert.strictEqual(getUsage().calls, 0);
@@ -845,7 +848,7 @@ describe('asAdvisor error handling', () => {
       tools: { advisor: advisorTool },
     });
 
-    const result = await executorAgent.generate({});
+    const result = await executorAgent.generate();
 
     assert.strictEqual(result.text, 'Task complete.');
     assert.strictEqual(getUsage().calls, 0);
@@ -877,7 +880,7 @@ describe('asAdvisor error handling', () => {
       tools: { advisor: advisorTool },
     });
 
-    const result = await executorAgent.generate({});
+    const result = await executorAgent.generate();
     assert.strictEqual(result.text, 'Task complete.');
   });
 
@@ -907,7 +910,7 @@ describe('asAdvisor error handling', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({});
+    await executorAgent.generate();
     assert.strictEqual(
       getUsage().calls,
       0,
@@ -941,7 +944,7 @@ describe('asAdvisor error handling', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({});
+    await executorAgent.generate();
     assert.strictEqual(
       getUsage().calls,
       0,
@@ -977,7 +980,7 @@ describe('asAdvisor maxConversationUses', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({});
+    await executorAgent.generate();
 
     assert.strictEqual(advisorModel.doGenerateCalls.length, 2);
     assert.strictEqual(getUsage().calls, 2);
@@ -1022,7 +1025,7 @@ describe('asAdvisor maxConversationUses', () => {
       tools: { advisor: advisorTool },
     });
 
-    await executorAgent.generate({});
+    await executorAgent.generate();
 
     assert.strictEqual(advisorModel.doGenerateCalls.length, 3);
     assert.strictEqual(getUsage().calls, 2);
@@ -1055,7 +1058,7 @@ describe('asTool output and options', () => {
       tools: { worker: subAgent.asTool() },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     const toolResult = result.steps.flatMap((s) => s.toolResults).at(0);
     assert.strictEqual(toolResult?.output, 'The final answer.');
@@ -1082,7 +1085,7 @@ describe('asTool output and options', () => {
       tools: { worker: subAgent.asTool() },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     const contentTypes = result.steps.flatMap((step) =>
       step.content.map((part) => part.type),
@@ -1119,7 +1122,7 @@ describe('asTool output and options', () => {
       tools: { worker: subAgent.asTool() },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     const toolResult = result.steps.flatMap((s) => s.toolResults).at(0);
     assert.ok(String(toolResult?.output).includes('Model API unavailable'));
@@ -1160,7 +1163,7 @@ describe('asTool output and options', () => {
       tools: { worker: subTool },
     });
 
-    const result = await callerAgent.generate({});
+    const result = await callerAgent.generate();
 
     const toolResult = result.steps.flatMap((s) => s.toolResults).at(0);
     assert.deepStrictEqual(toolResult?.output, { answer: 'The final answer.' });

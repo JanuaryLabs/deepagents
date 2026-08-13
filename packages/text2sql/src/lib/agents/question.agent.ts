@@ -15,10 +15,7 @@ import {
 } from '@deepagents/context';
 
 export type QuestionComplexity =
-  | 'simple'
-  | 'moderate'
-  | 'complex'
-  | 'high complex';
+  'simple' | 'moderate' | 'complex' | 'high complex';
 
 const complexityInstructions: Record<QuestionComplexity, string> = {
   simple: dedent`

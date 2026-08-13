@@ -54,8 +54,24 @@ const usage = {
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
+  #nextActivityRead?: {
+    started: PromiseWithResolvers<void>;
+    release: PromiseWithResolvers<void>;
+  };
   #running?: TurnRef;
   #options?: ConsumeOptions;
+
+  pauseNextActivityRead() {
+    const gate = {
+      started: Promise.withResolvers<void>(),
+      release: Promise.withResolvers<void>(),
+    };
+    this.#nextActivityRead = gate;
+    return {
+      started: gate.started.promise,
+      release: () => gate.release.resolve(),
+    };
+  }
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
@@ -65,6 +81,12 @@ class ControlledTurnQueue extends TurnQueue {
   override async getTurnActivity(
     conversation: Pick<TurnRef, 'chatId' | 'userId'>,
   ): Promise<'idle' | 'queued' | 'running'> {
+    const gate = this.#nextActivityRead;
+    if (gate) {
+      this.#nextActivityRead = undefined;
+      gate.started.resolve();
+      await gate.release.promise;
+    }
     const belongsToConversation = (turn: TurnRef) =>
       turn.chatId === conversation.chatId &&
       turn.userId === conversation.userId;
@@ -124,15 +146,15 @@ class ControlledTurnQueue extends TurnQueue {
 class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   readonly wakes = new Map<string, Wake<SchedulingWake>>();
   readonly handlers = new Set<(wake: Wake<SchedulingWake>) => Promise<void>>();
-  failNextSchedule = false;
+  scheduleFailuresRemaining = 0;
 
   get handler(): ((wake: Wake<SchedulingWake>) => Promise<void>) | undefined {
     return this.handlers.values().next().value;
   }
 
   override async schedule(wake: Wake<SchedulingWake>): Promise<void> {
-    if (this.failNextSchedule) {
-      this.failNextSchedule = false;
+    if (this.scheduleFailuresRemaining > 0) {
+      this.scheduleFailuresRemaining--;
       throw new Error('simulated wake insertion outage');
     }
     this.wakes.set(wake.id, wake);
@@ -220,6 +242,15 @@ function harness(
   scheduler: RecordingWakeScheduler,
   store: ContextStore = new InMemoryContextStore(),
 ) {
+  const resources = disposableHarness(scheduler, store);
+  t.after(() => resources[Symbol.dispose]());
+  return resources;
+}
+
+function disposableHarness(
+  scheduler: RecordingWakeScheduler,
+  store: ContextStore = new InMemoryContextStore(),
+) {
   const streamStore = new SqliteStreamStore(':memory:');
   const mailboxStore = new SqliteMailboxStore(':memory:');
   const streams = new StreamManager({
@@ -227,11 +258,16 @@ function harness(
     changeSource: new PollingChangeSource({ reads: streamStore }),
   });
   const queue = new ControlledTurnQueue();
-  t.after(() => {
-    streamStore.close();
-    mailboxStore.close();
-  });
-  return { store, streams, mailboxStore, queue };
+  return {
+    store,
+    streams,
+    mailboxStore,
+    queue,
+    [Symbol.dispose]() {
+      streamStore.close();
+      mailboxStore.close();
+    },
+  };
 }
 
 function lastUserText(prompt: unknown): string {
@@ -321,13 +357,18 @@ async function runTurn(
   await queue.runNext();
 }
 
-test('configured runtime injects Claude-compatible scheduling tools', async (t) => {
+test('configured runtime injects top-level Claude-compatible scheduling tools', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
-  let toolNames: string[] = [];
+  let modelTools: LanguageModelV4FunctionTool[] = [];
   const model = new MockLanguageModelV4({
     doStream: async ({ tools }) => {
-      toolNames = functionToolNames(tools);
+      modelTools = Array.isArray(tools)
+        ? tools.filter(
+            (candidate): candidate is LanguageModelV4FunctionTool =>
+              candidate.type === 'function',
+          )
+        : [];
       return {
         stream: simulateReadableStream({
           chunks: [
@@ -353,6 +394,7 @@ test('configured runtime injects Claude-compatible scheduling tools', async (t) 
     }),
     {
       ...h,
+      multiAgent: { toolNamespace: 'agents' },
       scheduling: { scheduler, timezone: 'UTC' },
     },
   );
@@ -364,12 +406,18 @@ test('configured runtime injects Claude-compatible scheduling tools', async (t) 
   await using _worker = await runtime.work();
   await h.queue.runNext();
 
-  assert.deepEqual(
-    toolNames.filter((name) =>
-      ['CronCreate', 'CronList', 'CronDelete', 'ScheduleWakeup'].includes(name),
-    ),
-    ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup'],
+  const schedulingTools = modelTools.filter(({ name }) =>
+    ['CronCreate', 'CronList', 'CronDelete', 'ScheduleWakeup'].includes(name),
   );
+  assert.deepEqual(schedulingTools.map(({ name }) => name).toSorted(), [
+    'CronCreate',
+    'CronDelete',
+    'CronList',
+    'ScheduleWakeup',
+  ]);
+  for (const schedulingTool of schedulingTools) {
+    assert.equal(schedulingTool.providerOptions?.openai?.namespace, undefined);
+  }
 });
 
 test('CronCreate, CronList, and CronDelete run through the model loop in one conversation', async (t) => {
@@ -829,7 +877,7 @@ test('startup reconciliation repairs a definition persisted before wake insertio
   });
   const conversation = { chatId: 'create-gap', userId: 'user-1' };
   const firstWorker = await runtime.work();
-  scheduler.failNextSchedule = true;
+  scheduler.scheduleFailuresRemaining = 1;
   await runTurn(runtime, h.queue, conversation, 'create during outage');
   assert.equal(scheduler.wakes.size, 0);
   await firstWorker[Symbol.asyncDispose]();
@@ -958,6 +1006,53 @@ test('retry after enqueue-before-advance executes one scheduled turn', async (t)
   );
 });
 
+test('deleting a claimed cron before materialization prevents its scheduled ask', async () => {
+  const scheduler = new RecordingWakeScheduler();
+  using h = disposableHarness(scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create deletion race',
+      {
+        name: 'CronCreate',
+        input: { cron: '* * * * *', prompt: 'cancelled scheduled prompt' },
+      },
+    ],
+  ]);
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
+  const conversation = { chatId: 'claimed-delete-race', userId: 'user-1' };
+  await using _worker = await runtime.work();
+  await runTurn(runtime, h.queue, conversation, 'create deletion race');
+  const wake = [...scheduler.wakes.values()][0];
+  assert.ok(wake.data.definitionId);
+  commands.set('delete claimed cron', {
+    name: 'CronDelete',
+    input: { id: wake.data.definitionId },
+  });
+
+  const gate = h.queue.pauseNextActivityRead();
+  const delivery = scheduler.fire(wake.id);
+  await gate.started;
+  await runTurn(runtime, h.queue, conversation, 'delete claimed cron');
+  gate.release();
+  await delivery;
+
+  assert.deepEqual(
+    h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    [],
+  );
+});
+
 test('reconciliation repairs a successor lost after recurrence advances', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
@@ -993,7 +1088,7 @@ test('reconciliation repairs a successor lost after recurrence advances', async 
   );
   const first = [...scheduler.wakes.values()][0];
 
-  scheduler.failNextSchedule = true;
+  scheduler.scheduleFailuresRemaining = 1;
   await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
   assert.equal(h.queue.turns.length, 1);
   const successor = [...scheduler.wakes.values()].find(
@@ -1011,6 +1106,49 @@ test('reconciliation repairs a successor lost after recurrence advances', async 
   assert.equal(
     seenUserText.filter((text) => text === 'successor prompt').length,
     1,
+  );
+});
+
+test('retrying a stale cron receipt repairs its persisted successor after a prolonged outage', async () => {
+  const scheduler = new RecordingWakeScheduler();
+  using h = disposableHarness(scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create prolonged outage cron',
+      {
+        name: 'CronCreate',
+        input: { cron: '* * * * *', prompt: 'prolonged outage prompt' },
+      },
+    ],
+  ]);
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
+  const conversation = { chatId: 'prolonged-successor-gap', userId: 'user-1' };
+  await using _worker = await runtime.work();
+  await runTurn(runtime, h.queue, conversation, 'create prolonged outage cron');
+  const first = [...scheduler.wakes.values()][0];
+
+  scheduler.scheduleFailuresRemaining = 2;
+  await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
+  await scheduler.fire(first.id);
+
+  assert.ok(
+    [...scheduler.wakes.values()].some(
+      ({ data }) =>
+        data.definitionId === first.data.definitionId &&
+        data.generation === first.data.generation + 1,
+    ),
+    'the stale retry should repair the persisted successor receipt',
   );
 });
 
@@ -1814,6 +1952,54 @@ test('file-backed restart repairs one overdue cron occurrence and arms the next 
     seenUserText.filter((text) => text === 'catch-up prompt').length,
     1,
   );
+});
+
+test('a recurring cron does not fire when its first occurrence is beyond its seven-day expiry', async () => {
+  mock.timers.enable({ apis: ['Date'] });
+  try {
+    mock.timers.setTime(new Date('2026-08-13T00:00:00Z').getTime());
+    const scheduler = new RecordingWakeScheduler();
+    using h = disposableHarness(scheduler);
+    const commands = new Map<string, { name: string; input: unknown }>([
+      [
+        'create sparse cron',
+        {
+          name: 'CronCreate',
+          input: { cron: '0 0 1 * *', prompt: 'expired monthly prompt' },
+        },
+      ],
+      ['list sparse cron', { name: 'CronList', input: {} }],
+    ]);
+    const runtime = new AgentRuntime(
+      defineAgent({
+        name: 'root',
+        model: toolModel(commands, []),
+        sandbox: async () => ({}) as AgentSandbox,
+        instructions: [],
+      }),
+      {
+        ...h,
+        scheduling: { scheduler, timezone: 'UTC' },
+      },
+    );
+    const conversation = { chatId: 'sparse-expiry', userId: 'user-1' };
+    await using _worker = await runtime.work();
+    await runTurn(runtime, h.queue, conversation, 'create sparse cron');
+    const wake = [...scheduler.wakes.values()][0];
+    assert.ok(wake.runAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1_000);
+
+    mock.timers.setTime(wake.runAt.getTime());
+    await scheduler.fire(wake.id);
+    assert.deepEqual(h.queue.turns, []);
+
+    await runTurn(runtime, h.queue, conversation, 'list sparse cron');
+    const result = (await runtime.observe(conversation).engine.getMessages())
+      .at(-1)!
+      .parts.find(isToolUIPart);
+    assert.deepEqual(result?.output, { jobs: [] });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('startup removes a recurring definition whose next match is beyond its seven-day expiry', async (t) => {

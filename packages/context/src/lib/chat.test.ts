@@ -237,10 +237,17 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'Python Help');
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     await context.continue(userMessage('help with python'));
-    const stream = await chat(chatAgent, { generateTitle: true });
+    const stream = await chat(chatAgent, {
+      generateTitle: true,
+    });
     await drain(stream);
 
     const chatData = await store.getChat('title-chat');
@@ -255,7 +262,12 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModel('Response');
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     await context.continue(userMessage('hello'));
     const stream = await chat(chatAgent);
@@ -273,7 +285,12 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModel('Response');
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
     const longMessage = 'a'.repeat(150);
 
     await context.continue(userMessage(longMessage));
@@ -292,10 +309,17 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'First Title');
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     await context.continue(userMessage('first question'));
-    const firstStream = await chat(chatAgent, { generateTitle: true });
+    const firstStream = await chat(chatAgent, {
+      generateTitle: true,
+    });
     await drain(firstStream);
 
     const firstChat = await store.getChat('multi-turn-chat');
@@ -321,7 +345,9 @@ describe('chat() title generation', () => {
     });
 
     await context.continue(userMessage('second question'));
-    const secondStream = await chat(secondAgent, { generateTitle: true });
+    const secondStream = await chat(secondAgent, {
+      generateTitle: true,
+    });
     await drain(secondStream);
 
     const secondChat = await store.getChat('multi-turn-chat');
@@ -336,10 +362,17 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'Stream Title');
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     await context.continue(userMessage('test'));
-    const stream = await chat(chatAgent, { generateTitle: true });
+    const stream = await chat(chatAgent, {
+      generateTitle: true,
+    });
 
     const parts = await drain(stream);
     const titlePart = parts.find(
@@ -378,10 +411,17 @@ describe('chat() title generation', () => {
         throw new Error('model unavailable');
       },
     });
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     await context.continue(userMessage('hello?'));
-    const stream = await chat(chatAgent, { generateTitle: true });
+    const stream = await chat(chatAgent, {
+      generateTitle: true,
+    });
     await drain(stream).catch(() => {});
 
     const messages = await context.getMessages();
@@ -400,10 +440,17 @@ describe('chat() title generation', () => {
       userId: 'test-user',
     });
     const model = createMockModelWithTitle('Response', 'Transient Title');
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     await context.continue(userMessage('test'));
-    const stream = await chat(chatAgent, { generateTitle: true });
+    const stream = await chat(chatAgent, {
+      generateTitle: true,
+    });
     await drain(stream);
 
     const branch = await store.getActiveBranch('transient-title-chat');
@@ -759,7 +806,12 @@ describe('chat() abort signal integration', () => {
     });
 
     const controller = new AbortController();
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     let chunksSeen = 0;
     await context.continue(userMessage('test'));
@@ -899,7 +951,12 @@ describe('chat() abort signal integration', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const chatAgent = agent({ sandbox, name: 'assistant', context, model });
+    const chatAgent = agent({
+      sandbox,
+      name: 'assistant',
+      context,
+      model,
+    });
 
     try {
       await context.continue(userMessage('test'));
@@ -1512,12 +1569,9 @@ describe('chat() guardrail self-correction persistence', () => {
       guardrails: [failOnceGuardrail],
     });
 
-    const result = await chatAgent.stream(
-      {},
-      {
-        transform: () => new TransformStream(),
-      },
-    );
+    const result = await chatAgent.stream({
+      transform: () => new TransformStream(),
+    });
 
     const uiStream = result.toUIMessageStream({
       sendStart: true,

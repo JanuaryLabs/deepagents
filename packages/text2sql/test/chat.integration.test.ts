@@ -111,7 +111,9 @@ describe('Text2Sql user-constructed chat', () => {
     });
 
     await engine.continue(msg);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
+    const stream = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -143,7 +145,9 @@ describe('Text2Sql user-constructed chat', () => {
     });
 
     await engine.continue(msg);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
+    const stream = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');
@@ -175,7 +179,9 @@ describe('Text2Sql user-constructed chat', () => {
     });
 
     await engine.continue(msg);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
+    const stream = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream);
 
     const branches = await store.listBranches('test-chat');
@@ -202,7 +208,9 @@ describe('Text2Sql user-constructed chat', () => {
     });
 
     await engine.continue(msg);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
+    const stream = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream);
 
     const persistedChat = await store.getChat('test-chat');
@@ -230,7 +238,9 @@ describe('Text2Sql user-constructed chat', () => {
 
     const msg = userMessage('How many users?');
     await engine.continue(msg);
-    const stream1 = await chat(ai, { transform: () => new TransformStream() });
+    const stream1 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -251,7 +261,9 @@ describe('Text2Sql user-constructed chat', () => {
     };
 
     await engine.continue(updatedAssistantMsg);
-    const stream2 = await chat(ai, { transform: () => new TransformStream() });
+    const stream2 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -287,7 +299,9 @@ describe('Text2Sql user-constructed chat', () => {
 
     const msg1 = userMessage('How many users?');
     await engine.continue(msg1);
-    const stream1 = await chat(ai, { transform: () => new TransformStream() });
+    const stream1 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -297,7 +311,9 @@ describe('Text2Sql user-constructed chat', () => {
 
     const msg2 = userMessage('Show me the first 10');
     await engine.continue(msg2);
-    const stream2 = await chat(ai, { transform: () => new TransformStream() });
+    const stream2 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -339,7 +355,9 @@ describe('Text2Sql user-constructed chat', () => {
     };
 
     await engine.continue(freshAssistant);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
+    const stream = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream);
 
     const branches = await store.listBranches('test-chat');
@@ -365,7 +383,9 @@ describe('Text2Sql user-constructed chat', () => {
 
     const msg1 = userMessage('Analyze users');
     await engine.continue(msg1);
-    const stream1 = await chat(ai, { transform: () => new TransformStream() });
+    const stream1 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream1);
 
     const branch1 = await store.getActiveBranch('test-chat');
@@ -380,7 +400,9 @@ describe('Text2Sql user-constructed chat', () => {
       parts: [{ type: 'text' as const, text: 'After first tool result' }],
     };
     await engine.continue(toolResult1);
-    const stream2 = await chat(ai, { transform: () => new TransformStream() });
+    const stream2 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream2);
 
     const branch2 = await store.getActiveBranch('test-chat');
@@ -401,7 +423,9 @@ describe('Text2Sql user-constructed chat', () => {
       parts: [{ type: 'text' as const, text: 'After second tool result' }],
     };
     await engine.continue(toolResult2);
-    const stream3 = await chat(ai, { transform: () => new TransformStream() });
+    const stream3 = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream3);
 
     const branch3 = await store.getActiveBranch('test-chat');
@@ -501,7 +525,9 @@ describe('Text2Sql user-constructed chat', () => {
     });
 
     await engine.continue(fragment);
-    const stream = await chat(ai, { transform: () => new TransformStream() });
+    const stream = await chat(ai, {
+      transform: () => new TransformStream(),
+    });
     await drain(stream);
 
     const branch = await store.getActiveBranch('test-chat');

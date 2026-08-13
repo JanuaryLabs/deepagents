@@ -720,7 +720,7 @@ describe('tool-output reminders', () => {
     );
     await context.continue(userMessage('run the task'));
 
-    await chatAgent.generate({});
+    await chatAgent.generate();
 
     assert.deepStrictEqual(toolResultValuesIn(latestGeneratePrompt(model)), [
       { ok: true },
@@ -786,7 +786,7 @@ describe('tool-output reminders', () => {
     );
     await context.continue(userMessage('run the task'));
 
-    await chatAgent.generate({});
+    await chatAgent.generate();
 
     assert.deepStrictEqual(requests.at(-1)?.messages.at(-1), {
       role: 'user',

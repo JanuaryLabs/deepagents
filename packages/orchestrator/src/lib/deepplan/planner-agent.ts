@@ -320,7 +320,7 @@ export async function plan(
     schema: PlannerOutputSchema,
   });
 
-  const output = await plannerOutput.generate(state);
+  const output = await plannerOutput.generate();
   return createExecutionContext(
     userRequest,
     output as {

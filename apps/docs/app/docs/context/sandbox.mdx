@@ -128,7 +128,7 @@ try {
     context,
   });
 
-  await printer.stdout(await assistant.stream({}));
+  await printer.stdout(await assistant.stream());
 } finally {
   await sandbox.sandbox.dispose();
 }

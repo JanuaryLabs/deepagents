@@ -5,9 +5,14 @@
 
 ## 1. Evidence (no behavior changes)
 
-- [ ] Fix same-chat FIFO in the **real Postgres** TurnQueue contract suite. The Docker-gated
-      `queue/pg-boss.turn-queue.contract.test.ts` cases are executable tests and currently reproduce
-      concurrent pg-boss workers claiming jobs out of order (`1, 3, 2`) on pg-boss 12.26.4.
+- [ ] Adopt the upstream pg-boss same-chat FIFO fix once
+      [timgit/pg-boss#871](https://github.com/timgit/pg-boss/pull/871) is released. The Docker-gated
+      `queue/pg-boss.turn-queue.contract.test.ts` cases reproduce concurrent workers claiming one
+      chat out of order (`1, 3, 2`) on pg-boss 12.26.x. Until then, FIFO-safe deployment means one
+      runtime instance using the default concurrency of `1`. This is an accepted temporary boundary:
+      do not add per-chat workers, encode sequence into priority, or couple Zukhruf to pg-boss's
+      private SQL. Close this item only after upgrading pg-boss and passing both real-Postgres
+      concurrent FIFO regressions.
 - [x] **Process-kill crash test** — SHIPPED (`queue/crash-recovery.integration.test.ts`, docker-gated): real child worker SIGKILLed mid-turn on real Postgres; heartbeat lapse → monitor fails job → DLQ → `onOrphaned` flips stream `failed` (with error) → chat unblocks → next turn runs; crashed turn never re-ran. ~16s.
 - [ ] Multi-process contract run: two workers on one Postgres — serialization + concurrency cap hold across processes. (The crash test partially covers this: parent + child workers shared one queue.)
 

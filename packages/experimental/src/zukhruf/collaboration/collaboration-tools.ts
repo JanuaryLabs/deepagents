@@ -9,36 +9,31 @@ import { createWaitAgentTool } from './wait-agent.ts';
 
 const NAMESPACE_DESCRIPTION = 'Tools for spawning and managing sub-agents.';
 
-export function createCollaborationTools(
-  config: ResolvedMultiAgentHostConfig,
-): ToolSet {
-  const tools: ToolSet = {
-    spawn_agent: createSpawnAgentTool({
-      usageHintText: config.usageHintText,
-    }),
-    send_message: sendMessageTool,
-    followup_task: followupTaskTool,
-    list_agents: listAgentsTool,
-    wait_agent: createWaitAgentTool({
-      minTimeoutMs: config.minWaitTimeoutMs,
-      defaultTimeoutMs: config.defaultWaitTimeoutMs,
-      maxTimeoutMs: config.maxWaitTimeoutMs,
-    }),
-    interrupt_agent: interruptAgentTool,
-  };
-
-  return Object.fromEntries(
-    Object.entries(tools).map(([name, collaborationTool]) => [
-      name,
-      configureTool(collaborationTool, config),
-    ]),
-  );
+export function createCollaborationTools(config: ResolvedMultiAgentHostConfig) {
+  return {
+    spawn_agent: configureTool(
+      createSpawnAgentTool({ usageHintText: config.usageHintText }),
+      config,
+    ),
+    send_message: configureTool(sendMessageTool, config),
+    followup_task: configureTool(followupTaskTool, config),
+    list_agents: configureTool(listAgentsTool, config),
+    wait_agent: configureTool(
+      createWaitAgentTool({
+        minTimeoutMs: config.minWaitTimeoutMs,
+        defaultTimeoutMs: config.defaultWaitTimeoutMs,
+        maxTimeoutMs: config.maxWaitTimeoutMs,
+      }),
+      config,
+    ),
+    interrupt_agent: configureTool(interruptAgentTool, config),
+  } satisfies ToolSet;
 }
 
-function configureTool(
-  collaborationTool: Tool,
+function configureTool<TOOL extends Tool>(
+  collaborationTool: TOOL,
   config: ResolvedMultiAgentHostConfig,
-): Tool {
+) {
   const openai = collaborationTool.providerOptions?.openai;
   return {
     ...collaborationTool,

@@ -14,9 +14,9 @@ import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  assistant,
   role,
   user,
-  assistant,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./app.db');
@@ -49,7 +49,11 @@ const chatId = `chat-${nextId++}`;
 The `chat` property returns a `ChatMeta` object after the engine has initialized (after any `save()` or `resolve()` call). Before initialization it returns `null`.
 
 ```typescript
-const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
 
 context.chat; // null (not yet initialized)
 
@@ -70,14 +74,14 @@ context.chatId; // 'chat-001'
 
 ### ChatMeta
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| `id` | `string` | Chat identifier |
-| `userId` | `string` | Owner of the chat |
-| `createdAt` | `number` | Unix timestamp (ms) |
-| `updatedAt` | `number` | Unix timestamp (ms), auto-updated |
-| `title` | `string \| undefined` | User-provided title |
-| `metadata` | `Record<string, unknown> \| undefined` | Custom key-value data |
+| Field       | Type                                   | Description                       |
+| ----------- | -------------------------------------- | --------------------------------- |
+| `id`        | `string`                               | Chat identifier                   |
+| `userId`    | `string`                               | Owner of the chat                 |
+| `createdAt` | `number`                               | Unix timestamp (ms)               |
+| `updatedAt` | `number`                               | Unix timestamp (ms), auto-updated |
+| `title`     | `string \| undefined`                  | User-provided title               |
+| `metadata`  | `Record<string, unknown> \| undefined` | Custom key-value data             |
 
 ## Updating Chat Metadata
 
@@ -139,11 +143,11 @@ const title = await generateChatTitle({
 
 ### GenerateChatTitleOptions
 
-| Option | Type | Required | Description |
-| --- | --- | --- | --- |
-| `message` | `UIMessage` | Yes | The user message to summarize |
-| `model` | `AgentModel` | Yes | The model used to generate the title |
-| `abortSignal` | `AbortSignal` | No | Signal to cancel the generation |
+| Option        | Type          | Required | Description                          |
+| ------------- | ------------- | -------- | ------------------------------------ |
+| `message`     | `UIMessage`   | Yes      | The user message to summarize        |
+| `model`       | `AgentModel`  | Yes      | The model used to generate the title |
+| `abortSignal` | `AbortSignal` | No       | Signal to cancel the generation      |
 
 ### How `chat()` Uses Titles
 
@@ -156,14 +160,14 @@ When you call `chat()`, titles are handled automatically:
 ```typescript
 import { chat } from '@deepagents/context';
 
-const stream = await chat(agent, messages, {
+const stream = await chat(agent, {
   generateTitle: true, // [!code highlight]
 });
 ```
 
 The `ChatAgentLike` interface exposes an optional `model` property. If `model` is not present on the agent, only the static title is applied.
 
-The `generateTitle` option is part of `ChatOptions`, which also accepts `contextVariables`, `transform`, `abortSignal`, `onError`, `messageMetadata`, and `finalAssistantMetadata`.
+The `generateTitle` option is part of `ChatOptions`, which also accepts `transform`, `abortSignal`, `onError`, `messageMetadata`, and `finalAssistantMetadata`. `toolsContext` is required only when an agent tool declares context.
 
 ## Listing Chats
 
@@ -174,7 +178,9 @@ const chats = await store.listChats();
 
 for (const chat of chats) {
   console.log(`${chat.id}: ${chat.title ?? 'Untitled'}`);
-  console.log(`  Messages: ${chat.messageCount}, Branches: ${chat.branchCount}`);
+  console.log(
+    `  Messages: ${chat.messageCount}, Branches: ${chat.branchCount}`,
+  );
   console.log(`  Updated: ${new Date(chat.updatedAt).toLocaleString()}`);
 }
 ```
@@ -200,27 +206,27 @@ const archived = await store.listChats({
 
 ### ListChatsOptions
 
-| Option | Type | Description |
-| ------ | ---- | ----------- |
-| `userId` | `string` | Filter by user |
+| Option     | Type                                                  | Description                               |
+| ---------- | ----------------------------------------------------- | ----------------------------------------- |
+| `userId`   | `string`                                              | Filter by user                            |
 | `metadata` | `{ key: string; value: string \| number \| boolean }` | Exact match on a top-level metadata field |
-| `limit` | `number` | Max results |
-| `offset` | `number` | Skip N results (pagination) |
+| `limit`    | `number`                                              | Max results                               |
+| `offset`   | `number`                                              | Skip N results (pagination)               |
 
 ### ChatInfo
 
 Each item returned from `listChats()` is a `ChatInfo`:
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| `id` | `string` | Chat identifier |
-| `userId` | `string` | Owner |
-| `title` | `string \| undefined` | Title |
-| `metadata` | `Record<string, unknown> \| undefined` | Custom data |
-| `messageCount` | `number` | Total messages in the chat |
-| `branchCount` | `number` | Total branches |
-| `createdAt` | `number` | Unix timestamp (ms) |
-| `updatedAt` | `number` | Unix timestamp (ms) |
+| Field          | Type                                   | Description                |
+| -------------- | -------------------------------------- | -------------------------- |
+| `id`           | `string`                               | Chat identifier            |
+| `userId`       | `string`                               | Owner                      |
+| `title`        | `string \| undefined`                  | Title                      |
+| `metadata`     | `Record<string, unknown> \| undefined` | Custom data                |
+| `messageCount` | `number`                               | Total messages in the chat |
+| `branchCount`  | `number`                               | Total branches             |
+| `createdAt`    | `number`                               | Unix timestamp (ms)        |
+| `updatedAt`    | `number`                               | Unix timestamp (ms)        |
 
 ## Deleting a Chat
 
@@ -243,13 +249,19 @@ const deleted = await store.deleteChat('chat-001', { userId: 'user-001' });
 Track cumulative token usage across the lifetime of a chat with `trackUsage()`. It accumulates `LanguageModelUsage` from the AI SDK into `chat.metadata.usage`:
 
 ```typescript
-import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
 
-const context = new ContextEngine({ store, chatId: 'chat-001', userId: 'user-001' });
+const context = new ContextEngine({
+  store,
+  chatId: 'chat-001',
+  userId: 'user-001',
+});
 context.set(role('You are helpful.'), user('What is TypeScript?'));
 
-const { systemPrompt, messages } = await context.resolve({ renderer: new XmlRenderer() });
+const { systemPrompt, messages } = await context.resolve({
+  renderer: new XmlRenderer(),
+});
 
 const result = await generateText({
   model: groq('gpt-oss-20b'),
@@ -301,22 +313,24 @@ async function deleteUserChat(chatId: string, userId: string) {
 ## Complete Example
 
 ```typescript
-import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
+import { generateText } from 'ai';
+
 import {
   ContextEngine,
   SqliteContextStore,
   XmlRenderer,
+  assistant,
   role,
   user,
-  assistant,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./chats.db');
 
 async function sendMessage(chatId: string, userId: string, text: string) {
-  const context = new ContextEngine({ store, chatId, userId })
-    .set(role('You are a helpful assistant.'));
+  const context = new ContextEngine({ store, chatId, userId }).set(
+    role('You are a helpful assistant.'),
+  );
 
   context.set(user(text));
 

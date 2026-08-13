@@ -15,6 +15,7 @@ import {
   chat,
   createBashTool,
   role,
+  user,
 } from '@deepagents/context';
 
 const sandbox = await createBashTool();
@@ -32,7 +33,8 @@ const myAgent = agent({
   model: groq('gpt-oss-20b'),
 });
 
-const stream = await chat(myAgent, messages, {
+await context.continue(user('Hello'));
+const stream = await chat(myAgent, {
   generateTitle: true,
 });
 ```
@@ -40,42 +42,34 @@ const stream = await chat(myAgent, messages, {
 ## Function Signature
 
 ```typescript
-async function chat<CIn>(
-  agent: ChatAgentLike<CIn>,
-  messages: ChatMessage[],
-  options?: ChatOptions<CIn>,
+async function chat<TOOLS extends ToolSet>(
+  agent: ChatAgentLike<TOOLS>,
+  options?: ChatOptions<TOOLS>,
 ): Promise<ReadableStream<UIMessageChunk>>;
 ```
 
 The return value is a `ReadableStream` produced by the AI SDK's `createUIMessageStream()`. It emits structured chunks (`text-delta`, `tool-call`, `data-chat-title`, etc.) that UI frameworks consume directly.
 
-| Argument   | Type                 | Description                                                                           |
-| ---------- | -------------------- | ------------------------------------------------------------------------------------- |
-| `agent`    | `ChatAgentLike<CIn>` | An object with `stream()`, `context`, and optionally `model`                          |
-| `messages` | `ChatMessage[]`      | The full conversation history including the new message. Must not be empty            |
-| `options`  | `ChatOptions<CIn>`   | Optional configuration for title generation, transforms, error handling, and metadata |
+| Argument  | Type                        | Description                                                                              |
+| --------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and optionally `model` |
+| `options` | `ChatOptions<TOOLS>`   | Optional tool contexts, title, transform, error-handling, and metadata configuration |
 
 The function throws if:
 
 - The agent has no `context` attached
-- The `messages` array is empty
+- The context head is not the assistant placeholder reserved by `context.continue()`
 
 ## ChatAgentLike
 
 Any object that satisfies this interface can be passed to `chat()`. The `agent()` wrapper from `@deepagents/context` implements it automatically.
 
 ```typescript
-interface ChatAgentLike<CIn> {
+interface ChatAgentLike<TOOLS extends ToolSet> {
   context?: ContextEngine;
   model?: AgentModel;
-  stream(
-    contextVariables: CIn,
-    config?: {
-      abortSignal?: AbortSignal;
-      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-      maxRetries?: number;
-    },
-  ): Promise<StreamTextResult<ToolSet, never>>;
+  tools?: TOOLS;
+  stream(options?: ChatOptions<TOOLS>): Promise<StreamTextResult<ToolSet, never>>;
 }
 ```
 
@@ -88,8 +82,8 @@ interface ChatAgentLike<CIn> {
 ## ChatOptions
 
 ```typescript
-interface ChatOptions<CIn> {
-  contextVariables?: CIn;
+interface ChatOptions<TOOLS extends ToolSet> {
+  toolsContext?: InferToolSetContext<TOOLS>;
   transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
   abortSignal?: AbortSignal;
   generateTitle?: boolean;
@@ -108,7 +102,7 @@ interface ChatOptions<CIn> {
 
 | Option                   | Type                                                       | Default            | Description                                                                                  |
 | ------------------------ | ---------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------- |
-| `contextVariables`       | `CIn`                                                      | `{}`               | Passed through to `agent.stream()` as context variables                                      |
+| `toolsContext`           | `InferToolSetContext<TOOLS>`                               | contextual tools   | Required only when a tool declares context; keyed by tool name                                |
 | `transform`              | `StreamTextTransform`                                      | `undefined`        | Custom stream transforms forwarded to `agent.stream()`                                       |
 | `abortSignal`            | `AbortSignal`                                              | `undefined`        | Signal to cancel the stream, forwarded to `agent.stream()`                                   |
 | `generateTitle`          | `boolean`                                                  | `false`            | Enable AI-powered title generation for untitled chats                                        |
@@ -116,39 +110,21 @@ interface ChatOptions<CIn> {
 | `messageMetadata`        | Derived from AI SDK                                        | `undefined`        | Forwarded to `toUIMessageStream()` — see [AI SDK docs](https://ai-sdk.dev) for the full type |
 | `finalAssistantMetadata` | `(msg: UIMessage) => Record<string, unknown> \| undefined` | `undefined`        | Async callback to attach metadata to the final assistant message before persisting           |
 
-## ChatMessage
-
-Messages can be passed as either raw AI SDK `UIMessage` objects or as context engine `MessageFragment`s. The function normalizes them internally.
-
-```typescript
-type ChatMessage = UIMessage | MessageFragment;
-```
-
-Use `toMessageFragment()` and `chatMessageToUIMessage()` to convert between formats:
-
-```typescript
-import { chatMessageToUIMessage, toMessageFragment } from '@deepagents/context';
-
-const fragment = toMessageFragment(uiMessage);
-const uiMsg = chatMessageToUIMessage(fragment);
-```
-
 ## Message Persistence Flow
 
 The `chat()` function persists messages at three points during a conversation turn:
 
 ```
-1. Before streaming  ─── save last message from caller
+1. Before streaming  ─── caller uses context.continue() to append input and reserve the assistant
 2. On each step      ─── save intermediate assistant state
 3. On finish         ─── save final assistant message + track usage
 ```
 
 ### 1. Initial Save
 
-When `chat()` is called, the last message in the array is persisted:
-
-- **User message** — saved with `save()` (creates a new branch point if needed), then a new assistant message ID is generated
-- **Assistant message** — saved with `save({ branch: false })` (in-place update, no branching). This handles the case where the client is resuming or continuing an assistant turn
+Before calling `chat()`, call `context.continue(input)`. It appends the input and
+reserves the assistant placeholder that `chat()` updates. This explicit
+precondition keeps message ownership in `ContextEngine`.
 
 ### 2. Step-Finish Saves
 
@@ -169,7 +145,7 @@ The `branch: false` option on assistant saves means the message node is updated 
 `chat()` handles title generation automatically for untitled chats:
 
 ```typescript
-const stream = await chat(myAgent, messages, {
+const stream = await chat(myAgent, {
   generateTitle: true,
 });
 ```
@@ -193,7 +169,7 @@ The built-in error formatter converts common AI SDK errors into user-friendly st
 Override with a custom formatter:
 
 ```typescript
-const stream = await chat(myAgent, messages, {
+const stream = await chat(myAgent, {
   onError: (error) => {
     if (error instanceof MyCustomError) {
       return 'Something went wrong. Please try again.';
@@ -207,7 +183,6 @@ const stream = await chat(myAgent, messages, {
 
 ```typescript
 import { groq } from '@ai-sdk/groq';
-import type { UIMessage } from 'ai';
 
 import {
   ContextEngine,
@@ -216,6 +191,7 @@ import {
   chat,
   createBashTool,
   role,
+  user,
 } from '@deepagents/context';
 
 const store = new SqliteContextStore('./chat.db');
@@ -224,7 +200,7 @@ const sandbox = await createBashTool();
 async function handleUserMessage(
   chatId: string,
   userId: string,
-  messages: UIMessage[],
+  message: string,
 ) {
   const context = new ContextEngine({
     store,
@@ -239,7 +215,8 @@ async function handleUserMessage(
     model: groq('gpt-oss-20b'),
   });
 
-  const stream = await chat(myAgent, messages, {
+  await context.continue(user(message));
+  const stream = await chat(myAgent, {
     generateTitle: true,
     finalAssistantMetadata: async (message) => ({
       completedAt: Date.now(),
@@ -252,14 +229,14 @@ async function handleUserMessage(
 
 ## chat() vs agent.stream()
 
-|                     | `chat()`                                       | `agent.stream()`   |
-| ------------------- | ---------------------------------------------- | ------------------ |
-| Message persistence | Automatic (save on enter, per step, on finish) | Manual             |
-| Title generation    | Built-in with `generateTitle` option           | Manual             |
-| Usage tracking      | Automatic via `trackUsage()`                   | Manual             |
-| Error formatting    | Built-in with override option                  | Raw errors         |
-| Return type         | `ReadableStream<UIMessageChunk>`               | `StreamTextResult` |
-| Branch management   | Handles `branch: false` for in-place updates   | N/A                |
+|                     | `chat()`                                          | `agent.stream()`   |
+| ------------------- | ------------------------------------------------- | ------------------ |
+| Message persistence | Assistant is automatic after `context.continue()` | Manual             |
+| Title generation    | Built-in with `generateTitle` option              | Manual             |
+| Usage tracking      | Automatic via `trackUsage()`                      | Manual             |
+| Error formatting    | Built-in with override option                     | Raw errors         |
+| Return type         | `ReadableStream<UIMessageChunk>`                  | `StreamTextResult` |
+| Branch management   | Handles `branch: false` for in-place updates      | N/A                |
 
 Use `chat()` when building a conversation UI. Use `agent.stream()` directly when you need lower-level control over the streaming pipeline.
 

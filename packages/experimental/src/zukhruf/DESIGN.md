@@ -221,7 +221,7 @@ work (long-running executor process):
     → sandbox = declaration.sandbox({chatId, userId}) // per-chat, attach-or-create; never disposed here
     → terminal stream? project/skip                // closes cancel-during-setup race
     → atomically claim stream queued → running     // orders execution against cancellation
-    → monitor cancellation → chat(contextVariables) → AWAIT persist(preclaimed)
+    → monitor cancellation → chat({ toolsContext }) → AWAIT persist(preclaimed)
                                                     // worker holds the job for the whole turn
     → child terminal? idempotent queue-only FINAL_ANSWER to its direct parent
     → mailbox.endTurn(conversation, streamId)     // stale attempts cannot close a successor
@@ -415,7 +415,7 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   same-tree parent whose canonical path is the immediate ancestor; self-parenting and skipped
   ancestors are rejected before work is queued. Persisted paths must already be canonical rather
   than being silently normalized on load.
-- Collaboration tools are internal direct `tool()` adapters. `chat(..., {contextVariables})`
+- Collaboration tools are internal direct `tool()` adapters. `chat(..., {toolsContext})`
   supplies only the `AgentControlPlane` and the current actor (turn, thread, declaration); tools
   receive no raw stores, queue callbacks, or `AsyncLocalStorage` state.
 - `spawn_agent` validates the selected direct subagent and derives deterministic child-chat and

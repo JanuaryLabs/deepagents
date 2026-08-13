@@ -1,10 +1,9 @@
-import type { Tool, ToolSet } from 'ai';
+import type { ToolSet } from 'ai';
 import { tool } from 'ai';
 import cronstrue from 'cronstrue';
 import { z } from 'zod';
 
-import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
-import type { SchedulingCoordinator } from './coordinator.ts';
+import type { SchedulingToolContext } from '../collaboration/agent-tool-context.ts';
 
 const nonBlank = z.string().refine((value) => value.trim().length > 0, {
   message: 'must not be blank',
@@ -61,45 +60,53 @@ const scheduleWakeupOutput = z
   })
   .strict();
 
-export function createSchedulingTools(
-  coordinator: SchedulingCoordinator,
-  namespace?: string,
-): ToolSet {
-  const tools: ToolSet = {
-    CronCreate: tool<
-      z.infer<typeof cronCreateInput>,
-      z.infer<typeof cronOutput>,
-      AgentToolContext
-    >({
-      description: 'Create a durable fixed cron schedule in this conversation.',
-      inputSchema: cronCreateInput,
-      outputSchema: cronOutput,
-      execute: async (input, { context, toolCallId }) => {
-        const definition = await coordinator.createCron(
-          context.actor.thread.conversation,
-          input,
-          toolCallId,
-        );
-        return {
-          id: definition.id,
-          humanSchedule: cronstrue.toString(definition.expression, {
-            throwExceptionOnParseError: true,
-          }),
-          recurring: definition.recurring,
-        };
-      },
-    }),
-    CronList: tool<
-      Record<string, never>,
-      z.infer<typeof cronListOutput>,
-      AgentToolContext
-    >({
-      description: 'List durable cron schedules in this conversation.',
-      inputSchema: z.object({}).strict(),
-      outputSchema: cronListOutput,
-      execute: async (_input, { context }) => ({
+const schedulingToolMetadata = {
+  zukhruf: {
+    kind: 'scheduling',
+    codeModeExposure: 'direct-model-only',
+  },
+};
+
+export const schedulingTools = {
+  CronCreate: tool<
+    z.infer<typeof cronCreateInput>,
+    z.infer<typeof cronOutput>,
+    SchedulingToolContext
+  >({
+    description: 'Create a durable fixed cron schedule in this conversation.',
+    inputSchema: cronCreateInput,
+    outputSchema: cronOutput,
+    metadata: schedulingToolMetadata,
+    execute: async (input, { context, toolCallId }) => {
+      const definition = await context.schedulingCoordinator.createCron(
+        context.actor.thread.conversation,
+        input,
+        toolCallId,
+      );
+      return {
+        id: definition.id,
+        humanSchedule: cronstrue.toString(definition.expression, {
+          throwExceptionOnParseError: true,
+        }),
+        recurring: definition.recurring,
+      };
+    },
+  }),
+  CronList: tool<
+    Record<string, never>,
+    z.infer<typeof cronListOutput>,
+    SchedulingToolContext
+  >({
+    description: 'List durable cron schedules in this conversation.',
+    inputSchema: z.object({}).strict(),
+    outputSchema: cronListOutput,
+    metadata: schedulingToolMetadata,
+    execute: async (_input, { context }) => {
+      return {
         jobs: (
-          await coordinator.cronJobs(context.actor.thread.conversation)
+          await context.schedulingCoordinator.cronJobs(
+            context.actor.thread.conversation,
+          )
         ).map((definition) => ({
           id: definition.id,
           cron: definition.expression,
@@ -109,75 +116,49 @@ export function createSchedulingTools(
           prompt: definition.prompt,
           ...(!definition.recurring ? { recurring: false } : {}),
         })),
-      }),
-    }),
-    CronDelete: tool<
-      z.infer<typeof cronDeleteInput>,
-      z.infer<typeof cronDeleteOutput>,
-      AgentToolContext
-    >({
-      description: 'Delete a durable cron schedule in this conversation.',
-      inputSchema: cronDeleteInput,
-      outputSchema: cronDeleteOutput,
-      execute: async ({ id }, { context }) => {
-        await coordinator.deleteCron(context.actor.thread.conversation, id);
-        return { id };
-      },
-    }),
-    ScheduleWakeup: tool<
-      z.infer<typeof scheduleWakeupInput>,
-      z.infer<typeof scheduleWakeupOutput>,
-      AgentToolContext
-    >({
-      description:
-        'Replace or stop the dynamic one-shot wakeup for this conversation.',
-      inputSchema: scheduleWakeupInput,
-      outputSchema: scheduleWakeupOutput,
-      execute: async (input, { context }) => {
-        const conversation = context.actor.thread.conversation;
-        if ('stop' in input) {
-          return {
-            scheduledFor: 0,
-            clampedDelaySeconds: 0,
-            wasClamped: false,
-            stopped: true,
-            cancelledWakeups: await coordinator.stopDynamic(conversation),
-          };
-        }
-        return coordinator.scheduleDynamic(conversation, input);
-      },
-    }),
-  };
-  return Object.fromEntries(
-    Object.entries(tools).map(([name, schedulingTool]) => [
-      name,
-      configureSchedulingTool(schedulingTool, namespace),
-    ]),
-  );
-}
-
-function configureSchedulingTool(tool: Tool, namespace?: string): Tool {
-  return {
-    ...tool,
-    providerOptions: {
-      ...tool.providerOptions,
-      ...(namespace === undefined
-        ? {}
-        : {
-            openai: {
-              namespace: {
-                name: namespace,
-                description: 'Tools for scheduling future agent turns.',
-              },
-            },
-          }),
+      };
     },
-    metadata: {
-      ...tool.metadata,
-      zukhruf: {
-        kind: 'scheduling',
-        codeModeExposure: 'direct-model-only',
-      },
+  }),
+  CronDelete: tool<
+    z.infer<typeof cronDeleteInput>,
+    z.infer<typeof cronDeleteOutput>,
+    SchedulingToolContext
+  >({
+    description: 'Delete a durable cron schedule in this conversation.',
+    inputSchema: cronDeleteInput,
+    outputSchema: cronDeleteOutput,
+    metadata: schedulingToolMetadata,
+    execute: async ({ id }, { context }) => {
+      await context.schedulingCoordinator.deleteCron(
+        context.actor.thread.conversation,
+        id,
+      );
+      return { id };
     },
-  };
-}
+  }),
+  ScheduleWakeup: tool<
+    z.infer<typeof scheduleWakeupInput>,
+    z.infer<typeof scheduleWakeupOutput>,
+    SchedulingToolContext
+  >({
+    description:
+      'Replace or stop the dynamic one-shot wakeup for this conversation.',
+    inputSchema: scheduleWakeupInput,
+    outputSchema: scheduleWakeupOutput,
+    metadata: schedulingToolMetadata,
+    execute: async (input, { context }) => {
+      const conversation = context.actor.thread.conversation;
+      if ('stop' in input) {
+        return {
+          scheduledFor: 0,
+          clampedDelaySeconds: 0,
+          wasClamped: false,
+          stopped: true,
+          cancelledWakeups:
+            await context.schedulingCoordinator.stopDynamic(conversation),
+        };
+      }
+      return context.schedulingCoordinator.scheduleDynamic(conversation, input);
+    },
+  }),
+} satisfies ToolSet;

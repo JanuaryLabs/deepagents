@@ -87,7 +87,7 @@ export class TitleGenerator {
       context,
       model: options.model,
       schema: titleSchema,
-    }).generate({}, { abortSignal: options.abortSignal });
+    }).generate({ abortSignal: options.abortSignal });
 
     if (!title) {
       throw new Error('Title generation returned an empty string.');

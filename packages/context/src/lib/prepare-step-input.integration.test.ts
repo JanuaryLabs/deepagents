@@ -279,7 +279,7 @@ describe('prepare-step input integration', () => {
     });
 
     await context.continue(message('original request'));
-    await generatingAgent.generate({});
+    await generatingAgent.generate();
 
     assert.equal(providerCalls, 0);
     assert.doesNotMatch(

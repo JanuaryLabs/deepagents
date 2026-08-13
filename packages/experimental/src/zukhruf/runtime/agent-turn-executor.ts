@@ -1,4 +1,4 @@
-import type { ToolSet, UIMessage } from 'ai';
+import type { UIMessage } from 'ai';
 
 import {
   type AvailableSkill,
@@ -13,7 +13,10 @@ import {
 } from '@deepagents/context';
 
 import type { ZukhrufSandbox } from '../agent.ts';
-import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
+import type {
+  AgentToolContext,
+  SchedulingToolContext,
+} from '../collaboration/agent-tool-context.ts';
 import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
@@ -23,6 +26,8 @@ import type {
 } from '../mailbox/types.ts';
 import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
+import type { SchedulingCoordinator } from '../scheduling/coordinator.ts';
+import { schedulingTools } from '../scheduling/tools.ts';
 import {
   type AgentSkills,
   createAgentSkills,
@@ -37,7 +42,7 @@ export interface AgentTurnExecutorOptions {
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
   multiAgent: ResolvedMultiAgentHostConfig;
-  schedulingTools: ToolSet;
+  scheduling?: SchedulingCoordinator;
 }
 
 interface SamplingMailboxState {
@@ -53,7 +58,7 @@ export class AgentTurnExecutor {
   readonly #approvals: ApprovalController;
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
-  readonly #schedulingTools: ToolSet;
+  readonly #scheduling?: SchedulingCoordinator;
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -63,7 +68,7 @@ export class AgentTurnExecutor {
     this.#approvals = options.approvals;
     this.#multiAgent = options.multiAgent;
     this.#collaborationTools = createCollaborationTools(options.multiAgent);
-    this.#schedulingTools = options.schedulingTools;
+    this.#scheduling = options.scheduling;
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
@@ -151,20 +156,31 @@ export class AgentTurnExecutor {
       await this.#projectSkippedTerminalTurn(turn);
       return;
     }
+    const agentContext = {
+      controlPlane: this.#controlPlane,
+      actor: { turn, thread, declaration },
+    } satisfies AgentToolContext;
     const mailboxState: SamplingMailboxState = { firstRequest: true };
-    const ai = agent<AgentToolContext>({
+    const agentOptions = {
       name: declaration.name,
       model: declaration.model,
       sandbox,
       context: engine,
-      tools: {
-        ...declaration.tools,
-        ...this.#collaborationTools,
-        ...this.#schedulingTools,
-      },
       telemetry: declaration.telemetry,
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),
-    });
+    };
+    const modelTools = {
+      ...declaration.tools,
+      ...this.#collaborationTools,
+    };
+    const collaborationToolsContext = {
+      spawn_agent: agentContext,
+      send_message: agentContext,
+      followup_task: agentContext,
+      list_agents: agentContext,
+      wait_agent: agentContext,
+      interrupt_agent: agentContext,
+    };
 
     const abort = new AbortController();
     const onWorkerAbort = () => abort.abort();
@@ -176,13 +192,40 @@ export class AgentTurnExecutor {
       );
       let stream: Awaited<ReturnType<typeof chat>>;
       try {
-        stream = await chat(ai, {
-          abortSignal: abort.signal,
-          contextVariables: {
-            controlPlane: this.#controlPlane,
-            actor: { turn, thread, declaration },
-          },
-        });
+        if (this.#scheduling === undefined) {
+          stream = await chat(
+            agent({
+              ...agentOptions,
+              tools: modelTools,
+            }),
+            {
+              abortSignal: abort.signal,
+              toolsContext: collaborationToolsContext,
+            },
+          );
+        } else {
+          const scheduledModelTools = { ...modelTools, ...schedulingTools };
+          const schedulingContext = {
+            ...agentContext,
+            schedulingCoordinator: this.#scheduling,
+          } satisfies SchedulingToolContext;
+          stream = await chat(
+            agent({
+              ...agentOptions,
+              tools: scheduledModelTools,
+            }),
+            {
+              abortSignal: abort.signal,
+              toolsContext: {
+                ...collaborationToolsContext,
+                CronCreate: schedulingContext,
+                CronList: schedulingContext,
+                CronDelete: schedulingContext,
+                ScheduleWakeup: schedulingContext,
+              },
+            },
+          );
+        }
       } finally {
         await setupCancellation[Symbol.asyncDispose]();
       }

@@ -3,7 +3,6 @@ import {
   InvalidToolInputError,
   NoSuchToolError,
   type StreamTextResult,
-  type StreamTextTransform,
   ToolCallRepairError,
   type ToolSet,
   type UIMessage,
@@ -13,21 +12,30 @@ import {
 } from 'ai';
 
 import type { AgentModel } from './advisor.ts';
+import type { StreamOptions, ToolCallArguments } from './agent.ts';
 import type { ContextEngine } from './engine.ts';
 import type { AgentSandbox } from './sandbox/types.ts';
 import { TitleGenerator } from './title.ts';
 
-export interface ChatAgentLike<CIn> {
+type ChatConfig = Omit<StreamOptions, 'maxRetries'> & {
+  generateTitle?: boolean;
+  onError?: (error: unknown) => string;
+  messageMetadata?: ChatMessageMetadata;
+  finalAssistantMetadata?: (
+    message: UIMessage,
+  ) =>
+    | Record<string, unknown>
+    | undefined
+    | Promise<Record<string, unknown> | undefined>;
+};
+
+export interface ChatAgentLike<TOOLS extends ToolSet = {}> {
   context?: ContextEngine;
   model?: AgentModel;
   sandbox: AgentSandbox;
+  tools?: TOOLS;
   stream(
-    contextVariables: CIn,
-    config?: {
-      abortSignal?: AbortSignal;
-      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-      maxRetries?: number;
-    },
+    ...args: ToolCallArguments<TOOLS, ChatConfig>
   ): Promise<StreamTextResult<ToolSet, any, any>>;
 }
 
@@ -46,20 +54,9 @@ export const defaultChatMessageMetadata: NonNullable<ChatMessageMetadata> = ({
   return undefined;
 };
 
-export interface ChatOptions<CIn> {
-  contextVariables?: CIn;
-  transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-  abortSignal?: AbortSignal;
-  generateTitle?: boolean;
-  onError?: (error: unknown) => string;
-  messageMetadata?: ChatMessageMetadata;
-  finalAssistantMetadata?: (
-    message: UIMessage,
-  ) =>
-    | Record<string, unknown>
-    | undefined
-    | Promise<Record<string, unknown> | undefined>;
-}
+export type ChatOptions<TOOLS extends ToolSet> = NonNullable<
+  ToolCallArguments<TOOLS, ChatConfig>[0]
+>;
 
 /**
  * Stream an assistant turn into the conversation context.
@@ -79,10 +76,11 @@ export interface ChatOptions<CIn> {
  * const stream = await chat(agent);
  * ```
  */
-export async function chat<CIn>(
-  agent: ChatAgentLike<CIn>,
-  options: ChatOptions<CIn> = {},
+export async function chat<const TOOLS extends ToolSet>(
+  agent: ChatAgentLike<TOOLS>,
+  ...args: ToolCallArguments<NoInfer<TOOLS>, ChatConfig>
 ) {
+  const [options] = args;
   const context = agent.context;
   if (!context) {
     throw new Error(
@@ -99,33 +97,25 @@ export async function chat<CIn>(
   const initialAssistantMsgId = head.id;
   const uiMessages = await context.getMessages();
 
-  const streamContextVariables =
-    options.contextVariables === undefined
-      ? ({} as CIn)
-      : options.contextVariables;
-
   const [title, result] = await Promise.all([
     makeTitle({
       context,
       model: agent.model,
-      generateTitle: options.generateTitle,
-      abortSignal: options.abortSignal,
+      generateTitle: options?.generateTitle,
+      abortSignal: options?.abortSignal,
     }),
-    agent.stream(streamContextVariables, {
-      transform: options.transform,
-      abortSignal: options.abortSignal,
-    }),
+    agent.stream(...args),
   ]);
 
   const uiStream = result.toUIMessageStream({
-    onError: options.onError ?? formatChatError,
+    onError: options?.onError ?? formatChatError,
     sendStart: true,
     sendFinish: true,
     sendReasoning: true,
     sendSources: true,
     originalMessages: uiMessages,
     generateMessageId: () => initialAssistantMsgId,
-    messageMetadata: options.messageMetadata ?? defaultChatMessageMetadata,
+    messageMetadata: options?.messageMetadata ?? defaultChatMessageMetadata,
   });
 
   return createUIMessageStream({
@@ -140,7 +130,7 @@ export async function chat<CIn>(
         message = { ...message, parts: sanitizeAbortedParts(message.parts) };
       }
 
-      const finalMetadata = await options.finalAssistantMetadata?.(message);
+      const finalMetadata = await options?.finalAssistantMetadata?.(message);
       const mergedMetadata = {
         ...((message.metadata as object) ?? {}),
         ...(finalMetadata ?? {}),

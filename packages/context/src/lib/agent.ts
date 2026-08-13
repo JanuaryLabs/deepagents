@@ -1,4 +1,9 @@
 import type { JSONObject } from '@ai-sdk/provider';
+import type {
+  HasRequiredKey,
+  InferToolSetContext,
+  ToolExecutionOptions,
+} from '@ai-sdk/provider-utils';
 import {
   type FlexibleSchema,
   type GenerateTextResult,
@@ -8,7 +13,7 @@ import {
   type StreamTextResult,
   type StreamTextTransform,
   type Tool,
-  type ToolChoice,
+  type ToolLoopAgentSettings,
   type ToolSet,
   type UIMessage,
   type UIMessageStreamWriter,
@@ -57,23 +62,50 @@ export interface SubagentToolInput {
   output?: string;
 }
 
-type SubagentExecuteOptions = Parameters<
-  NonNullable<Tool<SubagentToolInput, string>['execute']>
->[1];
+type PreparedTools<TOOLS extends ToolSet> = ReturnType<
+  typeof withHostOnlyToolMetadata<TOOLS>
+>;
 
-export type OutputExtractorFn<T = string> = (
-  output: GenerateTextResult<ToolSet, any, any>,
-) => T | Promise<T>;
+type AgentModelTools<TOOLS extends ToolSet> = PreparedTools<
+  AgentSandbox['tools'] & TOOLS
+>;
 
-export interface CreateAgent<CIn, COut = CIn> {
+type ToolCallOptions<TOOLS extends ToolSet, OPTIONS> = Pick<
+  ToolLoopAgentSettings<never, TOOLS>,
+  'toolsContext'
+> &
+  OPTIONS;
+
+export type ToolCallArguments<TOOLS extends ToolSet, OPTIONS> =
+  HasRequiredKey<InferToolSetContext<TOOLS>> extends true
+    ? [options: ToolCallOptions<TOOLS, OPTIONS>]
+    : [options?: ToolCallOptions<TOOLS, OPTIONS>];
+
+type GenerateOptions = {
+  abortSignal?: AbortSignal;
+};
+
+export type StreamOptions = {
+  abortSignal?: AbortSignal;
+  transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
+  maxRetries?: number;
+};
+
+export interface CreateAgent<TOOLS extends ToolSet = {}> {
   name: string;
   sandbox: AgentSandbox;
   context?: ContextEngine;
-  tools?: ToolSet;
+  tools?: TOOLS;
   model?: AgentModel;
-  toolChoice?: ToolChoice<Record<string, COut>>;
-  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
-  telemetry?: Parameters<typeof generateText>[0]['telemetry'];
+  toolChoice?: Parameters<
+    typeof generateText<AgentModelTools<TOOLS>>
+  >[0]['toolChoice'];
+  providerOptions?: Parameters<
+    typeof generateText<AgentModelTools<TOOLS>>
+  >[0]['providerOptions'];
+  telemetry?: Parameters<
+    typeof generateText<AgentModelTools<TOOLS>>
+  >[0]['telemetry'];
   /**
    * Ends the agent loop. Defaults to {@link DEFAULT_STOP_WHEN}. Raise it for a
    * long agentic run that would otherwise stop mid-task; lower it to bound cost
@@ -99,32 +131,32 @@ export interface CreateAgent<CIn, COut = CIn> {
  */
 export const DEFAULT_STOP_WHEN = isStepCount(200);
 
-class Agent<CIn, COut = CIn> {
-  #options: CreateAgent<CIn, COut>;
+class Agent<TOOLS extends ToolSet> {
+  #options: CreateAgent<TOOLS>;
   #guardrails: Guardrail[] = [];
-  readonly tools: ToolSet;
+  readonly tools: AgentModelTools<TOOLS>;
   readonly context?: ContextEngine;
   readonly model?: AgentModel;
   readonly sandbox: AgentSandbox;
-  constructor(options: CreateAgent<CIn, COut>) {
+  constructor(options: CreateAgent<TOOLS>) {
     this.#options = options;
-    this.tools = withHostOnlyToolMetadata({
-      ...options.sandbox.tools,
-      ...(options.tools || {}),
-    });
+    this.tools = withHostOnlyToolMetadata(
+      Object.assign({}, options.sandbox.tools, options.tools),
+    );
     this.context = options.context;
     this.model = options.model;
     this.sandbox = options.sandbox;
     this.#guardrails = options.guardrails || [];
   }
 
-  public async generate<COut, CIn = COut>(
-    contextVariables: CIn,
-    config?: {
-      abortSignal?: AbortSignal;
-    },
+  public async generate(
+    ...[options]: ToolCallArguments<AgentModelTools<TOOLS>, GenerateOptions>
   ): Promise<
-    GenerateTextResult<ToolSet, any, Output.Output<string, string, unknown>>
+    GenerateTextResult<
+      AgentModelTools<TOOLS>,
+      any,
+      Output.Output<string, string, unknown>
+    >
   > {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
@@ -141,7 +173,7 @@ class Agent<CIn, COut = CIn> {
       sandbox: this.#options.sandbox,
     });
     return generateText({
-      abortSignal: config?.abortSignal,
+      abortSignal: options?.abortSignal,
       providerOptions: this.#options.providerOptions,
       telemetry: this.#options.telemetry,
       model: this.#options.model,
@@ -156,11 +188,10 @@ class Agent<CIn, COut = CIn> {
         sandbox: this.#options.sandbox,
       }),
       tools: this.tools,
-      runtimeContext: contextVariables as any,
-      toolsContext: createToolsContext(this.tools, contextVariables) as any,
+      toolsContext: options?.toolsContext,
       repairToolCall: createRepairToolCall(
         this.#options.model,
-        config?.abortSignal,
+        options?.abortSignal,
       ),
       toolChoice: this.#options.toolChoice,
     });
@@ -174,7 +205,7 @@ class Agent<CIn, COut = CIn> {
    *
    * @example
    * ```typescript
-   * const stream = await agent.stream({});
+   * const stream = await agent.stream();
    *
    * // With guardrails - use toUIMessageStream for protection
    * await printer.readableStream(stream.toUIMessageStream());
@@ -183,13 +214,8 @@ class Agent<CIn, COut = CIn> {
    * await printer.stdout(stream);
    * ```
    */
-  public async stream<COut, CIn = COut>(
-    contextVariables: CIn,
-    config?: {
-      abortSignal?: AbortSignal;
-      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-      maxRetries?: number;
-    },
+  public async stream(
+    ...[options]: ToolCallArguments<AgentModelTools<TOOLS>, StreamOptions>
   ): Promise<StreamTextResult<ToolSet, any, any>> {
     if (!this.#options.context) {
       throw new Error(`Agent ${this.#options.name} is missing a context.`);
@@ -203,8 +229,8 @@ class Agent<CIn, COut = CIn> {
       sandbox: this.#options.sandbox,
     });
     const result = await this.#createRawStream(
-      contextVariables,
-      config,
+      options?.toolsContext as InferToolSetContext<AgentModelTools<TOOLS>>,
+      options,
       prepareStep,
     );
 
@@ -214,8 +240,8 @@ class Agent<CIn, COut = CIn> {
 
     return this.#wrapWithGuardrails(
       result,
-      contextVariables,
-      config,
+      options?.toolsContext as InferToolSetContext<AgentModelTools<TOOLS>>,
+      options,
       prepareStep,
     );
   }
@@ -223,8 +249,8 @@ class Agent<CIn, COut = CIn> {
   /**
    * Create a raw stream without guardrail processing.
    */
-  async #createRawStream<COut, CIn = COut>(
-    contextVariables: CIn,
+  async #createRawStream(
+    toolsContext: InferToolSetContext<AgentModelTools<TOOLS>>,
     config?: {
       abortSignal?: AbortSignal;
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
@@ -263,8 +289,8 @@ class Agent<CIn, COut = CIn> {
         context.createPrepareStep({ sandbox: this.#options.sandbox }),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
-      runtimeContext: contextVariables as any,
-      toolsContext: createToolsContext(this.tools, contextVariables) as any,
+      // Generic wrappers cannot reduce AI SDK's conditional ToolsContextParameter.
+      toolsContext: toolsContext as never,
       toolChoice: this.#options.toolChoice,
     });
   }
@@ -277,9 +303,9 @@ class Agent<CIn, COut = CIn> {
    * 2. A finish-step is emitted, triggering onStepEnd to persist the self-correction
    * 3. A new stream is started and the model continues from the correction
    */
-  #wrapWithGuardrails<CIn>(
+  #wrapWithGuardrails(
     result: StreamTextResult<ToolSet, any, any>,
-    contextVariables: CIn,
+    toolsContext: InferToolSetContext<AgentModelTools<TOOLS>>,
     config?: {
       abortSignal?: AbortSignal;
       transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
@@ -414,7 +440,7 @@ class Agent<CIn, COut = CIn> {
             await stepSaved.promise;
 
             currentResult = await this.#createRawStream(
-              contextVariables,
+              toolsContext,
               config,
               prepareStep,
             );
@@ -433,7 +459,9 @@ class Agent<CIn, COut = CIn> {
 
   public asTool<T = string>(props?: {
     toolDescription?: string;
-    outputExtractor?: OutputExtractorFn<T>;
+    outputExtractor?: (
+      output: Awaited<ReturnType<Agent<TOOLS>['generate']>>,
+    ) => T | Promise<T>;
     /** Not sent to the model; surfaces on tool call/result and UI message parts */
     metadata?: JSONObject;
     toModelOutput?: Tool<SubagentToolInput, T | string>['toModelOutput'];
@@ -457,7 +485,9 @@ class Agent<CIn, COut = CIn> {
       }),
       execute: async (
         { input, output }: SubagentToolInput,
-        options: SubagentExecuteOptions,
+        options: ToolExecutionOptions<
+          InferToolSetContext<AgentModelTools<TOOLS>>
+        >,
       ): Promise<T | string> => {
         if (!this.context) {
           throw new Error(
@@ -477,22 +507,10 @@ class Agent<CIn, COut = CIn> {
             : input;
           ctx.set(user(prompt));
 
-          const sub = agent({
-            name: this.#options.name,
-            sandbox: this.#options.sandbox,
-            model: this.model,
-            context: ctx,
-            tools: this.#options.tools,
-            providerOptions: this.#options.providerOptions,
-            telemetry: this.#options.telemetry,
+          const result = await this.clone({ context: ctx }).generate({
+            toolsContext: options.context,
+            abortSignal: options.abortSignal,
           });
-
-          const result = await sub.generate(
-            {},
-            {
-              abortSignal: options.abortSignal,
-            },
-          );
 
           if (props?.outputExtractor) {
             return await props.outputExtractor(result);
@@ -510,7 +528,11 @@ class Agent<CIn, COut = CIn> {
           return `An error thrown from a tool call. \n<ErrorDetails>\n${details}\n</ErrorDetails>`;
         }
       },
-    } as unknown as Tool<SubagentToolInput, T | string>;
+    } as unknown as Tool<
+      SubagentToolInput,
+      T | string,
+      InferToolSetContext<AgentModelTools<TOOLS>>
+    >;
 
     return tool(definition);
   }
@@ -590,24 +612,27 @@ class Agent<CIn, COut = CIn> {
     };
   }
 
-  clone(overrides?: Partial<CreateAgent<CIn, COut>>): Agent<CIn, COut> {
-    return new Agent<CIn, COut>({
+  clone(overrides?: Partial<CreateAgent<TOOLS>>): Agent<TOOLS> {
+    return new Agent<TOOLS>({
       ...this.#options,
       ...overrides,
     });
   }
 }
 
-export function agent<CIn, COut = CIn>(
-  options: CreateAgent<CIn, COut>,
-): Agent<CIn, COut> {
+export function agent<const TOOLS extends ToolSet = {}>(
+  options: CreateAgent<TOOLS>,
+): Agent<TOOLS> {
   return new Agent(options);
 }
 
 /**
  * Options for creating a structured output handler.
  */
-export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
+export interface StructuredOutputOptions<
+  TSchema extends FlexibleSchema,
+  TOOLS extends ToolSet = {},
+> {
   context?: ContextEngine;
   model?: AgentModel;
   schema: TSchema;
@@ -619,7 +644,7 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
   sandbox?: AgentSandbox;
   providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
-  tools?: ToolSet;
+  tools?: TOOLS;
 }
 
 /**
@@ -631,7 +656,6 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
  * @example
  * ```typescript
  * const output = structuredOutput({
- *   name: 'extractor',
  *   model: groq('...'),
  *   context,
  *   schema: z.object({
@@ -641,39 +665,37 @@ export interface StructuredOutputOptions<TSchema extends FlexibleSchema> {
  * });
  *
  * // Generate - returns only the structured output
- * const result = await output.generate({});
+ * const result = await output.generate();
  * // result: { name: string, age: number }
  *
  * // Stream - returns the full stream
- * const stream = await output.stream({});
+ * const stream = await output.stream();
  * ```
  */
-export interface StructuredOutputResult<TSchema extends FlexibleSchema> {
-  generate<CIn>(
-    contextVariables?: CIn,
-    config?: { abortSignal?: AbortSignal },
+export interface StructuredOutputResult<
+  TSchema extends FlexibleSchema,
+  TOOLS extends ToolSet,
+> {
+  generate(
+    ...args: ToolCallArguments<PreparedTools<TOOLS>, GenerateOptions>
   ): Promise<InferSchema<TSchema>>;
-  stream<CIn>(
-    contextVariables?: CIn,
-    config?: {
-      abortSignal?: AbortSignal;
-      transform?: StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-    },
+  stream(
+    ...args: ToolCallArguments<PreparedTools<TOOLS>, StreamOptions>
   ): Promise<
     StreamTextResult<ToolSet, any, Output.Output<unknown, unknown, unknown>>
   >;
 }
 
-export function structuredOutput<TSchema extends FlexibleSchema>(
-  options: StructuredOutputOptions<TSchema>,
-): StructuredOutputResult<TSchema> {
-  const tools = options.tools
-    ? withHostOnlyToolMetadata(options.tools)
-    : undefined;
+export function structuredOutput<
+  TSchema extends FlexibleSchema,
+  const TOOLS extends ToolSet = {},
+>(
+  options: StructuredOutputOptions<TSchema, TOOLS>,
+): StructuredOutputResult<TSchema, TOOLS> {
+  const tools = withHostOnlyToolMetadata({ ...options.tools });
   return {
-    async generate<CIn>(
-      contextVariables?: CIn,
-      config?: { abortSignal?: AbortSignal },
+    async generate(
+      ...[callOptions]: ToolCallArguments<PreparedTools<TOOLS>, GenerateOptions>
     ): Promise<InferSchema<TSchema>> {
       if (!options.context) {
         throw new Error(`structuredOutput is missing a context.`);
@@ -688,7 +710,7 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       });
 
       const result = await generateText({
-        abortSignal: config?.abortSignal,
+        abortSignal: callOptions?.abortSignal,
         providerOptions: options.providerOptions,
         telemetry: options.telemetry,
         model: options.model,
@@ -700,10 +722,9 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
         stopWhen: DEFAULT_STOP_WHEN,
         repairToolCall: createRepairToolCall(
           options.model,
-          config?.abortSignal,
+          callOptions?.abortSignal,
         ),
-        runtimeContext: contextVariables as any,
-        toolsContext: createToolsContext(tools ?? {}, contextVariables) as any,
+        toolsContext: callOptions?.toolsContext as never,
         output: Output.object({ schema: options.schema }),
         tools,
       });
@@ -711,13 +732,8 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       return result.output as InferSchema<TSchema>;
     },
 
-    async stream<CIn>(
-      contextVariables?: CIn,
-      config?: {
-        abortSignal?: AbortSignal;
-        transform?:
-          StreamTextTransform<ToolSet> | StreamTextTransform<ToolSet>[];
-      },
+    async stream(
+      ...[callOptions]: ToolCallArguments<PreparedTools<TOOLS>, StreamOptions>
     ) {
       if (!options.context) {
         throw new Error(`structuredOutput is missing a context.`);
@@ -732,34 +748,27 @@ export function structuredOutput<TSchema extends FlexibleSchema>(
       });
 
       return streamText({
-        abortSignal: config?.abortSignal,
+        abortSignal: callOptions?.abortSignal,
         providerOptions: options.providerOptions,
         telemetry: options.telemetry,
         model: options.model,
         instructions: systemPrompt,
         repairToolCall: createRepairToolCall(
           options.model,
-          config?.abortSignal,
+          callOptions?.abortSignal,
         ),
         messages: await convertToModelMessages(messages as never, {
           ignoreIncompleteToolCalls: true,
           tools,
         }),
         stopWhen: DEFAULT_STOP_WHEN,
-        experimental_transform: config?.transform ?? smoothStream(),
-        runtimeContext: contextVariables as any,
-        toolsContext: createToolsContext(tools ?? {}, contextVariables) as any,
+        experimental_transform: callOptions?.transform ?? smoothStream(),
+        toolsContext: callOptions?.toolsContext as never,
         output: Output.object({ schema: options.schema }),
         tools,
       });
     },
   };
-}
-
-function createToolsContext<C>(tools: ToolSet, context: C) {
-  return Object.fromEntries(
-    Object.keys(tools).map((toolName) => [toolName, context]),
-  );
 }
 
 /**
