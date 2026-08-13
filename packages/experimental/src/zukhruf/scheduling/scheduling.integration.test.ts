@@ -659,7 +659,6 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
       zukhruf: {
         ...(metadata!.zukhruf as Record<string, unknown>),
         scheduling: {
-          version: 1,
           cron: {
             deadbeef: {
               id: 'deadbeef',
@@ -890,6 +889,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
     }
   ).scheduling;
   assert.equal(Object.keys(scheduling.cron).length, 1);
+  assert.ok(!('version' in scheduling));
 });
 
 test('retry after enqueue-before-advance executes one scheduled turn', async (t) => {
@@ -1152,7 +1152,6 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
       zukhruf: {
         ...(metadata!.zukhruf as Record<string, unknown>),
         scheduling: {
-          version: 1,
           cron: {
             deadbeef: {
               id: 'deadbeef',
@@ -1259,7 +1258,6 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
       zukhruf: {
         ...(metadata!.zukhruf as Record<string, unknown>),
         scheduling: {
-          version: 1,
           cron: {
             deadbeef: {
               id: 'deadbeef',
@@ -1659,7 +1657,7 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
       ...metadata,
       zukhruf: {
         ...(metadata!.zukhruf as Record<string, unknown>),
-        scheduling: { version: 1, cron },
+        scheduling: { cron },
       },
     },
   }));
@@ -1769,7 +1767,6 @@ test('file-backed restart repairs one overdue cron occurrence and arms the next 
   await firstStore.updateChat(conversation.chatId, ({ metadata }) => {
     const zukhruf = metadata!.zukhruf as Record<string, unknown>;
     const scheduling = zukhruf.scheduling as {
-      version: 1;
       cron: Record<string, Record<string, unknown>>;
     };
     return {
@@ -1846,7 +1843,6 @@ test('startup removes a recurring definition whose next match is beyond its seve
       zukhruf: {
         ...(metadata!.zukhruf as Record<string, unknown>),
         scheduling: {
-          version: 1,
           cron: {
             deadbeef: {
               id: 'deadbeef',

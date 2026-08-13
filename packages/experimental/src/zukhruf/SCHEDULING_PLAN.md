@@ -178,8 +178,7 @@ Store the resolved timezone with every cron definition so a later host configura
 not reinterpret existing work. `humanSchedule` is derived for tool output and need not be stored.
 
 ```ts
-interface SchedulingStateV1 {
-  version: 1;
+interface SchedulingState {
   cron: Record<
     string,
     {
@@ -205,7 +204,7 @@ interface SchedulingStateV1 {
 ```
 
 This lives at `chat.metadata.zukhruf.scheduling`. Treat it as an untyped persistence boundary:
-validate the version and every field when loading, fail closed on malformed reserved state, and
+validate every field when loading, fail closed on malformed reserved state, and
 preserve unrelated `zukhruf` metadata during every atomic update.
 
 The wake payload carries only enough opaque routing data for the coordinator to reload state:

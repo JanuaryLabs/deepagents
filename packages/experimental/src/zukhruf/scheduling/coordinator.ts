@@ -30,7 +30,6 @@ const cronDefinitionSchema = z
 
 const schedulingStateSchema = z
   .object({
-    version: z.literal(1),
     cron: z.record(z.string(), cronDefinitionSchema),
     dynamic: z
       .object({
@@ -56,8 +55,8 @@ const schedulingStateSchema = z
     }
   });
 
-type SchedulingStateV1 = z.infer<typeof schedulingStateSchema>;
-type CronDefinition = SchedulingStateV1['cron'][string];
+type SchedulingState = z.infer<typeof schedulingStateSchema>;
+type CronDefinition = SchedulingState['cron'][string];
 
 export interface SchedulingWake {
   conversation: ConversationId;
@@ -215,7 +214,7 @@ export class SchedulingCoordinator {
     const createdAt = Date.now();
     const nextRunAt = createdAt + clampedDelaySeconds * 1_000;
     const generation = SchedulingCoordinator.#randomGeneration();
-    let previous: SchedulingStateV1['dynamic'];
+    let previous: SchedulingState['dynamic'];
     const dynamic = {
       prompt: input.prompt,
       reason: input.reason,
@@ -245,7 +244,7 @@ export class SchedulingCoordinator {
   }
 
   async stopDynamic(conversation: ConversationId): Promise<number> {
-    let removed: SchedulingStateV1['dynamic'];
+    let removed: SchedulingState['dynamic'];
     await this.#update(conversation, (state) => {
       removed = state.dynamic;
       if (!removed) return state;
@@ -402,7 +401,7 @@ export class SchedulingCoordinator {
   }
 
   #matchingCron(
-    state: SchedulingStateV1,
+    state: SchedulingState,
     wake: SchedulingWake,
   ): CronDefinition | undefined {
     if (wake.kind !== 'cron' || wake.definitionId === undefined) return;
@@ -414,9 +413,9 @@ export class SchedulingCoordinator {
   }
 
   #matchingDynamic(
-    state: SchedulingStateV1,
+    state: SchedulingState,
     wake: SchedulingWake,
-  ): SchedulingStateV1['dynamic'] {
+  ): SchedulingState['dynamic'] {
     if (wake.kind !== 'dynamic') return;
     return state.dynamic?.generation === wake.generation &&
       state.dynamic.nextRunAt === wake.scheduledFor
@@ -464,7 +463,7 @@ export class SchedulingCoordinator {
 
   #dynamicWake(
     conversation: ConversationId,
-    dynamic: NonNullable<SchedulingStateV1['dynamic']>,
+    dynamic: NonNullable<SchedulingState['dynamic']>,
   ): Wake<SchedulingWake> {
     return this.#toWake({
       conversation,
@@ -530,7 +529,7 @@ export class SchedulingCoordinator {
     }
   }
 
-  async #read(conversation: ConversationId): Promise<SchedulingStateV1> {
+  async #read(conversation: ConversationId): Promise<SchedulingState> {
     const chat = await this.#store.getChat(conversation.chatId);
     if (!chat)
       throw new Error(`Scheduling chat "${conversation.chatId}" not found`);
@@ -544,7 +543,7 @@ export class SchedulingCoordinator {
 
   async #update(
     conversation: ConversationId,
-    update: (state: SchedulingStateV1) => SchedulingStateV1,
+    update: (state: SchedulingState) => SchedulingState,
   ): Promise<void> {
     await this.#store.updateChat(conversation.chatId, (chat) => {
       if (chat.userId !== conversation.userId) {
@@ -564,10 +563,10 @@ export class SchedulingCoordinator {
     });
   }
 
-  #parse(metadata: Record<string, unknown> | undefined): SchedulingStateV1 {
-    if (metadata?.zukhruf === undefined) return { version: 1, cron: {} };
+  #parse(metadata: Record<string, unknown> | undefined): SchedulingState {
+    if (metadata?.zukhruf === undefined) return { cron: {} };
     const zukhruf = SchedulingCoordinator.#record(metadata.zukhruf);
-    if (zukhruf.scheduling === undefined) return { version: 1, cron: {} };
+    if (zukhruf.scheduling === undefined) return { cron: {} };
     const parsed = schedulingStateSchema.safeParse(zukhruf.scheduling);
     if (!parsed.success) {
       throw new Error('Invalid metadata.zukhruf.scheduling state', {

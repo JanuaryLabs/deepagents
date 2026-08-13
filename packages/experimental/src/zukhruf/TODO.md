@@ -153,6 +153,10 @@
 
 ## 5. Remaining independent work
 
+- [x] Timed scheduling primitives: `WakeScheduler`, `PgBossWakeScheduler`, `SchedulingCoordinator`,
+      runtime-injected `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`, durable scheduled-origin
+      turns, startup/failure reconciliation, and public-runtime integration coverage shipped in
+      `SCHEDULING_PLAN.md`.
 - [x] Keep runtime-owned wiring classes and injected collaboration-tool implementations internal.
       Customers compose through `AgentRuntime`, the DSL, and the store/queue adapters.
 - [ ] Add a host-configurable per-tree agent/residency limit that counts the root, rejects unbounded
