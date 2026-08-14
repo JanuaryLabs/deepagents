@@ -651,7 +651,7 @@ Claude's host-specific `durable` flag: every definition is durable and conversat
 
 ```text
 CronCreate({cron, prompt, recurring?})
-  → {id, humanSchedule, nextRunAt, timezone, recurring}
+  → {id, humanSchedule, nextRunAt, timezone, recurring, warning?}
 
 CronList({})
   → {jobs: [{id, cron, humanSchedule, nextRunAt, timezone, prompt, recurring?}]}
@@ -665,9 +665,10 @@ ScheduleWakeup({delaySeconds, reason, prompt} | {stop: true})
 
 - `CronCreate` accepts a standard five-field cron expression in the host-configured IANA timezone.
   It returns the exact next occurrence and timezone; immediate execution is not part of this tool.
-  `recurring` defaults to `true`; `false` fires once and deletes the definition. A conversation may
-  own at most 50 cron definitions. Recurring definitions expire after seven days, after their final
-  due occurrence.
+  A one-shot whose next occurrence is in a later local calendar year also returns an explicit
+  warning. `recurring` defaults to `true`; `false` fires once and deletes the definition. A
+  conversation may own at most 50 cron definitions. Recurring definitions expire after seven days,
+  after their final due occurrence.
 - `CronList` and `CronDelete` can see or mutate only the calling conversation's definitions. Public
   cron IDs are deterministic UUIDs derived from the conversation and create operation; internal
   wake and turn IDs additionally derive from the definition generation and intended fire time.

@@ -85,6 +85,7 @@ CronCreate({
   nextRunAt: number,
   timezone: string,
   recurring: boolean,
+  warning?: string,
 }>;
 
 CronList({}): Promise<{
@@ -120,7 +121,8 @@ ScheduleWakeup(
 - A cron ID is a deterministic UUID unique within its conversation.
 - `CronCreate` accepts exactly five cron fields, requires a match within the next year, resolves in
   the configured IANA timezone, and returns that exact occurrence and timezone without executing
-  immediately.
+  immediately. A one-shot whose next occurrence is in a later local calendar year also returns an
+  explicit warning.
 - A conversation may own at most 50 active cron definitions.
 - `recurring: false` fires at the next match and deletes itself.
 - Recurring definitions expire seven days after creation, after their final due occurrence.

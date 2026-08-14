@@ -575,6 +575,8 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
     nextRunAt: new Date('2027-08-13T12:08:00Z').getTime(),
     timezone: 'Asia/Amman',
     recurring: false,
+    warning:
+      'This one-shot cron resolves in calendar year 2027, not 2026. Confirm that year is intended.',
   });
 });
 

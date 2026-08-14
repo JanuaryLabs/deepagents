@@ -23,6 +23,7 @@ const cronOutput = z
     nextRunAt: z.number(),
     timezone: z.string(),
     recurring: z.boolean(),
+    warning: z.string().optional(),
   })
   .strict();
 const cronListOutput = z
@@ -71,6 +72,26 @@ const schedulingToolMetadata = {
   },
 };
 
+function calendarYearWarning(definition: {
+  createdAt: number;
+  nextRunAt: number;
+  recurring: boolean;
+  timezone: string;
+}): { warning?: string } {
+  if (definition.recurring) return {};
+  const year = new Intl.DateTimeFormat('en', {
+    calendar: 'iso8601',
+    timeZone: definition.timezone,
+    year: 'numeric',
+  });
+  const createdYear = year.format(definition.createdAt);
+  const nextYear = year.format(definition.nextRunAt);
+  if (createdYear === nextYear) return {};
+  return {
+    warning: `This one-shot cron resolves in calendar year ${nextYear}, not ${createdYear}. Confirm that year is intended.`,
+  };
+}
+
 export const schedulingTools = {
   CronCreate: tool<
     z.infer<typeof cronCreateInput>,
@@ -95,6 +116,7 @@ export const schedulingTools = {
         nextRunAt: definition.nextRunAt,
         timezone: definition.timezone,
         recurring: definition.recurring,
+        ...calendarYearWarning(definition),
       };
     },
   }),
