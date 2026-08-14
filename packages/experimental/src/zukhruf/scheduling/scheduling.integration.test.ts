@@ -452,7 +452,10 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
   await runTurn(runtime, h.queue, conversation, 'create cron');
   assert.equal(scheduler.wakes.size, 1);
   const definitionId = [...scheduler.wakes.values()][0].data.definitionId;
-  assert.match(definitionId ?? '', /^[0-9a-f]{8}$/);
+  assert.match(
+    definitionId ?? '',
+    /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
 
   await runTurn(runtime, h.queue, conversation, 'list cron');
   const listTool = (await runtime.observe(conversation).engine.getMessages())
@@ -708,8 +711,8 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
         ...(metadata!.zukhruf as Record<string, unknown>),
         scheduling: {
           cron: {
-            deadbeef: {
-              id: 'deadbeef',
+            '00000000-0000-4000-8000-000000000001': {
+              id: '00000000-0000-4000-8000-000000000001',
               expression: '*/10 * * * *',
               prompt: 'scheduled catch-up',
               recurring: true,
@@ -779,7 +782,8 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
   ]);
   assert.equal(
     [...scheduler.wakes.values()].filter(
-      ({ data }) => data.definitionId === 'deadbeef',
+      ({ data }) =>
+        data.definitionId === '00000000-0000-4000-8000-000000000001',
     ).length,
     1,
   );
@@ -852,7 +856,7 @@ test('runtime rejects an invalid scheduling timezone during construction', (t) =
   );
 });
 
-test('startup reconciliation repairs a definition persisted before wake insertion', async (t) => {
+test('failed wake insertion does not commit a cron definition', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
@@ -864,33 +868,27 @@ test('startup reconciliation repairs a definition persisted before wake insertio
       },
     ],
   ]);
-  const model = toolModel(commands, []);
-  const declaration = defineAgent({
-    name: 'root',
-    model,
-    sandbox: async () => ({}) as AgentSandbox,
-    instructions: [],
-  });
-  const runtime = new AgentRuntime(declaration, {
-    ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
-  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
   const conversation = { chatId: 'create-gap', userId: 'user-1' };
-  const firstWorker = await runtime.work();
+  await using _worker = await runtime.work();
   scheduler.scheduleFailuresRemaining = 1;
   await runTurn(runtime, h.queue, conversation, 'create during outage');
   assert.equal(scheduler.wakes.size, 0);
-  await firstWorker[Symbol.asyncDispose]();
-
-  const restarted = new AgentRuntime(declaration, {
-    ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
-  });
-  await using _restartedWorker = await restarted.work();
-  assert.equal(scheduler.wakes.size, 1);
+  const chat = await h.store.getChat(conversation.chatId);
   assert.equal(
-    [...scheduler.wakes.values()][0].data.conversation.chatId,
-    'create-gap',
+    (chat?.metadata?.zukhruf as { scheduling?: unknown }).scheduling,
+    undefined,
   );
 });
 
@@ -1053,7 +1051,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
   );
 });
 
-test('reconciliation repairs a successor lost after recurrence advances', async (t) => {
+test('failed successor insertion leaves the current cron retryable', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
@@ -1090,17 +1088,17 @@ test('reconciliation repairs a successor lost after recurrence advances', async 
 
   scheduler.scheduleFailuresRemaining = 1;
   await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
-  assert.equal(h.queue.turns.length, 1);
-  const successor = [...scheduler.wakes.values()].find(
-    ({ id }) => id !== first.id,
-  );
-  assert.ok(successor, 'reconciliation should arm the persisted successor');
+  assert.equal(h.queue.turns.length, 0);
 
   await scheduler.fire(first.id);
-  assert.equal(
-    h.queue.turns.length,
-    1,
-    'the stale receipt must not enqueue again',
+  assert.equal(h.queue.turns.length, 1);
+  assert.ok(
+    [...scheduler.wakes.values()].some(
+      ({ data }) =>
+        data.definitionId === first.data.definitionId &&
+        data.generation === first.data.generation + 1,
+    ),
+    'the successful retry arms the successor',
   );
   await h.queue.runNext();
   assert.equal(
@@ -1109,7 +1107,7 @@ test('reconciliation repairs a successor lost after recurrence advances', async 
   );
 });
 
-test('retrying a stale cron receipt repairs its persisted successor after a prolonged outage', async () => {
+test('pg-boss can retry successor insertion through a prolonged outage', async () => {
   const scheduler = new RecordingWakeScheduler();
   using h = disposableHarness(scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
@@ -1140,6 +1138,7 @@ test('retrying a stale cron receipt repairs its persisted successor after a prol
 
   scheduler.scheduleFailuresRemaining = 2;
   await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
+  await assert.rejects(scheduler.fire(first.id), /wake insertion outage/);
   await scheduler.fire(first.id);
 
   assert.ok(
@@ -1148,7 +1147,7 @@ test('retrying a stale cron receipt repairs its persisted successor after a prol
         data.definitionId === first.data.definitionId &&
         data.generation === first.data.generation + 1,
     ),
-    'the stale retry should repair the persisted successor receipt',
+    'the successful retry should persist the successor receipt',
   );
 });
 
@@ -1270,10 +1269,19 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
 
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create catch-up cron',
+      {
+        name: 'CronCreate',
+        input: { cron: '*/10 * * * *', prompt: 'cancel catch-up' },
+      },
+    ],
+  ]);
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: toolModel(new Map(), []),
+      model: toolModel(commands, []),
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
     }),
@@ -1283,37 +1291,15 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     },
   );
   const conversation = { chatId: 'cancel-user-for-cron', userId: 'user-1' };
-  await runtime.createSession(conversation);
-  await h.store.updateChat(conversation.chatId, ({ metadata }) => ({
-    metadata: {
-      ...metadata,
-      zukhruf: {
-        ...(metadata!.zukhruf as Record<string, unknown>),
-        scheduling: {
-          cron: {
-            deadbeef: {
-              id: 'deadbeef',
-              expression: '*/10 * * * *',
-              prompt: 'cancel catch-up',
-              recurring: true,
-              timezone: 'UTC',
-              createdAt: Date.now(),
-              expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1_000,
-              nextRunAt: Date.now() + 10 * 60_000,
-              generation: 1,
-            },
-          },
-        },
-      },
-    },
-  }));
   await using _worker = await runtime.work();
+  await runTurn(runtime, h.queue, conversation, 'create catch-up cron');
+  const wake = [...scheduler.wakes.values()][0];
   const queued = await runtime.enqueue(conversation, {
     id: 'cancel-user-turn',
     input: 'cancel me',
   });
   mock.timers.tick(10 * 60_000);
-  await scheduler.fire([...scheduler.wakes.keys()][0]);
+  await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 1);
 
   await runtime.observe(conversation).cancel(queued.id);
@@ -1331,47 +1317,20 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
 
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
-  let calls = 0;
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create approval cron',
+      {
+        name: 'CronCreate',
+        input: { cron: '*/10 * * * *', prompt: 'approval catch-up' },
+      },
+    ],
+    ['needs approval', { name: 'publish', input: {} }],
+  ]);
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'root',
-      model: new MockLanguageModelV4({
-        doStream: async () => {
-          calls++;
-          const chunks: LanguageModelV4StreamPart[] =
-            calls === 1
-              ? [
-                  {
-                    type: 'tool-call',
-                    toolCallId: 'approval-call',
-                    toolName: 'publish',
-                    input: '{}',
-                  },
-                  {
-                    type: 'finish',
-                    finishReason: { unified: 'tool-calls', raw: '' },
-                    usage,
-                  },
-                ]
-              : [
-                  { type: 'text-start', id: 'text-1' },
-                  {
-                    type: 'text-delta',
-                    id: 'text-1',
-                    delta: 'done',
-                  },
-                  { type: 'text-end', id: 'text-1' },
-                  {
-                    type: 'finish',
-                    finishReason: { unified: 'stop', raw: '' },
-                    usage,
-                  },
-                ];
-          return {
-            stream: simulateReadableStream({ chunks }),
-          };
-        },
-      }),
+      model: toolModel(commands, []),
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
       tools: {
@@ -1389,37 +1348,17 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
     },
   );
   const conversation = { chatId: 'approval-cron', userId: 'user-1' };
-  await runtime.createSession(conversation);
-  await h.store.updateChat(conversation.chatId, ({ metadata }) => ({
-    metadata: {
-      ...metadata,
-      zukhruf: {
-        ...(metadata!.zukhruf as Record<string, unknown>),
-        scheduling: {
-          cron: {
-            deadbeef: {
-              id: 'deadbeef',
-              expression: '*/10 * * * *',
-              prompt: 'approval catch-up',
-              recurring: true,
-              timezone: 'UTC',
-              createdAt: Date.now(),
-              expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1_000,
-              nextRunAt: Date.now() + 10 * 60_000,
-              generation: 1,
-            },
-          },
-        },
-      },
-    },
-  }));
   await using _worker = await runtime.work();
+  await runTurn(runtime, h.queue, conversation, 'create approval cron');
+  const wake = [...scheduler.wakes.values()][0];
   await runTurn(runtime, h.queue, conversation, 'needs approval');
   mock.timers.tick(10 * 60_000);
-  await scheduler.fire([...scheduler.wakes.keys()][0]);
+  await scheduler.fire(wake.id);
   assert.deepEqual(h.queue.turns, []);
 
-  await runtime.approve(conversation, { toolCallId: 'approval-call' });
+  await runtime.approve(conversation, {
+    toolCallId: 'call-publish-needs approval',
+  });
   await h.queue.runNext();
   const [catchUp] = h.queue.turns as TurnRef[];
   assert.ok(catchUp?.kind === 'ask');
@@ -1663,19 +1602,24 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   assert.deepEqual(rootList?.output, { jobs: [] });
 });
 
-test('malformed reserved scheduling metadata fails closed on worker startup', async (t) => {
+test('resume ignores scheduling metadata while scheduling tools fail closed', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
-  const declaration = defineAgent({
-    name: 'root',
-    model: new MockLanguageModelV4({}),
-    sandbox: async () => ({}) as AgentSandbox,
-    instructions: [],
-  });
-  const runtime = new AgentRuntime(declaration, {
-    ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
-  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(
+        new Map([['list malformed', { name: 'CronList', input: {} }]]),
+        [],
+      ),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
   const conversation = { chatId: 'malformed-state', userId: 'user-1' };
   await runtime.createSession(conversation);
   await h.store.updateChat(conversation.chatId, ({ metadata }) => ({
@@ -1687,11 +1631,12 @@ test('malformed reserved scheduling metadata fails closed on worker startup', as
       },
     },
   }));
+  await using _worker = await runtime.work();
+  assert.equal(await runtime.observe(conversation).resume(), null);
   await assert.rejects(
-    runtime.work(),
+    runTurn(runtime, h.queue, conversation, 'list malformed'),
     /Invalid metadata\.zukhruf\.scheduling state/,
   );
-  assert.equal(scheduler.handler, undefined);
 });
 
 test('CronCreate rejects six-field and unreachable expressions', async (t) => {
@@ -1773,7 +1718,7 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
   const now = Date.now();
   const cron = Object.fromEntries(
     Array.from({ length: 50 }, (_, index) => {
-      const id = index.toString(16).padStart(8, '0');
+      const id = crypto.randomUUID();
       return [
         id,
         {
@@ -1800,17 +1745,17 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
     },
   }));
   await using _worker = await runtime.work();
-  assert.equal(scheduler.wakes.size, 50);
+  assert.equal(scheduler.wakes.size, 0);
 
   await runTurn(runtime, h.queue, conversation, 'create fifty first');
-  assert.equal(scheduler.wakes.size, 50);
+  assert.equal(scheduler.wakes.size, 0);
   const result = (await runtime.observe(conversation).engine.getMessages())
     .at(-1)!
     .parts.find(isToolUIPart);
   assert.equal(result?.state, 'output-error');
 });
 
-test('a dynamic wake survives a file-backed metadata restart', async (t) => {
+test('a dynamic wake remains usable across a context-store restart', async (t) => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'zukhruf-dynamic-restart-'),
   );
@@ -1852,7 +1797,6 @@ test('a dynamic wake survives a file-backed metadata restart', async (t) => {
     'schedule persistent dynamic',
   );
   await firstWorker[Symbol.asyncDispose]();
-  scheduler.wakes.clear();
   firstDatabase.close();
 
   const secondDatabase = new DatabaseSync(databasePath);
@@ -1869,7 +1813,7 @@ test('a dynamic wake survives a file-backed metadata restart', async (t) => {
   assert.equal(seenUserText.at(-1), 'restarted dynamic prompt');
 });
 
-test('file-backed restart repairs one overdue cron occurrence and arms the next future match', async (t) => {
+test('a cron wake remains usable across a context-store restart', async (t) => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'zukhruf-scheduling-restart-'),
   );
@@ -1901,32 +1845,6 @@ test('file-backed restart repairs one overdue cron occurrence and arms the next 
   });
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'create restart cron');
-  const definitionId = [...scheduler.wakes.values()][0].data.definitionId!;
-  await firstStore.updateChat(conversation.chatId, ({ metadata }) => {
-    const zukhruf = metadata!.zukhruf as Record<string, unknown>;
-    const scheduling = zukhruf.scheduling as {
-      cron: Record<string, Record<string, unknown>>;
-    };
-    return {
-      metadata: {
-        ...metadata,
-        zukhruf: {
-          ...zukhruf,
-          scheduling: {
-            ...scheduling,
-            cron: {
-              ...scheduling.cron,
-              [definitionId]: {
-                ...scheduling.cron[definitionId],
-                nextRunAt: Date.now() - 5 * 60_000,
-              },
-            },
-          },
-        },
-      },
-    };
-  });
-  scheduler.wakes.clear();
   await firstWorker[Symbol.asyncDispose]();
   firstDatabase.close();
 
@@ -1940,11 +1858,10 @@ test('file-backed restart repairs one overdue cron occurrence and arms the next 
   });
   await using _restartedWorker = await restarted.work();
   assert.equal(scheduler.wakes.size, 1);
-  const overdue = [...scheduler.wakes.values()][0];
-  assert.ok(overdue.runAt.getTime() < Date.now());
+  const persisted = [...scheduler.wakes.values()][0];
 
-  await scheduler.fire(overdue.id);
-  assert.equal(h.queue.turns.length, 1, 'one catch-up turn is enqueued');
+  await scheduler.fire(persisted.id);
+  assert.equal(h.queue.turns.length, 1);
   const successor = [...scheduler.wakes.values()][0];
   assert.ok(successor.runAt.getTime() > Date.now());
   await h.queue.runNext();
@@ -2000,59 +1917,6 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
   } finally {
     mock.timers.reset();
   }
-});
-
-test('startup removes a recurring definition whose next match is beyond its seven-day expiry', async (t) => {
-  const scheduler = new RecordingWakeScheduler();
-  const h = harness(t, scheduler);
-  const commands = new Map<string, { name: string; input: unknown }>([
-    ['list expired', { name: 'CronList', input: {} }],
-  ]);
-  const runtime = new AgentRuntime(
-    defineAgent({
-      name: 'root',
-      model: toolModel(commands, []),
-      sandbox: async () => ({}) as AgentSandbox,
-      instructions: [],
-    }),
-    {
-      ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
-    },
-  );
-  const conversation = { chatId: 'expired-cron', userId: 'user-1' };
-  await runtime.createSession(conversation);
-  const now = Date.now();
-  await h.store.updateChat(conversation.chatId, ({ metadata }) => ({
-    metadata: {
-      ...metadata,
-      zukhruf: {
-        ...(metadata!.zukhruf as Record<string, unknown>),
-        scheduling: {
-          cron: {
-            deadbeef: {
-              id: 'deadbeef',
-              expression: '0 0 1 * *',
-              prompt: 'expired prompt',
-              recurring: true,
-              timezone: 'UTC',
-              createdAt: now,
-              expiresAt: now + 7 * 24 * 60 * 60 * 1_000,
-              nextRunAt: now + 20 * 24 * 60 * 60 * 1_000,
-              generation: 1,
-            },
-          },
-        },
-      },
-    },
-  }));
-  await using _worker = await runtime.work();
-  assert.equal(scheduler.wakes.size, 0);
-  await runTurn(runtime, h.queue, conversation, 'list expired');
-  const result = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
-  assert.deepEqual(result?.output, { jobs: [] });
 });
 
 test(

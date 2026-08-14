@@ -1,7 +1,8 @@
 # Zukhruf timed scheduling implementation plan
 
-> Status: implemented and verified on 2026-08-12. Focused scheduling checks are green; the full
-> package target retains the pre-existing pg-boss FIFO and retention regressions recorded in Slice 0.
+> Status: implemented and verified on 2026-08-12. Focused scheduling checks are green apart from
+> the pre-existing claimed-wake deletion race; the full package target also retains the pg-boss FIFO
+> and retention regressions recorded in Slice 0.
 >
 > Goal: add a portable durable one-shot wake substrate and the Claude-compatible model tools
 > `CronCreate`, `CronList`, `CronDelete`, and `ScheduleWakeup`. The `/loop` skill is explicitly out of
@@ -17,7 +18,7 @@ This plan delivers:
 - fixed cron and dynamic one-shot coordination;
 - the four agreed model-facing tools;
 - lazily materialized, provenance-carrying scheduled asks through the normal Zukhruf turn path;
-- startup and failure reconciliation across the metadata/wake dual-write boundary;
+- receipt-first state transitions across the metadata/wake dual-write boundary;
 - public-boundary integration coverage over PGlite and real PostgreSQL.
 
 This plan does not deliver:
@@ -64,7 +65,9 @@ This plan does not deliver:
 - `SchedulingCoordinator` owns prompts, conversations, cron, recurrence, expiry, replacement,
   catch-up, and conversion to turns.
 - `TurnQueue` remains the only authority for turn ordering and execution claims.
-- `ContextStore` metadata is authoritative. Wake jobs are disposable, reconstructable receipts.
+- `ContextStore` metadata is authoritative. Wake jobs are durable, disposable receipts.
+- `PgBossWakeScheduler` requires a stable queue name. Replicas of one agent tree share it; distinct
+  trees use distinct queues so a worker cannot claim another tree's wake.
 - Scheduling tools bind to `context.actor.thread.conversation`; tool input cannot select another
   user, chat, root, or child.
 - The tools are injected only when `AgentRuntime` receives scheduling configuration. Agent
@@ -111,7 +114,7 @@ ScheduleWakeup(
 - Zukhruf deliberately omits Claude's `durable` field. Every definition is durable and scoped to
   the current conversation.
 - Zukhruf deliberately omits Claude's internal feature-gated `noop` input.
-- A cron ID is an eight-character opaque string unique within its conversation.
+- A cron ID is a deterministic UUID unique within its conversation.
 - `CronCreate` accepts exactly five cron fields, requires a match within the next year, resolves in
   the configured IANA timezone, and does not execute immediately.
 - A conversation may own at most 50 active cron definitions.
@@ -138,8 +141,9 @@ ScheduleWakeup(
   prevents a second model execution.
 - After downtime, one overdue occurrence may catch up. The coordinator then arms the next future
   match; it never expands all missed ticks.
-- Startup reconciliation and wake-failure reconciliation recreate missing receipts from active
-  metadata. Stale receipts validate generation and due time against metadata before enqueueing.
+- A definition becomes active only after its wake exists. Recurrence inserts its successor before
+  enqueueing the occurrence and advancing metadata. Stale or unpublished receipts validate
+  generation and due time against metadata before enqueueing and become no-ops.
 - No process-local timer, recurrence cursor, or cancellation flag is authoritative.
 
 ## Target ownership
@@ -221,22 +225,22 @@ interface SchedulingWake {
 
 `WakeScheduler` remains generic over this data and does not inspect it.
 
-## Dual-write recovery protocol
+## Receipt-first transition protocol
 
 `ContextStore` and pg-boss cannot share one portable transaction. Correctness therefore comes from
-authority, deterministic identity, and reconciliation rather than pretending the dual write is
-atomic.
+authority, deterministic identity, and ordering rather than pretending the dual write is atomic.
 
-| Failure boundary                                         | Required result                                                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Definition persisted, process dies before wake insertion | Startup reconciliation re-arms the deterministic receipt.                                                          |
-| Wake inserted, response/tool process dies                | Retrying creation or reconciliation observes the same active definition and wake identity.                         |
-| Definition deleted/replaced while old wake is claimed    | Handler reloads metadata, sees generation mismatch or absence, and no-ops.                                         |
-| Handler enqueues occurrence, dies before advancing state | Retry derives the same turn ID; duplicate receipt is skipped after the first terminal stream.                      |
-| State advances, process dies before successor wake       | Handler retry or startup reconciliation arms the successor derived from current metadata.                          |
-| Multiple workers handle duplicates                       | Atomic metadata transition selects one state advance; deterministic enqueue identity prevents duplicate execution. |
-| Runtime is down across several cron matches              | Exactly one catch-up occurrence is eligible, followed by the next future match.                                    |
-| Delete/stop races with an already-enqueued turn          | Future wakes stop; existing turn remains under ordinary cancellation semantics.                                    |
+| Failure boundary                                         | Required result                                                                                          |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Wake insertion fails during create/replace               | Metadata remains unchanged and the tool reports failure.                                                 |
+| Wake inserted, process dies before metadata publication  | The unpublished receipt reloads metadata and no-ops.                                                     |
+| Definition deleted/replaced while old wake is claimed    | Handler sees the generation mismatch or absence and no-ops.                                              |
+| Successor insertion fails                                | The current definition and occurrence remain untouched so pg-boss can retry the wake.                    |
+| Successor inserted, process dies before state advances   | Retrying the current wake observes the same deterministic successor and occurrence identities.           |
+| Handler enqueues occurrence, dies before advancing state | Retry derives the same turn ID; settlement catch-up advances the still-due definition after work clears. |
+| Multiple workers handle duplicates                       | Atomic metadata transition selects one state advance; deterministic turn identity prevents reexecution.  |
+| Runtime is down across several cron matches              | The durable wake produces one catch-up occurrence, followed by the next future match.                    |
+| Delete/stop races with an already-enqueued turn          | Future wakes stop; existing turn remains under ordinary cancellation semantics.                          |
 
 Do not add an outbox table or a second scheduling store. The existing atomic chat updater plus
 idempotent wake insertion is sufficient for the accepted scale. If startup scans become a measured
@@ -272,7 +276,7 @@ nx run @deepagents/experimental:test
 
 - [x] Add `Wake<T>`, `WakeScheduler<T>`, and the idempotent schedule/cancel/at-least-once consume
       contract.
-- [x] Implement `PgBossWakeScheduler` on a dedicated queue using public `PgBoss` APIs only:
+- [x] Implement `PgBossWakeScheduler` on an explicitly named agent-tree queue using public `PgBoss` APIs only:
       `createQueue`, `sendAfter`, `work`, `cancel`, `findJobs`, and `offWork` as needed.
 - [x] Keep the `PgBoss` instance borrowed; the caller still owns `start()` and `stop()`.
 - [x] Use database-backed due time and normal polling. Do not create `setTimeout` state or use the
@@ -304,12 +308,13 @@ nx run @deepagents/experimental:test
       metadata keys.
 - [x] Use `ContextStore.updateChat()` for create, delete, dynamic replace/stop, occurrence claim, and
       advancement.
-- [x] Generate collision-checked eight-character public cron IDs and deterministic UUID wake and
-      occurrence IDs with the repository's existing UUID primitives.
+- [x] Generate deterministic UUID cron, wake, and occurrence IDs with the repository's existing
+      UUID primitives.
 - [x] Validate the configured IANA timezone and persist the resolved value with each cron definition.
 - [x] Implement create/list/delete, dynamic schedule/stop, wake handling, seven-day expiry, one-shot
       deletion, and one-occurrence catch-up.
-- [x] Reconcile active definitions on worker startup and after wake-handling failures.
+- [x] Insert create/replacement wakes before publishing metadata and recurring successors before
+      enqueueing their occurrence and advancing state.
 - [x] Keep `humanSchedule` out of persistence; derive it at the tool boundary.
 
 #### Behavioral proof
@@ -317,7 +322,7 @@ nx run @deepagents/experimental:test
 - [x] Public-runtime integration tests cover concurrent creates/deletes, replacement races, malformed
       reserved metadata, timezone stability, expiry, the 50-job cap, and current-conversation
       ownership.
-- [x] Deterministic barriers reproduce every row in the dual-write failure table before the final
+- [x] Deterministic barriers reproduce every row in the receipt-first failure table before the final
       green implementation.
 
 #### Exit criteria

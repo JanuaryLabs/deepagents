@@ -16,7 +16,7 @@ const MAX_CRON_JOBS = 50;
 
 const cronDefinitionSchema = z
   .object({
-    id: z.string().length(8),
+    id: z.uuid(),
     expression: z.string().min(1),
     prompt: z.string(),
     recurring: z.boolean(),
@@ -72,7 +72,7 @@ const schedulingWakeSchema: z.ZodType<SchedulingWake> = z
       .object({ chatId: z.string().min(1), userId: z.string().min(1) })
       .strict(),
     kind: z.enum(['cron', 'dynamic']),
-    definitionId: z.string().length(8).optional(),
+    definitionId: z.uuid().optional(),
     generation: z.number().int().positive(),
     scheduledFor: z.number().int().nonnegative(),
   })
@@ -100,7 +100,7 @@ interface CronCreateInput {
   recurring?: boolean;
 }
 
-/** Conversation scheduling state, recurrence, recovery, and turn conversion. */
+/** Conversation scheduling state, recurrence, and turn conversion. */
 export class SchedulingCoordinator {
   readonly #store: ContextStore;
   readonly #scheduler: WakeScheduler<SchedulingWake>;
@@ -129,53 +129,55 @@ export class SchedulingCoordinator {
       this.timezone,
       createdAt,
     );
-    let definition!: CronDefinition;
+    const matches = (definition: CronDefinition) =>
+      definition.expression === expression &&
+      definition.prompt === input.prompt &&
+      definition.recurring === recurring &&
+      definition.timezone === this.timezone;
 
-    await this.#update(conversation, (state) => {
-      let id: string | undefined;
-      for (let attempt = 0; attempt < 100; attempt++) {
-        const candidate = uuidv5(
-          attempt === 0 ? operationId : `${operationId}:${attempt}`,
-          conversationNamespace(conversation),
-        )
-          .replaceAll('-', '')
-          .slice(0, 8);
-        const existing = state.cron[candidate];
-        if (!existing) {
-          id = candidate;
-          break;
+    const id = uuidv5(operationId, conversationNamespace(conversation));
+    const state = await this.#read(conversation);
+    const existing = state.cron[id];
+    if (existing) {
+      if (matches(existing)) return existing;
+      throw new Error(`CronCreate operation "${operationId}" was reused`);
+    }
+    if (Object.keys(state.cron).length >= MAX_CRON_JOBS) {
+      throw new Error(
+        `CronCreate supports at most ${MAX_CRON_JOBS} active jobs per conversation`,
+      );
+    }
+    const definition: CronDefinition = {
+      id,
+      expression,
+      prompt: input.prompt,
+      recurring,
+      timezone: this.timezone,
+      createdAt,
+      expiresAt: recurring ? createdAt + CRON_LIFETIME_MS : nextRunAt,
+      nextRunAt,
+      generation: 1,
+    };
+    await this.#armCron(conversation, definition);
+
+    let committed = definition;
+    await this.#update(conversation, (current) => {
+      const currentDefinition = current.cron[id];
+      if (currentDefinition) {
+        if (!matches(currentDefinition)) {
+          throw new Error(`CronCreate operation "${operationId}" was reused`);
         }
-        if (
-          existing.expression === expression &&
-          existing.prompt === input.prompt &&
-          existing.recurring === recurring &&
-          existing.timezone === this.timezone
-        ) {
-          definition = existing;
-          return state;
-        }
+        committed = currentDefinition;
+        return current;
       }
-      if (!id) throw new Error('CronCreate could not allocate a unique job id');
-      if (Object.keys(state.cron).length >= MAX_CRON_JOBS) {
+      if (Object.keys(current.cron).length >= MAX_CRON_JOBS) {
         throw new Error(
           `CronCreate supports at most ${MAX_CRON_JOBS} active jobs per conversation`,
         );
       }
-      definition = {
-        id,
-        expression,
-        prompt: input.prompt,
-        recurring,
-        timezone: this.timezone,
-        createdAt,
-        expiresAt: recurring ? createdAt + CRON_LIFETIME_MS : nextRunAt,
-        nextRunAt,
-        generation: 1,
-      };
-      return { ...state, cron: { ...state.cron, [id]: definition } };
+      return { ...current, cron: { ...current.cron, [id]: definition } };
     });
-    await this.#armCron(conversation, definition);
-    return definition;
+    return committed;
   }
 
   async cronJobs(conversation: ConversationId): Promise<CronDefinition[]> {
@@ -222,11 +224,11 @@ export class SchedulingCoordinator {
       nextRunAt,
       generation,
     };
+    await this.#scheduler.schedule(this.#dynamicWake(conversation, dynamic));
     await this.#update(conversation, (state) => {
       previous = state.dynamic;
       return { ...state, dynamic };
     });
-    await this.#scheduler.schedule(this.#dynamicWake(conversation, dynamic));
     if (previous) {
       try {
         await this.#scheduler.cancel(
@@ -261,75 +263,33 @@ export class SchedulingCoordinator {
   }
 
   async work(): Promise<AsyncDisposable> {
-    const consumer = await this.#scheduler.consume(async (wake) => {
-      try {
-        await this.#handle(wake);
-      } catch (error) {
-        await this.reconcile();
-        throw error;
-      }
-    });
-    try {
-      await this.reconcile();
-      return consumer;
-    } catch (error) {
-      await consumer[Symbol.asyncDispose]();
-      throw error;
-    }
-  }
-
-  async reconcile(): Promise<void> {
-    const chats = await this.#store.listChats();
-    for (const chat of chats) {
-      if (!SchedulingCoordinator.#hasScheduling(chat.metadata)) continue;
-      const conversation = { chatId: chat.id, userId: chat.userId };
-      if (!(await this.#controlPlane.owns(conversation))) continue;
-      const state = this.#parse(chat.metadata);
-      for (const definition of Object.values(state.cron)) {
-        if (definition.nextRunAt > definition.expiresAt) {
-          await this.#expireCron(conversation, definition);
-        } else {
-          await this.#armCron(conversation, definition);
-        }
-      }
-      if (state.dynamic) {
-        await this.#scheduler.schedule(
-          this.#dynamicWake(conversation, state.dynamic),
-        );
-      }
-    }
+    return this.#scheduler.consume((wake) => this.#handle(wake));
   }
 
   async materializeDueIfEligible(conversation: ConversationId): Promise<void> {
-    try {
-      if (!(await this.#canMaterialize(conversation))) return;
-      const state = await this.#read(conversation);
-      const now = Date.now();
-      const due = [
-        ...Object.values(state.cron).map((definition) => ({
-          runAt: definition.nextRunAt,
-          wake: this.#cronWake(conversation, definition),
-        })),
-        ...(state.dynamic
-          ? [
-              {
-                runAt: state.dynamic.nextRunAt,
-                wake: this.#dynamicWake(conversation, state.dynamic),
-              },
-            ]
-          : []),
-      ]
-        .filter(({ runAt }) => runAt <= now)
-        .toSorted(
-          (left, right) =>
-            left.runAt - right.runAt ||
-            left.wake.id.localeCompare(right.wake.id),
-        )[0];
-      if (due) await this.#handle(due.wake);
-    } catch (error) {
-      await this.reconcile();
-      throw error;
-    }
+    if (!(await this.#canMaterialize(conversation))) return;
+    const state = await this.#read(conversation);
+    const now = Date.now();
+    const due = [
+      ...Object.values(state.cron).map((definition) => ({
+        runAt: definition.nextRunAt,
+        wake: this.#cronWake(conversation, definition),
+      })),
+      ...(state.dynamic
+        ? [
+            {
+              runAt: state.dynamic.nextRunAt,
+              wake: this.#dynamicWake(conversation, state.dynamic),
+            },
+          ]
+        : []),
+    ]
+      .filter(({ runAt }) => runAt <= now)
+      .toSorted(
+        (left, right) =>
+          left.runAt - right.runAt || left.wake.id.localeCompare(right.wake.id),
+      )[0];
+    if (due) await this.#handle(due.wake);
   }
 
   async #handle(rawWake: Wake<SchedulingWake>): Promise<void> {
@@ -342,14 +302,42 @@ export class SchedulingCoordinator {
         `Scheduling wake id "${rawWake.id}" does not match its payload`,
       );
     }
-    if (!(await this.#controlPlane.owns(wake.conversation))) return;
     const state = await this.#read(wake.conversation);
-    const prompt =
-      wake.kind === 'cron'
-        ? this.#matchingCron(state, wake)?.prompt
-        : this.#matchingDynamic(state, wake)?.prompt;
+    const definition = this.#matchingCron(state, wake);
+    const dynamic = this.#matchingDynamic(state, wake);
+    const prompt = definition?.prompt ?? dynamic?.prompt;
     if (prompt === undefined) return;
+    if (definition && definition.nextRunAt > definition.expiresAt) {
+      await this.#update(wake.conversation, (current) => {
+        const expired = this.#matchingCron(current, wake);
+        if (!expired) return current;
+        const cron = { ...current.cron };
+        delete cron[expired.id];
+        return { ...current, cron };
+      });
+      return;
+    }
     if (!(await this.#canMaterialize(wake.conversation))) return;
+
+    const successor =
+      definition?.recurring === true
+        ? {
+            ...definition,
+            nextRunAt: this.#nextOccurrence(
+              definition.expression,
+              definition.timezone,
+              Math.max(Date.now(), definition.nextRunAt),
+            ),
+            generation: definition.generation + 1,
+          }
+        : undefined;
+    const activeSuccessor =
+      successor && successor.nextRunAt <= successor.expiresAt
+        ? successor
+        : undefined;
+    if (activeSuccessor) {
+      await this.#armCron(wake.conversation, activeSuccessor);
+    }
 
     const occurrenceId = this.#occurrenceId(wake);
     const schedule: ScheduledTurnMetadata = {
@@ -367,7 +355,6 @@ export class SchedulingCoordinator {
       schedule,
     });
 
-    let successor: CronDefinition | undefined;
     await this.#update(wake.conversation, (current) => {
       if (wake.kind === 'dynamic') {
         if (!this.#matchingDynamic(current, wake)) return current;
@@ -378,28 +365,13 @@ export class SchedulingCoordinator {
       const definition = this.#matchingCron(current, wake);
       if (!definition) return current;
       const cron = { ...current.cron };
-      if (!definition.recurring) {
+      if (!activeSuccessor) {
         delete cron[definition.id];
         return { ...current, cron };
       }
-      const nextRunAt = this.#nextOccurrence(
-        definition.expression,
-        definition.timezone,
-        Math.max(Date.now(), definition.nextRunAt),
-      );
-      if (nextRunAt > definition.expiresAt) {
-        delete cron[definition.id];
-        return { ...current, cron };
-      }
-      successor = {
-        ...definition,
-        nextRunAt,
-        generation: definition.generation + 1,
-      };
-      cron[definition.id] = successor;
+      cron[definition.id] = activeSuccessor;
       return { ...current, cron };
     });
-    if (successor) await this.#armCron(wake.conversation, successor);
   }
 
   #matchingCron(
@@ -423,24 +395,6 @@ export class SchedulingCoordinator {
       state.dynamic.nextRunAt === wake.scheduledFor
       ? state.dynamic
       : undefined;
-  }
-
-  async #expireCron(
-    conversation: ConversationId,
-    expired: CronDefinition,
-  ): Promise<void> {
-    await this.#update(conversation, (state) => {
-      const current = state.cron[expired.id];
-      if (
-        current?.generation !== expired.generation ||
-        current.nextRunAt !== expired.nextRunAt
-      ) {
-        return state;
-      }
-      const cron = { ...state.cron };
-      delete cron[expired.id];
-      return { ...state, cron };
-    });
   }
 
   #armCron(
@@ -583,15 +537,6 @@ export class SchedulingCoordinator {
       throw new Error('Invalid metadata.zukhruf state');
     }
     return value as Record<string, unknown>;
-  }
-
-  static #hasScheduling(metadata: Record<string, unknown> | undefined) {
-    return (
-      typeof metadata?.zukhruf === 'object' &&
-      metadata.zukhruf !== null &&
-      !Array.isArray(metadata.zukhruf) &&
-      'scheduling' in metadata.zukhruf
-    );
   }
 
   static #resolveTimezone(timezone: string): string {

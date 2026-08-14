@@ -22,9 +22,15 @@ test('PgBossWakeScheduler delivers opaque data at or after its due time', async 
   boss.on('error', () => {});
   await boss.start();
   const scheduler = new PgBossWakeScheduler<{ value: string }>(boss, {
+    queue: 'wake-scheduler-delivery',
+    pollingIntervalSeconds: 0.5,
+  });
+  const otherTree = new PgBossWakeScheduler<{ value: string }>(boss, {
+    queue: 'wake-scheduler-other-tree',
     pollingIntervalSeconds: 0.5,
   });
   await scheduler.initialize();
+  await otherTree.initialize();
 
   try {
     const runAt = new Date(Date.now() + 500);
@@ -34,8 +40,14 @@ test('PgBossWakeScheduler delivers opaque data at or after its due time', async 
       data: { value: 'opaque' },
     };
     const delivered = Promise.withResolvers<Wake<{ value: string }>>();
+    const otherTreeDeliveries: Wake<{ value: string }>[] = [];
 
     await scheduler.schedule(wake);
+    await using _otherTreeConsumer = await otherTree.consume(
+      async (received) => {
+        otherTreeDeliveries.push(received);
+      },
+    );
     await using _consumer = await scheduler.consume(async (received) => {
       delivered.resolve(received);
     });
@@ -55,6 +67,7 @@ test('PgBossWakeScheduler delivers opaque data at or after its due time', async 
       }),
     ]);
     assert.deepEqual(received, wake);
+    assert.deepEqual(otherTreeDeliveries, []);
     assert.ok(Date.now() >= runAt.getTime());
   } finally {
     await boss.stop({ graceful: false });
@@ -203,6 +216,7 @@ test('PgBossWakeScheduler disposal stops claims and a replacement consumes the w
 });
 
 test('PgBossWakeScheduler keeps a future wake across a pg-boss restart', async (t) => {
+  const queue = 'wake-scheduler-restart';
   const database = new PGlite();
   const firstBoss = new PgBoss({
     db: fromPglite(database),
@@ -213,6 +227,7 @@ test('PgBossWakeScheduler keeps a future wake across a pg-boss restart', async (
   await firstBoss.start();
   const wake = { ...dueWake('restart'), runAt: new Date(Date.now() + 500) };
   const firstScheduler = new PgBossWakeScheduler<{ value: string }>(firstBoss, {
+    queue,
     pollingIntervalSeconds: 0.5,
   });
   await firstScheduler.initialize();
@@ -229,7 +244,7 @@ test('PgBossWakeScheduler keeps a future wake across a pg-boss restart', async (
     await secondBoss.start();
     const secondScheduler = new PgBossWakeScheduler<{ value: string }>(
       secondBoss,
-      { pollingIntervalSeconds: 0.5 },
+      { queue, pollingIntervalSeconds: 0.5 },
     );
     await secondScheduler.initialize();
     const seen: Wake<{ value: string }>[] = [];
@@ -363,6 +378,7 @@ test(
   { skip: dockerAvailable ? false : 'Docker is unavailable' },
   async (t) => {
     await withPostgresContainer(async (container) => {
+      const queue = 'wake-scheduler-worker-death';
       const bossOptions = {
         connectionString: container.connectionString,
         schedule: false as const,
@@ -376,6 +392,7 @@ test(
       const firstScheduler = new PgBossWakeScheduler<{ value: string }>(
         firstBoss,
         {
+          queue,
           pollingIntervalSeconds: 0.5,
           heartbeatSeconds: 10,
           expireInSeconds: 60,
@@ -398,6 +415,7 @@ test(
         const secondScheduler = new PgBossWakeScheduler<{ value: string }>(
           secondBoss,
           {
+            queue,
             pollingIntervalSeconds: 0.5,
             heartbeatSeconds: 10,
             expireInSeconds: 60,

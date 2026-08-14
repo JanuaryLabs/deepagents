@@ -18,7 +18,7 @@ const cronCreateInput = z
   .strict();
 const cronOutput = z
   .object({
-    id: z.string().length(8),
+    id: z.uuid(),
     humanSchedule: z.string(),
     recurring: z.boolean(),
   })
@@ -28,7 +28,7 @@ const cronListOutput = z
     jobs: z.array(
       z
         .object({
-          id: z.string().length(8),
+          id: z.uuid(),
           cron: z.string(),
           humanSchedule: z.string(),
           prompt: z.string(),
@@ -38,8 +38,8 @@ const cronListOutput = z
     ),
   })
   .strict();
-const cronDeleteInput = z.object({ id: z.string().length(8) }).strict();
-const cronDeleteOutput = z.object({ id: z.string().length(8) }).strict();
+const cronDeleteInput = z.object({ id: z.uuid() }).strict();
+const cronDeleteOutput = z.object({ id: z.uuid() }).strict();
 const scheduleWakeupInput = z.union([
   z.object({ stop: z.literal(true) }).strict(),
   z

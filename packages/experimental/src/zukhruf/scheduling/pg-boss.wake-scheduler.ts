@@ -4,7 +4,8 @@ import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { type Wake, WakeScheduler } from './wake-scheduler.ts';
 
 export interface PgBossWakeSchedulerOptions {
-  queue?: string;
+  /** Stable queue shared only by replicas of one agent tree. */
+  queue: string;
   pollingIntervalSeconds?: number;
   expireInSeconds?: number;
   heartbeatSeconds?: number;
@@ -18,10 +19,10 @@ export class PgBossWakeScheduler<T extends object> extends WakeScheduler<T> {
   readonly #expireInSeconds: number;
   readonly #heartbeatSeconds: number;
 
-  constructor(boss: PgBoss, options: PgBossWakeSchedulerOptions = {}) {
+  constructor(boss: PgBoss, options: PgBossWakeSchedulerOptions) {
     super();
     this.#boss = boss;
-    this.#queue = options.queue ?? 'zukhruf-wakes';
+    this.#queue = options.queue;
     this.#pollingIntervalSeconds = options.pollingIntervalSeconds ?? 1;
     this.#expireInSeconds = options.expireInSeconds ?? 3_600;
     this.#heartbeatSeconds = options.heartbeatSeconds ?? 30;

@@ -594,8 +594,8 @@ ScheduleWakeup ─────────────────────�
   after a requested time. It knows no prompts, conversations, cron expressions, recurrence, or
   model tools.
 - **`SchedulingCoordinator`** is the Zukhruf application layer. It owns conversation-scoped
-  definitions, cron calculation, dynamic-wake replacement, expiry, reconciliation, and conversion
-  of a fired occurrence into a normal Zukhruf ask.
+  definitions, cron calculation, dynamic-wake replacement, expiry, and conversion of a fired
+  occurrence into a normal Zukhruf ask.
 - **Scheduling tools** are the model-facing surface. They bind implicitly to the calling agent's
   current conversation and are injected only when `AgentRuntime` is configured with scheduling.
   The raw `WakeScheduler` is never exposed to the model.
@@ -625,11 +625,14 @@ state before acting. The Node/Postgres adapter is `PgBossWakeScheduler` over pg-
 it uses a dedicated queue and the public pg-boss API, not `node-cron`, custom SQL, or pg-boss's cron
 timekeeper. A Durable Object adapter can absorb the same one-shot contract with alarms later.
 
-The Node host initializes the adapter explicitly and passes it into the runtime; both the pg-boss
-instance and the configured timezone remain host-owned choices:
+The Node host initializes the adapter explicitly and passes it into the runtime; the pg-boss
+instance, stable agent-tree queue name, and configured timezone remain host-owned choices. Replicas
+of one agent tree share a queue; different trees use different queues:
 
 ```ts
-const wakes = new PgBossWakeScheduler<SchedulingWake>(boss);
+const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
+  queue: 'zukhruf-wakes-research-agent',
+});
 await wakes.initialize();
 const runtime = new AgentRuntime(root, {
   store,
@@ -665,8 +668,8 @@ ScheduleWakeup({delaySeconds, reason, prompt} | {stop: true})
   `true`; `false` fires once and deletes the definition. A conversation may own at most 50 cron
   definitions. Recurring definitions expire after seven days, after their final due occurrence.
 - `CronList` and `CronDelete` can see or mutate only the calling conversation's definitions. Public
-  cron IDs are eight characters; internal wake and turn IDs are deterministic UUIDs derived from
-  the conversation, public ID, definition generation, and intended fire time.
+  cron IDs are deterministic UUIDs derived from the conversation and create operation; internal
+  wake and turn IDs additionally derive from the definition generation and intended fire time.
 - `ScheduleWakeup` requires `delaySeconds`, `reason`, and `prompt` unless `stop` is `true`. The delay
   is rounded to a whole second and clamped to 60–3600 seconds. Each call replaces the current
   conversation's previous dynamic wake. `stop: true` removes only that dynamic wake; fixed cron
@@ -687,15 +690,15 @@ no hidden jitter. It fires at the calculated minute subject to worker polling de
 `ContextStore` chat metadata is the source of truth, under `metadata.zukhruf.scheduling`. It stores
 cron definitions and at most one dynamic wake for that conversation. The existing atomic
 `ContextStore.updateChat` operation serializes concurrent create/delete/replace/claim transitions
-across processes. Wake jobs are reconstructable delivery receipts, never the permanent definition
-store.
+across processes. Wake jobs are durable delivery receipts, never the permanent definition store.
 
-Creation persists the definition before arming its deterministic wake. Deletion removes or
-supersedes metadata before best-effort wake cancellation. `AgentRuntime.work()` starts the turn and
-wake consumers as one combined lifecycle, reconciles active metadata to missing wake receipts at
-startup, and re-runs reconciliation after wake failures. A stale, cancelled, duplicated, or racing
-wake reloads metadata and becomes a no-op when its definition generation or intended time no longer
-matches.
+Creation and dynamic replacement insert their deterministic wake before publishing its definition
+as active metadata. A recurring handler inserts its successor before enqueueing the occurrence and
+advancing metadata. Therefore a failed insert leaves the previous authoritative state retryable;
+an inserted-but-unpublished wake reloads metadata and no-ops. Deletion removes or supersedes
+metadata before best-effort wake cancellation. `AgentRuntime.work()` starts the turn and wake
+consumers as one combined lifecycle without scanning conversations. A stale, cancelled, duplicated,
+or racing wake becomes a no-op when its definition generation or intended time no longer matches.
 
 A due occurrence remains scheduling metadata while its conversation is running, queued, or paused
 for approval. After the final waiting turn settles, the coordinator materializes exactly one
@@ -705,10 +708,10 @@ telemetry policy; origin is not accepted from the public HTTP session input. The
 the only execution serializer: scheduled asks never enter an active model turn, already-waiting
 ordinary work runs first, and ordinary work arriving after materialization cannot overtake it.
 
-Wake delivery, settlement reconciliation, coordinator retries, and duplicate TurnQueue receipts are
-at-least-once. The deterministic occurrence turn id plus the StreamStore terminal check makes model execution
-idempotent. A busy window or downtime produces at most one catch-up occurrence, then advances to the
-next future match; it never expands every missed tick into a prompt backlog. Deleting a
+Wake delivery, settlement catch-up, coordinator retries, and duplicate TurnQueue receipts are
+at-least-once. The deterministic occurrence turn id plus the StreamStore terminal check makes model
+execution idempotent. A busy window or downtime produces at most one catch-up occurrence, then
+advances to the next future match; it never expands every missed tick into a prompt backlog. Deleting a
 definition or stopping a dynamic wake prevents future occurrences but does not cancel a scheduled
 ask already enqueued or running. Normal turn cancellation remains a separate operation.
 
@@ -796,7 +799,7 @@ work({concurrency?}) → AsyncDisposable }`.
   conversation metadata coordinator, and runtime-owned `CronCreate`, `CronList`, `CronDelete`, and
   `ScheduleWakeup` tools. The adapter uses a borrowed pg-boss instance and one-shot `sendAfter()`;
   the coordinator owns recurrence, replacement, expiry, catch-up, deterministic occurrence IDs,
-  deferred turn conversion, and startup/failure/settlement reconciliation.
+  deferred turn conversion, and settlement catch-up.
 - `control-plane/agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted
   addressing, durable thread identity, and ContextStore-backed tree discovery.
   `agent-status-projector.ts`
@@ -834,7 +837,7 @@ work({concurrency?}) → AsyncDisposable }`.
   queued and cross-runtime active interruption, target reuse, and idempotent
   success/failure/cancellation forwarding. Scheduling coverage exercises the public runtime and
   adapter boundaries over PGlite, SQLite metadata restarts, and Docker-gated PostgreSQL, including
-  duplicate delivery, worker death, both dual-write gaps, conversation isolation, busy-window
+  duplicate delivery, worker death, receipt-first transitions, conversation isolation, busy-window
   coalescing and FIFO ordering, cancellation, expiry, catch-up, and spent-receipt cleanup.
 - Backends switch by composition in the demo sandbox declarations
   (`defineSandbox(({chatId}) => createDockerSandbox({name: chatId}))` ↔ Daytona etc.);
