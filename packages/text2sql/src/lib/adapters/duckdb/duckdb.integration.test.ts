@@ -164,6 +164,13 @@ it('enforces DuckDB read-only and grounded-scope policy before execution', async
     for (const sql of [
       'DROP TABLE users',
       'SELECT 1; DROP TABLE users',
+      "COPY users TO '/nonexistent/blocked/users.csv'",
+      "ATTACH ':memory:' AS blocked",
+      'DETACH other',
+      'INSTALL httpfs',
+      'LOAD httpfs',
+      "CREATE SECRET blocked (TYPE S3, KEY_ID 'x', SECRET 'y')",
+      'SET threads = 1',
       "SELECT * FROM read_csv_auto('/tmp/secret.csv')",
       'SELECT * FROM duckdb_secrets()',
       "SELECT nextval('ids')",
@@ -300,6 +307,50 @@ it('joins explicitly grounded relations across attached DuckDB catalogs', async 
     await assert.rejects(
       text2sql.run('analytics', 'SELECT * FROM warehouse.main.secrets'),
       Text2SqlValidationError,
+    );
+  } finally {
+    connection.closeSync();
+    instance.closeSync();
+  }
+});
+
+it('introspects indexes on quoted DuckDB identifiers', async () => {
+  const instance = await DuckDBInstance.create(':memory:');
+  const connection = await instance.connect();
+
+  try {
+    await connection.run(`
+      CREATE TABLE "orders.archive" (
+        "customer.id" INTEGER,
+        email VARCHAR
+      );
+      CREATE INDEX customer_id_idx
+        ON "orders.archive"("customer.id");
+      CREATE INDEX lower_email_idx
+        ON "orders.archive"(lower(email));
+    `);
+
+    const execute = async (sql: string) =>
+      (await connection.runAndReadAll(sql)).getRowObjectsJson();
+    const fragments = await new DuckDB({
+      execute,
+      grounding: [tables(), indexes()],
+    }).introspect();
+    const table = fragments.find(
+      (fragment) =>
+        fragment.name === 'table' &&
+        (fragment.data as Record<string, unknown>).name ===
+          '"memory"."main"."orders.archive"',
+    );
+
+    assert.deepEqual(
+      (table?.data as Record<string, unknown> | undefined)?.indexes,
+      [
+        {
+          name: 'index',
+          data: { name: 'customer_id_idx', columns: ['customer.id'] },
+        },
+      ],
     );
   } finally {
     connection.closeSync();

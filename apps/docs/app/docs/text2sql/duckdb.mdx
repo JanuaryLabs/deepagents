@@ -103,6 +103,10 @@ options.
 Expression indexes remain valid in DuckDB but are omitted from grounding when
 their catalog expression cannot be represented as a simple column list.
 
+`columnStats()` remains exact and scans each supported column. The consumer's
+`execute` callback must enforce its query deadline and interrupt the underlying
+DuckDB connection when that deadline expires.
+
 ## Native SQL Policy
 
 DuckDB SQL is not passed through the shared SQL parser. Before validation or

@@ -376,27 +376,52 @@ export class DuckDBIndexesGrounding extends IndexesGrounding {
     tableName: string,
   ): Promise<TableIndex[]> {
     const relation = await this.#adapter.resolveRelationName(tableName);
-    const rows = await this.#adapter.runQuery<{
-      index_name: unknown;
-      expressions: unknown;
-      is_unique: unknown;
-      is_primary: unknown;
-    }>(`
-      SELECT index_name, expressions, is_unique, is_primary
-      FROM duckdb_indexes()
-      WHERE ${relationPredicate(this.#adapter, relation)}
-      ORDER BY index_name
-    `);
+    const [rows, columnRows] = await Promise.all([
+      this.#adapter.runQuery<{
+        index_name: unknown;
+        expressions: unknown;
+        is_unique: unknown;
+        is_primary: unknown;
+      }>(`
+        SELECT
+          index_name,
+          TRY_CAST(expressions AS VARCHAR[]) AS expressions,
+          is_unique,
+          is_primary
+        FROM duckdb_indexes()
+        WHERE ${relationPredicate(this.#adapter, relation)}
+        ORDER BY index_name
+      `),
+      this.#adapter.runQuery<{ column_name: unknown }>(`
+        SELECT column_name
+        FROM duckdb_columns()
+        WHERE ${relationPredicate(this.#adapter, relation)}
+        ORDER BY column_index
+      `),
+    ]);
+    const tableColumns = columnRows.map((row) =>
+      requiredString(row.column_name, 'column_name'),
+    );
 
     return rows.flatMap((row): TableIndex[] => {
-      if (
-        typeof row.index_name !== 'string' ||
-        typeof row.expressions !== 'string'
-      ) {
+      if (typeof row.index_name !== 'string') {
         throw new Error('DuckDB index catalog returned an unknown row shape.');
       }
-      const columns = parseSimpleIndexColumns(row.expressions);
-      return columns
+      if (
+        !Array.isArray(row.expressions) ||
+        row.expressions.some((expression) => typeof expression !== 'string')
+      ) {
+        return [];
+      }
+      const columns = row.expressions.map((expression) =>
+        tableColumns.find(
+          (column) =>
+            expression === column ||
+            expression === this.#adapter.quoteIdentifier(column),
+        ),
+      );
+      return columns.length > 0 &&
+        columns.every((column): column is string => column !== undefined)
         ? [
             {
               name: row.index_name,
@@ -617,27 +642,6 @@ function constraintFromRow(
         ? stringArray(row.referenced_column_names, 'referenced_column_names')
         : undefined,
   };
-}
-
-function parseSimpleIndexColumns(value: string): string[] | undefined {
-  if (!value.startsWith('[') || !value.endsWith(']')) return undefined;
-  const expressions = value
-    .slice(1, -1)
-    .split(',')
-    .map((item) => item.trim());
-  if (expressions.length === 0) return undefined;
-  const columns: string[] = [];
-  for (const expression of expressions) {
-    const quoted = /^"((?:""|[^"])*)"$/.exec(expression)?.[1];
-    if (quoted !== undefined) {
-      columns.push(quoted.replaceAll('""', '"'));
-    } else if (/^[A-Za-z_][A-Za-z0-9_$]*$/.test(expression)) {
-      columns.push(expression);
-    } else {
-      return undefined;
-    }
-  }
-  return columns;
 }
 
 function parseEnumLabels(type: string): string[] | undefined {
