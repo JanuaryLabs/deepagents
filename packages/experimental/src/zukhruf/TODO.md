@@ -158,7 +158,7 @@
 
 ## 5. Remaining independent work
 
-- [x] Timed scheduling primitives: `WakeScheduler`, `PgBossWakeScheduler`, `SchedulingCoordinator`,
+- [x] Timed scheduling primitives: `WakeScheduler`, `PgBossWakeScheduler`, `ConversationScheduler`,
       runtime-injected `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`, durable scheduled-origin
       turns, receipt-first metadata transitions, and public-runtime integration coverage shipped in
       `SCHEDULING_PLAN.md`.

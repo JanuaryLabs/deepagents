@@ -20,6 +20,8 @@ const cronOutput = z
   .object({
     id: z.uuid(),
     humanSchedule: z.string(),
+    nextRunAt: z.number(),
+    timezone: z.string(),
     recurring: z.boolean(),
   })
   .strict();
@@ -31,6 +33,8 @@ const cronListOutput = z
           id: z.uuid(),
           cron: z.string(),
           humanSchedule: z.string(),
+          nextRunAt: z.number(),
+          timezone: z.string(),
           prompt: z.string(),
           recurring: z.boolean().optional(),
         })
@@ -44,7 +48,7 @@ const scheduleWakeupInput = z.union([
   z.object({ stop: z.literal(true) }).strict(),
   z
     .object({
-      delaySeconds: z.number().finite(),
+      delaySeconds: z.number().finite().min(60).max(3_600),
       reason: nonBlank,
       prompt: nonBlank,
     })
@@ -78,7 +82,7 @@ export const schedulingTools = {
     outputSchema: cronOutput,
     metadata: schedulingToolMetadata,
     execute: async (input, { context, toolCallId }) => {
-      const definition = await context.schedulingCoordinator.createCron(
+      const definition = await context.conversationScheduler.createCron(
         context.actor.thread.conversation,
         input,
         toolCallId,
@@ -88,6 +92,8 @@ export const schedulingTools = {
         humanSchedule: cronstrue.toString(definition.expression, {
           throwExceptionOnParseError: true,
         }),
+        nextRunAt: definition.nextRunAt,
+        timezone: definition.timezone,
         recurring: definition.recurring,
       };
     },
@@ -104,7 +110,7 @@ export const schedulingTools = {
     execute: async (_input, { context }) => {
       return {
         jobs: (
-          await context.schedulingCoordinator.cronJobs(
+          await context.conversationScheduler.cronJobs(
             context.actor.thread.conversation,
           )
         ).map((definition) => ({
@@ -113,6 +119,8 @@ export const schedulingTools = {
           humanSchedule: cronstrue.toString(definition.expression, {
             throwExceptionOnParseError: true,
           }),
+          nextRunAt: definition.nextRunAt,
+          timezone: definition.timezone,
           prompt: definition.prompt,
           ...(!definition.recurring ? { recurring: false } : {}),
         })),
@@ -129,7 +137,7 @@ export const schedulingTools = {
     outputSchema: cronDeleteOutput,
     metadata: schedulingToolMetadata,
     execute: async ({ id }, { context }) => {
-      await context.schedulingCoordinator.deleteCron(
+      await context.conversationScheduler.deleteCron(
         context.actor.thread.conversation,
         id,
       );
@@ -155,10 +163,10 @@ export const schedulingTools = {
           wasClamped: false,
           stopped: true,
           cancelledWakeups:
-            await context.schedulingCoordinator.stopDynamic(conversation),
+            await context.conversationScheduler.stopDynamic(conversation),
         };
       }
-      return context.schedulingCoordinator.scheduleDynamic(conversation, input);
+      return context.conversationScheduler.scheduleDynamic(conversation, input);
     },
   }),
 } satisfies ToolSet;

@@ -53,6 +53,7 @@ const usage = {
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
+  pushFailuresRemaining = 0;
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
   #nextActivityRead?: {
     started: PromiseWithResolvers<void>;
@@ -74,6 +75,10 @@ class ControlledTurnQueue extends TurnQueue {
   }
 
   override async push(turn: TurnRef) {
+    if (this.pushFailuresRemaining > 0) {
+      this.pushFailuresRemaining--;
+      throw new Error('simulated turn enqueue outage');
+    }
     this.turns.push(turn);
     return { jobId: turn.streamId, inserted: true };
   }
@@ -146,16 +151,38 @@ class ControlledTurnQueue extends TurnQueue {
 class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   readonly wakes = new Map<string, Wake<SchedulingWake>>();
   readonly handlers = new Set<(wake: Wake<SchedulingWake>) => Promise<void>>();
+  #nextSchedule?: {
+    started: PromiseWithResolvers<void>;
+    release: PromiseWithResolvers<void>;
+  };
   scheduleFailuresRemaining = 0;
 
   get handler(): ((wake: Wake<SchedulingWake>) => Promise<void>) | undefined {
     return this.handlers.values().next().value;
   }
 
+  pauseNextSchedule() {
+    const gate = {
+      started: Promise.withResolvers<void>(),
+      release: Promise.withResolvers<void>(),
+    };
+    this.#nextSchedule = gate;
+    return {
+      started: gate.started.promise,
+      release: () => gate.release.resolve(),
+    };
+  }
+
   override async schedule(wake: Wake<SchedulingWake>): Promise<void> {
     if (this.scheduleFailuresRemaining > 0) {
       this.scheduleFailuresRemaining--;
       throw new Error('simulated wake insertion outage');
+    }
+    const gate = this.#nextSchedule;
+    if (gate) {
+      this.#nextSchedule = undefined;
+      gate.started.resolve();
+      await gate.release.promise;
     }
     this.wakes.set(wake.id, wake);
   }
@@ -193,8 +220,8 @@ class RecordingWakeScheduler extends WakeScheduler<SchedulingWake> {
   }
 }
 
-class FailOnceSchedulingAdvanceStore extends InMemoryContextStore {
-  failNextSchedulingAdvance = false;
+class FailOnceDispatchClearStore extends InMemoryContextStore {
+  failNextDispatchClear = false;
 
   override updateChat(
     chatId: string,
@@ -203,24 +230,36 @@ class FailOnceSchedulingAdvanceStore extends InMemoryContextStore {
     return super.updateChat(chatId, (chat) => {
       const result = update(chat);
       if (
-        this.failNextSchedulingAdvance &&
-        dynamicState(chat.metadata) !== undefined &&
-        dynamicState(result?.metadata) === undefined
+        this.failNextDispatchClear &&
+        dispatchingState(chat.metadata) !== undefined &&
+        dispatchingState(result?.metadata) === undefined
       ) {
-        this.failNextSchedulingAdvance = false;
-        throw new Error('simulated scheduling advance outage');
+        this.failNextDispatchClear = false;
+        throw new Error('simulated dispatch cleanup outage');
       }
       return result;
     });
   }
 }
 
+function dispatchingState(
+  metadata: Record<string, unknown> | undefined,
+): unknown {
+  return storedSchedulingState(metadata)?.dispatching;
+}
+
 function dynamicState(metadata: Record<string, unknown> | undefined): unknown {
+  return storedSchedulingState(metadata)?.dynamic;
+}
+
+function storedSchedulingState(
+  metadata: Record<string, unknown> | undefined,
+): { dispatching?: unknown; dynamic?: unknown } | undefined {
   const zukhruf = metadata?.zukhruf;
   if (typeof zukhruf !== 'object' || zukhruf === null) return;
   const scheduling = (zukhruf as { scheduling?: unknown }).scheduling;
   if (typeof scheduling !== 'object' || scheduling === null) return;
-  return (scheduling as { dynamic?: unknown }).dynamic;
+  return scheduling;
 }
 
 function functionToolNames(tools: unknown): string[] {
@@ -451,7 +490,8 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
 
   await runTurn(runtime, h.queue, conversation, 'create cron');
   assert.equal(scheduler.wakes.size, 1);
-  const definitionId = [...scheduler.wakes.values()][0].data.definitionId;
+  const cronWake = [...scheduler.wakes.values()][0];
+  const definitionId = cronWake.data.definitionId;
   assert.match(
     definitionId ?? '',
     /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -467,6 +507,8 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
         id: definitionId,
         cron: '*/15 * * * *',
         humanSchedule: 'Every 15 minutes',
+        nextRunAt: cronWake.runAt.getTime(),
+        timezone: 'Asia/Amman',
         prompt: 'review progress',
       },
     ],
@@ -485,6 +527,55 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     .at(-1)!
     .parts.find(isToolUIPart);
   assert.deepEqual(emptyList?.output, { jobs: [] });
+});
+
+test('CronCreate reports the exact next run and timezone for a one-shot cron', async (t) => {
+  mock.timers.enable({ apis: ['Date'] });
+  mock.timers.setTime(new Date('2026-08-13T12:09:00Z').getTime());
+  t.after(() => mock.timers.reset());
+
+  const scheduler = new RecordingWakeScheduler();
+  const h = harness(t, scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create passed one shot',
+      {
+        name: 'CronCreate',
+        input: {
+          cron: '8 15 13 8 *',
+          prompt: 'run once',
+          recurring: false,
+        },
+      },
+    ],
+  ]);
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'Asia/Amman' },
+    },
+  );
+  const conversation = { chatId: 'passed-one-shot', userId: 'user-1' };
+  await using _worker = await runtime.work();
+
+  await runTurn(runtime, h.queue, conversation, 'create passed one shot');
+
+  const result = (await runtime.observe(conversation).engine.getMessages())
+    .at(-1)!
+    .parts.find(isToolUIPart);
+  assert.deepEqual(result?.output, {
+    id: [...scheduler.wakes.values()][0].data.definitionId,
+    humanSchedule: 'At 03:08 PM, on day 13 of the month, only in August',
+    nextRunAt: new Date('2027-08-13T12:08:00Z').getTime(),
+    timezone: 'Asia/Amman',
+    recurring: false,
+  });
 });
 
 test('parallel model tool calls preserve concurrent cron creates and deletes', async (t) => {
@@ -576,7 +667,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
   assert.equal(scheduler.wakes.size, 0);
 });
 
-test('ScheduleWakeup clamps, fires an ask, and persists scheduled provenance', async (t) => {
+test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) => {
   const scheduler = new RecordingWakeScheduler();
   const h = harness(t, scheduler);
   const commands = new Map<string, { name: string; input: unknown }>([
@@ -585,7 +676,7 @@ test('ScheduleWakeup clamps, fires an ask, and persists scheduled provenance', a
       {
         name: 'ScheduleWakeup',
         input: {
-          delaySeconds: 12.6,
+          delaySeconds: 600,
           reason: 'check after enough time',
           prompt: 'scheduled prompt',
         },
@@ -622,7 +713,7 @@ test('ScheduleWakeup clamps, fires an ask, and persists scheduled provenance', a
       wasClamped: (scheduleTool?.output as { wasClamped?: boolean })
         ?.wasClamped,
     },
-    { clampedDelaySeconds: 60, wasClamped: true },
+    { clampedDelaySeconds: 600, wasClamped: false },
   );
 
   const wake = [...scheduler.wakes.values()][0];
@@ -650,6 +741,46 @@ test('ScheduleWakeup clamps, fires an ask, and persists scheduled provenance', a
       ?.origin,
     'scheduled',
   );
+});
+
+test('ScheduleWakeup rejects delays outside its supported window', async (t) => {
+  const scheduler = new RecordingWakeScheduler();
+  const h = harness(t, scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'schedule immediately',
+      {
+        name: 'ScheduleWakeup',
+        input: {
+          delaySeconds: 0,
+          reason: 'invalid immediate wake',
+          prompt: 'must not be scheduled',
+        },
+      },
+    ],
+  ]);
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
+  const conversation = { chatId: 'invalid-dynamic-delay', userId: 'user-1' };
+  await using _worker = await runtime.work();
+
+  await runTurn(runtime, h.queue, conversation, 'schedule immediately');
+
+  assert.equal(scheduler.wakes.size, 0);
+  const result = (await runtime.observe(conversation).engine.getMessages())
+    .at(-1)!
+    .parts.find(isToolUIPart);
+  assert.equal(result?.state, 'output-error');
 });
 
 test('a busy cron window materializes one catch-up ask after queued user work', async (t) => {
@@ -938,9 +1069,9 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
   assert.ok(!('version' in scheduling));
 });
 
-test('retry after enqueue-before-advance executes one scheduled turn', async (t) => {
+test('retry after enqueue-before-dispatch-clear executes one scheduled turn', async (t) => {
   const scheduler = new RecordingWakeScheduler();
-  const store = new FailOnceSchedulingAdvanceStore();
+  const store = new FailOnceDispatchClearStore();
   const h = harness(t, scheduler, store);
   const commands = new Map<string, { name: string; input: unknown }>([
     [
@@ -973,8 +1104,8 @@ test('retry after enqueue-before-advance executes one scheduled turn', async (t)
   await runTurn(runtime, h.queue, conversation, 'schedule crash window');
   const wake = [...scheduler.wakes.values()][0];
 
-  store.failNextSchedulingAdvance = true;
-  await assert.rejects(scheduler.fire(wake.id), /scheduling advance outage/);
+  store.failNextDispatchClear = true;
+  await assert.rejects(scheduler.fire(wake.id), /dispatch cleanup outage/);
   assert.equal(h.queue.turns.length, 1);
   await scheduler.fire(wake.id);
   assert.equal(
@@ -983,6 +1114,12 @@ test('retry after enqueue-before-advance executes one scheduled turn', async (t)
     'the queued occurrence makes the retry ineligible to materialize again',
   );
 
+  await h.queue.runNext();
+  assert.equal(
+    h.queue.turns.length,
+    1,
+    'settlement retries the durable dispatch with the same turn identity',
+  );
   await h.queue.runNext();
   assert.equal(
     seenUserText.filter((text) => text === 'deduplicated scheduled prompt')
@@ -1000,6 +1137,53 @@ test('retry after enqueue-before-advance executes one scheduled turn', async (t)
             part.text === 'deduplicated scheduled prompt',
         ),
     ).length,
+    1,
+  );
+});
+
+test('retry after claim-before-enqueue executes one scheduled turn', async (t) => {
+  const scheduler = new RecordingWakeScheduler();
+  const h = harness(t, scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'schedule claim crash window',
+      {
+        name: 'ScheduleWakeup',
+        input: {
+          delaySeconds: 60,
+          reason: 'exercise durable claim',
+          prompt: 'claimed scheduled prompt',
+        },
+      },
+    ],
+  ]);
+  const seenUserText: string[] = [];
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, seenUserText),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
+  const conversation = { chatId: 'claim-enqueue-gap', userId: 'user-1' };
+  await using _worker = await runtime.work();
+  await runTurn(runtime, h.queue, conversation, 'schedule claim crash window');
+  const wake = [...scheduler.wakes.values()][0];
+
+  h.queue.pushFailuresRemaining = 1;
+  await assert.rejects(scheduler.fire(wake.id), /turn enqueue outage/);
+  assert.equal(h.queue.turns.length, 0);
+
+  await scheduler.fire(wake.id);
+  assert.equal(h.queue.turns.length, 1);
+  await h.queue.runNext();
+  assert.equal(
+    seenUserText.filter((text) => text === 'claimed scheduled prompt').length,
     1,
   );
 });
@@ -1049,6 +1233,57 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
     h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
     [],
   );
+});
+
+test('deleting a claimed cron during successor insertion prevents its scheduled ask', async () => {
+  const scheduler = new RecordingWakeScheduler();
+  using h = disposableHarness(scheduler);
+  const commands = new Map<string, { name: string; input: unknown }>([
+    [
+      'create successor race',
+      {
+        name: 'CronCreate',
+        input: { cron: '* * * * *', prompt: 'cancelled successor prompt' },
+      },
+    ],
+  ]);
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(commands, []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      scheduling: { scheduler, timezone: 'UTC' },
+    },
+  );
+  const conversation = { chatId: 'successor-delete-race', userId: 'user-1' };
+  await using _worker = await runtime.work();
+  await runTurn(runtime, h.queue, conversation, 'create successor race');
+  const wake = [...scheduler.wakes.values()][0];
+  assert.ok(wake.data.definitionId);
+  commands.set('delete successor race', {
+    name: 'CronDelete',
+    input: { id: wake.data.definitionId },
+  });
+
+  const gate = scheduler.pauseNextSchedule();
+  const delivery = scheduler.fire(wake.id);
+  await gate.started;
+  await runTurn(runtime, h.queue, conversation, 'delete successor race');
+  gate.release();
+  await delivery;
+
+  assert.deepEqual(
+    h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    [],
+  );
+  const staleSuccessor = [...scheduler.wakes.values()][0];
+  assert.ok(staleSuccessor);
+  await scheduler.fire(staleSuccessor.id);
+  assert.equal(h.queue.turns.length, 0);
 });
 
 test('failed successor insertion leaves the current cron retryable', async (t) => {
@@ -1174,7 +1409,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
       {
         name: 'ScheduleWakeup',
         input: {
-          delaySeconds: 3_601,
+          delaySeconds: 3_600,
           reason: 'replacement',
           prompt: 'replacement prompt',
         },

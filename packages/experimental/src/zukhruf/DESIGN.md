@@ -583,7 +583,7 @@ becoming a second turn queue or a prompt store:
 
 ```text
 CronCreate / CronList / CronDelete ─┐
-                                    ├─ SchedulingCoordinator ─→ WakeScheduler
+                                    ├─ ConversationScheduler ─→ WakeScheduler
 ScheduleWakeup ─────────────────────┘                              │
                                                                   └─ timed wake
                                                                      → scheduled ask
@@ -593,7 +593,7 @@ ScheduleWakeup ─────────────────────�
 - **`WakeScheduler`** is host infrastructure. It durably delivers an opaque one-shot wake at or
   after a requested time. It knows no prompts, conversations, cron expressions, recurrence, or
   model tools.
-- **`SchedulingCoordinator`** is the Zukhruf application layer. It owns conversation-scoped
+- **`ConversationScheduler`** is the Zukhruf application layer. It owns conversation-scoped
   definitions, cron calculation, dynamic-wake replacement, expiry, and conversion of a fired
   occurrence into a normal Zukhruf ask.
 - **Scheduling tools** are the model-facing surface. They bind implicitly to the calling agent's
@@ -651,10 +651,10 @@ Claude's host-specific `durable` flag: every definition is durable and conversat
 
 ```text
 CronCreate({cron, prompt, recurring?})
-  → {id, humanSchedule, recurring}
+  → {id, humanSchedule, nextRunAt, timezone, recurring}
 
 CronList({})
-  → {jobs: [{id, cron, humanSchedule, prompt, recurring?}]}
+  → {jobs: [{id, cron, humanSchedule, nextRunAt, timezone, prompt, recurring?}]}
 
 CronDelete({id})
   → {id}
@@ -664,17 +664,18 @@ ScheduleWakeup({delaySeconds, reason, prompt} | {stop: true})
 ```
 
 - `CronCreate` accepts a standard five-field cron expression in the host-configured IANA timezone.
-  It waits for the next match; immediate execution is not part of this tool. `recurring` defaults to
-  `true`; `false` fires once and deletes the definition. A conversation may own at most 50 cron
-  definitions. Recurring definitions expire after seven days, after their final due occurrence.
+  It returns the exact next occurrence and timezone; immediate execution is not part of this tool.
+  `recurring` defaults to `true`; `false` fires once and deletes the definition. A conversation may
+  own at most 50 cron definitions. Recurring definitions expire after seven days, after their final
+  due occurrence.
 - `CronList` and `CronDelete` can see or mutate only the calling conversation's definitions. Public
   cron IDs are deterministic UUIDs derived from the conversation and create operation; internal
   wake and turn IDs additionally derive from the definition generation and intended fire time.
 - `ScheduleWakeup` requires `delaySeconds`, `reason`, and `prompt` unless `stop` is `true`. The delay
-  is rounded to a whole second and clamped to 60–3600 seconds. Each call replaces the current
-  conversation's previous dynamic wake. `stop: true` removes only that dynamic wake; fixed cron
-  definitions remain active. `reason` explains the timing decision but is not injected into the
-  later prompt.
+  must be 60–3600 seconds; valid fractional delays are rounded to a whole second. Each call replaces
+  the current conversation's previous dynamic wake. `stop: true` removes only that dynamic wake;
+  fixed cron definitions remain active. `reason` explains the timing decision but is not injected
+  into the later prompt.
 - Fixed and dynamic tools share the one-shot substrate. Cron recurrence is application behavior:
   after one occurrence is durably handled, the coordinator calculates and arms the next one. No
   recurrence exists in `WakeScheduler`.
@@ -693,12 +694,14 @@ cron definitions and at most one dynamic wake for that conversation. The existin
 across processes. Wake jobs are durable delivery receipts, never the permanent definition store.
 
 Creation and dynamic replacement insert their deterministic wake before publishing its definition
-as active metadata. A recurring handler inserts its successor before enqueueing the occurrence and
-advancing metadata. Therefore a failed insert leaves the previous authoritative state retryable;
-an inserted-but-unpublished wake reloads metadata and no-ops. Deletion removes or supersedes
-metadata before best-effort wake cancellation. `AgentRuntime.work()` starts the turn and wake
-consumers as one combined lifecycle without scanning conversations. A stale, cancelled, duplicated,
-or racing wake becomes a no-op when its definition generation or intended time no longer matches.
+as active metadata. A recurring handler inserts its successor, then atomically moves the due
+occurrence into a metadata-resident dispatch while advancing the active definition. The dispatch is
+cleared only after deterministic enqueue succeeds, so a crash resumes it without reopening the
+delete/claim race. Therefore a failed insert leaves the previous authoritative state retryable; an
+inserted-but-unpublished wake reloads metadata and no-ops. Deletion removes or supersedes metadata
+before best-effort wake cancellation. `AgentRuntime.work()` starts the turn and wake consumers as
+one combined lifecycle without scanning conversations. A stale, cancelled, duplicated, or racing
+wake becomes a no-op when its definition generation or intended time no longer matches.
 
 A due occurrence remains scheduling metadata while its conversation is running, queued, or paused
 for approval. After the final waiting turn settles, the coordinator materializes exactly one

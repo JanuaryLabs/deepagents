@@ -13,7 +13,7 @@ export * from './queue/turn-queue.ts';
 export * from './render-turn.ts';
 export * from './runtime/agent-runtime.ts';
 export * from './sandbox/define.ts';
-export type { SchedulingWake } from './scheduling/coordinator.ts';
+export type { SchedulingWake } from './scheduling/conversation-scheduler.ts';
 export * from './scheduling/pg-boss.wake-scheduler.ts';
 export * from './scheduling/wake-scheduler.ts';
 export * from './tool.ts';

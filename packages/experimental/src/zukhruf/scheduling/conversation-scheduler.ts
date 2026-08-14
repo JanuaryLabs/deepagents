@@ -28,6 +28,28 @@ const cronDefinitionSchema = z
   })
   .strict();
 
+const dispatchingOccurrenceSchema = z
+  .object({
+    kind: z.enum(['cron', 'dynamic']),
+    definitionId: z.uuid().optional(),
+    generation: z.number().int().positive(),
+    scheduledFor: z.number().int().nonnegative(),
+    prompt: z.string(),
+  })
+  .strict()
+  .superRefine((occurrence, context) => {
+    if (
+      (occurrence.kind === 'cron') !==
+      (occurrence.definitionId !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'cron occurrences require definitionId and dynamic occurrences omit it',
+      });
+    }
+  });
+
 const schedulingStateSchema = z
   .object({
     cron: z.record(z.string(), cronDefinitionSchema),
@@ -41,6 +63,7 @@ const schedulingStateSchema = z
       })
       .strict()
       .optional(),
+    dispatching: dispatchingOccurrenceSchema.optional(),
   })
   .strict()
   .superRefine(({ cron }, context) => {
@@ -57,6 +80,7 @@ const schedulingStateSchema = z
 
 type SchedulingState = z.infer<typeof schedulingStateSchema>;
 type CronDefinition = SchedulingState['cron'][string];
+type DispatchingOccurrence = NonNullable<SchedulingState['dispatching']>;
 
 export interface SchedulingWake {
   conversation: ConversationId;
@@ -86,7 +110,7 @@ const schedulingWakeSchema: z.ZodType<SchedulingWake> = z
     }
   });
 
-interface SchedulingCoordinatorOptions {
+interface ConversationSchedulerOptions {
   store: ContextStore;
   scheduler: WakeScheduler<SchedulingWake>;
   controlPlane: AgentControlPlane;
@@ -101,19 +125,19 @@ interface CronCreateInput {
 }
 
 /** Conversation scheduling state, recurrence, and turn conversion. */
-export class SchedulingCoordinator {
+export class ConversationScheduler {
   readonly #store: ContextStore;
   readonly #scheduler: WakeScheduler<SchedulingWake>;
   readonly #controlPlane: AgentControlPlane;
-  readonly #canMaterialize: SchedulingCoordinatorOptions['canMaterialize'];
+  readonly #canMaterialize: ConversationSchedulerOptions['canMaterialize'];
   readonly timezone: string;
 
-  constructor(options: SchedulingCoordinatorOptions) {
+  constructor(options: ConversationSchedulerOptions) {
     this.#store = options.store;
     this.#scheduler = options.scheduler;
     this.#controlPlane = options.controlPlane;
     this.#canMaterialize = options.canMaterialize;
-    this.timezone = SchedulingCoordinator.#resolveTimezone(options.timezone);
+    this.timezone = ConversationScheduler.#resolveTimezone(options.timezone);
   }
 
   async createCron(
@@ -215,7 +239,7 @@ export class SchedulingCoordinator {
     const clampedDelaySeconds = Math.min(3_600, Math.max(60, rounded));
     const createdAt = Date.now();
     const nextRunAt = createdAt + clampedDelaySeconds * 1_000;
-    const generation = SchedulingCoordinator.#randomGeneration();
+    const generation = ConversationScheduler.#randomGeneration();
     let previous: SchedulingState['dynamic'];
     const dynamic = {
       prompt: input.prompt,
@@ -270,26 +294,29 @@ export class SchedulingCoordinator {
     if (!(await this.#canMaterialize(conversation))) return;
     const state = await this.#read(conversation);
     const now = Date.now();
-    const due = [
-      ...Object.values(state.cron).map((definition) => ({
-        runAt: definition.nextRunAt,
-        wake: this.#cronWake(conversation, definition),
-      })),
-      ...(state.dynamic
-        ? [
-            {
-              runAt: state.dynamic.nextRunAt,
-              wake: this.#dynamicWake(conversation, state.dynamic),
-            },
-          ]
-        : []),
-    ]
-      .filter(({ runAt }) => runAt <= now)
-      .toSorted(
-        (left, right) =>
-          left.runAt - right.runAt || left.wake.id.localeCompare(right.wake.id),
-      )[0];
-    if (due) await this.#handle(due.wake);
+    const wake = state.dispatching
+      ? this.#dispatchingWake(conversation, state.dispatching)
+      : [
+          ...Object.values(state.cron).map((definition) => ({
+            runAt: definition.nextRunAt,
+            wake: this.#cronWake(conversation, definition),
+          })),
+          ...(state.dynamic
+            ? [
+                {
+                  runAt: state.dynamic.nextRunAt,
+                  wake: this.#dynamicWake(conversation, state.dynamic),
+                },
+              ]
+            : []),
+        ]
+          .filter(({ runAt }) => runAt <= now)
+          .toSorted(
+            (left, right) =>
+              left.runAt - right.runAt ||
+              left.wake.id.localeCompare(right.wake.id),
+          )[0]?.wake;
+    if (wake) await this.#handle(wake);
   }
 
   async #handle(rawWake: Wake<SchedulingWake>): Promise<void> {
@@ -302,7 +329,16 @@ export class SchedulingCoordinator {
         `Scheduling wake id "${rawWake.id}" does not match its payload`,
       );
     }
+    if (!(await this.#canMaterialize(wake.conversation))) return;
+
     const state = await this.#read(wake.conversation);
+    const dispatching = this.#matchingDispatching(state, wake);
+    if (dispatching) {
+      await this.#dispatch(wake, dispatching);
+      return;
+    }
+    if (state.dispatching) return;
+
     const definition = this.#matchingCron(state, wake);
     const dynamic = this.#matchingDynamic(state, wake);
     const prompt = definition?.prompt ?? dynamic?.prompt;
@@ -317,7 +353,6 @@ export class SchedulingCoordinator {
       });
       return;
     }
-    if (!(await this.#canMaterialize(wake.conversation))) return;
 
     const successor =
       definition?.recurring === true
@@ -339,6 +374,56 @@ export class SchedulingCoordinator {
       await this.#armCron(wake.conversation, activeSuccessor);
     }
 
+    const claimed = await this.#claimOccurrence(wake, activeSuccessor);
+    if (!claimed) return;
+    await this.#dispatch(wake, claimed);
+  }
+
+  async #claimOccurrence(
+    wake: SchedulingWake,
+    successor: CronDefinition | undefined,
+  ): Promise<DispatchingOccurrence | undefined> {
+    let claimed: DispatchingOccurrence | undefined;
+    await this.#update(wake.conversation, (current) => {
+      const concurrentClaim = this.#matchingDispatching(current, wake);
+      if (concurrentClaim) {
+        claimed = concurrentClaim;
+        return current;
+      }
+      if (current.dispatching) return current;
+
+      const currentDefinition = this.#matchingCron(current, wake);
+      const currentDynamic = this.#matchingDynamic(current, wake);
+      const currentPrompt = currentDefinition?.prompt ?? currentDynamic?.prompt;
+      if (currentPrompt === undefined) return current;
+
+      claimed = {
+        kind: wake.kind,
+        ...(wake.definitionId === undefined
+          ? {}
+          : { definitionId: wake.definitionId }),
+        generation: wake.generation,
+        scheduledFor: wake.scheduledFor,
+        prompt: currentPrompt,
+      };
+      if (currentDynamic) {
+        const { dynamic: _, ...withoutDynamic } = current;
+        return { ...withoutDynamic, dispatching: claimed };
+      }
+
+      if (!currentDefinition) return current;
+      const cron = { ...current.cron };
+      if (!successor) delete cron[currentDefinition.id];
+      else cron[currentDefinition.id] = successor;
+      return { ...current, cron, dispatching: claimed };
+    });
+    return claimed;
+  }
+
+  async #dispatch(
+    wake: SchedulingWake,
+    occurrence: DispatchingOccurrence,
+  ): Promise<void> {
     const occurrenceId = this.#occurrenceId(wake);
     const schedule: ScheduledTurnMetadata = {
       kind: wake.kind,
@@ -351,27 +436,28 @@ export class SchedulingCoordinator {
     };
     await this.#controlPlane.enqueueScheduled(wake.conversation, {
       id: occurrenceId,
-      input: prompt,
+      input: occurrence.prompt,
       schedule,
     });
 
     await this.#update(wake.conversation, (current) => {
-      if (wake.kind === 'dynamic') {
-        if (!this.#matchingDynamic(current, wake)) return current;
-        const { dynamic: _, ...withoutDynamic } = current;
-        return withoutDynamic;
-      }
-
-      const definition = this.#matchingCron(current, wake);
-      if (!definition) return current;
-      const cron = { ...current.cron };
-      if (!activeSuccessor) {
-        delete cron[definition.id];
-        return { ...current, cron };
-      }
-      cron[definition.id] = activeSuccessor;
-      return { ...current, cron };
+      if (!this.#matchingDispatching(current, wake)) return current;
+      const { dispatching: _, ...withoutDispatching } = current;
+      return withoutDispatching;
     });
+  }
+
+  #matchingDispatching(
+    state: SchedulingState,
+    wake: SchedulingWake,
+  ): DispatchingOccurrence | undefined {
+    const occurrence = state.dispatching;
+    return occurrence?.kind === wake.kind &&
+      occurrence.definitionId === wake.definitionId &&
+      occurrence.generation === wake.generation &&
+      occurrence.scheduledFor === wake.scheduledFor
+      ? occurrence
+      : undefined;
   }
 
   #matchingCron(
@@ -426,6 +512,21 @@ export class SchedulingCoordinator {
       kind: 'dynamic',
       generation: dynamic.generation,
       scheduledFor: dynamic.nextRunAt,
+    });
+  }
+
+  #dispatchingWake(
+    conversation: ConversationId,
+    occurrence: DispatchingOccurrence,
+  ): Wake<SchedulingWake> {
+    return this.#toWake({
+      conversation,
+      kind: occurrence.kind,
+      ...(occurrence.definitionId === undefined
+        ? {}
+        : { definitionId: occurrence.definitionId }),
+      generation: occurrence.generation,
+      scheduledFor: occurrence.scheduledFor,
     });
   }
 
@@ -509,7 +610,7 @@ export class SchedulingCoordinator {
       }
       const state = update(this.#parse(chat.metadata));
       const metadata = chat.metadata ?? {};
-      const zukhruf = SchedulingCoordinator.#record(metadata.zukhruf);
+      const zukhruf = ConversationScheduler.#record(metadata.zukhruf);
       return {
         metadata: {
           ...metadata,
@@ -521,7 +622,7 @@ export class SchedulingCoordinator {
 
   #parse(metadata: Record<string, unknown> | undefined): SchedulingState {
     if (metadata?.zukhruf === undefined) return { cron: {} };
-    const zukhruf = SchedulingCoordinator.#record(metadata.zukhruf);
+    const zukhruf = ConversationScheduler.#record(metadata.zukhruf);
     if (zukhruf.scheduling === undefined) return { cron: {} };
     const parsed = schedulingStateSchema.safeParse(zukhruf.scheduling);
     if (!parsed.success) {

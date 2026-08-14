@@ -2,7 +2,7 @@ import type {
   AgentActor,
   AgentControlPlane,
 } from '../control-plane/agent-control-plane.ts';
-import type { SchedulingCoordinator } from '../scheduling/coordinator.ts';
+import type { ConversationScheduler } from '../scheduling/conversation-scheduler.ts';
 
 export type AgentToolContext = {
   controlPlane: AgentControlPlane;
@@ -10,5 +10,5 @@ export type AgentToolContext = {
 };
 
 export type SchedulingToolContext = AgentToolContext & {
-  schedulingCoordinator: SchedulingCoordinator;
+  conversationScheduler: ConversationScheduler;
 };

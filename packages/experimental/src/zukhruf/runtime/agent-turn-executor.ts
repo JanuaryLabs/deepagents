@@ -26,7 +26,7 @@ import type {
 } from '../mailbox/types.ts';
 import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
-import type { SchedulingCoordinator } from '../scheduling/coordinator.ts';
+import type { ConversationScheduler } from '../scheduling/conversation-scheduler.ts';
 import { schedulingTools } from '../scheduling/tools.ts';
 import {
   type AgentSkills,
@@ -42,7 +42,7 @@ export interface AgentTurnExecutorOptions {
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
   multiAgent: ResolvedMultiAgentHostConfig;
-  scheduling?: SchedulingCoordinator;
+  scheduling?: ConversationScheduler;
 }
 
 interface SamplingMailboxState {
@@ -58,7 +58,7 @@ export class AgentTurnExecutor {
   readonly #approvals: ApprovalController;
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
-  readonly #scheduling?: SchedulingCoordinator;
+  readonly #scheduling?: ConversationScheduler;
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -207,7 +207,7 @@ export class AgentTurnExecutor {
           const scheduledModelTools = { ...modelTools, ...schedulingTools };
           const schedulingContext = {
             ...agentContext,
-            schedulingCoordinator: this.#scheduling,
+            conversationScheduler: this.#scheduling,
           } satisfies SchedulingToolContext;
           stream = await chat(
             agent({

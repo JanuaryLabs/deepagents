@@ -27,9 +27,9 @@ import {
 } from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import {
-  SchedulingCoordinator,
+  ConversationScheduler,
   type SchedulingWake,
-} from '../scheduling/coordinator.ts';
+} from '../scheduling/conversation-scheduler.ts';
 import type { WakeScheduler } from '../scheduling/wake-scheduler.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
@@ -73,14 +73,14 @@ export class AgentObservation {
   readonly #store: ContextStore;
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
-  readonly #scheduling?: SchedulingCoordinator;
+  readonly #scheduling?: ConversationScheduler;
 
   constructor(
     conversation: ConversationId,
     store: ContextStore,
     streams: StreamManager,
     queue: TurnQueue,
-    scheduling?: SchedulingCoordinator,
+    scheduling?: ConversationScheduler,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -148,7 +148,7 @@ export class AgentRuntime {
   readonly #controlPlane: AgentControlPlane;
   readonly #approvals: ApprovalController;
   readonly #executor: AgentTurnExecutor;
-  readonly #scheduling?: SchedulingCoordinator;
+  readonly #scheduling?: ConversationScheduler;
 
   constructor(root: AgentDeclaration, options: AgentRuntimeOptions) {
     const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
@@ -184,7 +184,7 @@ export class AgentRuntime {
       historyForker,
     });
     const scheduling = options.scheduling
-      ? new SchedulingCoordinator({
+      ? new ConversationScheduler({
           store: options.store,
           scheduler: options.scheduling.scheduler,
           controlPlane,
