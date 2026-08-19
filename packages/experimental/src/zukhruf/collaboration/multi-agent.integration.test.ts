@@ -199,6 +199,21 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
       model,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
+      subagents: [
+        defineAgent({
+          name: 'reviewer',
+          description: 'Reviews the current change.',
+          model,
+          sandbox: async () => ({}) as AgentSandbox,
+          instructions: [],
+        }),
+        defineAgent({
+          name: 'worker',
+          model,
+          sandbox: async () => ({}) as AgentSandbox,
+          instructions: [],
+        }),
+      ],
     }),
     {
       ...h,
@@ -247,6 +262,10 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
   assert.match(
     spawn?.description ?? '',
     /Prefer delegation for independent work\./,
+  );
+  assert.match(
+    spawn?.description ?? '',
+    /reviewer: Reviews the current change\., worker/,
   );
   const wait = tools.find((tool) => tool.name === 'wait_agent');
   const timeoutSchema = (

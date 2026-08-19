@@ -11,7 +11,9 @@
       "options": {
         "additionalEntryPoints": [
           "packages/experimental/src/coding-agent-reminders/index.ts",
-          "packages/experimental/src/zukhruf/index.ts"
+          "packages/experimental/src/zukhruf/index.ts",
+          "packages/experimental/src/zukhruf/plugins/file-agents/index.ts",
+          "packages/experimental/src/zukhruf/plugins/schedules/index.ts"
         ],
         "assets": []
       }

@@ -17,15 +17,21 @@ const CREATE_SESSION_ROUTE_PATH = '/session';
 const SESSION_ROUTE_PATH = '/session/:sessionId';
 const SESSION_CANCEL_ROUTE_PATH = '/session/:sessionId/cancel';
 const SESSION_STREAM_ROUTE_PATH = '/session/:sessionId/stream';
+const SESSION_TURN_ROUTE_PATH = '/session/:sessionId/turn/:turnId';
+const SESSION_TURN_CANCEL_ROUTE_PATH =
+  '/session/:sessionId/turn/:turnId/cancel';
 const INFO_ROUTE_PATH = '/info';
 const HEALTH_ROUTE_PATH = '/health';
 export const ZUKHRUF_CREATE_SESSION_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${CREATE_SESSION_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_CANCEL_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_CANCEL_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_STREAM_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_STREAM_ROUTE_PATH}`;
+export const ZUKHRUF_SESSION_TURN_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_TURN_ROUTE_PATH}`;
+export const ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_TURN_CANCEL_ROUTE_PATH}`;
 export const ZUKHRUF_INFO_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${INFO_ROUTE_PATH}`;
 export const ZUKHRUF_HEALTH_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${HEALTH_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_ID_HEADER = 'x-zukhruf-session-id';
+export const ZUKHRUF_TURN_ID_HEADER = 'x-zukhruf-turn-id';
 
 const MAX_BODY_BYTES = 10 * 1024;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
@@ -60,7 +66,7 @@ interface ZukhrufRuntime extends Pick<
 > {
   observe(
     conversation: ConversationId,
-  ): Pick<AgentObservation, 'cancel' | 'resume'>;
+  ): Pick<AgentObservation, 'cancel' | 'resume' | 'status'>;
 }
 
 type ZukhrufEnv = { Variables: { userId: string } };
@@ -128,12 +134,12 @@ export function zukhruf(runtime: ZukhrufRuntime) {
       );
       const conversation = { chatId: sessionId, userId };
       await runtime.createSession(conversation);
-      await runtime.enqueue(conversation, {
+      const turn = await runtime.enqueue(conversation, {
         id: idempotencyKey,
         input: body.input.trim(),
       });
 
-      return accepted(context, sessionId);
+      return accepted(context, sessionId, turn.id);
     },
   );
   app.all(CREATE_SESSION_ROUTE_PATH, (context) =>
@@ -164,15 +170,78 @@ export function zukhruf(runtime: ZukhrufRuntime) {
         userId: context.get('userId'),
       };
       await requireSession(runtime, conversation);
-      await runtime.enqueue(conversation, {
+      const turn = await runtime.enqueue(conversation, {
         id: idempotencyKey,
         input: body.input.trim(),
       });
 
-      return accepted(context, sessionId);
+      return accepted(context, sessionId, turn.id);
     },
   );
   app.all(SESSION_ROUTE_PATH, (context) => methodNotAllowed(context, 'POST'));
+
+  app.get(
+    SESSION_TURN_ROUTE_PATH,
+    validate((payload) => ({
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+      turnId: {
+        select: payload.params.turnId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      const { sessionId, turnId } = context.var.input;
+      const conversation = {
+        chatId: sessionId,
+        userId: context.get('userId'),
+      };
+      await requireSession(runtime, conversation);
+      const status = await runtime.observe(conversation).status(turnId);
+      if (!status) {
+        throw new HTTPException(404, {
+          message: 'Session turn not found',
+          cause: {
+            code: 'zukhruf/session-turn-not-found',
+            detail: `Turn ${turnId} does not exist in session ${sessionId}`,
+          },
+        });
+      }
+      return context.json({ sessionId, turnId, ...status }, 200, NO_STORE);
+    },
+  );
+  app.all(SESSION_TURN_ROUTE_PATH, (context) =>
+    methodNotAllowed(context, 'GET'),
+  );
+
+  app.post(
+    SESSION_TURN_CANCEL_ROUTE_PATH,
+    validate((payload) => ({
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+      turnId: {
+        select: payload.params.turnId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      const { sessionId, turnId } = context.var.input;
+      const conversation = {
+        chatId: sessionId,
+        userId: context.get('userId'),
+      };
+      await requireSession(runtime, conversation);
+      await runtime.observe(conversation).cancel(turnId);
+      return context.body(null, 204, NO_STORE);
+    },
+  );
+  app.all(SESSION_TURN_CANCEL_ROUTE_PATH, (context) =>
+    methodNotAllowed(context, 'POST'),
+  );
 
   app.post(
     SESSION_CANCEL_ROUTE_PATH,
@@ -239,10 +308,12 @@ export function zukhruf(runtime: ZukhrufRuntime) {
 function accepted<Env extends ZukhrufEnv>(
   context: Context<Env>,
   sessionId: string,
+  turnId: string,
 ) {
-  return context.json({ ok: true, sessionId }, 202, {
+  return context.json({ ok: true, sessionId, turnId }, 202, {
     ...NO_STORE,
     [ZUKHRUF_SESSION_ID_HEADER]: sessionId,
+    [ZUKHRUF_TURN_ID_HEADER]: turnId,
   });
 }
 

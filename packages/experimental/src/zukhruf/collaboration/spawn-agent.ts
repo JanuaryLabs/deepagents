@@ -41,7 +41,9 @@ export function createSpawnAgentTool(options?: { usageHintText?: string }) {
   return tool<SpawnAgentInput, { task_name: string }, AgentToolContext>({
     description: ({ context }) => {
       const available = (context.actor.declaration.subagents ?? [])
-        .map((subagent) => subagent.name)
+        .map(({ name, description }) =>
+          description ? `${name}: ${description}` : name,
+        )
         .join(', ');
       return [
         `Spawn an independent subagent. Available agent types: ${available || 'none'}.`,

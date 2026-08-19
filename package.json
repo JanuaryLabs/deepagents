@@ -95,10 +95,12 @@
     "demo/daytona-text2sql",
     "demo/microsandbox-text2sql",
     "demo/mcp",
+    "demo/zukhruf-dynamic-subagents",
     "demo/zukhruf-durable-turns",
     "demo/zukhruf-group-chat",
     "demo/zukhruf-mailbox",
     "demo/zukhruf-research-bot",
+    "demo/zukhruf-schedules",
     "demo/zukhruf-simple",
     "demo/zukhruf-whatsapp"
   ],

@@ -1,0 +1,20 @@
+{
+  "name": "@deepagents/demo-zukhruf-schedules",
+  "version": "6.1.2",
+  "private": true,
+  "type": "module",
+  "description": "Runnable Zukhruf schedule-files showcase backed by pg-boss and PGlite.",
+  "scripts": {
+    "start": "node run.ts",
+    "list": "node run.ts --list",
+    "daemon": "node run.ts --daemon"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.41",
+    "@deepagents/context": "6.1.2",
+    "@deepagents/experimental": "6.1.2",
+    "@electric-sql/pglite": "^0.5.4",
+    "just-bash": "^3.2.0",
+    "pg-boss": "^12.26.1"
+  }
+}

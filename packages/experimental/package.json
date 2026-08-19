@@ -31,6 +31,16 @@
       "types": "./dist/zukhruf/index.d.ts",
       "import": "./dist/zukhruf/index.js",
       "default": "./dist/zukhruf/index.js"
+    },
+    "./zukhruf/file-agents": {
+      "types": "./dist/zukhruf/plugins/file-agents/index.d.ts",
+      "import": "./dist/zukhruf/plugins/file-agents/index.js",
+      "default": "./dist/zukhruf/plugins/file-agents/index.js"
+    },
+    "./zukhruf/schedules": {
+      "types": "./dist/zukhruf/plugins/schedules/index.d.ts",
+      "import": "./dist/zukhruf/plugins/schedules/index.js",
+      "default": "./dist/zukhruf/plugins/schedules/index.js"
     }
   },
   "files": [
@@ -51,8 +61,10 @@
     "hono": "^4.12.33",
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
+    "rrule": "^2.8.1",
     "tiny-tfidf": "^1.0.0",
     "uuid": "^14.0.1",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

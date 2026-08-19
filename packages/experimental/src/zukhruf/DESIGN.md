@@ -226,7 +226,7 @@ work (long-running executor process):
     → child terminal? idempotent queue-only FINAL_ANSWER to its direct parent
     → mailbox.endTurn(conversation, streamId)     // stale attempts cannot close a successor
 
-observe (anywhere): AgentObservation { engine, resume(), cancel(streamId?) } — never spins a sandbox.
+observe (anywhere): AgentObservation { engine, resume(), status(streamId?), cancel(streamId?) } — never spins a sandbox.
 ```
 
 **Enqueue is idempotent on a caller key, and that key is caller-supplied by necessity.** Idempotency
@@ -787,11 +787,12 @@ Node+Postgres bundle; the DO adapter).
   or persists `SKILL.md` bodies, scripts, references, or assets. Skills belong to one agent sandbox
   and do not implicitly pass to subagents.
 - `runtime/agent-runtime.ts` —
-  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, scheduling?})` →
+  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, scheduling?, plugins?})` →
   `{ enqueue(conv, {id, input}) → {id, stream},
 deliver(communication, mode) → void,
 approve(conv, {toolCallId}) / deny(conv, {toolCallId, reason?}) → {id, stream},
-observe(conv) → AgentObservation {engine, resume, cancel(streamId?)},
+observe(conv) → AgentObservation {engine, resume, status(streamId?), cancel(streamId?)},
+initialize() → void,
 work({concurrency?}) → AsyncDisposable }`.
   It wires `AgentControlPlane`, `AgentTurnExecutor`, `ApprovalController`,
   `AgentStatusProjector`, and `MailboxCoordinator` once. Enqueue
@@ -804,6 +805,17 @@ work({concurrency?}) → AsyncDisposable }`.
   `ScheduleWakeup` tools. The adapter uses a borrowed pg-boss instance and one-shot `sendAfter()`;
   the coordinator owns recurrence, replacement, expiry, catch-up, deterministic occurrence IDs,
   deferred turn conversion, and settlement catch-up.
+- `plugins/schedules/` — the complete Scheduled Tasks plugin: control plane, persistence,
+  recurrence, workers, runtime execution, and optional file source.
+  Product-owned task and run rows share PostgreSQL with pg-boss; PGlite runs the same schema for
+  local hosts and tests. It accepts RRULE or five-field cron recurrences with persisted IANA
+  timezones, exposes future-task management and independent run review, and commits every
+  occurrence, dispatch, reconciliation, or cancellation job in the same transaction as its
+  authoritative state. The opt-in plugin owns its initialization and worker lifecycle, launches
+  every run as a fresh root task, and exposes the same management API directly.
+  Its `scheduleFiles` source compiles top-level `agent/schedules/*.md` declarations during runtime
+  initialization; removed files pause rather than delete their durable tasks. Other execution
+  targets remain application choices rather than scheduler concepts.
 - `control-plane/agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted
   addressing, durable thread identity, and ContextStore-backed tree discovery.
   `agent-status-projector.ts`
@@ -840,9 +852,10 @@ work({concurrency?}) → AsyncDisposable }`.
   queued/running/approval-paused-as-running/terminal tree status, caller-mailbox wait/timeout/cancellation,
   queued and cross-runtime active interruption, target reuse, and idempotent
   success/failure/cancellation forwarding. Scheduling coverage exercises the public runtime and
-  adapter boundaries over PGlite, SQLite metadata restarts, and Docker-gated PostgreSQL, including
+  adapter boundaries over PGlite and Docker-gated PostgreSQL, including
   duplicate delivery, worker death, receipt-first transitions, conversation isolation, busy-window
-  coalescing and FIFO ordering, cancellation, expiry, catch-up, and spent-receipt cleanup.
+  coalescing and FIFO ordering, cancellation, expiry, catch-up, spent-receipt cleanup, transactional
+  task/run deduplication, generic execution handoff, independent review, and restart recovery.
 - Backends switch by composition in the demo sandbox declarations
   (`defineSandbox(({chatId}) => createDockerSandbox({name: chatId}))` ↔ Daytona etc.);
   `docker.ts`/`daytona.ts` deleted (no presets, no dispatcher flag).

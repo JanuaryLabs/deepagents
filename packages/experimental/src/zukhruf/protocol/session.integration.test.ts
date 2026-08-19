@@ -12,6 +12,8 @@ import {
   ZUKHRUF_SESSION_ID_HEADER,
   ZUKHRUF_SESSION_ROUTE_PATH,
   ZUKHRUF_SESSION_STREAM_ROUTE_PATH,
+  ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH,
+  ZUKHRUF_SESSION_TURN_ROUTE_PATH,
   zukhruf,
 } from '@deepagents/experimental/zukhruf';
 
@@ -44,6 +46,9 @@ function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
         async cancel() {},
         async resume() {
           return null;
+        },
+        async status() {
+          return undefined;
         },
       };
     },
@@ -105,6 +110,7 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
   const firstBody = (await first.json()) as {
     ok: boolean;
     sessionId: string;
+    turnId: string;
   };
   const retry = await create();
   const retryBody = (await retry.json()) as typeof firstBody;
@@ -117,6 +123,7 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
     firstBody.sessionId,
   );
   assert.equal(retryBody.sessionId, firstBody.sessionId);
+  assert.equal(firstBody.turnId, 'internal-turn-id');
   assert.deepEqual(created, [
     { chatId: firstBody.sessionId, userId: 'user-1' },
     { chatId: firstBody.sessionId, userId: 'user-1' },
@@ -229,7 +236,11 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
   });
 
   assert.equal(response.status, 202);
-  assert.deepEqual(await response.json(), { ok: true, sessionId });
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    sessionId,
+    turnId: 'internal-turn-id',
+  });
   assert.deepEqual(enqueued, [
     {
       conversation: { chatId: sessionId, userId: 'user-1' },
@@ -266,6 +277,9 @@ test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', asyn
         async resume() {
           return null;
         },
+        async status() {
+          return undefined;
+        },
       };
     },
   });
@@ -283,6 +297,76 @@ test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', asyn
   const wrongMethod = await app.request(path);
   assert.equal(wrongMethod.status, 405);
   assert.equal(wrongMethod.headers.get('allow'), 'POST');
+});
+
+test('GET /zukhruf/v1/session/:sessionId/turn/:turnId exposes the exact durable turn outcome', async () => {
+  const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
+  const turnId = 'e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
+  const observed: string[] = [];
+  const runtime = createRuntime({
+    observe() {
+      return {
+        async cancel() {},
+        async resume() {
+          return null;
+        },
+        async status(id?: string) {
+          observed.push(id ?? 'current');
+          return {
+            status: 'failed' as const,
+            startedAt: 1_000,
+            finishedAt: 2_000,
+            error: 'model crashed',
+          };
+        },
+      };
+    },
+  });
+  const path = ZUKHRUF_SESSION_TURN_ROUTE_PATH.replace(
+    ':sessionId',
+    sessionId,
+  ).replace(':turnId', turnId);
+  const response = await createApp(runtime).request(path);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    sessionId,
+    turnId,
+    status: 'failed',
+    startedAt: 1_000,
+    finishedAt: 2_000,
+    error: 'model crashed',
+  });
+  assert.deepEqual(observed, [turnId]);
+});
+
+test('POST /zukhruf/v1/session/:sessionId/turn/:turnId/cancel cancels only that turn', async () => {
+  const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
+  const turnId = 'e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
+  const cancelled: Array<string | undefined> = [];
+  const runtime = createRuntime({
+    observe() {
+      return {
+        async cancel(id?: string) {
+          cancelled.push(id);
+        },
+        async resume() {
+          return null;
+        },
+        async status() {
+          return undefined;
+        },
+      };
+    },
+  });
+  const path = ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH.replace(
+    ':sessionId',
+    sessionId,
+  ).replace(':turnId', turnId);
+  const response = await createApp(runtime).request(path, { method: 'POST' });
+
+  assert.equal(response.status, 204);
+  assert.deepEqual(cancelled, [turnId]);
 });
 
 test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authenticated session', async () => {
@@ -303,6 +387,9 @@ test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authentica
               controller.close();
             },
           });
+        },
+        async status() {
+          return undefined;
         },
       };
     },

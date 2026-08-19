@@ -30,6 +30,7 @@ export interface AgentDeclaration {
    * conversations created from that graph still exist.
    */
   name: string;
+  description?: string;
   model: AgentModel;
   sandbox: (context: SandboxContext) => Promise<ZukhrufSandbox>;
   instructions: ContextFragment[];
@@ -47,12 +48,8 @@ export function defineAgent(
   declaration: AgentDeclaration,
 ): DefinedAgentDeclaration {
   return {
-    name: declaration.name,
-    model: declaration.model,
-    sandbox: declaration.sandbox,
-    instructions: declaration.instructions,
+    ...declaration,
     tools: declaration.tools ?? {},
     subagents: declaration.subagents ?? [],
-    telemetry: declaration.telemetry,
   };
 }

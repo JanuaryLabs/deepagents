@@ -31,7 +31,7 @@ import {
 The public experimental surface contains the pure declaration layer
 (`defineAgent` / `defineInstructions` / `defineTool` / `defineSandbox`),
 `AgentRuntime`, the Hono session protocol helper (`zukhruf(runtime)`), the
-domain values, and the store/queue ports and adapters.
+domain values, runtime plugins, and the store/queue ports and adapters.
 Declarations have a types-only dependency on `@deepagents/context`.
 `AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval,
 denial, worker lifecycle, and model-facing collaboration for declared
@@ -51,8 +51,57 @@ when creating the sandbox.
 
 `zukhruf(runtime)` mounts the HTTP session protocol under `/zukhruf/v1` for
 authenticated hosts: create or continue sessions with idempotent `POST` calls,
-cancel the active session turn, stream durable UI-message output, and read
-runtime info plus health checks.
+receive the durable `turnId`, check or cancel a specific turn, cancel the
+active session turn, stream durable UI-message output, and read runtime info
+plus health checks.
+
+The `schedules` runtime plugin owns durable task and run persistence, recurrence,
+workers, management, and fresh-root-task execution. It accepts five-field cron
+expressions or RRULE recurrences with IANA timezones. Its optional
+`scheduleFiles` source makes top-level `agent/schedules/*.md` files a startup
+source of truth. A file contains strict YAML frontmatter and uses its Markdown
+body as the prompt:
+
+```md
+---
+name: Monday report
+cron: '0 9 * * 1'
+timezone: Asia/Amman
+---
+
+Prepare the weekly engineering report.
+```
+
+```ts
+const scheduled = schedules({
+  boss,
+  queue: 'scheduled-tasks',
+  reconciliationIntervalMs: 5_000,
+  transaction,
+  sources: [
+    scheduleFiles({
+      directory: new URL('./agent/schedules/', import.meta.url),
+      ownerId,
+    }),
+  ],
+});
+
+const runtime = new AgentRuntime(root, {
+  store,
+  streams,
+  queue,
+  mailboxStore,
+  plugins: [scheduled],
+});
+
+await runtime.initialize();
+await using worker = await runtime.work();
+```
+
+Synchronization creates or updates present declarations, resumes present tasks
+that were paused by an earlier synchronization, and pauses removed files while
+preserving their run history. An explicitly archived task is never restored by
+the filesystem.
 
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete
@@ -63,9 +112,14 @@ executor: enqueue, detach, resume, strict per-chat FIFO),
 durable FIFO mail, and payload-free wakes),
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
 planner and researcher chats with mailbox-delivered findings),
+[`demo/zukhruf-schedules`](../../demo/zukhruf-schedules) (file-declared
+recurring work launched into fresh root tasks),
 [`demo/zukhruf-group-chat`](../../demo/zukhruf-group-chat) (managed group-chat
-orchestration over a shared transcript), and
+orchestration over a shared transcript),
 [`demo/zukhruf-whatsapp`](../../demo/zukhruf-whatsapp) (manager-free group
-notifications where specialists volunteer public replies).
+notifications where specialists volunteer public replies), and
+[`demo/zukhruf-dynamic-subagents`](../../demo/zukhruf-dynamic-subagents)
+(Markdown root agent, Markdown subagents, and a mounted skill discovered at
+startup).
 `spawn_agent` can fork all parent turns, no parent turns, or a bounded number of
 recent user-turn boundaries into a child chat through its `fork_turns` input.

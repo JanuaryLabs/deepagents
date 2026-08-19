@@ -1,0 +1,31 @@
+{
+  "name": "@deepagents/demo-zukhruf-dynamic-subagents",
+  "version": "6.1.2",
+  "private": true,
+  "type": "module",
+  "description": "Zukhruf coding agent with file-defined specialists and a feature-development skill.",
+  "exports": {
+    ".": "./agent.ts"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "start": "node run.ts",
+    "test": "node --test --no-warnings agent.integration.test.ts"
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "dependsOn": [
+          "build"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.41",
+    "@deepagents/context": "6.1.2",
+    "@deepagents/experimental": "6.1.2",
+    "@electric-sql/pglite": "^0.5.4",
+    "pg-boss": "^12.26.1"
+  }
+}

@@ -43,6 +43,9 @@
       "path": "./packages/experimental"
     },
     {
+      "path": "./demo/zukhruf-dynamic-subagents"
+    },
+    {
       "path": "./demo/zukhruf-group-chat"
     },
     {

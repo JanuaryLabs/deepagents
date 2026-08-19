@@ -2,6 +2,8 @@ import {
   ContextEngine,
   type ContextStore,
   type StreamManager,
+  type StreamPart,
+  type StreamStatus,
 } from '@deepagents/context';
 
 import type { AgentDeclaration } from '../agent.ts';
@@ -34,6 +36,20 @@ import type { WakeScheduler } from '../scheduling/wake-scheduler.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
 
+export interface AgentPluginHost {
+  enqueue(
+    conversation: ConversationId,
+    turn: TurnInput,
+  ): Promise<{ id: string; stream: ReadableStream<StreamPart> }>;
+  observe(conversation: ConversationId): AgentObservation;
+}
+
+export interface AgentRuntimePlugin {
+  configure?(root: AgentDeclaration): AgentDeclaration;
+  initialize?(host: AgentPluginHost): Promise<void>;
+  work?(host: AgentPluginHost): Promise<AsyncDisposable>;
+}
+
 export interface AgentRuntimeOptions {
   store: ContextStore;
   /** Borrowed stream subsystem; the caller owns its store, change source, and lifecycle. */
@@ -47,6 +63,7 @@ export interface AgentRuntimeOptions {
     scheduler: WakeScheduler<SchedulingWake>;
     timezone: string;
   };
+  plugins?: readonly AgentRuntimePlugin[];
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -57,6 +74,7 @@ export interface AgentRuntimeInfo {
   readonly root: string;
   readonly agents: readonly {
     readonly name: string;
+    readonly description?: string;
     readonly model: {
       readonly provider: string;
       readonly modelId: string;
@@ -64,6 +82,13 @@ export interface AgentRuntimeInfo {
     readonly tools: readonly string[];
     readonly subagents: readonly string[];
   }[];
+}
+
+export interface AgentTurnStatus {
+  status: StreamStatus;
+  startedAt: number | null;
+  finishedAt: number | null;
+  error: string | null;
 }
 
 /** Reconnect and cancellation view over one durable conversation. */
@@ -102,13 +127,23 @@ export class AgentObservation {
     return status ? this.#streams.watch(id) : null;
   }
 
+  async status(streamId?: string): Promise<AgentTurnStatus | undefined> {
+    await this.#assertOwner();
+    const id = streamId ?? (await this.#headStreamId());
+    if (!id) return undefined;
+    AgentTurnId.assertOwner(this.#conversation, id);
+    const stream = await this.#streams.store.getStream(id);
+    if (!stream) return undefined;
+    return {
+      status: stream.status,
+      startedAt: stream.startedAt,
+      finishedAt: stream.finishedAt,
+      error: stream.error,
+    };
+  }
+
   async cancel(streamId?: string): Promise<void> {
-    const chat = await this.#store.getChat(this.#conversation.chatId);
-    if (chat && chat.userId !== this.#conversation.userId) {
-      throw new Error(
-        `chat "${this.#conversation.chatId}" belongs to user "${chat.userId}", not "${this.#conversation.userId}"`,
-      );
-    }
+    await this.#assertOwner();
     const id = streamId ?? (await this.#headStreamId());
     if (!id) return;
     AgentTurnId.assertOwner(this.#conversation, id);
@@ -117,6 +152,15 @@ export class AgentObservation {
       await this.#streams.cancel(id);
       await this.#queue.cancel(id);
       await this.#scheduling?.materializeDueIfEligible(this.#conversation);
+    }
+  }
+
+  async #assertOwner(): Promise<void> {
+    const chat = await this.#store.getChat(this.#conversation.chatId);
+    if (chat && chat.userId !== this.#conversation.userId) {
+      throw new Error(
+        `chat "${this.#conversation.chatId}" belongs to user "${chat.userId}", not "${this.#conversation.userId}"`,
+      );
     }
   }
 
@@ -149,10 +193,18 @@ export class AgentRuntime {
   readonly #approvals: ApprovalController;
   readonly #executor: AgentTurnExecutor;
   readonly #scheduling?: ConversationScheduler;
+  readonly #plugins: readonly AgentRuntimePlugin[];
+  readonly #pluginHost: AgentPluginHost;
+  #initialization?: Promise<void>;
 
   constructor(root: AgentDeclaration, options: AgentRuntimeOptions) {
     const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
-    const declarations = new AgentDeclarationRegistry(root);
+    let configuredRoot = root;
+    const plugins = options.plugins ?? [];
+    for (const plugin of plugins) {
+      if (plugin.configure) configuredRoot = plugin.configure(configuredRoot);
+    }
+    const declarations = new AgentDeclarationRegistry(configuredRoot);
     const directory = new AgentDirectory(options.store);
     const streams = options.streams;
     const mailbox = new MailboxCoordinator({
@@ -174,7 +226,7 @@ export class AgentRuntime {
     });
     const historyForker = new AgentHistoryForker(options.store);
     const controlPlane = new AgentControlPlane({
-      root,
+      root: declarations.root,
       streams,
       queue: options.queue,
       mailbox,
@@ -203,10 +255,14 @@ export class AgentRuntime {
     this.#controlPlane = controlPlane;
     this.#approvals = approvals;
     this.#scheduling = scheduling;
+    this.#plugins = plugins;
     this.info = {
       root: declarations.root.name,
       agents: Array.from(declarations.values(), (declaration) => ({
         name: declaration.name,
+        ...(declaration.description === undefined
+          ? {}
+          : { description: declaration.description }),
         model: {
           provider: declaration.model.provider,
           modelId: declaration.model.modelId,
@@ -224,6 +280,15 @@ export class AgentRuntime {
       multiAgent,
       scheduling,
     });
+    this.#pluginHost = {
+      enqueue: (conversation, turn) => this.enqueue(conversation, turn),
+      observe: (conversation) => this.observe(conversation),
+    };
+  }
+
+  initialize(): Promise<void> {
+    if (!this.#initialization) this.#initialization = this.#initialize();
+    return this.#initialization;
   }
 
   async createSession(conversation: ConversationId): Promise<void> {
@@ -271,6 +336,7 @@ export class AgentRuntime {
   }
 
   async work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {
+    await this.initialize();
     const scheduling = this.#scheduling;
     const workers = new AsyncDisposableStack();
     workers.use(
@@ -286,10 +352,19 @@ export class AgentRuntime {
     );
     try {
       if (scheduling) workers.use(await scheduling.work());
+      for (const plugin of this.#plugins) {
+        if (plugin.work) workers.use(await plugin.work(this.#pluginHost));
+      }
       return workers;
     } catch (error) {
       await workers.disposeAsync();
       throw error;
+    }
+  }
+
+  async #initialize(): Promise<void> {
+    for (const plugin of this.#plugins) {
+      await plugin.initialize?.(this.#pluginHost);
     }
   }
 

@@ -12,7 +12,7 @@ import {
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtempDisposable, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtempDisposable, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -36,6 +36,7 @@ import {
 import {
   type AgentDeclaration,
   AgentRuntime,
+  type AgentRuntimeOptions,
   AgentThread,
   PgBossTurnQueue,
   SqliteMailboxStore,
@@ -44,6 +45,11 @@ import {
   defineSandbox,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+import {
+  type Schedules,
+  scheduleFiles,
+  schedules,
+} from '@deepagents/experimental/zukhruf/schedules';
 import { settleWithin, timebox } from '@deepagents/test';
 
 const usage = {
@@ -365,6 +371,10 @@ async function harness(
   options?: {
     queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
     declaration?: AgentDeclaration;
+    plugins?: (infrastructure: {
+      boss: PgBoss;
+      database: PGlite;
+    }) => AgentRuntimeOptions['plugins'];
   },
 ) {
   const pglite = new PGlite();
@@ -395,10 +405,14 @@ async function harness(
       streams,
       queue,
       mailboxStore,
+      ...(options?.plugins
+        ? { plugins: options.plugins({ boss, database: pglite }) }
+        : {}),
     },
   );
   return {
     runtime,
+    database: pglite,
     streamStore,
     boss,
     queue,
@@ -505,9 +519,335 @@ describe('zukhruf runtime — host sessions', () => {
       id: 'message-1',
       input: 'hello',
     });
+    assert.deepEqual(await h.runtime.observe(conversation).status(pending.id), {
+      status: 'queued',
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+    });
     assert.ok(await h.runtime.observe(conversation).resume());
     await h.runtime.observe(conversation).cancel();
     assert.equal(await h.streamStore.getStreamStatus(pending.id), 'cancelled');
+    assert.equal(
+      (await h.runtime.observe(conversation).status(pending.id))?.status,
+      'cancelled',
+    );
+  });
+
+  it('runs scheduled prompts in fresh, idempotent root sessions', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    let scheduled: Schedules | undefined;
+    await using h = await harness(slowModel(track), undefined, {
+      plugins: ({ boss, database }) => {
+        scheduled = schedules({
+          boss,
+          queue: `scheduled-runtime-${crypto.randomUUID()}`,
+          reconciliationIntervalMs: 50,
+          transaction: (operation) =>
+            database.transaction((transaction) =>
+              operation(fromPglite(transaction)),
+            ),
+          workerOptions: { pollingIntervalSeconds: 0.5 },
+        });
+        return [scheduled];
+      },
+    });
+    assert.ok(scheduled);
+    const scheduleControl = scheduled;
+    await Promise.all([h.runtime.initialize(), h.runtime.initialize()]);
+    const cancelledTask = await scheduleControl.create('user-1', {
+      idempotencyKey: 'cancelled-task',
+      name: 'Cancelled task',
+      prompt: 'do not run',
+      recurrence: '0 9 * * 1',
+      timezone: 'Asia/Amman',
+      executionConfig: {},
+    });
+    const completedTask = await scheduleControl.create('user-1', {
+      idempotencyKey: 'completed-task',
+      name: 'Completed task',
+      prompt: 'prepare the report',
+      recurrence: '0 9 * * 1',
+      timezone: 'Asia/Amman',
+      executionConfig: {},
+    });
+    await using _worker = await h.runtime.work();
+
+    const cancelled = await scheduleControl.runNow(
+      'user-1',
+      cancelledTask.id,
+      'cancelled-run',
+    );
+    await timebox(
+      async () => {
+        assert.equal(
+          (await scheduleControl.getRun('user-1', cancelled.id)).status,
+          'running',
+        );
+      },
+      { maxRetryTime: 10_000, minTimeout: 25 },
+    );
+    assert.deepEqual(
+      await scheduleControl.cancelRun('user-1', cancelled.id),
+      await scheduleControl.cancelRun('user-1', cancelled.id),
+    );
+    assert.equal(
+      (await scheduleControl.getRun('user-1', cancelled.id)).status,
+      'cancelled',
+    );
+
+    const launched = await scheduleControl.runNow(
+      'user-1',
+      completedTask.id,
+      'completed-run',
+    );
+    assert.deepEqual(
+      await scheduleControl.runNow('user-1', completedTask.id, 'completed-run'),
+      launched,
+    );
+    const completed = await timebox(
+      async () => {
+        const execution = await scheduleControl.getRun('user-1', launched.id);
+        if (execution.status !== 'completed') {
+          throw new Error(`scheduled execution is ${execution.status}`);
+        }
+        return execution;
+      },
+      { maxRetryTime: 10_000, minTimeout: 25 },
+    );
+    assert.equal(completed.error, null);
+    assert.equal(
+      await h.runtime.sessionExists({
+        chatId: launched.id,
+        userId: 'user-1',
+      }),
+      true,
+    );
+    assert.deepEqual(track.calls, ['do not run', 'prepare the report']);
+  });
+
+  it('fails a scheduled task that requires interactive approval', async () => {
+    const { track, tools, model } = approvalSetup();
+    let scheduled: Schedules | undefined;
+    await using h = await harness(model, tools, {
+      plugins: ({ boss, database }) => {
+        scheduled = schedules({
+          boss,
+          queue: `scheduled-approval-${crypto.randomUUID()}`,
+          reconciliationIntervalMs: 50,
+          transaction: (operation) =>
+            database.transaction((transaction) =>
+              operation(fromPglite(transaction)),
+            ),
+          workerOptions: { pollingIntervalSeconds: 0.5 },
+        });
+        return [scheduled];
+      },
+    });
+    assert.ok(scheduled);
+    const scheduleControl = scheduled;
+    await h.runtime.initialize();
+    const task = await scheduleControl.create('user-1', {
+      idempotencyKey: 'approval-task',
+      name: 'Approval task',
+      prompt: 'send it',
+      recurrence: '0 9 * * 1',
+      timezone: 'Asia/Amman',
+      executionConfig: {},
+    });
+    await using _worker = await h.runtime.work();
+    const launched = await scheduleControl.runNow(
+      'user-1',
+      task.id,
+      'approval-run',
+    );
+    await waitForConversation(
+      h.runtime,
+      { chatId: launched.id, userId: 'user-1' },
+      (messages) =>
+        messages
+          .at(-1)
+          ?.parts.some(
+            (part) => isToolUIPart(part) && part.state === 'approval-requested',
+          ) ?? false,
+      'scheduled approval pause',
+    );
+
+    const failed = await timebox(
+      async () => {
+        const run = await scheduleControl.getRun('user-1', launched.id);
+        if (run.status !== 'failed') {
+          throw new Error(`scheduled execution is ${run.status}`);
+        }
+        return run;
+      },
+      { maxRetryTime: 10_000, minTimeout: 25 },
+    );
+    assert.equal(
+      failed.error,
+      'Scheduled execution requires interactive tool approval',
+    );
+    assert.equal(track.toolRuns, 0);
+  });
+
+  it('synchronizes a Markdown schedule and runs it as a fresh root task', async () => {
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-schedules-'),
+    );
+    const file = join(directory.path, 'monday-report.md');
+    await writeFile(
+      file,
+      `---
+name: Monday report
+cron: "0 9 * * 1"
+timezone: Asia/Amman
+---
+Prepare the engineering report.
+`,
+    );
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const source = scheduleFiles({
+      directory: directory.path,
+      ownerId: 'user-1',
+    });
+    let scheduled: Schedules | undefined;
+    await using h = await harness(scriptedModel(track), undefined, {
+      plugins: ({ boss, database }) => {
+        scheduled = schedules({
+          boss,
+          queue: `scheduled-files-${crypto.randomUUID()}`,
+          reconciliationIntervalMs: 50,
+          transaction: (operation) =>
+            database.transaction((transaction) =>
+              operation(fromPglite(transaction)),
+            ),
+          workerOptions: { pollingIntervalSeconds: 0.5 },
+          sources: [source],
+        });
+        return [scheduled];
+      },
+    });
+    assert.ok(scheduled);
+    const scheduleControl = scheduled;
+    await h.runtime.initialize();
+    const [task] = await scheduleControl.list('user-1');
+    assert.equal(task.name, 'Monday report');
+    assert.equal(task.recurrence, '0 9 * * 1');
+
+    await using _worker = await h.runtime.work();
+    const run = await scheduleControl.runNow('user-1', task.id, 'first-run');
+    await timebox(
+      async () => {
+        assert.equal(
+          (await scheduleControl.getRun('user-1', run.id)).status,
+          'completed',
+        );
+      },
+      { maxRetryTime: 10_000, minTimeout: 25 },
+    );
+    assert.deepEqual(track.calls, ['Prepare the engineering report.']);
+    assert.equal(
+      await h.runtime.sessionExists({ chatId: run.id, userId: 'user-1' }),
+      true,
+    );
+
+    await writeFile(
+      file,
+      `---
+cron: "30 10 * * 1"
+timezone: Asia/Amman
+---
+Prepare the updated report.
+`,
+    );
+    await source(scheduleControl);
+    const [updated] = await scheduleControl.list('user-1');
+    assert.equal(updated.id, task.id);
+    assert.equal(updated.name, 'monday-report');
+    assert.equal(updated.prompt, 'Prepare the updated report.');
+
+    await unlink(file);
+    await source(scheduleControl);
+    assert.equal(
+      (await scheduleControl.get('user-1', task.id)).status,
+      'paused',
+    );
+
+    await writeFile(
+      file,
+      `---
+cron: "30 10 * * 1"
+timezone: Asia/Amman
+---
+Prepare the updated report.
+`,
+    );
+    await source(scheduleControl);
+    assert.equal(
+      (await scheduleControl.get('user-1', task.id)).status,
+      'active',
+    );
+
+    await writeFile(
+      join(directory.path, 'invalid.md'),
+      `---
+cron: "0 9 * * 1"
+---
+Missing a timezone.
+`,
+    );
+    await assert.rejects(
+      source(scheduleControl),
+      /Invalid schedule declaration invalid\.md/,
+    );
+    assert.equal(
+      (await scheduleControl.get('user-1', task.id)).status,
+      'active',
+    );
+  });
+
+  it('blocks runtime initialization on an invalid schedule source', async () => {
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-invalid-schedules-'),
+    );
+    await writeFile(
+      join(directory.path, 'invalid.md'),
+      `---
+cron: "0 9 * * 1"
+---
+Missing a timezone.
+`,
+    );
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    let scheduled: Schedules | undefined;
+    await using h = await harness(scriptedModel(track), undefined, {
+      plugins: ({ boss, database }) => {
+        scheduled = schedules({
+          boss,
+          queue: `scheduled-invalid-${crypto.randomUUID()}`,
+          reconciliationIntervalMs: 50,
+          transaction: (operation) =>
+            database.transaction((transaction) =>
+              operation(fromPglite(transaction)),
+            ),
+          sources: [
+            scheduleFiles({ directory: directory.path, ownerId: 'user-1' }),
+          ],
+        });
+        return [scheduled];
+      },
+    });
+    assert.ok(scheduled);
+    await assert.rejects(
+      h.runtime.initialize(),
+      /Invalid schedule declaration invalid\.md/,
+    );
+    await assert.rejects(
+      h.runtime.work(),
+      /Invalid schedule declaration invalid\.md/,
+    );
+    assert.deepEqual(await scheduled.list('user-1'), []);
+    assert.deepEqual(track.calls, []);
   });
 });
 

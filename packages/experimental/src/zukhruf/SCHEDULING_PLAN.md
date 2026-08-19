@@ -409,8 +409,8 @@ nx run @deepagents/experimental:test
 - [x] Prove one catch-up after downtime, successor re-arming, seven-day expiry, and cleanup of spent
       wake receipts.
 - [x] Update `DESIGN.md`, package exports, and demo wiring examples to reflect the implemented status.
-- [x] Leave `schedules/` declaration directories unwired; these tools are runtime capabilities, not
-      immutable agent declarations.
+- [x] Leave `schedules/` directories out of the conversation-local tool slice; the later standalone
+      Scheduled Tasks control plane owns file declarations without changing these runtime tools.
 
 #### Verification
 
