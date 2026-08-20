@@ -1,15 +1,15 @@
 {
   "name": "@deepagents/demo-microsandbox-text2sql",
-  "version": "6.1.2",
+  "version": "6.2.0",
   "private": true,
   "type": "module",
   "description": "Host entrypoint for the text2sql demo on a microsandbox microVM. Boots the shared text2sql-daemon image locally — no daemon service, no API key.",
   "dependencies": {
     "@ai-sdk/openai": "^4.0.41",
-    "@deepagents/agent": "6.1.2",
-    "@deepagents/context": "6.1.2",
-    "@deepagents/demo-text2sql-daemon": "6.1.2",
-    "@deepagents/text2sql": "6.1.2",
+    "@deepagents/agent": "6.2.0",
+    "@deepagents/context": "6.2.0",
+    "@deepagents/demo-text2sql-daemon": "6.2.0",
+    "@deepagents/text2sql": "6.2.0",
     "microsandbox": "^0.6.7",
     "nano-spawn": "^2.1.0"
   }
