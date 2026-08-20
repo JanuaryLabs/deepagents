@@ -18,11 +18,14 @@ export function withHostOnlyToolMetadata<TOOLS extends ToolSet>(
     wrapped[name] =
       tool.toModelOutput !== undefined
         ? tool
-        : {
-            ...tool,
-            toModelOutput: ({ output }: { output: unknown }) =>
-              defaultToolModelOutput(output),
-          };
+        : Object.defineProperties(
+            {
+              ...tool,
+              toModelOutput: ({ output }: { output: unknown }) =>
+                defaultToolModelOutput(output),
+            },
+            Object.getOwnPropertyDescriptors(tool),
+          );
   }
   return wrapped as ToolSetWithModelOutput<TOOLS>;
 }

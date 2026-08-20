@@ -33,9 +33,8 @@ export interface MultiAgentHostConfig {
   /** Native OpenAI Responses namespace for the six collaboration tools. */
   toolNamespace?: string;
   /**
-   * Keeps collaboration tools on the direct model surface instead of a nested
-   * code-mode executor. Defaults to true. Zukhruf currently rejects false
-   * because it has no nested code-mode executor in which to expose the tools.
+   * Keeps collaboration tools on the direct model surface. Set false to expose
+   * them through AI SDK code mode. Defaults to true.
    */
   nonCodeModeOnly?: boolean;
 }
@@ -48,6 +47,7 @@ export interface ResolvedMultiAgentHostConfig {
   rootAgentUsageHintText?: string;
   subagentUsageHintText?: string;
   toolNamespace?: string;
+  codeMode: boolean;
 }
 
 export function resolveMultiAgentHostConfig(
@@ -89,13 +89,13 @@ export function resolveMultiAgentHostConfig(
   }
   if (toolNamespace !== undefined) validateToolNamespace(toolNamespace);
 
-  if (input.nonCodeModeOnly === false) {
-    throw new Error(
-      'AgentRuntime: multiAgent.nonCodeModeOnly=false requires a nested code-mode executor, which Zukhruf does not provide',
-    );
-  }
+  const codeMode = input.nonCodeModeOnly === false;
   const tool = (name: string) =>
-    toolNamespace === undefined ? name : `${toolNamespace}.${name}`;
+    codeMode
+      ? `tools.${name}`
+      : toolNamespace === undefined
+        ? name
+        : `${toolNamespace}.${name}`;
   const collaborationTools = [
     'spawn_agent',
     'send_message',
@@ -106,7 +106,11 @@ export function resolveMultiAgentHostConfig(
   ]
     .map((name) => `\`${tool(name)}\``)
     .join(', ');
-  const shared = `Call ${collaborationTools} directly. They are intentionally unavailable inside nested code execution.
+  const shared = codeMode
+    ? `Call ${collaborationTools} from \`code_mode\`.
+
+All agents share the same workspace, current working directory, and filesystem.`
+    : `Call ${collaborationTools} directly. They are intentionally unavailable inside nested code execution.
 
 All agents share the same workspace, current working directory, and filesystem.`;
 
@@ -124,6 +128,7 @@ All agents share the same workspace, current working directory, and filesystem.`
         ? defaultSubagentUsageHint(tool, shared)
         : nonEmptyText(input.subagentUsageHintText),
     toolNamespace,
+    codeMode,
   };
 }
 

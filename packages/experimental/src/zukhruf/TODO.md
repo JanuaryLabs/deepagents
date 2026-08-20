@@ -128,13 +128,12 @@
       targets no-op; no broader close/resume/shutdown lifecycle was added.
 - [x] Port Codex host configuration for separate root/subagent guidance, spawn usage text,
       validated OpenAI Responses tool namespaces, and wait bounds. Keep collaboration tools on the
-      direct model surface when `nonCodeModeOnly` is true.
+      direct model surface when `nonCodeModeOnly` is true and expose them through native AI SDK
+      code mode when false.
 - [ ] Add explicit spawn-context contracts for dedicated subagent developer instructions and the
       current turn's host execution context/environment. Reuse existing Zukhruf declaration,
       instruction-fragment, sandbox, and fork-snapshot primitives; do not copy Codex's Rust
       `TurnContext` representation.
-- [ ] Add a nested code-mode executor before accepting `nonCodeModeOnly: false`; current Zukhruf has
-      no `functions.exec`-equivalent surface, so the unsupported value fails explicitly.
 - [x] Match the implemented Codex collaboration output/status contracts: canonical
       `{task_name}` spawn output, empty send/follow-up success text, strict list/wait/interrupt
       output schemas, approval pauses as `running`, and missing interrupt targets as `not_found`.

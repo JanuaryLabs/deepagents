@@ -394,9 +394,8 @@ instead of introducing a Runner or separate thread database:
   subagent developer instruction and inherits the spawning turn's ready-step environment. Zukhruf
   does not yet expose equivalents; they are tracked in TODO.md.
 - Collaboration tools are direct-model-only by default, matching Codex's
-  `non_code_mode_only = true`. Zukhruf does not have a nested code-mode executor, so
-  `nonCodeModeOnly: false` fails explicitly instead of pretending the tools are reachable from an
-  execution surface that does not exist.
+  `non_code_mode_only = true`. Setting `nonCodeModeOnly: false` exposes them through the AI SDK's
+  provider-agnostic code-mode tool and removes them from the direct model surface.
 - `new AgentRuntime(root, options)` recursively compiles declarations by unique canonical names
   without surrounding whitespace. Each worker turn loads the chat's reserved Zukhruf metadata and
   selects the matching declaration.

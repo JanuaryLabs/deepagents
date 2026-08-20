@@ -2,6 +2,9 @@ import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
+import { mkdtempDisposable, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -24,6 +27,7 @@ import {
   createInterAgentCommunication,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
@@ -469,6 +473,79 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
   assert.doesNotMatch(serialized, /agent_path/);
 });
 
+test('file-loaded subagent uses AI SDK code mode collaboration', async (t) => {
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), 'zukhruf-code-mode-'),
+  );
+  await writeFile(
+    join(directory.path, 'reviewer.md'),
+    `---\nname: reviewer\ndescription: Reviews the current change.\n---\n\nReview the implementation.\n`,
+  );
+
+  const h = harness(t);
+  const requests: Array<{ prompt: unknown; tools: unknown }> = [];
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt, tools }) => {
+      requests.push({ prompt, tools });
+      if (requests.length === 1) {
+        return toolCallResponse('code_mode', {
+          js: `return await tools.spawn_agent({ agent_type: 'reviewer', task_name: 'review', message: 'Review the implementation.', fork_turns: 'none' });`,
+        });
+      }
+      if (requests.length === 3) {
+        return toolCallResponse('code_mode', {
+          js: `return await tools.list_agents({});`,
+        });
+      }
+      return textResponse('done');
+    },
+  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model,
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      multiAgent: { nonCodeModeOnly: false },
+      plugins: [fileAgents({ directory: directory.path })],
+    },
+  );
+
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    { id: 'root-turn', input: 'Delegate the review.' },
+  );
+  await using worker = await runtime.work();
+  void worker;
+  await h.queue.runNext();
+  await h.queue.runNext();
+
+  assert.equal(requests.length, 4);
+  assert.deepEqual(
+    functionTools(requests[0]?.tools).map(({ name }) => name),
+    ['code_mode'],
+  );
+  assert.deepEqual(
+    functionTools(requests[2]?.tools).map(({ name }) => name),
+    ['code_mode'],
+  );
+  assert.match(
+    JSON.stringify(requests[1]?.prompt),
+    /"task_name":"\/root\/review"/,
+  );
+  assert.match(
+    JSON.stringify(requests[2]?.prompt),
+    /Review the implementation\./,
+  );
+  assert.match(
+    JSON.stringify(requests[3]?.prompt),
+    /"agent_name":"\/root\/review"/,
+  );
+});
+
 test('interrupt_agent reports not_found for a missing target', async (t) => {
   const h = harness(t);
   let calls = 0;
@@ -536,14 +613,6 @@ test('host config rejects invalid namespaces and wait bounds', () => {
           multiAgent: { toolNamespace: ' agents ' },
         }),
       /cannot be empty or padded/,
-    );
-    assert.throws(
-      () =>
-        new AgentRuntime(declaration, {
-          ...h,
-          multiAgent: { nonCodeModeOnly: false },
-        }),
-      /requires a nested code-mode executor/,
     );
     assert.throws(
       () =>

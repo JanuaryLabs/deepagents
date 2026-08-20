@@ -106,6 +106,9 @@ export interface CreateAgent<TOOLS extends ToolSet = {}> {
   telemetry?: Parameters<
     typeof generateText<AgentModelTools<TOOLS>>
   >[0]['telemetry'];
+  experimental_toolCallers?: Parameters<
+    typeof generateText<AgentModelTools<TOOLS>>
+  >[0]['experimental_toolCallers'];
   /**
    * Ends the agent loop. Defaults to {@link DEFAULT_STOP_WHEN}. Raise it for a
    * long agentic run that would otherwise stop mid-task; lower it to bound cost
@@ -189,6 +192,7 @@ class Agent<TOOLS extends ToolSet> {
       }),
       tools: this.tools,
       toolsContext: options?.toolsContext,
+      experimental_toolCallers: this.#options.experimental_toolCallers,
       repairToolCall: createRepairToolCall(
         this.#options.model,
         options?.abortSignal,
@@ -289,8 +293,9 @@ class Agent<TOOLS extends ToolSet> {
         context.createPrepareStep({ sandbox: this.#options.sandbox }),
       experimental_transform: config?.transform ?? smoothStream(),
       tools: this.tools,
-      // Generic wrappers cannot reduce AI SDK's conditional ToolsContextParameter.
+      // Generic wrappers cannot reduce AI SDK's conditional context or caller maps.
       toolsContext: toolsContext as never,
+      experimental_toolCallers: this.#options.experimental_toolCallers as never,
       toolChoice: this.#options.toolChoice,
     });
   }

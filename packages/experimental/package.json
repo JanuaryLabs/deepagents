@@ -53,8 +53,9 @@
     "access": "public"
   },
   "dependencies": {
+    "@ai-sdk/code-mode": "^1.0.27",
     "@deepagents/context": "6.2.0",
-    "ai": "^7.0.64",
+    "ai": "^7.0.70",
     "cron-parser": "5.6.2",
     "cronstrue": "^3.24.0",
     "fast-content-type-parse": "^3.0.0",

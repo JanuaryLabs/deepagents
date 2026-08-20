@@ -55,7 +55,6 @@ function configureTool<TOOL extends Tool>(
       ...collaborationTool.metadata,
       zukhruf: {
         kind: 'collaboration',
-        codeModeExposure: 'direct-model-only',
       },
     },
   };

@@ -1,3 +1,4 @@
+import { experimental_codeModeTool } from '@ai-sdk/code-mode';
 import type { UIMessage } from 'ai';
 
 import {
@@ -168,10 +169,23 @@ export class AgentTurnExecutor {
       context: engine,
       telemetry: declaration.telemetry,
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),
+      ...(this.#multiAgent.codeMode
+        ? {
+            experimental_toolCallers: Object.fromEntries(
+              Object.keys(this.#collaborationTools).map((name) => [
+                name,
+                ['code_mode'] as const,
+              ]),
+            ),
+          }
+        : {}),
     };
     const modelTools = {
       ...declaration.tools,
       ...this.#collaborationTools,
+      ...(this.#multiAgent.codeMode
+        ? { code_mode: experimental_codeModeTool() }
+        : {}),
     };
     const collaborationToolsContext = {
       spawn_agent: agentContext,
@@ -180,6 +194,7 @@ export class AgentTurnExecutor {
       list_agents: agentContext,
       wait_agent: agentContext,
       interrupt_agent: agentContext,
+      ...(this.#multiAgent.codeMode ? { code_mode: agentContext } : {}),
     };
 
     const abort = new AbortController();
