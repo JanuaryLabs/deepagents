@@ -11,6 +11,7 @@
     "src/**/*.spec.ts",
     "src/**/*.contract.ts",
     "src/**/*.fixture.ts",
+    "global-setup.ts",
     "../../global.d.ts"
   ],
   "references": [

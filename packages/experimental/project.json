@@ -22,7 +22,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/experimental.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/experimental.xml --test-force-exit"
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/experimental.xml --test-global-setup=global-setup.ts --test-force-exit"
       }
     }
   }
