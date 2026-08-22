@@ -18,7 +18,16 @@ import {
 export * from './schedule-files.ts';
 export * from './scheduled-tasks.ts';
 
-type ExecutionConfig = Record<string, never>;
+export type ScheduleTarget =
+  | { kind: 'new-conversation' }
+  | { kind: 'existing-conversation'; chatId: string };
+
+export interface ScheduleExecutionConfig {
+  /** Omit to run each occurrence in its own fresh conversation. */
+  target?: ScheduleTarget;
+}
+
+type ExecutionConfig = ScheduleExecutionConfig;
 
 export type ScheduleControl = Pick<
   ScheduledTasks<ExecutionConfig>,
@@ -50,7 +59,7 @@ export interface SchedulesOptions extends Omit<
 
 export type Schedules = AgentRuntimePlugin & ScheduleControl;
 
-/** Install durable standalone schedules into one AgentRuntime. */
+/** Install durable schedules that run in fresh or existing conversations. */
 export function schedules(options: SchedulesOptions): Schedules {
   return new SchedulesPlugin(options);
 }
@@ -96,11 +105,13 @@ class SchedulesPlugin implements Schedules {
     return this.#scheduled.work(this.#workerOptions);
   }
 
-  create(
+  async create(
     ownerId: string,
     input: CreateScheduledTaskInput<ExecutionConfig>,
   ): Promise<ScheduledTask<ExecutionConfig>> {
-    return this.#scheduled.create(ownerId, input);
+    const executionConfig = normalizeExecutionConfig(input.executionConfig);
+    await this.#assertTarget(ownerId, executionConfig);
+    return this.#scheduled.create(ownerId, { ...input, executionConfig });
   }
 
   get(
@@ -142,12 +153,20 @@ class SchedulesPlugin implements Schedules {
     return this.#scheduled.resume(ownerId, taskId);
   }
 
-  update(
+  async update(
     ownerId: string,
     taskId: string,
     input: UpdateScheduledTaskInput<ExecutionConfig>,
   ): Promise<ScheduledTask<ExecutionConfig>> {
-    return this.#scheduled.update(ownerId, taskId, input);
+    if (input.executionConfig === undefined) {
+      return this.#scheduled.update(ownerId, taskId, input);
+    }
+    const executionConfig = normalizeExecutionConfig(input.executionConfig);
+    await this.#assertTarget(ownerId, executionConfig);
+    return this.#scheduled.update(ownerId, taskId, {
+      ...input,
+      executionConfig,
+    });
   }
 
   runNow(
@@ -200,31 +219,45 @@ class SchedulesPlugin implements Schedules {
     runId,
     ownerId,
     prompt,
+    executionConfig,
   }: {
     runId: string;
     ownerId: string;
     prompt: string;
     executionConfig: ExecutionConfig;
   }): Promise<{ executionId: string }> {
-    await this.#requiredHost().enqueue(
-      { chatId: runId, userId: ownerId },
-      { id: runId, input: prompt },
-    );
-    return { executionId: runId };
+    const host = this.#requiredHost();
+    const conversation = executionConversation(runId, ownerId, executionConfig);
+    if (
+      executionConfig.target?.kind === 'existing-conversation' &&
+      !(await host.conversationExists(conversation))
+    ) {
+      throw new Error(
+        `Scheduled target conversation "${conversation.chatId}" was not found`,
+      );
+    }
+    const execution = await host.enqueue(conversation, {
+      id: runId,
+      input: prompt,
+    });
+    return { executionId: execution.id };
   }
 
   async #inspect({
+    runId,
     ownerId,
     executionId,
+    executionConfig,
   }: {
+    runId: string;
     ownerId: string;
     executionId: string;
+    executionConfig: ExecutionConfig;
   }): Promise<ScheduledExecutionObservation> {
-    const observation = this.#requiredHost().observe({
-      chatId: executionId,
-      userId: ownerId,
-    });
-    const execution = await observation.status();
+    const observation = this.#requiredHost().observe(
+      executionConversation(runId, ownerId, executionConfig),
+    );
+    const execution = await observation.status(executionId);
     if (!execution) {
       throw new Error(`Scheduled execution "${executionId}" was not found`);
     }
@@ -239,7 +272,10 @@ class SchedulesPlugin implements Schedules {
     if (
       execution.status === 'completed' &&
       (await observation.engine.getMessages())
-        .at(-1)
+        .find(
+          (message) =>
+            message.role === 'assistant' && message.id === executionId,
+        )
         ?.parts.some(
           (part) => isToolUIPart(part) && part.state === 'approval-requested',
         )
@@ -264,19 +300,72 @@ class SchedulesPlugin implements Schedules {
   }
 
   async #cancel({
+    runId,
     ownerId,
     executionId,
+    executionConfig,
   }: {
+    runId: string;
     ownerId: string;
     executionId: string;
+    executionConfig: ExecutionConfig;
   }): Promise<void> {
     await this.#requiredHost()
-      .observe({ chatId: executionId, userId: ownerId })
-      .cancel();
+      .observe(executionConversation(runId, ownerId, executionConfig))
+      .cancel(executionId);
+  }
+
+  async #assertTarget(
+    ownerId: string,
+    executionConfig: ExecutionConfig,
+  ): Promise<void> {
+    if (executionConfig.target?.kind !== 'existing-conversation') return;
+    const conversation = {
+      chatId: executionConfig.target.chatId,
+      userId: ownerId,
+    };
+    if (await this.#requiredHost().conversationExists(conversation)) return;
+    throw new Error(
+      `Scheduled target conversation "${conversation.chatId}" was not found`,
+    );
   }
 
   #requiredHost(): AgentPluginHost {
     if (!this.#host) throw new Error('schedules plugin is not initialized');
     return this.#host;
   }
+}
+
+function executionConversation(
+  runId: string,
+  ownerId: string,
+  executionConfig: ExecutionConfig,
+) {
+  const normalized = normalizeExecutionConfig(executionConfig);
+  return {
+    chatId:
+      normalized.target?.kind === 'existing-conversation'
+        ? normalized.target.chatId
+        : runId,
+    userId: ownerId,
+  };
+}
+
+function normalizeExecutionConfig(
+  value: ScheduleExecutionConfig,
+): ScheduleExecutionConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Schedule execution config must be an object');
+  }
+  if (Object.keys(value).some((key) => key !== 'target')) {
+    throw new Error('Schedule execution config contains an unknown field');
+  }
+  const { target } = value;
+  if (!target || target.kind === 'new-conversation') return {};
+  if (target.kind !== 'existing-conversation') {
+    throw new Error('Schedule target kind is invalid');
+  }
+  const chatId = target.chatId.trim();
+  if (!chatId) throw new Error('Schedule target chatId cannot be empty');
+  return { target: { kind: 'existing-conversation', chatId } };
 }

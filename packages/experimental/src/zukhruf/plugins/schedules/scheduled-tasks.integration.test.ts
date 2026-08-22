@@ -77,15 +77,22 @@ class TestExecutor {
   }
 
   async inspect(input: {
+    runId: string;
     ownerId: string;
     executionId: string;
+    executionConfig: TestExecutionConfig;
   }): Promise<ExecutionState> {
     const execution = this.executions.get(input.executionId);
     if (!execution) throw new Error(`missing execution ${input.executionId}`);
     return execution.state;
   }
 
-  async cancel(input: { ownerId: string; executionId: string }): Promise<void> {
+  async cancel(input: {
+    runId: string;
+    ownerId: string;
+    executionId: string;
+    executionConfig: TestExecutionConfig;
+  }): Promise<void> {
     const execution = this.executions.get(input.executionId);
     if (!execution || isTerminal(execution.state.status)) return;
     execution.state = {

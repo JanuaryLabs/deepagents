@@ -625,6 +625,76 @@ describe('zukhruf runtime — host sessions', () => {
     );
   });
 
+  it('runs a scheduled prompt in an existing conversation', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    let scheduled: Schedules | undefined;
+    await using h = await harness(scriptedModel(track), undefined, {
+      plugins: ({ boss, database }) => {
+        scheduled = schedules({
+          boss,
+          queue: `scheduled-existing-${crypto.randomUUID()}`,
+          reconciliationIntervalMs: 50,
+          transaction: (operation) =>
+            database.transaction((transaction) =>
+              operation(fromPglite(transaction)),
+            ),
+          workerOptions: { pollingIntervalSeconds: 0.5 },
+        });
+        return [scheduled];
+      },
+    });
+    assert.ok(scheduled);
+    const scheduleControl = scheduled;
+    const conversation = { chatId: 'existing-chat', userId: 'user-1' };
+    await using _worker = await h.runtime.work();
+    await collectText(
+      (
+        await h.runtime.enqueue(conversation, {
+          id: 'existing-turn',
+          input: 'existing context',
+        })
+      ).stream,
+    );
+    const task = await scheduleControl.create('user-1', {
+      idempotencyKey: 'existing-conversation-task',
+      name: 'Existing conversation task',
+      prompt: 'scheduled follow-up',
+      recurrence: '0 9 * * 1',
+      timezone: 'Asia/Amman',
+      executionConfig: {
+        target: { kind: 'existing-conversation', chatId: conversation.chatId },
+      },
+    });
+
+    const launched = await scheduleControl.runNow(
+      'user-1',
+      task.id,
+      'existing-conversation-run',
+    );
+    await timebox(
+      async () => {
+        assert.equal(
+          (await scheduleControl.getRun('user-1', launched.id)).status,
+          'completed',
+        );
+      },
+      { maxRetryTime: 10_000, minTimeout: 25 },
+    );
+
+    assert.deepEqual(track.calls, ['existing context', 'scheduled follow-up']);
+    assert.equal(
+      await h.runtime.sessionExists({
+        chatId: launched.id,
+        userId: 'user-1',
+      }),
+      false,
+    );
+    assert.equal(
+      (await h.runtime.observe(conversation).engine.getMessages()).length,
+      4,
+    );
+  });
+
   it('fails a scheduled task that requires interactive approval', async () => {
     const { track, tools, model } = approvalSetup();
     let scheduled: Schedules | undefined;

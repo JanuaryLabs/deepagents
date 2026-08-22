@@ -48,6 +48,7 @@ export interface AgentPluginHost {
     conversation: ConversationId,
     turn: TurnInput,
   ): Promise<{ id: string; stream: ReadableStream<StreamPart> }>;
+  conversationExists(conversation: ConversationId): Promise<boolean>;
   isConversationAvailable(conversation: ConversationId): Promise<boolean>;
   readConversationMetadata(
     conversation: ConversationId,
@@ -348,6 +349,8 @@ export class AgentRuntime {
     });
     this.#pluginHost = {
       enqueue: (conversation, turn) => this.enqueue(conversation, turn),
+      conversationExists: async (conversation) =>
+        Boolean(await this.#directory.load(conversation)),
       isConversationAvailable: (conversation) =>
         this.#isConversationAvailable(conversation),
       readConversationMetadata: (conversation) =>

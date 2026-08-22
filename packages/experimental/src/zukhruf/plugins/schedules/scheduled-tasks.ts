@@ -143,11 +143,18 @@ export interface ScheduledExecutionAdapter<ExecutionConfig extends object> {
     executionConfig: ExecutionConfig;
   }): Promise<{ executionId: string }>;
   inspect(input: {
+    runId: string;
     ownerId: string;
     executionId: string;
+    executionConfig: ExecutionConfig;
   }): Promise<ScheduledExecutionObservation>;
   /** Cancellation must be safe to repeat. */
-  cancel(input: { ownerId: string; executionId: string }): Promise<void>;
+  cancel(input: {
+    runId: string;
+    ownerId: string;
+    executionId: string;
+    executionConfig: ExecutionConfig;
+  }): Promise<void>;
 }
 
 export interface CreateScheduledTaskInput<ExecutionConfig extends object> {
@@ -697,8 +704,10 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       throw new Error(`Scheduled Run "${run.id}" has no external execution`);
     }
     await this.#executor.cancel({
+      runId: run.id,
       ownerId: run.ownerId,
       executionId: run.externalExecutionId,
+      executionConfig: run.executionConfig,
     });
     return this.#transaction(async (database) => {
       const current = await this.#requiredRun(database, ownerId, runId, true);
@@ -918,7 +927,12 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       return true;
     });
     if (!bound) {
-      await this.#executor.cancel({ ownerId: run.ownerId, executionId });
+      await this.#executor.cancel({
+        runId: run.id,
+        ownerId: run.ownerId,
+        executionId,
+        executionConfig: run.executionConfig,
+      });
     }
   }
 
@@ -944,8 +958,10 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     let observed: ScheduledExecutionObservation;
     try {
       observed = await this.#executor.inspect({
+        runId: run.id,
         ownerId: run.ownerId,
         executionId: row.external_execution_id,
+        executionConfig: run.executionConfig,
       });
     } catch (error) {
       if (job.retryCount < job.retryLimit) throw error;
