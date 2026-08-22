@@ -15,6 +15,7 @@ import { AgentDeclarationRegistry } from '../control-plane/agent-declaration-reg
 import { AgentDirectory } from '../control-plane/agent-directory.ts';
 import { AgentHistoryForker } from '../control-plane/agent-history-forker.ts';
 import { AgentStatusProjector } from '../control-plane/agent-status-projector.ts';
+import { AgentThread } from '../control-plane/agent-thread.ts';
 import { AgentTurnId } from '../control-plane/agent-turn-id.ts';
 import { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type { MailboxStore } from '../mailbox/store.ts';
@@ -41,10 +42,13 @@ export interface AgentPluginHost {
     conversation: ConversationId,
     turn: TurnInput,
   ): Promise<{ id: string; stream: ReadableStream<StreamPart> }>;
+  listHistory(): Promise<readonly AgentHistoryItem[]>;
   observe(conversation: ConversationId): AgentObservation;
 }
 
 export interface AgentRuntimePlugin {
+  /** Static namespaced context merged into every model call made by this runtime. */
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   configure?(root: AgentDeclaration): AgentDeclaration;
   initialize?(host: AgentPluginHost): Promise<void>;
   work?(host: AgentPluginHost): Promise<AsyncDisposable>;
@@ -82,6 +86,16 @@ export interface AgentRuntimeInfo {
     readonly tools: readonly string[];
     readonly subagents: readonly string[];
   }[];
+}
+
+export interface AgentHistoryItem {
+  readonly chatId: string;
+  readonly userId: string;
+  readonly title?: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly messageCount: number;
+  readonly status: StreamStatus | 'idle';
 }
 
 export interface AgentTurnStatus {
@@ -279,9 +293,14 @@ export class AgentRuntime {
       approvals,
       multiAgent,
       scheduling,
+      pluginRuntimeContext: Object.assign(
+        {},
+        ...plugins.map(({ runtimeContext }) => runtimeContext ?? {}),
+      ),
     });
     this.#pluginHost = {
       enqueue: (conversation, turn) => this.enqueue(conversation, turn),
+      listHistory: () => this.#listHistory(),
       observe: (conversation) => this.observe(conversation),
     };
   }
@@ -332,6 +351,40 @@ export class AgentRuntime {
       this.#streams,
       this.#queue,
       this.#scheduling,
+    );
+  }
+
+  async #listHistory(): Promise<readonly AgentHistoryItem[]> {
+    const chats = await this.#store.listChats();
+    const roots = chats.flatMap((chat) => {
+      const conversation = { chatId: chat.id, userId: chat.userId };
+      const thread = AgentThread.fromMetadata(conversation, chat.metadata);
+      if (!thread) {
+        if (AgentThread.hasReservedMetadata(chat.metadata)) {
+          throw new Error(`invalid Zukhruf metadata for chat "${chat.id}"`);
+        }
+        return [];
+      }
+      return thread.path.isRoot && thread.declarationName === this.info.root
+        ? [{ chat, thread }]
+        : [];
+    });
+
+    return Promise.all(
+      roots.map(async ({ chat, thread }) => {
+        const stream = thread.lastTurnId
+          ? await this.#streams.store.getStream(thread.lastTurnId)
+          : undefined;
+        return {
+          chatId: chat.id,
+          userId: chat.userId,
+          ...(chat.title === undefined ? {} : { title: chat.title }),
+          createdAt: chat.createdAt,
+          updatedAt: chat.updatedAt,
+          messageCount: chat.messageCount,
+          status: stream?.status ?? 'idle',
+        };
+      }),
     );
   }
 

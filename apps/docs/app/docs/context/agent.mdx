@@ -229,10 +229,10 @@ console.log(result.text);
 
 `generate()` accepts one options object:
 
-| Argument             | Type                  | Description                                      |
-| -------------------- | --------------------- | ------------------------------------------------ |
+| Argument       | Type                  | Description                                                    |
+| -------------- | --------------------- | -------------------------------------------------------------- |
 | `toolsContext` | `InferToolSetContext` | Required only when a tool declares context; keyed by tool name |
-| `abortSignal`  | `AbortSignal`         | Cancel the request                                          |
+| `abortSignal`  | `AbortSignal`         | Cancel the request                                             |
 
 `abortSignal` is forwarded to the model call and any tool-call repair attempt, so cancellation stops the full request instead of only the outer wrapper.
 
@@ -255,8 +255,8 @@ for await (const part of stream.toUIMessageStream()) {
 
 `stream()` accepts one options object:
 
-| Argument             | Type                                           | Description                                             |
-| -------------------- | ---------------------------------------------- | ------------------------------------------------------- |
+| Argument       | Type                                           | Description                                             |
+| -------------- | ---------------------------------------------- | ------------------------------------------------------- |
 | `toolsContext` | `InferToolSetContext`                          | Required only when a tool declares context              |
 | `abortSignal`  | `AbortSignal`                                  | Cancel the request                                      |
 | `transform`    | `StreamTextTransform \| StreamTextTransform[]` | Custom stream transforms (defaults to `smoothStream()`) |

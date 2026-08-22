@@ -117,9 +117,13 @@ recurring work launched into fresh root tasks),
 [`demo/zukhruf-group-chat`](../../demo/zukhruf-group-chat) (managed group-chat
 orchestration over a shared transcript),
 [`demo/zukhruf-whatsapp`](../../demo/zukhruf-whatsapp) (manager-free group
-notifications where specialists volunteer public replies), and
+notifications where specialists volunteer public replies),
 [`demo/zukhruf-dynamic-subagents`](../../demo/zukhruf-dynamic-subagents)
 (Markdown root agent, Markdown subagents, and a mounted skill discovered at
-startup).
+startup), and [`demo/wasm-render`](../../demo/wasm-render) (a durable Zukhruf
+coding agent for the terminal-bench wasm-render challenge).
 `spawn_agent` can fork all parent turns, no parent turns, or a bounded number of
 recent user-turn boundaries into a child chat through its `fork_turns` input.
+Collaboration tools stay on the direct model surface by default; set
+`multiAgent.nonCodeModeOnly: false` to expose them through AI SDK code mode
+instead.

@@ -50,9 +50,9 @@ async function chat<TOOLS extends ToolSet>(
 
 The return value is a `ReadableStream` produced by the AI SDK's `createUIMessageStream()`. It emits structured chunks (`text-delta`, `tool-call`, `data-chat-title`, etc.) that UI frameworks consume directly.
 
-| Argument  | Type                        | Description                                                                              |
-| --------- | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and optionally `model` |
+| Argument  | Type                   | Description                                                                        |
+| --------- | ---------------------- | ---------------------------------------------------------------------------------- |
+| `agent`   | `ChatAgentLike<TOOLS>` | An object with `stream()`, `context`, and optionally `model`                       |
 | `options` | `ChatOptions<TOOLS>`   | Optional tool contexts, title, transform, error-handling, and metadata configuration |
 
 The function throws if:

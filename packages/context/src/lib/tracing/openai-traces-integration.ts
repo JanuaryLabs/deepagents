@@ -156,7 +156,7 @@ export function createOpenAITracesIntegration(
             active_tools: event.activeTools,
             provider_options: event.providerOptions,
           }),
-          ...(includeSensitive
+          ...(includeSensitive && event.recordInputs !== false
             ? { input: normalizeRecordArray(event.messages) }
             : {}),
         } satisfies GenerationSpanData,
@@ -183,7 +183,7 @@ export function createOpenAITracesIntegration(
         span_data: {
           type: 'function',
           name: event.toolCall.toolName,
-          ...(includeSensitive
+          ...(includeSensitive && event.recordInputs !== false
             ? {
                 input: normalizeForJson(event.toolCall.input),
               }
@@ -223,7 +223,7 @@ export function createOpenAITracesIntegration(
 
       const data = span.span_data as FunctionSpanData;
       if (event.toolOutput.type === 'tool-result') {
-        if (includeSensitive) {
+        if (includeSensitive && event.recordOutputs !== false) {
           data.output = normalizeForJson(event.toolOutput.output);
         }
       } else {
@@ -252,7 +252,7 @@ export function createOpenAITracesIntegration(
       span.ended_at = now();
 
       const data = span.span_data as GenerationSpanData;
-      if (includeSensitive) {
+      if (includeSensitive && event.recordOutputs !== false) {
         data.output = normalizeRecordArray(event.response.messages);
       }
       data.usage = normalizeUsage(event.usage);

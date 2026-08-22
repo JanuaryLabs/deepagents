@@ -106,6 +106,9 @@ export interface CreateAgent<TOOLS extends ToolSet = {}> {
   telemetry?: Parameters<
     typeof generateText<AgentModelTools<TOOLS>>
   >[0]['telemetry'];
+  runtimeContext?: Parameters<
+    typeof generateText<AgentModelTools<TOOLS>>
+  >[0]['runtimeContext'];
   experimental_toolCallers?: Parameters<
     typeof generateText<AgentModelTools<TOOLS>>
   >[0]['experimental_toolCallers'];
@@ -179,6 +182,7 @@ class Agent<TOOLS extends ToolSet> {
       abortSignal: options?.abortSignal,
       providerOptions: this.#options.providerOptions,
       telemetry: this.#options.telemetry,
+      runtimeContext: this.#options.runtimeContext,
       model: this.#options.model,
       instructions: systemPrompt,
       messages: await convertToModelMessages(messages as never, {
@@ -280,6 +284,7 @@ class Agent<TOOLS extends ToolSet> {
       abortSignal: config?.abortSignal,
       providerOptions: this.#options.providerOptions,
       telemetry: this.#options.telemetry,
+      runtimeContext: this.#options.runtimeContext,
       model,
       instructions: systemPrompt,
       messages: await convertToModelMessages(messages as never, {

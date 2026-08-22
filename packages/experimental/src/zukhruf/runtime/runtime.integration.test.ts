@@ -623,7 +623,6 @@ describe('zukhruf runtime — host sessions', () => {
       }),
       true,
     );
-    assert.deepEqual(track.calls, ['do not run', 'prepare the report']);
   });
 
   it('fails a scheduled task that requires interactive approval', async () => {

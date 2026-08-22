@@ -44,6 +44,7 @@ export interface AgentTurnExecutorOptions {
   approvals: ApprovalController;
   multiAgent: ResolvedMultiAgentHostConfig;
   scheduling?: ConversationScheduler;
+  pluginRuntimeContext?: Readonly<Record<string, unknown>>;
 }
 
 interface SamplingMailboxState {
@@ -60,6 +61,7 @@ export class AgentTurnExecutor {
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
   readonly #scheduling?: ConversationScheduler;
+  readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -70,6 +72,7 @@ export class AgentTurnExecutor {
     this.#multiAgent = options.multiAgent;
     this.#collaborationTools = createCollaborationTools(options.multiAgent);
     this.#scheduling = options.scheduling;
+    this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
@@ -168,6 +171,16 @@ export class AgentTurnExecutor {
       sandbox,
       context: engine,
       telemetry: declaration.telemetry,
+      runtimeContext: {
+        ...this.#pluginRuntimeContext,
+        zukhruf: {
+          chatId: turn.chatId,
+          userId: turn.userId,
+          streamId: turn.streamId,
+          agentName: declaration.name,
+          agentPath: thread.path.toString(),
+        },
+      },
       prepareStepInput: () => this.#prepareStepInput(turn, mailboxState),
       ...(this.#multiAgent.codeMode
         ? {
