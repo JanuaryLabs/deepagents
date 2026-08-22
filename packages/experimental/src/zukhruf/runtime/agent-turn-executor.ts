@@ -14,10 +14,7 @@ import {
 } from '@deepagents/context';
 
 import type { ZukhrufSandbox } from '../agent.ts';
-import type {
-  AgentToolContext,
-  SchedulingToolContext,
-} from '../collaboration/agent-tool-context.ts';
+import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
 import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
@@ -27,8 +24,8 @@ import type {
 } from '../mailbox/types.ts';
 import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
-import type { ConversationScheduler } from '../scheduling/conversation-scheduler.ts';
-import { schedulingTools } from '../scheduling/tools.ts';
+import type { ZukhrufToolSet } from '../tool.ts';
+import type { AgentPluginToolContext } from './agent-runtime.ts';
 import {
   type AgentSkills,
   createAgentSkills,
@@ -43,7 +40,8 @@ export interface AgentTurnExecutorOptions {
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
   multiAgent: ResolvedMultiAgentHostConfig;
-  scheduling?: ConversationScheduler;
+  collaborationTools: ReturnType<typeof createCollaborationTools>;
+  pluginTools: ZukhrufToolSet;
   pluginRuntimeContext?: Readonly<Record<string, unknown>>;
 }
 
@@ -60,7 +58,7 @@ export class AgentTurnExecutor {
   readonly #approvals: ApprovalController;
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
-  readonly #scheduling?: ConversationScheduler;
+  readonly #pluginTools: ZukhrufToolSet;
   readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
 
   constructor(options: AgentTurnExecutorOptions) {
@@ -70,8 +68,8 @@ export class AgentTurnExecutor {
     this.#mailbox = options.mailbox;
     this.#approvals = options.approvals;
     this.#multiAgent = options.multiAgent;
-    this.#collaborationTools = createCollaborationTools(options.multiAgent);
-    this.#scheduling = options.scheduling;
+    this.#collaborationTools = options.collaborationTools;
+    this.#pluginTools = options.pluginTools;
     this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
   }
 
@@ -199,7 +197,14 @@ export class AgentTurnExecutor {
       ...(this.#multiAgent.codeMode
         ? { code_mode: experimental_codeModeTool() }
         : {}),
+      ...this.#pluginTools,
     };
+    const pluginContext = {
+      conversation: { chatId: turn.chatId, userId: turn.userId },
+      streamId: turn.streamId,
+      agentName: declaration.name,
+      agentPath: thread.path.toString(),
+    } satisfies AgentPluginToolContext;
     const collaborationToolsContext = {
       spawn_agent: agentContext,
       send_message: agentContext,
@@ -208,6 +213,9 @@ export class AgentTurnExecutor {
       wait_agent: agentContext,
       interrupt_agent: agentContext,
       ...(this.#multiAgent.codeMode ? { code_mode: agentContext } : {}),
+      ...Object.fromEntries(
+        Object.keys(this.#pluginTools).map((name) => [name, pluginContext]),
+      ),
     };
 
     const abort = new AbortController();
@@ -220,40 +228,16 @@ export class AgentTurnExecutor {
       );
       let stream: Awaited<ReturnType<typeof chat>>;
       try {
-        if (this.#scheduling === undefined) {
-          stream = await chat(
-            agent({
-              ...agentOptions,
-              tools: modelTools,
-            }),
-            {
-              abortSignal: abort.signal,
-              toolsContext: collaborationToolsContext,
-            },
-          );
-        } else {
-          const scheduledModelTools = { ...modelTools, ...schedulingTools };
-          const schedulingContext = {
-            ...agentContext,
-            conversationScheduler: this.#scheduling,
-          } satisfies SchedulingToolContext;
-          stream = await chat(
-            agent({
-              ...agentOptions,
-              tools: scheduledModelTools,
-            }),
-            {
-              abortSignal: abort.signal,
-              toolsContext: {
-                ...collaborationToolsContext,
-                CronCreate: schedulingContext,
-                CronList: schedulingContext,
-                CronDelete: schedulingContext,
-                ScheduleWakeup: schedulingContext,
-              },
-            },
-          );
-        }
+        stream = await chat(
+          agent({
+            ...agentOptions,
+            tools: modelTools,
+          }),
+          {
+            abortSignal: abort.signal,
+            toolsContext: collaborationToolsContext,
+          },
+        );
       } finally {
         await setupCancellation[Symbol.asyncDispose]();
       }
@@ -413,19 +397,14 @@ export class AgentTurnExecutor {
   #askInputMessage(
     turn: Extract<TurnRef, { kind: 'ask' }>,
   ): ReturnType<typeof user> {
-    if (turn.origin !== 'scheduled') {
-      return user(turn.input);
-    }
+    if (!turn.message) return user(turn.input);
     return user({
-      id: turn.schedule.occurrenceId,
+      id: turn.message.id,
       role: 'user',
       parts: [{ type: 'text', text: turn.input }],
-      metadata: {
-        zukhruf: {
-          origin: 'scheduled',
-          schedule: turn.schedule,
-        },
-      },
+      ...(turn.message.metadata === undefined
+        ? {}
+        : { metadata: turn.message.metadata }),
     });
   }
 

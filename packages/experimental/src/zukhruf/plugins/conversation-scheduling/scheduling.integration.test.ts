@@ -28,15 +28,18 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  type SchedulingWake,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
-  type Wake,
-  WakeScheduler,
   defineAgent,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+import {
+  type SchedulingWake,
+  type Wake,
+  WakeScheduler,
+  conversationScheduling,
+} from '@deepagents/experimental/zukhruf/conversation-scheduling';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
 
 const dockerAvailable = await isDockerAvailable();
@@ -434,7 +437,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
     {
       ...h,
       multiAgent: { toolNamespace: 'agents' },
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
 
@@ -482,7 +485,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'Asia/Amman' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'Asia/Amman' })],
     },
   );
   const conversation = { chatId: 'cron-tools', userId: 'user-1' };
@@ -558,7 +561,7 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'Asia/Amman' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'Asia/Amman' })],
     },
   );
   const conversation = { chatId: 'passed-one-shot', userId: 'user-1' };
@@ -653,7 +656,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'parallel-cron', userId: 'user-1' };
@@ -695,7 +698,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'dynamic-tools', userId: 'user-1' };
@@ -724,7 +727,11 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
   const scheduledTurn = h.queue.turns[0];
   assert.equal(scheduledTurn.kind, 'ask');
   if (scheduledTurn.kind !== 'ask') assert.fail('expected scheduled ask');
-  assert.equal(scheduledTurn.origin, 'scheduled');
+  assert.equal(
+    (scheduledTurn.message?.metadata as { zukhruf?: { origin?: string } })
+      ?.zukhruf?.origin,
+    'scheduled',
+  );
   assert.equal(scheduledTurn.input, 'scheduled prompt');
 
   await h.queue.runNext();
@@ -770,7 +777,7 @@ test('ScheduleWakeup rejects delays outside its supported window', async (t) => 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'invalid-dynamic-delay', userId: 'user-1' };
@@ -832,7 +839,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'busy-cron', userId: 'user-1' };
@@ -982,11 +989,71 @@ test('runtime rejects an invalid scheduling timezone during construction', (t) =
         }),
         {
           ...h,
-          scheduling: { scheduler, timezone: 'Not/A_Timezone' },
+          plugins: [
+            conversationScheduling({ scheduler, timezone: 'Not/A_Timezone' }),
+          ],
         },
       ),
     /Invalid scheduling timezone/,
   );
+});
+
+test('conversation-scheduling plugin instances belong to one runtime', async (t) => {
+  const scheduler = new RecordingWakeScheduler();
+  const h = harness(t, scheduler);
+  const plugin = conversationScheduling({ scheduler, timezone: 'UTC' });
+  const declaration = defineAgent({
+    name: 'root',
+    model: new MockLanguageModelV4({}),
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+
+  await new AgentRuntime(declaration, { ...h, plugins: [plugin] }).initialize();
+  await assert.rejects(
+    new AgentRuntime(declaration, { ...h, plugins: [plugin] }).initialize(),
+    /conversation-scheduling plugin cannot be shared by AgentRuntime instances/,
+  );
+});
+
+test('conversation availability reaches every plugin before reporting failures', async (t) => {
+  const scheduler = new RecordingWakeScheduler();
+  const h = harness(t, scheduler);
+  const calls: string[] = [];
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: toolModel(new Map(), []),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+    }),
+    {
+      ...h,
+      plugins: [
+        {
+          name: 'failing',
+          conversationAvailable: async () => {
+            calls.push('failing');
+            throw new Error('availability failed');
+          },
+        },
+        {
+          name: 'following',
+          conversationAvailable: async () => {
+            calls.push('following');
+          },
+        },
+      ],
+    },
+  );
+
+  await runtime.enqueue(
+    { chatId: 'availability', userId: 'user-1' },
+    { id: 'turn-1', input: 'settle' },
+  );
+  await using _worker = await runtime.work();
+  await assert.rejects(h.queue.runNext(), /availability failed/);
+  assert.deepEqual(calls, ['failing', 'following']);
 });
 
 test('failed wake insertion does not commit a cron definition', async (t) => {
@@ -1010,7 +1077,7 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'create-gap', userId: 'user-1' };
@@ -1047,7 +1114,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
   const conversation = { chatId: 'create-response-gap', userId: 'user-1' };
   const firstRuntime = new AgentRuntime(root(toolModel(commands, [])), {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'retry create response');
@@ -1056,7 +1123,7 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
 
   const retriedRuntime = new AgentRuntime(root(toolModel(commands, [])), {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   await using _retriedWorker = await retriedRuntime.work();
   await runTurn(retriedRuntime, h.queue, conversation, 'retry create response');
@@ -1098,7 +1165,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'advance-gap', userId: 'user-1' };
@@ -1169,7 +1236,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async (t) =
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'claim-enqueue-gap', userId: 'user-1' };
@@ -1211,7 +1278,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'claimed-delete-race', userId: 'user-1' };
@@ -1258,7 +1325,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'successor-delete-race', userId: 'user-1' };
@@ -1310,7 +1377,7 @@ test('failed successor insertion leaves the current cron retryable', async (t) =
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'successor-gap', userId: 'user-1' };
@@ -1365,7 +1432,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'prolonged-successor-gap', userId: 'user-1' };
@@ -1428,7 +1495,7 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'replace-stop', userId: 'user-1' };
@@ -1484,7 +1551,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'scheduled-cancel', userId: 'user-1' };
@@ -1524,7 +1591,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'cancel-user-for-cron', userId: 'user-1' };
@@ -1543,7 +1610,11 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   assert.equal(h.queue.turns.length, 1);
   const catchUp = h.queue.turns[0];
   assert.ok(catchUp?.kind === 'ask');
-  assert.equal(catchUp.origin, 'scheduled');
+  assert.equal(
+    (catchUp.message?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
+      ?.origin,
+    'scheduled',
+  );
   assert.equal(catchUp.input, 'cancel catch-up');
 });
 
@@ -1581,7 +1652,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'approval-cron', userId: 'user-1' };
@@ -1599,7 +1670,11 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   await h.queue.runNext();
   const [catchUp] = h.queue.turns as TurnRef[];
   assert.ok(catchUp?.kind === 'ask');
-  assert.equal(catchUp.origin, 'scheduled');
+  assert.equal(
+    (catchUp.message?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
+      ?.origin,
+    'scheduled',
+  );
   assert.equal(catchUp.input, 'approval catch-up');
 });
 
@@ -1628,7 +1703,7 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'cron-one-shot', userId: 'user-1' };
@@ -1669,7 +1744,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
   const conversation = { chatId: 'timezone-stability', userId: 'user-1' };
   const firstRuntime = new AgentRuntime(declaration, {
     ...h,
-    scheduling: { scheduler, timezone: 'Asia/Amman' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'Asia/Amman' })],
   });
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'create zoned cron');
@@ -1678,7 +1753,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
 
   const restarted = new AgentRuntime(declaration, {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   await using _restartedWorker = await restarted.work();
   await scheduler.fire(firstWake.id);
@@ -1712,7 +1787,7 @@ test('cron definitions are isolated by conversation and user across runtimes', a
   });
   const runtime = new AgentRuntime(declaration, {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   const worker = await runtime.work();
   await runTurn(
@@ -1725,7 +1800,7 @@ test('cron definitions are isolated by conversation and user across runtimes', a
 
   const otherRuntime = new AgentRuntime(declaration, {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   await using _otherWorker = await otherRuntime.work();
   const other = { chatId: 'private-b', userId: 'user-b' };
@@ -1792,7 +1867,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const root = { chatId: 'scheduling-root', userId: 'user-1' };
@@ -1854,7 +1929,7 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'malformed-state', userId: 'user-1' };
@@ -1911,7 +1986,7 @@ test('CronCreate rejects six-field and unreachable expressions', async (t) => {
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'invalid-cron', userId: 'user-1' };
@@ -1947,7 +2022,7 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
     }),
     {
       ...h,
-      scheduling: { scheduler, timezone: 'UTC' },
+      plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
     },
   );
   const conversation = { chatId: 'cron-cap', userId: 'user-1' };
@@ -2024,7 +2099,7 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
   const conversation = { chatId: 'dynamic-file-restart', userId: 'user-1' };
   const firstRuntime = new AgentRuntime(declaration, {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   const firstWorker = await firstRuntime.work();
   await runTurn(
@@ -2041,7 +2116,7 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
   const restarted = new AgentRuntime(declaration, {
     ...h,
     store: new SqliteContextStore(secondDatabase),
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   await using _restartedWorker = await restarted.work();
   assert.equal(scheduler.wakes.size, 1);
@@ -2078,7 +2153,7 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
   const conversation = { chatId: 'file-restart', userId: 'user-1' };
   const firstRuntime = new AgentRuntime(declaration, {
     ...h,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   const firstWorker = await firstRuntime.work();
   await runTurn(firstRuntime, h.queue, conversation, 'create restart cron');
@@ -2091,7 +2166,7 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
   const restarted = new AgentRuntime(declaration, {
     ...h,
     store: restartedStore,
-    scheduling: { scheduler, timezone: 'UTC' },
+    plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
   });
   await using _restartedWorker = await restarted.work();
   assert.equal(scheduler.wakes.size, 1);
@@ -2133,7 +2208,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
       }),
       {
         ...h,
-        scheduling: { scheduler, timezone: 'UTC' },
+        plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
       },
     );
     const conversation = { chatId: 'sparse-expiry', userId: 'user-1' };
@@ -2193,12 +2268,12 @@ test(
       });
       const firstRuntime = new AgentRuntime(declaration, {
         ...h,
-        scheduling: { scheduler, timezone: 'UTC' },
+        plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
       });
       const secondRuntime = new AgentRuntime(declaration, {
         ...h,
         store: secondStore,
-        scheduling: { scheduler, timezone: 'UTC' },
+        plugins: [conversationScheduling({ scheduler, timezone: 'UTC' })],
       });
       const conversation = {
         chatId: 'postgres-duplicate',

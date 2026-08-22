@@ -2,12 +2,9 @@ import { CronExpressionParser } from 'cron-parser';
 import { v5 as uuidv5 } from 'uuid';
 import { z } from 'zod';
 
-import type { ContextStore } from '@deepagents/context';
-
-import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
-import { conversationNamespace } from '../control-plane/agent-turn-id.ts';
-import type { ConversationId } from '../mailbox/types.ts';
-import type { ScheduledTurnMetadata } from '../queue/turn-queue.ts';
+import { conversationNamespace } from '../../control-plane/agent-turn-id.ts';
+import type { ConversationId } from '../../mailbox/types.ts';
+import type { AgentPluginHost } from '../../runtime/agent-runtime.ts';
 import type { Wake, WakeScheduler } from './wake-scheduler.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -111,10 +108,8 @@ const schedulingWakeSchema: z.ZodType<SchedulingWake> = z
   });
 
 interface ConversationSchedulerOptions {
-  store: ContextStore;
   scheduler: WakeScheduler<SchedulingWake>;
-  controlPlane: AgentControlPlane;
-  canMaterialize: (conversation: ConversationId) => Promise<boolean>;
+  host: () => AgentPluginHost;
   timezone: string;
 }
 
@@ -126,17 +121,13 @@ interface CronCreateInput {
 
 /** Conversation scheduling state, recurrence, and turn conversion. */
 export class ConversationScheduler {
-  readonly #store: ContextStore;
   readonly #scheduler: WakeScheduler<SchedulingWake>;
-  readonly #controlPlane: AgentControlPlane;
-  readonly #canMaterialize: ConversationSchedulerOptions['canMaterialize'];
+  readonly #host: ConversationSchedulerOptions['host'];
   readonly timezone: string;
 
   constructor(options: ConversationSchedulerOptions) {
-    this.#store = options.store;
     this.#scheduler = options.scheduler;
-    this.#controlPlane = options.controlPlane;
-    this.#canMaterialize = options.canMaterialize;
+    this.#host = options.host;
     this.timezone = ConversationScheduler.#resolveTimezone(options.timezone);
   }
 
@@ -220,8 +211,9 @@ export class ConversationScheduler {
       delete cron[id];
       return { ...state, cron };
     });
+    if (!removed) throw new Error(`CronDelete could not find job "${id}"`);
     try {
-      await this.#scheduler.cancel(this.#cronWake(conversation, removed!).id);
+      await this.#scheduler.cancel(this.#cronWake(conversation, removed).id);
     } catch {
       // Metadata is authoritative; a claimed/stale receipt validates and no-ops.
     }
@@ -274,7 +266,8 @@ export class ConversationScheduler {
     await this.#update(conversation, (state) => {
       removed = state.dynamic;
       if (!removed) return state;
-      const { dynamic: _, ...withoutDynamic } = state;
+      const withoutDynamic = { ...state };
+      delete withoutDynamic.dynamic;
       return withoutDynamic;
     });
     if (!removed) return 0;
@@ -291,7 +284,7 @@ export class ConversationScheduler {
   }
 
   async materializeDueIfEligible(conversation: ConversationId): Promise<void> {
-    if (!(await this.#canMaterialize(conversation))) return;
+    if (!(await this.#host().isConversationAvailable(conversation))) return;
     const state = await this.#read(conversation);
     const now = Date.now();
     const wake = state.dispatching
@@ -329,7 +322,8 @@ export class ConversationScheduler {
         `Scheduling wake id "${rawWake.id}" does not match its payload`,
       );
     }
-    if (!(await this.#canMaterialize(wake.conversation))) return;
+    if (!(await this.#host().isConversationAvailable(wake.conversation)))
+      return;
 
     const state = await this.#read(wake.conversation);
     const dispatching = this.#matchingDispatching(state, wake);
@@ -407,7 +401,8 @@ export class ConversationScheduler {
         prompt: currentPrompt,
       };
       if (currentDynamic) {
-        const { dynamic: _, ...withoutDynamic } = current;
+        const withoutDynamic = { ...current };
+        delete withoutDynamic.dynamic;
         return { ...withoutDynamic, dispatching: claimed };
       }
 
@@ -425,7 +420,7 @@ export class ConversationScheduler {
     occurrence: DispatchingOccurrence,
   ): Promise<void> {
     const occurrenceId = this.#occurrenceId(wake);
-    const schedule: ScheduledTurnMetadata = {
+    const schedule = {
       kind: wake.kind,
       ...(wake.definitionId === undefined
         ? {}
@@ -434,15 +429,19 @@ export class ConversationScheduler {
       scheduledFor: wake.scheduledFor,
       occurrenceId,
     };
-    await this.#controlPlane.enqueueScheduled(wake.conversation, {
+    await this.#host().enqueue(wake.conversation, {
       id: occurrenceId,
       input: occurrence.prompt,
-      schedule,
+      message: {
+        id: occurrenceId,
+        metadata: { zukhruf: { origin: 'scheduled', schedule } },
+      },
     });
 
     await this.#update(wake.conversation, (current) => {
       if (!this.#matchingDispatching(current, wake)) return current;
-      const { dispatching: _, ...withoutDispatching } = current;
+      const withoutDispatching = { ...current };
+      delete withoutDispatching.dispatching;
       return withoutDispatching;
     });
   }
@@ -587,35 +586,22 @@ export class ConversationScheduler {
   }
 
   async #read(conversation: ConversationId): Promise<SchedulingState> {
-    const chat = await this.#store.getChat(conversation.chatId);
-    if (!chat)
-      throw new Error(`Scheduling chat "${conversation.chatId}" not found`);
-    if (chat.userId !== conversation.userId) {
-      throw new Error(
-        `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
-      );
-    }
-    return this.#parse(chat.metadata);
+    return this.#parse(
+      await this.#host().readConversationMetadata(conversation),
+    );
   }
 
   async #update(
     conversation: ConversationId,
     update: (state: SchedulingState) => SchedulingState,
   ): Promise<void> {
-    await this.#store.updateChat(conversation.chatId, (chat) => {
-      if (chat.userId !== conversation.userId) {
-        throw new Error(
-          `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
-        );
-      }
-      const state = update(this.#parse(chat.metadata));
-      const metadata = chat.metadata ?? {};
+    await this.#host().updateConversationMetadata(conversation, (stored) => {
+      const state = update(this.#parse(stored));
+      const metadata = stored ?? {};
       const zukhruf = ConversationScheduler.#record(metadata.zukhruf);
       return {
-        metadata: {
-          ...metadata,
-          zukhruf: { ...zukhruf, scheduling: state },
-        },
+        ...metadata,
+        zukhruf: { ...zukhruf, scheduling: state },
       };
     });
   }

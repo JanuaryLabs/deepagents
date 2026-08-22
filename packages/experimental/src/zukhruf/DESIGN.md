@@ -575,29 +575,30 @@ surface; full history lives in the chain, which is the source of truth anyway.
   already-terminal replay, and from orphan cleanup. Later asks therefore do not inherit a phantom
   approval gate, even when terminal projection itself must be retried.
 
-## Timed scheduling: one-shot wakes and model-facing tools _(Built)_
+## Conversation-scheduling plugin: one-shot wakes and model-facing tools _(Built)_
 
 Timed scheduling has three separate owners. Keeping them separate prevents a clock adapter from
 becoming a second turn queue or a prompt store:
 
 ```text
-CronCreate / CronList / CronDelete ─┐
-                                    ├─ ConversationScheduler ─→ WakeScheduler
-ScheduleWakeup ─────────────────────┘                              │
-                                                                  └─ timed wake
-                                                                     → scheduled ask
-                                                                     → TurnQueue
+conversationScheduling() plugin
+├─ CronCreate / CronList / CronDelete ─┐
+│                                      ├─ ConversationScheduler ─→ WakeScheduler
+└─ ScheduleWakeup ─────────────────────┘                              │
+                                                                    └─ timed wake
+                                                                       → scheduled ask
+                                                                       → TurnQueue
 ```
 
 - **`WakeScheduler`** is host infrastructure. It durably delivers an opaque one-shot wake at or
   after a requested time. It knows no prompts, conversations, cron expressions, recurrence, or
   model tools.
-- **`ConversationScheduler`** is the Zukhruf application layer. It owns conversation-scoped
+- **`ConversationScheduler`** is private plugin application logic. It owns conversation-scoped
   definitions, cron calculation, dynamic-wake replacement, expiry, and conversion of a fired
   occurrence into a normal Zukhruf ask.
-- **Scheduling tools** are the model-facing surface. They bind implicitly to the calling agent's
-  current conversation and are injected only when `AgentRuntime` is configured with scheduling.
-  The raw `WakeScheduler` is never exposed to the model.
+- **`conversationScheduling()`** is the model-facing capability bundle. Its tools bind implicitly
+  to the calling agent's current conversation and are injected into root and child agents only when
+  the plugin is installed. The core runtime and model never see the raw `WakeScheduler`.
 
 The portable one-shot port is intentionally smaller than cron:
 
@@ -624,11 +625,17 @@ state before acting. The Node/Postgres adapter is `PgBossWakeScheduler` over pg-
 it uses a dedicated queue and the public pg-boss API, not `node-cron`, custom SQL, or pg-boss's cron
 timekeeper. A Durable Object adapter can absorb the same one-shot contract with alarms later.
 
-The Node host initializes the adapter explicitly and passes it into the runtime; the pg-boss
+The Node host initializes the adapter explicitly and passes it into the plugin; the pg-boss
 instance, stable agent-tree queue name, and configured timezone remain host-owned choices. Replicas
 of one agent tree share a queue; different trees use different queues:
 
 ```ts
+import {
+  PgBossWakeScheduler,
+  type SchedulingWake,
+  conversationScheduling,
+} from '@deepagents/experimental/zukhruf/conversation-scheduling';
+
 const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
   queue: 'zukhruf-wakes-research-agent',
 });
@@ -638,7 +645,7 @@ const runtime = new AgentRuntime(root, {
   streams,
   queue,
   mailboxStore,
-  scheduling: { scheduler: wakes, timezone: 'UTC' },
+  plugins: [conversationScheduling({ scheduler: wakes, timezone: 'UTC' })],
 });
 await using worker = await runtime.work();
 ```
@@ -699,14 +706,14 @@ occurrence into a metadata-resident dispatch while advancing the active definiti
 cleared only after deterministic enqueue succeeds, so a crash resumes it without reopening the
 delete/claim race. Therefore a failed insert leaves the previous authoritative state retryable; an
 inserted-but-unpublished wake reloads metadata and no-ops. Deletion removes or supersedes metadata
-before best-effort wake cancellation. `AgentRuntime.work()` starts the turn and wake consumers as
-one combined lifecycle without scanning conversations. A stale, cancelled, duplicated, or racing
+before best-effort wake cancellation. The plugin's `work()` hook starts the wake consumer inside
+the runtime's combined lifecycle without scanning conversations. A stale, cancelled, duplicated, or racing
 wake becomes a no-op when its definition generation or intended time no longer matches.
 
 A due occurrence remains scheduling metadata while its conversation is running, queued, or paused
 for approval. After the final waiting turn settles, the coordinator materializes exactly one
-catch-up occurrence through the existing enqueue path as an ordinary FIFO ask with
-`origin: 'scheduled'`. Scheduled provenance is durable and available to later authorization or
+catch-up occurrence through the generic plugin enqueue path as an ordinary FIFO ask with
+`message.metadata.zukhruf.origin: 'scheduled'`. Scheduled provenance is durable and available to later authorization or
 telemetry policy; origin is not accepted from the public HTTP session input. The TurnQueue remains
 the only execution serializer: scheduled asks never enter an active model turn, already-waiting
 ordinary work runs first, and ordinary work arriving after materialization cannot overtake it.
@@ -786,7 +793,7 @@ Node+Postgres bundle; the DO adapter).
   or persists `SKILL.md` bodies, scripts, references, or assets. Skills belong to one agent sandbox
   and do not implicitly pass to subagents.
 - `runtime/agent-runtime.ts` —
-  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, scheduling?, plugins?})` →
+  `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, plugins?})` →
   `{ enqueue(conv, {id, input}) → {id, stream},
 deliver(communication, mode) → void,
 approve(conv, {toolCallId}) / deny(conv, {toolCallId, reason?}) → {id, stream},
@@ -794,14 +801,16 @@ observe(conv) → AgentObservation {engine, resume, status(streamId?), cancel(st
 initialize() → void,
 work({concurrency?}) → AsyncDisposable }`.
   It wires `AgentControlPlane`, `AgentTurnExecutor`, `ApprovalController`,
-  `AgentStatusProjector`, and `MailboxCoordinator` once. Enqueue
+  `AgentStatusProjector`, and `MailboxCoordinator` once, then contributes plugin tools, lifecycle,
+  owner-checked metadata access, and conversation-availability notifications through the typed
+  plugin contract. Enqueue
   remains idempotent on the required caller-supplied key and returns its conversation-scoped
   durable id. Instructions are seeded
   **unconditionally per turn** (the old `getTurnCount()===0` guard ran reopened conversations with
   an empty system prompt).
-- `scheduling/` — the generic `WakeScheduler` port, public `PgBossWakeScheduler` adapter,
-  conversation metadata coordinator, and runtime-owned `CronCreate`, `CronList`, `CronDelete`, and
-  `ScheduleWakeup` tools. The adapter uses a borrowed pg-boss instance and one-shot `sendAfter()`;
+- `plugins/conversation-scheduling/` — the opt-in `conversationScheduling()` capability, generic
+  `WakeScheduler` port, public `PgBossWakeScheduler` adapter, conversation metadata coordinator, and
+  `CronCreate`, `CronList`, `CronDelete`, and `ScheduleWakeup` tools. The adapter uses a borrowed pg-boss instance and one-shot `sendAfter()`;
   the coordinator owns recurrence, replacement, expiry, catch-up, deterministic occurrence IDs,
   deferred turn conversion, and settlement catch-up.
 - `plugins/schedules/` — the complete Scheduled Tasks plugin: control plane, persistence,

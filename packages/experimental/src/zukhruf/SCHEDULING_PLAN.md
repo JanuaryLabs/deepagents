@@ -2,6 +2,9 @@
 
 > Status: implemented and verified on 2026-08-14. Focused scheduling checks are green; the full
 > package target retains the pg-boss FIFO and retention regressions recorded in Slice 0.
+> On 2026-08-22 the complete capability moved behind the opt-in
+> `@deepagents/experimental/zukhruf/conversation-scheduling` plugin. Persisted scheduling metadata,
+> wake payloads, deterministic IDs, and model-facing behavior remain unchanged.
 >
 > Goal: add a portable durable one-shot wake substrate and the Claude-compatible model tools
 > `CronCreate`, `CronList`, `CronDelete`, and `ScheduleWakeup`. The `/loop` skill is explicitly out of
@@ -67,9 +70,10 @@ This plan does not deliver:
 - `ContextStore` metadata is authoritative. Wake jobs are durable, disposable receipts.
 - `PgBossWakeScheduler` requires a stable queue name. Replicas of one agent tree share it; distinct
   trees use distinct queues so a worker cannot claim another tree's wake.
-- Scheduling tools bind to `context.actor.thread.conversation`; tool input cannot select another
+- Scheduling tools bind to the runtime-supplied plugin turn context; tool input cannot select another
   user, chat, root, or child.
-- The tools are injected only when `AgentRuntime` receives scheduling configuration. Agent
+- The tools are injected only when `AgentRuntime` receives `conversationScheduling()` in `plugins`.
+  Agent
   declarations do not repeat them and the raw wake port never enters model context.
 
 ### Model-facing contract
@@ -160,21 +164,22 @@ AgentRuntime
 ├── AgentTurnExecutor
 ├── AgentControlPlane
 ├── MailboxCoordinator
-└── ConversationScheduler
-    ├── ContextStore metadata.zukhruf.scheduling
-    ├── WakeScheduler
-    │   └── PgBossWakeScheduler
-    ├── CronCreate / CronList / CronDelete
-    └── ScheduleWakeup
+└── conversationScheduling() plugin
+    └── ConversationScheduler
+        ├── ContextStore metadata.zukhruf.scheduling
+        ├── WakeScheduler
+        │   └── PgBossWakeScheduler
+        ├── CronCreate / CronList / CronDelete
+        └── ScheduleWakeup
 ```
 
 Suggested files are deliberately few:
 
 ```text
-packages/experimental/src/zukhruf/scheduling/
+packages/experimental/src/zukhruf/plugins/conversation-scheduling/
 ├── wake-scheduler.ts
 ├── pg-boss.wake-scheduler.ts
-├── coordinator.ts
+├── conversation-scheduler.ts
 ├── tools.ts
 ├── pg-boss.wake-scheduler.contract.test.ts
 └── scheduling.integration.test.ts

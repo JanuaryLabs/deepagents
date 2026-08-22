@@ -7,7 +7,7 @@ import { PgBoss, fromPglite } from 'pg-boss';
 import {
   PgBossWakeScheduler,
   type Wake,
-} from '@deepagents/experimental/zukhruf';
+} from '@deepagents/experimental/zukhruf/conversation-scheduling';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
 
 const dockerAvailable = await isDockerAvailable();

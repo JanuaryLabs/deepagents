@@ -1,17 +1,17 @@
-export interface ScheduledTurnMetadata {
-  kind: 'cron' | 'dynamic';
-  definitionId?: string;
-  generation: number;
-  scheduledFor: number;
-  occurrenceId: string;
-}
+import type { UIMessage } from 'ai';
+
+/** Optional persisted user-message identity and metadata for a queued ask. */
+export type TurnInputMessage = Pick<
+  UIMessage<Record<string, unknown>>,
+  'id' | 'metadata'
+>;
 
 export type TurnRef = {
   streamId: string;
   chatId: string;
   userId: string;
 } & (
-  | ({
+  | {
       kind: 'ask';
       /**
        * The user message, carried by the queue until the turn executes. It
@@ -21,10 +21,8 @@ export type TurnRef = {
        * be THIS turn's placeholder).
        */
       input: string;
-    } & (
-      | { origin?: undefined; schedule?: undefined }
-      | { origin: 'scheduled'; schedule: ScheduledTurnMetadata }
-    ))
+      message?: TurnInputMessage;
+    }
   | {
       /**
        * Recovery-only re-execution of an existing stream. Normal approval

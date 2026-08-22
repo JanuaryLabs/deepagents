@@ -56,6 +56,7 @@ export function schedules(options: SchedulesOptions): Schedules {
 }
 
 class SchedulesPlugin implements Schedules {
+  readonly name = 'schedules';
   readonly #scheduled: ScheduledTasks<ExecutionConfig>;
   readonly #sources: readonly ScheduleSource[] | undefined;
   readonly #workerOptions: JobPollingOptions | undefined;

@@ -11,7 +11,7 @@ import {
   createInterAgentCommunication,
 } from '../mailbox/types.ts';
 import type {
-  ScheduledTurnMetadata,
+  TurnInputMessage,
   TurnQueue,
   TurnRef,
 } from '../queue/turn-queue.ts';
@@ -47,6 +47,8 @@ export interface TurnInput {
   /** Caller-supplied idempotency key; enqueue returns its scoped durable id. */
   id: string;
   input: string;
+  /** Persist this identity and metadata on the user message created when the turn runs. */
+  message?: TurnInputMessage;
 }
 
 export interface SpawnAgentInput {
@@ -108,21 +110,6 @@ export class AgentControlPlane {
     conversation: ConversationId,
     turn: TurnInput,
   ): Promise<string> {
-    return this.#enqueue(conversation, turn);
-  }
-
-  async enqueueScheduled(
-    conversation: ConversationId,
-    turn: TurnInput & { schedule: ScheduledTurnMetadata },
-  ): Promise<string> {
-    return this.#enqueue(conversation, turn, turn.schedule);
-  }
-
-  async #enqueue(
-    conversation: ConversationId,
-    turn: TurnInput,
-    schedule?: ScheduledTurnMetadata,
-  ): Promise<string> {
     if (!turn.id.trim()) {
       throw new Error(
         'enqueue: turn id is required — it names the ask, making retries idempotent',
@@ -137,10 +124,9 @@ export class AgentControlPlane {
       chatId: conversation.chatId,
       userId: conversation.userId,
       input: turn.input,
+      ...(turn.message === undefined ? {} : { message: turn.message }),
     } as const;
-    await this.#queue.push(
-      schedule === undefined ? ask : { ...ask, origin: 'scheduled', schedule },
-    );
+    await this.#queue.push(ask);
     return streamId;
   }
 

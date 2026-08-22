@@ -7,6 +7,7 @@ import {
 } from '@deepagents/context';
 
 import type { AgentDeclaration } from '../agent.ts';
+import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import {
   AgentControlPlane,
   type TurnInput,
@@ -29,29 +30,50 @@ import {
   resolveMultiAgentHostConfig,
 } from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
-import {
-  ConversationScheduler,
-  type SchedulingWake,
-} from '../scheduling/conversation-scheduler.ts';
-import type { WakeScheduler } from '../scheduling/wake-scheduler.ts';
+import type { ZukhrufToolSet } from '../tool.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
+
+export interface AgentPluginToolContext extends Readonly<
+  Record<string, unknown>
+> {
+  readonly conversation: ConversationId;
+  readonly streamId: string;
+  readonly agentName: string;
+  readonly agentPath: string;
+}
 
 export interface AgentPluginHost {
   enqueue(
     conversation: ConversationId,
     turn: TurnInput,
   ): Promise<{ id: string; stream: ReadableStream<StreamPart> }>;
+  isConversationAvailable(conversation: ConversationId): Promise<boolean>;
+  readConversationMetadata(
+    conversation: ConversationId,
+  ): Promise<Record<string, unknown> | undefined>;
+  updateConversationMetadata(
+    conversation: ConversationId,
+    update: (
+      metadata: Record<string, unknown> | undefined,
+    ) => Record<string, unknown>,
+  ): Promise<void>;
   listHistory(): Promise<readonly AgentHistoryItem[]>;
   observe(conversation: ConversationId): AgentObservation;
 }
 
 export interface AgentRuntimePlugin {
+  readonly name: string;
+  readonly tools?: ZukhrufToolSet;
   /** Static namespaced context merged into every model call made by this runtime. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   configure?(root: AgentDeclaration): AgentDeclaration;
   initialize?(host: AgentPluginHost): Promise<void>;
   work?(host: AgentPluginHost): Promise<AsyncDisposable>;
+  conversationAvailable?(
+    host: AgentPluginHost,
+    conversation: ConversationId,
+  ): Promise<void>;
 }
 
 export interface AgentRuntimeOptions {
@@ -63,10 +85,6 @@ export interface AgentRuntimeOptions {
   mailboxStore: MailboxStore;
   /** Codex-compatible multi-agent host guidance and tool configuration. */
   multiAgent?: MultiAgentHostConfig;
-  scheduling?: {
-    scheduler: WakeScheduler<SchedulingWake>;
-    timezone: string;
-  };
   plugins?: readonly AgentRuntimePlugin[];
 }
 
@@ -112,14 +130,14 @@ export class AgentObservation {
   readonly #store: ContextStore;
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
-  readonly #scheduling?: ConversationScheduler;
+  readonly #conversationAvailable?: () => Promise<void>;
 
   constructor(
     conversation: ConversationId,
     store: ContextStore,
     streams: StreamManager,
     queue: TurnQueue,
-    scheduling?: ConversationScheduler,
+    conversationAvailable?: () => Promise<void>,
   ) {
     this.engine = new ContextEngine({
       store,
@@ -130,7 +148,7 @@ export class AgentObservation {
     this.#store = store;
     this.#streams = streams;
     this.#queue = queue;
-    this.#scheduling = scheduling;
+    this.#conversationAvailable = conversationAvailable;
   }
 
   async resume() {
@@ -165,7 +183,7 @@ export class AgentObservation {
     if (status === 'queued' || status === 'running' || status === 'cancelled') {
       await this.#streams.cancel(id);
       await this.#queue.cancel(id);
-      await this.#scheduling?.materializeDueIfEligible(this.#conversation);
+      await this.#conversationAvailable?.();
     }
   }
 
@@ -206,8 +224,8 @@ export class AgentRuntime {
   readonly #controlPlane: AgentControlPlane;
   readonly #approvals: ApprovalController;
   readonly #executor: AgentTurnExecutor;
-  readonly #scheduling?: ConversationScheduler;
   readonly #plugins: readonly AgentRuntimePlugin[];
+  readonly #pluginTools: ZukhrufToolSet;
   readonly #pluginHost: AgentPluginHost;
   #initialization?: Promise<void>;
 
@@ -215,10 +233,51 @@ export class AgentRuntime {
     const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
     let configuredRoot = root;
     const plugins = options.plugins ?? [];
+    const pluginNames = new Set<string>();
+    const pluginTools: ZukhrufToolSet = {};
+    const collaborationTools = createCollaborationTools(multiAgent);
+    const injectedTools = new Map<string, string>(
+      Object.keys(collaborationTools).map((name) => [name, 'the runtime']),
+    );
+    if (multiAgent.codeMode) injectedTools.set('code_mode', 'the runtime');
+    for (const plugin of plugins) {
+      if (!plugin.name.trim()) {
+        throw new Error('AgentRuntime: plugin name cannot be empty');
+      }
+      if (plugin.name !== plugin.name.trim()) {
+        throw new Error(
+          `AgentRuntime: plugin name "${plugin.name}" must not contain surrounding whitespace`,
+        );
+      }
+      if (pluginNames.has(plugin.name)) {
+        throw new Error(`AgentRuntime: duplicate plugin name "${plugin.name}"`);
+      }
+      pluginNames.add(plugin.name);
+      for (const [name, tool] of Object.entries(plugin.tools ?? {})) {
+        const owner = injectedTools.get(name);
+        if (owner) {
+          throw new Error(
+            `AgentRuntime: plugin tool "${name}" from "${plugin.name}" conflicts with ${owner}`,
+          );
+        }
+        injectedTools.set(name, `plugin "${plugin.name}"`);
+        pluginTools[name] = tool;
+      }
+    }
     for (const plugin of plugins) {
       if (plugin.configure) configuredRoot = plugin.configure(configuredRoot);
     }
     const declarations = new AgentDeclarationRegistry(configuredRoot);
+    for (const declaration of declarations.values()) {
+      for (const name of Object.keys(declaration.tools ?? {})) {
+        const owner = injectedTools.get(name);
+        if (owner) {
+          throw new Error(
+            `AgentRuntime: tool "${name}" on agent "${declaration.name}" conflicts with ${owner}`,
+          );
+        }
+      }
+    }
     const directory = new AgentDirectory(options.store);
     const streams = options.streams;
     const mailbox = new MailboxCoordinator({
@@ -249,18 +308,6 @@ export class AgentRuntime {
       statusProjector,
       historyForker,
     });
-    const scheduling = options.scheduling
-      ? new ConversationScheduler({
-          store: options.store,
-          scheduler: options.scheduling.scheduler,
-          controlPlane,
-          canMaterialize: async (conversation) =>
-            (await options.queue.getTurnActivity(conversation)) === 'idle' &&
-            !(await approvals.isConversationPaused(conversation)),
-          timezone: options.scheduling.timezone,
-        })
-      : undefined;
-
     this.#store = options.store;
     this.#queue = options.queue;
     this.#streams = streams;
@@ -268,8 +315,8 @@ export class AgentRuntime {
     this.#directory = directory;
     this.#controlPlane = controlPlane;
     this.#approvals = approvals;
-    this.#scheduling = scheduling;
     this.#plugins = plugins;
+    this.#pluginTools = pluginTools;
     this.info = {
       root: declarations.root.name,
       agents: Array.from(declarations.values(), (declaration) => ({
@@ -292,7 +339,8 @@ export class AgentRuntime {
       mailbox,
       approvals,
       multiAgent,
-      scheduling,
+      collaborationTools,
+      pluginTools,
       pluginRuntimeContext: Object.assign(
         {},
         ...plugins.map(({ runtimeContext }) => runtimeContext ?? {}),
@@ -300,6 +348,12 @@ export class AgentRuntime {
     });
     this.#pluginHost = {
       enqueue: (conversation, turn) => this.enqueue(conversation, turn),
+      isConversationAvailable: (conversation) =>
+        this.#isConversationAvailable(conversation),
+      readConversationMetadata: (conversation) =>
+        this.#readConversationMetadata(conversation),
+      updateConversationMetadata: (conversation, update) =>
+        this.#updateConversationMetadata(conversation, update),
       listHistory: () => this.#listHistory(),
       observe: (conversation) => this.observe(conversation),
     };
@@ -350,8 +404,46 @@ export class AgentRuntime {
       this.#store,
       this.#streams,
       this.#queue,
-      this.#scheduling,
+      () => this.#conversationAvailable(conversation),
     );
+  }
+
+  async #isConversationAvailable(
+    conversation: ConversationId,
+  ): Promise<boolean> {
+    return (
+      (await this.#queue.getTurnActivity(conversation)) === 'idle' &&
+      !(await this.#approvals.isConversationPaused(conversation))
+    );
+  }
+
+  async #readConversationMetadata(
+    conversation: ConversationId,
+  ): Promise<Record<string, unknown> | undefined> {
+    const chat = await this.#store.getChat(conversation.chatId);
+    if (!chat) throw new Error(`chat "${conversation.chatId}" not found`);
+    if (chat.userId !== conversation.userId) {
+      throw new Error(
+        `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
+      );
+    }
+    return chat.metadata;
+  }
+
+  async #updateConversationMetadata(
+    conversation: ConversationId,
+    update: (
+      metadata: Record<string, unknown> | undefined,
+    ) => Record<string, unknown>,
+  ): Promise<void> {
+    await this.#store.updateChat(conversation.chatId, (chat) => {
+      if (chat.userId !== conversation.userId) {
+        throw new Error(
+          `chat "${conversation.chatId}" belongs to user "${chat.userId}", not "${conversation.userId}"`,
+        );
+      }
+      return { metadata: update(chat.metadata) };
+    });
   }
 
   async #listHistory(): Promise<readonly AgentHistoryItem[]> {
@@ -390,24 +482,23 @@ export class AgentRuntime {
 
   async work(options?: AgentRuntimeWorkOptions): Promise<AsyncDisposable> {
     await this.initialize();
-    const scheduling = this.#scheduling;
     const workers = new AsyncDisposableStack();
-    workers.use(
-      await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
-        concurrency: options?.concurrency,
-        onOrphaned: this.#onOrphaned.bind(this),
-        onSettled:
-          scheduling === undefined
-            ? undefined
-            : ({ chatId, userId }) =>
-                scheduling.materializeDueIfEligible({ chatId, userId }),
-      }),
-    );
     try {
-      if (scheduling) workers.use(await scheduling.work());
       for (const plugin of this.#plugins) {
         if (plugin.work) workers.use(await plugin.work(this.#pluginHost));
       }
+      workers.use(
+        await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
+          concurrency: options?.concurrency,
+          onOrphaned: this.#onOrphaned.bind(this),
+          onSettled: !this.#plugins.some(({ conversationAvailable }) =>
+            Boolean(conversationAvailable),
+          )
+            ? undefined
+            : ({ chatId, userId }) =>
+                this.#conversationAvailable({ chatId, userId }),
+        }),
+      );
       return workers;
     } catch (error) {
       await workers.disposeAsync();
@@ -418,6 +509,23 @@ export class AgentRuntime {
   async #initialize(): Promise<void> {
     for (const plugin of this.#plugins) {
       await plugin.initialize?.(this.#pluginHost);
+    }
+  }
+
+  async #conversationAvailable(conversation: ConversationId): Promise<void> {
+    const errors: unknown[] = [];
+    for (const plugin of this.#plugins) {
+      try {
+        await plugin.conversationAvailable?.(this.#pluginHost, conversation);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        `AgentRuntime: conversation availability reconciliation failed for "${conversation.chatId}": ${errors.map((error) => (error instanceof Error ? error.message : String(error))).join('; ')}`,
+      );
     }
   }
 
@@ -449,7 +557,7 @@ export class AgentRuntime {
         (await this.#approvals.retryIdempotentContinuation(
           turn,
           turn.streamId,
-          declaration.tools ?? {},
+          { ...declaration.tools, ...this.#pluginTools },
         ))
       ) {
         return;

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import type { AgentModel, AgentSandbox } from '@deepagents/context';
 import * as zukhruf from '@deepagents/experimental/zukhruf';
+import * as conversationSchedulingPlugin from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 const { defineAgent } = zukhruf;
 
@@ -43,6 +44,9 @@ test('the customer barrel hides runtime wiring and injected tool implementations
   for (const internal of [
     'AgentControlPlane',
     'ConversationScheduler',
+    'WakeScheduler',
+    'PgBossWakeScheduler',
+    'conversationScheduling',
     'AgentDeclarationRegistry',
     'AgentDirectory',
     'AgentStatusProjector',
@@ -59,4 +63,17 @@ test('the customer barrel hides runtime wiring and injected tool implementations
   ]) {
     assert.equal(internal in zukhruf, false, `${internal} is internal wiring`);
   }
+});
+
+test('conversation scheduling is available only through its plugin subpath', () => {
+  assert.equal(
+    typeof conversationSchedulingPlugin.conversationScheduling,
+    'function',
+  );
+  assert.equal(typeof conversationSchedulingPlugin.WakeScheduler, 'function');
+  assert.equal(
+    typeof conversationSchedulingPlugin.PgBossWakeScheduler,
+    'function',
+  );
+  assert.equal('ConversationScheduler' in conversationSchedulingPlugin, false);
 });

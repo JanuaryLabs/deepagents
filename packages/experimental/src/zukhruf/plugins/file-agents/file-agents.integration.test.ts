@@ -62,6 +62,7 @@ test('fileAgents plugin adds one deterministic startup snapshot through AgentRun
     plugins: [
       fileAgents({ directory: directory.path }),
       {
+        name: 'capture-configured',
         configure(declaration) {
           configured = declaration;
           return declaration;

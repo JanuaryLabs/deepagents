@@ -12,6 +12,7 @@ export function fileAgents({
   directory: string | URL;
 }): AgentRuntimePlugin {
   return {
+    name: 'file-agents',
     configure(root) {
       const path =
         directory instanceof URL ? fileURLToPath(directory) : directory;

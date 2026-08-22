@@ -16,14 +16,17 @@ import {
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
-  type SchedulingWake,
   SqliteMailboxStore,
   TurnQueue,
   type TurnRef,
-  type Wake,
-  WakeScheduler,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+import {
+  type SchedulingWake,
+  type Wake,
+  WakeScheduler,
+  conversationScheduling,
+} from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 const usage = {
   inputTokens: {
@@ -216,7 +219,9 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       }),
       queue: queueA,
       mailboxStore: mailboxStoreA,
-      scheduling: { scheduler: schedulerA, timezone: 'UTC' },
+      plugins: [
+        conversationScheduling({ scheduler: schedulerA, timezone: 'UTC' }),
+      ],
     },
   );
   const runtimeB = new AgentRuntime(
@@ -234,7 +239,9 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       }),
       queue: queueB,
       mailboxStore: mailboxStoreB,
-      scheduling: { scheduler: schedulerB, timezone: 'UTC' },
+      plugins: [
+        conversationScheduling({ scheduler: schedulerB, timezone: 'UTC' }),
+      ],
     },
   );
   let workerA: AsyncDisposable | undefined;

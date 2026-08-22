@@ -37,6 +37,11 @@
       "import": "./dist/zukhruf/plugins/file-agents/index.js",
       "default": "./dist/zukhruf/plugins/file-agents/index.js"
     },
+    "./zukhruf/conversation-scheduling": {
+      "types": "./dist/zukhruf/plugins/conversation-scheduling/index.d.ts",
+      "import": "./dist/zukhruf/plugins/conversation-scheduling/index.js",
+      "default": "./dist/zukhruf/plugins/conversation-scheduling/index.js"
+    },
     "./zukhruf/schedules": {
       "types": "./dist/zukhruf/plugins/schedules/index.d.ts",
       "import": "./dist/zukhruf/plugins/schedules/index.js",
