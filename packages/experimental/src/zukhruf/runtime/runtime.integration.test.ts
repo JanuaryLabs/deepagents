@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import { PgBoss, fromPglite } from 'pg-boss';
 import { z } from 'zod';
 
@@ -378,6 +379,7 @@ async function harness(
   },
 ) {
   const pglite = new PGlite();
+  const store = new InMemoryContextStore();
   const boss = new PgBoss({
     db: fromPglite(pglite),
     backend: 'pglite',
@@ -401,7 +403,7 @@ async function harness(
   const runtime = new AgentRuntime(
     options?.declaration ?? declaration(model, tools),
     {
-      store: new InMemoryContextStore(),
+      store,
       streams,
       queue,
       mailboxStore,
@@ -412,6 +414,7 @@ async function harness(
   );
   return {
     runtime,
+    store,
     database: pglite,
     streamStore,
     boss,
@@ -1003,6 +1006,100 @@ describe('zukhruf runtime — setup failure durability', () => {
 });
 
 describe('zukhruf runtime — background executor', () => {
+  it('installs plugin skills into the agent sandbox', async () => {
+    await using directory = await mkdtempDisposable(
+      join(tmpdir(), 'zukhruf-plugin-skill-'),
+    );
+    const skillDirectory = join(directory.path, 'manage-schedules');
+    await mkdir(join(skillDirectory, 'scripts'), { recursive: true });
+    const skillMd = [
+      '---',
+      'name: manage-schedules',
+      'description: Create and maintain conversation schedules.',
+      '---',
+      '',
+      '# Manage schedules',
+    ].join('\n');
+    await Promise.all([
+      writeFile(join(skillDirectory, 'SKILL.md'), skillMd),
+      writeFile(
+        join(skillDirectory, 'scripts', 'validate.js'),
+        'console.log("valid");',
+      ),
+    ]);
+
+    const prompts: string[] = [];
+    const backends: DisposableSandbox[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        prompts.push(JSON.stringify(prompt));
+        return { stream: buildStream(['ok'], 0) };
+      },
+    });
+    const agentDeclaration = declaration(model);
+    agentDeclaration.sandbox = defineSandbox(async () => {
+      const backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+      backends.push(backend);
+      return backend;
+    });
+    agentDeclaration.subagents = [
+      defineAgent({ ...agentDeclaration, name: 'worker' }),
+    ];
+
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+      plugins: () => [
+        {
+          name: 'scheduling-skills',
+          skills: [pathToFileURL(skillDirectory)],
+        },
+      ],
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const result = await h.runtime.enqueue(
+      { chatId: 'plugin-skills', userId: 'u1' },
+      turn('schedule a follow-up'),
+    );
+    assert.equal(await collectText(result.stream), 'ok');
+
+    await h.store.createChat({
+      id: 'plugin-skills-child',
+      userId: 'u1',
+      metadata: {
+        zukhrufTreeId: 'plugin-skills',
+        zukhruf: {
+          path: '/root/worker',
+          parentChatId: 'plugin-skills',
+          declarationName: 'worker',
+        },
+      },
+    });
+    const childResult = await h.runtime.enqueue(
+      { chatId: 'plugin-skills-child', userId: 'u1' },
+      turn('schedule from the child'),
+    );
+    assert.equal(await collectText(childResult.stream), 'ok');
+
+    assert.equal(prompts.length, 2);
+    for (const prompt of prompts) {
+      assert.match(prompt, /<available_skills>/);
+      assert.match(prompt, /Create and maintain conversation schedules/);
+    }
+    for (const backend of backends) {
+      assert.equal(
+        await backend.readFile('/workspace/skills/manage-schedules/SKILL.md'),
+        skillMd,
+      );
+      assert.equal(
+        await backend.readFile(
+          '/workspace/skills/manage-schedules/scripts/validate.js',
+        ),
+        'console.log("valid");',
+      );
+    }
+  });
+
   it('discovers explicitly uploaded sandbox skills once per conversation', async () => {
     await using directory = await mkdtempDisposable(
       join(tmpdir(), 'zukhruf-skills-'),

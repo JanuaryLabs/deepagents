@@ -31,6 +31,7 @@ import {
 } from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
+import { loadPluginSkills } from './agent-skills.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
 
@@ -67,6 +68,8 @@ export interface AgentPluginHost {
 export interface AgentRuntimePlugin {
   readonly name: string;
   readonly tools?: ZukhrufToolSet;
+  /** Skill directories installed into every agent sandbox. */
+  readonly skills?: readonly (string | URL)[];
   /** Static namespaced context merged into every model call made by this runtime. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   configure?(root: AgentDeclaration): AgentDeclaration;
@@ -343,6 +346,9 @@ export class AgentRuntime {
       multiAgent,
       collaborationTools,
       pluginTools,
+      pluginSkills: loadPluginSkills(
+        plugins.flatMap(({ skills }) => skills ?? []),
+      ),
       pluginRuntimeContext: Object.assign(
         {},
         ...plugins.map(({ runtimeContext }) => runtimeContext ?? {}),

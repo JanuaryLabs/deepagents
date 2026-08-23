@@ -1,4 +1,6 @@
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   type AvailableSkill,
@@ -14,7 +16,58 @@ export interface AgentSkills {
   fragments: readonly ContextFragment[];
 }
 
+export interface PluginSkills {
+  available: readonly AvailableSkill[];
+  files: readonly { path: string; content: Buffer }[];
+}
+
 const EMPTY_SKILLS: AgentSkills = { available: [], fragments: [] };
+
+export function loadPluginSkills(
+  directories: readonly (string | URL)[],
+): PluginSkills {
+  const skillsByName = new Map<string, AvailableSkill>();
+  const files: { path: string; content: Buffer }[] = [];
+
+  for (const directory of directories) {
+    const directoryPath =
+      directory instanceof URL ? fileURLToPath(directory) : directory;
+    const directoryName = path.basename(directoryPath);
+    const available = availableSkill(
+      readFileSync(path.join(directoryPath, 'SKILL.md'), 'utf8'),
+      directoryName,
+    );
+    if (skillsByName.has(available.name)) {
+      throw new Error(
+        `AgentRuntime: duplicate plugin skill "${available.name}"`,
+      );
+    }
+    skillsByName.set(available.name, available);
+
+    for (const entry of readdirSync(directoryPath, {
+      recursive: true,
+      withFileTypes: true,
+    })) {
+      if (!entry.isFile()) continue;
+      const source = path.join(entry.parentPath, entry.name);
+      files.push({
+        path: path.posix.join(
+          'skills',
+          directoryName,
+          ...path.relative(directoryPath, source).split(path.sep),
+        ),
+        content: readFileSync(source),
+      });
+    }
+  }
+
+  return {
+    available: [...skillsByName.values()].toSorted((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
+    files: files.toSorted((left, right) => left.path.localeCompare(right.path)),
+  };
+}
 
 export async function discoverAgentSkills(
   sandbox: ZukhrufSandbox,
@@ -60,9 +113,16 @@ async function loadSkill(
   directory: string,
 ): Promise<AvailableSkill> {
   const directoryName = path.posix.basename(directory);
-  const skillMd = await sandbox.sandbox.readFile(
-    path.posix.join(directory, 'SKILL.md'),
+  return availableSkill(
+    await sandbox.sandbox.readFile(path.posix.join(directory, 'SKILL.md')),
+    directoryName,
   );
+}
+
+function availableSkill(
+  skillMd: string,
+  directoryName: string,
+): AvailableSkill {
   const { frontmatter } = parseFrontmatter(skillMd);
   if (frontmatter.name !== directoryName) {
     throw new Error(

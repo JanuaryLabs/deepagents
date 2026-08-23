@@ -1,5 +1,6 @@
 import { experimental_codeModeTool } from '@ai-sdk/code-mode';
 import type { UIMessage } from 'ai';
+import path from 'node:path';
 
 import {
   type AvailableSkill,
@@ -28,6 +29,7 @@ import type { ZukhrufToolSet } from '../tool.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
 import {
   type AgentSkills,
+  type PluginSkills,
   createAgentSkills,
   discoverAgentSkills,
 } from './agent-skills.ts';
@@ -42,6 +44,7 @@ export interface AgentTurnExecutorOptions {
   multiAgent: ResolvedMultiAgentHostConfig;
   collaborationTools: ReturnType<typeof createCollaborationTools>;
   pluginTools: ZukhrufToolSet;
+  pluginSkills: PluginSkills;
   pluginRuntimeContext?: Readonly<Record<string, unknown>>;
 }
 
@@ -59,6 +62,7 @@ export class AgentTurnExecutor {
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
   readonly #pluginTools: ZukhrufToolSet;
+  readonly #pluginSkills: PluginSkills;
   readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
 
   constructor(options: AgentTurnExecutorOptions) {
@@ -70,6 +74,7 @@ export class AgentTurnExecutor {
     this.#multiAgent = options.multiAgent;
     this.#collaborationTools = options.collaborationTools;
     this.#pluginTools = options.pluginTools;
+    this.#pluginSkills = options.pluginSkills;
     this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
   }
 
@@ -349,8 +354,11 @@ export class AgentTurnExecutor {
   ): Promise<AgentSkills> {
     const chat = await this.#store.getChat(turn.chatId);
     const existing = readSkills(chat?.metadata);
-    if (existing !== undefined) return createAgentSkills(existing);
-    if (sandbox.workingDirectory === undefined) return createAgentSkills([]);
+    if (existing !== undefined)
+      return this.#withPluginSkills(existing, sandbox);
+    if (sandbox.workingDirectory === undefined) {
+      return this.#withPluginSkills([], sandbox);
+    }
 
     const discovered = await discoverAgentSkills(sandbox, signal);
     let available = discovered.available;
@@ -369,9 +377,40 @@ export class AgentTurnExecutor {
         },
       };
     });
-    return available === discovered.available
-      ? discovered
-      : createAgentSkills(available);
+    return this.#withPluginSkills(available, sandbox);
+  }
+
+  async #withPluginSkills(
+    available: readonly AvailableSkill[],
+    sandbox: ZukhrufSandbox,
+  ): Promise<AgentSkills> {
+    if (this.#pluginSkills.available.length === 0) {
+      return createAgentSkills(available);
+    }
+    if (sandbox.workingDirectory === undefined) {
+      throw new Error(
+        'AgentRuntime: plugin skills require a sandbox workingDirectory',
+      );
+    }
+    const workingDirectory = sandbox.workingDirectory;
+    const names = new Set(available.map(({ name }) => name));
+    const duplicate = this.#pluginSkills.available.find(({ name }) =>
+      names.has(name),
+    );
+    if (duplicate) {
+      throw new Error(`AgentRuntime: duplicate skill "${duplicate.name}"`);
+    }
+    await sandbox.sandbox.writeFiles(
+      this.#pluginSkills.files.map(({ path: relativePath, content }) => ({
+        path: path.posix.join(workingDirectory, relativePath),
+        content,
+      })),
+    );
+    return createAgentSkills(
+      [...available, ...this.#pluginSkills.available].toSorted((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
+    );
   }
 
   #engineFor({ chatId, userId }: ConversationId): ContextEngine {
