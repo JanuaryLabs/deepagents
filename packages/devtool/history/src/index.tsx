@@ -1,4 +1,3 @@
-import { cn } from '@/lib/utils';
 import {
   BanIcon,
   CircleAlertIcon,
@@ -7,6 +6,8 @@ import {
   MessageSquareIcon,
 } from 'lucide-react';
 import { type ReactNode, createContext, use, useMemo } from 'react';
+
+import { cn } from '@deepagents/devtool-shadcn';
 
 export type HistoryRecord = {
   chatId: string;
@@ -19,7 +20,7 @@ export type HistoryRecord = {
 };
 
 type HistoryContextValue = {
-  activeChatId: string | null;
+  activeChatId: string | undefined;
   onSelect: (history: HistoryRecord) => void;
 };
 
@@ -34,12 +35,12 @@ function useHistoryContext() {
 }
 
 function HistoryRoot({
-  activeChatId = null,
+  activeChatId,
   onSelect,
   className,
   children,
 }: {
-  activeChatId?: string | null;
+  activeChatId: string | undefined;
   onSelect: (history: HistoryRecord) => void;
   className?: string;
   children: ReactNode;

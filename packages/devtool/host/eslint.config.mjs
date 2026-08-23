@@ -2,7 +2,7 @@ import nx from '@nx/eslint-plugin';
 
 import baseConfig, {
   packageJsonDependencyChecks,
-} from '../../eslint.config.mjs';
+} from '../../../eslint.config.mjs';
 
 const [severity, options] =
   packageJsonDependencyChecks.rules['@nx/dependency-checks'];

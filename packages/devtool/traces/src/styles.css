@@ -1,0 +1,9 @@
+.trace-running {
+  animation: trace-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes trace-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@deepagents/devtool-history",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/devtool/history/src",
+  "projectType": "library",
+  "tags": ["scope:public"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "main": "packages/devtool/history/src/index.tsx",
+        "external": ["@deepagents/devtool-shadcn", "lucide-react", "react"]
+      }
+    }
+  }
+}

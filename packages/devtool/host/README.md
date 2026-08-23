@@ -8,31 +8,30 @@ React or CSS.
 npm install --save-dev @deepagents/devtool
 ```
 
-Keep durable telemetry on the agent declaration, then load the devtool only
-when composing the development runtime:
+Keep durable telemetry and the devtool definition on the agent declaration:
 
 ```ts
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
-
-const root = defineAgent({
-  // ...
-  telemetry: {
-    integrations: createFileTelemetry({ path: './telemetry.jsonl' }),
-  },
-});
 
 const developerTool =
   process.env.NODE_ENV === 'development'
     ? (await import('@deepagents/devtool')).devtool()
     : undefined;
 
-const runtime = new AgentRuntime(root, {
-  ...runtimeOptions,
+const root = defineAgent({
+  // ...
+  telemetry: {
+    integrations: createFileTelemetry({ path: './telemetry.jsonl' }),
+  },
   plugins: developerTool ? [developerTool] : [],
 });
 
+const runtime = new AgentRuntime(root, {
+  ...runtimeOptions,
+});
+
 await using work = await runtime.work();
-if (developerTool) console.info(developerTool.url?.href);
+if (developerTool) console.info(runtime.plugin(developerTool).url?.href);
 ```
 
 The devtool listener is loopback-only. Its `GET /zukhruf/v1/info` response

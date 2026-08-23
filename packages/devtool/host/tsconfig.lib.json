@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
@@ -12,10 +12,13 @@
   "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"],
   "references": [
     {
-      "path": "../context/tsconfig.lib.json"
+      "path": "../../context/tsconfig.lib.json"
     },
     {
-      "path": "../experimental/tsconfig.lib.json"
+      "path": "../../experimental/tsconfig.lib.json"
+    },
+    {
+      "path": "../traces/tsconfig.lib.json"
     }
   ]
 }

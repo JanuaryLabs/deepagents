@@ -43,7 +43,16 @@
       "path": "./packages/experimental"
     },
     {
-      "path": "./packages/devtool"
+      "path": "./packages/devtool/shadcn"
+    },
+    {
+      "path": "./packages/devtool/history"
+    },
+    {
+      "path": "./packages/devtool/traces"
+    },
+    {
+      "path": "./packages/devtool/host"
     },
     {
       "path": "./demo/zukhruf-dynamic-subagents"

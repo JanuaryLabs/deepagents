@@ -5,7 +5,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/JanuaryLabs/deepagents",
-    "directory": "packages/devtool"
+    "directory": "packages/devtool/host"
   },
   "bugs": {
     "url": "https://github.com/JanuaryLabs/deepagents/issues"
@@ -35,26 +35,25 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.10",
+    "@deepagents/devtool-traces": "6.2.0",
     "hono": "^4.12.33"
   },
   "peerDependencies": {
-    "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0"
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.7",
     "@deepagents/context": "6.2.0",
+    "@deepagents/devtool-history": "6.2.0",
+    "@deepagents/devtool-shadcn": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.33.0",
     "ai": "7.0.70",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
     "vite": "8.1.5",
     "zod": "4.4.3"

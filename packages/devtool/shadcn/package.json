@@ -1,0 +1,43 @@
+{
+  "name": "@deepagents/devtool-shadcn",
+  "version": "6.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JanuaryLabs/deepagents",
+    "directory": "packages/devtool/shadcn"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": {
+      "development": "./src/styles.css",
+      "default": "./dist/styles.css"
+    }
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
+  }
+}

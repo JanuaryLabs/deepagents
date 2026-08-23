@@ -10,6 +10,16 @@ changes.
 
 ## Current state — 2026-08-23
 
+- `packages/devtool` is now a folder-only container. The existing published
+  `@deepagents/devtool` package lives at `packages/devtool/host`; its package
+  name and public API are unchanged. Workspace discovery, Nx project roots,
+  TypeScript references, lock metadata, tests, lint, and packed contents all
+  resolve from the nested package.
+- The existing implementation is physically split into publishable child
+  packages: `shadcn` owns shared display primitives and theme CSS, `history`
+  owns the History composition and record model, and `traces` owns telemetry
+  discovery, the file adapter, HTTP routes, trace models, and trace UI. `host`
+  owns only plugin/server composition and the browser application shell.
 - The approved Traces slice is implemented in the working tree:
   conversation-scoped HTTP routes, persistent History navigation, newest-first
   trace selection, waterfall, and span inspector.
@@ -38,9 +48,9 @@ changes.
   root, planner, and researcher declarations, starts the worker and devtool,
   and waits for shutdown. It has no conversation creation, `enqueue()` call,
   terminal client, or automatic turn execution.
-- Backlog `#1194` is done: the generated shadcn component scaffold and
-  its unused dependencies are removed. Native controls cover the selector and
-  inspector tabs; the History composition remains the only local component.
+- Backlog `#1194` remains done: no generated component scaffold returned. The
+  new `shadcn` package contains only relocated code the current devtool uses:
+  `cn`, `StatusBadge`, timestamp formatting, and theme CSS.
 - The plugin-owned correction is green for the 15 protocol tests, six file
   telemetry tests, all three devtool integration tests,
   context/experimental/devtool typechecks, devtool lint, package dry-run,
@@ -53,14 +63,18 @@ changes.
   resolve a TypeScript config for `apps/docs/react-router.config.ts`. Verification
   temporarily excluded the docs app from Vite/Vitest inference, then restored
   `nx.json` exactly. The independent defect is tracked as backlog `#1210`.
-- The complete plugin-owned devtool slice is staged as of 2026-08-23. Mixed
-  root lockfile, TypeScript project-reference, and experimental runtime files
-  retain their unrelated wasm and plugin-skills changes only in the working
-  tree; do not overwrite, restore, stage, or attribute those changes to
-  devtool.
+- The package-container and child-package relocation changes are unstaged.
+  Mixed root lockfile, TypeScript project-reference, and experimental runtime
+  files retain unrelated changes; do not overwrite, restore, stage, or
+  attribute those changes to devtool.
 - `.scratch/devtool/implementation-phases.md` is a historical establishment
   record, not the source of truth. Its capability checkpoint is stale because
   History already expanded `AgentPluginHost`.
+- The next product slice is the Scheduled Tasks management UI, owner-wide run
+  inbox, explicit cross-run memory, and local notifications. Its dependency
+  plan and proposed wireframes live in
+  [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md). Production work is
+  blocked on explicit wireframe and notification-scope approval.
 - Historical baseline: the full context suite passed with 1,396 tests. The
   experimental suite had unrelated PostgreSQL-environment and pg-boss
   retention blockers.
@@ -315,12 +329,30 @@ implementing, but the behavior is fixed:
 - [x] Select the devtool adapter from the URI scheme and keep file access in
       the Node devtool process.
 - [x] Remove trace storage metadata and telemetry inspection from Zukhruf core.
-- [x] Use the existing `AgentRuntimePlugin.configure(root)` seam to include the
-      existing Zukhruf runtime context only in the plugin's runtime copy.
+- [x] Use the devtool definition's fresh `AgentPluginInstance.configure(root)`
+      hook to discover telemetry only in that runtime's copy.
 - [x] Omit `traces` and hide links when the source is not discoverable.
 - [x] Preserve the embedded `devtool()` lifecycle.
 - [x] Re-run final lint, package, restart, and discovery integration proof.
 - [x] Reload the live browser for the corrected empty-file adapter proof.
+
+### Phase 6 — Devtool package container
+
+- [x] Make `packages/devtool` the container and move the existing published
+      package to `packages/devtool/host`.
+- [x] Update npm workspace discovery, package-lock links, Nx paths, TypeScript
+      references, package metadata, and tracked plan links.
+- [x] Verify typecheck, integration tests, lint, and `npm pack --dry-run` from
+      the nested host package.
+- [x] Extract the existing History composition as the first real child package.
+- [x] Extract the trace read model and trace UI as a child package without
+      duplicating their contracts.
+- [x] Relocate the current shared display utilities and theme into a real
+      `shadcn` child package without adding speculative components.
+- [ ] Inventory the proven Limerence components and import only the components
+      the devtool uses into the existing `shadcn` package.
+- [ ] Add the Scheduled Tasks and run-inbox UI only after their HTTP,
+      notification, and cross-run-memory contracts are approved.
 
 ## Non-goals
 
@@ -395,7 +427,9 @@ execution.
 
 ## Continuation record
 
-**Exact next action:** rerun the declaration-only demo without submitting a
-turn if fresh live-browser validation is wanted. Do not commit without explicit
-authorization. Fixing the independent docs graph defect and stale wasm
-reference remains outside this change.
+**Exact next action:** inventory the real Limerence component exports and map
+only the approved Scheduled Tasks controls into the existing `shadcn` package.
+Then obtain approval or corrections for the Scheduled Tasks wireframes and
+notification scope before implementing that product phase. Do not stage or
+commit without explicit authorization. Fixing the independent docs graph
+defect and stale wasm reference remains outside this change.

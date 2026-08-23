@@ -109,6 +109,9 @@
           "@deepagents/retrieval",
           "@deepagents/orchestrator",
           "@deepagents/context",
+          "@deepagents/devtool-history",
+          "@deepagents/devtool-shadcn",
+          "@deepagents/devtool-traces",
           "@deepagents/evals",
           "@deepagents/experimental"
         ]

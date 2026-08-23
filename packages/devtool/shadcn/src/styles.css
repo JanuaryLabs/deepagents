@@ -1,4 +1,8 @@
 @import 'tailwindcss';
+@source '../src/status-badge.tsx';
+@source '../../history/src/index.tsx';
+@source '../../host/ui/src/main.tsx';
+@source '../../traces/src/ui.tsx';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -161,16 +165,6 @@ body {
 
 #root {
   min-height: 100vh;
-}
-
-.trace-running {
-  animation: trace-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes trace-pulse {
-  50% {
-    opacity: 0.35;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -16,7 +16,7 @@ import {
   StreamManager,
 } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
-import { devtool } from '@deepagents/devtool';
+import { type Devtool, devtool } from '@deepagents/devtool';
 import {
   AgentRuntime,
   type ConsumeContext,
@@ -156,8 +156,9 @@ test('devtool participates in the AgentRuntime lifecycle', async () => {
     (value) => value.close(),
   );
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
-  const plugin = devtool({ port: 0 });
+  const definition = devtool({ port: 0 });
   const store = new InMemoryContextStore();
+  const lifecycle = { plugin: undefined as Devtool | undefined };
   const runtimeOptions = {
     store,
     streams: new StreamManager({
@@ -165,13 +166,15 @@ test('devtool participates in the AgentRuntime lifecycle', async () => {
       changeSource: new PollingChangeSource({ reads: streamStore }),
     }),
     queue: new IdleTurnQueue({
-      onConsume: () => assert(plugin.url),
-      onDispose: () => assert(plugin.url),
+      onConsume: () => assert(lifecycle.plugin?.url),
+      onDispose: () => assert(lifecycle.plugin?.url),
     }),
     mailboxStore,
-    plugins: [plugin],
   };
-  const runtime = new AgentRuntime(declaration, runtimeOptions);
+  const root = defineAgent({ ...declaration, plugins: [definition] });
+  const runtime = new AgentRuntime(root, runtimeOptions);
+  const plugin = runtime.plugin(definition);
+  lifecycle.plugin = plugin;
   await runtime.createSession({ chatId: 'chat-1', userId: 'user-1' });
   await store.updateChat('chat-1', () => ({ title: 'First conversation' }));
   await store.upsertChat({ id: 'unrelated-chat', userId: 'user-1' });
@@ -237,21 +240,18 @@ test('devtool participates in the AgentRuntime lifecycle', async () => {
     assert((await assetResponse.arrayBuffer()).byteLength > 0);
   }
 
-  await assert.rejects(
-    new AgentRuntime(declaration, runtimeOptions).initialize(),
-    /devtool plugin cannot be shared by AgentRuntime instances/,
-  );
+  const secondRuntime = new AgentRuntime(root, runtimeOptions);
+  assert.notEqual(secondRuntime.plugin(definition), plugin);
 
-  const conflictingPlugin = devtool({
+  const conflictingDefinition = devtool({
     port: Number(plugin.url.port),
   });
-  await assert.rejects(
-    new AgentRuntime(declaration, {
-      ...runtimeOptions,
-      plugins: [conflictingPlugin],
-    }).work(),
-    { code: 'EADDRINUSE' },
+  const conflictingRuntime = new AgentRuntime(
+    defineAgent({ ...declaration, plugins: [conflictingDefinition] }),
+    runtimeOptions,
   );
+  const conflictingPlugin = conflictingRuntime.plugin(conflictingDefinition);
+  await assert.rejects(conflictingRuntime.work(), { code: 'EADDRINUSE' });
   assert.equal(conflictingPlugin.url, undefined);
 
   await worker[Symbol.asyncDispose]();
@@ -320,6 +320,7 @@ test('devtool persists conversation-scoped traces from a public AgentRuntime tur
       return { stream: simulateReadableStream({ chunks }) };
     },
   });
+  const definition = devtool({ port: 0 });
   const root = defineAgent({
     name: 'trace-agent',
     model,
@@ -341,16 +342,16 @@ test('devtool persists conversation-scoped traces from a public AgentRuntime tur
         execute: async ({ query }) => ({ query, status: 'ok' }),
       }),
     },
+    plugins: [definition],
   });
-  const plugin = devtool({ port: 0 });
   const queue = new ControlledTurnQueue();
   const runtime = new AgentRuntime(root, {
     store,
     streams,
     queue,
     mailboxStore,
-    plugins: [plugin],
   });
+  const plugin = runtime.plugin(definition);
   assert.equal(root.telemetry?.includeRuntimeContext, undefined);
   const worker = await runtime.work();
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
@@ -491,14 +492,14 @@ test('devtool persists conversation-scoped traces from a public AgentRuntime tur
 
   await worker[Symbol.asyncDispose]();
 
-  const restartedPlugin = devtool({ port: 0 });
   const restarted = new AgentRuntime(root, {
     store,
     streams,
     queue: new ControlledTurnQueue(),
     mailboxStore,
-    plugins: [restartedPlugin],
   });
+  const restartedPlugin = restarted.plugin(definition);
+  assert.notEqual(restartedPlugin, plugin);
   const restartedWorker = await restarted.work();
   assert(restartedPlugin.url);
   const restartedUrl = new URL(
