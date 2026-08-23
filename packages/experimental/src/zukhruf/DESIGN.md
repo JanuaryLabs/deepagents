@@ -634,18 +634,27 @@ import {
   PgBossWakeScheduler,
   type SchedulingWake,
   conversationScheduling,
+  conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
   queue: 'zukhruf-wakes-research-agent',
 });
 await wakes.initialize();
+const scheduling = conversationScheduling();
+const root = defineAgent({
+  // model, sandbox, instructions, ...
+  plugins: [scheduling],
+});
 const runtime = new AgentRuntime(root, {
   store,
   streams,
   queue,
   mailboxStore,
-  plugins: [conversationScheduling({ scheduler: wakes, timezone: 'UTC' })],
+  bindings: [
+    conversationSchedulingCapabilities.scheduler.bind(wakes),
+    conversationSchedulingCapabilities.timezone.bind('UTC'),
+  ],
 });
 await using worker = await runtime.work();
 ```

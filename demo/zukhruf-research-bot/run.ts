@@ -8,14 +8,13 @@ import {
   SqliteStreamStore,
   StreamManager,
 } from '@deepagents/context';
-import { devtool } from '@deepagents/devtool';
 import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
 
-import declaration from './agent.ts';
+import declaration, { developerTool } from './agent.ts';
 
 await using resources = new AsyncDisposableStack();
 
@@ -48,19 +47,18 @@ const streams = new StreamManager({
   store: streamStore,
   changeSource: new PollingChangeSource({ reads: streamStore }),
 });
-const developerTool = devtool();
-
 const runtime = new AgentRuntime(declaration, {
   store: new SqliteContextStore('./zukhruf-research.sqlite'),
   streams,
   queue,
   mailboxStore,
-  plugins: [developerTool],
 });
 
 resources.use(await runtime.work({ concurrency: 4 }));
 
-console.log(styleText('dim', `devtool: ${developerTool.url?.href}`));
+console.log(
+  styleText('dim', `devtool: ${runtime.plugin(developerTool).url?.href}`),
+);
 console.log(
   styleText(
     'dim',

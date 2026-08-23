@@ -29,6 +29,9 @@ jobs:
       - name: Build packages
         run: npx nx run-many -t build --prod
 
+      - name: Verify packed definition-owned plugins
+        run: npm run verify:packed-plugins
+
       - name: Publish packages
         run: npx nx release publish
         env:

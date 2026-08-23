@@ -50,3 +50,6 @@ jobs:
 
       - name: Build affected
         run: npx nx affected -t build
+
+      - name: Verify packed definition-owned plugins
+        run: npm run verify:packed-plugins

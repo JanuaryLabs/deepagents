@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { role } from '@deepagents/context';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
+import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 
 import { createWorkspaceSandbox } from './sandbox.ts';
 
@@ -35,6 +36,11 @@ Run the narrowest relevant checks after editing. Before finishing a meaningful
 change, spawn \`code-reviewer\`, wait for its result, and fix confirmed
 high-impact findings. End with the changed files, checks run, and any genuine
 blocker.`),
+    ],
+    plugins: [
+      fileAgents({
+        directory: new URL('./agents/subagents/', import.meta.url),
+      }),
     ],
   });
 }

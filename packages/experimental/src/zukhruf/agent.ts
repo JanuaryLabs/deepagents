@@ -6,6 +6,7 @@ import type {
   ContextFragment,
 } from '@deepagents/context';
 
+import type { AgentPluginDefinition } from './runtime/agent-runtime.ts';
 import type { ZukhrufToolSet } from './tool.ts';
 
 /**
@@ -36,12 +37,15 @@ export interface AgentDeclaration {
   instructions: ContextFragment[];
   tools?: ZukhrufToolSet;
   subagents?: AgentDeclaration[];
+  /** Runtime plugins owned by this declaration when it is the root agent. */
+  plugins?: readonly AgentPluginDefinition[];
   telemetry?: Parameters<typeof generateText>[0]['telemetry'];
 }
 
 export interface DefinedAgentDeclaration extends AgentDeclaration {
   tools: ZukhrufToolSet;
   subagents: AgentDeclaration[];
+  plugins: readonly AgentPluginDefinition[];
 }
 
 export function defineAgent(
@@ -50,6 +54,7 @@ export function defineAgent(
   return {
     ...declaration,
     tools: declaration.tools ?? {},
-    subagents: declaration.subagents ?? [],
+    subagents: declaration.subagents ? [...declaration.subagents] : [],
+    plugins: declaration.plugins ? [...declaration.plugins] : [],
   };
 }

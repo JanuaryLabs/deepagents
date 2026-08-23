@@ -4,33 +4,38 @@ import { fileURLToPath } from 'node:url';
 
 import { parseFrontmatter, role } from '@deepagents/context';
 
-import { type AgentDeclaration, type AgentRuntimePlugin } from '../../index.ts';
+import {
+  type AgentDeclaration,
+  type AgentPluginDefinition,
+} from '../../index.ts';
 
 export function fileAgents({
   directory,
 }: {
   directory: string | URL;
-}): AgentRuntimePlugin {
+}): AgentPluginDefinition {
   return {
     name: 'file-agents',
-    configure(root) {
-      const path =
-        directory instanceof URL ? fileURLToPath(directory) : directory;
-      const discovered = readdirSync(path, { withFileTypes: true })
-        .filter(
-          (entry) =>
-            entry.isFile() &&
-            !entry.name.startsWith('.') &&
-            extname(entry.name) === '.md',
-        )
-        .toSorted((left, right) => left.name.localeCompare(right.name))
-        .map((entry) => loadAgent(join(path, entry.name), root));
+    create: () => ({
+      configure(root) {
+        const path =
+          directory instanceof URL ? fileURLToPath(directory) : directory;
+        const discovered = readdirSync(path, { withFileTypes: true })
+          .filter(
+            (entry) =>
+              entry.isFile() &&
+              !entry.name.startsWith('.') &&
+              extname(entry.name) === '.md',
+          )
+          .toSorted((left, right) => left.name.localeCompare(right.name))
+          .map((entry) => loadAgent(join(path, entry.name), root));
 
-      return {
-        ...root,
-        subagents: [...(root.subagents ?? []), ...discovered],
-      };
-    },
+        return {
+          ...root,
+          subagents: [...(root.subagents ?? []), ...discovered],
+        };
+      },
+    }),
   };
 }
 

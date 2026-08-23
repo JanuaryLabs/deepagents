@@ -14,7 +14,6 @@ import {
   SqliteMailboxStore,
   renderTurn,
 } from '@deepagents/experimental/zukhruf';
-import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 
 import { createCodingAgent } from './agent.ts';
 
@@ -61,11 +60,6 @@ const runtime = new AgentRuntime(root, {
   }),
   queue,
   mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
-  plugins: [
-    fileAgents({
-      directory: new URL('./agents/subagents/', import.meta.url),
-    }),
-  ],
 });
 resources.use(await runtime.work({ concurrency: 4 }));
 

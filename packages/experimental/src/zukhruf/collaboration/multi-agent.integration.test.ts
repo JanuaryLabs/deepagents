@@ -506,11 +506,11 @@ test('file-loaded subagent uses AI SDK code mode collaboration', async (t) => {
       model,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
+      plugins: [fileAgents({ directory: directory.path })],
     }),
     {
       ...h,
       multiAgent: { nonCodeModeOnly: false },
-      plugins: [fileAgents({ directory: directory.path })],
     },
   );
 

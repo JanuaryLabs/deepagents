@@ -36,8 +36,9 @@ import {
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
+  type AgentPluginBinding,
+  type AgentPluginDefinition,
   AgentRuntime,
-  type AgentRuntimeOptions,
   AgentThread,
   PgBossTurnQueue,
   SqliteMailboxStore,
@@ -47,9 +48,9 @@ import {
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 import {
-  type Schedules,
   scheduleFiles,
   schedules,
+  schedulesCapabilities,
 } from '@deepagents/experimental/zukhruf/schedules';
 import { settleWithin, timebox } from '@deepagents/test';
 
@@ -372,10 +373,10 @@ async function harness(
   options?: {
     queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
     declaration?: AgentDeclaration;
-    plugins?: (infrastructure: {
-      boss: PgBoss;
-      database: PGlite;
-    }) => AgentRuntimeOptions['plugins'];
+    composition?: (infrastructure: { boss: PgBoss; database: PGlite }) => {
+      definitions: readonly AgentPluginDefinition[];
+      bindings?: readonly AgentPluginBinding[];
+    };
   },
 ) {
   const pglite = new PGlite();
@@ -400,16 +401,21 @@ async function harness(
     changeSource: new PollingChangeSource({ reads: streamStore }),
   });
   const mailboxStore = new SqliteMailboxStore(':memory:');
+  const composition = options?.composition?.({ boss, database: pglite });
+  const root = options?.declaration ?? declaration(model, tools);
   const runtime = new AgentRuntime(
-    options?.declaration ?? declaration(model, tools),
+    composition
+      ? defineAgent({
+          ...root,
+          plugins: [...(root.plugins ?? []), ...composition.definitions],
+        })
+      : root,
     {
       store,
       streams,
       queue,
       mailboxStore,
-      ...(options?.plugins
-        ? { plugins: options.plugins({ boss, database: pglite }) }
-        : {}),
+      ...(composition?.bindings ? { bindings: composition.bindings } : {}),
     },
   );
   return {
@@ -426,6 +432,18 @@ async function harness(
       mailboxStore.close();
     },
   };
+}
+
+function scheduleBindings(
+  boss: PgBoss,
+  database: PGlite,
+): readonly AgentPluginBinding[] {
+  return [
+    schedulesCapabilities.boss.bind(boss),
+    schedulesCapabilities.transaction.bind((operation) =>
+      database.transaction((transaction) => operation(fromPglite(transaction))),
+    ),
+  ];
 }
 
 async function collectText(stream: ReadableStream<UIMessageChunk>) {
@@ -539,24 +557,22 @@ describe('zukhruf runtime — host sessions', () => {
 
   it('runs scheduled prompts in fresh, idempotent root sessions', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
-    let scheduled: Schedules | undefined;
+    let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(slowModel(track), undefined, {
-      plugins: ({ boss, database }) => {
+      composition: ({ boss, database }) => {
         scheduled = schedules({
-          boss,
           queue: `scheduled-runtime-${crypto.randomUUID()}`,
           reconciliationIntervalMs: 50,
-          transaction: (operation) =>
-            database.transaction((transaction) =>
-              operation(fromPglite(transaction)),
-            ),
           workerOptions: { pollingIntervalSeconds: 0.5 },
         });
-        return [scheduled];
+        return {
+          definitions: [scheduled],
+          bindings: scheduleBindings(boss, database),
+        };
       },
     });
     assert.ok(scheduled);
-    const scheduleControl = scheduled;
+    const scheduleControl = h.runtime.plugin(scheduled);
     await Promise.all([h.runtime.initialize(), h.runtime.initialize()]);
     const cancelledTask = await scheduleControl.create('user-1', {
       idempotencyKey: 'cancelled-task',
@@ -630,24 +646,22 @@ describe('zukhruf runtime — host sessions', () => {
 
   it('runs a scheduled prompt in an existing conversation', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
-    let scheduled: Schedules | undefined;
+    let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(scriptedModel(track), undefined, {
-      plugins: ({ boss, database }) => {
+      composition: ({ boss, database }) => {
         scheduled = schedules({
-          boss,
           queue: `scheduled-existing-${crypto.randomUUID()}`,
           reconciliationIntervalMs: 50,
-          transaction: (operation) =>
-            database.transaction((transaction) =>
-              operation(fromPglite(transaction)),
-            ),
           workerOptions: { pollingIntervalSeconds: 0.5 },
         });
-        return [scheduled];
+        return {
+          definitions: [scheduled],
+          bindings: scheduleBindings(boss, database),
+        };
       },
     });
     assert.ok(scheduled);
-    const scheduleControl = scheduled;
+    const scheduleControl = h.runtime.plugin(scheduled);
     const conversation = { chatId: 'existing-chat', userId: 'user-1' };
     await using _worker = await h.runtime.work();
     await collectText(
@@ -700,24 +714,22 @@ describe('zukhruf runtime — host sessions', () => {
 
   it('fails a scheduled task that requires interactive approval', async () => {
     const { track, tools, model } = approvalSetup();
-    let scheduled: Schedules | undefined;
+    let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(model, tools, {
-      plugins: ({ boss, database }) => {
+      composition: ({ boss, database }) => {
         scheduled = schedules({
-          boss,
           queue: `scheduled-approval-${crypto.randomUUID()}`,
           reconciliationIntervalMs: 50,
-          transaction: (operation) =>
-            database.transaction((transaction) =>
-              operation(fromPglite(transaction)),
-            ),
           workerOptions: { pollingIntervalSeconds: 0.5 },
         });
-        return [scheduled];
+        return {
+          definitions: [scheduled],
+          bindings: scheduleBindings(boss, database),
+        };
       },
     });
     assert.ok(scheduled);
-    const scheduleControl = scheduled;
+    const scheduleControl = h.runtime.plugin(scheduled);
     await h.runtime.initialize();
     const task = await scheduleControl.create('user-1', {
       idempotencyKey: 'approval-task',
@@ -782,25 +794,23 @@ Prepare the engineering report.
       directory: directory.path,
       ownerId: 'user-1',
     });
-    let scheduled: Schedules | undefined;
+    let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(scriptedModel(track), undefined, {
-      plugins: ({ boss, database }) => {
+      composition: ({ boss, database }) => {
         scheduled = schedules({
-          boss,
           queue: `scheduled-files-${crypto.randomUUID()}`,
           reconciliationIntervalMs: 50,
-          transaction: (operation) =>
-            database.transaction((transaction) =>
-              operation(fromPglite(transaction)),
-            ),
           workerOptions: { pollingIntervalSeconds: 0.5 },
           sources: [source],
         });
-        return [scheduled];
+        return {
+          definitions: [scheduled],
+          bindings: scheduleBindings(boss, database),
+        };
       },
     });
     assert.ok(scheduled);
-    const scheduleControl = scheduled;
+    const scheduleControl = h.runtime.plugin(scheduled);
     await h.runtime.initialize();
     const [task] = await scheduleControl.list('user-1');
     assert.equal(task.name, 'Monday report');
@@ -891,22 +901,20 @@ Missing a timezone.
 `,
     );
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
-    let scheduled: Schedules | undefined;
+    let scheduled: ReturnType<typeof schedules> | undefined;
     await using h = await harness(scriptedModel(track), undefined, {
-      plugins: ({ boss, database }) => {
+      composition: ({ boss, database }) => {
         scheduled = schedules({
-          boss,
           queue: `scheduled-invalid-${crypto.randomUUID()}`,
           reconciliationIntervalMs: 50,
-          transaction: (operation) =>
-            database.transaction((transaction) =>
-              operation(fromPglite(transaction)),
-            ),
           sources: [
             scheduleFiles({ directory: directory.path, ownerId: 'user-1' }),
           ],
         });
-        return [scheduled];
+        return {
+          definitions: [scheduled],
+          bindings: scheduleBindings(boss, database),
+        };
       },
     });
     assert.ok(scheduled);
@@ -918,7 +926,7 @@ Missing a timezone.
       h.runtime.work(),
       /Invalid schedule declaration invalid\.md/,
     );
-    assert.deepEqual(await scheduled.list('user-1'), []);
+    assert.deepEqual(await h.runtime.plugin(scheduled).list('user-1'), []);
     assert.deepEqual(track.calls, []);
   });
 });
@@ -1048,12 +1056,14 @@ describe('zukhruf runtime — background executor', () => {
 
     await using h = await harness(model, undefined, {
       declaration: agentDeclaration,
-      plugins: () => [
-        {
-          name: 'scheduling-skills',
-          skills: [pathToFileURL(skillDirectory)],
-        },
-      ],
+      composition: () => ({
+        definitions: [
+          {
+            name: 'scheduling-skills',
+            create: () => ({ skills: [pathToFileURL(skillDirectory)] }),
+          },
+        ],
+      }),
     });
     await using worker = await h.runtime.work();
     void worker;

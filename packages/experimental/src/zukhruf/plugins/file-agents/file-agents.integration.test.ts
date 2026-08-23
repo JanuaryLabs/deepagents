@@ -57,19 +57,24 @@ test('fileAgents plugin adds one deterministic startup snapshot through AgentRun
   symlinkSync(join(directory.path, 'a.md'), join(directory.path, 'linked.md'));
 
   let configured: AgentDeclaration | undefined;
-  const runtime = new AgentRuntime(root, {
-    ...({} as AgentRuntimeOptions),
-    plugins: [
-      fileAgents({ directory: directory.path }),
-      {
-        name: 'capture-configured',
-        configure(declaration) {
-          configured = declaration;
-          return declaration;
+  const runtime = new AgentRuntime(
+    defineAgent({
+      ...root,
+      plugins: [
+        fileAgents({ directory: directory.path }),
+        {
+          name: 'capture-configured',
+          create: () => ({
+            configure(declaration) {
+              configured = declaration;
+              return declaration;
+            },
+          }),
         },
-      },
-    ],
-  });
+      ],
+    }),
+    { ...({} as AgentRuntimeOptions) },
+  );
 
   assert.deepEqual(
     configured?.subagents?.map(({ name }) => name),
@@ -127,10 +132,13 @@ test('fileAgents rejects an invalid catalog before AgentRuntime construction', a
     writeFileSync(join(directory.path, fileName), content);
     assert.throws(
       () =>
-        new AgentRuntime(root, {
-          ...({} as AgentRuntimeOptions),
-          plugins: [fileAgents({ directory: directory.path })],
-        }),
+        new AgentRuntime(
+          defineAgent({
+            ...root,
+            plugins: [fileAgents({ directory: directory.path })],
+          }),
+          { ...({} as AgentRuntimeOptions) },
+        ),
       expected,
     );
   }
@@ -148,28 +156,37 @@ test('fileAgents accepts an empty directory and leaves duplicate validation to A
     declaration('code-defined', 'Duplicate.'),
   );
 
-  const runtime = new AgentRuntime(root, {
-    ...({} as AgentRuntimeOptions),
-    plugins: [fileAgents({ directory: pathToFileURL(empty.path) })],
-  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      ...root,
+      plugins: [fileAgents({ directory: pathToFileURL(empty.path) })],
+    }),
+    { ...({} as AgentRuntimeOptions) },
+  );
   assert.deepEqual(
     runtime.info.agents.map(({ name }) => name),
     ['root', 'code-defined'],
   );
   assert.throws(
     () =>
-      new AgentRuntime(root, {
-        ...({} as AgentRuntimeOptions),
-        plugins: [fileAgents({ directory: duplicate.path })],
-      }),
+      new AgentRuntime(
+        defineAgent({
+          ...root,
+          plugins: [fileAgents({ directory: duplicate.path })],
+        }),
+        { ...({} as AgentRuntimeOptions) },
+      ),
     /duplicate agent declaration name "code-defined"/,
   );
   assert.throws(
     () =>
-      new AgentRuntime(root, {
-        ...({} as AgentRuntimeOptions),
-        plugins: [fileAgents({ directory: join(empty.path, 'missing') })],
-      }),
+      new AgentRuntime(
+        defineAgent({
+          ...root,
+          plugins: [fileAgents({ directory: join(empty.path, 'missing') })],
+        }),
+        { ...({} as AgentRuntimeOptions) },
+      ),
     /ENOENT/,
   );
 });

@@ -6,17 +6,11 @@ import {
   AgentRuntime,
   type AgentRuntimeOptions,
 } from '@deepagents/experimental/zukhruf';
-import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 
 test('builds the demo root in code and discovers its file agents through the runtime plugin', () => {
   const root = createCodingAgent(import.meta.dirname);
   const runtime = new AgentRuntime(root, {
     ...({} as AgentRuntimeOptions),
-    plugins: [
-      fileAgents({
-        directory: new URL('./agents/subagents/', import.meta.url),
-      }),
-    ],
   });
 
   assert.deepEqual(

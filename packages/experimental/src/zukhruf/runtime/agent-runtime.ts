@@ -65,8 +65,28 @@ export interface AgentPluginHost {
   observe(conversation: ConversationId): AgentObservation;
 }
 
-export interface AgentRuntimePlugin {
+export interface AgentPluginBinding {
+  readonly capability: AgentPluginCapability<unknown>;
+  readonly value: unknown;
+}
+
+export class AgentPluginCapability<Value> {
   readonly name: string;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  bind(value: Value): AgentPluginBinding {
+    return { capability: this, value };
+  }
+}
+
+export interface AgentPluginBindings {
+  get<Value>(capability: AgentPluginCapability<Value>): Value;
+}
+
+export interface AgentPluginInstance {
   readonly tools?: ZukhrufToolSet;
   /** Skill directories installed into every agent sandbox. */
   readonly skills?: readonly (string | URL)[];
@@ -85,6 +105,48 @@ export interface AgentRuntimePlugin {
   ): Promise<void>;
 }
 
+export interface AgentPluginDefinition<Instance extends object = object> {
+  readonly name: string;
+  readonly capabilities?: readonly AgentPluginCapability<unknown>[];
+  create(bindings: AgentPluginBindings): AgentPluginInstance & Instance;
+}
+
+interface MaterializedAgentPlugin {
+  readonly definition: AgentPluginDefinition;
+  readonly instance: AgentPluginInstance;
+}
+
+function assertRootPluginComposition(
+  declared: AgentDeclaration,
+  configured: AgentDeclaration,
+): void {
+  if (declared.plugins === configured.plugins) return;
+  if (
+    !declared.plugins ||
+    !configured.plugins ||
+    declared.plugins.length !== configured.plugins.length ||
+    declared.plugins.some(
+      (definition, index) => configured.plugins?.[index] !== definition,
+    )
+  ) {
+    throw new Error(
+      'AgentRuntime: plugins cannot change the root plugin composition',
+    );
+  }
+}
+
+function assertNoSubagentPlugins(root: AgentDeclaration): void {
+  const visit = (declaration: AgentDeclaration): void => {
+    if (declaration.plugins && declaration.plugins.length > 0) {
+      throw new Error(
+        `AgentRuntime: subagent "${declaration.name}" cannot declare runtime plugins`,
+      );
+    }
+    for (const subagent of declaration.subagents ?? []) visit(subagent);
+  };
+  for (const subagent of root.subagents ?? []) visit(subagent);
+}
+
 export interface AgentRuntimeOptions {
   store: ContextStore;
   /** Borrowed stream subsystem; the caller owns its store, change source, and lifecycle. */
@@ -94,7 +156,8 @@ export interface AgentRuntimeOptions {
   mailboxStore: MailboxStore;
   /** Codex-compatible multi-agent host guidance and tool configuration. */
   multiAgent?: MultiAgentHostConfig;
-  plugins?: readonly AgentRuntimePlugin[];
+  /** Host implementations for capabilities required by root-owned plugins. */
+  bindings?: readonly AgentPluginBinding[];
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -233,7 +296,7 @@ export class AgentRuntime {
   readonly #controlPlane: AgentControlPlane;
   readonly #approvals: ApprovalController;
   readonly #executor: AgentTurnExecutor;
-  readonly #plugins: readonly AgentRuntimePlugin[];
+  readonly #plugins: readonly MaterializedAgentPlugin[];
   readonly #pluginTools: ZukhrufToolSet;
   readonly #pluginHost: AgentPluginHost;
   #initialization?: Promise<void>;
@@ -241,41 +304,147 @@ export class AgentRuntime {
   constructor(root: AgentDeclaration, options: AgentRuntimeOptions) {
     const multiAgent = resolveMultiAgentHostConfig(options.multiAgent);
     let configuredRoot = root;
-    const plugins = options.plugins ?? [];
     const pluginNames = new Set<string>();
+    const capabilities = new Map<
+      string,
+      { capability: AgentPluginCapability<unknown>; plugin: string }
+    >();
+    if (root.plugins) {
+      for (const definition of root.plugins) {
+        if (!definition.name.trim()) {
+          throw new Error('AgentRuntime: plugin name cannot be empty');
+        }
+        if (definition.name !== definition.name.trim()) {
+          throw new Error(
+            `AgentRuntime: plugin name "${definition.name}" must not contain surrounding whitespace`,
+          );
+        }
+        if (pluginNames.has(definition.name)) {
+          throw new Error(
+            `AgentRuntime: duplicate plugin name "${definition.name}"`,
+          );
+        }
+        pluginNames.add(definition.name);
+        if (!definition.capabilities) continue;
+        const declaredCapabilities = new Set<AgentPluginCapability<unknown>>();
+        for (const capability of definition.capabilities) {
+          if (declaredCapabilities.has(capability)) {
+            throw new Error(
+              `AgentRuntime: plugin "${definition.name}" declares duplicate capability "${capability.name}"`,
+            );
+          }
+          declaredCapabilities.add(capability);
+          if (!capability.name.trim()) {
+            throw new Error(
+              `AgentRuntime: capability name from plugin "${definition.name}" cannot be empty`,
+            );
+          }
+          if (capability.name !== capability.name.trim()) {
+            throw new Error(
+              `AgentRuntime: capability "${capability.name}" from plugin "${definition.name}" must not contain surrounding whitespace`,
+            );
+          }
+          const existing = capabilities.get(capability.name);
+          if (existing && existing.capability !== capability) {
+            throw new Error(
+              `AgentRuntime: capability "${capability.name}" from plugin "${definition.name}" conflicts with plugin "${existing.plugin}"`,
+            );
+          }
+          if (!existing) {
+            capabilities.set(capability.name, {
+              capability,
+              plugin: definition.name,
+            });
+          }
+        }
+      }
+    }
+    const bindingValues = new Map<AgentPluginCapability<unknown>, unknown>();
+    const bindingNames = new Set<string>();
+    if (options.bindings) {
+      for (const binding of options.bindings) {
+        if (bindingNames.has(binding.capability.name)) {
+          throw new Error(
+            `AgentRuntime: duplicate binding for capability "${binding.capability.name}"`,
+          );
+        }
+        bindingNames.add(binding.capability.name);
+        const required = capabilities.get(binding.capability.name);
+        if (!required || required.capability !== binding.capability) {
+          throw new Error(
+            `AgentRuntime: unused binding for capability "${binding.capability.name}"`,
+          );
+        }
+        bindingValues.set(binding.capability, binding.value);
+      }
+    }
+    const plugins: MaterializedAgentPlugin[] = [];
+    if (root.plugins) {
+      for (const definition of root.plugins) {
+        const declared = new Set(definition.capabilities);
+        if (definition.capabilities) {
+          for (const capability of definition.capabilities) {
+            if (!bindingValues.has(capability)) {
+              throw new Error(
+                `AgentRuntime: plugin "${definition.name}" requires missing capability "${capability.name}"`,
+              );
+            }
+          }
+        }
+        const instance = definition.create({
+          get: <Value>(capability: AgentPluginCapability<Value>): Value => {
+            if (!declared.has(capability)) {
+              throw new Error(
+                `AgentRuntime: plugin "${definition.name}" did not declare capability "${capability.name}"`,
+              );
+            }
+            return bindingValues.get(capability) as Value;
+          },
+        });
+        plugins.push({ definition, instance });
+      }
+    }
     const pluginTools: ZukhrufToolSet = {};
+    const pluginSkills: (string | URL)[] = [];
+    const pluginRuntimeContext: Record<string, unknown> = {};
+    const runtimeContextOwners = new Map<string, string>([
+      ['zukhruf', 'the runtime'],
+    ]);
     const collaborationTools = createCollaborationTools(multiAgent);
     const injectedTools = new Map<string, string>(
       Object.keys(collaborationTools).map((name) => [name, 'the runtime']),
     );
     if (multiAgent.codeMode) injectedTools.set('code_mode', 'the runtime');
-    for (const plugin of plugins) {
-      if (!plugin.name.trim()) {
-        throw new Error('AgentRuntime: plugin name cannot be empty');
-      }
-      if (plugin.name !== plugin.name.trim()) {
-        throw new Error(
-          `AgentRuntime: plugin name "${plugin.name}" must not contain surrounding whitespace`,
-        );
-      }
-      if (pluginNames.has(plugin.name)) {
-        throw new Error(`AgentRuntime: duplicate plugin name "${plugin.name}"`);
-      }
-      pluginNames.add(plugin.name);
-      for (const [name, tool] of Object.entries(plugin.tools ?? {})) {
+    for (const { definition, instance } of plugins) {
+      for (const [name, tool] of Object.entries(instance.tools ?? {})) {
         const owner = injectedTools.get(name);
         if (owner) {
           throw new Error(
-            `AgentRuntime: plugin tool "${name}" from "${plugin.name}" conflicts with ${owner}`,
+            `AgentRuntime: plugin tool "${name}" from "${definition.name}" conflicts with ${owner}`,
           );
         }
-        injectedTools.set(name, `plugin "${plugin.name}"`);
+        injectedTools.set(name, `plugin "${definition.name}"`);
         pluginTools[name] = tool;
       }
+      if (instance.skills) pluginSkills.push(...instance.skills);
+      if (!instance.runtimeContext) continue;
+      for (const [name, value] of Object.entries(instance.runtimeContext)) {
+        const owner = runtimeContextOwners.get(name);
+        if (owner) {
+          throw new Error(
+            `AgentRuntime: runtime context "${name}" from plugin "${definition.name}" conflicts with ${owner}`,
+          );
+        }
+        runtimeContextOwners.set(name, `plugin "${definition.name}"`);
+        pluginRuntimeContext[name] = value;
+      }
     }
-    for (const plugin of plugins) {
-      if (plugin.configure) configuredRoot = plugin.configure(configuredRoot);
+    for (const { instance } of plugins) {
+      if (instance.configure)
+        configuredRoot = instance.configure(configuredRoot);
     }
+    assertRootPluginComposition(root, configuredRoot);
+    assertNoSubagentPlugins(configuredRoot);
     const declarations = new AgentDeclarationRegistry(configuredRoot);
     for (const declaration of declarations.values()) {
       for (const name of Object.keys(declaration.tools ?? {})) {
@@ -350,18 +519,13 @@ export class AgentRuntime {
       multiAgent,
       collaborationTools,
       pluginTools,
-      pluginSkills: loadPluginSkills(
-        plugins.flatMap(({ skills }) => skills ?? []),
-      ),
-      pluginRuntimeContext: Object.assign(
-        {},
-        ...plugins.map(({ runtimeContext }) => runtimeContext ?? {}),
-      ),
+      pluginSkills: loadPluginSkills(pluginSkills),
+      pluginRuntimeContext,
       configureTelemetry: (context, telemetry) =>
         plugins.reduce(
-          (configured, plugin) =>
-            plugin.configureTelemetry
-              ? plugin.configureTelemetry(context, configured)
+          (configured, { instance }) =>
+            instance.configureTelemetry
+              ? instance.configureTelemetry(context, configured)
               : configured,
           telemetry,
         ),
@@ -385,6 +549,20 @@ export class AgentRuntime {
   initialize(): Promise<void> {
     if (!this.#initialization) this.#initialization = this.#initialize();
     return this.#initialization;
+  }
+
+  plugin<Instance extends object>(
+    definition: AgentPluginDefinition<Instance>,
+  ): AgentPluginInstance & Instance {
+    const plugin = this.#plugins.find(
+      ({ definition: candidate }) => candidate === definition,
+    );
+    if (!plugin) {
+      throw new Error(
+        `AgentRuntime: plugin "${definition.name}" does not belong to this runtime`,
+      );
+    }
+    return plugin.instance as AgentPluginInstance & Instance;
   }
 
   async createSession(conversation: ConversationId): Promise<void> {
@@ -508,15 +686,17 @@ export class AgentRuntime {
     await this.initialize();
     const workers = new AsyncDisposableStack();
     try {
-      for (const plugin of this.#plugins) {
-        if (plugin.work) workers.use(await plugin.work(this.#pluginHost));
+      for (const { instance } of this.#plugins) {
+        if (instance.work) {
+          workers.use(await instance.work(this.#pluginHost));
+        }
       }
       workers.use(
         await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
           concurrency: options?.concurrency,
           onOrphaned: this.#onOrphaned.bind(this),
-          onSettled: !this.#plugins.some(({ conversationAvailable }) =>
-            Boolean(conversationAvailable),
+          onSettled: !this.#plugins.some(({ instance }) =>
+            Boolean(instance.conversationAvailable),
           )
             ? undefined
             : ({ chatId, userId }) =>
@@ -531,16 +711,16 @@ export class AgentRuntime {
   }
 
   async #initialize(): Promise<void> {
-    for (const plugin of this.#plugins) {
-      await plugin.initialize?.(this.#pluginHost);
+    for (const { instance } of this.#plugins) {
+      await instance.initialize?.(this.#pluginHost);
     }
   }
 
   async #conversationAvailable(conversation: ConversationId): Promise<void> {
     const errors: unknown[] = [];
-    for (const plugin of this.#plugins) {
+    for (const { instance } of this.#plugins) {
       try {
-        await plugin.conversationAvailable?.(this.#pluginHost, conversation);
+        await instance.conversationAvailable?.(this.#pluginHost, conversation);
       } catch (error) {
         errors.push(error);
       }

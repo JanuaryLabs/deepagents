@@ -26,6 +26,7 @@ import {
   type Wake,
   WakeScheduler,
   conversationScheduling,
+  conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 
 const usage = {
@@ -210,6 +211,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       model: new MockLanguageModelV4({}),
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
+      plugins: [conversationScheduling()],
     }),
     {
       store,
@@ -219,8 +221,9 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       }),
       queue: queueA,
       mailboxStore: mailboxStoreA,
-      plugins: [
-        conversationScheduling({ scheduler: schedulerA, timezone: 'UTC' }),
+      bindings: [
+        conversationSchedulingCapabilities.scheduler.bind(schedulerA),
+        conversationSchedulingCapabilities.timezone.bind('UTC'),
       ],
     },
   );
@@ -230,6 +233,7 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       model: cronCreatingModel(),
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
+      plugins: [conversationScheduling()],
     }),
     {
       store,
@@ -239,8 +243,9 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
       }),
       queue: queueB,
       mailboxStore: mailboxStoreB,
-      plugins: [
-        conversationScheduling({ scheduler: schedulerB, timezone: 'UTC' }),
+      bindings: [
+        conversationSchedulingCapabilities.scheduler.bind(schedulerB),
+        conversationSchedulingCapabilities.timezone.bind('UTC'),
       ],
     },
   );

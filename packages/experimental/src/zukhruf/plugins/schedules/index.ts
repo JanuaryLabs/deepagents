@@ -1,15 +1,18 @@
 import { isToolUIPart } from 'ai';
-import type { JobPollingOptions } from 'pg-boss';
+import type { JobPollingOptions, PgBoss } from 'pg-boss';
 
-import type {
-  AgentPluginHost,
-  AgentRuntimePlugin,
+import {
+  AgentPluginCapability,
+  type AgentPluginDefinition,
+  type AgentPluginHost,
+  type AgentPluginInstance,
 } from '../../runtime/agent-runtime.ts';
 import {
   type CreateScheduledTaskInput,
   type ScheduledExecutionObservation,
   type ScheduledRun,
   type ScheduledTask,
+  type ScheduledTaskTransaction,
   ScheduledTasks,
   type ScheduledTasksOptions,
   type UpdateScheduledTaskInput,
@@ -49,30 +52,55 @@ export type ScheduleControl = Pick<
 
 export type ScheduleSource = (schedules: ScheduleControl) => Promise<void>;
 
-export interface SchedulesOptions extends Omit<
+export interface SchedulesOptions extends Pick<
   ScheduledTasksOptions<ExecutionConfig>,
-  'executor'
+  'queue' | 'queueOptions' | 'reconciliationIntervalMs'
 > {
   workerOptions?: JobPollingOptions;
   sources?: readonly ScheduleSource[];
 }
 
-export type Schedules = AgentRuntimePlugin & ScheduleControl;
+export const schedulesCapabilities = {
+  boss: new AgentPluginCapability<PgBoss>('schedules.boss'),
+  transaction: new AgentPluginCapability<ScheduledTaskTransaction>(
+    'schedules.transaction',
+  ),
+} as const;
+
+export type Schedules = AgentPluginInstance & ScheduleControl;
 
 /** Install durable schedules that run in fresh or existing conversations. */
-export function schedules(options: SchedulesOptions): Schedules {
-  return new SchedulesPlugin(options);
+export function schedules(
+  options: SchedulesOptions,
+): AgentPluginDefinition<Schedules> {
+  return {
+    name: 'schedules',
+    capabilities: [
+      schedulesCapabilities.boss,
+      schedulesCapabilities.transaction,
+    ],
+    create: (bindings) =>
+      new SchedulesPlugin({
+        ...options,
+        boss: bindings.get(schedulesCapabilities.boss),
+        transaction: bindings.get(schedulesCapabilities.transaction),
+      }),
+  };
 }
 
 class SchedulesPlugin implements Schedules {
-  readonly name = 'schedules';
   readonly #scheduled: ScheduledTasks<ExecutionConfig>;
   readonly #sources: readonly ScheduleSource[] | undefined;
   readonly #workerOptions: JobPollingOptions | undefined;
   #host?: AgentPluginHost;
   #initialization?: Promise<void>;
 
-  constructor({ sources, workerOptions, ...options }: SchedulesOptions) {
+  constructor({
+    sources,
+    workerOptions,
+    ...options
+  }: SchedulesOptions &
+    Pick<ScheduledTasksOptions<ExecutionConfig>, 'boss' | 'transaction'>) {
     this.#sources = sources;
     this.#workerOptions = workerOptions;
     this.#scheduled = new ScheduledTasks({
@@ -86,11 +114,6 @@ class SchedulesPlugin implements Schedules {
   }
 
   initialize(host: AgentPluginHost): Promise<void> {
-    if (this.#host && this.#host !== host) {
-      throw new Error(
-        'schedules plugin cannot be shared by AgentRuntime instances',
-      );
-    }
     this.#host = host;
     if (!this.#initialization) this.#initialization = this.#initialize();
     return this.#initialization;

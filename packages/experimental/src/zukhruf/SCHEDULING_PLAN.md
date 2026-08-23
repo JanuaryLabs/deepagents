@@ -72,9 +72,10 @@ This plan does not deliver:
   trees use distinct queues so a worker cannot claim another tree's wake.
 - Scheduling tools bind to the runtime-supplied plugin turn context; tool input cannot select another
   user, chat, root, or child.
-- The tools are injected only when `AgentRuntime` receives `conversationScheduling()` in `plugins`.
-  Agent
-  declarations do not repeat them and the raw wake port never enters model context.
+- The tools are injected only when the root agent declaration owns
+  `conversationScheduling()`. `AgentRuntime` receives the host-owned scheduler
+  and timezone through typed capability bindings; the raw wake port never
+  enters model context.
 
 ### Model-facing contract
 

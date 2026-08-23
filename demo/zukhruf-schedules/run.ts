@@ -23,6 +23,7 @@ import {
 import {
   scheduleFiles,
   schedules,
+  schedulesCapabilities,
 } from '@deepagents/experimental/zukhruf/schedules';
 
 await using resources = new AsyncDisposableStack();
@@ -57,11 +58,8 @@ const source = scheduleFiles({
   ownerId,
 });
 const scheduled = schedules({
-  boss,
   queue: 'scheduled-tasks',
   reconciliationIntervalMs: 5_000,
-  transaction: (operation) =>
-    database.transaction((transaction) => operation(fromPglite(transaction))),
   workerOptions: { pollingIntervalSeconds: 0.5 },
   sources: [source],
 });
@@ -75,6 +73,7 @@ const runtime = new AgentRuntime(
     instructions: [
       role('Complete scheduled work autonomously and return a concise result.'),
     ],
+    plugins: [scheduled],
   }),
   {
     store: new SqliteContextStore(join(import.meta.dirname, 'zukhruf.sqlite')),
@@ -84,12 +83,20 @@ const runtime = new AgentRuntime(
     }),
     queue,
     mailboxStore,
-    plugins: [scheduled],
+    bindings: [
+      schedulesCapabilities.boss.bind(boss),
+      schedulesCapabilities.transaction.bind((operation) =>
+        database.transaction((transaction) =>
+          operation(fromPglite(transaction)),
+        ),
+      ),
+    ],
   },
 );
 
 await runtime.initialize();
-const [task] = await scheduled.list(ownerId);
+const scheduler = runtime.plugin(scheduled);
+const [task] = await scheduler.list(ownerId);
 if (!task) throw new Error('No schedule declarations were found');
 
 console.table([
@@ -112,7 +119,7 @@ if (!process.argv.includes('--list')) {
     process.once('SIGTERM', () => stopped.resolve());
     await stopped.promise;
   } else {
-    const launched = await scheduled.runNow(
+    const launched = await scheduler.runNow(
       ownerId,
       task.id,
       crypto.randomUUID(),
@@ -122,7 +129,7 @@ if (!process.argv.includes('--list')) {
     while (run.status === 'dispatching' || run.status === 'running') {
       if (Date.now() >= deadline) throw new Error('Scheduled run timed out');
       await sleep(250);
-      run = await scheduled.getRun(ownerId, launched.id);
+      run = await scheduler.getRun(ownerId, launched.id);
     }
     if (run.status !== 'completed') {
       throw new Error(run.error ?? `Scheduled run ${run.status}`);

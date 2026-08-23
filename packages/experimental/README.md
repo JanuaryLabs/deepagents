@@ -74,10 +74,8 @@ Prepare the weekly engineering report.
 
 ```ts
 const scheduled = schedules({
-  boss,
   queue: 'scheduled-tasks',
   reconciliationIntervalMs: 5_000,
-  transaction,
   sources: [
     scheduleFiles({
       directory: new URL('./agent/schedules/', import.meta.url),
@@ -86,15 +84,24 @@ const scheduled = schedules({
   ],
 });
 
+const root = defineAgent({
+  // model, sandbox, instructions, ...
+  plugins: [scheduled],
+});
+
 const runtime = new AgentRuntime(root, {
   store,
   streams,
   queue,
   mailboxStore,
-  plugins: [scheduled],
+  bindings: [
+    schedulesCapabilities.boss.bind(boss),
+    schedulesCapabilities.transaction.bind(transaction),
+  ],
 });
 
 await runtime.initialize();
+const scheduleControl = runtime.plugin(scheduled);
 await using worker = await runtime.work();
 ```
 
