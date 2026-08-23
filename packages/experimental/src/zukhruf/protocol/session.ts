@@ -20,6 +20,7 @@ const SESSION_STREAM_ROUTE_PATH = '/session/:sessionId/stream';
 const SESSION_TURN_ROUTE_PATH = '/session/:sessionId/turn/:turnId';
 const SESSION_TURN_CANCEL_ROUTE_PATH =
   '/session/:sessionId/turn/:turnId/cancel';
+const HISTORY_ROUTE_PATH = '/history';
 const INFO_ROUTE_PATH = '/info';
 const HEALTH_ROUTE_PATH = '/health';
 export const ZUKHRUF_CREATE_SESSION_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${CREATE_SESSION_ROUTE_PATH}`;
@@ -28,6 +29,7 @@ export const ZUKHRUF_SESSION_CANCEL_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSI
 export const ZUKHRUF_SESSION_STREAM_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_STREAM_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_TURN_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_TURN_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_TURN_CANCEL_ROUTE_PATH}`;
+export const ZUKHRUF_HISTORY_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${HISTORY_ROUTE_PATH}`;
 export const ZUKHRUF_INFO_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${INFO_ROUTE_PATH}`;
 export const ZUKHRUF_HEALTH_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${HEALTH_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_ID_HEADER = 'x-zukhruf-session-id';
@@ -62,11 +64,20 @@ const limitTurnBody = bodyLimit({
 
 interface ZukhrufRuntime extends Pick<
   AgentRuntime,
-  'createSession' | 'enqueue' | 'info' | 'sessionExists'
+  'createSession' | 'enqueue' | 'info' | 'listHistory' | 'sessionExists'
 > {
   observe(
     conversation: ConversationId,
   ): Pick<AgentObservation, 'cancel' | 'resume' | 'status'>;
+}
+
+export function zukhrufDiscovery(runtime: Pick<ZukhrufRuntime, 'info'>) {
+  return {
+    ...runtime.info,
+    capabilities: {
+      history: { href: ZUKHRUF_HISTORY_ROUTE_PATH },
+    },
+  };
 }
 
 type ZukhrufEnv = { Variables: { userId: string } };
@@ -108,9 +119,18 @@ export function zukhruf(runtime: ZukhrufRuntime) {
   });
 
   app.get(INFO_ROUTE_PATH, (context) =>
-    context.json(runtime.info, 200, NO_STORE),
+    context.json(zukhrufDiscovery(runtime), 200, NO_STORE),
   );
   app.all(INFO_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
+
+  app.get(HISTORY_ROUTE_PATH, async (context) =>
+    context.json(
+      await runtime.listHistory(context.get('userId')),
+      200,
+      NO_STORE,
+    ),
+  );
+  app.all(HISTORY_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
   app.post(
     CREATE_SESSION_ROUTE_PATH,

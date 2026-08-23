@@ -13,5 +13,8 @@
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@deepagents/devtool": "6.2.0"
   }
 }

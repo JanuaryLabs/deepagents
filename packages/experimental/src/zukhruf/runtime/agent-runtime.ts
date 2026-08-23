@@ -44,6 +44,7 @@ export interface AgentPluginToolContext extends Readonly<
 }
 
 export interface AgentPluginHost {
+  readonly info: AgentRuntimeInfo;
   enqueue(
     conversation: ConversationId,
     turn: TurnInput,
@@ -348,6 +349,7 @@ export class AgentRuntime {
       ),
     });
     this.#pluginHost = {
+      info: this.info,
       enqueue: (conversation, turn) => this.enqueue(conversation, turn),
       conversationExists: async (conversation) =>
         Boolean(await this.#directory.load(conversation)),
@@ -357,7 +359,7 @@ export class AgentRuntime {
         this.#readConversationMetadata(conversation),
       updateConversationMetadata: (conversation, update) =>
         this.#updateConversationMetadata(conversation, update),
-      listHistory: () => this.#listHistory(),
+      listHistory: () => this.listHistory(),
       observe: (conversation) => this.observe(conversation),
     };
   }
@@ -449,9 +451,10 @@ export class AgentRuntime {
     });
   }
 
-  async #listHistory(): Promise<readonly AgentHistoryItem[]> {
+  async listHistory(userId?: string): Promise<readonly AgentHistoryItem[]> {
     const chats = await this.#store.listChats();
     const roots = chats.flatMap((chat) => {
+      if (userId !== undefined && chat.userId !== userId) return [];
       const conversation = { chatId: chat.id, userId: chat.userId };
       const thread = AgentThread.fromMetadata(conversation, chat.metadata);
       if (!thread) {

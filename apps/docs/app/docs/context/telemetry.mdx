@@ -88,16 +88,21 @@ const telemetry = createFileTelemetry({
 });
 ```
 
-| Option             | Type                                            | Default  | Description                                                                               |
-| ------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `path`             | `string`                                        | required | Destination JSONL file                                                                    |
-| `append`           | `boolean`                                       | `true`   | Append to an existing file; set to `false` to truncate it when the integration is created |
-| `includeTimestamp` | `boolean`                                       | `true`   | Add an ISO timestamp to each record                                                       |
-| `onWriteError`     | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation                                   |
+| Option                   | Type                                            | Default  | Description                                                                               |
+| ------------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `path`                   | `string`                                        | required | Destination JSONL file                                                                    |
+| `append`                 | `boolean`                                       | `true`   | Append to an existing file; set to `false` to truncate it when the integration is created |
+| `includeTimestamp`       | `boolean`                                       | `true`   | Add an ISO timestamp to each record                                                       |
+| `preserveRuntimeContext` | `readonly string[]`                             | `[]`     | Preserve named runtime-context namespaces when inputs are not recorded                    |
+| `onWriteError`           | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation                                   |
 
 Parent directories are created automatically. Writes from the same integration
 instance are serialized, so concurrent AI events cannot interleave and corrupt
 JSONL records.
+
+The returned integration exposes `telemetry.traces.path` as an absolute `file:`
+URL. It writes to that same resolved file, allowing runtimes to advertise the
+trace source without duplicating the configured path.
 
 ## Record format
 
@@ -137,6 +142,12 @@ await generateText({
   },
 });
 ```
+
+`runtimeContext` is normally redacted with other inputs. Use
+`preserveRuntimeContext` only for namespaces containing non-sensitive
+correlation identifiers. For example, the Zukhruf devtool uses
+`preserveRuntimeContext: ['zukhruf']`; every other runtime-context namespace
+remains redacted.
 
 See [Tracing](/docs/context/tracing) to additionally export AI SDK operations
 to OpenAI's Traces API.

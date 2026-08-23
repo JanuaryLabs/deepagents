@@ -1,0 +1,62 @@
+{
+  "name": "@deepagents/devtool",
+  "version": "6.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JanuaryLabs/deepagents",
+    "directory": "packages/devtool"
+  },
+  "bugs": {
+    "url": "https://github.com/JanuaryLabs/deepagents/issues"
+  },
+  "homepage": "https://github.com/JanuaryLabs/deepagents#readme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/spec/**",
+    "!dist/ui-types/**",
+    "!**/*.tsbuildinfo",
+    "!**/*.test.*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.10",
+    "hono": "^4.12.33"
+  },
+  "peerDependencies": {
+    "@deepagents/context": "6.2.0",
+    "@deepagents/experimental": "6.2.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "4.0.7",
+    "@deepagents/context": "6.2.0",
+    "@deepagents/experimental": "6.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.33.0",
+    "ai": "7.0.70",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.3",
+    "vite": "8.1.5",
+    "zod": "4.4.3"
+  }
+}

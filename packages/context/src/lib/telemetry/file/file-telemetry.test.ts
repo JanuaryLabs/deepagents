@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
@@ -52,6 +53,7 @@ describe('createFileTelemetry()', () => {
       path,
       includeTimestamp: false,
     });
+    assert.deepEqual(telemetry.traces, { path: pathToFileURL(path).href });
 
     await generateText({
       model: createTextModel(),
@@ -76,6 +78,46 @@ describe('createFileTelemetry()', () => {
     );
     assert.match(JSON.stringify(records), /file input/);
     assert.match(JSON.stringify(records), /file output/);
+  });
+
+  it('preserves selected runtime context when inputs are not recorded', async () => {
+    const path = await temporaryLogPath();
+    const telemetry = createFileTelemetry({
+      path,
+      includeTimestamp: false,
+      preserveRuntimeContext: ['zukhruf'],
+    });
+
+    await telemetry.onStart?.({
+      recordInputs: false,
+      recordOutputs: false,
+      prompt: 'SECRET_PROMPT',
+      runtimeContext: {
+        zukhruf: {
+          chatId: 'chat-1',
+          userId: 'user-1',
+          streamId: 'stream-1',
+          agentName: 'agent-1',
+          agentPath: '/root',
+        },
+        private: { secret: 'SECRET_CONTEXT' },
+      },
+    } as never);
+
+    const [{ data }] = (await readFile(path, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { data: Record<string, unknown> });
+    assert.deepEqual(data.runtimeContext, {
+      zukhruf: {
+        chatId: 'chat-1',
+        userId: 'user-1',
+        streamId: 'stream-1',
+        agentName: 'agent-1',
+        agentPath: '/root',
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(data), /SECRET_/);
   });
 
   it('writes every AI SDK telemetry lifecycle callback', async () => {
@@ -104,8 +146,7 @@ describe('createFileTelemetry()', () => {
 
     for (const name of callbackNames) {
       const callback = telemetry[name] as
-        | ((event: unknown) => void | PromiseLike<void>)
-        | undefined;
+        ((event: unknown) => void | PromiseLike<void>) | undefined;
       assert.ok(callback, `${name} should be implemented`);
       await callback({ marker: name });
     }

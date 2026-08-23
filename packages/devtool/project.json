@@ -1,0 +1,44 @@
+{
+  "name": "@deepagents/devtool",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/devtool/src",
+  "projectType": "library",
+  "tags": ["scope:public"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "dependsOn": ["^build", "ui-build"],
+      "options": {
+        "assets": [
+          {
+            "input": "packages/devtool/ui/dist",
+            "glob": "**/*",
+            "output": "ui"
+          }
+        ],
+        "includeIgnoredAssetFiles": true
+      }
+    },
+    "ui-build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/ui/dist"],
+      "options": {
+        "command": "vite build --config ui/vite.config.ts",
+        "cwd": "{projectRoot}",
+        "env": {
+          "NODE_ENV": "production"
+        }
+      }
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/test-results/devtool.xml"],
+      "options": {
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/devtool.xml --test-force-exit",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

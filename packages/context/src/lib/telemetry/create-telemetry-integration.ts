@@ -12,9 +12,14 @@ type TelemetryEventWriter = (
 
 export function createTelemetryIntegration(
   write: TelemetryEventWriter,
+  preserveRuntimeContext: readonly string[],
 ): Telemetry {
   const emit = (level: TelemetryLogLevel, event: string, data: unknown) =>
-    write(level, event, redactTelemetryEvent(event, data));
+    write(
+      level,
+      event,
+      redactTelemetryEvent(event, data, preserveRuntimeContext),
+    );
   const log = (event: string, data: unknown) => emit('log', event, data);
 
   return {

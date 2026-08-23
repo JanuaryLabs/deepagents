@@ -26,5 +26,5 @@ export function createConsoleTelemetry(
       // Telemetry must never affect the observed operation.
     }
   };
-  return createTelemetryIntegration(write);
+  return createTelemetryIntegration(write, []);
 }

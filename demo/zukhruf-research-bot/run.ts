@@ -1,6 +1,4 @@
 import { PGlite } from '@electric-sql/pglite';
-import { stdin, stdout } from 'node:process';
-import { createInterface } from 'node:readline/promises';
 import { styleText } from 'node:util';
 import { PgBoss, fromPglite } from 'pg-boss';
 
@@ -10,18 +8,14 @@ import {
   SqliteStreamStore,
   StreamManager,
 } from '@deepagents/context';
+import { devtool } from '@deepagents/devtool';
 import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
-  renderTurn,
 } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
-
-const initialQuery =
-  process.argv.slice(2).join(' ') ||
-  'What are the most promising approaches to grid-scale energy storage in 2026?';
 
 await using resources = new AsyncDisposableStack();
 
@@ -54,47 +48,27 @@ const streams = new StreamManager({
   store: streamStore,
   changeSource: new PollingChangeSource({ reads: streamStore }),
 });
+const developerTool = devtool();
 
 const runtime = new AgentRuntime(declaration, {
   store: new SqliteContextStore('./zukhruf-research.sqlite'),
   streams,
   queue,
   mailboxStore,
+  plugins: [developerTool],
 });
 
-const conversation = {
-  chatId: `research-cli-${crypto.randomUUID()}`,
-  userId: process.env.USER ?? 'local',
-};
 resources.use(await runtime.work({ concurrency: 4 }));
-const terminal = resources.adopt(
-  createInterface({ input: stdin, output: stdout }),
-  (terminal) => terminal.close(),
-);
 
-await runTurn(initialQuery);
+console.log(styleText('dim', `devtool: ${developerTool.url?.href}`));
 console.log(
   styleText(
     'dim',
-    [
-      'researchers keep working in the background; findings arrive on later turns.',
-      'try: "Synthesize every researcher finding received so far." — /exit to quit',
-    ].join('\n'),
+    'agent declarations loaded; no turns are submitted — Ctrl+C to stop',
   ),
 );
 
-while (true) {
-  const input = (await terminal.question('\nresearch> ')).trim();
-  if (input === '/exit') break;
-  if (!input) continue;
-  await runTurn(input);
-}
-
-async function runTurn(input: string): Promise<void> {
-  const turn = await runtime.enqueue(conversation, {
-    id: crypto.randomUUID(),
-    input,
-  });
-  console.log();
-  await renderTurn(turn.stream);
-}
+const stopped = Promise.withResolvers<void>();
+process.once('SIGINT', () => stopped.resolve());
+process.once('SIGTERM', () => stopped.resolve());
+await stopped.promise;

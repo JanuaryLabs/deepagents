@@ -6,6 +6,7 @@ import type { StreamPart } from '@deepagents/context';
 import {
   ZUKHRUF_CREATE_SESSION_ROUTE_PATH,
   ZUKHRUF_HEALTH_ROUTE_PATH,
+  ZUKHRUF_HISTORY_ROUTE_PATH,
   ZUKHRUF_INFO_ROUTE_PATH,
   ZUKHRUF_ROUTE_PREFIX,
   ZUKHRUF_SESSION_CANCEL_ROUTE_PATH,
@@ -15,6 +16,7 @@ import {
   ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH,
   ZUKHRUF_SESSION_TURN_ROUTE_PATH,
   zukhruf,
+  zukhrufDiscovery,
 } from '@deepagents/experimental/zukhruf';
 
 type ProtocolRuntime = Parameters<typeof zukhruf>[0];
@@ -40,6 +42,9 @@ function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
         id: 'internal-turn-id',
         stream: new ReadableStream<StreamPart>(),
       };
+    },
+    async listHistory() {
+      return [];
     },
     observe() {
       return {
@@ -440,7 +445,7 @@ test('GET /zukhruf/v1/info and health expose runtime and deployment metadata', a
   const authenticated = createApp(runtime);
   const info = await authenticated.request(ZUKHRUF_INFO_ROUTE_PATH);
   assert.equal(info.status, 200);
-  assert.deepEqual(await info.json(), runtimeInfo);
+  assert.deepEqual(await info.json(), zukhrufDiscovery(runtime));
 
   const unauthenticated = createUnauthenticatedApp(runtime);
   const health = await unauthenticated.request(ZUKHRUF_HEALTH_ROUTE_PATH);
@@ -459,4 +464,30 @@ test('GET /zukhruf/v1/info and health expose runtime and deployment metadata', a
     ((await protectedInfo.json()) as { cause: { code: string } }).cause.code,
     'api/unauthenticated',
   );
+});
+
+test('GET /zukhruf/v1/history exposes runtime observations', async () => {
+  const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
+  const observedUsers: string[] = [];
+  const runtime = createRuntime({
+    async listHistory(userId) {
+      observedUsers.push(userId ?? 'missing');
+      return [
+        {
+          chatId: sessionId,
+          userId: 'user-1',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 1,
+          status: 'running',
+        },
+      ];
+    },
+  });
+  const app = createApp(runtime);
+
+  const history = await app.request(ZUKHRUF_HISTORY_ROUTE_PATH);
+  assert.equal(history.status, 200);
+  assert.equal(((await history.json()) as unknown[]).length, 1);
+  assert.deepEqual(observedUsers, ['user-1']);
 });
