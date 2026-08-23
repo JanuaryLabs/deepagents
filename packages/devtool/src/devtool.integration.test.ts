@@ -1,7 +1,7 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable } from 'node:fs/promises';
+import { mkdtempDisposable, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -332,7 +332,6 @@ test('devtool persists conversation-scoped traces from a public AgentRuntime tur
       integrations: createFileTelemetry({
         path: telemetry,
         append: false,
-        preserveRuntimeContext: ['zukhruf'],
       }),
     },
     tools: {
@@ -366,6 +365,25 @@ test('devtool persists conversation-scoped traces from a public AgentRuntime tur
     'completed',
   );
   assert(plugin.url);
+  const records = (await readFile(telemetry, 'utf8'))
+    .trim()
+    .split('\n')
+    .map(
+      (line) =>
+        JSON.parse(line) as {
+          event: string;
+          data: Record<string, unknown>;
+        },
+    );
+  const start = records.find(({ event }) => event === 'onStart');
+  assert(start);
+  assert.deepEqual(start.data.zukhruf, {
+    conversation,
+    streamId: turn.id,
+    agentName: 'trace-agent',
+    agentPath: '/root',
+  });
+  assert.equal(start.data.runtimeContext, '[Redacted]');
 
   const discovery = (await (
     await fetch(new URL(ZUKHRUF_INFO_ROUTE_PATH, plugin.url))

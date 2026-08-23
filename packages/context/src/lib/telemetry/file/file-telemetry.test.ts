@@ -80,12 +80,11 @@ describe('createFileTelemetry()', () => {
     assert.match(JSON.stringify(records), /file output/);
   });
 
-  it('preserves selected runtime context when inputs are not recorded', async () => {
+  it('redacts runtime context when inputs are not recorded', async () => {
     const path = await temporaryLogPath();
     const telemetry = createFileTelemetry({
       path,
       includeTimestamp: false,
-      preserveRuntimeContext: ['zukhruf'],
     });
 
     await telemetry.onStart?.({
@@ -93,13 +92,6 @@ describe('createFileTelemetry()', () => {
       recordOutputs: false,
       prompt: 'SECRET_PROMPT',
       runtimeContext: {
-        zukhruf: {
-          chatId: 'chat-1',
-          userId: 'user-1',
-          streamId: 'stream-1',
-          agentName: 'agent-1',
-          agentPath: '/root',
-        },
         private: { secret: 'SECRET_CONTEXT' },
       },
     } as never);
@@ -108,15 +100,7 @@ describe('createFileTelemetry()', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as { data: Record<string, unknown> });
-    assert.deepEqual(data.runtimeContext, {
-      zukhruf: {
-        chatId: 'chat-1',
-        userId: 'user-1',
-        streamId: 'stream-1',
-        agentName: 'agent-1',
-        agentPath: '/root',
-      },
-    });
+    assert.equal(data.runtimeContext, '[Redacted]');
     assert.doesNotMatch(JSON.stringify(data), /SECRET_/);
   });
 

@@ -63,8 +63,8 @@ which the devtool plugin projects unchanged. It does not move, replace, or
 mutate the declaration's telemetry configuration. Retention, rotation, and
 deletion remain properties of that existing file.
 
-The devtool plugin includes the runtime's existing `runtimeContext.zukhruf`
-namespace for discoverable trace telemetry so records can be correlated with
-History. If `recordInputs` is false, configure `preserveRuntimeContext:
-['zukhruf']` on `createFileTelemetry()`. The devtool honors recording controls
-and labels disabled payloads as not recorded.
+For each turn, the devtool plugin adds the runtime's conversation, stream, and
+agent identifiers to the discovered integration's start event. This correlation
+metadata is not model input and does not require changing the agent declaration.
+The devtool honors recording controls and labels disabled payloads as not
+recorded.

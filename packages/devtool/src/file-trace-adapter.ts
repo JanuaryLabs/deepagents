@@ -93,7 +93,7 @@ export class FileTraceAdapter implements AgentTraceReader {
       if (callId === undefined) continue;
 
       if (record.event === 'onStart') {
-        const context = captureContext(record.data.runtimeContext);
+        const context = captureContext(record.data.zukhruf);
         if (!context) continue;
         const trace: ProjectedTrace = {
           id: callId,
@@ -370,8 +370,9 @@ function captureContext(
       'chatId' | 'userId' | 'streamId' | 'agentName' | 'agentPath'
     >
   | undefined {
-  if (!isRecord(value) || !isRecord(value.zukhruf)) return undefined;
-  const { chatId, userId, streamId, agentName, agentPath } = value.zukhruf;
+  if (!isRecord(value) || !isRecord(value.conversation)) return undefined;
+  const { chatId, userId } = value.conversation;
+  const { streamId, agentName, agentPath } = value;
   if (
     typeof chatId !== 'string' ||
     typeof userId !== 'string' ||

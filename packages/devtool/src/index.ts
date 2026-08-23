@@ -7,6 +7,7 @@ import type {
   AgentDeclaration,
   AgentHistoryItem,
   AgentPluginHost,
+  AgentPluginToolContext,
   AgentRuntimePlugin,
   ConversationId,
 } from '@deepagents/experimental/zukhruf';
@@ -28,6 +29,10 @@ export interface DevtoolOptions {
 
 export type Devtool = AgentRuntimePlugin & { readonly url?: URL };
 type RunningDevtool = AsyncDisposable & { readonly url: URL };
+type TelemetryIntegration = Exclude<
+  NonNullable<NonNullable<AgentDeclaration['telemetry']>['integrations']>,
+  readonly unknown[]
+>;
 
 const ui = fileURLToPath(new URL('./ui/', import.meta.url));
 const TRACE_LIST_ROUTE = '/api/history/:chatId/traces' as const;
@@ -98,26 +103,36 @@ class DevtoolPlugin implements Devtool {
     if (source.protocol !== 'file:') return root;
     this.#traces = { path, adapter: new FileTraceAdapter(source) };
 
-    const includeTraceContext = (
-      declaration: AgentDeclaration,
-    ): AgentDeclaration => ({
-      ...declaration,
-      ...(tracePaths(declaration).includes(path)
+    return root;
+  }
+
+  configureTelemetry(
+    context: AgentPluginToolContext,
+    telemetry: AgentDeclaration['telemetry'],
+  ): AgentDeclaration['telemetry'] {
+    const path = this.#traces?.path;
+    const integrations = telemetry?.integrations;
+    if (path === undefined || integrations === undefined) return telemetry;
+
+    const decorate = (
+      integration: TelemetryIntegration,
+    ): TelemetryIntegration =>
+      tracePath(integration) === path
         ? {
-            telemetry: {
-              ...declaration.telemetry,
-              includeRuntimeContext: {
-                ...declaration.telemetry?.includeRuntimeContext,
-                zukhruf: true,
-              },
-            },
+            ...integration,
+            onStart: (event) =>
+              integration.onStart?.call(integration, {
+                ...event,
+                zukhruf: context,
+              }),
           }
-        : {}),
-      ...(declaration.subagents === undefined
-        ? {}
-        : { subagents: declaration.subagents.map(includeTraceContext) }),
-    });
-    return includeTraceContext(root);
+        : integration;
+    return {
+      ...telemetry,
+      integrations: Array.isArray(integrations)
+        ? integrations.map(decorate)
+        : decorate(integrations),
+    };
   }
 
   initialize(host: AgentPluginHost): Promise<void> {
@@ -210,9 +225,14 @@ function tracePaths(declaration: AgentDeclaration): string[] {
         ? integrations
         : [integrations]
   ).flatMap((integration) => {
-    const path = (integration as { traces?: { path?: unknown } }).traces?.path;
-    return typeof path === 'string' && URL.canParse(path) ? [path] : [];
+    const path = tracePath(integration);
+    return path === undefined ? [] : [path];
   });
+}
+
+function tracePath(integration: TelemetryIntegration): string | undefined {
+  const path = (integration as { traces?: { path?: unknown } }).traces?.path;
+  return typeof path === 'string' && URL.canParse(path) ? path : undefined;
 }
 
 async function withDurableStatus<Trace extends AgentTraceSummary>(

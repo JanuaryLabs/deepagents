@@ -13,7 +13,6 @@ export interface FileTelemetryOptions {
   path: string;
   includeTimestamp?: boolean;
   append?: boolean;
-  preserveRuntimeContext?: readonly string[];
   onWriteError?: (error: unknown) => void | PromiseLike<void>;
 }
 
@@ -51,7 +50,7 @@ export function createFileTelemetry(
   };
 
   return {
-    ...createTelemetryIntegration(write, options.preserveRuntimeContext ?? []),
+    ...createTelemetryIntegration(write),
     traces: { path: pathToFileURL(path).href },
   };
 }

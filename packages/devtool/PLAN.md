@@ -217,8 +217,8 @@ another one:
   projected, but records must not be copied into another persistence mechanism.
 - Zukhruf supplies conversation/turn context at the runtime boundary;
   declaration-scoped telemetry alone cannot correlate a trace to History. The
-  devtool plugin opts that existing namespace into telemetry on its cloned
-  runtime declaration graph.
+  devtool plugin adds that correlation metadata to the discovered integration's
+  start event for each turn without changing the agent declaration.
 - The devtool's `/zukhruf/v1/info` exposes `traces.path`; the URI scheme selects
   its adapter. `file:` is local-only and is consumed by Node, never the browser.
 - Honor `telemetry: { isEnabled: false }`; an opted-out turn produces no trace.
@@ -234,10 +234,10 @@ another one:
   JSONL. The devtool owns no database and exposes no second retention setting.
 - Keep the loopback-only server boundary. Remote access and authentication stay
   out of scope.
-- Preserve AI SDK recording controls. `preserveRuntimeContext` may retain only
-  explicitly selected non-sensitive correlation namespaces when inputs are not
-  recorded. The UI must label disabled payloads and never imply that missing
-  sensitive data was captured.
+- Preserve AI SDK recording controls. Correlation metadata is not model input;
+  runtime context remains redacted when inputs are not recorded. The UI must
+  label disabled payloads and never imply that missing sensitive data was
+  captured.
 
 ## HTTP/read surface
 
@@ -374,14 +374,14 @@ execution.
   `TelemetryLogRecord` output. The devtool's file adapter groups lifecycle
   events by AI SDK `callId` and derives the agent, generation, and function
   spans required by the existing UI.
-- The Zukhruf executor already supplies `chatId`, `userId`, `streamId`,
-  declaration name, and canonical agent path under `runtimeContext.zukhruf`.
-  The devtool plugin opts that namespace into AI SDK telemetry through the
-  existing declaration-configuration seam.
+- The Zukhruf runtime supplies the conversation, stream, declaration name, and
+  canonical agent path to a generic per-turn plugin telemetry hook. The devtool
+  decorates only the discovered file integration's `onStart` event with that
+  correlation metadata.
 - The devtool advertises an absolute `file:` URI only when exactly one supported
   source is discoverable. The scheme is the adapter identifier.
-- When `recordInputs` is false, `createFileTelemetry()` can preserve only
-  `zukhruf`; prompt, tool, and unrelated runtime context remain redacted.
+- When `recordInputs` is false, prompt, tool, and runtime context remain
+  redacted while the devtool-owned correlation metadata remains available.
 
 ### Selected storage and retention
 

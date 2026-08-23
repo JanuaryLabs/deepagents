@@ -61,11 +61,7 @@ const OUTPUT_SPECIFICATION_EVENTS = new Set([
   'onObjectStepStart',
 ]);
 
-export function redactTelemetryEvent(
-  event: string,
-  data: unknown,
-  preserveRuntimeContext: readonly string[],
-): unknown {
+export function redactTelemetryEvent(event: string, data: unknown): unknown {
   if (!isRecord(data)) return data;
   const recordInputs = data.recordInputs !== false;
   const recordOutputs = data.recordOutputs !== false;
@@ -73,14 +69,7 @@ export function redactTelemetryEvent(
 
   const redacted = { ...data };
   if (!recordInputs) {
-    const runtimeContext = pickRuntimeContext(
-      data.runtimeContext,
-      preserveRuntimeContext,
-    );
     redactFields(redacted, INPUT_FIELDS);
-    if (runtimeContext !== undefined) {
-      redacted.runtimeContext = runtimeContext;
-    }
     if (
       OUTPUT_SPECIFICATION_EVENTS.has(event) &&
       Object.hasOwn(redacted, 'output')
@@ -113,19 +102,6 @@ export function redactTelemetryEvent(
     }
   }
   return redacted;
-}
-
-function pickRuntimeContext(
-  value: unknown,
-  namespaces: readonly string[],
-): Record<string, unknown> | undefined {
-  if (!isRecord(value)) return undefined;
-  const preserved = Object.fromEntries(
-    namespaces.flatMap((namespace) =>
-      Object.hasOwn(value, namespace) ? [[namespace, value[namespace]]] : [],
-    ),
-  );
-  return Object.keys(preserved).length === 0 ? undefined : preserved;
 }
 
 function redactFields(

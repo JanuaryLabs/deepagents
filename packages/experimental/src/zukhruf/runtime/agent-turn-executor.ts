@@ -14,7 +14,7 @@ import {
   user,
 } from '@deepagents/context';
 
-import type { ZukhrufSandbox } from '../agent.ts';
+import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
 import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
@@ -46,6 +46,10 @@ export interface AgentTurnExecutorOptions {
   pluginTools: ZukhrufToolSet;
   pluginSkills: PluginSkills;
   pluginRuntimeContext?: Readonly<Record<string, unknown>>;
+  configureTelemetry: (
+    context: AgentPluginToolContext,
+    telemetry: AgentDeclaration['telemetry'],
+  ) => AgentDeclaration['telemetry'];
 }
 
 interface SamplingMailboxState {
@@ -64,6 +68,7 @@ export class AgentTurnExecutor {
   readonly #pluginTools: ZukhrufToolSet;
   readonly #pluginSkills: PluginSkills;
   readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
+  readonly #configureTelemetry: AgentTurnExecutorOptions['configureTelemetry'];
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -76,6 +81,7 @@ export class AgentTurnExecutor {
     this.#pluginTools = options.pluginTools;
     this.#pluginSkills = options.pluginSkills;
     this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
+    this.#configureTelemetry = options.configureTelemetry;
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
@@ -167,13 +173,19 @@ export class AgentTurnExecutor {
       controlPlane: this.#controlPlane,
       actor: { turn, thread, declaration },
     } satisfies AgentToolContext;
+    const pluginContext = {
+      conversation: { chatId: turn.chatId, userId: turn.userId },
+      streamId: turn.streamId,
+      agentName: declaration.name,
+      agentPath: thread.path.toString(),
+    } satisfies AgentPluginToolContext;
     const mailboxState: SamplingMailboxState = { firstRequest: true };
     const agentOptions = {
       name: declaration.name,
       model: declaration.model,
       sandbox,
       context: engine,
-      telemetry: declaration.telemetry,
+      telemetry: this.#configureTelemetry(pluginContext, declaration.telemetry),
       runtimeContext: {
         ...this.#pluginRuntimeContext,
         zukhruf: {
@@ -204,12 +216,6 @@ export class AgentTurnExecutor {
         : {}),
       ...this.#pluginTools,
     };
-    const pluginContext = {
-      conversation: { chatId: turn.chatId, userId: turn.userId },
-      streamId: turn.streamId,
-      agentName: declaration.name,
-      agentPath: thread.path.toString(),
-    } satisfies AgentPluginToolContext;
     const collaborationToolsContext = {
       spawn_agent: agentContext,
       send_message: agentContext,

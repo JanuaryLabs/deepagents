@@ -73,6 +73,10 @@ export interface AgentRuntimePlugin {
   /** Static namespaced context merged into every model call made by this runtime. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   configure?(root: AgentDeclaration): AgentDeclaration;
+  configureTelemetry?(
+    context: AgentPluginToolContext,
+    telemetry: AgentDeclaration['telemetry'],
+  ): AgentDeclaration['telemetry'];
   initialize?(host: AgentPluginHost): Promise<void>;
   work?(host: AgentPluginHost): Promise<AsyncDisposable>;
   conversationAvailable?(
@@ -353,6 +357,14 @@ export class AgentRuntime {
         {},
         ...plugins.map(({ runtimeContext }) => runtimeContext ?? {}),
       ),
+      configureTelemetry: (context, telemetry) =>
+        plugins.reduce(
+          (configured, plugin) =>
+            plugin.configureTelemetry
+              ? plugin.configureTelemetry(context, configured)
+              : configured,
+          telemetry,
+        ),
     });
     this.#pluginHost = {
       info: this.info,
