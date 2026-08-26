@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+@source '../src/sidebar.tsx';
+@source '../src/sheet.tsx';
 @source '../src/status-badge.tsx';
 @source '../../history/src/index.tsx';
 @source '../../host/ui/src/main.tsx';

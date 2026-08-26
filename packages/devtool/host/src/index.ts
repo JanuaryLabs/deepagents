@@ -19,6 +19,7 @@ import type {
 import {
   ZUKHRUF_HISTORY_ROUTE_PATH,
   ZUKHRUF_INFO_ROUTE_PATH,
+  ZUKHRUF_ROUTE_PREFIX,
   zukhrufDiscovery,
 } from '@deepagents/experimental/zukhruf';
 
@@ -31,6 +32,7 @@ export type Devtool = AgentPluginInstance & { readonly url?: URL };
 type RunningDevtool = AsyncDisposable & { readonly url: URL };
 
 const ui = fileURLToPath(new URL('./ui/', import.meta.url));
+const uiShell = serveStatic({ root: ui, path: 'index.html' });
 
 function createApp(host: AgentPluginHost, traces: TraceSource | undefined) {
   const app = new Hono();
@@ -46,8 +48,13 @@ function createApp(host: AgentPluginHost, traces: TraceSource | undefined) {
   );
   mountTraceRoutes(app, traces, host);
   return app
-    .get('/', serveStatic({ root: ui, path: 'index.html' }))
-    .use('/assets/*', serveStatic({ root: ui }));
+    .use('/assets/*', serveStatic({ root: ui }))
+    .on(
+      'GET',
+      ['/assets/*', '/api/*', `${ZUKHRUF_ROUTE_PREFIX}/*`, '/health/*'],
+      (context) => context.notFound(),
+    )
+    .get('*', uiShell);
 }
 
 export function devtool(

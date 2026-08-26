@@ -1,7 +1,8 @@
 # Scheduled Tasks in `@deepagents/devtool`
 
-Status: proposed; Phase 0 awaits explicit wireframe, component-seam, and
-notification-scope approval.
+Status: in progress; the Limerence shadcn sidebar seam and full off-canvas
+navigation shell are ported. The full management wireframe and notification
+scope still await approval.
 
 ## Outcome
 
@@ -33,8 +34,9 @@ remain separate phases with separate proofs.
   empty, exposes runs only through one task at a time, and has no cross-run
   memory.
 - The devtool now has publishable `shadcn`, `history`, and `traces` child
-  packages. `shadcn` contains only the shared utilities, status badge, and
-  theme CSS the current UI uses; no speculative component scaffold exists.
+  packages. `shadcn` contains the shared utilities, status badge, theme CSS,
+  and the Limerence-derived off-canvas sidebar the current UI uses; no
+  speculative component scaffold exists.
 
 ## Source contracts
 
@@ -53,7 +55,7 @@ Read these before implementing a phase:
   [`../traces/src`](../traces/src) package — current loopback host, discovery,
   trace routes, polling, navigation, and native UI;
 - [`ui-components.md`](ui-components.md) — current repository UI topology and
-  the Limerence component-reuse gate;
+  the approved Limerence component-reuse seam;
 - [`../../../TEST_PRIMITIVES.md`](../../../TEST_PRIMITIVES.md) — repository test
   primitives and public-boundary rules;
 - [`../../../.scratch/codex-scheduled-tasks/map.md`](../../../.scratch/codex-scheduled-tasks/map.md)
@@ -221,9 +223,9 @@ when it is absent.
 └──────────────────────┴───────────────────────────────────────────────────────────────────────┘
 ```
 
-Component selection is gated by [`ui-components.md`](ui-components.md) and the
-follow-up inventory of the real Limerence component source. Do not add a second
-primitive system or import components from another application.
+Component selection follows the approved seam in
+[`ui-components.md`](ui-components.md). Do not add a second primitive system or
+import components from another application.
 
 Interactions and states:
 
@@ -249,14 +251,14 @@ Interactions and states:
 Work:
 
 - approve or revise both wireframes;
-- approve the Limerence component seam after its source inventory;
+- [x] approve the Limerence component seam after its source inventory;
 - confirm whether notifications are page-open browser alerts or require a
   closed-browser host notifier;
 - confirm that the local devtool binds one owner ID;
 - make this file the single source of truth for this product slice.
 
-Complete when the user explicitly approves the UI structure, component seam,
-and notification guarantee. No production code changes belong to this phase.
+Complete when the user explicitly approves the UI structure and notification
+guarantee. No production code changes belong to this phase.
 
 ### Phase 1 — Scheduler read model and run results
 

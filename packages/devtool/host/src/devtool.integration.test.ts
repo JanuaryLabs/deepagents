@@ -28,6 +28,7 @@ import {
   type TurnRef,
   ZUKHRUF_HISTORY_ROUTE_PATH,
   ZUKHRUF_INFO_ROUTE_PATH,
+  ZUKHRUF_ROUTE_PREFIX,
   defineAgent,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
@@ -230,7 +231,7 @@ test('devtool participates in the AgentRuntime lifecycle', async () => {
   const shell = await shellResponse.text();
   assert.match(shell, /<title>Zukhruf Devtool<\/title>/);
   const assets = Array.from(
-    shell.matchAll(/(?:src|href)="(\.\/assets\/[^"]+)"/g),
+    shell.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g),
     ([, asset]) => asset,
   );
   assert(assets.length > 0);
@@ -238,6 +239,17 @@ test('devtool participates in the AgentRuntime lifecycle', async () => {
     const assetResponse = await fetch(new URL(asset, plugin.url));
     assert.equal(assetResponse.status, 200);
     assert((await assetResponse.arrayBuffer()).byteLength > 0);
+  }
+  const clientRoute = await fetch(new URL('/future-client-route', plugin.url));
+  assert.equal(clientRoute.status, 200);
+  assert.match(await clientRoute.text(), /<title>Zukhruf Devtool<\/title>/);
+  for (const path of [
+    '/assets/missing.js',
+    '/api/missing',
+    `${ZUKHRUF_ROUTE_PREFIX}/missing`,
+    '/health/missing',
+  ]) {
+    assert.equal((await fetch(new URL(path, plugin.url))).status, 404);
   }
 
   const secondRuntime = new AgentRuntime(root, runtimeOptions);

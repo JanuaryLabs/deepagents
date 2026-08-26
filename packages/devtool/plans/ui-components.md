@@ -1,7 +1,7 @@
 # UI Component Topology
 
-Status: current-source inventory after the devtool package split. This map also
-records the remaining Limerence component gate.
+Status: current-source inventory after the devtool package split and the
+approved Limerence sidebar port.
 
 ## Conclusion
 
@@ -19,7 +19,7 @@ deepagents
 │   ├── app/components              6 cross-route compositions
 │   └── app/routes                 product screens and route-local UI
 └── packages/devtool
-    ├── shadcn                      shared utilities, badge, and theme CSS
+    ├── shadcn                      shared utilities, badge, sidebar, and theme CSS
     ├── history                     History compound composition and model
     ├── traces                      trace server core and trace React view
     └── host/ui/main.tsx            application shell and navigation
@@ -45,15 +45,17 @@ Ownership:
   [`../traces/src/ui.tsx`](../traces/src/ui.tsx) owns the waterfall and inspector.
 - [`../shadcn/src/index.ts`](../shadcn/src/index.ts) owns `cn()` and timestamp
   formatting; [`../shadcn/src/status-badge.tsx`](../shadcn/src/status-badge.tsx)
-  owns the shared badge, and
+  owns the shared badge; [`../shadcn/src/sidebar.tsx`](../shadcn/src/sidebar.tsx)
+  owns the Limerence-derived off-canvas sidebar contract, and
   [`../shadcn/src/styles.css`](../shadcn/src/styles.css) owns the Tailwind theme.
 - [`../host/ui/vite.config.ts`](../host/ui/vite.config.ts) builds the UI into static
   assets copied into the published `@deepagents/devtool` package.
 
-Current dependencies remain React, Tailwind CSS, Lucide, `clsx`, and
-`tailwind-merge`. No new primitive dependency was added. The existing public
-integration test exercises the server/package interface; CSS-rule comparison
-proves the relocation preserved all 168 generated selectors and declarations.
+Current dependencies are React, Tailwind CSS, Lucide, Radix Dialog, `clsx`, and
+`tailwind-merge`. Radix Dialog is used only for the responsive sidebar sheet.
+The existing public integration test exercises the server/package interface;
+CSS-rule comparison proves the relocation preserved all 168 generated
+selectors and declarations.
 
 Implication: scheduled-task UI belongs in feature packages, while only proven
 Limerence components should enter the existing `shadcn` package.
@@ -129,9 +131,9 @@ this checkout. Actual imports resolve to app-local hooks and
 This drift must not be treated as proof that a reusable component package
 already exists.
 
-## Limerence reuse gate
+## Limerence reuse seam
 
-Before Phase 4 of the scheduled-tasks plan:
+The source inventory selected the following seam:
 
 1. inventory the actual Limerence component source, package exports, tokens,
    fonts, assets, primitive system, and dependency footprint;
@@ -146,6 +148,10 @@ Before Phase 4 of the scheduled-tasks plan:
 5. add no parallel primitive system and do not import from one application
    into another.
 
-The next evidence-gathering action remains locating and inventorying the real
-Limerence component source. No Limerence component migration is approved by
-this map.
+The Limerence source is `packages/stdlib/shadcn/src/lib/ui/sidebar.tsx`, composed
+by `apps/desktop/frontend/src/app/routes/Layout/Layout.tsx`. The approved port
+includes the behavior the devtool shell uses: provider state, desktop
+off-canvas transition, inset restore trigger, rail, Ctrl/Cmd+B shortcut,
+cookie persistence, and the responsive Radix sheet. The host continues to own
+navigation and records. No application-owned import or second primitive system
+is introduced.

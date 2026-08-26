@@ -16,7 +16,14 @@
             "output": "."
           }
         ],
-        "external": ["clsx", "react", "tailwind-merge"]
+        "external": [
+          "@radix-ui/react-dialog",
+          "@radix-ui/react-slot",
+          "clsx",
+          "lucide-react",
+          "react",
+          "tailwind-merge"
+        ]
       }
     }
   }

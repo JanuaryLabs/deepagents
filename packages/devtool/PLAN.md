@@ -49,8 +49,9 @@ changes.
   and waits for shutdown. It has no conversation creation, `enqueue()` call,
   terminal client, or automatic turn execution.
 - Backlog `#1194` remains done: no generated component scaffold returned. The
-  new `shadcn` package contains only relocated code the current devtool uses:
-  `cn`, `StatusBadge`, timestamp formatting, and theme CSS.
+  `shadcn` package contains only code the current devtool uses: `cn`,
+  `StatusBadge`, timestamp formatting, theme CSS, and the selected
+  Limerence-derived off-canvas sidebar primitives.
 - The plugin-owned correction is green for the 15 protocol tests, six file
   telemetry tests, all three devtool integration tests,
   context/experimental/devtool typechecks, devtool lint, package dry-run,
@@ -349,7 +350,7 @@ implementing, but the behavior is fixed:
       duplicating their contracts.
 - [x] Relocate the current shared display utilities and theme into a real
       `shadcn` child package without adding speculative components.
-- [ ] Inventory the proven Limerence components and import only the components
+- [x] Inventory the proven Limerence components and import only the components
       the devtool uses into the existing `shadcn` package.
 - [ ] Add the Scheduled Tasks and run-inbox UI only after their HTTP,
       notification, and cross-run-memory contracts are approved.
@@ -427,9 +428,7 @@ execution.
 
 ## Continuation record
 
-**Exact next action:** inventory the real Limerence component exports and map
-only the approved Scheduled Tasks controls into the existing `shadcn` package.
-Then obtain approval or corrections for the Scheduled Tasks wireframes and
-notification scope before implementing that product phase. Do not stage or
-commit without explicit authorization. Fixing the independent docs graph
-defect and stale wasm reference remains outside this change.
+**Exact next action:** obtain approval or corrections for the Scheduled Tasks
+wireframes and notification scope, then implement Phase 1 of the scheduled-task
+plan. Do not stage or commit without explicit authorization. Fixing the stale
+wasm reference remains outside this change.
