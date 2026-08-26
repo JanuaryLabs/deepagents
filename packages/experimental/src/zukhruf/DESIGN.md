@@ -829,10 +829,12 @@ work({concurrency?}) → AsyncDisposable }`.
   timezones, exposes future-task management and independent run review, and commits every
   occurrence, dispatch, reconciliation, or cancellation job in the same transaction as its
   authoritative state. The opt-in plugin owns its initialization and worker lifecycle, launches
-  every run as a fresh root task, and exposes the same management API directly.
+  each run as a fresh root task by default or into an explicitly configured owner-scoped existing
+  conversation, and exposes the same management API directly.
   Its `scheduleFiles` source compiles top-level `agent/schedules/*.md` declarations during runtime
-  initialization; removed files pause rather than delete their durable tasks. Other execution
-  targets remain application choices rather than scheduler concepts.
+  initialization; removed files pause rather than delete their durable tasks. The AgentRuntime
+  adapter supports new- and existing-conversation targets; other execution targets remain
+  application choices rather than scheduler concepts.
 - `control-plane/agent-path.ts`, `agent-thread.ts`, and `agent-directory.ts` — canonical rooted
   addressing, durable thread identity, and ContextStore-backed tree discovery.
   `agent-status-projector.ts`

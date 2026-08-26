@@ -55,12 +55,12 @@ receive the durable `turnId`, check or cancel a specific turn, cancel the
 active session turn, stream durable UI-message output, and read runtime info
 plus health checks.
 
-The `schedules` runtime plugin owns durable task and run persistence, recurrence,
-workers, management, and fresh-root-task execution. It accepts five-field cron
-expressions or RRULE recurrences with IANA timezones. Its optional
-`scheduleFiles` source makes top-level `agent/schedules/*.md` files a startup
-source of truth. A file contains strict YAML frontmatter and uses its Markdown
-body as the prompt:
+The `schedules` runtime plugin owns durable task and run persistence,
+recurrence, workers, management, and execution into either new or existing
+conversations. It accepts five-field cron expressions or RRULE recurrences with
+IANA timezones. Its optional `scheduleFiles` source makes top-level
+`agent/schedules/*.md` files a startup source of truth. A file contains strict
+YAML frontmatter and uses its Markdown body as the prompt:
 
 ```md
 ---
@@ -127,8 +127,7 @@ orchestration over a shared transcript),
 notifications where specialists volunteer public replies),
 [`demo/zukhruf-dynamic-subagents`](../../demo/zukhruf-dynamic-subagents)
 (Markdown root agent, Markdown subagents, and a mounted skill discovered at
-startup), and [`demo/wasm-render`](../../demo/wasm-render) (a durable Zukhruf
-coding agent for the terminal-bench wasm-render challenge).
+startup).
 `spawn_agent` can fork all parent turns, no parent turns, or a bounded number of
 recent user-turn boundaries into a child chat through its `fork_turns` input.
 Collaboration tools stay on the direct model surface by default; set

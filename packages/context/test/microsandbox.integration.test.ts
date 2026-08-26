@@ -336,14 +336,14 @@ describe('Microsandbox Sandbox', async () => {
       it('removes an unnamed sandbox entirely on dispose', async () => {
         const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
         const namesBefore = new Set(
-          (await sdk.Sandbox.list()).map((handle) => handle.name),
+          (await sdk.Sandbox.list()).sandboxes.map((handle) => handle.name),
         );
 
         const sandbox = await createMicrosandboxSandbox();
         await sandbox.executeCommand('true');
         await sandbox.dispose();
 
-        const leftovers = (await sdk.Sandbox.list())
+        const leftovers = (await sdk.Sandbox.list()).sandboxes
           .map((handle) => handle.name)
           .filter(
             (name) =>

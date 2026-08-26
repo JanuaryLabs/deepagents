@@ -269,6 +269,55 @@ test('missed occurrences collapse into one catch-up while later runs may overlap
   assert.equal((await scheduled.getRun('owner-1', later.id)).status, 'running');
 });
 
+test('duplicate delivery of one occurrence creates one run and one successor', async (t) => {
+  await using harness = await pgliteHarness();
+  const { boss, executor, queue, scheduled } = harness;
+  const task = await scheduled.create('owner-1', {
+    idempotencyKey: 'duplicate-occurrence',
+    name: 'Duplicate occurrence',
+    prompt: 'Run once',
+    recurrence: futureRecurrence(2_000, 'FREQ=DAILY;COUNT=2'),
+    timezone: 'UTC',
+    executionConfig: { destination: 'duplicate' },
+  });
+  type Work = (...args: unknown[]) => Promise<string>;
+  const mutableBoss = boss as unknown as { work: Work };
+  const originalWork = mutableBoss.work.bind(boss);
+  let duplicated = false;
+  mutableBoss.work = (name, options, candidate) =>
+    originalWork(name, options, async (jobs: unknown[]) => {
+      const handler = candidate as (jobs: unknown[]) => Promise<void>;
+      await handler(jobs);
+      if (!duplicated) {
+        duplicated = true;
+        await handler(jobs);
+      }
+    });
+  await using _worker = await scheduled.work(FAST_POLLING);
+  mutableBoss.work = originalWork;
+
+  await t.waitFor(
+    async () => {
+      const runs = await scheduled.listRuns('owner-1', task.id);
+      assert.equal(runs.length, 1);
+      assert.equal(runs[0]?.status, 'running');
+    },
+    { interval: 20, timeout: 5_000 },
+  );
+  assert.equal(duplicated, true);
+  assert.equal(executor.launches.length, 1);
+  const claimableOccurrences = (
+    await boss.findJobs<{ kind: string }>(queue)
+  ).filter(
+    ({ data, state }) =>
+      data.kind === 'occurrence' &&
+      state !== 'completed' &&
+      state !== 'cancelled' &&
+      state !== 'failed',
+  );
+  assert.equal(claimableOccurrences.length, 1);
+});
+
 test('management changes future work while archive preserves independently reviewable runs', async (t) => {
   await using harness = await pgliteHarness();
   const { executor, scheduled } = harness;
@@ -504,6 +553,78 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
     await database.close();
   }
 });
+
+test(
+  'real PostgreSQL competing workers launch one execution for one run',
+  { skip: !dockerAvailable },
+  async (t) => {
+    await withPostgresContainer(async ({ connectionString }) => {
+      const pool = new Pool({ connectionString });
+      const firstBoss = new PgBoss({ connectionString, schedule: false });
+      const secondBoss = new PgBoss({ connectionString, schedule: false });
+      firstBoss.on('error', () => {});
+      secondBoss.on('error', () => {});
+      await firstBoss.start();
+      await secondBoss.start();
+      const transaction: ScheduledTaskTransaction = async (operation) => {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const database: Db = {
+            executeSql: (text, values) => client.query(text, values),
+          };
+          const result = await operation(database);
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      };
+      const executor = new TestExecutor();
+      const queue = `scheduled-workers-${randomUUID()}`;
+      const first = new ScheduledTasks({
+        boss: firstBoss,
+        queue,
+        reconciliationIntervalMs: 50,
+        transaction,
+        executor,
+      });
+      const second = new ScheduledTasks({
+        boss: secondBoss,
+        queue,
+        reconciliationIntervalMs: 50,
+        transaction,
+        executor,
+      });
+      await first.initialize();
+      await second.initialize();
+      try {
+        await using _firstWorker = await first.work(FAST_POLLING);
+        await using _secondWorker = await second.work(FAST_POLLING);
+        const task = await first.create('owner-1', {
+          idempotencyKey: 'competing-workers',
+          name: 'Competing workers',
+          prompt: 'Launch once',
+          recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
+          timezone: 'UTC',
+          executionConfig: { destination: 'postgres' },
+        });
+        const run = await first.runNow('owner-1', task.id, 'one-run');
+
+        await waitForRun(t, first, 'owner-1', run.id, 'running');
+        assert.equal(executor.launches.length, 1);
+        assert.equal(executor.executions.size, 1);
+      } finally {
+        await secondBoss.stop({ graceful: false });
+        await firstBoss.stop({ graceful: false });
+        await pool.end();
+      }
+    });
+  },
+);
 
 test(
   'real PostgreSQL commits duplicate management calls as one schedule and run',

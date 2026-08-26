@@ -16,18 +16,7 @@
       "~routes/*": ["./.react-router/types/app/*"]
     }
   },
-  "include": [
-    "app/**/*.ts",
-    "app/**/*.tsx",
-    ".source/**/*.ts",
-    ".react-router/types/app/**/*.ts",
-    "app/**/*.js",
-    "app/**/*.jsx",
-    "**/.server/**/*.ts",
-    "**/.server/**/*.tsx",
-    "**/.client/**/*.ts",
-    "**/.client/**/*.tsx"
-  ],
+  "include": ["app", ".source/**/*.ts", ".react-router/types/app", "*config.ts"],
   "exclude": [
     "out-tsc",
     "dist",
