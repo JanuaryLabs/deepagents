@@ -33,6 +33,10 @@ const runtimeInfo = {
   ],
 } satisfies ProtocolRuntime['info'];
 
+const emptyEngine = {
+  getMessages: () => Promise.resolve([]),
+};
+
 function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
   const runtime: ProtocolRuntime = {
     info: runtimeInfo,
@@ -48,6 +52,7 @@ function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
     },
     observe() {
       return {
+        engine: emptyEngine,
         async cancel() {},
         async resume() {
           return null;
@@ -270,12 +275,48 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
   );
 });
 
+test('GET /zukhruf/v1/session/:sessionId returns the authenticated conversation', async () => {
+  const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
+  const messages = [
+    {
+      id: 'message-1',
+      role: 'user' as const,
+      parts: [{ type: 'text' as const, text: 'Hello' }],
+    },
+  ];
+  const observed: Array<{ chatId: string; userId: string }> = [];
+  const runtime = createRuntime({
+    observe(conversation) {
+      observed.push(conversation);
+      return {
+        engine: { getMessages: () => Promise.resolve(messages) },
+        async cancel() {},
+        async resume() {
+          return null;
+        },
+        async status() {
+          return undefined;
+        },
+      };
+    },
+  });
+
+  const response = await createApp(runtime).request(
+    ZUKHRUF_SESSION_ROUTE_PATH.replace(':sessionId', sessionId),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { sessionId, messages });
+  assert.deepEqual(observed, [{ chatId: sessionId, userId: 'user-1' }]);
+});
+
 test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', async () => {
   const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
   const cancelled: Array<{ chatId: string; userId: string }> = [];
   const runtime = createRuntime({
     observe(conversation) {
       return {
+        engine: emptyEngine,
         async cancel() {
           cancelled.push(conversation);
         },
@@ -311,6 +352,7 @@ test('GET /zukhruf/v1/session/:sessionId/turn/:turnId exposes the exact durable 
   const runtime = createRuntime({
     observe() {
       return {
+        engine: emptyEngine,
         async cancel() {},
         async resume() {
           return null;
@@ -352,6 +394,7 @@ test('POST /zukhruf/v1/session/:sessionId/turn/:turnId/cancel cancels only that 
   const runtime = createRuntime({
     observe() {
       return {
+        engine: emptyEngine,
         async cancel(id?: string) {
           cancelled.push(id);
         },
@@ -380,6 +423,7 @@ test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authentica
     observe(conversation) {
       observed.push(conversation);
       return {
+        engine: emptyEngine,
         async cancel() {},
         async resume() {
           return new ReadableStream<StreamPart>({

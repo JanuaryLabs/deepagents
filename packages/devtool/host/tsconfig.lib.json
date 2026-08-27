@@ -18,10 +18,16 @@
       "path": "../../react/shadcn/tsconfig.lib.json"
     },
     {
+      "path": "../../react/genai/tsconfig.lib.json"
+    },
+    {
       "path": "../history/tsconfig.lib.json"
     },
     {
       "path": "../../context/tsconfig.lib.json"
+    },
+    {
+      "path": "../../chat-input/tsconfig.lib.json"
     },
     {
       "path": "../../experimental/tsconfig.lib.json"

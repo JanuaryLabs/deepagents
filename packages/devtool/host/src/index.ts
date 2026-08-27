@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
+import { proxy } from 'hono/proxy';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -17,6 +18,7 @@ import type {
   AgentPluginToolContext,
 } from '@deepagents/experimental/zukhruf';
 import {
+  ZUKHRUF_CREATE_SESSION_ROUTE_PATH,
   ZUKHRUF_HISTORY_ROUTE_PATH,
   ZUKHRUF_INFO_ROUTE_PATH,
   ZUKHRUF_ROUTE_PREFIX,
@@ -26,26 +28,54 @@ import {
 export interface DevtoolOptions {
   hostname?: '127.0.0.1' | '::1';
   port?: number;
+  runtime?: {
+    url: string | URL;
+    headers?: RuntimeHeaders | (() => RuntimeHeaders | Promise<RuntimeHeaders>);
+  };
 }
 
 export type Devtool = AgentPluginInstance & { readonly url?: URL };
 type RunningDevtool = AsyncDisposable & { readonly url: URL };
+type RuntimeHeaders = NonNullable<ConstructorParameters<typeof Headers>[0]>;
 
 const ui = fileURLToPath(new URL('./ui/', import.meta.url));
 const uiShell = serveStatic({ root: ui, path: 'index.html' });
 
-function createApp(host: AgentPluginHost, traces: TraceSource | undefined) {
+type ResolvedDevtoolOptions = Required<
+  Pick<DevtoolOptions, 'hostname' | 'port'>
+> & {
+  runtime?: NonNullable<DevtoolOptions['runtime']> & { url: URL };
+};
+
+function createApp(
+  host: AgentPluginHost,
+  traces: TraceSource | undefined,
+  runtime: ResolvedDevtoolOptions['runtime'],
+) {
   const app = new Hono();
   app.get('/health', (context) => context.json({ ok: true }));
-  app.get(ZUKHRUF_INFO_ROUTE_PATH, (context) =>
-    context.json({
-      ...zukhrufDiscovery(host),
+  app.get(ZUKHRUF_INFO_ROUTE_PATH, (context) => {
+    const discovery = zukhrufDiscovery(host);
+    return context.json({
+      ...discovery,
+      capabilities: {
+        ...discovery.capabilities,
+        ...(runtime
+          ? { chat: { href: ZUKHRUF_CREATE_SESSION_ROUTE_PATH } }
+          : {}),
+      },
       ...(traces === undefined ? {} : { traces: { path: traces.path } }),
-    }),
-  );
+    });
+  });
   app.get(ZUKHRUF_HISTORY_ROUTE_PATH, async (context) =>
     context.json(await host.listHistory()),
   );
+  if (runtime) {
+    const forward = (context: Context) =>
+      forwardRuntimeRequest(context, runtime);
+    app.all(ZUKHRUF_CREATE_SESSION_ROUTE_PATH, forward);
+    app.all(`${ZUKHRUF_CREATE_SESSION_ROUTE_PATH}/*`, forward);
+  }
   mountTraceRoutes(app, traces, host);
   return app
     .use('/assets/*', serveStatic({ root: ui }))
@@ -70,13 +100,15 @@ export function devtool(
 class DevtoolPlugin implements Devtool {
   readonly #hostname: NonNullable<DevtoolOptions['hostname']>;
   readonly #port: number;
+  readonly #runtime?: ResolvedDevtoolOptions['runtime'];
   #host?: AgentPluginHost;
   #traces?: TraceSource;
   #url?: URL;
 
-  constructor({ hostname, port }: Required<DevtoolOptions>) {
+  constructor({ hostname, port, runtime }: ResolvedDevtoolOptions) {
     this.#hostname = hostname;
     this.#port = port;
+    this.#runtime = runtime;
   }
 
   get url(): URL | undefined {
@@ -106,10 +138,13 @@ class DevtoolPlugin implements Devtool {
     }
     if (this.#url) throw new Error('devtool plugin is already running');
 
-    const running = await startDevtool(createApp(host, this.#traces), {
-      hostname: this.#hostname,
-      port: this.#port,
-    });
+    const running = await startDevtool(
+      createApp(host, this.#traces, this.#runtime),
+      {
+        hostname: this.#hostname,
+        port: this.#port,
+      },
+    );
     this.#url = running.url;
 
     return {
@@ -124,11 +159,44 @@ class DevtoolPlugin implements Devtool {
 function resolveOptions({
   hostname = '127.0.0.1',
   port = 4317,
-}: DevtoolOptions): Required<DevtoolOptions> {
+  runtime,
+}: DevtoolOptions): ResolvedDevtoolOptions {
   if (hostname !== '127.0.0.1' && hostname !== '::1') {
     throw new TypeError('devtool hostname must be a loopback address');
   }
-  return { hostname, port };
+  if (!runtime) return { hostname, port };
+  const url = new URL(runtime.url);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new TypeError('devtool runtime URL must use HTTP or HTTPS');
+  }
+  if (url.username || url.password) {
+    throw new TypeError('devtool runtime URL must not contain credentials');
+  }
+  return { hostname, port, runtime: { ...runtime, url } };
+}
+
+async function forwardRuntimeRequest(
+  context: Context,
+  runtime: NonNullable<ResolvedDevtoolOptions['runtime']>,
+) {
+  const headers = new Headers();
+  for (const name of ['accept', 'content-type', 'idempotency-key']) {
+    const value = context.req.header(name);
+    if (value) headers.set(name, value);
+  }
+  const configuredHeaders =
+    typeof runtime.headers === 'function'
+      ? await runtime.headers()
+      : runtime.headers;
+  for (const [name, value] of new Headers(configuredHeaders)) {
+    headers.set(name, value);
+  }
+  const response = await proxy(new URL(context.req.path, runtime.url), {
+    raw: context.req.raw,
+    headers,
+  });
+  response.headers.delete('set-cookie');
+  return response;
 }
 
 async function startDevtool(

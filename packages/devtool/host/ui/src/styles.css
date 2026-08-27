@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+@source '../../../../chat-input/src';
+@source '../../../../react/genai/src';
 @source '../../../../react/shadcn/src';
 @source '../../../history/src/index.tsx';
 @source './**/*.{ts,tsx}';

@@ -1,5 +1,7 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import { serve } from '@hono/node-server';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
+import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -26,6 +28,7 @@ import {
   type TurnPushResult,
   TurnQueue,
   type TurnRef,
+  ZUKHRUF_CREATE_SESSION_ROUTE_PATH,
   ZUKHRUF_HISTORY_ROUTE_PATH,
   ZUKHRUF_INFO_ROUTE_PATH,
   ZUKHRUF_ROUTE_PREFIX,
@@ -147,6 +150,14 @@ test('devtool rejects non-loopback listeners', () => {
   assert.throws(
     () => devtool({ hostname: '0.0.0.0' as '127.0.0.1' }),
     /devtool hostname must be a loopback address/,
+  );
+  assert.throws(
+    () => devtool({ runtime: { url: 'file:///tmp/runtime' } }),
+    /runtime URL must use HTTP or HTTPS/,
+  );
+  assert.throws(
+    () => devtool({ runtime: { url: 'https://user:secret@example.com' } }),
+    /runtime URL must not contain credentials/,
   );
 });
 
@@ -271,6 +282,171 @@ test('devtool participates in the AgentRuntime lifecycle', async () => {
   await assert.rejects(
     fetch(response.url, { signal: AbortSignal.timeout(1_000) }),
   );
+});
+
+test('devtool proxies authenticated Zukhruf chat HTTP without exposing credentials', async () => {
+  const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
+  const requests: Array<{
+    path: string;
+    method: string;
+    authorization: string | undefined;
+    cookie: string | undefined;
+    idempotencyKey: string | undefined;
+    body: unknown;
+  }> = [];
+  const upstream = new Hono();
+  upstream.all('/zukhruf/v1/session*', async (context) => {
+    requests.push({
+      path: context.req.path,
+      method: context.req.method,
+      authorization: context.req.header('authorization'),
+      cookie: context.req.header('cookie'),
+      idempotencyKey: context.req.header('idempotency-key'),
+      body:
+        context.req.method === 'POST' &&
+        context.req.header('content-type') === 'application/json'
+          ? await context.req.json()
+          : undefined,
+    });
+    if (
+      context.req.method === 'POST' &&
+      context.req.path === ZUKHRUF_CREATE_SESSION_ROUTE_PATH
+    ) {
+      return context.json({ ok: true, sessionId, turnId: 'turn-1' }, 202, {
+        'set-cookie': 'upstream-secret=hidden',
+      });
+    }
+    if (
+      context.req.method === 'GET' &&
+      context.req.path === `/zukhruf/v1/session/${sessionId}`
+    ) {
+      return context.json({ sessionId, messages: [] });
+    }
+    if (
+      context.req.method === 'GET' &&
+      context.req.path === `/zukhruf/v1/session/${sessionId}/stream`
+    ) {
+      return new Response(
+        'data: {"type":"text-start","id":"text-1"}\n\n' +
+          'data: {"type":"text-delta","id":"text-1","delta":"Hello"}\n\n' +
+          'data: {"type":"text-end","id":"text-1"}\n\n' +
+          'data: [DONE]\n\n',
+        {
+          headers: {
+            'content-type': 'text/event-stream',
+            'x-vercel-ai-ui-message-stream': 'v1',
+          },
+        },
+      );
+    }
+    if (
+      context.req.method === 'POST' &&
+      context.req.path === `/zukhruf/v1/session/${sessionId}/cancel`
+    ) {
+      return context.body(null, 204);
+    }
+    return context.notFound();
+  });
+  const upstreamStarted = Promise.withResolvers<URL>();
+  const upstreamServer = serve(
+    { fetch: upstream.fetch, hostname: '127.0.0.1', port: 0 },
+    ({ address, port }) =>
+      upstreamStarted.resolve(new URL(`http://${address}:${port}/`)),
+  );
+  await using resources = new AsyncDisposableStack();
+  resources.use(upstreamServer);
+  const upstreamUrl = await upstreamStarted.promise;
+
+  const streamStore = resources.adopt(
+    new SqliteStreamStore(':memory:'),
+    (value) => value.close(),
+  );
+  const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
+  const definition = devtool({
+    port: 0,
+    runtime: {
+      url: upstreamUrl,
+      headers: async () => ({ authorization: 'Bearer server-token' }),
+    },
+  });
+  const runtime = new AgentRuntime(
+    defineAgent({ ...declaration, plugins: [definition] }),
+    {
+      store: new InMemoryContextStore(),
+      streams: new StreamManager({
+        store: streamStore,
+        changeSource: new PollingChangeSource({ reads: streamStore }),
+      }),
+      queue: new IdleTurnQueue(),
+      mailboxStore,
+    },
+  );
+  const plugin = runtime.plugin(definition);
+  resources.use(await runtime.work());
+  assert(plugin.url);
+
+  const discovery = (await (
+    await fetch(new URL(ZUKHRUF_INFO_ROUTE_PATH, plugin.url))
+  ).json()) as { capabilities: { chat?: { href: string } } };
+  assert.deepEqual(discovery.capabilities.chat, {
+    href: ZUKHRUF_CREATE_SESSION_ROUTE_PATH,
+  });
+
+  const createResponse = await fetch(
+    new URL(ZUKHRUF_CREATE_SESSION_ROUTE_PATH, plugin.url),
+    {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer browser-token',
+        cookie: 'browser-secret=hidden',
+        'content-type': 'application/json',
+        'idempotency-key': 'message-1',
+      },
+      body: JSON.stringify({ input: 'Hello' }),
+    },
+  );
+  assert.equal(createResponse.status, 202);
+  assert.equal(createResponse.headers.get('set-cookie'), null);
+  assert.deepEqual(await createResponse.json(), {
+    ok: true,
+    sessionId,
+    turnId: 'turn-1',
+  });
+
+  const sessionResponse = await fetch(
+    new URL(`/zukhruf/v1/session/${sessionId}`, plugin.url),
+  );
+  assert.equal(sessionResponse.status, 200);
+  assert.deepEqual(await sessionResponse.json(), { sessionId, messages: [] });
+
+  const streamResponse = await fetch(
+    new URL(`/zukhruf/v1/session/${sessionId}/stream`, plugin.url),
+  );
+  assert.equal(streamResponse.status, 200);
+  assert.match(await streamResponse.text(), /"delta":"Hello"/);
+
+  const cancelResponse = await fetch(
+    new URL(`/zukhruf/v1/session/${sessionId}/cancel`, plugin.url),
+    { method: 'POST' },
+  );
+  assert.equal(cancelResponse.status, 204);
+  assert.deepEqual(
+    requests.map(({ path, method }) => ({ path, method })),
+    [
+      { path: ZUKHRUF_CREATE_SESSION_ROUTE_PATH, method: 'POST' },
+      { path: `/zukhruf/v1/session/${sessionId}`, method: 'GET' },
+      { path: `/zukhruf/v1/session/${sessionId}/stream`, method: 'GET' },
+      { path: `/zukhruf/v1/session/${sessionId}/cancel`, method: 'POST' },
+    ],
+  );
+  assert(
+    requests.every(
+      ({ authorization, cookie }) =>
+        authorization === 'Bearer server-token' && cookie === undefined,
+    ),
+  );
+  assert.equal(requests[0].idempotencyKey, 'message-1');
+  assert.deepEqual(requests[0].body, { input: 'Hello' });
 });
 
 test('devtool persists conversation-scoped traces from a public AgentRuntime turn', async () => {

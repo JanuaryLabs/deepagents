@@ -9,7 +9,7 @@ import {
   useSidebar,
 } from '@deepagents/react-shadcn';
 
-import { DevtoolSidebar } from './sidebar.tsx';
+import { DevtoolSidebar, NewChatButton } from './sidebar.tsx';
 
 function getSidebarStateFromCookie() {
   const cookie = document.cookie
@@ -40,10 +40,11 @@ export function AppLayout() {
 function InsetTitlebar() {
   const { isMobile, state } = useSidebar();
   return (
-    <div className="flex h-9 shrink-0 items-center px-2">
+    <div className="flex h-9 shrink-0 items-center gap-1 px-2">
       {isMobile || state === 'collapsed' ? (
         <SidebarTrigger aria-label="Open sidebar" title="Open sidebar" />
       ) : null}
+      {state === 'collapsed' ? <NewChatButton iconOnly /> : null}
     </div>
   );
 }

@@ -1,10 +1,12 @@
 import { QueryClient, skipToken, useQuery } from '@tanstack/react-query';
+import { validateUIMessages } from 'ai';
 
 import type { HistoryRecord } from '@deepagents/devtool-history';
 
 type Discovery = {
   traces?: { path: string };
   capabilities: {
+    chat?: { href: string };
     history: { href: string };
   };
 };
@@ -51,9 +53,38 @@ export function useRuntimeData() {
   });
   return {
     discovery: discovery.data,
+    discoveryPending: discovery.isPending,
     history: history.data ?? [],
     historyError: discovery.isError || history.isError,
   };
+}
+
+export function useSessionMessages(
+  api: string | undefined,
+  sessionId?: string,
+) {
+  return useQuery({
+    queryKey: ['runtime', 'session', sessionId],
+    queryFn:
+      api && sessionId
+        ? async ({ signal }) => {
+            const response = await fetch(
+              `${api}/${encodeURIComponent(sessionId)}`,
+              { signal },
+            );
+            if (!response.ok) {
+              throw new Error(`Session request failed: ${response.status}`);
+            }
+            const body = (await response.json()) as {
+              messages?: unknown;
+            };
+            if (!Array.isArray(body.messages)) {
+              throw new Error('Session response did not include messages');
+            }
+            return validateUIMessages({ messages: body.messages });
+          }
+        : skipToken,
+  });
 }
 
 export function useHealth() {

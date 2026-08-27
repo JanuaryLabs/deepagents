@@ -15,7 +15,14 @@ import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
 const developerTool =
   process.env.NODE_ENV === 'development'
-    ? (await import('@deepagents/devtool')).devtool()
+    ? (await import('@deepagents/devtool')).devtool({
+        runtime: {
+          url: process.env.ZUKHRUF_RUNTIME_URL!,
+          headers: () => ({
+            authorization: `Bearer ${process.env.ZUKHRUF_RUNTIME_TOKEN}`,
+          }),
+        },
+      })
     : undefined;
 
 const root = defineAgent({
@@ -50,6 +57,13 @@ The browser never fetches a `file:` URL.
 The default address is `http://127.0.0.1:4317/`. Pass `{ port: 0 }` to select
 an available port. The URL becomes available after `runtime.work()` resolves
 and returns to `undefined` when that work handle is disposed.
+
+Set `runtime.url` to the authenticated HTTP host that mounts
+`zukhruf(runtime)` under `/zukhruf/v1`. The DevTool exposes that session API
+through its own loopback origin, so **New Chat**, conversation loading,
+streaming, and cancellation stay HTTP-based without putting runtime
+credentials in the browser. Static headers or an async `headers` callback can
+provide server-side authentication.
 
 The UI discovers History and the optional trace source from the devtool's
 `GET /zukhruf/v1/info`. History stays in the left sidebar. When one file source

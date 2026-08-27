@@ -11,7 +11,13 @@
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
   "references": [
     {
+      "path": "../../../chat-input/tsconfig.lib.json"
+    },
+    {
       "path": "../../history/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../react/genai/tsconfig.lib.json"
     },
     {
       "path": "../../../react/shadcn/tsconfig.lib.json"

@@ -66,9 +66,12 @@ interface ZukhrufRuntime extends Pick<
   AgentRuntime,
   'createSession' | 'enqueue' | 'info' | 'listHistory' | 'sessionExists'
 > {
-  observe(
-    conversation: ConversationId,
-  ): Pick<AgentObservation, 'cancel' | 'resume' | 'status'>;
+  observe(conversation: ConversationId): Pick<
+    AgentObservation,
+    'cancel' | 'resume' | 'status'
+  > & {
+    engine: Pick<AgentObservation['engine'], 'getMessages'>;
+  };
 }
 
 export function zukhrufDiscovery(runtime: Pick<ZukhrufRuntime, 'info'>) {
@@ -166,6 +169,31 @@ export function zukhruf(runtime: ZukhrufRuntime) {
     methodNotAllowed(context, 'POST'),
   );
 
+  app.get(
+    SESSION_ROUTE_PATH,
+    validate((payload) => ({
+      sessionId: {
+        select: payload.params.sessionId,
+        against: sessionIdSchema,
+      },
+    })),
+    async (context) => {
+      const { sessionId } = context.var.input;
+      const conversation = {
+        chatId: sessionId,
+        userId: context.get('userId'),
+      };
+      await requireSession(runtime, conversation);
+      return context.json(
+        {
+          sessionId,
+          messages: await runtime.observe(conversation).engine.getMessages(),
+        },
+        200,
+        NO_STORE,
+      );
+    },
+  );
   app.post(
     SESSION_ROUTE_PATH,
     limitTurnBody,
@@ -198,7 +226,9 @@ export function zukhruf(runtime: ZukhrufRuntime) {
       return accepted(context, sessionId, turn.id);
     },
   );
-  app.all(SESSION_ROUTE_PATH, (context) => methodNotAllowed(context, 'POST'));
+  app.all(SESSION_ROUTE_PATH, (context) =>
+    methodNotAllowed(context, 'GET, POST'),
+  );
 
   app.get(
     SESSION_TURN_ROUTE_PATH,

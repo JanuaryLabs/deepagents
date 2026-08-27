@@ -1,6 +1,12 @@
-import { CalendarClockIcon, HistoryIcon } from 'lucide-react';
+import { CalendarClockIcon, HistoryIcon, SquarePenIcon } from 'lucide-react';
 import { useCallback } from 'react';
-import { NavLink, generatePath, useNavigate, useParams } from 'react-router';
+import {
+  NavLink,
+  generatePath,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router';
 
 import {
   History,
@@ -8,6 +14,7 @@ import {
   HistoryStatusIcon,
 } from '@deepagents/devtool-history';
 import {
+  Button,
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -35,9 +42,9 @@ export function DevtoolSidebar() {
             title="Collapse sidebar"
           />
         </div>
-        <PrimaryNavigation />
       </SidebarHeader>
       <SidebarContent>
+        <PrimaryNavigation />
         <RunsNavigation />
       </SidebarContent>
       <SidebarRail />
@@ -45,40 +52,74 @@ export function DevtoolSidebar() {
   );
 }
 
+export function NewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
+  const navigate = useNavigate();
+  const startNewChat = () =>
+    navigate(`/chat?draft=${encodeURIComponent(crypto.randomUUID())}`);
+
+  if (iconOnly) {
+    return (
+      <Button
+        aria-label="New chat"
+        className="size-7"
+        size="icon"
+        title="New chat"
+        type="button"
+        variant="ghost"
+        onClick={startNewChat}
+      >
+        <SquarePenIcon className="size-4" />
+      </Button>
+    );
+  }
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton onClick={startNewChat} tooltip="New chat">
+        <SquarePenIcon />
+        <span>New Chat</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 function PrimaryNavigation() {
   return (
     <nav aria-label="Devtool views">
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton render={<NavLink to="/history" />}>
-            <HistoryIcon />
-            <span>History</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton render={<NavLink to="/scheduled" />}>
-            <CalendarClockIcon />
-            <span>Scheduled</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <NewChatButton />
+            <SidebarMenuItem>
+              <SidebarMenuButton render={<NavLink to="/history" />}>
+                <HistoryIcon />
+                <span>History</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton render={<NavLink to="/scheduled" />}>
+                <CalendarClockIcon />
+                <span>Scheduled</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
     </nav>
   );
 }
 
 function RunsNavigation() {
+  const location = useLocation();
   const navigate = useNavigate();
   const route = useParams();
   const { discovery, history, historyError } = useRuntimeData();
-  const selected = selectConversation(history, route);
+  const selected = location.pathname.startsWith('/chat')
+    ? history.find(({ chatId }) => chatId === route.sessionId)
+    : selectConversation(history, route);
   const select = useCallback(
     (entry: HistoryRecord) =>
-      navigate(
-        generatePath('/history/:userId/:chatId', {
-          chatId: entry.chatId,
-          userId: entry.userId,
-        }),
-      ),
+      navigate(generatePath('/chat/:sessionId', { sessionId: entry.chatId })),
     [navigate],
   );
 
@@ -100,9 +141,15 @@ function RunsNavigation() {
               return (
                 <History.Item
                   key={`${entry.userId}:${entry.chatId}`}
-                  className={cn(active && 'bg-accent rounded-lg')}
+                  className={cn(
+                    'hover:bg-accent rounded-lg transition-colors',
+                    active && 'bg-accent',
+                  )}
                 >
-                  <History.ItemTrigger history={entry} className="pb-0">
+                  <History.ItemTrigger
+                    history={entry}
+                    className="pb-0 hover:bg-transparent"
+                  >
                     <HistoryStatusIcon status={entry.status} />
                     <span className="text-foreground truncate">
                       {entry.title ?? entry.chatId}
