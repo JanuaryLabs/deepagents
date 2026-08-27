@@ -1,6 +1,5 @@
 import { Link } from 'react-router';
 
-import { useData } from '../../hooks/use-client.ts';
 import {
   Badge,
   Button,
@@ -11,7 +10,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import { useData } from '../../hooks/use-client.ts';
 
 export default function SuiteList() {
   const { data: suites, isLoading } = useData('GET /suites');
@@ -42,8 +43,12 @@ export default function SuiteList() {
             <p className="text-muted-foreground text-sm">
               {suites.length} suite{suites.length !== 1 ? 's' : ''}
             </p>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/evals/new">New Eval</Link>
+            <Button
+              render={<Link to="/evals/new" />}
+              variant="outline"
+              size="sm"
+            >
+              New Eval
             </Button>
           </div>
 

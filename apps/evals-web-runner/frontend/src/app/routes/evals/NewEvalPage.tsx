@@ -2,20 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 
 import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorLogo,
-  ModelSelectorName,
-  ModelSelectorTrigger,
-} from '../../components/ModelSelector.tsx';
-import { useAction, useData } from '../../hooks/use-client.ts';
-import { useModels } from '../../hooks/use-models.ts';
-import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -36,7 +22,22 @@ import {
   TabsList,
   TabsTrigger,
   Textarea,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorLogo,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+} from '../../components/ModelSelector.tsx';
+import { useAction, useData } from '../../hooks/use-client.ts';
+import { useModels } from '../../hooks/use-models.ts';
 
 const DETERMINISTIC_SCORERS = [
   { name: 'exactMatch', label: 'Exact Match' },
@@ -271,19 +272,21 @@ export default function NewEvalPage() {
               open={modelSelectorOpen}
               onOpenChange={setModelSelectorOpen}
             >
-              <ModelSelectorTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full justify-start"
-                  disabled={modelsLoading || modelsError}
-                >
-                  {modelsLoading
-                    ? 'Loading models...'
-                    : modelsError
-                      ? 'Failed to load models'
-                      : 'Select a model...'}
-                </Button>
+              <ModelSelectorTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start"
+                    disabled={modelsLoading || modelsError}
+                  />
+                }
+              >
+                {modelsLoading
+                  ? 'Loading models...'
+                  : modelsError
+                    ? 'Failed to load models'
+                    : 'Select a model...'}
               </ModelSelectorTrigger>
               <ModelSelectorContent>
                 <ModelSelectorInput placeholder="Search models..." />
@@ -353,7 +356,9 @@ export default function NewEvalPage() {
                     <Label>Prompt Version</Label>
                     <Select
                       value={selectedPromptId}
-                      onValueChange={setSelectedPromptId}
+                      onValueChange={(value) =>
+                        value !== null && setSelectedPromptId(value)
+                      }
                     >
                       <SelectTrigger className="mt-1">
                         <SelectValue placeholder="Select a prompt..." />
@@ -414,7 +419,12 @@ export default function NewEvalPage() {
               .
             </p>
           ) : (
-            <Select value={selectedDataset} onValueChange={setSelectedDataset}>
+            <Select
+              value={selectedDataset}
+              onValueChange={(value) =>
+                value !== null && setSelectedDataset(value)
+              }
+            >
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="Select a dataset..." />
               </SelectTrigger>
@@ -431,7 +441,12 @@ export default function NewEvalPage() {
             <div className="mt-3 grid grid-cols-2 gap-4">
               <div>
                 <Label>Input Column</Label>
-                <Select value={inputField} onValueChange={setInputField}>
+                <Select
+                  value={inputField}
+                  onValueChange={(value) =>
+                    value !== null && setInputField(value)
+                  }
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="input" />
                   </SelectTrigger>
@@ -446,7 +461,12 @@ export default function NewEvalPage() {
               </div>
               <div>
                 <Label>Expected Column</Label>
-                <Select value={expectedField} onValueChange={setExpectedField}>
+                <Select
+                  value={expectedField}
+                  onValueChange={(value) =>
+                    value !== null && setExpectedField(value)
+                  }
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="expected" />
                   </SelectTrigger>
@@ -499,28 +519,30 @@ export default function NewEvalPage() {
                   open={scorerSelectorOpen}
                   onOpenChange={setScorerSelectorOpen}
                 >
-                  <ModelSelectorTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="mt-1 w-full justify-start"
-                      disabled={modelsLoading || modelsError}
-                    >
-                      {scorerModel ? (
-                        <>
-                          <ModelSelectorLogo
-                            provider={getModelProvider(scorerModel)}
-                          />
-                          <ModelSelectorName>{scorerModel}</ModelSelectorName>
-                        </>
-                      ) : modelsLoading ? (
-                        'Loading models...'
-                      ) : modelsError ? (
-                        'Failed to load models'
-                      ) : (
-                        'Select scorer model...'
-                      )}
-                    </Button>
+                  <ModelSelectorTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="mt-1 w-full justify-start"
+                        disabled={modelsLoading || modelsError}
+                      />
+                    }
+                  >
+                    {scorerModel ? (
+                      <>
+                        <ModelSelectorLogo
+                          provider={getModelProvider(scorerModel)}
+                        />
+                        <ModelSelectorName>{scorerModel}</ModelSelectorName>
+                      </>
+                    ) : modelsLoading ? (
+                      'Loading models...'
+                    ) : modelsError ? (
+                      'Failed to load models'
+                    ) : (
+                      'Select scorer model...'
+                    )}
                   </ModelSelectorTrigger>
                   <ModelSelectorContent>
                     <ModelSelectorInput placeholder="Search models..." />
@@ -562,7 +584,7 @@ export default function NewEvalPage() {
           </div>
         </div>
 
-        <Accordion type="single" collapsible>
+        <Accordion>
           <AccordionItem value="advanced">
             <AccordionTrigger className="text-sm font-medium">
               Advanced Options

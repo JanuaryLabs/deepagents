@@ -1,4 +1,3 @@
-import { Fragment, useMemo } from 'react';
 import {
   type ColumnDef,
   type ExpandedState,
@@ -7,6 +6,7 @@ import {
   getExpandedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
+import { Fragment, useMemo } from 'react';
 import { useState } from 'react';
 
 import {
@@ -16,7 +16,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
 import { formatInputValue, truncate } from '../lib/format.ts';
 
 interface ScoreEntry {
@@ -126,9 +127,7 @@ function ExpandedCaseRow({
   scorerNames: string[];
   threshold: number;
 }) {
-  const scoreMap = new Map(
-    caseData.scores.map((s) => [s.scorer_name, s]),
-  );
+  const scoreMap = new Map(caseData.scores.map((s) => [s.scorer_name, s]));
   const errorSummary = formatCaseError(caseData.error);
   const errorDetails = formatCaseErrorDetails(caseData.error);
 
@@ -178,12 +177,7 @@ function ExpandedCaseRow({
                   const reason =
                     normalizeReason(s?.reason) ??
                     (!passing
-                      ? fallbackFailureReason(
-                          caseData,
-                          name,
-                          score,
-                          threshold,
-                        )
+                      ? fallbackFailureReason(caseData, name, score, threshold)
                       : null);
 
                   return (
@@ -229,7 +223,7 @@ function ExpandedCaseRow({
               {errorSummary}
             </p>
             {errorDetails && errorDetails !== errorSummary && (
-              <pre className="text-destructive/80 mt-2 whitespace-pre-wrap font-mono text-[10px]">
+              <pre className="text-destructive/80 mt-2 font-mono text-[10px] whitespace-pre-wrap">
                 {errorDetails}
               </pre>
             )}
@@ -279,11 +273,7 @@ export function CaseTable({
           const passed = c.scores.every((s) => s.score >= threshold);
           const status = c.error ? 'error' : passed ? 'pass' : 'fail';
           const label =
-            status === 'pass'
-              ? 'PASS'
-              : status === 'fail'
-                ? 'FAIL'
-                : 'ERROR';
+            status === 'pass' ? 'PASS' : status === 'fail' ? 'FAIL' : 'ERROR';
           return (
             <span
               className={`text-xs font-medium ${
@@ -330,26 +320,24 @@ export function CaseTable({
       },
     ];
 
-    const scorerCols: ColumnDef<CaseWithScores>[] = scorerNames.map(
-      (name) => ({
-        id: `scorer-${name}`,
-        header: name,
-        size: 80,
-        cell: ({ row }) => {
-          const s = row.original.scores.find((sc) => sc.scorer_name === name);
-          const score = s?.score ?? 0;
-          return (
-            <span
-              className={`font-mono text-xs ${
-                score >= threshold ? 'text-green-600' : 'text-destructive'
-              }`}
-            >
-              {score.toFixed(3)}
-            </span>
-          );
-        },
-      }),
-    );
+    const scorerCols: ColumnDef<CaseWithScores>[] = scorerNames.map((name) => ({
+      id: `scorer-${name}`,
+      header: name,
+      size: 80,
+      cell: ({ row }) => {
+        const s = row.original.scores.find((sc) => sc.scorer_name === name);
+        const score = s?.score ?? 0;
+        return (
+          <span
+            className={`font-mono text-xs ${
+              score >= threshold ? 'text-green-600' : 'text-destructive'
+            }`}
+          >
+            {score.toFixed(3)}
+          </span>
+        );
+      },
+    }));
 
     const tail: ColumnDef<CaseWithScores>[] = [
       {

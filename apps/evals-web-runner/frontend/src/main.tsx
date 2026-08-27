@@ -2,10 +2,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createBrowserRouter, redirect } from 'react-router';
+import { Toaster } from 'sonner';
 
 import { queryClient } from './app/hooks/query-client.ts';
 import Layout from './app/routes/Layout.tsx';
-import { Toaster } from './app/shadcn/index.ts';
 
 const router = createBrowserRouter(
   [
@@ -92,7 +92,21 @@ const root = createRoot(document.getElementById('root') as HTMLElement);
 root.render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <Toaster />
+      <Toaster
+        theme="system"
+        className="toaster group"
+        toastOptions={{
+          classNames: {
+            toast:
+              'group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg',
+            description: 'group-[.toast]:text-muted-foreground',
+            actionButton:
+              'group-[.toast]:bg-primary group-[.toast]:text-primary-foreground',
+            cancelButton:
+              'group-[.toast]:bg-muted group-[.toast]:text-muted-foreground',
+          },
+        }}
+      />
       <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>,

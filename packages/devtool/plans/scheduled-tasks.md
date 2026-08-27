@@ -1,8 +1,9 @@
 # Scheduled Tasks in `@deepagents/devtool`
 
-Status: in progress; the Limerence shadcn sidebar seam and full off-canvas
-navigation shell are ported. The full management wireframe and notification
-scope still await approval.
+Status: in progress; the shared Shadcn sidebar seam, routed off-canvas
+navigation shell, and placeholder Scheduled route are ported. Schedule
+capability discovery, management routes, management UI, and notification scope
+still await approval and implementation.
 
 ## Outcome
 
@@ -28,15 +29,14 @@ remain separate phases with separate proofs.
   `runtime.plugin(definition)`. It supports fresh-root and
   existing-conversation targets.
 - `@deepagents/devtool` is an embedded runtime plugin with a loopback-only Hono
-  server, capability discovery, a persistent History sidebar, and three-second
-  polling.
+  server, capability discovery, React Router routes, a persistent History
+  sidebar, a placeholder Scheduled route, and three-second polling.
 - The current schedule adapter leaves successful run `title` and `summary`
   empty, exposes runs only through one task at a time, and has no cross-run
   memory.
-- The devtool now has publishable `shadcn`, `history`, and `traces` child
-  packages. `shadcn` contains the shared utilities, status badge, theme CSS,
-  and the Limerence-derived off-canvas sidebar the current UI uses; no
-  speculative component scaffold exists.
+- The devtool has publishable `history` and `traces` child packages and
+  consumes Base UI-backed primitives from `@deepagents/react-shadcn`.
+  History owns status presentation; the host owns its theme and shell.
 
 ## Source contracts
 
@@ -250,15 +250,16 @@ Interactions and states:
 
 Work:
 
-- approve or revise both wireframes;
+- approve or revise the management and inbox UI structure;
 - [x] approve the Limerence component seam after its source inventory;
 - confirm whether notifications are page-open browser alerts or require a
   closed-browser host notifier;
 - confirm that the local devtool binds one owner ID;
 - make this file the single source of truth for this product slice.
 
-Complete when the user explicitly approves the UI structure and notification
-guarantee. No production code changes belong to this phase.
+Complete when the user explicitly approves the UI structure, schedule bridge
+shape, and notification guarantee. No additional production code changes belong
+to this phase.
 
 ### Phase 1 — Scheduler read model and run results
 

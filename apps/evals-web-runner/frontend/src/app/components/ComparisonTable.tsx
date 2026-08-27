@@ -1,7 +1,5 @@
 import { Fragment } from 'react';
 
-import type { Endpoints } from '../hooks/use-client.ts';
-import { formatDelta } from '../lib/format.ts';
 import {
   Card,
   CardContent,
@@ -13,7 +11,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import type { Endpoints } from '../hooks/use-client.ts';
+import { formatDelta } from '../lib/format.ts';
 
 type RegressionDetail = { exceeds: boolean; meanDelta: number };
 type ComparisonResult = Endpoints['GET /compare']['output']['result'];

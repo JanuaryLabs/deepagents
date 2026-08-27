@@ -16,7 +16,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
 
 export default function RunListPage() {
   // TODO: use "usePolling"
@@ -93,8 +93,12 @@ export default function RunListPage() {
             {data.totalRuns} run{data.totalRuns !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button asChild variant="outline" size="sm">
-          <Link to="/evals/new">New Eval</Link>
+        <Button
+          render={<Link to="/evals/new" />}
+          variant="outline"
+          size="sm"
+        >
+          New Eval
         </Button>
       </div>
 

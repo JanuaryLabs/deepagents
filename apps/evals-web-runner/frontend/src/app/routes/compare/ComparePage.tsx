@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { ComparisonTable } from '../../components/ComparisonTable.tsx';
-import { useData } from '../../hooks/use-client.ts';
 import {
   Button,
   Select,
@@ -11,7 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import { ComparisonTable } from '../../components/ComparisonTable.tsx';
+import { useData } from '../../hooks/use-client.ts';
 
 export default function ComparePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -63,7 +64,12 @@ export default function ComparePage() {
       <div className="mb-8 max-w-lg space-y-4">
         <div>
           <label className="text-sm font-medium">Baseline Run</label>
-          <Select value={selectedBaseline} onValueChange={setSelectedBaseline}>
+          <Select
+            value={selectedBaseline}
+            onValueChange={(value) =>
+              value !== null && setSelectedBaseline(value)
+            }
+          >
             <SelectTrigger className="mt-1">
               <SelectValue placeholder="Select a run..." />
             </SelectTrigger>
@@ -82,7 +88,9 @@ export default function ComparePage() {
           <label className="text-sm font-medium">Candidate Run</label>
           <Select
             value={selectedCandidate}
-            onValueChange={setSelectedCandidate}
+            onValueChange={(value) =>
+              value !== null && setSelectedCandidate(value)
+            }
           >
             <SelectTrigger className="mt-1">
               <SelectValue placeholder="Select a run..." />

@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@deepagents/devtool-history": "6.2.0",
-    "@deepagents/devtool-shadcn": "6.2.0",
+    "@deepagents/react-shadcn": "6.2.0",
     "hono": "^4.12.33",
     "lucide-react": "^1.33.0"
   },

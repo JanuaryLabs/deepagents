@@ -1,13 +1,13 @@
 # UI Component Topology
 
-Status: current-source inventory after the devtool package split and the
-approved Limerence sidebar port.
+Status: current-source inventory after consolidating Shadcn primitives into
+`@deepagents/react-shadcn`.
 
 ## Conclusion
 
-The devtool now owns three publishable UI packages plus its host shell. The repo
-still has no cross-product `@deepagents/ui`, `@stdlib/ui`, or `@stdlib/shadcn`
-package.
+The repo has one cross-product Shadcn package:
+`@deepagents/react-shadcn`. Applications own their themes and feature
+compositions; they do not vendor primitive copies.
 
 ```text
 deepagents
@@ -15,19 +15,17 @@ deepagents
 │   ├── fumadocs-ui layouts and document components
 │   └── app-local editorial CSS
 ├── apps/evals-web-runner/frontend
-│   ├── app/shadcn                 54 vendored primitive files
 │   ├── app/components              6 cross-route compositions
 │   └── app/routes                 product screens and route-local UI
+├── packages/react/shadcn           Base UI-backed shared primitives
 └── packages/devtool
-    ├── shadcn                      shared utilities, badge, sidebar, and theme CSS
-    ├── history                     History compound composition and model
+    ├── history                     History composition, status, and formatting
     ├── traces                      trace server core and trace React view
-    └── host/ui/main.tsx            application shell and navigation
+    └── host/ui                     application shell, navigation, and theme
 ```
 
-The eval runner is the only substantial in-repository component collection,
-but it is an application implementation detail rather than a reusable package.
-The devtool must not import through an app-owned path.
+Both the eval runner and devtool import primitives from the shared package.
+Neither imports through the other application's paths.
 
 ## UI modules
 
@@ -35,37 +33,40 @@ The devtool must not import through an app-owned path.
 
 Ownership:
 
-- [`../host/ui/src/main.tsx`](../host/ui/src/main.tsx) owns only the application
-  shell, discovery/history polling, navigation, and conversation summary.
+- [`../host/ui/src/main.tsx`](../host/ui/src/main.tsx),
+  [`../host/ui/src/router.tsx`](../host/ui/src/router.tsx), and
+  [`../host/ui/src/app`](../host/ui/src/app) own the application shell,
+  discovery/history polling, routing, navigation, and placeholder Scheduled
+  route.
 - [`../history/src/index.tsx`](../history/src/index.tsx) owns `History.Root`,
   `History.Item`, `History.ItemTrigger`, `History.Empty`, `HistoryStatusIcon`,
   and the `HistoryRecord` model.
 - [`../traces/src/index.ts`](../traces/src/index.ts) owns trace discovery,
   telemetry decoration, and HTTP routes;
   [`../traces/src/ui.tsx`](../traces/src/ui.tsx) owns the waterfall and inspector.
-- [`../shadcn/src/index.ts`](../shadcn/src/index.ts) owns `cn()` and timestamp
-  formatting; [`../shadcn/src/status-badge.tsx`](../shadcn/src/status-badge.tsx)
-  owns the shared badge; [`../shadcn/src/sidebar.tsx`](../shadcn/src/sidebar.tsx)
-  owns the Limerence-derived off-canvas sidebar contract, and
-  [`../shadcn/src/styles.css`](../shadcn/src/styles.css) owns the Tailwind theme.
+- [`../../react/shadcn/src/index.ts`](../../react/shadcn/src/index.ts) exports
+  `cn()` and the shared Base UI-backed primitive set.
+- [`../history/src/index.tsx`](../history/src/index.tsx) owns status presentation
+  and timestamp formatting.
+- [`../host/ui/src/styles.css`](../host/ui/src/styles.css) owns the devtool
+  Tailwind theme.
 - [`../host/ui/vite.config.ts`](../host/ui/vite.config.ts) builds the UI into static
   assets copied into the published `@deepagents/devtool` package.
 
-Current dependencies are React, Tailwind CSS, Lucide, Radix Dialog, `clsx`, and
-`tailwind-merge`. Radix Dialog is used only for the responsive sidebar sheet.
-The existing public integration test exercises the server/package interface;
-CSS-rule comparison proves the relocation preserved all 168 generated
-selectors and declarations.
+The existing public integration test exercises the server/package interface.
+The shared sidebar preserves provider state, desktop off-canvas behavior,
+inset restore trigger, rail, Ctrl/Cmd+B, cookie persistence, and a responsive
+sheet.
 
 Implication: scheduled-task UI belongs in feature packages, while only proven
-Limerence components should enter the existing `shadcn` package.
+cross-product primitives should enter `@deepagents/react-shadcn`.
 
 ### `apps/evals-web-runner/frontend`
 
 Ownership:
 
-- [`../../../apps/evals-web-runner/frontend/src/app/shadcn/index.ts`](../../../apps/evals-web-runner/frontend/src/app/shadcn/index.ts)
-  exports an app-local collection of 54 shadcn-derived primitive files.
+- [`../../react/shadcn/src/index.ts`](../../react/shadcn/src/index.ts) supplies
+  the eval runner's shared primitives.
 - [`../../../apps/evals-web-runner/frontend/src/app/components`](../../../apps/evals-web-runner/frontend/src/app/components)
   contains six compositions shared by more than one route or too substantial
   to leave inline.
@@ -92,7 +93,6 @@ Direct primitive usage by breadth:
 | Accordion, Tabs, Sidebar |                1 each | One specialized screen or shell              |
 | Command + Dialog         |                     1 | `ModelSelector` composition                  |
 | Chart                    |                     1 | `SuiteComparison` composition                |
-| `TheButton`              |                     1 | One async dataset import action              |
 | Toaster                  |                     1 | Root feedback host                           |
 
 Cross-route compositions and callers:
@@ -123,35 +123,21 @@ Implication: the docs UI is not a source for devtool management primitives.
 ## Documentation drift
 
 [`../../../apps/evals-web-runner/AGENTS.md`](../../../apps/evals-web-runner/AGENTS.md)
-describes generated hooks in `packages/ui`, `TheButton` in `@stdlib/ui`, and
-shadcn exports in `packages/stdlib/shadcn`. None of those packages exist in
-this checkout. Actual imports resolve to app-local hooks and
-`app/shadcn/index.ts`.
+now points UI work to `@deepagents/react-shadcn`. Generated data hooks remain
+app-local.
 
-This drift must not be treated as proof that a reusable component package
-already exists.
+## Shared package seam
 
-## Limerence reuse seam
+The package boundary uses these constraints:
 
-The source inventory selected the following seam:
-
-1. inventory the actual Limerence component source, package exports, tokens,
-   fonts, assets, primitive system, and dependency footprint;
-2. map only the scheduled-task wireframe needs to those existing components;
-3. choose the seam from demonstrated consumers:
-   - consume an existing Limerence package if it is already a stable package;
-   - add selected Limerence components to `packages/devtool/shadcn` when they
-     are needed by an approved devtool screen;
-   - otherwise leave them in their current owner;
+1. import primitives and `cn` from `@deepagents/react-shadcn`;
+2. keep feature compositions in their owning application or feature package;
+3. add primitives to the shared package only after a demonstrated consumer;
 4. keep theme tokens app-owned unless both consumers demonstrably share the
    same product theme;
 5. add no parallel primitive system and do not import from one application
    into another.
 
-The Limerence source is `packages/stdlib/shadcn/src/lib/ui/sidebar.tsx`, composed
-by `apps/desktop/frontend/src/app/routes/Layout/Layout.tsx`. The approved port
-includes the behavior the devtool shell uses: provider state, desktop
-off-canvas transition, inset restore trigger, rail, Ctrl/Cmd+B shortcut,
-cookie persistence, and the responsive Radix sheet. The host continues to own
-navigation and records. No application-owned import or second primitive system
-is introduced.
+The devtool host continues to own navigation and records, and the eval runner
+continues to own its product screens. Their themes remain intentionally
+different.

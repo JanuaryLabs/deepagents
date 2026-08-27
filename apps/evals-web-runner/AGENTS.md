@@ -124,7 +124,7 @@ Always break down components into smaller components and colocate them in the sa
 
 ### Loading Buttons
 
-Use a component named `TheButton` from `@stdlib/ui` package for all buttons that trigger async operations and need to show loading state.
+Use `Button` and `Spinner` from `@deepagents/react-shadcn` for buttons that trigger async operations and need to show loading state.
 
 ### Local Database
 
@@ -136,7 +136,7 @@ Opinionated constraints for building better interfaces with agents.
 
 ### Shadcn UI
 
-All components already installed an exported from `packages/stdlib/shadcn/src/lib/ui/index.ts` and can be imported from `@stdlib/shadcn`.
+All components are exported from `packages/react/shadcn/src/index.ts` and imported from `@deepagents/react-shadcn`. The package uses Base UI as its primitive foundation.
 
 Always make sure to make extensive use of existing components before creating new ones.
 

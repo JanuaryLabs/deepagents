@@ -18,7 +18,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-} from '../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
 
 interface NavItem {
   href: string;
@@ -52,15 +52,13 @@ export default function Layout() {
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
-                    asChild
+                    render={<Link to={item.href} />}
                     size="sm"
                     tooltip={item.label}
                     isActive={location.pathname.startsWith(item.href)}
                   >
-                    <Link to={item.href}>
-                      <item.icon className="size-4" />
-                      <span>{item.label}</span>
-                    </Link>
+                    <item.icon className="size-4" />
+                    <span>{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

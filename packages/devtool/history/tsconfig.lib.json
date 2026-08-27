@@ -10,7 +10,7 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
-      "path": "../shadcn/tsconfig.lib.json"
+      "path": "../../react/shadcn/tsconfig.lib.json"
     }
   ]
 }

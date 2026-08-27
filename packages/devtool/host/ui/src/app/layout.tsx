@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import { Outlet } from 'react-router';
 
 import {
@@ -7,7 +7,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
   useSidebar,
-} from '@deepagents/devtool-shadcn';
+} from '@deepagents/react-shadcn';
 
 import { DevtoolSidebar } from './sidebar.tsx';
 
@@ -21,7 +21,11 @@ function getSidebarStateFromCookie() {
 export function AppLayout() {
   const [sidebarOpen] = useState(getSidebarStateFromCookie);
   return (
-    <SidebarProvider defaultOpen={sidebarOpen} className="h-screen min-h-0">
+    <SidebarProvider
+      defaultOpen={sidebarOpen}
+      className="h-screen min-h-0"
+      style={{ '--sidebar-width': '18rem' } as CSSProperties}
+    >
       <DevtoolSidebar />
       <SidebarInset className="min-h-0">
         <InsetTitlebar />

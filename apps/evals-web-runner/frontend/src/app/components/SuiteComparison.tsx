@@ -14,8 +14,6 @@ import {
 } from 'recharts';
 import { toast } from 'sonner';
 
-import { useData } from '../hooks/use-client.ts';
-import { formatDuration, formatTokens } from '../lib/format.ts';
 import {
   Button,
   Card,
@@ -34,8 +32,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../shadcn/index.ts';
-import type { ChartConfig } from '../shadcn/lib/ui/chart.tsx';
+} from '@deepagents/react-shadcn';
+import type { ChartConfig } from '@deepagents/react-shadcn';
+
+import { useData } from '../hooks/use-client.ts';
+import { formatDuration, formatTokens } from '../lib/format.ts';
 
 const RUN_COLORS = [
   'hsl(221, 83%, 53%)',

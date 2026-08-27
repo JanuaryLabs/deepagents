@@ -28,7 +28,7 @@
     }
   },
   "dependencies": {
-    "@deepagents/devtool-shadcn": "6.2.0",
+    "@deepagents/react-shadcn": "6.2.0",
     "lucide-react": "^1.33.0"
   },
   "peerDependencies": {

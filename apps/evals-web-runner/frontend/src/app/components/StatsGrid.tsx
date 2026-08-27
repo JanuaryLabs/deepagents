@@ -3,7 +3,8 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from '../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
 import { formatDuration, formatTokens } from '../lib/format.ts';
 
 interface RunSummary {

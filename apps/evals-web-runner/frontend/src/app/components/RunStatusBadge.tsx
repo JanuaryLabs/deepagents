@@ -1,4 +1,4 @@
-import { Badge } from '../shadcn/index.ts';
+import { Badge } from '@deepagents/react-shadcn';
 
 const variantMap: Record<
   string,

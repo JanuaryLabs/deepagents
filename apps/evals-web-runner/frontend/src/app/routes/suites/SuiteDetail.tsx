@@ -2,11 +2,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
-import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
-import { SuiteComparison } from '../../components/SuiteComparison.tsx';
-import { useAction, useData } from '../../hooks/use-client.ts';
-import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
-import { formatDuration, formatTokens } from '../../lib/format.ts';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -29,7 +24,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import { RunStatusBadge } from '../../components/RunStatusBadge.tsx';
+import { SuiteComparison } from '../../components/SuiteComparison.tsx';
+import { useAction, useData } from '../../hooks/use-client.ts';
+import { useSuiteEvents } from '../../hooks/use-suite-events.ts';
+import { formatDuration, formatTokens } from '../../lib/format.ts';
 
 export default function SuiteDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -132,8 +133,8 @@ export default function SuiteDetailPage() {
         <Breadcrumb className="mb-3">
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link to="/suites">Suites</Link>
+              <BreadcrumbLink render={<Link to="/suites" />}>
+                Suites
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -183,12 +184,16 @@ export default function SuiteDetailPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link
-                to={`/evals/new?suiteId=${suite.id}${runs[0] ? `&from=${runs[0].id}` : ''}`}
-              >
-                Add Run
-              </Link>
+            <Button
+              render={
+                <Link
+                  to={`/evals/new?suiteId=${suite.id}${runs[0] ? `&from=${runs[0].id}` : ''}`}
+                />
+              }
+              variant="outline"
+              size="sm"
+            >
+              Add Run
             </Button>
             <Button
               variant="ghost"

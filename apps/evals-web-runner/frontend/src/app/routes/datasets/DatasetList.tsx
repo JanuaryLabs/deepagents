@@ -1,20 +1,21 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 
-import { useAction, useData } from '../../hooks/use-client.ts';
-import { formatSize } from '../../lib/format.ts';
 import {
   Button,
   Input,
   Skeleton,
+  Spinner,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-  TheButton,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import { useAction, useData } from '../../hooks/use-client.ts';
+import { formatSize } from '../../lib/format.ts';
 
 export default function DatasetListPage() {
   const { data: datasets, isLoading } = useData('GET /datasets');
@@ -129,9 +130,10 @@ export default function DatasetListPage() {
               className="mt-1 w-28"
             />
           </div>
-          <TheButton type="submit" size="sm" loading={hfMutation.isPending}>
+          <Button type="submit" size="sm" disabled={hfMutation.isPending}>
+            {hfMutation.isPending && <Spinner />}
             Import
-          </TheButton>
+          </Button>
         </form>
       </div>
 

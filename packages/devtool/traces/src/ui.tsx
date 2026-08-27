@@ -8,8 +8,12 @@ import {
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
-import type { HistoryRecord } from '@deepagents/devtool-history';
-import { StatusBadge, cn, formatTimestamp } from '@deepagents/devtool-shadcn';
+import {
+  type HistoryRecord,
+  StatusBadge,
+  formatTimestamp,
+} from '@deepagents/devtool-history';
+import { cn } from '@deepagents/react-shadcn';
 
 import type {
   AgentTrace,

@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
   cn,
-} from '../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
 
 export type ModelSelectorProps = ComponentProps<typeof Dialog>;
 

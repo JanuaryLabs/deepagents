@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @plugin '@tailwindcss/typography';
+@source '../../../../packages/react/shadcn/src';
 
 /* custom variant for setting dark mode programmatically */
 @custom-variant dark (&:is(.dark, .dark *));

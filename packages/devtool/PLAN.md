@@ -8,21 +8,25 @@ canonical implementation and continuation record. Chat context is disposable;
 update this file whenever a decision, finding, completed phase, or next action
 changes.
 
-## Current state — 2026-08-23
+## Current state — 2026-08-27
 
 - `packages/devtool` is now a folder-only container. The existing published
   `@deepagents/devtool` package lives at `packages/devtool/host`; its package
   name and public API are unchanged. Workspace discovery, Nx project roots,
   TypeScript references, lock metadata, tests, lint, and packed contents all
   resolve from the nested package.
-- The existing implementation is physically split into publishable child
-  packages: `shadcn` owns shared display primitives and theme CSS, `history`
-  owns the History composition and record model, and `traces` owns telemetry
-  discovery, the file adapter, HTTP routes, trace models, and trace UI. `host`
-  owns only plugin/server composition and the browser application shell.
+- The existing implementation is physically split into publishable `history`
+  and `traces` child packages plus `host`. Shared display primitives come
+  from `@deepagents/react-shadcn`; History owns status formatting and the host
+  owns plugin/server composition, the browser shell, and its Tailwind theme.
 - The approved Traces slice is implemented in the working tree:
   conversation-scoped HTTP routes, persistent History navigation, newest-first
   trace selection, waterfall, and span inspector.
+- The host UI now uses React Router with `/history`,
+  `/history/:userId/:chatId/traces/:traceId?`, and `/scheduled` routes inside
+  the shared off-canvas sidebar shell. `/scheduled` is a placeholder
+  route only; schedule capability discovery and management routes are not
+  attached yet.
 - Storage discovery belongs to the devtool plugin. Agent declarations retain
   their existing telemetry integration; the plugin reads its public
   `traces.path` descriptor and advertises it from the devtool's own
@@ -49,21 +53,18 @@ changes.
   and waits for shutdown. It has no conversation creation, `enqueue()` call,
   terminal client, or automatic turn execution.
 - Backlog `#1194` remains done: no generated component scaffold returned. The
-  `shadcn` package contains only code the current devtool uses: `cn`,
-  `StatusBadge`, timestamp formatting, theme CSS, and the selected
-  Limerence-derived off-canvas sidebar primitives.
+  devtool imports Base UI-backed primitives and `cn` from
+  `@deepagents/react-shadcn`; History owns its status presentation and
+  timestamp formatting, while the host owns its Tailwind theme.
 - The plugin-owned correction is green for the 15 protocol tests, six file
   telemetry tests, all three devtool integration tests,
   context/experimental/devtool typechecks, devtool lint, package dry-run,
-  generated declaration audit, restart persistence, and discovery output. The
-  typechecks use Nx's supported
-  `--skip-sync` flag because the unrelated `demo/wasm-render` reference is
-  stale. Whole-context lint still has its existing `require-yield` error at
+  generated declaration audit, restart persistence, and discovery output.
+  Whole-context lint still has its existing `require-yield` error at
   `test/sqlite/stream-chunks.test.ts:282`.
-- A fresh normal Nx graph remains blocked by the docs Vite plugin failing to
-  resolve a TypeScript config for `apps/docs/react-router.config.ts`. Verification
-  temporarily excluded the docs app from Vite/Vitest inference, then restored
-  `nx.json` exactly. The independent defect is tracked as backlog `#1210`.
+- The Nx graph and sync are healthy after the docs TypeScript config replaced
+  its per-extension source list with project directories plus `*config.ts`.
+  Docs typecheck and the full prerendering build pass; backlog `#1210` is done.
 - The package-container and child-package relocation changes are unstaged.
   Mixed root lockfile, TypeScript project-reference, and experimental runtime
   files retain unrelated changes; do not overwrite, restore, stage, or
@@ -71,9 +72,10 @@ changes.
 - `.scratch/devtool/implementation-phases.md` is a historical establishment
   record, not the source of truth. Its capability checkpoint is stale because
   History already expanded `AgentPluginHost`.
-- The next product slice is the Scheduled Tasks management UI, owner-wide run
-  inbox, explicit cross-run memory, and local notifications. Its dependency
-  plan and proposed wireframes live in
+- The next product slice is the Scheduled Tasks capability: schedule discovery
+  and HTTP management routes, the management UI, owner-wide run inbox, explicit
+  cross-run memory, and local notifications. Its dependency plan and proposed
+  wireframes live in
   [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md). Production work is
   blocked on explicit wireframe and notification-scope approval.
 - Historical baseline: the full context suite passed with 1,396 tests. The
@@ -309,7 +311,7 @@ implementing, but the behavior is fixed:
 
 - [x] Focused `nx run @deepagents/context:test` telemetry proof.
 - [x] `nx run @deepagents/devtool:lint`
-- [x] `nx run @deepagents/devtool:typecheck --skip-sync`
+- [x] `nx run @deepagents/devtool:typecheck`
 - [x] `nx run @deepagents/devtool:test`
 - [ ] Browser smoke: summary → underlined Traces link → newest trace → older
       trace → span inspector → browser Back, with no console errors.
@@ -348,10 +350,9 @@ implementing, but the behavior is fixed:
 - [x] Extract the existing History composition as the first real child package.
 - [x] Extract the trace read model and trace UI as a child package without
       duplicating their contracts.
-- [x] Relocate the current shared display utilities and theme into a real
-      `shadcn` child package without adding speculative components.
-- [x] Inventory the proven Limerence components and import only the components
-      the devtool uses into the existing `shadcn` package.
+- [x] Consolidate shared display primitives in `@deepagents/react-shadcn`
+      without adding speculative devtool components.
+- [x] Keep devtool status formatting in History and theme values in the host.
 - [ ] Add the Scheduled Tasks and run-inbox UI only after their HTTP,
       notification, and cross-run-memory contracts are approved.
 
@@ -430,5 +431,4 @@ execution.
 
 **Exact next action:** obtain approval or corrections for the Scheduled Tasks
 wireframes and notification scope, then implement Phase 1 of the scheduled-task
-plan. Do not stage or commit without explicit authorization. Fixing the stale
-wasm reference remains outside this change.
+plan. Do not stage or commit without explicit authorization.

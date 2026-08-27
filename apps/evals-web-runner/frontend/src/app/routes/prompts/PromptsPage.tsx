@@ -1,6 +1,5 @@
 import { useState } from 'react';
 
-import { useAction, useData } from '../../hooks/use-client.ts';
 import {
   Badge,
   Button,
@@ -17,7 +16,9 @@ import {
   TableHeader,
   TableRow,
   Textarea,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import { useAction, useData } from '../../hooks/use-client.ts';
 
 interface PromptRow {
   id: string;

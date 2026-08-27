@@ -20,7 +20,7 @@
         "external": [
           "@deepagents/context",
           "@deepagents/devtool-history",
-          "@deepagents/devtool-shadcn",
+          "@deepagents/react-shadcn",
           "@deepagents/experimental",
           "hono",
           "lucide-react",

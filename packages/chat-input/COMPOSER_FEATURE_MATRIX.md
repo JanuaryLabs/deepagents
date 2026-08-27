@@ -1,0 +1,70 @@
+# Composer Feature Matrix
+
+This package now has one reusable composer implementation:
+`packages/chat-input/src/lib/Composer.tsx`.
+
+`Composer` is backed by Tiptap/ProseMirror, but the public package API is
+editor-agnostic. Treat it as a structured prompt composer, not a Markdown editor
+or a plain textarea.
+
+## Source Notes
+
+- Open-source Codex TUI references used during the original audit:
+  - `codex-rs/tui/src/chat_composer.rs`
+  - `codex-rs/tui/src/bottom_pane/textarea.rs`
+  - `codex-rs/tui/src/bottom_pane/command_popup.rs`
+  - `codex-rs/tui/src/bottom_pane/slash_input.rs`
+  - `codex-rs/tui/src/bottom_pane/attachment_state.rs`
+  - `codex-rs/tui/src/bottom_pane/input_queue.rs`
+  - `codex-rs/tui/src/bottom_pane/input_restore.rs`
+  - `codex-rs/tui/src/keymap.rs`
+- Current Codex desktop/web behavior added to the local contract:
+  - slash suggestions and structured slash marks work after whitespace/newlines
+  - mentions work anywhere in the editor
+  - selecting text and pasting a URL creates a labeled text link
+  - rich-link atoms and text-link marks are distinct structured items
+
+## Feature Status
+
+| Feature                      | Status                       | Local Contract                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Structured composer state    | Supported                    | The editor serializes to `ComposerState`; public submissions expose only canonical `prompt`, `persistedPrompt`, and semantic items. Editor-only marks never become a parallel transport protocol.                                                                                                                                                                                                                                                           |
+| Public compound API          | Supported                    | `Composer.Root`, `Content`, `Toolbar`, `Editor`, `RemoteImages`, `Error`, `Popup`, `Shortcuts`, `Footer`, `AttachLocalImage`, `AddRemoteImage`, `InsertPaste`, `InsertRichLink`, `Submit`, and `Reset`. Action triggers support Radix `Slot.Root` through `asChild`.                                                                                                                                                                                        |
+| Host initialization          | Supported                    | Hosts pass restorable prompt content through `initialDraft`. Controller-only fields such as cursor, inline error, history cursor, reverse search, and kill buffer stay internal.                                                                                                                                                                                                                                                                            |
+| Slash commands               | Supported                    | Slash suggestions complete into editable prompt text. Custom prompts use plain `/prompts:<id>` text and expand at submission; built-in command marks remain editor-only. Unknown or disabled leading commands preserve the draft and show inline errors.                                                                                                                                                                                                    |
+| Slash filtering and ordering | Supported                    | Commands and mention candidates support `visibility` (`always`, `hidden`, `before-interaction`, `after-interaction` — phase-gated by the host-supplied `hasInteracted` prop on `Composer.Root`); commands additionally support `aliases`, `searchTerms`, and `availability`. Visible enabled suggestions are ranked by exact/prefix matches and capped. Command resolution (`findSlashCommandByName`) ignores visibility, matching hidden-command behavior. |
+| Mentions                     | Supported                    | `/` discovers commands and all mention candidates in one flat list. `@` and `$` remain direct candidate filters. Accepted candidates submit structured items and unmatched mention text can remain literal prompt text.                                                                                                                                                                                                                                     |
+| Popup routing                | Supported                    | One popup model owns navigation for `/`, `@`, and `$`: arrows, Ctrl+P/Ctrl+N, Escape, Tab/Enter insertion, mouse row activation, and direct index acceptance through compound consumers. A second `/` remains ordinary text.                                                                                                                                                                                                                                |
+| Keyboard shortcuts           | Supported subset             | Covered user-facing shortcuts include Enter submit/queue, idle Tab no-submit, Shift+Enter and Alt/Ctrl newline paths, Ctrl/Meta+A replacement, Ctrl+E, Ctrl+K/U/W/Y, Alt+B/F, Ctrl/Alt+Left/Right, Ctrl+P/N history, and Ctrl+R/Ctrl+S reverse-history cycling.                                                                                                                                                                                             |
+| Atomic deletion              | Supported                    | Mention, local-image, paste, rich-link, and mixed atom/text-link selections prune the matching structured payloads. Slash marks are editable and stale slash metadata is pruned when visible text no longer matches.                                                                                                                                                                                                                                        |
+| Paste and drop               | Supported                    | Clipboard files, image paths, file URIs, DownloadURL values, large text pastes, and dropped files become structured image/file/paste payloads where applicable.                                                                                                                                                                                                                                                                                             |
+| Text links                   | Supported                    | Selected text plus URL paste keeps the selected label and emits a structured `link` item. Collapsed URL paste creates a URL-labeled text link. Non-URL paste over a link clears stale metadata.                                                                                                                                                                                                                                                             |
+| Rich links                   | Supported                    | Rich-link atoms submit `rich_link` items and can preserve optional host-provided unfurl metadata. Fetching/caching unfurl data remains host-owned.                                                                                                                                                                                                                                                                                                          |
+| Remote images                | Supported                    | Remote images can submit without prompt text, can be keyboard selected/removed, and affect local image renumbering.                                                                                                                                                                                                                                                                                                                                         |
+| Empty submission suppression | Supported                    | Empty text with no attachments does not submit; remote-image-only prompts can submit unless disabled/modal guarded.                                                                                                                                                                                                                                                                                                                                         |
+| Disabled/modal guard         | Supported                    | `disabled` blocks typing, paste, toolbar mutations, keyboard submit, action triggers, and remote-image-only submit while still rendering current content.                                                                                                                                                                                                                                                                                                   |
+| Prompt length cap            | Supported                    | `maxExpandedTextChars` rejects oversized expanded text before `onSubmit` and preserves the visible draft plus hidden paste payloads.                                                                                                                                                                                                                                                                                                                        |
+| Shortcut overlay             | Supported                    | `?` toggles shortcuts only while the draft is empty; non-empty `?` remains editable text. Terminal paste-burst state is not implemented.                                                                                                                                                                                                                                                                                                                    |
+| External edit                | Supported as helper          | `createDraftFromExternalEdit()` transforms host-returned text, clears paste payloads, preserves matching local image placeholders, renumbers images, and rebases surviving mention/link metadata. Launching an external editor is host-owned.                                                                                                                                                                                                               |
+| Queue handoff                | Supported as host-owned      | `onSubmit` emits the narrow transport separately from a `ComposerDraftSource`. The host stores immutable resolved execution alongside that editable persisted source and its image/paste sidecars.                                                                                                                                                                                                                                                          |
+| History                      | Supported as editor behavior | In-memory history reuses `ComposerDraftSource`; attachment-only and repeated equal-text submissions remain distinct. Recall reparses canonical prompt text and reapplies only the minimal image/paste sidecars.                                                                                                                                                                                                                                             |
+| Shell mode                   | Supported subset             | Leading `!` enters shell mode, submits shell args with Enter, suppresses slash metadata, and exits at a bare shell prompt with Escape/Backspace.                                                                                                                                                                                                                                                                                                            |
+| Terminal footer hyperlink    | Not supported                | This is a TUI status-line feature, not part of the browser composer body.                                                                                                                                                                                                                                                                                                                                                                                   |
+
+## Removed With Textarea Migration
+
+- Handrolled textarea source and tests.
+- Overlay-token rendering.
+- Textarea DOM selection contracts such as `selectionStart`/`selectionEnd`.
+- Cursor movement over serialized placeholder text.
+- Textarea range bookkeeping for link/mention metadata.
+- Side-by-side textarea/Tiptap playground comparison.
+
+## Non-Goals Unless Requested
+
+- Terminal paste-burst heuristics.
+- Vim-mode composer editing.
+- Terminal status-line hyperlinks.
+- Full queue ownership inside `@deepagents/chat-input`.
+- Durable history storage or hydration inside `@deepagents/chat-input`.
+- Rich-link unfurl fetching/caching inside `@deepagents/chat-input`.

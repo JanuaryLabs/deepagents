@@ -110,8 +110,8 @@
           "@deepagents/orchestrator",
           "@deepagents/context",
           "@deepagents/devtool-history",
-          "@deepagents/devtool-shadcn",
           "@deepagents/devtool-traces",
+          "@deepagents/react-shadcn",
           "@deepagents/evals",
           "@deepagents/experimental"
         ]

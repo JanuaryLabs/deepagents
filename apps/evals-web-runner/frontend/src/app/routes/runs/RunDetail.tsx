@@ -23,7 +23,7 @@ import {
   TableBody,
   TableCell,
   TableRow,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
 
 interface ScoreEntry {
   scorer_name: string;
@@ -156,14 +156,14 @@ export default function RunDetailPage() {
         <Breadcrumb className="mb-3">
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link to="/suites">Suites</Link>
+              <BreadcrumbLink render={<Link to="/suites" />}>
+                Suites
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link to={`/suites/${suite.id}`}>{suite.name}</Link>
+              <BreadcrumbLink render={<Link to={`/suites/${suite.id}`} />}>
+                {suite.name}
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -224,8 +224,12 @@ export default function RunDetailPage() {
             >
               {retryMutation.isPending ? 'Retrying\u2026' : 'Retry'}
             </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link to={`/evals/new?from=${run.id}`}>Add Run</Link>
+            <Button
+              render={<Link to={`/evals/new?from=${run.id}`} />}
+              variant="outline"
+              size="sm"
+            >
+              Add Run
             </Button>
             <Button
               variant="ghost"

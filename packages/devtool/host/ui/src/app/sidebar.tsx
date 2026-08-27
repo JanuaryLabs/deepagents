@@ -1,11 +1,6 @@
 import { CalendarClockIcon, HistoryIcon } from 'lucide-react';
 import { useCallback } from 'react';
-import {
-  NavLink,
-  generatePath,
-  useNavigate,
-  useParams,
-} from 'react-router';
+import { NavLink, generatePath, useNavigate, useParams } from 'react-router';
 
 import {
   History,
@@ -25,7 +20,7 @@ import {
   SidebarRail,
   SidebarTrigger,
   cn,
-} from '@deepagents/devtool-shadcn';
+} from '@deepagents/react-shadcn';
 
 import { selectConversation, useRuntimeData } from './runtime-data.ts';
 
@@ -55,19 +50,15 @@ function PrimaryNavigation() {
     <nav aria-label="Devtool views">
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton asChild>
-            <NavLink to="/history">
-              <HistoryIcon />
-              <span>History</span>
-            </NavLink>
+          <SidebarMenuButton render={<NavLink to="/history" />}>
+            <HistoryIcon />
+            <span>History</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
         <SidebarMenuItem>
-          <SidebarMenuButton asChild>
-            <NavLink to="/scheduled">
-              <CalendarClockIcon />
-              <span>Scheduled</span>
-            </NavLink>
+          <SidebarMenuButton render={<NavLink to="/scheduled" />}>
+            <CalendarClockIcon />
+            <span>Scheduled</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
@@ -119,13 +110,10 @@ function RunsNavigation() {
                   </History.ItemTrigger>
                   {discovery?.traces ? (
                     <NavLink
-                      to={generatePath(
-                        '/history/:userId/:chatId/traces',
-                        {
-                          chatId: entry.chatId,
-                          userId: entry.userId,
-                        },
-                      )}
+                      to={generatePath('/history/:userId/:chatId/traces', {
+                        chatId: entry.chatId,
+                        userId: entry.userId,
+                      })}
                       className={({ isActive }) =>
                         cn(
                           'text-muted-foreground hover:text-foreground ml-8 block px-2 pb-1.5 text-[0.6875rem]',

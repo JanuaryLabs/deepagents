@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { type ReactNode, createContext, use, useMemo } from 'react';
 
-import { cn } from '@deepagents/devtool-shadcn';
+import { cn } from '@deepagents/react-shadcn';
 
 export type HistoryRecord = {
   chatId: string;
@@ -140,6 +140,28 @@ export function HistoryStatusIcon({ status }: Pick<HistoryRecord, 'status'>) {
     case 'completed':
       return <MessageSquareIcon aria-label={status} className={className} />;
   }
+}
+
+export function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        'text-muted-foreground rounded-md border px-2 py-1 font-mono text-[0.6875rem] capitalize',
+        status === 'failed' && 'text-destructive border-destructive/30',
+      )}
+    >
+      {status}
+    </span>
+  );
+}
+
+const dateTime = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+export function formatTimestamp(value: number | string) {
+  return dateTime.format(new Date(value));
 }
 
 export const History = {

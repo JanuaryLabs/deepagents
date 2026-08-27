@@ -12,13 +12,19 @@
   "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"],
   "references": [
     {
+      "path": "../traces/tsconfig.lib.json"
+    },
+    {
+      "path": "../../react/shadcn/tsconfig.lib.json"
+    },
+    {
+      "path": "../history/tsconfig.lib.json"
+    },
+    {
       "path": "../../context/tsconfig.lib.json"
     },
     {
       "path": "../../experimental/tsconfig.lib.json"
-    },
-    {
-      "path": "../traces/tsconfig.lib.json"
     }
   ]
 }

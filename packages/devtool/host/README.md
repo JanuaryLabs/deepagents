@@ -56,6 +56,8 @@ The UI discovers History and the optional trace source from the devtool's
 is discoverable, the underlined **Traces** link beneath each conversation opens
 its model steps, tool calls, timings, usage, inputs, outputs, and errors. With
 no unambiguous supported source, `/info` omits `traces` and the links are absent.
+The **Scheduled** view is present but remains a placeholder until the host
+attaches a schedules bridge.
 
 The built-in telemetry integration exposes its public `traces.path` descriptor,
 which the devtool plugin projects unchanged. It does not move, replace, or

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
-import { useData } from '../../hooks/use-client.ts';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -22,7 +21,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../../shadcn/index.ts';
+} from '@deepagents/react-shadcn';
+
+import { useData } from '../../hooks/use-client.ts';
 
 const PAGE_SIZE = 50;
 
@@ -86,8 +87,8 @@ export default function DatasetDetailPage() {
         <Breadcrumb className="mb-3">
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link to="/datasets">Datasets</Link>
+              <BreadcrumbLink render={<Link to="/datasets" />}>
+                Datasets
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
@@ -108,6 +109,7 @@ export default function DatasetDetailPage() {
             <Select
               value={decodedName}
               onValueChange={(v) => {
+                if (v === null) return;
                 setOffset(0);
                 navigate(`/datasets/${encodeURIComponent(v)}`);
               }}

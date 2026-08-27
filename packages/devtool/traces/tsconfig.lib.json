@@ -20,7 +20,7 @@
       "path": "../history/tsconfig.lib.json"
     },
     {
-      "path": "../shadcn/tsconfig.lib.json"
+      "path": "../../react/shadcn/tsconfig.lib.json"
     }
   ]
 }

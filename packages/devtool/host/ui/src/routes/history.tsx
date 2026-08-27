@@ -1,7 +1,10 @@
 import { useParams } from 'react-router';
 
-import type { HistoryRecord } from '@deepagents/devtool-history';
-import { StatusBadge, formatTimestamp } from '@deepagents/devtool-shadcn';
+import {
+  type HistoryRecord,
+  StatusBadge,
+  formatTimestamp,
+} from '@deepagents/devtool-history';
 
 import {
   selectConversation,
