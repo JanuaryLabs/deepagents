@@ -46,6 +46,12 @@
       "path": "./packages/react/shadcn"
     },
     {
+      "path": "./packages/react/formatters"
+    },
+    {
+      "path": "./packages/react/genai"
+    },
+    {
       "path": "./packages/devtool/history"
     },
     {
@@ -67,7 +73,7 @@
       "path": "./packages/chat-input"
     },
     {
-      "path": "./packages/elements"
+      "path": "./packages/react/elements"
     }
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "name": "@deepagents/react-elements",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/react/elements/src",
+  "projectType": "library",
+  "tags": ["scope:public"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "external": ["react", "zod"]
+      }
+    },
+    "test": {
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/test-results/react-elements.xml"],
+      "options": {
+        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/react-elements.xml",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

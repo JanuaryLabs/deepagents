@@ -1,0 +1,25 @@
+{
+  "name": "@deepagents/react-formatters",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/react/formatters/src",
+  "projectType": "library",
+  "tags": ["scope:public"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "external": ["date-fns"]
+      }
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/test-results/react-formatters.xml"],
+      "options": {
+        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/react-formatters.xml",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}
