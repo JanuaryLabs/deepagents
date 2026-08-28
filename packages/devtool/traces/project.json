@@ -27,6 +27,15 @@
           "react"
         ]
       }
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": ["default", "^production"],
+      "outputs": ["{workspaceRoot}/test-results/devtool-traces.xml"],
+      "options": {
+        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/devtool-traces.xml --test-force-exit",
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }

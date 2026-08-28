@@ -1,85 +1,89 @@
 # `@deepagents/devtool`
 
-Development-only Zukhruf runtime plugin. Its browser UI is bundled into the
-package and served from a loopback-only HTTP listener; consumers do not import
-React or CSS.
+Development-only Zukhruf DevTool UI. `devtool()` returns a mountable Hono app
+containing only the bundled browser assets and their SPA fallback; consumers do
+not import React or CSS, and the DevTool owns no listener, port, runtime
+object, runtime URL, credentials, or proxy.
 
 ```sh
-npm install --save-dev @deepagents/devtool
+npm install --save-dev @deepagents/devtool @deepagents/devtool-traces
 ```
 
-Keep durable telemetry and the devtool definition on the agent declaration:
+The host owns one Hono server. It mounts the authenticated Zukhruf protocol at
+`/zukhruf/v1` and the DevTool UI at `/devtool` on the same origin:
 
 ```ts
-import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
 
-const developerTool =
-  process.env.NODE_ENV === 'development'
-    ? (await import('@deepagents/devtool')).devtool({
-        runtime: {
-          url: process.env.ZUKHRUF_RUNTIME_URL!,
-          headers: () => ({
-            authorization: `Bearer ${process.env.ZUKHRUF_RUNTIME_TOKEN}`,
-          }),
-        },
-      })
-    : undefined;
+import { DEVTOOL_ROUTE_PREFIX, devtool } from '@deepagents/devtool';
+import { fileTelemetry } from '@deepagents/devtool-traces';
+import {
+  AgentRuntime,
+  ZUKHRUF_ROUTE_PREFIX,
+  defineAgent,
+  zukhruf,
+} from '@deepagents/experimental/zukhruf';
 
-const root = defineAgent({
-  // ...
-  telemetry: {
-    integrations: createFileTelemetry({ path: './telemetry.jsonl' }),
-  },
-  plugins: developerTool ? [developerTool] : [],
+const runtime = new AgentRuntime(
+  defineAgent({
+    ...declaration,
+    plugins: [
+      ...declaration.plugins,
+      fileTelemetry({ path: './telemetry.jsonl' }),
+    ],
+  }),
+  runtimeOptions,
+);
+await using worker = await runtime.work();
+
+const app = new Hono<{ Variables: { userId: string } }>();
+app.use(`${ZUKHRUF_ROUTE_PREFIX}/*`, async (context, next) => {
+  context.set('userId', 'demo');
+  await next();
 });
+app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
+app.route(DEVTOOL_ROUTE_PREFIX, devtool());
 
-const runtime = new AgentRuntime(root, {
-  ...runtimeOptions,
+await using server = serve({
+  fetch: app.fetch,
+  hostname: '127.0.0.1',
+  port: 4317,
 });
-
-await using work = await runtime.work();
-if (developerTool) console.info(runtime.plugin(developerTool).url?.href);
+console.info('http://127.0.0.1:4317/devtool');
 ```
 
-The devtool listener is loopback-only. Its `GET /zukhruf/v1/info` response
-advertises the existing telemetry source:
+The browser discovers everything through same-origin `GET /zukhruf/v1/info`:
 
 ```json
 {
-  "traces": { "path": "file:///absolute/path/to/telemetry.jsonl" }
+  "capabilities": {
+    "history": { "href": "/zukhruf/v1/history" },
+    "chat": { "href": "/zukhruf/v1/session" },
+    "traces": { "href": "/zukhruf/v1/traces" }
+  }
 }
 ```
 
-The URI scheme selects the devtool adapter. The `file:` adapter runs in the
-Node devtool process, projects that JSONL in place, and creates no trace store.
-The browser never fetches a `file:` URL.
+`history` and `chat` are always advertised by `zukhruf(runtime)`. **New Chat**,
+conversation loading, streaming, and cancellation use the session protocol on
+the current origin, so the host's own authentication middleware guards every
+runtime request. Runtime health comes from `GET /zukhruf/v1/health`.
 
-The default address is `http://127.0.0.1:4317/`. Pass `{ port: 0 }` to select
-an available port. The URL becomes available after `runtime.work()` resolves
-and returns to `undefined` when that work handle is disposed.
+`traces` appears only when the runtime installs the `fileTelemetry()` plugin
+from `@deepagents/devtool-traces`. The plugin contributes the AI SDK file
+telemetry integration, adds the runtime's conversation, stream, and agent
+identifiers to each turn's start event, projects the JSONL in place inside the
+runtime process, and serves
+`GET /zukhruf/v1/traces/:chatId` and `GET /zukhruf/v1/traces/:chatId/:traceId`
+behind the Zukhruf authentication boundary. Ownership comes from the
+authenticated `userId`; the file URI is never exposed and the browser never
+sends a user ID. Without the plugin, `/info` omits `traces` and the UI hides
+every **Traces** link. Recording controls are honored and disabled payloads are
+labelled as not recorded.
 
-Set `runtime.url` to the authenticated HTTP host that mounts
-`zukhruf(runtime)` under `/zukhruf/v1`. The DevTool exposes that session API
-through its own loopback origin, so **New Chat**, conversation loading,
-streaming, and cancellation stay HTTP-based without putting runtime
-credentials in the browser. Static headers or an async `headers` callback can
-provide server-side authentication.
-
-The UI discovers History and the optional trace source from the devtool's
-`GET /zukhruf/v1/info`. History stays in the left sidebar. When one file source
-is discoverable, the underlined **Traces** link beneath each conversation opens
-its model steps, tool calls, timings, usage, inputs, outputs, and errors. With
-no unambiguous supported source, `/info` omits `traces` and the links are absent.
-The **Scheduled** view is present but remains a placeholder until the host
-attaches a schedules bridge.
-
-The built-in telemetry integration exposes its public `traces.path` descriptor,
-which the devtool plugin projects unchanged. It does not move, replace, or
-mutate the declaration's telemetry configuration. Retention, rotation, and
-deletion remain properties of that existing file.
-
-For each turn, the devtool plugin adds the runtime's conversation, stream, and
-agent identifiers to the discovered integration's start event. This correlation
-metadata is not model input and does not require changing the agent declaration.
-The devtool honors recording controls and labels disabled payloads as not
-recorded.
+The UI is built for the `/devtool` base: `/devtool` and `/devtool/` load the
+shell, assets load beneath `/devtool/assets/`, deep links such as
+`/devtool/history/:userId/:chatId/traces/:traceId` receive the shell for
+browser history, and `/devtool` redirects to `/devtool/history`. The
+**Scheduled** view is present but remains a placeholder.

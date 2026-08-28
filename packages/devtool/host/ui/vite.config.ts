@@ -4,6 +4,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   root: import.meta.dirname,
+  base: '/devtool/',
   plugins: [react(), tailwindcss()],
   build: {
     outDir: './dist',

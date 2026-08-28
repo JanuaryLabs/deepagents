@@ -1,9 +1,19 @@
+import type { Telemetry } from 'ai';
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 
+import {
+  type FileTelemetryOptions,
+  createFileTelemetry,
+} from '@deepagents/context/telemetry/file';
 import type {
-  AgentDeclaration,
+  AgentPluginDefinition,
   AgentPluginHost,
+  AgentPluginInstance,
+  AgentPluginProtocol,
   AgentPluginToolContext,
+  AgentProtocolEnv,
+  ConversationId,
 } from '@deepagents/experimental/zukhruf';
 
 import {
@@ -13,129 +23,104 @@ import {
 
 export * from './file-trace-adapter.ts';
 
-export interface TraceSource {
-  readonly path: string;
-  readonly adapter: FileTraceAdapter;
-}
+const TRACES_PATH = '/traces';
+const NO_STORE = { 'cache-control': 'no-store' } as const;
 
-type TelemetryIntegration = Exclude<
-  NonNullable<NonNullable<AgentDeclaration['telemetry']>['integrations']>,
-  readonly unknown[]
->;
-
-const TRACE_LIST_ROUTE = '/api/history/:chatId/traces' as const;
-const TRACE_ROUTE = '/api/history/:chatId/traces/:traceId' as const;
-
-export function discoverTraceSource(
-  root: AgentDeclaration,
-): TraceSource | undefined {
-  const paths = new Set<string>();
-  const collect = (declaration: AgentDeclaration): void => {
-    for (const path of tracePaths(declaration)) paths.add(path);
-    for (const subagent of declaration.subagents ?? []) collect(subagent);
-  };
-  collect(root);
-  if (paths.size !== 1) return undefined;
-
-  const [path] = paths;
-  const source = new URL(path);
-  if (source.protocol !== 'file:') return undefined;
-  return { path, adapter: new FileTraceAdapter(source) };
-}
-
-export function configureTraceTelemetry(
-  source: TraceSource | undefined,
-  context: AgentPluginToolContext,
-  telemetry: AgentDeclaration['telemetry'],
-): AgentDeclaration['telemetry'] {
-  const path = source?.path;
-  const integrations = telemetry?.integrations;
-  if (path === undefined || integrations === undefined) return telemetry;
-
-  const decorate = (integration: TelemetryIntegration): TelemetryIntegration =>
-    tracePath(integration) === path
-      ? {
-          ...integration,
-          onStart: (event) =>
-            integration.onStart?.call(integration, {
-              ...event,
-              zukhruf: context,
-            }),
-        }
-      : integration;
+/**
+ * File telemetry integration with authenticated, conversation-scoped trace
+ * reads through `zukhruf(runtime)` as the `traces` capability.
+ */
+export function fileTelemetry(
+  options: FileTelemetryOptions,
+): AgentPluginDefinition {
+  const integration = createFileTelemetry(options);
   return {
-    ...telemetry,
-    integrations: Array.isArray(integrations)
-      ? integrations.map(decorate)
-      : decorate(integrations),
+    name: `file-telemetry:${integration.traces.path}`,
+    create: () => new FileTelemetryPlugin(integration),
   };
 }
 
-export function mountTraceRoutes(
-  app: Hono,
-  source: TraceSource | undefined,
-  host: AgentPluginHost,
-): void {
-  if (!source) return;
-  app.get(TRACE_LIST_ROUTE, async (context) => {
-    const conversation = await requestedConversation(
-      host,
-      context.req.param('chatId'),
-      context.req.query('userId'),
-    );
-    if (!conversation) return context.json({ error: 'Not found' }, 404);
+class FileTelemetryPlugin implements AgentPluginInstance {
+  readonly #adapter: FileTraceAdapter;
+  readonly #integration: ReturnType<typeof createFileTelemetry>;
+
+  constructor(integration: ReturnType<typeof createFileTelemetry>) {
+    this.#adapter = new FileTraceAdapter(new URL(integration.traces.path));
+    this.#integration = integration;
+  }
+
+  telemetry(context: AgentPluginToolContext): Telemetry {
+    const integration = this.#integration;
+    return {
+      ...integration,
+      onStart: (event) =>
+        integration.onStart?.call(integration, { ...event, zukhruf: context }),
+    };
+  }
+
+  get protocol(): AgentPluginProtocol {
+    return {
+      discovery: { traces: { path: TRACES_PATH } },
+      routes: (host) => traceRoutes(this.#adapter, host),
+    };
+  }
+}
+
+function traceRoutes(adapter: FileTraceAdapter, host: AgentPluginHost) {
+  const app = new Hono<AgentProtocolEnv>();
+  app.get(`${TRACES_PATH}/:chatId`, async (context) => {
+    const conversation = await requireConversation(host, {
+      chatId: context.req.param('chatId'),
+      userId: context.get('userId'),
+    });
     return context.json(
       await Promise.all(
-        (await source.adapter.list(conversation)).map((trace) =>
+        (await adapter.list(conversation)).map((trace) =>
           withDurableStatus(host, trace),
         ),
       ),
+      200,
+      NO_STORE,
     );
   });
-  app.get(TRACE_ROUTE, async (context) => {
-    const conversation = await requestedConversation(
-      host,
-      context.req.param('chatId'),
-      context.req.query('userId'),
-    );
-    if (!conversation) return context.json({ error: 'Not found' }, 404);
-    const trace = await source.adapter.get(
-      conversation,
-      context.req.param('traceId'),
-    );
-    if (!trace) return context.json({ error: 'Not found' }, 404);
-    return context.json(await withDurableStatus(host, trace));
+  app.get(`${TRACES_PATH}/:chatId/:traceId`, async (context) => {
+    const conversation = await requireConversation(host, {
+      chatId: context.req.param('chatId'),
+      userId: context.get('userId'),
+    });
+    const traceId = context.req.param('traceId');
+    const trace = await adapter.get(conversation, traceId);
+    if (!trace) {
+      throw new HTTPException(404, {
+        message: 'Trace not found',
+        cause: {
+          code: 'traces/trace-not-found',
+          detail: `Trace ${traceId} does not exist in conversation ${conversation.chatId}`,
+        },
+      });
+    }
+    return context.json(await withDurableStatus(host, trace), 200, NO_STORE);
   });
+  return app;
 }
 
-async function requestedConversation(
+async function requireConversation(
   host: AgentPluginHost,
-  chatId: string,
-  userId: string | undefined,
-) {
-  if (userId === undefined) return undefined;
-  return (await host.listHistory()).find(
-    (item) => item.chatId === chatId && item.userId === userId,
+  conversation: ConversationId,
+): Promise<ConversationId> {
+  const owned = (await host.listHistory()).some(
+    (item) =>
+      item.chatId === conversation.chatId &&
+      item.userId === conversation.userId,
   );
-}
-
-function tracePaths(declaration: AgentDeclaration): string[] {
-  const integrations = declaration.telemetry?.integrations;
-  return (
-    integrations === undefined
-      ? []
-      : Array.isArray(integrations)
-        ? integrations
-        : [integrations]
-  ).flatMap((integration) => {
-    const path = tracePath(integration);
-    return path === undefined ? [] : [path];
+  if (owned) return conversation;
+  throw new HTTPException(404, {
+    message: 'Conversation not found',
+    cause: {
+      code: 'traces/conversation-not-found',
+      detail: `Conversation ${conversation.chatId} does not exist`,
+    },
   });
-}
-
-function tracePath(integration: TelemetryIntegration): string | undefined {
-  const path = (integration as { traces?: { path?: unknown } }).traces?.path;
-  return typeof path === 'string' && URL.canParse(path) ? path : undefined;
 }
 
 async function withDurableStatus<Trace extends AgentTraceSummary>(

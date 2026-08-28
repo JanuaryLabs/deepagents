@@ -8,6 +8,7 @@ import z from 'zod';
 import type { ConversationId } from '../mailbox/types.ts';
 import type {
   AgentObservation,
+  AgentProtocolEnv,
   AgentRuntime,
 } from '../runtime/agent-runtime.ts';
 import { validate } from './validator.ts';
@@ -64,7 +65,12 @@ const limitTurnBody = bodyLimit({
 
 interface ZukhrufRuntime extends Pick<
   AgentRuntime,
-  'createSession' | 'enqueue' | 'info' | 'listHistory' | 'sessionExists'
+  | 'createSession'
+  | 'enqueue'
+  | 'info'
+  | 'listHistory'
+  | 'protocol'
+  | 'sessionExists'
 > {
   observe(conversation: ConversationId): Pick<
     AgentObservation,
@@ -74,20 +80,28 @@ interface ZukhrufRuntime extends Pick<
   };
 }
 
-export function zukhrufDiscovery(runtime: Pick<ZukhrufRuntime, 'info'>) {
-  return {
-    ...runtime.info,
-    capabilities: {
-      history: { href: ZUKHRUF_HISTORY_ROUTE_PATH },
-    },
+export function zukhrufDiscovery(
+  runtime: Pick<ZukhrufRuntime, 'info' | 'protocol'>,
+) {
+  const capabilities: Record<string, { href: string }> = {
+    history: { href: ZUKHRUF_HISTORY_ROUTE_PATH },
+    chat: { href: ZUKHRUF_CREATE_SESSION_ROUTE_PATH },
   };
+  for (const [name, { path }] of Object.entries(runtime.protocol.discovery)) {
+    if (Object.hasOwn(capabilities, name)) {
+      throw new Error(
+        `zukhruf: plugin protocol capability "${name}" conflicts with the built-in protocol`,
+      );
+    }
+    capabilities[name] = { href: `${ZUKHRUF_ROUTE_PREFIX}${path}` };
+  }
+  return { ...runtime.info, capabilities };
 }
-
-type ZukhrufEnv = { Variables: { userId: string } };
 
 /** Mount with `app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime))`. */
 export function zukhruf(runtime: ZukhrufRuntime) {
-  const app = new Hono<ZukhrufEnv>();
+  const discovery = zukhrufDiscovery(runtime);
+  const app = new Hono<AgentProtocolEnv>();
   app.onError((error, context) => {
     if (error instanceof HTTPException) {
       return context.json(
@@ -121,9 +135,7 @@ export function zukhruf(runtime: ZukhrufRuntime) {
     await next();
   });
 
-  app.get(INFO_ROUTE_PATH, (context) =>
-    context.json(zukhrufDiscovery(runtime), 200, NO_STORE),
-  );
+  app.get(INFO_ROUTE_PATH, (context) => context.json(discovery, 200, NO_STORE));
   app.all(INFO_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
   app.get(HISTORY_ROUTE_PATH, async (context) =>
@@ -352,10 +364,12 @@ export function zukhruf(runtime: ZukhrufRuntime) {
     methodNotAllowed(context, 'GET'),
   );
 
+  for (const routes of runtime.protocol.routes) app.route('/', routes);
+
   return app;
 }
 
-function accepted<Env extends ZukhrufEnv>(
+function accepted<Env extends AgentProtocolEnv>(
   context: Context<Env>,
   sessionId: string,
   turnId: string,
@@ -381,7 +395,10 @@ async function requireSession(
   });
 }
 
-function methodNotAllowed(context: Context<ZukhrufEnv>, allow: string): never {
+function methodNotAllowed(
+  context: Context<AgentProtocolEnv>,
+  allow: string,
+): never {
   context.header('Allow', allow);
   throw new HTTPException(405, {
     message: 'Method not allowed',

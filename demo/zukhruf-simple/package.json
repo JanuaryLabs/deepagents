@@ -5,14 +5,22 @@
   "type": "module",
   "description": "Smallest complete Zukhruf agent declaration.",
   "scripts": {
+    "devtool": "node --env-file=../../.env run.ts --devtool",
+    "predevtool": "cd ../.. && nx run @deepagents/devtool:build",
     "start": "node run.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.41",
     "@deepagents/context": "6.2.0",
+    "@deepagents/devtool-traces": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@electric-sql/pglite": "^0.5.4",
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1"
+  },
+  "devDependencies": {
+    "@deepagents/devtool": "6.2.0",
+    "@hono/node-server": "^2.0.10",
+    "hono": "^4.12.33"
   }
 }

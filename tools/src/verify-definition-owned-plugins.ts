@@ -20,6 +20,9 @@ try {
     pack('packages/agent'),
     pack('packages/context'),
     pack('packages/experimental'),
+    pack('packages/react/shadcn'),
+    pack('packages/devtool/history'),
+    pack('packages/devtool/traces'),
     pack('packages/devtool/host'),
   ];
   writeFileSync(
@@ -86,6 +89,7 @@ function pack(directory: string): string {
 function createConsumerSource(): string {
   return String.raw`
 import { devtool } from '@deepagents/devtool';
+import { fileTelemetry } from '@deepagents/devtool-traces';
 import {
   type AgentPluginDefinition,
   AgentPluginCapability,
@@ -130,13 +134,13 @@ const scheduled = schedules({
   queue: 'consumer-schedules',
   reconciliationIntervalMs: 1,
 });
-const developerTool = devtool({ port: 0 });
+const traceDefinition = fileTelemetry({ path: './telemetry.jsonl' });
 const root = defineAgent({
   name: 'consumer',
   model: { provider: 'consumer', modelId: 'consumer' } as never,
   sandbox: async () => ({}) as never,
   instructions: [],
-  plugins: [custom, files, conversation, scheduled, developerTool],
+  plugins: [custom, files, conversation, scheduled, traceDefinition],
 });
 const scheduler = new ConsumerWakeScheduler();
 const boss = { getDb: () => ({}) } as never;
@@ -160,9 +164,10 @@ const second = new AgentRuntime(root, options('second'));
 if (first.plugin(custom) === second.plugin(custom)) throw new Error('shared custom instance');
 if (first.plugin(custom).value !== 'first') throw new Error('wrong first binding');
 if (second.plugin(custom).value !== 'second') throw new Error('wrong second binding');
-if (first.plugin(developerTool) === second.plugin(developerTool)) {
-  throw new Error('shared devtool instance');
+if (first.plugin(traceDefinition) === second.plugin(traceDefinition)) {
+  throw new Error('shared file telemetry instance');
 }
+if (typeof devtool().fetch !== 'function') throw new Error('devtool is not mountable');
 if (first.plugin(files) === second.plugin(files)) throw new Error('shared file-agents instance');
 if (first.plugin(conversation) === second.plugin(conversation)) {
   throw new Error('shared conversation-scheduling instance');

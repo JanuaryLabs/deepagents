@@ -1,7 +1,7 @@
 import { openai } from '@ai-sdk/openai';
 import { join } from 'node:path';
 
-import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+import { fileTelemetry } from '@deepagents/devtool-traces';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 
 import instructions from './instructions.ts';
@@ -12,10 +12,10 @@ export default defineAgent({
   model: openai('gpt-5.6-luna'),
   sandbox,
   instructions,
-  telemetry: {
-    integrations: createFileTelemetry({
+  plugins: [
+    fileTelemetry({
       append: false,
       path: join(import.meta.dirname, 'telemetry.jsonl'),
     }),
-  },
+  ],
 });

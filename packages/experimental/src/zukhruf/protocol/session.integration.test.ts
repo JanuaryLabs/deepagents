@@ -40,6 +40,7 @@ const emptyEngine = {
 function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
   const runtime: ProtocolRuntime = {
     info: runtimeInfo,
+    protocol: { discovery: {}, routes: [] },
     async createSession() {},
     async enqueue() {
       return {

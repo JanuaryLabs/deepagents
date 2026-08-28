@@ -155,7 +155,7 @@ function RunsNavigation() {
                       {entry.title ?? entry.chatId}
                     </span>
                   </History.ItemTrigger>
-                  {discovery?.traces ? (
+                  {discovery?.capabilities.traces ? (
                     <NavLink
                       to={generatePath('/history/:userId/:chatId/traces', {
                         chatId: entry.chatId,

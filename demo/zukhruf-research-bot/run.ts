@@ -14,7 +14,8 @@ import {
   SqliteMailboxStore,
 } from '@deepagents/experimental/zukhruf';
 
-import declaration, { developerTool } from './agent.ts';
+import declaration from './agent.ts';
+import { serveDevtool } from './server.ts';
 
 await using resources = new AsyncDisposableStack();
 
@@ -56,9 +57,9 @@ const runtime = new AgentRuntime(declaration, {
 
 resources.use(await runtime.work({ concurrency: 4 }));
 
-console.log(
-  styleText('dim', `devtool: ${runtime.plugin(developerTool).url?.href}`),
-);
+const { server, url } = serveDevtool(runtime);
+resources.use(server);
+console.log(styleText('dim', `devtool: ${(await url).href}`));
 console.log(
   styleText(
     'dim',

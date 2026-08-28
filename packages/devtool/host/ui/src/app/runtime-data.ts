@@ -3,11 +3,14 @@ import { validateUIMessages } from 'ai';
 
 import type { HistoryRecord } from '@deepagents/devtool-history';
 
+const ZUKHRUF_INFO_URL = '/zukhruf/v1/info';
+const ZUKHRUF_HEALTH_URL = '/zukhruf/v1/health';
+
 type Discovery = {
-  traces?: { path: string };
   capabilities: {
-    chat?: { href: string };
+    chat: { href: string };
     history: { href: string };
+    traces?: { href: string };
   };
 };
 
@@ -24,7 +27,7 @@ export function useRuntimeData() {
   const discovery = useQuery({
     queryKey: ['runtime', 'discovery'],
     queryFn: async ({ signal }) => {
-      const response = await fetch('/zukhruf/v1/info', { signal });
+      const response = await fetch(ZUKHRUF_INFO_URL, { signal });
       if (!response.ok) {
         throw new Error(`Discovery request failed: ${response.status}`);
       }
@@ -36,10 +39,7 @@ export function useRuntimeData() {
     queryFn: discovery.data
       ? async ({ signal }) => {
           const response = await fetch(
-            new URL(
-              discovery.data.capabilities.history.href,
-              window.location.href,
-            ),
+            discovery.data.capabilities.history.href,
             { signal },
           );
           if (!response.ok) {
@@ -90,7 +90,8 @@ export function useSessionMessages(
 export function useHealth() {
   return useQuery({
     queryKey: ['runtime', 'health'],
-    queryFn: async ({ signal }) => (await fetch('/health', { signal })).ok,
+    queryFn: async ({ signal }) =>
+      (await fetch(ZUKHRUF_HEALTH_URL, { signal })).ok,
   });
 }
 

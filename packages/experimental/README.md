@@ -53,7 +53,16 @@ when creating the sandbox.
 authenticated hosts: create or continue sessions with idempotent `POST` calls,
 receive the durable `turnId`, check or cancel a specific turn, cancel the
 active session turn, stream durable UI-message output, and read runtime info
-plus health checks.
+plus health checks. `GET /info` advertises `capabilities.history.href` and
+`capabilities.chat.href`. Installed runtime plugins may contribute an
+`AgentPluginProtocol` (`discovery` entries plus authenticated `routes(host)`);
+`AgentRuntime` gathers them into `runtime.protocol`, rejects duplicate
+capability names, and `zukhruf(runtime)` mounts the routes beneath `/zukhruf/v1`
+and merges the entries into `capabilities`. The host only calls
+`zukhruf(runtime)`; it never enumerates plugin capabilities.
+Plugins may also contribute one AI SDK telemetry integration per turn through
+`telemetry(context)`; the runtime appends every contribution to the agent's
+declaration-local telemetry integrations.
 
 The `schedules` runtime plugin owns durable task and run persistence,
 recurrence, workers, management, and execution into either new or existing

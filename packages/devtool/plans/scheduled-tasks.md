@@ -28,9 +28,12 @@ remain separate phases with separate proofs.
   materializes a fresh `ScheduleControl`, available through
   `runtime.plugin(definition)`. It supports fresh-root and
   existing-conversation targets.
-- `@deepagents/devtool` is an embedded runtime plugin with a loopback-only Hono
-  server, capability discovery, React Router routes, a persistent History
-  sidebar, a placeholder Scheduled route, and three-second polling.
+- `@deepagents/devtool` is a mountable static UI app served by the host's one
+  Hono server at `/devtool`. It discovers capabilities from the same-origin
+  `GET /zukhruf/v1/info`; runtime plugins contribute discovery entries and
+  authenticated routes to `zukhruf(runtime)` automatically. It has React Router
+  routes under the `/devtool` basename, a persistent History sidebar, a
+  placeholder Scheduled route, and three-second polling.
 - The current schedule adapter leaves successful run `title` and `summary`
   empty, exposes runs only through one task at a time, and has no cross-run
   memory.
@@ -52,8 +55,9 @@ Read these before implementing a phase:
   — AgentRuntime schedule adapter and public control surface;
 - [`../host/src/index.ts`](../host/src/index.ts),
   [`../host/ui/src/main.tsx`](../host/ui/src/main.tsx), and the
-  [`../traces/src`](../traces/src) package — current loopback host, discovery,
-  trace routes, polling, navigation, and native UI;
+  [`../traces/src`](../traces/src) package — current mountable UI app, the
+  browser's same-origin discovery, the `fileTelemetry()` plugin's routes,
+  polling, navigation, and native UI;
 - [`ui-components.md`](ui-components.md) — current repository UI topology and
   the approved Limerence component-reuse seam;
 - [`../../../TEST_PRIMITIVES.md`](../../../TEST_PRIMITIVES.md) — repository test

@@ -741,6 +741,33 @@ default loop prompts, and loop-specific UI remain future host behavior.
 
 The ordered implementation work and crash-boundary proofs live in `SCHEDULING_PLAN.md`.
 
+## Plugin protocol contributions _(Built)_
+
+`zukhruf(runtime)` is the only HTTP surface a host mounts. Built-in discovery from `GET /info`
+always advertises `capabilities.history.href` and `capabilities.chat.href`. A root runtime plugin may
+additionally contribute an `AgentPluginProtocol` from its instance:
+
+```ts
+interface AgentPluginProtocol {
+  discovery: Record<string, { path: string }>; // merged into /info capabilities
+  routes(host: AgentPluginHost): Hono<{ Variables: { userId: string } }>;
+}
+```
+
+- `AgentRuntime` reads `instance.protocol` once, after `configure(root)`, gathers the entries into
+  `runtime.protocol`, and rejects duplicate capability names or relative paths during construction.
+- Each plugin may contribute one AI SDK telemetry integration for a turn through
+  `telemetry(context)`. `AgentRuntime` appends every contribution to the declaration-local
+  integrations and lets the AI SDK dispatch the lifecycle events.
+- `zukhruf(runtime)` prefixes each `path` with `/zukhruf/v1` into `href`, rejects collisions with the
+  built-in names at mount time, and mounts every plugin route group after its authentication
+  middleware, so plugin handlers read the authenticated `userId` from the Hono context and never
+  accept identity from the request.
+- The host calls `zukhruf(runtime)` and nothing else; it never enumerates or passes plugin
+  capabilities, and `@deepagents/experimental` imports no DevTool package. The DevTool UI is a
+  separate static app mounted at `/devtool` on the same origin that discovers everything through
+  same-origin `GET /zukhruf/v1/info`.
+
 ## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
 
 A **stack** binds the runtime's needs to one platform (Cloudflare, Node+Postgres, …) and is the

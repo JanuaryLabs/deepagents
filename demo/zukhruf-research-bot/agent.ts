@@ -1,14 +1,11 @@
 import { openai } from '@ai-sdk/openai';
 
-import { createFileTelemetry } from '@deepagents/context/telemetry/file';
-import { devtool } from '@deepagents/devtool';
+import { fileTelemetry } from '@deepagents/devtool-traces';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 
 import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
 import { planner } from './subagents/planner.ts';
-
-export const developerTool = devtool();
 
 export default defineAgent({
   name: 'ResearchBot',
@@ -16,11 +13,10 @@ export default defineAgent({
   sandbox,
   instructions,
   subagents: [planner],
-  plugins: [developerTool],
-  telemetry: {
-    integrations: createFileTelemetry({
+  plugins: [
+    fileTelemetry({
       includeTimestamp: true,
       path: './telemetry.json',
     }),
-  },
+  ],
 });

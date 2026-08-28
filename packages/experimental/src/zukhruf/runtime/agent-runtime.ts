@@ -1,3 +1,6 @@
+import type { Telemetry } from 'ai';
+import type { Hono } from 'hono';
+
 import {
   ContextEngine,
   type ContextStore,
@@ -86,17 +89,32 @@ export interface AgentPluginBindings {
   get<Value>(capability: AgentPluginCapability<Value>): Value;
 }
 
+export type AgentProtocolEnv = { Variables: { userId: string } };
+
+export interface AgentProtocolCapability {
+  /** Route path beneath the Zukhruf protocol prefix, such as `/traces`. */
+  readonly path: string;
+}
+
+/** HTTP surface one plugin contributes to `zukhruf(runtime)`. */
+export interface AgentPluginProtocol {
+  /** Discovery entries merged into `GET /info` `capabilities`, keyed by capability name. */
+  readonly discovery: Readonly<Record<string, AgentProtocolCapability>>;
+  /** Routes mounted beneath the Zukhruf protocol prefix behind its authentication boundary. */
+  routes(host: AgentPluginHost): Hono<AgentProtocolEnv>;
+}
+
 export interface AgentPluginInstance {
   readonly tools?: ZukhrufToolSet;
+  /** Per-turn AI SDK telemetry integration contributed by this plugin. */
+  telemetry?(context: AgentPluginToolContext): Telemetry;
   /** Skill directories installed into every agent sandbox. */
   readonly skills?: readonly (string | URL)[];
   /** Static namespaced context merged into every model call made by this runtime. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
+  /** Read once after `configure()`, so discovery may depend on the configured root. */
+  readonly protocol?: AgentPluginProtocol;
   configure?(root: AgentDeclaration): AgentDeclaration;
-  configureTelemetry?(
-    context: AgentPluginToolContext,
-    telemetry: AgentDeclaration['telemetry'],
-  ): AgentDeclaration['telemetry'];
   initialize?(host: AgentPluginHost): Promise<void>;
   work?(host: AgentPluginHost): Promise<AsyncDisposable>;
   conversationAvailable?(
@@ -162,6 +180,12 @@ export interface AgentRuntimeOptions {
 
 export interface AgentRuntimeWorkOptions {
   concurrency?: number;
+}
+
+/** Plugin-contributed HTTP surface gathered from the materialized plugins. */
+export interface AgentRuntimeProtocol {
+  readonly discovery: Readonly<Record<string, AgentProtocolCapability>>;
+  readonly routes: readonly Hono<AgentProtocolEnv>[];
 }
 
 export interface AgentRuntimeInfo {
@@ -287,6 +311,7 @@ export class AgentObservation {
 /** Thin host-facing composition and lifecycle façade for a Zukhruf agent tree. */
 export class AgentRuntime {
   readonly info: AgentRuntimeInfo;
+  readonly protocol: AgentRuntimeProtocol;
 
   readonly #store: ContextStore;
   readonly #queue: TurnQueue;
@@ -521,14 +546,24 @@ export class AgentRuntime {
       pluginTools,
       pluginSkills: loadPluginSkills(pluginSkills),
       pluginRuntimeContext,
-      configureTelemetry: (context, telemetry) =>
-        plugins.reduce(
-          (configured, { instance }) =>
-            instance.configureTelemetry
-              ? instance.configureTelemetry(context, configured)
-              : configured,
-          telemetry,
-        ),
+      configureTelemetry: (context, telemetry) => {
+        const contributed = plugins.flatMap(
+          ({ instance }) => instance.telemetry?.(context) ?? [],
+        );
+        if (contributed.length === 0) return telemetry;
+        const declared = telemetry?.integrations;
+        return {
+          ...telemetry,
+          integrations: [
+            ...(declared === undefined
+              ? []
+              : Array.isArray(declared)
+                ? declared
+                : [declared]),
+            ...contributed,
+          ],
+        };
+      },
     });
     this.#pluginHost = {
       info: this.info,
@@ -544,6 +579,36 @@ export class AgentRuntime {
       listHistory: () => this.listHistory(),
       observe: (conversation) => this.observe(conversation),
     };
+    const discovery: Record<string, AgentProtocolCapability> = {};
+    const discoveryOwners = new Map<string, string>();
+    const routes: Hono<AgentProtocolEnv>[] = [];
+    for (const { definition, instance } of plugins) {
+      if (!instance.protocol) continue;
+      for (const [name, capability] of Object.entries(
+        instance.protocol.discovery,
+      )) {
+        if (!name.trim() || name !== name.trim()) {
+          throw new Error(
+            `AgentRuntime: protocol capability name "${name}" from plugin "${definition.name}" must be non-empty without surrounding whitespace`,
+          );
+        }
+        if (!capability.path.startsWith('/')) {
+          throw new Error(
+            `AgentRuntime: protocol capability "${name}" from plugin "${definition.name}" must use an absolute path`,
+          );
+        }
+        const owner = discoveryOwners.get(name);
+        if (owner) {
+          throw new Error(
+            `AgentRuntime: protocol capability "${name}" from plugin "${definition.name}" conflicts with plugin "${owner}"`,
+          );
+        }
+        discoveryOwners.set(name, definition.name);
+        discovery[name] = capability;
+      }
+      routes.push(instance.protocol.routes(this.#pluginHost));
+    }
+    this.protocol = { discovery, routes };
   }
 
   initialize(): Promise<void> {

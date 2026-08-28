@@ -24,10 +24,13 @@ import type {
 
 export function TracesView({
   conversation,
+  href,
   traceId,
   onTraceId,
 }: {
   conversation: HistoryRecord;
+  /** Trace capability base advertised by runtime discovery. */
+  href: string;
   traceId?: string;
   onTraceId: (traceId: string, replace: boolean) => void;
 }) {
@@ -41,7 +44,7 @@ export function TracesView({
     const controller = new AbortController();
     const refresh = async () => {
       try {
-        const response = await fetch(traceListUrl(conversation), {
+        const response = await fetch(traceListUrl(href, conversation), {
           signal: controller.signal,
         });
         if (!response.ok)
@@ -66,16 +69,17 @@ export function TracesView({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [conversation, onTraceId, traceId]);
+  }, [conversation, href, onTraceId, traceId]);
 
   useEffect(() => {
     if (!traceId) return;
     const controller = new AbortController();
     const refresh = async () => {
       try {
-        const response = await fetch(traceDetailUrl(conversation, traceId), {
-          signal: controller.signal,
-        });
+        const response = await fetch(
+          traceDetailUrl(href, conversation, traceId),
+          { signal: controller.signal },
+        );
         if (!response.ok)
           throw new Error(`Trace detail failed: ${response.status}`);
         const next = (await response.json()) as AgentTrace;
@@ -96,7 +100,7 @@ export function TracesView({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [conversation, traceId]);
+  }, [conversation, href, traceId]);
 
   const activeDetail = detail?.id === traceId ? detail : undefined;
   const selectedSpan = activeDetail?.spans.find(
@@ -433,22 +437,16 @@ function spanDepths(spans: AgentTraceSpan[]) {
   return depths;
 }
 
-function traceListUrl(conversation: HistoryRecord) {
-  const url = new URL(
-    `./api/history/${encodeURIComponent(conversation.chatId)}/traces`,
-    window.location.href,
-  );
-  url.searchParams.set('userId', conversation.userId);
-  return url;
+function traceListUrl(href: string, conversation: HistoryRecord) {
+  return `${href}/${encodeURIComponent(conversation.chatId)}`;
 }
 
-function traceDetailUrl(conversation: HistoryRecord, traceId: string) {
-  const url = new URL(
-    `./api/history/${encodeURIComponent(conversation.chatId)}/traces/${encodeURIComponent(traceId)}`,
-    window.location.href,
-  );
-  url.searchParams.set('userId', conversation.userId);
-  return url;
+function traceDetailUrl(
+  href: string,
+  conversation: HistoryRecord,
+  traceId: string,
+) {
+  return `${traceListUrl(href, conversation)}/${encodeURIComponent(traceId)}`;
 }
 
 function formatDuration(

@@ -6,27 +6,30 @@ import { HistoryRoute } from './routes/history.tsx';
 import { ScheduledRoute } from './routes/scheduled.tsx';
 import { TracesRoute } from './routes/traces.tsx';
 
-export const router = createBrowserRouter([
-  {
-    Component: AppLayout,
-    children: [
-      { index: true, loader: () => redirect('/history') },
-      {
-        path: 'chat/:sessionId?',
-        Component: ChatRoute,
-      },
-      {
-        path: 'history/:userId?/:chatId?',
-        Component: HistoryRoute,
-      },
-      {
-        path: 'history/:userId/:chatId/traces/:traceId?',
-        Component: TracesRoute,
-      },
-      {
-        path: 'scheduled',
-        Component: ScheduledRoute,
-      },
-    ],
-  },
-]);
+export const router = createBrowserRouter(
+  [
+    {
+      Component: AppLayout,
+      children: [
+        { index: true, loader: () => redirect('/history') },
+        {
+          path: 'chat/:sessionId?',
+          Component: ChatRoute,
+        },
+        {
+          path: 'history/:userId?/:chatId?',
+          Component: HistoryRoute,
+        },
+        {
+          path: 'history/:userId/:chatId/traces/:traceId?',
+          Component: TracesRoute,
+        },
+        {
+          path: 'scheduled',
+          Component: ScheduledRoute,
+        },
+      ],
+    },
+  ],
+  { basename: import.meta.env.BASE_URL.replace(/\/$/, '') },
+);

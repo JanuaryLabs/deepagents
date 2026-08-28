@@ -13,7 +13,9 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "!**/*.tsbuildinfo"
+    "!dist/spec/**",
+    "!**/*.tsbuildinfo",
+    "!**/*.test.*"
   ],
   "publishConfig": {
     "access": "public"
@@ -49,10 +51,13 @@
     "react": "19.2.7"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "4.0.7",
     "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@types/react": "19.2.17",
+    "ai": "7.0.70",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "zod": "4.4.3"
   }
 }

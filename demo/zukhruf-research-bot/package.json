@@ -7,6 +7,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.41",
     "@deepagents/context": "6.2.0",
+    "@deepagents/devtool-traces": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@electric-sql/pglite": "^0.5.4",
     "ai": "^7.0.64",
@@ -15,6 +16,12 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@deepagents/devtool": "6.2.0"
+    "@deepagents/devtool": "6.2.0",
+    "@hono/node-server": "^2.0.10",
+    "hono": "^4.12.33"
+  },
+  "scripts": {
+    "start": "node --env-file=../../.env run.ts",
+    "prestart": "cd ../.. && nx run @deepagents/devtool:build"
   }
 }
