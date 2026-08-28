@@ -14,7 +14,7 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/evals`            | Run LLM evals with datasets, scorers, persistence, and reports.                                                                     |
 | `@deepagents/devtool`          | Serve the Zukhruf development UI on the same origin as the authenticated runtime protocol.                                          |
 | `@deepagents/devtool-traces`   | Record file telemetry and expose correlated, authenticated Zukhruf traces.                                                          |
-| `@deepagents/chat-input`       | Provide the reusable structured prompt composer used by browser chat surfaces.                                                      |
+| `@deepagents/react-input`      | Provide the reusable structured prompt composer used by browser chat surfaces.                                                      |
 | `@deepagents/react-elements`   | Serialize and validate GenAI element descriptors for React renderers.                                                               |
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                        |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                                    |

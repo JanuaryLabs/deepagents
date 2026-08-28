@@ -7,6 +7,7 @@ export type SerializedToolRegistry = Record<
   {
     inputSchema: z.core.JSONSchema.BaseSchema;
     description: string;
+    needsApproval: boolean;
   }
 >;
 
@@ -24,6 +25,7 @@ export function serializeToolsRegistry(
           unrepresentable: 'any',
         }),
         description: tool.description,
+        needsApproval: tool.needsApproval === true,
       };
       return acc;
     },

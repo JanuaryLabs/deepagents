@@ -111,6 +111,21 @@ try {
 </Tab>
 </Tabs>
 
+## Command Timeouts and Cancellation
+
+Set `commandTimeout` once on any Docker sandbox strategy to limit every
+`executeCommand` and `spawn` call in milliseconds:
+
+```typescript
+const sandbox = await createDockerSandbox({ commandTimeout: 300_000 });
+```
+
+A deadline terminates the command's process group inside the container before
+`executeCommand` returns exit code `124` or `spawn().exit` resolves with
+`{ code: 124, signal: null, success: false }`. A per-call `AbortSignal` remains
+separate caller cancellation: `spawn` reports an unsuccessful `SIGKILL`, while
+`executeCommand` returns non-zero; neither is reported as a timeout.
+
 ## Stable Container Names
 
 Runtime and Dockerfile strategies accept an optional `name` to reuse the same

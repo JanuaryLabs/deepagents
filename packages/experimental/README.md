@@ -126,10 +126,10 @@ Runnable end-to-end showcases live in
 deployable unit),
 [`demo/zukhruf-durable-turns`](../../demo/zukhruf-durable-turns) (the durable
 executor: enqueue, detach, resume, strict per-chat FIFO),
-[`demo/zukhruf-mailbox`](../../demo/zukhruf-mailbox) (API-key-free host delivery,
-durable FIFO mail, and payload-free wakes),
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
 planner and researcher chats with mailbox-delivered findings),
+[`demo/zukhruf-claude-code`](../../demo/zukhruf-claude-code) (Claude Code owns
+the model/tool loop while Zukhruf owns persistence, streaming, and HTTP),
 [`demo/zukhruf-schedules`](../../demo/zukhruf-schedules) (file-declared
 recurring work launched into fresh root tasks),
 [`demo/zukhruf-group-chat`](../../demo/zukhruf-group-chat) (managed group-chat

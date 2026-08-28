@@ -1,7 +1,8 @@
 import spawn, { type SubprocessError } from 'nano-spawn';
 import { type StdioOptions, spawn as childSpawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { toSandboxProcess } from './cli-process.ts';
 import type {
@@ -32,6 +33,7 @@ import {
   type Installer,
   createInstallerContext,
 } from './installers/installer.ts';
+import { shellQuote } from './shell-quote.ts';
 import type {
   CommandResult,
   DisposableSandbox,
@@ -145,6 +147,8 @@ export interface DockerNetwork {
 export interface DockerCommonOptions extends CommonSandboxOptions {
   volumes?: SandboxVolume[];
   resources?: DockerResources;
+  /** Per-command timeout in milliseconds for `executeCommand` and `spawn`. */
+  commandTimeout?: number;
   /**
    * `--platform` (e.g. `'linux/amd64'`) — emulated when it differs from the host
    * arch. For the Dockerfile strategy it also applies to `docker build` and is
@@ -213,6 +217,8 @@ export interface ComposeSandboxOptions {
   compose: string;
   service: string;
   resources?: DockerResources;
+  /** Per-command timeout in milliseconds for `executeCommand` and `spawn`. */
+  commandTimeout?: number;
 }
 
 export type DockerSandboxOptions =
@@ -571,10 +577,246 @@ function buildDockerExecFlags(options?: SpawnOptions): string[] {
   return flags;
 }
 
+type DockerExecArgs = (command: string, options?: SpawnOptions) => string[];
+
+function managedDockerCommand(command: string, controlPath: string): string {
+  return [
+    'set -m',
+    `control=${shellQuote(controlPath)}`,
+    ': > "$control" || exit 1',
+    'trap \'rm -f "$control"\' EXIT',
+    `bash -lc ${shellQuote(command)} &`,
+    'pid=$!',
+    'printf \'%s\\n\' "$pid" > "$control"',
+    'wait "$pid"',
+    'exit "$?"',
+  ].join('\n');
+}
+
+async function waitForDockerExecPid(
+  execArgs: DockerExecArgs,
+  controlPath: string,
+  localExit: Promise<unknown>,
+): Promise<number | undefined> {
+  const exited = localExit.then(
+    () => true,
+    () => true,
+  );
+  const readPid = `if IFS= read -r pid < ${shellQuote(controlPath)}; then printf '%s' "$pid"; fi`;
+
+  while (true) {
+    const result = await spawn('docker', execArgs(readPid));
+    if (result.stdout) return Number(result.stdout);
+    if (await Promise.race([exited, delay(10).then(() => false)])) {
+      return undefined;
+    }
+  }
+}
+
+async function terminateDockerExec(
+  execArgs: DockerExecArgs,
+  controlPath: string,
+  localExit: Promise<unknown>,
+): Promise<boolean> {
+  const pid = await waitForDockerExecPid(execArgs, controlPath, localExit);
+  if (pid === undefined) return false;
+
+  const result = await spawn(
+    'docker',
+    execArgs(
+      [
+        `pid=${pid}`,
+        `IFS= read -r control_pid < ${shellQuote(controlPath)} || exit 0`,
+        '[ "$control_pid" = "$pid" ] || exit 0',
+        'kill -KILL -- "-$pid" 2>/dev/null || exit 0',
+        'group_alive() {',
+        '  local stat rest state pgrp',
+        '  for stat_path in /proc/[0-9]*/stat; do',
+        '    IFS= read -r stat < "$stat_path" || continue',
+        '    rest=${stat##*) }',
+        '    read -r state _ pgrp _ <<< "$rest"',
+        '    if [ "$pgrp" = "$pid" ] && [ "$state" != Z ]; then return 0; fi',
+        '  done',
+        '  return 1',
+        '}',
+        'while group_alive; do sleep 0.01; done',
+        'printf terminated',
+      ].join('\n'),
+    ),
+  );
+  return result.stdout === 'terminated';
+}
+
+function spawnDockerProcess(
+  execArgs: DockerExecArgs,
+  command: string,
+  options: SpawnOptions = {},
+  commandTimeout?: number,
+): SandboxProcess {
+  if (!commandTimeout && options.signal === undefined) {
+    return toSandboxProcess(
+      childSpawn('docker', execArgs(command, options)),
+      undefined,
+    );
+  }
+
+  const controlPath = `/dev/shm/deepagents-exec-${randomUUID()}.pid`;
+  const localProcess = toSandboxProcess(
+    childSpawn(
+      'docker',
+      execArgs(managedDockerCommand(command, controlPath), options),
+    ),
+    undefined,
+  );
+  let termination:
+    | {
+        reason: 'abort' | 'timeout';
+        confirmed: Promise<boolean>;
+      }
+    | undefined;
+  const terminate = (reason: 'abort' | 'timeout') => {
+    termination ??= {
+      reason,
+      confirmed: terminateDockerExec(execArgs, controlPath, localProcess.exit),
+    };
+  };
+  const onAbort = () => terminate('abort');
+
+  if (options.signal?.aborted) onAbort();
+  else options.signal?.addEventListener('abort', onAbort, { once: true });
+
+  let timeout: NodeJS.Timeout | undefined;
+  if (commandTimeout) {
+    timeout = setTimeout(() => terminate('timeout'), commandTimeout);
+    timeout.unref();
+  }
+
+  return {
+    stdout: localProcess.stdout,
+    stderr: localProcess.stderr,
+    exit: localProcess.exit
+      .then(async (info) => {
+        const activeTermination = termination;
+        if (!activeTermination || !(await activeTermination.confirmed)) {
+          return info;
+        }
+        return activeTermination.reason === 'timeout'
+          ? { code: 124, signal: null, success: false }
+          : { code: null, signal: 'SIGKILL' as const, success: false };
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener('abort', onAbort);
+      }),
+  };
+}
+
+async function executeDockerCommand(
+  execArgs: DockerExecArgs,
+  command: string,
+  options: ExecuteCommandOptions = {},
+  commandTimeout?: number,
+): Promise<CommandResult> {
+  if (!commandTimeout && options.signal === undefined) {
+    try {
+      const result = await spawn('docker', execArgs(command));
+      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+    } catch (error) {
+      const err = error as SubprocessError;
+      return {
+        stdout: err.stdout || '',
+        stderr: err.stderr || err.message || '',
+        exitCode: err.exitCode ?? 1,
+      };
+    }
+  }
+
+  const process = spawnDockerProcess(
+    execArgs,
+    command,
+    { signal: options.signal },
+    commandTimeout,
+  );
+  const [stdout, stderr, info] = await Promise.all([
+    new Response(process.stdout).text(),
+    new Response(process.stderr).text(),
+    process.exit,
+  ]);
+  const result = {
+    stdout: stdout.replace(/\r?\n$/, ''),
+    stderr: stderr.replace(/\r?\n$/, ''),
+  };
+  if (info.signal === 'SIGKILL') {
+    return {
+      ...result,
+      stderr: result.stderr || 'Command aborted',
+      exitCode: 1,
+    };
+  }
+  return { ...result, exitCode: info.code ?? 1 };
+}
+
+class DockerRuntimeStrategy extends RuntimeStrategy<DockerCommonOptions> {
+  protected override exec(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult> {
+    return executeDockerCommand(
+      (value, spawnOptions) =>
+        this.engine.execArgs(this.context.containerId, value, spawnOptions),
+      command,
+      options,
+      this.opts.commandTimeout,
+    );
+  }
+
+  protected override spawnProcess(
+    command: string,
+    options?: SpawnOptions,
+  ): SandboxProcess {
+    return spawnDockerProcess(
+      (value, spawnOptions) =>
+        this.engine.execArgs(this.context.containerId, value, spawnOptions),
+      command,
+      options,
+      this.opts.commandTimeout,
+    );
+  }
+}
+
+class DockerContainerfileStrategy extends ContainerfileStrategy<DockerCommonOptions> {
+  protected override exec(
+    command: string,
+    options?: ExecuteCommandOptions,
+  ): Promise<CommandResult> {
+    return executeDockerCommand(
+      (value, spawnOptions) =>
+        this.engine.execArgs(this.context.containerId, value, spawnOptions),
+      command,
+      options,
+      this.opts.commandTimeout,
+    );
+  }
+
+  protected override spawnProcess(
+    command: string,
+    options?: SpawnOptions,
+  ): SandboxProcess {
+    return spawnDockerProcess(
+      (value, spawnOptions) =>
+        this.engine.execArgs(this.context.containerId, value, spawnOptions),
+      command,
+      options,
+      this.opts.commandTimeout,
+    );
+  }
+}
+
 export interface ComposeStrategyArgs {
   compose: string;
   service: string;
   resources?: DockerResources;
+  commandTimeout?: number;
 }
 
 /**
@@ -586,11 +828,13 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
   private projectName: string;
   private composeFile: string;
   private service: string;
+  private commandTimeout?: number;
 
   constructor(args: ComposeStrategyArgs) {
     super({ resources: args.resources }, dockerEngine);
     this.composeFile = args.compose;
     this.service = args.service;
+    this.commandTimeout = args.commandTimeout;
     this.projectName = this.computeProjectName();
   }
 
@@ -639,40 +883,28 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
     command: string,
     options?: ExecuteCommandOptions,
   ): Promise<CommandResult> {
-    try {
-      const result = await spawn(
-        'docker',
-        [
-          'compose',
-          '-f',
-          this.composeFile,
-          '-p',
-          this.projectName,
-          'exec',
-          '-T',
-          this.service,
-          'bash',
-          '-lc',
-          command,
-        ],
-        { signal: options?.signal },
-      );
-      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-    } catch (error) {
-      const err = error as SubprocessError;
-      return {
-        stdout: err.stdout || '',
-        stderr: err.stderr || err.message || '',
-        exitCode: err.exitCode ?? 1,
-      };
-    }
+    return executeDockerCommand(
+      (value, spawnOptions) => this.execArgs(value, spawnOptions),
+      command,
+      options,
+      this.commandTimeout,
+    );
   }
 
   protected override spawnProcess(
     command: string,
     options?: SpawnOptions,
   ): SandboxProcess {
-    const child = childSpawn('docker', [
+    return spawnDockerProcess(
+      (value, spawnOptions) => this.execArgs(value, spawnOptions),
+      command,
+      options,
+      this.commandTimeout,
+    );
+  }
+
+  private execArgs(command: string, options?: SpawnOptions): string[] {
+    return [
       'compose',
       '-f',
       this.composeFile,
@@ -685,8 +917,7 @@ export class ComposeStrategy extends ContainerSandboxStrategy {
       'bash',
       '-lc',
       command,
-    ]);
-    return toSandboxProcess(child, options?.signal);
+    ];
   }
 
   protected override async stopContainer(_containerId: string): Promise<void> {
@@ -748,17 +979,18 @@ export async function createDockerSandbox(
       compose: options.compose,
       service: options.service,
       resources: options.resources,
+      commandTimeout: options.commandTimeout,
     }).create();
   }
   if (isDockerfileOptions(options)) {
-    return new ContainerfileStrategy(options, dockerEngine, {
+    return new DockerContainerfileStrategy(options, dockerEngine, {
       dockerfile: options.dockerfile,
       context: options.context ?? '.',
       showBuildLogs: options.showBuildLogs ?? false,
       identity: options.platform,
     }).create();
   }
-  return new RuntimeStrategy(options, dockerEngine, {
+  return new DockerRuntimeStrategy(options, dockerEngine, {
     image: options.image ?? dockerEngine.defaultImage,
     installers: options.installers ?? [],
   }).create();

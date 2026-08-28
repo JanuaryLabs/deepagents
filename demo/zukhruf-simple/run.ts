@@ -1,4 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -14,6 +16,8 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const resources = new AsyncDisposableStack();
 
@@ -33,7 +37,7 @@ const queue = new PgBossTurnQueue(boss, {
 });
 await queue.initialize();
 const streamStore = resources.adopt(
-  new SqliteStreamStore('./simple.sqlite'),
+  new SqliteStreamStore(join(__dirname, 'simple.sqlite')),
   (store) => store.close(),
 );
 const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));

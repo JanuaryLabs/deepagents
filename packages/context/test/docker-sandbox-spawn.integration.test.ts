@@ -1,6 +1,7 @@
 import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { after, before, describe, it } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   type AgentSandbox,
@@ -178,6 +179,69 @@ describe('Docker Sandbox — spawn', async () => {
         0,
         'aborted sleep must not return a 0 exit code',
       );
+    });
+  });
+
+  describe('guest process termination', () => {
+    it('enforces commandTimeout for executeCommand and spawn without delayed writes', async () => {
+      await using timedSandbox = await createDockerSandbox({
+        commandTimeout: 100,
+      });
+
+      const executeResult = await timedSandbox.executeCommand(
+        'sleep 0.5; printf leaked > /workspace/execute-timeout-leaked',
+      );
+      assert.strictEqual(executeResult.exitCode, 124);
+
+      assert.ok(timedSandbox.spawn);
+      const child = timedSandbox.spawn(
+        'printf "%s:%s" "$MANAGED" "$PWD"; printf managed-err >&2; sleep 0.5; printf leaked > /workspace/spawn-timeout-leaked',
+        { cwd: '/tmp', env: { MANAGED: 'yes' } },
+      );
+      const [stdout, stderr, exit] = await Promise.all([
+        readAllText(child.stdout),
+        readAllText(child.stderr),
+        child.exit,
+      ]);
+      assert.strictEqual(stdout, 'yes:/tmp');
+      assert.match(stderr, /managed-err/);
+      assert.deepStrictEqual(exit, {
+        code: 124,
+        signal: null,
+        success: false,
+      });
+
+      await sleep(700);
+      const sentinel = await timedSandbox.executeCommand(
+        'test ! -e /workspace/execute-timeout-leaked && test ! -e /workspace/spawn-timeout-leaked',
+      );
+      assert.strictEqual(sentinel.exitCode, 0);
+    });
+
+    it('keeps caller abort distinct from the configured deadline', async () => {
+      await using abortableSandbox = await createDockerSandbox({
+        commandTimeout: 5_000,
+      });
+      assert.ok(abortableSandbox.spawn);
+      const controller = new AbortController();
+      const child = abortableSandbox.spawn(
+        'printf ready; sleep 0.5; printf leaked > /workspace/abort-leaked',
+        { signal: controller.signal },
+      );
+
+      assert.strictEqual(await readFirstChunk(child.stdout), 'ready');
+      controller.abort();
+      assert.deepStrictEqual(await child.exit, {
+        code: null,
+        signal: 'SIGKILL',
+        success: false,
+      });
+
+      await sleep(700);
+      const sentinel = await abortableSandbox.executeCommand(
+        'test ! -e /workspace/abort-leaked',
+      );
+      assert.strictEqual(sentinel.exitCode, 0);
     });
   });
 

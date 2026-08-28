@@ -5,6 +5,7 @@ import {
   type UIDataTypes,
   type UIMessage,
   type UITools,
+  lastAssistantMessageIsCompleteWithApprovalResponses,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
 import { AnimatePresence, motion } from 'motion/react';
@@ -29,7 +30,9 @@ export function useAgentChatSetup(props: {
     experimental_throttle: 50,
     messages: props.initialMessages,
     transport: props.transport,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    sendAutomaticallyWhen: (options) =>
+      lastAssistantMessageIsCompleteWithToolCalls(options) ||
+      lastAssistantMessageIsCompleteWithApprovalResponses(options),
     async onToolCall({ toolCall }) {
       await handleToolAutoApproval(chat, props.registry, toolCall);
     },

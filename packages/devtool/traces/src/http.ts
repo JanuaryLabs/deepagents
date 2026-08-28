@@ -71,7 +71,7 @@ async function requireConversation(
   runtime: Pick<HttpRuntime, 'listHistory'>,
   conversation: ConversationId,
 ): Promise<ConversationId> {
-  const owned = (await runtime.listHistory()).some(
+  const owned = (await runtime.listHistory(conversation.userId)).some(
     (item) =>
       item.chatId === conversation.chatId &&
       item.userId === conversation.userId,

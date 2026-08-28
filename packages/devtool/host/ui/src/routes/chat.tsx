@@ -1,20 +1,25 @@
 import type { UIMessage } from 'ai';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
-import { Composer, useComposer } from '@deepagents/react-input/browser';
 import {
   AgentHeader,
   AgentProvider,
   ChatBot,
   ChatComposer,
+  MessageQueue,
   Messages,
   PendingToolInput,
   SubmitButton,
+  serializeToolsRegistry,
   useAgent,
   useAgentMessages,
+  useAgentMeta,
   useAgentStatus,
+  useChatManager,
 } from '@deepagents/react-genai';
+import { Composer, useComposer } from '@deepagents/react-input/browser';
+import { cn } from '@deepagents/react-shadcn';
 
 import {
   queryClient,
@@ -22,6 +27,8 @@ import {
   useSessionMessages,
 } from '../app/runtime-data.ts';
 import { ZukhrufChatTransport } from '../app/zukhruf-chat-transport.ts';
+
+const TOOL_REGISTRY = {};
 
 export function ChatRoute() {
   const { sessionId } = useParams();
@@ -90,6 +97,7 @@ function ChatSession({
       new ZukhrufChatTransport({
         api,
         sessionId,
+        tools: serializeToolsRegistry(TOOL_REGISTRY),
         onSession: (acceptedSessionId) => {
           void navigate(`/chat/${encodeURIComponent(acceptedSessionId)}`, {
             replace: true,
@@ -110,15 +118,12 @@ function ChatSession({
         navigate(`/chat?draft=${encodeURIComponent(crypto.randomUUID())}`)
       }
       resume={Boolean(sessionId)}
+      registry={TOOL_REGISTRY}
       transport={transport}
     >
       <ChatBot className="max-w-5xl">
         <AgentHeader.Root className="px-6">
           <AgentHeader.Hero>How can I help?</AgentHeader.Hero>
-          <AgentHeader.Title>Zukhruf</AgentHeader.Title>
-          <AgentHeader.Description>
-            Chat with the development runtime over HTTP.
-          </AgentHeader.Description>
         </AgentHeader.Root>
         <ChatMessages />
         <ChatInput />
@@ -155,11 +160,17 @@ function ChatMessages() {
 
 function ChatInput() {
   const { submit } = useAgent();
+  const { hasSubmitted } = useAgentMeta();
   const { status } = useAgentStatus();
   const isRunning = status === 'submitted' || status === 'streaming';
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-      <PendingToolInput>
+    <div
+      className={cn(
+        'mx-auto w-full max-w-3xl px-6 pb-6',
+        hasSubmitted && 'bg-background sticky bottom-0 mt-auto pt-2',
+      )}
+    >
+      <PendingToolInput className="bg-background">
         <ChatComposer.Provider
           isTaskRunning={isRunning}
           onSubmit={(submission, context) =>
@@ -171,6 +182,7 @@ function ChatInput() {
           }
         >
           <ChatComposer.Root>
+            <QueuedMessagesStrip />
             <ChatComposer.Popup />
             <ChatComposer.Content>
               <ChatComposer.Editor placeholder="Message Zukhruf…" />
@@ -183,6 +195,26 @@ function ChatInput() {
         </ChatComposer.Provider>
       </PendingToolInput>
     </div>
+  );
+}
+
+function QueuedMessagesStrip() {
+  const manager = useChatManager();
+  const queue = useSyncExternalStore(manager.subscribe, () => manager.queue);
+  if (queue.length === 0) return null;
+
+  return (
+    <MessageQueue.Root>
+      {queue.map((message) => (
+        <MessageQueue.Item key={message.id}>
+          <MessageQueue.Icon />
+          <MessageQueue.Text>{message.persistedPrompt}</MessageQueue.Text>
+          <MessageQueue.Remove
+            onClick={() => manager.removeFromQueue(message.id)}
+          />
+        </MessageQueue.Item>
+      ))}
+    </MessageQueue.Root>
   );
 }
 
