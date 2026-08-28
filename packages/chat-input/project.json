@@ -18,6 +18,7 @@
           }
         ],
         "external": [
+          "@base-ui/react",
           "@tiptap/core",
           "@tiptap/extension-link",
           "@tiptap/pm",
@@ -26,7 +27,6 @@
           "clsx",
           "lodash-es",
           "lucide-react",
-          "radix-ui",
           "react",
           "react-dom",
           "tailwind-merge"

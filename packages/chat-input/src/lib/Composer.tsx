@@ -1,6 +1,6 @@
+import { useRender } from '@base-ui/react/use-render';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
-import { Slot } from 'radix-ui';
 import {
   type ComponentPropsWithoutRef,
   type MouseEvent,
@@ -123,9 +123,7 @@ export type ComposerShortcutsProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
 
-type ComposerActionTriggerProps = ComponentPropsWithoutRef<'button'> & {
-  asChild?: boolean;
-};
+type ComposerActionTriggerProps = useRender.ComponentProps<'button'>;
 
 export type ComposerAttachLocalImageProps = ComposerActionTriggerProps & {
   path?: string;
@@ -2032,7 +2030,7 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
 }
 
 function ComposerAttachLocalImage({
-  asChild = false,
+  render,
   path,
   onClick,
   ...props
@@ -2040,7 +2038,7 @@ function ComposerAttachLocalImage({
   const { actions } = useComposerContext('Composer.AttachLocalImage');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
+      render={render}
       onClick={onClick}
       action={() => actions.attachLocalImage(path)}
       {...props}
@@ -2049,7 +2047,7 @@ function ComposerAttachLocalImage({
 }
 
 function ComposerAddRemoteImage({
-  asChild = false,
+  render,
   url,
   onClick,
   ...props
@@ -2057,7 +2055,7 @@ function ComposerAddRemoteImage({
   const { actions } = useComposerContext('Composer.AddRemoteImage');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
+      render={render}
       onClick={onClick}
       action={() => actions.addRemoteImage(url)}
       {...props}
@@ -2066,7 +2064,7 @@ function ComposerAddRemoteImage({
 }
 
 function ComposerInsertPaste({
-  asChild = false,
+  render,
   content,
   onClick,
   ...props
@@ -2074,7 +2072,7 @@ function ComposerInsertPaste({
   const { actions } = useComposerContext('Composer.InsertPaste');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
+      render={render}
       onClick={onClick}
       action={() => actions.insertPaste(content)}
       {...props}
@@ -2083,7 +2081,7 @@ function ComposerInsertPaste({
 }
 
 function ComposerInsertRichLink({
-  asChild = false,
+  render,
   href,
   label,
   metadata,
@@ -2093,7 +2091,7 @@ function ComposerInsertRichLink({
   const { actions } = useComposerContext('Composer.InsertRichLink');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
+      render={render}
       onClick={onClick}
       action={() => actions.insertRichLink(href, label, metadata)}
       {...props}
@@ -2101,15 +2099,11 @@ function ComposerInsertRichLink({
   );
 }
 
-function ComposerSubmit({
-  asChild = false,
-  onClick,
-  ...props
-}: ComposerSubmitProps) {
+function ComposerSubmit({ render, onClick, ...props }: ComposerSubmitProps) {
   const { actions } = useComposerContext('Composer.Submit');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
+      render={render}
       onClick={onClick}
       action={actions.submit}
       {...props}
@@ -2117,15 +2111,11 @@ function ComposerSubmit({
   );
 }
 
-function ComposerReset({
-  asChild = false,
-  onClick,
-  ...props
-}: ComposerResetProps) {
+function ComposerReset({ render, onClick, ...props }: ComposerResetProps) {
   const { actions } = useComposerContext('Composer.Reset');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
+      render={render}
       onClick={onClick}
       action={actions.reset}
       {...props}
@@ -2134,26 +2124,27 @@ function ComposerReset({
 }
 
 function ComposerTiptapActionTrigger({
-  asChild,
+  render,
   action,
   onClick,
   disabled,
-  type = 'button',
+  type,
   ...props
 }: ComposerActionTriggerProps & { action: () => void }) {
   const { disabled: rootDisabled } = useComposerContext(
     'Composer.ActionTrigger',
   );
-  const Comp = asChild ? Slot.Root : 'button';
   const actionDisabled = rootDisabled || Boolean(disabled);
-  return (
-    <Comp
-      {...props}
-      aria-disabled={asChild && actionDisabled ? true : props['aria-disabled']}
-      data-disabled={actionDisabled ? '' : undefined}
-      disabled={asChild ? undefined : actionDisabled}
-      type={asChild ? undefined : type}
-      onClick={(event: MouseEvent<HTMLButtonElement>) => {
+  return useRender({
+    defaultTagName: 'button',
+    render,
+    props: {
+      ...props,
+      'aria-disabled': render && actionDisabled ? true : props['aria-disabled'],
+      'data-disabled': actionDisabled ? '' : undefined,
+      disabled: render ? undefined : actionDisabled,
+      type: render ? undefined : (type ?? 'button'),
+      onClick: (event: MouseEvent<HTMLButtonElement>) => {
         if (actionDisabled) {
           event.preventDefault();
           return;
@@ -2162,9 +2153,9 @@ function ComposerTiptapActionTrigger({
         if (!event.defaultPrevented) {
           action();
         }
-      }}
-    />
-  );
+      },
+    },
+  });
 }
 
 function isInsertNewlineShortcut(

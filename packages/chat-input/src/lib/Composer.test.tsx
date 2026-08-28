@@ -449,17 +449,16 @@ function RichCompoundActionScenario() {
           <Composer.Editor />
         </Composer.Content>
         <Composer.Submit
-          asChild
+          render={<button type="button">Blocked rich child submit</button>}
           onClick={(event) => {
             event.preventDefault();
             setLastClick('blocked');
           }}
-        >
-          <button type="button">Blocked rich child submit</button>
-        </Composer.Submit>
-        <Composer.Submit asChild onClick={() => setLastClick('allowed')}>
-          <button type="button">Allowed rich child submit</button>
-        </Composer.Submit>
+        />
+        <Composer.Submit
+          render={<button type="button">Allowed rich child submit</button>}
+          onClick={() => setLastClick('allowed')}
+        />
       </Composer.Root>
       <p>Last rich child click: {lastClick}</p>
       <SubmissionLog submissions={submissions} />
@@ -490,9 +489,9 @@ function RichDisabledAnchorActionScenario() {
         <Composer.Content>
           <Composer.Editor />
         </Composer.Content>
-        <Composer.Submit asChild>
-          <a href="/submit">Disabled rich anchor submit</a>
-        </Composer.Submit>
+        <Composer.Submit
+          render={<a href="/submit">Disabled rich anchor submit</a>}
+        />
       </Composer.Root>
       <SubmissionLog submissions={submissions} />
     </>
@@ -688,7 +687,7 @@ describe('Composer compound API', () => {
     ).toBeInTheDocument();
   });
 
-  it('supports asChild action triggers while honoring prevented child clicks', async () => {
+  it('supports rendered action triggers while honoring prevented child clicks', async () => {
     const user = userEvent.setup();
     render(<RichCompoundActionScenario />);
 
@@ -715,7 +714,7 @@ describe('Composer compound API', () => {
     ).toHaveTextContent('Text: compound prompt');
   });
 
-  it('marks disabled asChild actions without leaking native disabled onto non-buttons', async () => {
+  it('marks disabled rendered actions without leaking native disabled onto non-buttons', async () => {
     const user = userEvent.setup();
     render(<RichDisabledAnchorActionScenario />);
 

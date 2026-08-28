@@ -1,8 +1,7 @@
-/* Source classes in workspace development and bundled JavaScript after publish. */
-@source './lib/Composer.tsx';
-@source './*.js';
+/* Source utility classes from the published JavaScript bundle. */
+@source "../dist/*.js";
 
-[data-slot='composer'] {
+[data-slot="composer"] {
   --composer-line-height: 1.55rem;
   --composer-font-size: 0.875rem;
   --composer-min-height: 8.5rem;
@@ -10,7 +9,7 @@
   --composer-padding: 0.875rem;
 }
 
-[data-slot='composer'] [data-slot='composer-frame'] {
+[data-slot="composer"] [data-slot="composer-frame"] {
   position: relative;
   min-height: var(--composer-min-height);
   max-height: var(--composer-max-height);
@@ -20,7 +19,7 @@
   background: var(--color-background);
 }
 
-[data-slot='composer'] [data-slot='composer-placeholder'] {
+[data-slot="composer"] [data-slot="composer-placeholder"] {
   box-sizing: border-box;
   min-height: var(--composer-min-height);
   width: 100%;
@@ -36,50 +35,50 @@
   color: var(--color-muted-foreground);
 }
 
-[data-slot='composer'] [data-slot='composer-frame']:focus-within {
+[data-slot="composer"] [data-slot="composer-frame"]:focus-within {
   border-color: color-mix(in srgb, var(--color-primary) 80%, transparent);
   box-shadow: 0 0 0 3px
     color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
-[data-slot='composer'] [data-token] {
+[data-slot="composer"] [data-token] {
   border-radius: calc(var(--radius-sm) - 1px);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
-[data-slot='composer'] [data-token='slash-command'] {
+[data-slot="composer"] [data-token="slash-command"] {
   color: var(--color-primary);
 }
 
-[data-slot='composer'] [data-token='mention'] {
+[data-slot="composer"] [data-token="mention"] {
   background: color-mix(in srgb, var(--color-info) 12%, transparent);
   color: var(--color-info);
 }
 
-[data-slot='composer'] [data-token='image'] {
+[data-slot="composer"] [data-token="image"] {
   background: color-mix(in srgb, var(--color-success) 12%, transparent);
   color: var(--color-success);
 }
 
-[data-slot='composer'] [data-token='paste'] {
+[data-slot="composer"] [data-token="paste"] {
   background: color-mix(in srgb, var(--color-warning) 14%, transparent);
   color: var(--color-warning);
 }
 
-[data-slot='composer'] [data-token='link'] {
+[data-slot="composer"] [data-token="link"] {
   color: var(--color-info);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.16em;
 }
 
-[data-slot='composer'] [data-token='rich-link'] {
+[data-slot="composer"] [data-token="rich-link"] {
   background: color-mix(in srgb, var(--color-success) 12%, transparent);
   color: var(--color-success);
 }
 
-[data-slot='composer'] [data-slot='composer-editor'] {
+[data-slot="composer"] [data-slot="composer-editor"] {
   min-height: var(--composer-min-height);
   padding: var(--composer-padding);
   font-size: var(--composer-font-size);
@@ -89,16 +88,16 @@
   word-break: break-word;
 }
 
-[data-slot='composer'] [data-slot='composer-editor'] p {
+[data-slot="composer"] [data-slot="composer-editor"] p {
   margin: 0;
   unicode-bidi: plaintext;
 }
 
-[data-slot='composer'] [data-slot='composer-editor'] p + p {
+[data-slot="composer"] [data-slot="composer-editor"] p + p {
   margin-top: var(--composer-line-height);
 }
 
-[data-slot='composer'] [data-slot='composer-editor'] .is-empty::before {
+[data-slot="composer"] [data-slot="composer-editor"] .is-empty::before {
   content: attr(data-placeholder);
   float: left;
   height: 0;
@@ -106,12 +105,12 @@
   color: var(--color-muted-foreground);
 }
 
-[data-slot='composer'] [data-slot='composer-editor'] [data-composer-atom],
-[data-slot='composer'] [data-slot='composer-editor'] [data-composer-mention] {
+[data-slot="composer"] [data-slot="composer-editor"] [data-composer-atom],
+[data-slot="composer"] [data-slot="composer-editor"] [data-composer-mention] {
   user-select: all;
 }
 
-[data-slot='composer'] [data-slot='composer-editor'] a {
+[data-slot="composer"] [data-slot="composer-editor"] a {
   color: var(--color-info);
   text-decoration: underline;
   text-decoration-thickness: 1px;

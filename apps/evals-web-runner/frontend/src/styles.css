@@ -1,7 +1,10 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
-@plugin '@tailwindcss/typography';
-@source '../../../../packages/react/shadcn/src';
+@import "tailwindcss";
+
+/* nx-tailwind-sources:start */
+@source "../../../../packages/react/shadcn";
+/* nx-tailwind-sources:end */
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
 
 /* custom variant for setting dark mode programmatically */
 @custom-variant dark (&:is(.dark, .dark *));
@@ -85,10 +88,10 @@
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
-  --font-sans: 'Noto Sans', sans-serif;
-  --font-serif: 'Literata', Georgia, serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-heading: 'Fraunces', serif;
+  --font-sans: "Noto Sans", sans-serif;
+  --font-serif: "Literata", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-heading: "Fraunces", serif;
   --grain-opacity: 0.025;
   --reader-bg: oklch(0.985 0 0);
 }
@@ -125,10 +128,10 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.552 0.016 285.938);
-  --font-sans: 'Noto Sans', sans-serif;
-  --font-serif: 'Literata', Georgia, serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-heading: 'Fraunces', serif;
+  --font-sans: "Noto Sans", sans-serif;
+  --font-serif: "Literata", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-heading: "Fraunces", serif;
   --grain-opacity: 0.035;
   --reader-bg: oklch(0.23 0.004 285);
 }

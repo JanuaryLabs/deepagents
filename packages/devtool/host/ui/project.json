@@ -1,0 +1,7 @@
+{
+  "name": "@deepagents/devtool-ui",
+  "$schema": "../../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/devtool/host/ui/src",
+  "projectType": "application",
+  "tags": ["scope:private"]
+}

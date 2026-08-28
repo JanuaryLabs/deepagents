@@ -1,16 +1,32 @@
-@import 'tailwindcss';
-@source '../../../../chat-input/src';
-@source '../../../../react/genai/src';
-@source '../../../../react/shadcn/src';
-@source '../../../history/src/index.tsx';
-@source './**/*.{ts,tsx}';
-@source '../../../traces/src/ui.tsx';
+@import "@deepagents/chat-input/styles.css";
+@import "@deepagents/devtool-traces/styles.css";
+@import "streamdown/styles.css";
+@import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+/* nx-tailwind-sources:start */
+@source "../../../../agent";
+@source "../../../../chat-input";
+@source "../../../../context";
+@source "../../../../experimental";
+@source "../../../../react/elements";
+@source "../../../../react/formatters";
+@source "../../../../react/genai";
+@source "../../../../react/shadcn";
+@source "../../../../test";
+@source "../../../history";
+@source "../../../traces";
+/* nx-tailwind-sources:end */
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@plugin "@tailwindcss/typography";
+
+@source "../../../../../node_modules/streamdown/dist/*.js";
+
+@custom-variant dark (@media not all);
 
 @theme inline {
-  --font-sans: 'Inter', 'Noto Sans Arabic', sans-serif;
-  --font-heading: 'Inter', sans-serif;
+  --font-sans: "Inter", "Noto Sans Arabic", sans-serif;
+  --font-heading: "Inter", sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -88,40 +104,6 @@
   text-rendering: optimizeLegibility;
 }
 
-.dark {
-  --background: oklch(0.145 0.008 326);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.212 0.019 322.12);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.212 0.019 322.12);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.432 0.232 292.759);
-  --primary-foreground: oklch(0.969 0.016 293.756);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.263 0.024 320.12);
-  --muted-foreground: oklch(0.711 0.019 323.02);
-  --accent: oklch(0.263 0.024 320.12);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.542 0.034 322.5);
-  --chart-1: oklch(0.865 0.012 325.68);
-  --chart-2: oklch(0.542 0.034 322.5);
-  --chart-3: oklch(0.435 0.029 321.78);
-  --chart-4: oklch(0.364 0.029 323.89);
-  --chart-5: oklch(0.263 0.024 320.12);
-  --sidebar: oklch(0.212 0.019 322.12);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.606 0.25 292.717);
-  --sidebar-primary-foreground: oklch(0.969 0.016 293.756);
-  --sidebar-accent: oklch(0.263 0.024 320.12);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.542 0.034 322.5);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -150,7 +132,7 @@
   }
 
   button:not(:disabled),
-  [role='button']:not(:disabled) {
+  [role="button"]:not(:disabled) {
     cursor: pointer;
   }
 }

@@ -85,6 +85,7 @@
   },
   "targetDefaults": {
     "@nx/esbuild:esbuild": {
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"],
       "options": {
         "outputPath": "{projectRoot}/dist",
         "main": "{projectRoot}/src/index.ts",
@@ -121,6 +122,7 @@
       "inputs": ["production", "^production"]
     },
     "build": {
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"],
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
     },
@@ -139,7 +141,11 @@
       ]
     },
     "dev": {
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"],
       "dependsOn": ["^build"]
+    },
+    "serve": {
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"]
     },
     "test": {
       "executor": "nx:run-commands",

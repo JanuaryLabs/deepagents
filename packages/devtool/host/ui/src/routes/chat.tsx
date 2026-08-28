@@ -50,18 +50,14 @@ function ChatSessionBoundary({
 }) {
   const [initialSessionId] = useState(sessionId);
   const { discovery, discoveryPending } = useRuntimeData();
-  const api = discovery?.capabilities.chat?.href;
+  const api = discovery?.capabilities.chat.href;
   const session = useSessionMessages(api, initialSessionId);
 
   if (discoveryPending || (initialSessionId && session.isPending)) {
     return <ChatStatus>Loading chat…</ChatStatus>;
   }
   if (!api) {
-    return (
-      <ChatStatus>
-        Configure the DevTool runtime URL to start an HTTP chat.
-      </ChatStatus>
-    );
+    return <ChatStatus>Development runtime unavailable.</ChatStatus>;
   }
   if (session.isError) {
     return <ChatStatus>Unable to load this conversation.</ChatStatus>;
@@ -208,14 +204,16 @@ function ChatSubmitButton() {
     );
   }
   return (
-    <Composer.Submit asChild>
-      <SubmitButton
-        className="ml-auto"
-        type="button"
-        variant="send"
-        disabled={!hasDraft}
-      />
-    </Composer.Submit>
+    <Composer.Submit
+      render={
+        <SubmitButton
+          className="ml-auto"
+          type="button"
+          variant="send"
+          disabled={!hasDraft}
+        />
+      }
+    />
   );
 }
 
