@@ -8,7 +8,7 @@ import {
   type ComposerRootProps,
   type ComposerToolbarProps,
   useComposer,
-} from '@deepagents/chat-input/browser';
+} from '@deepagents/react-input/browser';
 import { cn } from '@deepagents/react-shadcn';
 
 import { useAgentMeta } from '../chat/agent-context.tsx';

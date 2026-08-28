@@ -1,7 +1,7 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     "outDir": "dist",
     "types": [
       "node",
@@ -26,11 +26,5 @@
     "eslint.config.mjs"
   ],
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
-  "references": [
-    { "path": "../elements/tsconfig.lib.json" },
-    { "path": "../formatters/tsconfig.lib.json" },
-    { "path": "../shadcn/tsconfig.lib.json" },
-    { "path": "../input/tsconfig.lib.json" },
-    { "path": "../../context/tsconfig.lib.json" }
-  ]
+  "references": [{ "path": "../shadcn/tsconfig.lib.json" }]
 }

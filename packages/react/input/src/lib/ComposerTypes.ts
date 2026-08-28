@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 export type TokenKind =
   'slash-command' | 'mention' | 'image' | 'paste' | 'link' | 'rich-link';
 
@@ -99,6 +101,7 @@ export type ComposerItem = {
   label: string;
   detail: string;
   atomic: boolean;
+  icon?: ReactNode;
   payload?: unknown;
   expandsTo?: string;
   persistsAs?: string;

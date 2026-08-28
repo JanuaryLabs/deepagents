@@ -1,4 +1,4 @@
-import { useRender } from '@base-ui/react/use-render';
+import { Button } from '@base-ui/react/button';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
 import {
@@ -14,6 +14,8 @@ import {
   useState,
 } from 'react';
 
+import { cn } from '@deepagents/react-shadcn';
+
 import {
   type ComposerPreparedPayload,
   createComposerDraftSource,
@@ -28,6 +30,7 @@ import {
   shouldNavigateHistory,
   unknownSlashCommand,
 } from './ComposerCore.ts';
+import { readStoredDraft, writeStoredDraft } from './ComposerDraft.ts';
 import {
   ComposerCommand,
   ComposerMention,
@@ -50,7 +53,6 @@ import type {
   ComposerSubmission,
   ComposerSuggestion,
 } from './ComposerTypes.ts';
-import { cn } from './cn.ts';
 import {
   type ComposerTiptapKillBuffer,
   activeEditorToken,
@@ -82,6 +84,7 @@ import {
 
 export type ComposerRootProps = {
   initialDraft?: ComposerInitialDraft;
+  draftKey?: string;
   disabled?: boolean;
   isTaskRunning?: boolean;
   queueSubmissions?: boolean;
@@ -94,7 +97,7 @@ export type ComposerRootProps = {
   onSubmit?: (
     event: ComposerSubmission,
     context: ComposerSubmitContext,
-  ) => void;
+  ) => void | Promise<unknown>;
   onStateChange?: (
     state: ComposerState,
     preparedPayload: ComposerPreparedPayload,
@@ -123,7 +126,7 @@ export type ComposerShortcutsProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
 
-type ComposerActionTriggerProps = useRender.ComponentProps<'button'>;
+type ComposerActionTriggerProps = Button.Props;
 
 export type ComposerAttachLocalImageProps = ComposerActionTriggerProps & {
   path?: string;
@@ -230,8 +233,21 @@ export function useComposer(componentName = 'useComposer'): ComposerContextApi {
   };
 }
 
-function ComposerRoot({
-  initialDraft,
+function ComposerRoot(props: ComposerRootProps) {
+  return <ComposerRootInner key={props.draftKey ?? ''} {...props} />;
+}
+
+function isThenable(value: unknown): value is Promise<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+function ComposerRootInner({
+  initialDraft: providedInitialDraft,
+  draftKey,
   disabled = false,
   isTaskRunning = false,
   queueSubmissions = false,
@@ -271,13 +287,19 @@ function ComposerRoot({
   const mentionTriggersRef = useRef(mentionTriggers);
   mentionTriggersRef.current = mentionTriggers;
 
-  const initialRemoteImagesRef = useRef(
-    initialDraft?.remoteImages ??
-      (initialDraft?.remoteImageUrls ?? []).map((url, index) => ({
-        id: stableId('remote-image', url, index),
-        url,
-      })),
-  );
+  const [initialDraft] = useState(() => {
+    if (providedInitialDraft) {
+      return providedInitialDraft;
+    }
+    if (draftKey === undefined) {
+      return undefined;
+    }
+    const source = readStoredDraft(draftKey);
+    return source
+      ? createDraftFromSource({ source, slashCommands, mentionCandidates })
+      : undefined;
+  });
+  const initialRemoteImagesRef = useRef(initialDraft?.remoteImages ?? []);
   const initialContentRef = useRef(
     contentFromStateOrText({
       state: initialDraft,
@@ -286,6 +308,15 @@ function ComposerRoot({
       triggers,
     }),
   );
+  const pendingSendsRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [remoteImages, setRemoteImages] = useState<ComposerRemoteImage[]>(
     initialRemoteImagesRef.current,
   );
@@ -438,7 +469,20 @@ function ComposerRoot({
 
   useEffect(() => {
     onStateChangeRef.current?.(composer, preparedPayload);
-  }, [composer, preparedPayload]);
+    if (draftKey === undefined) {
+      return;
+    }
+    if (preparedPayload) {
+      writeStoredDraft(
+        draftKey,
+        createComposerDraftSource(composer, preparedPayload.persistedPrompt),
+      );
+    } else if (pendingSendsRef.current === 0) {
+      // Submit clears the editor before the send settles; keep the stored
+      // draft until the outcome is known so a mid-flight reload loses nothing.
+      writeStoredDraft(draftKey, null);
+    }
+  }, [composer, draftKey, preparedPayload]);
 
   useEffect(() => {
     setComposer((current) =>
@@ -1034,14 +1078,26 @@ function ComposerRoot({
       setActivePopup(null);
       return;
     }
-    const prepared = prepareComposerPayload(
+    const preparedPayload = prepareComposerPayload(
       current,
       slashCommands,
       commandTriggers,
     );
-    if (!prepared) {
-      return;
-    }
+    const prepared =
+      preparedPayload ??
+      ({
+        mode: 'submitted',
+        prompt: '',
+        persistedPrompt: '',
+        historyPrompt: '',
+        action: 'Plain',
+        command: undefined,
+        args: undefined,
+        items: [],
+        elements: [],
+        payloadElements: [],
+        mentionBindings: [],
+      } satisfies NonNullable<ComposerPreparedPayload>);
     const lengthError = expandedTextLimitError(prepared, maxExpandedTextChars);
     if (lengthError) {
       setComposer((state) => ({
@@ -1068,13 +1124,35 @@ function ComposerRoot({
     if (rejectInvalidSubmission(event)) {
       return;
     }
-    onSubmitRef.current?.(event, {
-      editableSource: createComposerDraftSource(
-        current,
-        prepared.persistedPrompt,
-      ),
-    });
-    const nextHistory = pushComposerHistory(current, prepared.historyPrompt);
+    const editableSource = createComposerDraftSource(
+      current,
+      prepared.persistedPrompt,
+    );
+    const submitResult = onSubmitRef.current?.(event, { editableSource });
+    if (draftKey !== undefined && isThenable(submitResult)) {
+      pendingSendsRef.current += 1;
+      submitResult
+        .then(() => writeStoredDraft(draftKey, null))
+        .catch(() => {
+          writeStoredDraft(draftKey, editableSource);
+          if (mountedRef.current) {
+            restoreDraft(
+              createDraftFromSource({
+                source: editableSource,
+                slashCommands,
+                mentionCandidates,
+              }),
+              null,
+            );
+          }
+        })
+        .finally(() => {
+          pendingSendsRef.current -= 1;
+        });
+    }
+    const nextHistory = preparedPayload
+      ? pushComposerHistory(current, prepared.historyPrompt)
+      : current.history;
     historyCursorRef.current = null;
     remoteImagesRef.current = [];
     setRemoteImages([]);
@@ -1136,7 +1214,7 @@ function ComposerRoot({
       historyCursor === 0 &&
       pendingHistoryDraftRef.current
     ) {
-      restoreHistoryDraft(pendingHistoryDraftRef.current, null);
+      restoreDraft(pendingHistoryDraftRef.current, null);
       pendingHistoryDraftRef.current = null;
       return;
     }
@@ -1164,10 +1242,10 @@ function ComposerRoot({
       slashCommands,
       mentionCandidates,
     });
-    restoreHistoryDraft(draft, historyCursor);
+    restoreDraft(draft, historyCursor);
   }
 
-  function restoreHistoryDraft(
+  function restoreDraft(
     draft: ComposerInitialDraft,
     historyCursor: number | null,
   ) {
@@ -1366,6 +1444,12 @@ function ComposerRoot({
     : handleRemoteImageKeyDown;
 
   function onEditorKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (
+      !(event.target instanceof Element) ||
+      !event.target.closest('[data-slot="composer-editor"]')
+    ) {
+      return;
+    }
     if (disabled) {
       event.preventDefault();
       return;
@@ -1769,49 +1853,42 @@ function ComposerPopup({ className, ...props }: ComposerPopupProps) {
   const {
     activePopup,
     suggestions,
-    commandTriggers,
     actions: { acceptSuggestion },
   } = useComposerContext('Composer.Popup');
   if (!activePopup) {
     return null;
   }
 
+  // A single icon reserves the slot for every row, so tokens keep one left edge
+  // even when a host gives icons to only part of its registry.
+  const withIcons = suggestions.some((suggestion) => suggestion.icon);
+
   return (
     <div
       className={cn(
-        'border-border bg-popover absolute right-3 bottom-[calc(100%-0.5rem)] left-3 z-10 rounded-md border shadow-sm',
+        'border-border bg-popover absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-10 rounded-xl border shadow-lg',
         className,
       )}
       {...props}
     >
       <div
-        className="max-h-[260px] overflow-auto p-1"
+        className="flex max-h-72 flex-col gap-1 overflow-y-auto p-1"
         role="listbox"
         aria-label="Suggestions"
       >
-        {suggestions.map((suggestion, index) =>
-          !suggestion.atomic ? (
-            <PopupRow
-              key={`item:${suggestion.id}`}
-              selected={index === activePopup.selectedIndex}
-              title={`${suggestion.trigger}${suggestion.value}`}
-              meta={suggestion.supportsArgs ? 'args' : 'item'}
-              description={suggestion.detail}
-              onMouseDown={() => acceptSuggestion({ index })}
-            />
-          ) : (
-            <PopupRow
-              key={`item:${suggestion.id}`}
-              selected={index === activePopup.selectedIndex}
-              title={itemToken(suggestion)}
-              meta={suggestion.detail}
-              description={suggestion.label}
-              onMouseDown={() => acceptSuggestion({ index })}
-            />
-          ),
-        )}
+        {suggestions.map((suggestion, index) => (
+          <PopupRow
+            key={`item:${suggestion.id}`}
+            selected={index === activePopup.selectedIndex}
+            icon={withIcons ? suggestion.icon : null}
+            token={itemToken(suggestion)}
+            takesArgs={suggestion.supportsArgs === true}
+            description={suggestion.detail}
+            onMouseDown={() => acceptSuggestion({ index })}
+          />
+        ))}
         {suggestions.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-3 text-xs">
+          <div className="text-muted-foreground px-2 py-1 text-[13px] leading-4">
             no matches
           </div>
         ) : null}
@@ -1822,14 +1899,16 @@ function ComposerPopup({ className, ...props }: ComposerPopupProps) {
 
 function PopupRow({
   selected,
-  title,
-  meta,
+  icon,
+  token,
+  takesArgs,
   description,
   onMouseDown,
 }: {
   selected: boolean;
-  title: string;
-  meta: string;
+  icon: ReactNode;
+  token: string;
+  takesArgs: boolean;
   description: string;
   onMouseDown: () => void;
 }) {
@@ -1848,19 +1927,26 @@ function PopupRow({
       role="option"
       aria-selected={selected}
       className={cn(
-        'grid w-full grid-cols-[minmax(140px,0.42fr)_72px_minmax(0,1fr)] items-center gap-3 rounded-sm px-2 py-2 text-left text-xs',
+        'flex w-full items-center gap-2 rounded-md px-2 py-1 text-start text-[13px] leading-4 [&_svg]:size-4 [&_svg]:shrink-0',
         selected
-          ? 'bg-primary text-primary-foreground'
-          : 'text-foreground hover:bg-muted',
+          ? 'bg-accent text-foreground'
+          : 'text-foreground/80 hover:bg-accent/60',
       )}
       onMouseDown={(event) => {
         event.preventDefault();
         onMouseDown();
       }}
     >
-      <span className="truncate font-medium">{title}</span>
-      <span className="truncate opacity-70">{meta}</span>
-      <span className="truncate opacity-70">{description}</span>
+      {icon === null ? null : (
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          {icon}
+        </span>
+      )}
+      <span className="truncate">{token}</span>
+      {takesArgs ? (
+        <span className="text-muted-foreground shrink-0">args</span>
+      ) : null}
+      <span className="text-muted-foreground truncate">{description}</span>
     </button>
   );
 }
@@ -2030,16 +2116,12 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
 }
 
 function ComposerAttachLocalImage({
-  render,
   path,
-  onClick,
   ...props
 }: ComposerAttachLocalImageProps) {
   const { actions } = useComposerContext('Composer.AttachLocalImage');
   return (
     <ComposerTiptapActionTrigger
-      render={render}
-      onClick={onClick}
       action={() => actions.attachLocalImage(path)}
       {...props}
     />
@@ -2047,33 +2129,22 @@ function ComposerAttachLocalImage({
 }
 
 function ComposerAddRemoteImage({
-  render,
   url,
-  onClick,
   ...props
 }: ComposerAddRemoteImageProps) {
   const { actions } = useComposerContext('Composer.AddRemoteImage');
   return (
     <ComposerTiptapActionTrigger
-      render={render}
-      onClick={onClick}
       action={() => actions.addRemoteImage(url)}
       {...props}
     />
   );
 }
 
-function ComposerInsertPaste({
-  render,
-  content,
-  onClick,
-  ...props
-}: ComposerInsertPasteProps) {
+function ComposerInsertPaste({ content, ...props }: ComposerInsertPasteProps) {
   const { actions } = useComposerContext('Composer.InsertPaste');
   return (
     <ComposerTiptapActionTrigger
-      render={render}
-      onClick={onClick}
       action={() => actions.insertPaste(content)}
       {...props}
     />
@@ -2081,81 +2152,51 @@ function ComposerInsertPaste({
 }
 
 function ComposerInsertRichLink({
-  render,
   href,
   label,
   metadata,
-  onClick,
   ...props
 }: ComposerInsertRichLinkProps) {
   const { actions } = useComposerContext('Composer.InsertRichLink');
   return (
     <ComposerTiptapActionTrigger
-      render={render}
-      onClick={onClick}
       action={() => actions.insertRichLink(href, label, metadata)}
       {...props}
     />
   );
 }
 
-function ComposerSubmit({ render, onClick, ...props }: ComposerSubmitProps) {
+function ComposerSubmit(props: ComposerSubmitProps) {
   const { actions } = useComposerContext('Composer.Submit');
-  return (
-    <ComposerTiptapActionTrigger
-      render={render}
-      onClick={onClick}
-      action={actions.submit}
-      {...props}
-    />
-  );
+  return <ComposerTiptapActionTrigger action={actions.submit} {...props} />;
 }
 
-function ComposerReset({ render, onClick, ...props }: ComposerResetProps) {
+function ComposerReset(props: ComposerResetProps) {
   const { actions } = useComposerContext('Composer.Reset');
-  return (
-    <ComposerTiptapActionTrigger
-      render={render}
-      onClick={onClick}
-      action={actions.reset}
-      {...props}
-    />
-  );
+  return <ComposerTiptapActionTrigger action={actions.reset} {...props} />;
 }
 
 function ComposerTiptapActionTrigger({
-  render,
   action,
   onClick,
   disabled,
-  type,
   ...props
 }: ComposerActionTriggerProps & { action: () => void }) {
   const { disabled: rootDisabled } = useComposerContext(
     'Composer.ActionTrigger',
   );
-  const actionDisabled = rootDisabled || Boolean(disabled);
-  return useRender({
-    defaultTagName: 'button',
-    render,
-    props: {
-      ...props,
-      'aria-disabled': render && actionDisabled ? true : props['aria-disabled'],
-      'data-disabled': actionDisabled ? '' : undefined,
-      disabled: render ? undefined : actionDisabled,
-      type: render ? undefined : (type ?? 'button'),
-      onClick: (event: MouseEvent<HTMLButtonElement>) => {
-        if (actionDisabled) {
-          event.preventDefault();
-          return;
-        }
+  return (
+    <Button
+      {...props}
+      disabled={rootDisabled || disabled}
+      onClick={(event) => {
         onClick?.(event);
         if (!event.defaultPrevented) {
           action();
         }
-      },
-    },
-  });
+      }}
+    />
+  );
 }
 
 function isInsertNewlineShortcut(

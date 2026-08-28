@@ -10,7 +10,7 @@ export default [
         {
           ignoredFiles: [
             '{projectRoot}/eslint.config.{js,cjs,mjs}',
-            '{projectRoot}/esbuild.config.{js,ts,mjs,mts}',
+            '{projectRoot}/vite.config.{js,ts,mjs,mts}',
           ],
         },
       ],

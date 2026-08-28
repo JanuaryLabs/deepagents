@@ -2,7 +2,7 @@ import type { UIMessage } from 'ai';
 import { useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
-import { Composer, useComposer } from '@deepagents/chat-input/browser';
+import { Composer, useComposer } from '@deepagents/react-input/browser';
 import {
   AgentHeader,
   AgentProvider,

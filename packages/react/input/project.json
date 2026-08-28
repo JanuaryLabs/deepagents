@@ -1,7 +1,7 @@
 {
-  "name": "@deepagents/react-shadcn",
+  "name": "@deepagents/react-input",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/react/shadcn/src",
+  "sourceRoot": "packages/react/input/src",
   "projectType": "library",
   "tags": ["scope:public"]
 }

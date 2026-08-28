@@ -1,16 +1,16 @@
-@import "@deepagents/chat-input/styles.css";
+@import "@deepagents/react-input/styles.css";
 @import "@deepagents/devtool-traces/styles.css";
 @import "streamdown/styles.css";
 @import "tailwindcss";
 
 /* nx-tailwind-sources:start */
 @source "../../../../agent";
-@source "../../../../chat-input";
 @source "../../../../context";
 @source "../../../../experimental";
 @source "../../../../react/elements";
 @source "../../../../react/formatters";
 @source "../../../../react/genai";
+@source "../../../../react/input";
 @source "../../../../react/shadcn";
 @source "../../../../test";
 @source "../../../history";

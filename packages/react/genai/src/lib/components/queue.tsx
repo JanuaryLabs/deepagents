@@ -1,7 +1,7 @@
 import { ListPlus, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { PersistedPromptText } from '@deepagents/chat-input/browser';
+import { PersistedPromptText } from '@deepagents/react-input/browser';
 import { cn } from '@deepagents/react-shadcn';
 
 function MessageQueueRoot({

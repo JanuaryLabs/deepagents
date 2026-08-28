@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
@@ -17,6 +18,7 @@ export default defineConfig(() => ({
       tsconfigPath: path.join(import.meta.dirname, 'tsconfig.lib.json'),
     }),
   ],
+  oxc: { jsx: { development: false } },
   assetsInclude: ['**/*.css'],
   build: {
     outDir: './dist',
@@ -41,5 +43,13 @@ export default defineConfig(() => ({
         ),
       output: { assetFileNames: 'assets/[name][extname]' },
     },
+  },
+  test: {
+    name: '@deepagents/react-shadcn',
+    watch: false,
+    include: ['tests/**/*.{test,spec}.{js,mjs,ts,tsx}'],
+    reporters: ['default', 'junit'],
+    outputFile: { junit: './test-results/junit.xml' },
+    coverage: { reportsDirectory: './test-results' },
   },
 }));

@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.7",
-    "@deepagents/chat-input": "6.2.0",
+    "@deepagents/react-input": "6.2.0",
     "@deepagents/context": "6.2.0",
     "@deepagents/devtool-history": "6.2.0",
     "@deepagents/devtool-traces": "6.2.0",

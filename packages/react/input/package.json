@@ -1,11 +1,11 @@
 {
-  "name": "@deepagents/chat-input",
+  "name": "@deepagents/react-input",
   "version": "6.2.0",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/JanuaryLabs/deepagents",
-    "directory": "packages/chat-input"
+    "directory": "packages/react/input"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -24,45 +24,57 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./browser": {
+      "development": "./src/browser.ts",
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
     "./styles.css": {
       "development": "./src/styles.css",
-      "import": "./dist/styles.css",
-      "default": "./dist/styles.css"
+      "import": "./src/styles.css",
+      "default": "./src/styles.css"
     }
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
+    "@deepagents/react-shadcn": "6.2.0",
     "@tiptap/core": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
     "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
-    "clsx": "^2.1.1",
     "lodash-es": "^4.17.21",
-    "lucide-react": "^0.575.0",
-    "tailwind-merge": "^3.6.0"
+    "lucide-react": "^1.33.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"
   },
   "devDependencies": {
+    "@rolldown/plugin-babel": "^0.2.3",
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "esbuild": "^0.28.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "babel-plugin-react-compiler": "^1.0.0",
     "happy-dom": "20.10.6",
-    "typescript": "^6.0.3"
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "typescript": "6.0.3",
+    "vite": "8.1.5",
+    "vite-plugin-dts": "~4.5.0",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -8,7 +8,6 @@ import { findSlashCommandByName } from './ComposerSlashCommands.ts';
 import {
   itemToken,
   startsWithTrigger,
-  tokenScanPattern,
   triggerAlternation,
 } from './ComposerTriggers.ts';
 import type {
@@ -666,10 +665,6 @@ export function selectedRemoteImageIndex(
   return index === -1 ? null : index;
 }
 
-export function normalizePastedText(text: string) {
-  return text.replace(/\r\n?/g, '\n');
-}
-
 export function characterCount(text: string) {
   return Array.from(text).length;
 }
@@ -725,21 +720,6 @@ export function downloadUrlItem(downloadUrl: string) {
     return '';
   }
   return line.split(':').slice(2).join(':').trim();
-}
-
-function nextPastePlaceholder(
-  pastes: ComposerPendingPaste[],
-  charCount: number,
-) {
-  const base = `[Pasted Content ${charCount} chars]`;
-  if (!pastes.some((paste) => paste.placeholder === base)) {
-    return base;
-  }
-  let suffix = 2;
-  while (pastes.some((paste) => paste.placeholder === `${base} #${suffix}`)) {
-    suffix += 1;
-  }
-  return `${base} #${suffix}`;
 }
 
 export function createDraftFromState(
@@ -901,7 +881,11 @@ function decodePersistedPromptText(
       protectedRanges.push({ start, end: decodedText.length });
       continue;
     }
-    if (token.kind !== 'link' && token.kind !== 'skill-link') {
+    if (
+      token.kind !== 'link' &&
+      token.kind !== 'skill-link' &&
+      token.kind !== 'mention'
+    ) {
       decodedText += token.source;
       continue;
     }
@@ -1115,249 +1099,6 @@ function persistedTextReplacement(
   }
 
   return null;
-}
-
-export function createDraftFromExternalEdit({
-  draft,
-  text,
-  slashCommands = [],
-  commandTriggers = [],
-}: {
-  draft: ComposerInitialDraft;
-  text: string;
-  slashCommands?: ComposerItemEntry[];
-  commandTriggers?: string[];
-}): ComposerInitialDraft {
-  const remoteImages = (draft.remoteImages ?? []).map((image) => ({
-    ...image,
-  }));
-  const normalizedText = normalizePastedText(text);
-  const preservedLocalImages = preservedImagesForExternalEdit(
-    normalizedText,
-    draft.localImages ?? [],
-    remoteImages.length,
-  );
-  const nextText = replaceExternalEditImageLabels(
-    normalizedText,
-    preservedLocalImages,
-  );
-  const imageElements = preservedLocalImages.map(({ image, label, start }) => ({
-    id: stableId('image', label, start),
-    kind: 'image' as const,
-    label,
-    range: { start, end: start + label.length },
-    detail: image.path,
-  }));
-  const elements = [
-    ...(draft.elements ?? []).filter(
-      (element) => element.kind !== 'image' && element.kind !== 'paste',
-    ),
-    ...imageElements,
-  ];
-  const state = createComposerState({
-    initialDraft: {
-      ...draft,
-      text: nextText,
-      elements,
-      localImages: preservedLocalImages.map(({ image, label, start }) => ({
-        ...image,
-        id: stableId('image', label, start),
-        placeholder: label,
-      })),
-      remoteImages,
-      pendingPastes: [],
-    },
-    slashCommands,
-  });
-  const synced = syncTextElements(
-    {
-      ...state,
-      cursor: nextText.length,
-      pendingPastes: [],
-    },
-    slashCommands,
-    commandTriggers,
-  );
-
-  return createDraftFromState(synced);
-}
-
-type ExternalEditImage = {
-  image: ComposerLocalImage;
-  oldLabel: string;
-  label: string;
-  start: number;
-};
-
-function preservedImagesForExternalEdit(
-  text: string,
-  localImages: ComposerLocalImage[],
-  remoteCount: number,
-) {
-  const imageOccurrences = localImages
-    .map((image, index) => {
-      const start = text.indexOf(image.placeholder);
-      if (start === -1) {
-        return null;
-      }
-      return {
-        image,
-        oldLabel: image.placeholder,
-        start,
-        originalIndex: index,
-      };
-    })
-    .filter((image): image is NonNullable<typeof image> => Boolean(image))
-    .sort(
-      (left, right) =>
-        left.start - right.start || left.originalIndex - right.originalIndex,
-    );
-
-  return imageOccurrences.map((item, index): ExternalEditImage => {
-    const label = `[Image #${remoteCount + index + 1}]`;
-    return {
-      ...item,
-      label,
-    };
-  });
-}
-
-function replaceExternalEditImageLabels(
-  text: string,
-  images: ExternalEditImage[],
-) {
-  let nextText = text;
-  let delta = 0;
-  for (const image of images) {
-    const start = image.start + delta;
-    const range = { start, end: start + image.oldLabel.length };
-    nextText = replaceTextRange(nextText, range, image.label);
-    image.start = start;
-    delta += image.label.length - image.oldLabel.length;
-  }
-  return nextText;
-}
-
-export function mergeComposerDraftsForRestore(
-  drafts: ComposerInitialDraft[],
-): ComposerInitialDraft {
-  const liveDrafts = drafts.filter(hasDraftContent);
-  const merged: Required<
-    Pick<
-      ComposerInitialDraft,
-      | 'text'
-      | 'elements'
-      | 'mentionBindings'
-      | 'localImages'
-      | 'remoteImages'
-      | 'pendingPastes'
-    >
-  > = {
-    text: '',
-    elements: [],
-    mentionBindings: [],
-    localImages: [],
-    remoteImages: liveDrafts
-      .flatMap((draft) => draft.remoteImages ?? [])
-      .map((image, index) => ({
-        ...image,
-        id: stableId('remote-image', image.url, index),
-      })),
-    pendingPastes: [],
-  };
-
-  for (const draft of liveDrafts) {
-    let nextText = draft.text ?? '';
-    const separator = merged.text.length > 0 ? '\n' : '';
-    const offset = merged.text.length + separator.length;
-    let delta = 0;
-
-    const idMap = new Map<string, string>();
-    for (const element of sortElements(draft.elements ?? [])) {
-      const localRange = {
-        start: element.range.start + delta,
-        end: element.range.end + delta,
-      };
-      const localImage =
-        element.kind === 'image'
-          ? draft.localImages?.find(
-              (image) =>
-                image.id === element.id || image.placeholder === element.label,
-            )
-          : undefined;
-      const pendingPaste =
-        element.kind === 'paste'
-          ? draft.pendingPastes?.find(
-              (paste) =>
-                paste.id === element.id || paste.placeholder === element.label,
-            )
-          : undefined;
-      const label = localImage
-        ? `[Image #${merged.remoteImages.length + merged.localImages.length + 1}]`
-        : pendingPaste
-          ? nextPastePlaceholder(
-              merged.pendingPastes,
-              characterCount(pendingPaste.content),
-            )
-          : element.label;
-      if (label !== element.label) {
-        nextText = replaceTextRange(nextText, localRange, label);
-      }
-      const range = {
-        start: localRange.start + offset,
-        end: localRange.start + label.length + offset,
-      };
-      const id = stableId(element.kind, label, range.start);
-      idMap.set(element.id, id);
-      merged.elements.push({
-        ...element,
-        id,
-        label,
-        range,
-      });
-      if (localImage) {
-        merged.localImages.push({
-          ...localImage,
-          id,
-          placeholder: label,
-        });
-      }
-      if (pendingPaste) {
-        merged.pendingPastes.push({
-          ...pendingPaste,
-          id,
-          placeholder: label,
-        });
-      }
-      delta += label.length - (element.range.end - element.range.start);
-    }
-
-    for (const binding of draft.mentionBindings ?? []) {
-      merged.mentionBindings.push({
-        ...binding,
-        id: idMap.get(binding.id) ?? binding.id,
-      });
-    }
-    merged.text += `${separator}${nextText}`;
-  }
-
-  return {
-    text: merged.text,
-    elements: sortElements(merged.elements),
-    mentionBindings: merged.mentionBindings,
-    localImages: merged.localImages,
-    remoteImages: merged.remoteImages,
-    pendingPastes: merged.pendingPastes,
-  };
-}
-
-function hasDraftContent(draft: ComposerInitialDraft) {
-  return (
-    (draft.text?.trim().length ?? 0) > 0 ||
-    (draft.localImages?.length ?? 0) > 0 ||
-    (draft.remoteImages?.length ?? 0) > 0 ||
-    (draft.pendingPastes?.length ?? 0) > 0
-  );
 }
 
 function cloneTextElements(elements: ComposerTextElement[]) {

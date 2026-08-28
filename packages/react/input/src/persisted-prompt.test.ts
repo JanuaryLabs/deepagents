@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import {
+  serializeMentionPromptLink,
   serializePersistedPromptLink,
   serializeSkillPromptLink,
   tokenizePersistedPrompt,
-} from '@deepagents/chat-input';
+} from '@deepagents/react-input';
 
 describe('persisted prompt links', () => {
   it('round-trips escaped labels and destinations', () => {
@@ -106,5 +107,21 @@ describe('persisted skill links', () => {
         .map((token) => token.name),
       ['review'],
     );
+  });
+
+  it('tokenizes a serialized mention link back to a mention token', () => {
+    const source = serializeMentionPromptLink('Paul Graham');
+    const tokens = tokenizePersistedPrompt(`ask ${source} today`);
+
+    assert.deepEqual(
+      tokens.map((token) => token.kind),
+      ['text', 'mention', 'text'],
+    );
+    const mention = tokens[1];
+    assert.equal(mention.kind, 'mention');
+    if (mention.kind !== 'mention') return;
+    assert.equal(mention.name, 'Paul Graham');
+    assert.equal(mention.label, '@Paul Graham');
+    assert.equal(mention.source, source);
   });
 });

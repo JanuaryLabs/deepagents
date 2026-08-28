@@ -1,7 +1,7 @@
 import type { UIMessage, UseChatHelpers } from '@ai-sdk/react';
 import type { ChatStatus, UIDataTypes, UITools } from 'ai';
 
-import type { ComposerDraftSource } from '@deepagents/chat-input/browser';
+import type { ComposerDraftSource } from '@deepagents/react-input/browser';
 
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
 

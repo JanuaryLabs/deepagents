@@ -1,4 +1,4 @@
-import escapeRegExp from 'lodash-es/escapeRegExp.js';
+import { escapeRegExp } from 'lodash-es';
 
 export function triggerAlternation(triggers: string[]) {
   return triggers.map(escapeRegExp).join('|');

@@ -2,10 +2,10 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "outDir": "dist/spec",
-    "tsBuildInfoFile": "dist/tsconfig.spec.tsbuildinfo",
-    "types": ["node"]
+    "outDir": "out-tsc/vitest",
+    "tsBuildInfoFile": "out-tsc/vitest/tsconfig.spec.tsbuildinfo",
+    "types": ["node", "vite/client", "vitest"]
   },
-  "include": ["src/**/*.test.ts", "../../../global.d.ts"],
+  "include": ["vite.config.ts", "src/**/*.test.ts", "../../../global.d.ts"],
   "references": [{ "path": "./tsconfig.lib.json" }]
 }

@@ -5,11 +5,10 @@ import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
-import { configDefaults } from 'vitest/config';
 
 export default defineConfig(() => ({
   root: import.meta.dirname,
-  cacheDir: '../../../node_modules/.vite/packages/react-genai',
+  cacheDir: '../../../node_modules/.vite/packages/react/input',
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),
@@ -30,9 +29,11 @@ export default defineConfig(() => ({
       transformMixedEsModules: true,
     },
     lib: {
-      entry: 'src/index.ts',
-      name: '@deepagents/react-genai',
-      fileName: 'index',
+      entry: {
+        index: 'src/index.ts',
+        browser: 'src/browser.ts',
+      },
+      name: '@deepagents/react-input',
       formats: ['es' as const],
     },
     rolldownOptions: {
@@ -50,18 +51,14 @@ export default defineConfig(() => ({
     },
   },
   test: {
-    name: '@deepagents/react-genai',
+    name: '@deepagents/react-input',
     watch: false,
     globals: true,
     environment: 'happy-dom',
     pool: 'forks',
     execArgv: ['--no-experimental-webstorage'],
-    setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
-    exclude: [
-      ...configDefaults.exclude,
-      'src/**/*.browser.{test,spec}.{ts,tsx}',
-    ],
+    setupFiles: ['./src/test-setup.ts'],
     reporters: ['default', 'junit'],
     outputFile: { junit: './test-results/junit.xml' },
     coverage: { reportsDirectory: './test-results' },

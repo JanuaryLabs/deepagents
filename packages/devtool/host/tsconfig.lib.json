@@ -27,7 +27,7 @@
       "path": "../../context/tsconfig.lib.json"
     },
     {
-      "path": "../../chat-input/tsconfig.lib.json"
+      "path": "../../react/input/tsconfig.lib.json"
     },
     {
       "path": "../../experimental/tsconfig.lib.json"

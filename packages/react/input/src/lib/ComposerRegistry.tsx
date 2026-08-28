@@ -23,6 +23,7 @@ export type ComposerMentionProps = {
   value: string;
   label: string;
   detail: string;
+  icon?: ReactNode;
   payload?: unknown;
   persistsAs?: string;
   visibility?: ComposerVisibility;
@@ -105,11 +106,19 @@ export function collectComposerRegistry(children: ReactNode): ComposerRegistry {
 
 export function composerRegistrySignature(registry: ComposerRegistry) {
   return JSON.stringify([
-    registry.slashCommands,
-    registry.mentionCandidates,
+    registry.slashCommands.map(withoutIcon),
+    registry.mentionCandidates.map(withoutIcon),
     registry.commandTriggers,
     registry.mentionTriggers,
   ]);
+}
+
+// An icon is a React element: it does not survive JSON.stringify and carries no
+// stable identity to compare, so it stays out of the signature. Nothing about
+// how a suggestion matches, inserts, or submits depends on it.
+function withoutIcon(item: ComposerItemEntry) {
+  const { icon, ...rest } = item;
+  return rest;
 }
 
 type RegistrySink = {
@@ -172,6 +181,7 @@ function toMentionCandidate(
     label: props.label,
     detail: props.detail,
     atomic: true,
+    icon: props.icon,
     payload: props.payload,
     persistsAs: props.persistsAs,
     visibility: props.visibility,

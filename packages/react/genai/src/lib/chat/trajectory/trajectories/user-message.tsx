@@ -1,7 +1,7 @@
 import type { UIMessage } from 'ai';
 import { memo, useMemo, useState } from 'react';
 
-import { PersistedPromptText } from '@deepagents/chat-input/browser';
+import { PersistedPromptText } from '@deepagents/react-input/browser';
 import {
   type UserReminderMetadata,
   stripReminders,

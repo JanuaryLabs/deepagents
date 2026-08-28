@@ -17,7 +17,7 @@
       "path": "../../../react/genai"
     },
     {
-      "path": "../../../chat-input"
+      "path": "../../../react/input"
     },
     {
       "path": "../../history"

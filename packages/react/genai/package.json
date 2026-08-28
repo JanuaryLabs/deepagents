@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.73",
-    "@deepagents/chat-input": "6.2.0",
+    "@deepagents/react-input": "6.2.0",
     "@deepagents/context": "6.2.0",
     "@deepagents/react-elements": "6.2.0",
     "@deepagents/react-formatters": "6.2.0",

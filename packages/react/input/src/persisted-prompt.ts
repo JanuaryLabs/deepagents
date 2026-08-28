@@ -39,13 +39,21 @@ export type PersistedPromptStandaloneSkillToken = PersistedPromptTokenBase & {
   name: string;
 };
 
+export type PersistedPromptMentionToken = PersistedPromptTokenBase & {
+  kind: 'mention';
+  label: string;
+  href: string;
+  name: string;
+};
+
 export type PersistedPromptToken =
   | PersistedPromptTextToken
   | PersistedPromptInlineCodeToken
   | PersistedPromptCodeBlockToken
   | PersistedPromptLinkToken
   | PersistedPromptSkillLinkToken
-  | PersistedPromptStandaloneSkillToken;
+  | PersistedPromptStandaloneSkillToken
+  | PersistedPromptMentionToken;
 
 type PromptLink = {
   label: string;
@@ -57,6 +65,7 @@ type PromptLink = {
 const CODE_PATTERN = /```([^\r\n`]*)\r?\n?([\s\S]*?)```|`([^`\r\n]+)`/g;
 const STANDALONE_SKILL_PATTERN = /\$\[[^\]\r\n]+\]|\$[A-Za-z0-9][\w.-]*/g;
 const SKILL_HREF_PREFIX = 'skill://';
+const MENTION_HREF_PREFIX = 'mention://';
 
 export function serializePersistedPromptLink(label: string, href: string) {
   return `[${escapeLinkPart(label, '[]')}](${escapeLinkPart(href, '()')})`;
@@ -66,6 +75,13 @@ export function serializeSkillPromptLink(name: string, skillId: string) {
   return serializePersistedPromptLink(
     `$${name}`,
     `${SKILL_HREF_PREFIX}${skillId}`,
+  );
+}
+
+export function serializeMentionPromptLink(name: string) {
+  return serializePersistedPromptLink(
+    `@${name}`,
+    `${MENTION_HREF_PREFIX}${name}`,
   );
 }
 
@@ -139,10 +155,27 @@ function promptLinkToken(
   link: PromptLink,
   text: string,
   sourceOffset: number,
-): PersistedPromptLinkToken | PersistedPromptSkillLinkToken {
+):
+  | PersistedPromptLinkToken
+  | PersistedPromptSkillLinkToken
+  | PersistedPromptMentionToken {
   const start = sourceOffset + link.start;
   const end = sourceOffset + link.end;
   const source = text.slice(link.start, link.end);
+  if (link.href.startsWith(MENTION_HREF_PREFIX)) {
+    const name = link.href.slice(MENTION_HREF_PREFIX.length);
+    if (name) {
+      return {
+        kind: 'mention',
+        source,
+        start,
+        end,
+        label: link.label,
+        href: link.href,
+        name,
+      };
+    }
+  }
   if (link.label.startsWith('$') && link.href.startsWith(SKILL_HREF_PREFIX)) {
     const name = link.label.slice(1);
     const skillId = link.href.slice(SKILL_HREF_PREFIX.length);

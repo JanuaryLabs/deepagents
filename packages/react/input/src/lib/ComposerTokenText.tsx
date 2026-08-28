@@ -27,12 +27,14 @@ export function ComposerTokenText({
 }
 
 function tokenSegments(text: string, elements: ComposerTextElement[]) {
-  const ordered = sortElements(elements).filter(
-    (element) =>
-      element.range.start >= 0 &&
-      element.range.end <= text.length &&
-      text.slice(element.range.start, element.range.end) === element.label,
-  );
+  const ordered = elements
+    .toSorted((left, right) => left.range.start - right.range.start)
+    .filter(
+      (element) =>
+        element.range.start >= 0 &&
+        element.range.end <= text.length &&
+        text.slice(element.range.start, element.range.end) === element.label,
+    );
   const segments: Array<{
     text: string;
     start: number;
@@ -63,12 +65,5 @@ function tokenSegments(text: string, elements: ComposerTextElement[]) {
       end: text.length,
     });
   }
-  if (segments.length === 0) {
-    return [{ text: '', start: 0, end: 0 }];
-  }
-  return segments;
-}
-
-function sortElements(elements: ComposerTextElement[]) {
-  return [...elements].sort((a, b) => a.range.start - b.range.start);
+  return segments.length === 0 ? [{ text: '', start: 0, end: 0 }] : segments;
 }

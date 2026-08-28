@@ -33,17 +33,16 @@ const queue = new PgBossTurnQueue(boss, {
 });
 await queue.initialize();
 const streamStore = resources.adopt(
-  new SqliteStreamStore(':memory:'),
+  new SqliteStreamStore('./simple.sqlite'),
   (store) => store.close(),
 );
-const streams = new StreamManager({
-  store: streamStore,
-  changeSource: new PollingChangeSource({ reads: streamStore }),
-});
 const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
 const runtime = new AgentRuntime(declaration, {
   store: new InMemoryContextStore(),
-  streams,
+  streams: new StreamManager({
+    store: streamStore,
+    changeSource: new PollingChangeSource({ reads: streamStore }),
+  }),
   queue,
   mailboxStore,
 });

@@ -67,16 +67,9 @@
     {
       "plugin": "@nx/vitest",
       "options": {
-        "testTargetName": "vite:test"
-      }
-    },
-    {
-      "plugin": "@nx/vitest",
-      "options": {
         "testTargetName": "test",
-        "testMode": "watch"
-      },
-      "include": ["apps/evals-web-runner/frontend/**/*"]
+        "testMode": "run"
+      }
     }
   ],
   "workspaceLayout": {

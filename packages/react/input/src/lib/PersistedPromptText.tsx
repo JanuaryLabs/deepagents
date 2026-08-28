@@ -56,6 +56,17 @@ function renderPromptToken(token: PersistedPromptToken): ReactNode {
           source={token.source}
         />
       );
+    case 'mention':
+      return (
+        <span
+          key={token.start}
+          data-token="mention"
+          data-persisted-source={token.source}
+          className="bg-foreground/10 rounded-sm px-0.5 font-medium"
+        >
+          {token.label}
+        </span>
+      );
     case 'link':
       return /^(?:https?:|mailto:)/.test(token.href) ? (
         <a

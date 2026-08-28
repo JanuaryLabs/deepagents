@@ -1,5 +1,6 @@
-/* Source utility classes from the published JavaScript bundle. */
-@source "../dist/*.js";
+/* nx-tailwind-sources:start */
+@source "../../shadcn";
+/* nx-tailwind-sources:end */
 
 [data-slot="composer"] {
   --composer-line-height: 1.55rem;

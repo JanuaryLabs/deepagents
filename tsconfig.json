@@ -70,7 +70,7 @@
       "path": "./demo/zukhruf-whatsapp"
     },
     {
-      "path": "./packages/chat-input"
+      "path": "./packages/react/input"
     },
     {
       "path": "./packages/react/elements"

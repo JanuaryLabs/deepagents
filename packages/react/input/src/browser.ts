@@ -2,6 +2,7 @@ export * from './index.ts';
 export { Composer, useComposer } from './lib/Composer.tsx';
 export { ComposerTokenText } from './lib/ComposerTokenText.tsx';
 export { PersistedPromptText } from './lib/PersistedPromptText.tsx';
+export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection.ts';
 export type {
   ComposerAcceptSuggestionOptions,
   ComposerActions,
@@ -29,11 +30,9 @@ export {
   createComposerDraftSource,
   createDraftFromPersistedText,
   createDraftFromSource,
-  createDraftFromExternalEdit,
   createDraftFromState,
   createPersistedTextFromDraft,
   decodeComposerTextLinkHref,
-  mergeComposerDraftsForRestore,
   prepareComposerPayload,
   pushComposerHistory,
 } from './lib/ComposerCore.ts';
