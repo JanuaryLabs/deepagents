@@ -2,18 +2,45 @@ import { createUIMessageStreamResponse } from 'ai';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
+import { basePath } from 'hono/route';
 import { v5 as uuidv5, validate as validateUuid } from 'uuid';
 import z from 'zod';
 
-import type { ConversationId } from '../mailbox/types.ts';
+import type { ConversationId } from '../../mailbox/types.ts';
 import type {
   AgentObservation,
-  AgentProtocolEnv,
+  AgentPluginDefinition,
+  AgentPluginInstance,
   AgentRuntime,
-} from '../runtime/agent-runtime.ts';
+} from '../../runtime/agent-runtime.ts';
 import { validate } from './validator.ts';
 
-export const ZUKHRUF_ROUTE_PREFIX = '/zukhruf/v1';
+export type HttpEnv = { Variables: { userId: string } };
+
+export interface HttpContribution {
+  readonly capabilities: Readonly<Record<string, { readonly path: string }>>;
+  readonly publicRoutes?: Hono<HttpEnv>;
+  readonly authenticatedRoutes?: Hono<HttpEnv>;
+}
+
+export interface HttpProjection {
+  project(runtime: HttpRuntime): HttpContribution;
+}
+
+export function projectHttp<Instance extends object>(
+  definition: AgentPluginDefinition<Instance>,
+  project: (
+    plugin: AgentPluginInstance & Instance,
+    runtime: HttpRuntime,
+  ) => HttpContribution,
+): HttpProjection {
+  return {
+    project(runtime) {
+      return project(runtime.plugin(definition), runtime);
+    },
+  };
+}
+
 const CREATE_SESSION_ROUTE_PATH = '/session';
 const SESSION_ROUTE_PATH = '/session/:sessionId';
 const SESSION_CANCEL_ROUTE_PATH = '/session/:sessionId/cancel';
@@ -24,15 +51,6 @@ const SESSION_TURN_CANCEL_ROUTE_PATH =
 const HISTORY_ROUTE_PATH = '/history';
 const INFO_ROUTE_PATH = '/info';
 const HEALTH_ROUTE_PATH = '/health';
-export const ZUKHRUF_CREATE_SESSION_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${CREATE_SESSION_ROUTE_PATH}`;
-export const ZUKHRUF_SESSION_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_ROUTE_PATH}`;
-export const ZUKHRUF_SESSION_CANCEL_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_CANCEL_ROUTE_PATH}`;
-export const ZUKHRUF_SESSION_STREAM_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_STREAM_ROUTE_PATH}`;
-export const ZUKHRUF_SESSION_TURN_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_TURN_ROUTE_PATH}`;
-export const ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${SESSION_TURN_CANCEL_ROUTE_PATH}`;
-export const ZUKHRUF_HISTORY_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${HISTORY_ROUTE_PATH}`;
-export const ZUKHRUF_INFO_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${INFO_ROUTE_PATH}`;
-export const ZUKHRUF_HEALTH_ROUTE_PATH = `${ZUKHRUF_ROUTE_PREFIX}${HEALTH_ROUTE_PATH}`;
 export const ZUKHRUF_SESSION_ID_HEADER = 'x-zukhruf-session-id';
 export const ZUKHRUF_TURN_ID_HEADER = 'x-zukhruf-turn-id';
 
@@ -63,13 +81,13 @@ const limitTurnBody = bodyLimit({
   },
 });
 
-interface ZukhrufRuntime extends Pick<
+export interface HttpRuntime extends Pick<
   AgentRuntime,
   | 'createSession'
   | 'enqueue'
   | 'info'
   | 'listHistory'
-  | 'protocol'
+  | 'plugin'
   | 'sessionExists'
 > {
   observe(conversation: ConversationId): Pick<
@@ -80,28 +98,35 @@ interface ZukhrufRuntime extends Pick<
   };
 }
 
-export function zukhrufDiscovery(
-  runtime: Pick<ZukhrufRuntime, 'info' | 'protocol'>,
+/** Mount at the host-selected path with `app.route(path, http(runtime))`. */
+export function http(
+  runtime: HttpRuntime,
+  ...projections: readonly HttpProjection[]
 ) {
-  const capabilities: Record<string, { href: string }> = {
-    history: { href: ZUKHRUF_HISTORY_ROUTE_PATH },
-    chat: { href: ZUKHRUF_CREATE_SESSION_ROUTE_PATH },
+  const contributions = projections.map((projection) =>
+    projection.project(runtime),
+  );
+  const capabilities: Record<string, { path: string }> = {
+    history: { path: HISTORY_ROUTE_PATH },
+    chat: { path: CREATE_SESSION_ROUTE_PATH },
   };
-  for (const [name, { path }] of Object.entries(runtime.protocol.discovery)) {
-    if (Object.hasOwn(capabilities, name)) {
-      throw new Error(
-        `zukhruf: plugin protocol capability "${name}" conflicts with the built-in protocol`,
-      );
+  for (const { capabilities: contributed } of contributions) {
+    for (const [name, capability] of Object.entries(contributed)) {
+      if (!name.trim() || name !== name.trim()) {
+        throw new Error(
+          `http: capability name "${name}" must be non-empty without surrounding whitespace`,
+        );
+      }
+      if (!capability.path.startsWith('/')) {
+        throw new Error(`http: capability "${name}" must use an absolute path`);
+      }
+      if (Object.hasOwn(capabilities, name)) {
+        throw new Error(`http: duplicate capability "${name}"`);
+      }
+      capabilities[name] = capability;
     }
-    capabilities[name] = { href: `${ZUKHRUF_ROUTE_PREFIX}${path}` };
   }
-  return { ...runtime.info, capabilities };
-}
-
-/** Mount with `app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime))`. */
-export function zukhruf(runtime: ZukhrufRuntime) {
-  const discovery = zukhrufDiscovery(runtime);
-  const app = new Hono<AgentProtocolEnv>();
+  const app = new Hono<HttpEnv>();
   app.onError((error, context) => {
     if (error instanceof HTTPException) {
       return context.json(
@@ -122,6 +147,10 @@ export function zukhruf(runtime: ZukhrufRuntime) {
     methodNotAllowed(context, 'GET, HEAD'),
   );
 
+  for (const { publicRoutes } of contributions) {
+    if (publicRoutes) app.route('/', publicRoutes);
+  }
+
   app.use('*', async (context, next) => {
     if (!context.get('userId')?.trim()) {
       throw new HTTPException(401, {
@@ -135,7 +164,22 @@ export function zukhruf(runtime: ZukhrufRuntime) {
     await next();
   });
 
-  app.get(INFO_ROUTE_PATH, (context) => context.json(discovery, 200, NO_STORE));
+  app.get(INFO_ROUTE_PATH, (context) => {
+    const mount = basePath(context).replace(/\/$/, '');
+    return context.json(
+      {
+        ...runtime.info,
+        capabilities: Object.fromEntries(
+          Object.entries(capabilities).map(([name, { path }]) => [
+            name,
+            { href: `${mount}${path}` },
+          ]),
+        ),
+      },
+      200,
+      NO_STORE,
+    );
+  });
   app.all(INFO_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
   app.get(HISTORY_ROUTE_PATH, async (context) =>
@@ -364,12 +408,14 @@ export function zukhruf(runtime: ZukhrufRuntime) {
     methodNotAllowed(context, 'GET'),
   );
 
-  for (const routes of runtime.protocol.routes) app.route('/', routes);
+  for (const { authenticatedRoutes } of contributions) {
+    if (authenticatedRoutes) app.route('/', authenticatedRoutes);
+  }
 
   return app;
 }
 
-function accepted<Env extends AgentProtocolEnv>(
+function accepted<Env extends HttpEnv>(
   context: Context<Env>,
   sessionId: string,
   turnId: string,
@@ -382,7 +428,7 @@ function accepted<Env extends AgentProtocolEnv>(
 }
 
 async function requireSession(
-  runtime: ZukhrufRuntime,
+  runtime: HttpRuntime,
   conversation: ConversationId,
 ): Promise<void> {
   if (await runtime.sessionExists(conversation)) return;
@@ -395,10 +441,7 @@ async function requireSession(
   });
 }
 
-function methodNotAllowed(
-  context: Context<AgentProtocolEnv>,
-  allow: string,
-): never {
+function methodNotAllowed(context: Context<HttpEnv>, allow: string): never {
   context.header('Allow', allow);
   throw new HTTPException(405, {
     message: 'Method not allowed',

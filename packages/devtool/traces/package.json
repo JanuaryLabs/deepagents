@@ -28,6 +28,12 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./http": {
+      "development": "./src/http.ts",
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js",
+      "default": "./dist/http.js"
+    },
     "./ui": {
       "development": "./src/ui.tsx",
       "types": "./dist/ui.d.ts",

@@ -16,9 +16,9 @@ import {
   StreamManager,
 } from '@deepagents/context';
 import { fileTelemetry } from '@deepagents/devtool-traces';
+import { tracesHttp } from '@deepagents/devtool-traces/http';
 import {
   type AgentDeclaration,
-  type AgentProtocolEnv,
   AgentRuntime,
   type ConsumeContext,
   type ConsumeOptions,
@@ -27,15 +27,19 @@ import {
   type TurnPushResult,
   TurnQueue,
   type TurnRef,
-  ZUKHRUF_INFO_ROUTE_PATH,
-  ZUKHRUF_ROUTE_PREFIX,
   defineAgent,
   defineTool,
-  zukhruf,
 } from '@deepagents/experimental/zukhruf';
+import {
+  type HttpEnv,
+  type HttpProjection,
+  http,
+} from '@deepagents/experimental/zukhruf/http';
 
 const USER_HEADER = 'x-test-user';
-const TRACES_HREF = `${ZUKHRUF_ROUTE_PREFIX}/traces`;
+const ZUKHRUF_MOUNT_PATH = '/zukhruf/v1';
+const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
+const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
 
 class ControlledTurnQueue extends TurnQueue {
   readonly #turns: TurnRef[] = [];
@@ -114,14 +118,14 @@ function createStores(resources: AsyncDisposableStack) {
   };
 }
 
-function createHost(runtime: AgentRuntime) {
-  const app = new Hono<AgentProtocolEnv>();
-  app.use(`${ZUKHRUF_ROUTE_PREFIX}/*`, async (context, next) => {
+function createHost(runtime: AgentRuntime, ...projections: HttpProjection[]) {
+  const app = new Hono<HttpEnv>();
+  app.use(`${ZUKHRUF_MOUNT_PATH}/*`, (context, next) => {
     const userId = context.req.header(USER_HEADER);
     if (userId) context.set('userId', userId);
-    await next();
+    return next();
   });
-  app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
+  app.route(ZUKHRUF_MOUNT_PATH, http(runtime, ...projections));
   return app;
 }
 
@@ -129,8 +133,8 @@ function asUser(userId: string) {
   return { headers: { [USER_HEADER]: userId } };
 }
 
-async function readCapabilities(app: Hono<AgentProtocolEnv>, userId: string) {
-  const response = await app.request(ZUKHRUF_INFO_ROUTE_PATH, asUser(userId));
+async function readCapabilities(app: Hono<HttpEnv>, userId: string) {
+  const response = await app.request(INFO_URL, asUser(userId));
   assert.equal(response.status, 200);
   const body = await response.text();
   return {
@@ -212,9 +216,10 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
   const stores = createStores(resources);
   let declaredStarts = 0;
   let observedStarts = 0;
+  const traceTelemetry = fileTelemetry({ path: telemetry, append: false });
   const root = createDeclaration(
     [
-      fileTelemetry({ path: telemetry, append: false }),
+      traceTelemetry,
       {
         name: 'observer-telemetry',
         create: () => ({
@@ -281,7 +286,7 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
   });
   assert.equal(start.data.runtimeContext, '[Redacted]');
 
-  const app = createHost(runtime);
+  const app = createHost(runtime, tracesHttp(traceTelemetry));
   const { body, capabilities } = await readCapabilities(app, 'user-1');
   assert.deepEqual(capabilities.traces, { href: TRACES_HREF });
   assert.doesNotMatch(body, /file:|telemetry\.jsonl/);
@@ -397,16 +402,16 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
     queue: new ControlledTurnQueue(),
   });
   const restartedWorker = await restarted.work();
-  const restartedResponse = await createHost(restarted).request(
-    listUrl,
-    asUser('user-1'),
-  );
+  const restartedResponse = await createHost(
+    restarted,
+    tracesHttp(traceTelemetry),
+  ).request(listUrl, asUser('user-1'));
   assert.equal(restartedResponse.status, 200);
   assert.equal(((await restartedResponse.json()) as unknown[]).length, 2);
   await restartedWorker[Symbol.asyncDispose]();
 });
 
-test('fileTelemetry() advertises an empty file, omits absent telemetry, and rejects duplicate trace providers', async () => {
+test('fileTelemetry() advertises an empty file, omits absent telemetry, and rejects duplicate HTTP projections', async () => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'deepagents-traces-'),
   );
@@ -414,17 +419,16 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
   const stores = createStores(resources);
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
 
-  const emptyRuntime = new AgentRuntime(
-    createDeclaration([
-      fileTelemetry({
-        path: join(directory.path, 'empty.jsonl'),
-        append: false,
-      }),
-    ]),
-    { ...stores, queue: new ControlledTurnQueue() },
-  );
+  const emptyTelemetry = fileTelemetry({
+    path: join(directory.path, 'empty.jsonl'),
+    append: false,
+  });
+  const emptyRuntime = new AgentRuntime(createDeclaration([emptyTelemetry]), {
+    ...stores,
+    queue: new ControlledTurnQueue(),
+  });
   await emptyRuntime.createSession(conversation);
-  const emptyHost = createHost(emptyRuntime);
+  const emptyHost = createHost(emptyRuntime, tracesHttp(emptyTelemetry));
   const empty = await readCapabilities(emptyHost, 'user-1');
   assert.deepEqual(empty.capabilities.traces, { href: TRACES_HREF });
   assert.doesNotMatch(empty.body, /file:|empty\.jsonl/);
@@ -448,15 +452,14 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
     404,
   );
 
+  const first = fileTelemetry({ path: join(directory.path, 'first.jsonl') });
+  const second = fileTelemetry({ path: join(directory.path, 'second.jsonl') });
+  const duplicateRuntime = new AgentRuntime(
+    createDeclaration([first, second]),
+    { ...stores, queue: new ControlledTurnQueue() },
+  );
   assert.throws(
-    () =>
-      new AgentRuntime(
-        createDeclaration([
-          fileTelemetry({ path: join(directory.path, 'first.jsonl') }),
-          fileTelemetry({ path: join(directory.path, 'second.jsonl') }),
-        ]),
-        { ...stores, queue: new ControlledTurnQueue() },
-      ),
-    /protocol capability "traces".+conflicts/,
+    () => createHost(duplicateRuntime, tracesHttp(first), tracesHttp(second)),
+    /duplicate capability "traces"/,
   );
 });

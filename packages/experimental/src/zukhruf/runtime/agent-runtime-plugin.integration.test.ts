@@ -1,4 +1,3 @@
-import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtempDisposable, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,14 +9,10 @@ import type { AgentModel, AgentSandbox } from '@deepagents/context';
 import {
   AgentPluginCapability,
   type AgentPluginDefinition,
-  type AgentProtocolEnv,
   AgentRuntime,
   type AgentRuntimeOptions,
-  ZUKHRUF_INFO_ROUTE_PATH,
-  ZUKHRUF_ROUTE_PREFIX,
   defineAgent,
   defineTool,
-  zukhruf,
 } from '@deepagents/experimental/zukhruf';
 
 const tool = defineTool({
@@ -277,92 +272,5 @@ test('AgentRuntime rejects context collisions and subagent plugins', () => {
         options,
       ),
     /subagent "child" cannot declare runtime plugins/,
-  );
-});
-
-test('installed plugins contribute authenticated protocol capabilities through zukhruf(runtime)', async () => {
-  const echo = plugin('echo', () => ({
-    protocol: {
-      discovery: { echo: { path: '/echo' } },
-      routes: (host) =>
-        new Hono<AgentProtocolEnv>().get('/echo', (context) =>
-          context.json({ userId: context.get('userId'), root: host.info.root }),
-        ),
-    },
-  }));
-  const runtime = new AgentRuntime(declaration([echo]), options);
-  const app = new Hono<AgentProtocolEnv>();
-  app.use(async (context, next) => {
-    const userId = context.req.header('x-test-user');
-    if (userId) context.set('userId', userId);
-    await next();
-  });
-  app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
-  const asUser = { headers: { 'x-test-user': 'user-1' } };
-
-  const info = await app.request(ZUKHRUF_INFO_ROUTE_PATH, asUser);
-  assert.equal(info.status, 200);
-  const { capabilities } = (await info.json()) as {
-    capabilities: Record<string, { href: string }>;
-  };
-  assert.deepEqual(capabilities.echo, { href: `${ZUKHRUF_ROUTE_PREFIX}/echo` });
-  assert(capabilities.history && capabilities.chat);
-
-  const authenticated = await app.request(capabilities.echo.href, asUser);
-  assert.equal(authenticated.status, 200);
-  assert.deepEqual(await authenticated.json(), {
-    userId: 'user-1',
-    root: 'root',
-  });
-
-  const unauthenticated = await app.request(capabilities.echo.href);
-  assert.equal(unauthenticated.status, 401);
-  assert.equal(
-    ((await unauthenticated.json()) as { cause: { code: string } }).cause.code,
-    'api/unauthenticated',
-  );
-});
-
-test('protocol capability names are unique across plugins and the built-in protocol', () => {
-  const contribute = (name: string, capability: string) =>
-    plugin(name, () => ({
-      protocol: {
-        discovery: { [capability]: { path: `/${capability}` } },
-        routes: () => new Hono<AgentProtocolEnv>(),
-      },
-    }));
-
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([contribute('one', 'shared'), contribute('two', 'shared')]),
-        options,
-      ),
-    /protocol capability "shared" from plugin "two" conflicts with plugin "one"/,
-  );
-  assert.throws(
-    () =>
-      new AgentRuntime(
-        declaration([
-          plugin('relative', () => ({
-            protocol: {
-              discovery: { relative: { path: 'relative' } },
-              routes: () => new Hono<AgentProtocolEnv>(),
-            },
-          })),
-        ]),
-        options,
-      ),
-    /protocol capability "relative" from plugin "relative" must use an absolute path/,
-  );
-  assert.throws(
-    () =>
-      zukhruf(
-        new AgentRuntime(
-          declaration([contribute('shadow', 'history')]),
-          options,
-        ),
-      ),
-    /plugin protocol capability "history" conflicts with the built-in protocol/,
   );
 });

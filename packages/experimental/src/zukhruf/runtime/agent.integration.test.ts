@@ -77,3 +77,9 @@ test('conversation scheduling is available only through its plugin subpath', () 
   );
   assert.equal('ConversationScheduler' in conversationSchedulingPlugin, false);
 });
+
+test('the customer barrel does not expose the HTTP transport plugin', () => {
+  assert.equal('http' in zukhruf, false);
+  assert.equal('projectHttp' in zukhruf, false);
+  assert.equal('ZUKHRUF_SESSION_ID_HEADER' in zukhruf, false);
+});

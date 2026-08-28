@@ -133,7 +133,6 @@ export function validate<T extends ValidatorConfig>(
     }
 
     const contentType = ct ? parseContentType(ct) : null;
-    // eslint-disable-next-line no-useless-assignment
     let body: unknown = null;
 
     switch (contentType?.type) {
@@ -153,9 +152,7 @@ export function validate<T extends ValidatorConfig>(
       query: parseQueryParams(c.req.query()),
       queries: parseQueriesParams(c.req.queries()),
       params: c.req.param(),
-      headers: Object.fromEntries(
-        Object.entries(c.req.header()).map(([k, v]) => [k, v ?? '']),
-      ),
+      headers: c.req.header(),
     };
 
     const config = _selector(payload as never);

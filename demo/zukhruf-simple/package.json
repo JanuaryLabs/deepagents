@@ -5,9 +5,7 @@
   "type": "module",
   "description": "Smallest complete Zukhruf agent declaration.",
   "scripts": {
-    "devtool": "node --env-file=../../.env run.ts --devtool",
-    "predevtool": "cd ../.. && nx run @deepagents/devtool:build",
-    "start": "node run.ts"
+    "start": "node server.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.41",

@@ -8,45 +8,42 @@ canonical implementation and continuation record. Chat context is disposable;
 update this file whenever a decision, finding, completed phase, or next action
 changes.
 
-## Current state — 2026-08-27 (one-server hard cutover)
+## Current state — 2026-08-28 (definition-bound transport projections)
 
 - The approved one-server, HTTP-only topology is implemented in the working
   tree. The host owns one Hono server and one `@hono/node-server` listener,
-  mounts the authenticated Zukhruf protocol at `/zukhruf/v1` with
-  `zukhruf(runtime)`, and mounts the DevTool UI at `/devtool` with
-  `devtool()`. One terminal prints one `/devtool` URL.
+  chooses `/zukhruf/v1` for the authenticated Zukhruf protocol with
+  `http(runtime, tracesHttp(traceTelemetry))`, and mounts the DevTool UI at
+  `/devtool` with `devtool()`. One terminal prints one `/devtool` URL.
 - `@deepagents/devtool` (`packages/devtool/host`) is a mountable static UI app.
-  `devtool()` returns a Hono app that serves the bundled assets beneath
-  `/devtool/assets/*` (using `serveStatic` with a mount-prefix rewrite, which
-  the probe proved necessary because Hono sub-apps see the full request path)
-  and the SPA shell for every other `/devtool/*` path. It exports
-  `DEVTOOL_ROUTE_PREFIX`. It receives no runtime object, runtime URL,
-  credentials, hostname, port, headers, or proxy configuration and owns no
-  plugin lifecycle. The Vite build uses `base: '/devtool/'`; the router uses
-  React Router's `basename` from `import.meta.env.BASE_URL`, so `/devtool`
-  redirects to `/devtool/history` and normal browser history works for deep
-  links, refresh, and Back.
+  `devtool()` uses Hono's effective mount for its static-file rewrite and
+  injects it as the document base. Vite emits relative asset URLs and React
+  Router reads the document base, so the host chooses the UI path while assets,
+  deep links, refresh, and Back remain scoped beneath it. The package exports no
+  route prefix. It receives no runtime object, runtime URL, credentials,
+  hostname, port, headers, or proxy configuration and owns no plugin lifecycle.
 - The browser uses same-origin HTTP only: discovery `GET /zukhruf/v1/info`,
   health `GET /zukhruf/v1/health`, History via `capabilities.history.href`,
   chat via `capabilities.chat.href` (the unchanged `ZukhrufChatTransport`),
   and traces via `capabilities.traces.href`. Trace list/detail URLs carry no
   `userId`. The Traces links stay hidden when discovery omits `traces`.
-- `@deepagents/experimental` owns the smallest first-class plugin HTTP
-  contract: `AgentPluginInstance.protocol?: AgentPluginProtocol` with
-  `discovery` entries (`{ path }` beneath the prefix) and authenticated
-  `routes(host)`. `AgentRuntime` reads it once after `configure()`, gathers it
-  into `runtime.protocol`, and rejects duplicate capability names or relative
-  paths at construction. `zukhruf(runtime)` prefixes each path into an `href`,
-  rejects collisions with the built-in `history` and `chat` capabilities at
-  mount time, and mounts plugin routes after its authentication middleware so
-  handlers read `userId` from the Hono context. The host only calls
-  `zukhruf(runtime)`; `@deepagents/experimental` imports no DevTool package.
+- The root `@deepagents/experimental/zukhruf` entry point is transport-neutral.
+  Runtime plugin definitions return typed transport-neutral instances;
+  `AgentRuntime.plugin(definition)` resolves the installed instance by exact
+  definition identity. The `/zukhruf/http` transport plugin owns Hono, auth,
+  SSE, built-in routes, discovery, and `projectHttp()`. The host passes explicit,
+  definition-bound projections to `http(runtime, ...projections)`; HTTP rejects
+  duplicate capability names and relative paths before mounting projected
+  `publicRoutes` before auth and `authenticatedRoutes` after auth. No projection
+  registry, DevTool type, or Hono type enters core, and no generic REST
+  semantics are derived from arbitrary runtime methods.
 - `@deepagents/devtool-traces` owns the `fileTelemetry()` runtime plugin. It
   creates the file telemetry integration, correlates conversation, stream,
-  agent name, and agent path on each turn, and contributes
-  `capabilities.traces` plus
-  `GET /zukhruf/v1/traces/:chatId` and `GET /zukhruf/v1/traces/:chatId/:traceId`
-  automatically. Ownership is the authenticated `userId` plus `chatId`;
+  agent name, and agent path on each turn, and exposes a transport-neutral trace
+  reader on its typed plugin instance. Its `/http` entry point exports
+  `tracesHttp(definition)`, which contributes `capabilities.traces` plus
+  relative trace routes that resolve beneath the host-selected Hono mount.
+  Ownership is the authenticated `userId` plus `chatId`;
   durable turn status still overrides the projected status; empty files remain
   readable as an empty list and no file URI appears in discovery. The package
   has its own `test` Nx target.
@@ -54,8 +51,9 @@ changes.
   ordinary CLI turn preserved) and `demo/zukhruf-research-bot`. Each agent
   declaration installs `fileTelemetry()`; each `run.ts` runs `runtime.work()`
   before serving; each `server.ts` owns the HTTP composition (the host
-  middleware that sets `userId` for `/zukhruf/v1/*`, `zukhruf(runtime)` at
-  `/zukhruf/v1`, `devtool()` at `/devtool`, and the one listener on
+  chooses `/zukhruf/v1`, scopes its `userId` middleware to that route, mounts
+  `http(runtime, tracesHttp(traceTelemetry))` there, mounts
+  `devtool()` at `/devtool`, and owns the one listener on
   `127.0.0.1:4317`), returns the `/devtool` URL, and `run.ts` disposes worker and
   server through the existing `AsyncDisposableStack`.
   `tools/src/verify-definition-owned-plugins.ts` packs
@@ -67,7 +65,8 @@ changes.
   DevTool-owned `/zukhruf/v1/info` and History routes, the `?userId=` trace
   query contract, declaration scanning for `traces.path`, the separate
   trace-discovery plugin, `mountTraceRoutes`, and the proxy-focused tests and
-  documentation. No compatibility path remains.
+  documentation. The core-owned plugin HTTP contract and root HTTP exports are
+  also removed. No compatibility path remains.
 - The `/scheduled` route remains the unchanged placeholder. Scheduled Tasks
   stay a later slice; see [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md).
 - Separate overlapping work in the same dirty tree (the shared component
@@ -102,10 +101,9 @@ Re-read these before changing their contracts:
   conversation and turn lifetimes, durable execution, identity, and plugin
   boundaries. Read in full on 2026-08-22 before this plan was written.
 - `packages/experimental/src/zukhruf/runtime/agent-runtime.ts` — plugin host,
-  lifecycle, and the `AgentPluginProtocol` contribution contract gathered into
-  `runtime.protocol`.
-- `packages/experimental/src/zukhruf/protocol/session.ts` — the authenticated
-  `/zukhruf/v1` protocol, discovery merging, and plugin route mounting.
+  lifecycle, and typed installed-plugin lookup.
+- `packages/experimental/src/zukhruf/plugins/http/index.ts` — the mount-neutral
+  authenticated protocol, Hono-derived discovery, and HTTP projection mounting.
 - `packages/experimental/src/zukhruf/runtime/agent-turn-executor.ts` — the point
   where one declaration becomes one conversation-scoped durable turn.
 - `packages/context/src/lib/telemetry/*` — the built-in AI SDK lifecycle
@@ -242,9 +240,10 @@ another one:
 
 ### Capture boundary
 
-- The `fileTelemetry()` runtime plugin owns recording, discovery, correlation, projection, and
-  the authenticated `/zukhruf/v1/traces` routes. The DevTool UI never receives
-  a runtime object or file path.
+- The `fileTelemetry()` runtime plugin owns recording, discovery, correlation,
+  projection, and the relative authenticated `/traces` routes. The host's Hono
+  mount determines their effective URLs. The DevTool UI never receives a
+  runtime object or file path.
 
 - Agent declarations remain the owners of AI SDK recording policy and any
   declaration-local integrations. Runtime plugins may contribute additional
@@ -268,9 +267,9 @@ another one:
   cleanup after terminal turns.
 - Durability, retention, and deletion belong to the agent's file telemetry
   JSONL. The devtool owns no database and exposes no second retention setting.
-- Trace reads are authenticated HTTP operations behind the host's
-  `/zukhruf/v1/*` middleware; ownership derives from the authenticated
-  `userId`, never a query parameter.
+- Trace reads are authenticated HTTP operations inside the host-mounted
+  HTTP plugin; ownership derives from the authenticated `userId`, never a
+  query parameter.
 - Preserve AI SDK recording controls. Correlation metadata is not model input;
   runtime context remains redacted when inputs are not recorded. The UI must
   label disabled payloads and never imply that missing sensitive data was
@@ -378,19 +377,19 @@ implementing, but the behavior is fixed:
 - [ ] Add the Scheduled Tasks and run-inbox UI only after their HTTP,
       notification, and cross-run-memory contracts are approved.
 
-### Phase 7 — One-server hard cutover (approved, implemented 2026-08-27)
+### Phase 7 — One-server hard cutover (approved, implemented 2026-08-27; transport seam replaced in Phase 8)
 
-- [x] Add the plugin HTTP contribution contract to `@deepagents/experimental`
-      (`AgentPluginProtocol`, `runtime.protocol`, discovery merging, route
-      mounting, deterministic duplicate failures) with public integration tests.
+- [x] Add the original plugin HTTP contribution seam to
+      `@deepagents/experimental`; Phase 8 replaces it with transport-neutral
+      plugin instances and explicit projections.
 - [x] Add `fileTelemetry()` to `@deepagents/devtool-traces`; it contributes one
       AI SDK telemetry integration plus authenticated trace discovery and
       routes. Its Nx `test` target proves multi-integration dispatch, owner
       isolation, list/detail, durable status, empty files, omitted capability
       without the plugin, restart persistence, and no file-path leakage.
-- [x] Convert `devtool()` into a mountable static Hono app with a `/devtool`
-      base, asset prefix rewrite, and scoped SPA fallback; remove the embedded
-      plugin, listener, proxy, options, and direct host access.
+- [x] Convert `devtool()` into a mountable static Hono app with a host-selected
+      base, Hono-derived asset prefix rewrite, and scoped SPA fallback; remove
+      the embedded plugin, listener, proxy, options, and direct host access.
 - [x] Switch the browser to same-origin `/zukhruf/v1` discovery, health,
       History, chat, and traces; remove the runtime-URL state and the
       `?userId=` trace contract.
@@ -400,6 +399,21 @@ implementing, but the behavior is fixed:
       Scheduled Tasks plan foundation, and both demo READMEs.
 - [ ] Browser smoke on the one-server `zukhruf-simple` DevTool (see the
       continuation record).
+
+### Phase 8 — Definition-bound transport projections (approved, implemented 2026-08-28)
+
+- [x] Remove Hono types, root HTTP exports, plugin protocol fields, and the
+      aggregated protocol object from Zukhruf core with no compatibility shim.
+- [x] Bind projections directly to typed plugin definitions through
+      `AgentRuntime.plugin(definition)`; add no parallel capability registry.
+- [x] Move auth, discovery, session routes, validation, and SSE to
+      `@deepagents/experimental/zukhruf/http`.
+- [x] Add explicit HTTP projections and prove installed, absent,
+      authenticated, duplicate, and invalid-path behavior.
+- [x] Move trace HTTP routes to `@deepagents/devtool-traces/http`; retain the
+      trace reader and telemetry integration as transport-neutral plugin data.
+- [x] Migrate both demos and the DevTool host composition to
+      `http(runtime, tracesHttp(traceTelemetry))`.
 
 ## Non-goals
 
@@ -478,5 +492,6 @@ execution.
 topology. The next product slice is still Scheduled Tasks: obtain approval or
 corrections for its wireframes and notification scope, then implement Phase 1
 of [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md) as an installed
-runtime plugin that contributes its own `AgentPluginProtocol`. Do not stage or
-commit without explicit authorization.
+runtime plugin with a typed transport-neutral instance and an explicit,
+definition-bound HTTP projection. Do not stage or commit without explicit
+authorization.

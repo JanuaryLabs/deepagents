@@ -32,6 +32,11 @@
       "import": "./dist/zukhruf/index.js",
       "default": "./dist/zukhruf/index.js"
     },
+    "./zukhruf/http": {
+      "types": "./dist/zukhruf/plugins/http/index.d.ts",
+      "import": "./dist/zukhruf/plugins/http/index.js",
+      "default": "./dist/zukhruf/plugins/http/index.js"
+    },
     "./zukhruf/file-agents": {
       "types": "./dist/zukhruf/plugins/file-agents/index.d.ts",
       "import": "./dist/zukhruf/plugins/file-agents/index.js",

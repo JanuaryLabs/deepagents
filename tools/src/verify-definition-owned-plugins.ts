@@ -90,12 +90,14 @@ function createConsumerSource(): string {
   return String.raw`
 import { devtool } from '@deepagents/devtool';
 import { fileTelemetry } from '@deepagents/devtool-traces';
+import { tracesHttp } from '@deepagents/devtool-traces/http';
 import {
   type AgentPluginDefinition,
   AgentPluginCapability,
   AgentRuntime,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+import { http } from '@deepagents/experimental/zukhruf/http';
 import {
   type SchedulingWake,
   WakeScheduler,
@@ -166,6 +168,9 @@ if (first.plugin(custom).value !== 'first') throw new Error('wrong first binding
 if (second.plugin(custom).value !== 'second') throw new Error('wrong second binding');
 if (first.plugin(traceDefinition) === second.plugin(traceDefinition)) {
   throw new Error('shared file telemetry instance');
+}
+if (typeof http(first, tracesHttp(traceDefinition)).fetch !== 'function') {
+  throw new Error('HTTP transport plugin is not mountable');
 }
 if (typeof devtool().fetch !== 'function') throw new Error('devtool is not mountable');
 if (first.plugin(files) === second.plugin(files)) throw new Error('shared file-agents instance');

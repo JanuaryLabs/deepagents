@@ -14,6 +14,7 @@ import {
 } from '@deepagents/context';
 import { devtool } from '@deepagents/devtool';
 import { fileTelemetry } from '@deepagents/devtool-traces';
+import { tracesHttp } from '@deepagents/devtool-traces/http';
 import {
   AgentRuntime,
   SqliteMailboxStore,
@@ -21,14 +22,9 @@ import {
   type TurnPushResult,
   TurnQueue,
   type TurnRef,
-  ZUKHRUF_CREATE_SESSION_ROUTE_PATH,
-  ZUKHRUF_HEALTH_ROUTE_PATH,
-  ZUKHRUF_HISTORY_ROUTE_PATH,
-  ZUKHRUF_INFO_ROUTE_PATH,
-  ZUKHRUF_ROUTE_PREFIX,
   defineAgent,
-  zukhruf,
 } from '@deepagents/experimental/zukhruf';
+import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
 class AcceptingTurnQueue extends TurnQueue {
   push(turn: TurnRef): Promise<TurnPushResult> {
@@ -60,6 +56,11 @@ class AcceptingTurnQueue extends TurnQueue {
 
 const DEVTOOL_PREFIX = '/devtool';
 const USER_HEADER = 'x-test-user';
+const ZUKHRUF_MOUNT_PATH = '/zukhruf/v1';
+const CREATE_SESSION_URL = `${ZUKHRUF_MOUNT_PATH}/session`;
+const HEALTH_URL = `${ZUKHRUF_MOUNT_PATH}/health`;
+const HISTORY_URL = `${ZUKHRUF_MOUNT_PATH}/history`;
+const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
 
 function telemetryRecords(
   conversation: { chatId: string; userId: string },
@@ -105,13 +106,14 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   );
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   const store = new InMemoryContextStore();
+  const traceTelemetry = fileTelemetry({ path: telemetry, append: true });
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'devtool-test',
       model: { provider: 'test', modelId: 'test' } as AgentModel,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
-      plugins: [fileTelemetry({ path: telemetry, append: true })],
+      plugins: [traceTelemetry],
     }),
     {
       store,
@@ -134,42 +136,42 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   await writeFile(telemetry, telemetryRecords(conversation, turn.id));
   resources.use(await runtime.work());
 
-  const app = new Hono<{ Variables: { userId: string } }>();
-  app.use(`${ZUKHRUF_ROUTE_PREFIX}/*`, async (context, next) => {
+  const app = new Hono<HttpEnv>();
+  app.use(`${ZUKHRUF_MOUNT_PATH}/*`, (context, next) => {
     const userId = context.req.header(USER_HEADER);
     if (userId) context.set('userId', userId);
-    await next();
+    return next();
   });
-  app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
+  app.route(ZUKHRUF_MOUNT_PATH, http(runtime, tracesHttp(traceTelemetry)));
   app.route(DEVTOOL_PREFIX, devtool());
   const asUser = { headers: { [USER_HEADER]: conversation.userId } };
 
-  const health = await app.request(ZUKHRUF_HEALTH_ROUTE_PATH);
+  const health = await app.request(HEALTH_URL);
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { ok: true });
 
-  const discovery = await app.request(ZUKHRUF_INFO_ROUTE_PATH, asUser);
+  const discovery = await app.request(INFO_URL, asUser);
   assert.equal(discovery.status, 200);
   const discoveryBody = await discovery.text();
   assert.deepEqual(JSON.parse(discoveryBody), {
     ...runtime.info,
     capabilities: {
-      history: { href: ZUKHRUF_HISTORY_ROUTE_PATH },
-      chat: { href: ZUKHRUF_CREATE_SESSION_ROUTE_PATH },
-      traces: { href: `${ZUKHRUF_ROUTE_PREFIX}/traces` },
+      history: { href: HISTORY_URL },
+      chat: { href: CREATE_SESSION_URL },
+      traces: { href: `${ZUKHRUF_MOUNT_PATH}/traces` },
     },
   });
   assert.doesNotMatch(discoveryBody, /file:|telemetry\.jsonl/);
-  assert.equal((await app.request(ZUKHRUF_INFO_ROUTE_PATH)).status, 401);
+  assert.equal((await app.request(INFO_URL)).status, 401);
 
-  const history = await app.request(ZUKHRUF_HISTORY_ROUTE_PATH, asUser);
+  const history = await app.request(HISTORY_URL, asUser);
   assert.equal(history.status, 200);
   const [entry] = (await history.json()) as Array<Record<string, unknown>>;
   assert.equal(entry.chatId, conversation.chatId);
   assert.equal(entry.title, 'First conversation');
 
   const traceList = await app.request(
-    `${ZUKHRUF_ROUTE_PREFIX}/traces/${conversation.chatId}`,
+    `${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}`,
     asUser,
   );
   assert.equal(traceList.status, 200);
@@ -183,7 +185,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     { id: 'call-1', streamId: turn.id, status: 'queued' },
   );
   const traceDetail = await app.request(
-    `${ZUKHRUF_ROUTE_PREFIX}/traces/${conversation.chatId}/${trace.id}`,
+    `${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}/${trace.id}`,
     asUser,
   );
   assert.equal(traceDetail.status, 200);
@@ -197,19 +199,16 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   assert.equal(
     (
       await app.request(
-        `${ZUKHRUF_ROUTE_PREFIX}/traces/${conversation.chatId}?userId=${conversation.userId}`,
+        `${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}?userId=${conversation.userId}`,
       )
     ).status,
     401,
   );
   assert.equal(
     (
-      await app.request(
-        `${ZUKHRUF_ROUTE_PREFIX}/traces/${conversation.chatId}`,
-        {
-          headers: { [USER_HEADER]: 'other-user' },
-        },
-      )
+      await app.request(`${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}`, {
+        headers: { [USER_HEADER]: 'other-user' },
+      })
     ).status,
     404,
   );
@@ -220,14 +219,16 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     assert.match(await shellResponse.text(), /<title>Zukhruf Devtool<\/title>/);
   }
   const shell = await (await app.request(DEVTOOL_PREFIX)).text();
+  assert.match(shell, new RegExp(`<base href="${DEVTOOL_PREFIX}/"`));
   const assets = Array.from(
     shell.matchAll(/(?:src|href)="([^"]+)"/g),
     ([, asset]) => asset,
-  ).filter((asset) => asset.startsWith('/'));
+  ).filter((asset) => asset.startsWith('./assets/'));
   assert(assets.length > 0);
   for (const asset of assets) {
-    assert.match(asset, new RegExp(`^${DEVTOOL_PREFIX}/assets/`));
-    const assetResponse = await app.request(asset);
+    const path = new URL(asset, `http://localhost${DEVTOOL_PREFIX}/`).pathname;
+    assert.match(path, new RegExp(`^${DEVTOOL_PREFIX}/assets/`));
+    const assetResponse = await app.request(path);
     assert.equal(assetResponse.status, 200);
     assert((await assetResponse.arrayBuffer()).byteLength > 0);
   }
@@ -246,10 +247,23 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   }
   for (const path of [
     `${DEVTOOL_PREFIX}/assets/missing.js`,
-    `${ZUKHRUF_ROUTE_PREFIX}/missing`,
+    `${ZUKHRUF_MOUNT_PATH}/missing`,
     '/devtoolx',
     '/',
   ]) {
     assert.equal((await app.request(path, asUser)).status, 404);
   }
+});
+
+test('devtool follows the host-selected Hono mount', async () => {
+  const mount = '/host/selected/devtool';
+  const app = new Hono().route(mount, devtool());
+  const shell = await (await app.request(`${mount}/history/user-1`)).text();
+
+  assert.match(shell, new RegExp(`<base href="${mount}/"`));
+  const asset = shell.match(/(?:src|href)="(\.\/assets\/[^"]+)"/);
+  assert(asset);
+  const response = await app.request(`${mount}/${asset[1].slice(2)}`);
+  assert.equal(response.status, 200);
+  assert((await response.arrayBuffer()).byteLength > 0);
 });

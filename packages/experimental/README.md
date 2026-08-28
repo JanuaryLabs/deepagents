@@ -30,8 +30,9 @@ import {
 
 The public experimental surface contains the pure declaration layer
 (`defineAgent` / `defineInstructions` / `defineTool` / `defineSandbox`),
-`AgentRuntime`, the Hono session protocol helper (`zukhruf(runtime)`), the
-domain values, runtime plugins, and the store/queue ports and adapters.
+`AgentRuntime`, typed runtime plugins, the domain values, and the store/queue
+ports and adapters. The optional Hono transport plugin is a separate
+`@deepagents/experimental/zukhruf/http` entry point.
 Declarations have a types-only dependency on `@deepagents/context`.
 `AgentRuntime` exposes enqueue, host mailbox delivery, observation, approval,
 denial, worker lifecycle, and model-facing collaboration for declared
@@ -49,17 +50,18 @@ Skill bodies, scripts, references, and assets remain in the sandbox. Providers
 may preinstall or mount them, or opt into the existing `uploadDirectory` support
 when creating the sandbox.
 
-`zukhruf(runtime)` mounts the HTTP session protocol under `/zukhruf/v1` for
-authenticated hosts: create or continue sessions with idempotent `POST` calls,
-receive the durable `turnId`, check or cancel a specific turn, cancel the
+`http(runtime, ...projections)` returns the HTTP session protocol for a host to
+mount at its chosen path: create or continue sessions with idempotent `POST`
+calls, receive the durable `turnId`, check or cancel a specific turn, cancel the
 active session turn, stream durable UI-message output, and read runtime info
-plus health checks. `GET /info` advertises `capabilities.history.href` and
-`capabilities.chat.href`. Installed runtime plugins may contribute an
-`AgentPluginProtocol` (`discovery` entries plus authenticated `routes(host)`);
-`AgentRuntime` gathers them into `runtime.protocol`, rejects duplicate
-capability names, and `zukhruf(runtime)` mounts the routes beneath `/zukhruf/v1`
-and merges the entries into `capabilities`. The host only calls
-`zukhruf(runtime)`; it never enumerates plugin capabilities.
+plus health checks. `GET /info` advertises mount-relative
+`capabilities.history.href` and `capabilities.chat.href`. Runtime plugin
+definitions return typed transport-neutral instances. Transport packages bind
+those exact installed instances explicitly: `projectHttp(definition, project)`
+produces HTTP-owned `publicRoutes`, `authenticatedRoutes`, and discovery
+entries, while a future gRPC package can project the same plugin instance into
+services and streaming without changing core. The HTTP transport plugin rejects
+duplicate capability names and relative paths.
 Plugins may also contribute one AI SDK telemetry integration per turn through
 `telemetry(context)`; the runtime appends every contribution to the agent's
 declaration-local telemetry integrations.

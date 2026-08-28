@@ -1,33 +1,35 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { styleText } from 'node:util';
 
-import { DEVTOOL_ROUTE_PREFIX, devtool } from '@deepagents/devtool';
-import {
-  type AgentRuntime,
-  ZUKHRUF_ROUTE_PREFIX,
-  zukhruf,
-} from '@deepagents/experimental/zukhruf';
+import { devtool } from '@deepagents/devtool';
+import { tracesHttp } from '@deepagents/devtool-traces/http';
+import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
-/**
- * One host server: the authenticated Zukhruf protocol at `/zukhruf/v1` and
- * the DevTool UI at `/devtool` on the same origin.
- */
-export function serveDevtool(runtime: AgentRuntime) {
-  const app = new Hono<{ Variables: { userId: string } }>();
-  app.use(`${ZUKHRUF_ROUTE_PREFIX}/*`, async (context, next) => {
-    context.set('userId', 'demo');
-    await next();
-  });
-  app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
-  app.route(DEVTOOL_ROUTE_PREFIX, devtool());
+import { traceTelemetry } from './agent.ts';
+import runtime, { resources } from './run.ts';
 
-  const started = Promise.withResolvers<URL>();
-  const server = serve(
-    { fetch: app.fetch, hostname: '127.0.0.1', port: 4317 },
-    ({ port }) =>
-      started.resolve(
-        new URL(DEVTOOL_ROUTE_PREFIX, `http://127.0.0.1:${port}`),
-      ),
-  );
-  return { server, url: started.promise };
-}
+await using runtimeResources = resources;
+
+const app = new Hono<HttpEnv>();
+const devtoolPath = '/devtool';
+app.use('/zukhruf/v1/*', (context, next) => {
+  context.set('userId', 'demo');
+  return next();
+});
+app.route('/zukhruf/v1', http(runtime, tracesHttp(traceTelemetry)));
+app.route(devtoolPath, devtool());
+
+const started = Promise.withResolvers<URL>();
+runtimeResources.use(
+  serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 4317 }, ({ port }) =>
+    started.resolve(new URL(devtoolPath, `http://127.0.0.1:${port}`)),
+  ),
+);
+console.log(styleText('bold', `Open ${(await started.promise).href}`));
+console.log(styleText('dim', 'Press Ctrl+C to stop.'));
+
+const stopped = Promise.withResolvers<void>();
+process.once('SIGINT', () => stopped.resolve());
+process.once('SIGTERM', () => stopped.resolve());
+await stopped.promise;

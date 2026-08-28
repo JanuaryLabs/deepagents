@@ -7,15 +7,15 @@ import { defineAgent } from '@deepagents/experimental/zukhruf';
 import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
 
+export const traceTelemetry = fileTelemetry({
+  append: false,
+  path: join(import.meta.dirname, 'telemetry.jsonl'),
+});
+
 export default defineAgent({
   name: 'SimpleAgent',
   model: openai('gpt-5.6-luna'),
   sandbox,
   instructions,
-  plugins: [
-    fileTelemetry({
-      append: false,
-      path: join(import.meta.dirname, 'telemetry.jsonl'),
-    }),
-  ],
+  plugins: [traceTelemetry],
 });

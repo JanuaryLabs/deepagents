@@ -9,7 +9,10 @@
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],
       "options": {
-        "additionalEntryPoints": ["packages/devtool/traces/src/ui.tsx"],
+        "additionalEntryPoints": [
+          "packages/devtool/traces/src/http.ts",
+          "packages/devtool/traces/src/ui.tsx"
+        ],
         "assets": [
           {
             "input": "packages/devtool/traces/src",

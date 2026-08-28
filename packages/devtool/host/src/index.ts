@@ -1,15 +1,20 @@
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { html } from 'hono/html';
+import { basePath } from 'hono/route';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-export const DEVTOOL_ROUTE_PREFIX = '/devtool';
-
 const ui = fileURLToPath(new URL('./ui/', import.meta.url));
+const shell = await readFile(
+  new URL('./ui/index.html', import.meta.url),
+  'utf8',
+);
 
 /**
- * Static DevTool UI. Mount with `app.route(DEVTOOL_ROUTE_PREFIX, devtool())`
- * on the same origin that mounts `zukhruf(runtime)`; the browser discovers
- * every runtime capability through `GET /zukhruf/v1/info`.
+ * Static DevTool UI. Mount with `app.route(path, devtool())` on the same origin
+ * that mounts `http(runtime)`; the browser discovers every runtime capability
+ * through `GET /zukhruf/v1/info`.
  */
 export function devtool() {
   return new Hono()
@@ -17,9 +22,14 @@ export function devtool() {
       '/assets/*',
       serveStatic({
         root: ui,
-        rewriteRequestPath: (path) => path.slice(DEVTOOL_ROUTE_PREFIX.length),
+        rewriteRequestPath: (path, context) =>
+          path.slice(basePath(context).replace(/\/$/, '').length),
       }),
     )
     .get('/assets/*', (context) => context.notFound())
-    .get('*', serveStatic({ root: ui, path: 'index.html' }));
+    .get('*', async (context) => {
+      const mount = basePath(context).replace(/\/$/, '');
+      const base = await html`<base href="${mount}/" />`;
+      return context.html(shell.replace('<head>', `<head>${base}`));
+    });
 }

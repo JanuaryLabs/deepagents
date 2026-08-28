@@ -3,23 +3,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { StreamPart } from '@deepagents/context';
+import type { AgentPluginDefinition } from '@deepagents/experimental/zukhruf';
 import {
-  ZUKHRUF_CREATE_SESSION_ROUTE_PATH,
-  ZUKHRUF_HEALTH_ROUTE_PATH,
-  ZUKHRUF_HISTORY_ROUTE_PATH,
-  ZUKHRUF_INFO_ROUTE_PATH,
-  ZUKHRUF_ROUTE_PREFIX,
-  ZUKHRUF_SESSION_CANCEL_ROUTE_PATH,
+  type HttpEnv,
+  type HttpProjection,
   ZUKHRUF_SESSION_ID_HEADER,
-  ZUKHRUF_SESSION_ROUTE_PATH,
-  ZUKHRUF_SESSION_STREAM_ROUTE_PATH,
-  ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH,
-  ZUKHRUF_SESSION_TURN_ROUTE_PATH,
-  zukhruf,
-  zukhrufDiscovery,
-} from '@deepagents/experimental/zukhruf';
+  http,
+  projectHttp,
+} from '@deepagents/experimental/zukhruf/http';
 
-type ProtocolRuntime = Parameters<typeof zukhruf>[0];
+type TestRuntime = Parameters<typeof http>[0];
+
+const MOUNT_PATH = '/zukhruf/v1';
+const mounted = (path: string) => `${MOUNT_PATH}${path}`;
 
 const runtimeInfo = {
   root: 'assistant',
@@ -31,16 +27,18 @@ const runtimeInfo = {
       subagents: [],
     },
   ],
-} satisfies ProtocolRuntime['info'];
+} satisfies TestRuntime['info'];
 
 const emptyEngine = {
   getMessages: () => Promise.resolve([]),
 };
 
-function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
-  const runtime: ProtocolRuntime = {
+function createRuntime(overrides: Partial<TestRuntime> = {}) {
+  const runtime: TestRuntime = {
     info: runtimeInfo,
-    protocol: { discovery: {}, routes: [] },
+    plugin() {
+      throw new Error('plugin is not installed');
+    },
     async createSession() {},
     async enqueue() {
       return {
@@ -70,20 +68,23 @@ function createRuntime(overrides: Partial<ProtocolRuntime> = {}) {
   return Object.assign(runtime, overrides);
 }
 
-function createApp(runtime: ProtocolRuntime) {
-  const app = new Hono<{ Variables: { userId: string } }>();
+function createApp(runtime: TestRuntime, ...projections: HttpProjection[]) {
+  const app = new Hono<HttpEnv>();
   app.use(async (context, next) => {
     context.set('userId', 'user-1');
     await next();
   });
-  app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
+  app.route(MOUNT_PATH, http(runtime, ...projections));
   app.get('/health', (context) => context.text('ok'));
   return app;
 }
 
-function createUnauthenticatedApp(runtime: ProtocolRuntime) {
-  const app = new Hono<{ Variables: { userId: string } }>();
-  app.route(ZUKHRUF_ROUTE_PREFIX, zukhruf(runtime));
+function createUnauthenticatedApp(
+  runtime: TestRuntime,
+  ...projections: HttpProjection[]
+) {
+  const app = new Hono<HttpEnv>();
+  app.route(MOUNT_PATH, http(runtime, ...projections));
   return app;
 }
 
@@ -108,7 +109,7 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
 
   const app = createApp(runtime);
   const create = () =>
-    app.request(ZUKHRUF_CREATE_SESSION_ROUTE_PATH, {
+    app.request(mounted('/session'), {
       body: JSON.stringify({ input: '  Hello  ' }),
       headers: {
         'content-type': 'application/json',
@@ -162,7 +163,7 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
     headers?: Record<string, string>;
     method?: string;
   }) =>
-    app.request(ZUKHRUF_CREATE_SESSION_ROUTE_PATH, {
+    app.request(mounted('/session'), {
       ...input,
       method: input.method ?? 'POST',
     });
@@ -236,7 +237,7 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
       };
     },
   });
-  const path = ZUKHRUF_SESSION_ROUTE_PATH.replace(':sessionId', sessionId);
+  const path = mounted('/session/:sessionId').replace(':sessionId', sessionId);
   const response = await createApp(runtime).request(path, {
     body: JSON.stringify({ input: '  Continue  ' }),
     headers: {
@@ -303,7 +304,7 @@ test('GET /zukhruf/v1/session/:sessionId returns the authenticated conversation'
   });
 
   const response = await createApp(runtime).request(
-    ZUKHRUF_SESSION_ROUTE_PATH.replace(':sessionId', sessionId),
+    mounted('/session/:sessionId').replace(':sessionId', sessionId),
   );
 
   assert.equal(response.status, 200);
@@ -330,7 +331,7 @@ test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', asyn
       };
     },
   });
-  const path = ZUKHRUF_SESSION_CANCEL_ROUTE_PATH.replace(
+  const path = mounted('/session/:sessionId/cancel').replace(
     ':sessionId',
     sessionId,
   );
@@ -370,10 +371,9 @@ test('GET /zukhruf/v1/session/:sessionId/turn/:turnId exposes the exact durable 
       };
     },
   });
-  const path = ZUKHRUF_SESSION_TURN_ROUTE_PATH.replace(
-    ':sessionId',
-    sessionId,
-  ).replace(':turnId', turnId);
+  const path = mounted('/session/:sessionId/turn/:turnId')
+    .replace(':sessionId', sessionId)
+    .replace(':turnId', turnId);
   const response = await createApp(runtime).request(path);
 
   assert.equal(response.status, 200);
@@ -408,10 +408,9 @@ test('POST /zukhruf/v1/session/:sessionId/turn/:turnId/cancel cancels only that 
       };
     },
   });
-  const path = ZUKHRUF_SESSION_TURN_CANCEL_ROUTE_PATH.replace(
-    ':sessionId',
-    sessionId,
-  ).replace(':turnId', turnId);
+  const path = mounted('/session/:sessionId/turn/:turnId/cancel')
+    .replace(':sessionId', sessionId)
+    .replace(':turnId', turnId);
   const response = await createApp(runtime).request(path, { method: 'POST' });
 
   assert.equal(response.status, 204);
@@ -448,7 +447,7 @@ test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authentica
   const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
 
   const response = await app.request(
-    ZUKHRUF_SESSION_STREAM_ROUTE_PATH.replace(':sessionId', sessionId),
+    mounted('/session/:sessionId/stream').replace(':sessionId', sessionId),
   );
 
   assert.equal(response.status, 200);
@@ -466,7 +465,7 @@ test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authentica
 
 test('GET /zukhruf/v1/session/:sessionId/stream returns 404 without a durable stream', async () => {
   const app = createApp(createRuntime());
-  const path = ZUKHRUF_SESSION_STREAM_ROUTE_PATH.replace(
+  const path = mounted('/session/:sessionId/stream').replace(
     ':sessionId',
     '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15',
   );
@@ -488,27 +487,52 @@ test('GET /zukhruf/v1/session/:sessionId/stream returns 404 without a durable st
 test('GET /zukhruf/v1/info and health expose runtime and deployment metadata', async () => {
   const runtime = createRuntime();
   const authenticated = createApp(runtime);
-  const info = await authenticated.request(ZUKHRUF_INFO_ROUTE_PATH);
+  const info = await authenticated.request(mounted('/info'));
   assert.equal(info.status, 200);
-  assert.deepEqual(await info.json(), zukhrufDiscovery(runtime));
+  assert.deepEqual(await info.json(), {
+    ...runtime.info,
+    capabilities: {
+      history: { href: mounted('/history') },
+      chat: { href: mounted('/session') },
+    },
+  });
 
   const unauthenticated = createUnauthenticatedApp(runtime);
-  const health = await unauthenticated.request(ZUKHRUF_HEALTH_ROUTE_PATH);
+  const health = await unauthenticated.request(mounted('/health'));
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { ok: true });
 
-  const head = await unauthenticated.request(ZUKHRUF_HEALTH_ROUTE_PATH, {
+  const head = await unauthenticated.request(mounted('/health'), {
     method: 'HEAD',
   });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), '');
 
-  const protectedInfo = await unauthenticated.request(ZUKHRUF_INFO_ROUTE_PATH);
+  const protectedInfo = await unauthenticated.request(mounted('/info'));
   assert.equal(protectedInfo.status, 401);
   assert.equal(
     ((await protectedInfo.json()) as { cause: { code: string } }).cause.code,
     'api/unauthenticated',
   );
+});
+
+test('discovery follows the host-selected Hono mount', async () => {
+  const app = new Hono<HttpEnv>();
+  app.use(async (context, next) => {
+    context.set('userId', 'user-1');
+    await next();
+  });
+  app.route('/chosen/by-host', http(createRuntime()));
+
+  const discovery = (await (
+    await app.request('/chosen/by-host/info')
+  ).json()) as {
+    capabilities: Record<string, { href: string }>;
+  };
+  assert.deepEqual(discovery.capabilities, {
+    history: { href: '/chosen/by-host/history' },
+    chat: { href: '/chosen/by-host/session' },
+  });
 });
 
 test('GET /zukhruf/v1/history exposes runtime observations', async () => {
@@ -531,8 +555,101 @@ test('GET /zukhruf/v1/history exposes runtime observations', async () => {
   });
   const app = createApp(runtime);
 
-  const history = await app.request(ZUKHRUF_HISTORY_ROUTE_PATH);
+  const history = await app.request(mounted('/history'));
   assert.equal(history.status, 200);
   assert.equal(((await history.json()) as unknown[]).length, 1);
   assert.deepEqual(observedUsers, ['user-1']);
+});
+
+test('HTTP projections bind installed plugins behind the transport boundary', async () => {
+  const reader = { read: () => 'ready' };
+  const notices: AgentPluginDefinition<typeof reader> = {
+    name: 'notices',
+    create: () => reader,
+  };
+  const noticesHttp = projectHttp(notices, (plugin) => {
+    const publicRoutes = new Hono<HttpEnv>().get('/notice-health', (context) =>
+      context.json({ ok: true }),
+    );
+    const authenticatedRoutes = new Hono<HttpEnv>();
+    authenticatedRoutes.get('/notices', (context) =>
+      context.json({ notice: plugin.read() }),
+    );
+    return {
+      capabilities: { notices: { path: '/notices' } },
+      publicRoutes,
+      authenticatedRoutes,
+    };
+  });
+  const runtime = createRuntime({
+    plugin: ((definition) => {
+      assert.equal(definition, notices);
+      return reader;
+    }) as TestRuntime['plugin'],
+  });
+
+  const app = createApp(runtime, noticesHttp);
+  assert.deepEqual(
+    (
+      (await (await app.request(mounted('/info'))).json()) as {
+        capabilities: Record<string, { href: string }>;
+      }
+    ).capabilities.notices,
+    { href: mounted('/notices') },
+  );
+  assert.deepEqual(await (await app.request(mounted('/notices'))).json(), {
+    notice: 'ready',
+  });
+  assert.equal(
+    (
+      await createUnauthenticatedApp(runtime, noticesHttp).request(
+        mounted('/notices'),
+      )
+    ).status,
+    401,
+  );
+  assert.deepEqual(
+    await (
+      await createUnauthenticatedApp(runtime, noticesHttp).request(
+        mounted('/notice-health'),
+      )
+    ).json(),
+    { ok: true },
+  );
+
+  assert.throws(
+    () => createApp(createRuntime(), noticesHttp),
+    /plugin is not installed/,
+  );
+  const absent = createApp(createRuntime());
+  assert.equal(
+    (
+      (await (await absent.request(mounted('/info'))).json()) as {
+        capabilities: Record<string, unknown>;
+      }
+    ).capabilities.notices,
+    undefined,
+  );
+  assert.equal((await absent.request(mounted('/notices'))).status, 404);
+});
+
+test('HTTP discovery rejects invalid contributed capabilities', () => {
+  assert.throws(
+    () =>
+      http(createRuntime(), {
+        project: () => ({
+          capabilities: { history: { path: '/other' } },
+        }),
+      }),
+    /duplicate capability "history"/,
+  );
+  assert.throws(
+    () =>
+      http(createRuntime(), {
+        project: () => ({
+          capabilities: { relative: { path: 'relative' } },
+        }),
+      }),
+    /must use an absolute path/,
+  );
 });

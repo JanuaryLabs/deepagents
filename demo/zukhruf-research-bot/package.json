@@ -21,7 +21,7 @@
     "hono": "^4.12.33"
   },
   "scripts": {
-    "start": "node --env-file=../../.env run.ts",
+    "start": "node --env-file=../../.env server.ts",
     "prestart": "cd ../.. && nx run @deepagents/devtool:build"
   }
 }

@@ -741,32 +741,40 @@ default loop prompts, and loop-specific UI remain future host behavior.
 
 The ordered implementation work and crash-boundary proofs live in `SCHEDULING_PLAN.md`.
 
-## Plugin protocol contributions _(Built)_
+## Runtime plugin instances and transport projections _(Built)_
 
-`zukhruf(runtime)` is the only HTTP surface a host mounts. Built-in discovery from `GET /info`
-always advertises `capabilities.history.href` and `capabilities.chat.href`. A root runtime plugin may
-additionally contribute an `AgentPluginProtocol` from its instance:
+The root Zukhruf entry point is transport-neutral. A runtime plugin definition returns its typed
+operation surface directly:
 
 ```ts
-interface AgentPluginProtocol {
-  discovery: Record<string, { path: string }>; // merged into /info capabilities
-  routes(host: AgentPluginHost): Hono<{ Variables: { userId: string } }>;
+interface TracePlugin {
+  readonly traces: AgentTraceReader;
 }
+
+const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
+  name: 'trace-telemetry',
+  create: () => ({ traces: reader }),
+};
 ```
 
-- `AgentRuntime` reads `instance.protocol` once, after `configure(root)`, gathers the entries into
-  `runtime.protocol`, and rejects duplicate capability names or relative paths during construction.
-- Each plugin may contribute one AI SDK telemetry integration for a turn through
-  `telemetry(context)`. `AgentRuntime` appends every contribution to the declaration-local
-  integrations and lets the AI SDK dispatch the lifecycle events.
-- `zukhruf(runtime)` prefixes each `path` with `/zukhruf/v1` into `href`, rejects collisions with the
-  built-in names at mount time, and mounts every plugin route group after its authentication
-  middleware, so plugin handlers read the authenticated `userId` from the Hono context and never
-  accept identity from the request.
-- The host calls `zukhruf(runtime)` and nothing else; it never enumerates or passes plugin
-  capabilities, and `@deepagents/experimental` imports no DevTool package. The DevTool UI is a
-  separate static app mounted at `/devtool` on the same origin that discovers everything through
-  same-origin `GET /zukhruf/v1/info`.
+- `AgentRuntime.plugin(definition)` returns the installed instance for that exact definition object
+  and fails when the definition does not belong to the runtime. Core needs no second capability or
+  projection registry.
+- Core knows neither Hono nor gRPC. The plugin instance exposes transport-neutral operations, not
+  protocol metadata, routes, serializers, or authentication policy.
+- The `@deepagents/experimental/zukhruf/http` transport plugin owns Hono, authentication, SSE,
+  built-in session routes, and discovery. `projectHttp(definition, project)` resolves the installed
+  instance and explicitly adapts it into HTTP-owned `publicRoutes`, `authenticatedRoutes`, and
+  capability paths.
+- `http(runtime, ...projections)` mounts built-in and projected routes at the host-selected Hono
+  path. It rejects relative paths and duplicate capability names, mounts public routes before its
+  authentication boundary, and mounts authenticated routes after it so handlers use the trusted
+  `userId` from Hono context.
+- A future `@deepagents/experimental/zukhruf/grpc` entry point can accept the same plugin definition
+  and adapt its installed instance into services, interceptors, and streams. Core does not derive
+  REST or RPC semantics from arbitrary TypeScript methods.
+- Each plugin may independently contribute one AI SDK telemetry integration per turn through
+  `telemetry(context)`.
 
 ## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
 

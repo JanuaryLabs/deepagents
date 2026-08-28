@@ -29,10 +29,12 @@ remain separate phases with separate proofs.
   `runtime.plugin(definition)`. It supports fresh-root and
   existing-conversation targets.
 - `@deepagents/devtool` is a mountable static UI app served by the host's one
-  Hono server at `/devtool`. It discovers capabilities from the same-origin
-  `GET /zukhruf/v1/info`; runtime plugins contribute discovery entries and
-  authenticated routes to `zukhruf(runtime)` automatically. It has React Router
-  routes under the `/devtool` basename, a persistent History sidebar, a
+  Hono server at a host-selected path (currently `/devtool` in both demos). It
+  discovers capabilities from the same-origin info route at the host-selected
+  protocol mount; runtime plugins expose typed transport-neutral instances, and
+  definition-bound HTTP projections contribute authenticated routes and
+  discovery entries to `http(runtime, ...projections)`. It has React Router
+  routes under the injected document base, a persistent History sidebar, a
   placeholder Scheduled route, and three-second polling.
 - The current schedule adapter leaves successful run `title` and `summary`
   empty, exposes runs only through one task at a time, and has no cross-run

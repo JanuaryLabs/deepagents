@@ -27,13 +27,13 @@ and keeps the worker alive; it does not create a conversation or submit a turn.
 The declaration's `fileTelemetry()` plugin records `./telemetry.json`,
 correlates each turn, and advertises the `traces` capability from
 `/zukhruf/v1/info`. `run.ts` starts the worker; `server.ts` serves one Hono
-server that mounts the authenticated Zukhruf protocol at `/zukhruf/v1` and the
-`@deepagents/devtool` UI at `/devtool`. Open the printed `/devtool` URL while
-the host is running to inspect persisted root conversations from the History
-sidebar. Each conversation's underlined **Traces** link opens its model steps,
-tool calls, timings, usage, inputs, outputs, and errors. No second trace store
-is created and no file path reaches the browser. Without the plugin, discovery
-and the UI omit traces.
+server that imports the runtime, mounts the authenticated Zukhruf protocol at
+`/zukhruf/v1` and the `@deepagents/devtool` UI at `/devtool`, and owns shutdown.
+Open the printed `/devtool` URL while the host is running to inspect persisted
+root conversations from the History sidebar. Each conversation's underlined
+**Traces** link opens its model steps, tool calls, timings, usage, inputs,
+outputs, and errors. No second trace store is created and no file path reaches
+the browser. Without the plugin, discovery and the UI omit traces.
 
 The root can call `list_agents` at any time to observe the complete tree. The
 tool reports canonical paths plus `pending_init`, `running`,
@@ -50,10 +50,11 @@ remain `running` until the continuation settles.
 - `subagents/researcher.ts` — an independent web researcher that sends sourced
   findings directly to `/root`.
 - `sandbox.ts` and `subagents/sandbox.ts` — per-chat in-memory sandboxes.
-- `run.ts` — the declaration host and concurrent worker; it contains no turn
-  submission.
-- `server.ts` — the one HTTP server that mounts the authenticated Zukhruf
-  protocol at `/zukhruf/v1` and the DevTool UI at `/devtool`.
+- `run.ts` — initializes and exports the runtime, stores, queue, and concurrent
+  worker; it contains no turn submission.
+- `server.ts` — the top-level process that imports the runtime, mounts the
+  authenticated Zukhruf protocol at `/zukhruf/v1` and the DevTool UI at
+  `/devtool`, and owns shutdown.
 
 ## Run
 

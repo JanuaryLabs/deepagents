@@ -1,5 +1,4 @@
 import { PGlite } from '@electric-sql/pglite';
-import { styleText } from 'node:util';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -15,9 +14,8 @@ import {
 } from '@deepagents/experimental/zukhruf';
 
 import declaration from './agent.ts';
-import { serveDevtool } from './server.ts';
 
-await using resources = new AsyncDisposableStack();
+export const resources = new AsyncDisposableStack();
 
 const database = resources.adopt(
   new PGlite('./zukhruf-research.queue'),
@@ -56,18 +54,4 @@ const runtime = new AgentRuntime(declaration, {
 });
 
 resources.use(await runtime.work({ concurrency: 4 }));
-
-const { server, url } = serveDevtool(runtime);
-resources.use(server);
-console.log(styleText('dim', `devtool: ${(await url).href}`));
-console.log(
-  styleText(
-    'dim',
-    'agent declarations loaded; no turns are submitted — Ctrl+C to stop',
-  ),
-);
-
-const stopped = Promise.withResolvers<void>();
-process.once('SIGINT', () => stopped.resolve());
-process.once('SIGTERM', () => stopped.resolve());
-await stopped.promise;
+export default runtime;
