@@ -54,13 +54,13 @@
   "peerDependencies": {
     "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0",
-    "react": "19.2.7"
+    "react": "19.2.8"
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.7",
     "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0",
-    "@types/react": "19.2.17",
+    "@types/react": "19.2.18",
     "ai": "7.0.70",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3",
