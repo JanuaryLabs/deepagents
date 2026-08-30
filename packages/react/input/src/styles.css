@@ -1,7 +1,3 @@
-/* nx-tailwind-sources:start */
-@source "../../shadcn";
-/* nx-tailwind-sources:end */
-
 [data-slot="composer"] {
   --composer-line-height: 1.55rem;
   --composer-font-size: 0.875rem;
