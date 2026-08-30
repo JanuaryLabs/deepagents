@@ -10,7 +10,6 @@ import {
   PgBoss,
   fromPglite,
 } from 'pg-boss';
-import { v5 as uuidv5 } from 'uuid';
 
 import type {
   PgBossTurnQueueOptions,
@@ -79,40 +78,40 @@ async function waitForAsync(
   throw new Error(`timed out waiting for: ${what}`);
 }
 
-type AskRef = Extract<TurnRef, { kind: 'ask' }>;
+type MessageRef = Extract<TurnRef, { kind: 'message' }>;
 
-function inputOf(turn: TurnRef): string {
-  if (turn.kind !== 'ask') {
-    throw new Error('contract test only pushes ask turns');
+function textOf(turn: TurnRef): string {
+  if (turn.kind !== 'message') {
+    throw new Error('contract test only pushes message turns');
   }
-  return turn.input;
+  const part = turn.message.parts.find((part) => part.type === 'text');
+  assert.ok(part);
+  return part.text;
 }
 
 /** Deliberately NOT a UUID — ids are opaque strings as far as the port goes. */
-function ref(chat: string, n: number): AskRef {
+function ref(chat: string, n: number): MessageRef {
   return {
-    kind: 'ask',
+    kind: 'message',
     streamId: `turn/${chat}#${n}:${crypto.randomUUID()}`,
     chatId: chat,
     userId: 'u1',
-    input: `input-${n}`,
+    message: {
+      id: `message-${n}`,
+      role: 'user',
+      parts: [{ type: 'text', text: `input-${n}` }],
+    },
+    trigger: 'submit-message',
   };
 }
 
-type ApprovalRef = Extract<TurnRef, { kind: 'approval' }>;
-
-function approvalRef(
-  chat: string,
-  decision: ApprovalRef['decision'] = { approved: true },
-): ApprovalRef {
+function recoveryRef(chat: string): Extract<TurnRef, { kind: 'recovery' }> {
   return {
-    kind: 'approval',
-    streamId: `turn/${chat}#approval:${crypto.randomUUID()}`,
+    kind: 'recovery',
+    mode: 'handoff',
+    streamId: `turn/${chat}#recovery:${crypto.randomUUID()}`,
     chatId: chat,
     userId: 'u1',
-    toolCallId: 'tool-call-1',
-    approvalId: 'approval-1',
-    decision,
   };
 }
 
@@ -351,43 +350,6 @@ for (const contract of turnQueueContracts) {
         assert.equal(maxActive, 1, 'duplicates never run concurrently');
       });
 
-      test('deduplicates opposite commands for one persisted approval id', async (t) => {
-        await using h = await contract.makeQueue();
-        const approve = approvalRef('approval-dedup');
-        const deny = {
-          ...approve,
-          decision: { approved: false, reason: 'no' },
-        } satisfies ApprovalRef;
-
-        const first = await h.queue.push(approve);
-        const second = await h.queue.push(deny);
-        const namespace = uuidv5(
-          JSON.stringify([approve.userId, approve.chatId]),
-          uuidv5.URL,
-        );
-        const expectedId = uuidv5(`approval:${approve.approvalId}`, namespace);
-        assert.deepStrictEqual(first, {
-          jobId: expectedId,
-          inserted: true,
-        });
-        assert.deepStrictEqual(second, {
-          jobId: expectedId,
-          inserted: false,
-        });
-
-        const seen: TurnRef[] = [];
-        await using _consumer = await h.queue.consume(async (turn) => {
-          seen.push(turn);
-        }, noOrphans);
-        await waitFor(
-          t,
-          () => seen.length === 1,
-          'the winning approval command',
-        );
-        await sleep(1_000);
-        assert.deepStrictEqual(seen, [approve]);
-      });
-
       test(
         'turns in one chat run strictly FIFO, one at a time',
         { todo: contract.sameChatFifoTodo },
@@ -398,9 +360,9 @@ for (const contract of turnQueueContracts) {
           const events: string[] = [];
           await using _consumer = await h.queue.consume(
             async (turn) => {
-              events.push(`start ${inputOf(turn)}`);
+              events.push(`start ${textOf(turn)}`);
               await sleep(250);
-              events.push(`end ${inputOf(turn)}`);
+              events.push(`end ${textOf(turn)}`);
             },
             { ...noOrphans, concurrency: 4 },
           );
@@ -535,7 +497,7 @@ for (const contract of turnQueueContracts) {
         const orphans: Array<{ streamId: string; error: string }> = [];
         await using _consumer = await h.queue.consume(
           async (turn) => {
-            invocations.push(inputOf(turn));
+            invocations.push(textOf(turn));
             if (turn.streamId === boom.streamId) throw new Error('kaput');
           },
           {
@@ -547,14 +509,14 @@ for (const contract of turnQueueContracts) {
 
         await waitFor(
           t,
-          () => invocations.includes(next.input) && orphans.length === 1,
+          () => invocations.includes(textOf(next)) && orphans.length === 1,
           'orphan reported and chat unblocked',
           20_000,
         );
         await sleep(500);
         assert.deepStrictEqual(
           invocations,
-          [boom.input, next.input],
+          [textOf(boom), textOf(next)],
           'crashed turn ran exactly once (no retry), successor ran after it',
         );
         assert.equal(orphans.length, 1, 'orphan surfaced exactly once');
@@ -573,7 +535,7 @@ for (const contract of turnQueueContracts) {
         let orphanAttempts = 0;
         await using _consumer = await h.queue.consume(
           async (turn) => {
-            invocations.push(inputOf(turn));
+            invocations.push(textOf(turn));
             if (turn.streamId === boom.streamId) throw new Error('kaput');
           },
           {
@@ -586,12 +548,12 @@ for (const contract of turnQueueContracts) {
 
         await waitFor(
           t,
-          () => invocations.includes(next.input),
+          () => invocations.includes(textOf(next)),
           'source acknowledgement unblocks the successor despite callback failure',
           5_000,
         );
         assert.ok(orphanAttempts >= 1);
-        assert.deepStrictEqual(invocations, [boom.input, next.input]);
+        assert.deepStrictEqual(invocations, [textOf(boom), textOf(next)]);
       });
 
       test('a parked turn is not redelivered until resumeParked; revival preserves order', async (t) => {
@@ -601,13 +563,13 @@ for (const contract of turnQueueContracts) {
         const ran: string[] = [];
         await using _consumer = await h.queue.consume(
           async (turn, context) => {
-            if (turn.kind !== 'ask') return;
+            if (turn.kind !== 'message') return;
             if (!gateOpen) {
-              parked.push(turn.input);
+              parked.push(textOf(turn));
               await context.park();
               return;
             }
-            ran.push(turn.input);
+            ran.push(textOf(turn));
           },
           { ...noOrphans, concurrency: 2 },
         );
@@ -640,7 +602,7 @@ for (const contract of turnQueueContracts) {
         );
       });
 
-      test('an approval command outranks revived parked turns of its chat', async (t) => {
+      test('a recovery outranks revived parked turns of its chat', async (t) => {
         await using h = await contract.makeQueue();
         const ran: string[] = [];
 
@@ -653,7 +615,7 @@ for (const contract of turnQueueContracts) {
         await waitFor(t, () => parkCount === 1, 'turn parked');
         await gatekeeper[Symbol.asyncDispose]();
 
-        await h.queue.push(approvalRef('ranked'));
+        await h.queue.push(recoveryRef('ranked'));
         await h.queue.resumeParked('ranked');
 
         await using _consumer = await h.queue.consume(async (turn) => {
@@ -663,8 +625,8 @@ for (const contract of turnQueueContracts) {
         await waitFor(t, () => ran.length === 2, 'both delivered');
         assert.deepStrictEqual(
           ran,
-          ['approval', 'ask'],
-          'approval runs before the revived (older created_on) parked turn',
+          ['recovery', 'message'],
+          'recovery runs before the revived (older created_on) parked turn',
         );
       });
 
@@ -741,7 +703,7 @@ suite(
         async (turn) => {
           const chat = seen.get(turn.chatId);
           assert.ok(chat, `unexpected chat: ${turn.chatId}`);
-          chat.push(inputOf(turn));
+          chat.push(textOf(turn));
           deliveries++;
           await sleep(50);
         },
@@ -800,7 +762,7 @@ suite(
           try {
             const chat = seen.get(turn.chatId);
             assert.ok(chat, `unexpected chat: ${turn.chatId}`);
-            chat.push(inputOf(turn));
+            chat.push(textOf(turn));
             deliveries++;
             await sleep(50);
           } finally {

@@ -1,5 +1,5 @@
 import { experimental_codeModeTool } from '@ai-sdk/code-mode';
-import type { UIMessage } from 'ai';
+import { type UIMessage, jsonSchema, tool } from 'ai';
 import path from 'node:path';
 
 import {
@@ -85,20 +85,7 @@ export class AgentTurnExecutor {
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
-    if (turn.kind === 'approval') {
-      if (!(await this.#approvals.applyDecision(turn))) return;
-      await this.#reopen(turn.streamId);
-      return this.execute(
-        {
-          kind: 'continuation',
-          streamId: turn.streamId,
-          chatId: turn.chatId,
-          userId: turn.userId,
-        },
-        context,
-      );
-    }
-    if (turn.kind === 'continuation' && turn.recovery !== undefined) {
+    if (turn.kind === 'recovery') {
       await this.#reopen(turn.streamId);
     }
     if (await this.#projectSkippedTerminalTurn(turn)) return;
@@ -133,7 +120,10 @@ export class AgentTurnExecutor {
       ...(usageHint === undefined ? [] : [role(usageHint)]),
     );
 
-    if (turn.kind === 'ask' || turn.kind === 'mailbox') {
+    if (
+      (turn.kind === 'message' && turn.message.role === 'user') ||
+      turn.kind === 'mailbox'
+    ) {
       const head = (await engine.getMessages()).at(-1);
       if (this.#approvals.isPaused(head)) {
         await park();
@@ -142,7 +132,7 @@ export class AgentTurnExecutor {
     }
 
     let communications: InterAgentCommunication[] = [];
-    if (turn.kind === 'ask') {
+    if (turn.kind === 'message' && turn.message.role === 'user') {
       communications = await this.#mailbox.drainLeadingQueueOnly(turn);
     } else if (turn.kind === 'mailbox') {
       communications = await this.#mailbox.drain(turn);
@@ -209,6 +199,17 @@ export class AgentTurnExecutor {
         : {}),
     };
     const modelTools = {
+      ...(turn.kind === 'message'
+        ? Object.fromEntries(
+            Object.entries(turn.tools ?? {}).map(([name, definition]) => [
+              name,
+              tool({
+                description: definition.description,
+                inputSchema: jsonSchema(definition.inputSchema),
+              }),
+            ]),
+          )
+        : {}),
       ...declaration.tools,
       ...this.#collaborationTools,
       ...(this.#multiAgent.codeMode
@@ -256,7 +257,10 @@ export class AgentTurnExecutor {
         preclaimed: true,
         onCancelDetected: () => abort.abort(),
       });
-      if (turn.kind === 'continuation') {
+      if (
+        turn.kind === 'recovery' ||
+        (turn.kind === 'message' && turn.message.role === 'assistant')
+      ) {
         await this.#reconcileTerminalContinuation(turn);
       }
       await this.#controlPlane.projectTerminal(turn, thread);
@@ -270,7 +274,10 @@ export class AgentTurnExecutor {
     if (status === 'queued' || status === 'running') return false;
     if (status === undefined || turn.kind === 'mailbox') return true;
 
-    if (turn.kind === 'continuation') {
+    if (
+      turn.kind === 'recovery' ||
+      (turn.kind === 'message' && turn.message.role === 'assistant')
+    ) {
       await this.#reconcileTerminalContinuation(turn);
     }
 
@@ -317,15 +324,25 @@ export class AgentTurnExecutor {
     engine: ContextEngine,
     communications: InterAgentCommunication[],
   ): Promise<void> {
-    if (turn.kind === 'ask') {
-      engine.set(
-        ...communications.map((communication) =>
-          user(this.#mailboxInputMessage(communication)),
-        ),
-        this.#askInputMessage(turn),
-        assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
-      );
-      await engine.save({ branch: true });
+    if (turn.kind === 'message') {
+      if (turn.message.role === 'assistant') {
+        await engine.continue(assistant(turn.message));
+      } else if (turn.trigger === 'regenerate-message') {
+        await engine.rewind(turn.message.id);
+        engine.set(
+          assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
+        );
+        await engine.save({ branch: false });
+      } else {
+        engine.set(
+          ...communications.map((communication) =>
+            user(this.#mailboxInputMessage(communication)),
+          ),
+          user(turn.message),
+          assistant({ id: turn.streamId, role: 'assistant', parts: [] }),
+        );
+        await engine.save({ branch: true });
+      }
     } else if (turn.kind === 'mailbox') {
       engine.set(
         ...communications.map((communication) =>
@@ -342,7 +359,9 @@ export class AgentTurnExecutor {
     state: SamplingMailboxState,
   ): Promise<Array<UIMessage & { role: 'user' }> | undefined> {
     const communications =
-      turn.kind === 'ask' && state.firstRequest
+      turn.kind === 'message' &&
+      turn.message.role === 'user' &&
+      state.firstRequest
         ? await this.#mailbox.drainLeadingQueueOnly(turn)
         : await this.#mailbox.drain(turn);
     state.firstRequest = false;
@@ -437,20 +456,6 @@ export class AgentTurnExecutor {
       ],
       metadata: { interAgentCommunication: communication },
     };
-  }
-
-  #askInputMessage(
-    turn: Extract<TurnRef, { kind: 'ask' }>,
-  ): ReturnType<typeof user> {
-    if (!turn.message) return user(turn.input);
-    return user({
-      id: turn.message.id,
-      role: 'user',
-      parts: [{ type: 'text', text: turn.input }],
-      ...(turn.message.metadata === undefined
-        ? {}
-        : { metadata: turn.message.metadata }),
-    });
   }
 
   #renderInterAgentCommunication(

@@ -73,7 +73,6 @@ class RecordingTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -257,8 +256,12 @@ test('one runtime neither discovers nor consumes another runtime cron', async ()
     await runtimeB.createSession(conversationB);
     workerB = await runtimeB.work();
     await runtimeB.enqueue(conversationB, {
-      id: 'create-b-cron-turn',
-      input: 'create B cron',
+      message: {
+        id: 'create-b-cron-turn',
+        role: 'user',
+        parts: [{ type: 'text', text: 'create B cron' }],
+      },
+      trigger: 'submit-message',
     });
     await queueB.runNext();
 

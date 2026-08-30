@@ -24,11 +24,16 @@ function waitFor(
 
 function ref(chat: string, n: number): TurnRef {
   return {
-    kind: 'ask',
+    kind: 'message',
     streamId: `turn/${chat}#${n}:${crypto.randomUUID()}`,
     chatId: chat,
     userId: 'u1',
-    input: `input-${n}`,
+    message: {
+      id: `message-${n}`,
+      role: 'user',
+      parts: [{ type: 'text', text: `input-${n}` }],
+    },
+    trigger: 'submit-message',
   };
 }
 

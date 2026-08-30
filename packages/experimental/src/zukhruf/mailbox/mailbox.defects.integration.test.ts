@@ -1,5 +1,5 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
-import { simulateReadableStream } from 'ai';
+import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
@@ -29,6 +29,45 @@ import {
   createInterAgentCommunication,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
+async function submitApproval(
+  runtime: AgentRuntime,
+  conversation: { chatId: string; userId: string },
+  toolCallId: string,
+) {
+  const head = (await runtime.observe(conversation).engine.getMessages()).at(
+    -1,
+  );
+  assert.equal(head?.role, 'assistant');
+  const message: UIMessage & { role: 'assistant' } = {
+    ...head,
+    role: 'assistant',
+    parts: head.parts.map((part) =>
+      isToolUIPart(part) &&
+      part.state === 'approval-requested' &&
+      part.toolCallId === toolCallId
+        ? {
+            ...part,
+            state: 'approval-responded',
+            approval: { ...part.approval, approved: true },
+          }
+        : part,
+    ),
+  };
+  await runtime.enqueue(conversation, {
+    message,
+    trigger: 'submit-message',
+  });
+}
 
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
@@ -109,7 +148,6 @@ class ManualTurnQueue extends TurnQueue {
       throw new Error('simulated queue push failure');
     }
     this.pending.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -271,10 +309,10 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const h = runtimeHarness({ model });
     try {
       await using _worker = await h.runtime.work();
-      await h.runtime.enqueue(researcher, {
-        id: 'active-safe-boundary-turn',
-        input: 'start working',
-      });
+      await h.runtime.enqueue(
+        researcher,
+        userTurn('active-safe-boundary-turn', 'start working'),
+      );
       const executing = h.queue.runNext();
       await firstStepStarted.promise;
 
@@ -355,10 +393,10 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const h = runtimeHarness({ model });
     try {
       await using _worker = await h.runtime.work();
-      await h.runtime.enqueue(researcher, {
-        id: 'active-final-boundary-turn',
-        input: 'finish this response',
-      });
+      await h.runtime.enqueue(
+        researcher,
+        userTurn('active-final-boundary-turn', 'finish this response'),
+      );
       const executing = h.queue.runNext();
       await firstSamplingStarted.promise;
 
@@ -441,10 +479,10 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const senderRuntime = new AgentRuntime(agent, runtimeOptions);
     try {
       await using _worker = await workerRuntime.work();
-      await workerRuntime.enqueue(researcher, {
-        id: 'cross-runtime-active-turn',
-        input: 'finish this response',
-      });
+      await workerRuntime.enqueue(
+        researcher,
+        userTurn('cross-runtime-active-turn', 'finish this response'),
+      );
       const executing = queue.runNext();
       await firstSamplingStarted.promise;
 
@@ -560,10 +598,10 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const senderRuntime = new AgentRuntime(agent, runtimeOptions);
     try {
       await using _worker = await workerRuntime.work();
-      const completed = await workerRuntime.enqueue(researcher, {
-        id: 'completed-before-queue-only-mail',
-        input: 'finish first',
-      });
+      const completed = await workerRuntime.enqueue(
+        researcher,
+        userTurn('completed-before-queue-only-mail', 'finish first'),
+      );
       await queue.runNext();
       assert.equal(
         await streamStore.getStreamStatus(completed.id),
@@ -683,17 +721,17 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     });
     try {
       await using _worker = await h.runtime.work();
-      await h.runtime.enqueue(researcher, {
-        id: 'approval-mailbox-turn',
-        input: 'send it',
-      });
+      await h.runtime.enqueue(
+        researcher,
+        userTurn('approval-mailbox-turn', 'send it'),
+      );
       await h.queue.runNext();
 
       await h.runtime.deliver(
         mail('mail must reach resumed request'),
         MessageDeliveryMode.QueueOnly,
       );
-      await h.runtime.approve(researcher, { toolCallId: 'approval-call' });
+      await submitApproval(h.runtime, researcher, 'approval-call');
       await h.queue.runNext();
 
       assert.match(

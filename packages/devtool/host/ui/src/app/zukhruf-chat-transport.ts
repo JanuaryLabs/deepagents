@@ -1,4 +1,4 @@
-import { DefaultChatTransport, type UIMessage, isTextUIPart } from 'ai';
+import { DefaultChatTransport, type UIMessage } from 'ai';
 
 export interface ZukhrufChatTransportOptions {
   api: string;
@@ -56,23 +56,12 @@ export class ZukhrufChatTransport extends DefaultChatTransport<UIMessage> {
           signal,
         });
       },
-      prepareSendMessagesRequest: ({ messages, messageId, headers }) => {
-        const message = messages.findLast(({ role }) => role === 'user');
-        const input = message?.parts
-          .filter(isTextUIPart)
-          .map(({ text }) => text)
-          .join('')
-          .trim();
-        if (!message || !input) {
-          throw new Error('A user text message is required');
-        }
-
-        const requestHeaders = new Headers(headers);
-        requestHeaders.set('idempotency-key', messageId ?? message.id);
+      prepareSendMessagesRequest: ({ messages, trigger }) => {
+        const message = messages.at(-1);
+        if (!message) throw new Error('A message is required');
         return {
           api: state.sessionId ? sessionUrl(api, state.sessionId) : api,
-          body: { input },
-          headers: requestHeaders,
+          body: { message, trigger },
         };
       },
       prepareReconnectToStreamRequest: ({ headers }) => ({

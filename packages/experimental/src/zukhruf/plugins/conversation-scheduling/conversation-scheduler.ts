@@ -430,12 +430,13 @@ export class ConversationScheduler {
       occurrenceId,
     };
     await this.#host().enqueue(wake.conversation, {
-      id: occurrenceId,
-      input: occurrence.prompt,
       message: {
         id: occurrenceId,
+        role: 'user',
+        parts: [{ type: 'text', text: occurrence.prompt }],
         metadata: { zukhruf: { origin: 'scheduled', schedule } },
       },
+      trigger: 'submit-message',
     });
 
     await this.#update(wake.conversation, (current) => {

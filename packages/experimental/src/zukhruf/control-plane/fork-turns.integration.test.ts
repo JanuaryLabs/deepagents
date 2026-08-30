@@ -22,6 +22,15 @@ import {
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
     store,
@@ -35,7 +44,6 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -247,13 +255,13 @@ async function spawnAfter(
   for (const [index, turn] of options.history.entries()) {
     await runtime.enqueue(
       { chatId: 'root-chat', userId: 'user-1' },
-      { id: `history-${index}`, input: turn.input },
+      userTurn(`history-${index}`, turn.input),
     );
     await queue.runNext();
   }
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'spawn-turn', input: 'delegate current request' },
+    userTurn('spawn-turn', 'delegate current request'),
   );
   await queue.runNext();
 
@@ -272,7 +280,7 @@ async function spawnAfter(
     };
   }
   assert.notEqual(options.expectSpawn, false);
-  assert.ok(childTurn.kind === 'ask', JSON.stringify(parentHistory));
+  assert.ok(childTurn.kind === 'message', JSON.stringify(parentHistory));
   const conversation = { chatId: childTurn.chatId, userId: childTurn.userId };
   const childChat = await store.getChat(childTurn.chatId);
   const forkedHistory = await runtime

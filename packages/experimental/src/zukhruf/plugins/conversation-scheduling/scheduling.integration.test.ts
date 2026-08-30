@@ -2,7 +2,7 @@ import type {
   LanguageModelV4FunctionTool,
   LanguageModelV4StreamPart,
 } from '@ai-sdk/provider';
-import { isToolUIPart, simulateReadableStream } from 'ai';
+import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable } from 'node:fs/promises';
@@ -43,7 +43,52 @@ import {
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
+async function submitApproval(
+  runtime: AgentRuntime,
+  conversation: { chatId: string; userId: string },
+  toolCallId: string,
+) {
+  const head = (await runtime.observe(conversation).engine.getMessages()).at(
+    -1,
+  );
+  assert.equal(head?.role, 'assistant');
+  const message: UIMessage & { role: 'assistant' } = {
+    ...head,
+    role: 'assistant',
+    parts: head.parts.map((part) =>
+      isToolUIPart(part) &&
+      part.state === 'approval-requested' &&
+      part.toolCallId === toolCallId
+        ? {
+            ...part,
+            state: 'approval-responded',
+            approval: { ...part.approval, approved: true },
+          }
+        : part,
+    ),
+  };
+  await runtime.enqueue(conversation, {
+    message,
+    trigger: 'submit-message',
+  });
+}
+
 const dockerAvailable = await isDockerAvailable();
+
+function messageText(turn: Extract<TurnRef, { kind: 'message' }>): string {
+  const part = turn.message.parts.find((part) => part.type === 'text');
+  assert.ok(part);
+  return part.text;
+}
 
 const usage = {
   inputTokens: {
@@ -84,7 +129,6 @@ class ControlledTurnQueue extends TurnQueue {
       throw new Error('simulated turn enqueue outage');
     }
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -403,10 +447,10 @@ async function runTurn(
   conversation: { chatId: string; userId: string },
   input: string,
 ) {
-  await runtime.enqueue(conversation, {
-    id: `turn:${input}:${crypto.randomUUID()}`,
-    input,
-  });
+  await runtime.enqueue(
+    conversation,
+    userTurn(`message:${input}:${crypto.randomUUID()}`, input),
+  );
   await queue.runNext();
 }
 
@@ -458,7 +502,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
 
   await runtime.enqueue(
     { chatId: 'scheduled-tools', userId: 'user-1' },
-    { id: 'turn-1', input: 'show tools' },
+    userTurn('turn-1', 'show tools'),
   );
   await using _worker = await runtime.work();
   await h.queue.runNext();
@@ -756,14 +800,13 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 1);
   const scheduledTurn = h.queue.turns[0];
-  assert.equal(scheduledTurn.kind, 'ask');
-  if (scheduledTurn.kind !== 'ask') assert.fail('expected scheduled ask');
+  assert.ok(scheduledTurn?.kind === 'message');
   assert.equal(
     (scheduledTurn.message?.metadata as { zukhruf?: { origin?: string } })
       ?.zukhruf?.origin,
     'scheduled',
   );
-  assert.equal(scheduledTurn.input, 'scheduled prompt');
+  assert.equal(messageText(scheduledTurn), 'scheduled prompt');
 
   await h.queue.runNext();
   assert.equal(seenUserText.at(-1), 'scheduled prompt');
@@ -908,16 +951,16 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
   }));
   await using _worker = await runtime.work();
 
-  await runtime.enqueue(conversation, {
-    id: 'long-user-turn',
-    input: 'long user turn',
-  });
+  await runtime.enqueue(
+    conversation,
+    userTurn('long-user-turn', 'long user turn'),
+  );
   const running = h.queue.runNext();
   await firstStarted.promise;
-  await runtime.enqueue(conversation, {
-    id: 'queued-user-turn',
-    input: 'queued user turn',
-  });
+  await runtime.enqueue(
+    conversation,
+    userTurn('queued-user-turn', 'queued user turn'),
+  );
 
   for (let occurrence = 1; occurrence <= 3; occurrence++) {
     mock.timers.tick(10 * 60_000);
@@ -927,7 +970,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     if (due) await scheduler.fire(due.id);
     assert.deepEqual(
       h.queue.turns.map((turn) =>
-        turn.kind === 'ask' ? turn.input : turn.kind,
+        turn.kind === 'message' ? messageText(turn) : turn.kind,
       ),
       ['queued user turn'],
       `tick ${occurrence} does not materialize scheduled work while busy`,
@@ -938,19 +981,23 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
   finishFirst.resolve();
   await running;
   assert.deepEqual(
-    h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    h.queue.turns.map((turn) =>
+      turn.kind === 'message' ? messageText(turn) : turn.kind,
+    ),
     ['queued user turn'],
   );
 
   await h.queue.runNext();
   assert.deepEqual(
-    h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    h.queue.turns.map((turn) =>
+      turn.kind === 'message' ? messageText(turn) : turn.kind,
+    ),
     ['scheduled catch-up'],
   );
-  await runtime.enqueue(conversation, {
-    id: 'later-user-turn',
-    input: 'later user turn',
-  });
+  await runtime.enqueue(
+    conversation,
+    userTurn('later-user-turn', 'later user turn'),
+  );
   await h.queue.runNext();
   await h.queue.runNext();
   assert.deepEqual(seenUserText, [
@@ -1001,7 +1048,7 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
   );
   await runtime.enqueue(
     { chatId: 'no-scheduling', userId: 'user-1' },
-    { id: 'turn-1', input: 'show tools' },
+    userTurn('turn-1', 'show tools'),
   );
   await using _worker = await runtime.work();
   await h.queue.runNext();
@@ -1098,7 +1145,7 @@ test('conversation availability reaches every plugin before reporting failures',
 
   await runtime.enqueue(
     { chatId: 'availability', userId: 'user-1' },
-    { id: 'turn-1', input: 'settle' },
+    userTurn('turn-1', 'settle'),
   );
   await using _worker = await runtime.work();
   await assert.rejects(h.queue.runNext(), /availability failed/);
@@ -1365,7 +1412,9 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
   await delivery;
 
   assert.deepEqual(
-    h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    h.queue.turns.map((turn) =>
+      turn.kind === 'message' ? messageText(turn) : turn.kind,
+    ),
     [],
   );
 });
@@ -1416,7 +1465,9 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
   await delivery;
 
   assert.deepEqual(
-    h.queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    h.queue.turns.map((turn) =>
+      turn.kind === 'message' ? messageText(turn) : turn.kind,
+    ),
     [],
   );
   const staleSuccessor = [...scheduler.wakes.values()][0];
@@ -1688,10 +1739,10 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   await using _worker = await runtime.work();
   await runTurn(runtime, h.queue, conversation, 'create catch-up cron');
   const wake = [...scheduler.wakes.values()][0];
-  const queued = await runtime.enqueue(conversation, {
-    id: 'cancel-user-turn',
-    input: 'cancel me',
-  });
+  const queued = await runtime.enqueue(
+    conversation,
+    userTurn('cancel-user-turn', 'cancel me'),
+  );
   mock.timers.tick(10 * 60_000);
   await scheduler.fire(wake.id);
   assert.equal(h.queue.turns.length, 1);
@@ -1699,13 +1750,13 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   await runtime.observe(conversation).cancel(queued.id);
   assert.equal(h.queue.turns.length, 1);
   const catchUp = h.queue.turns[0];
-  assert.ok(catchUp?.kind === 'ask');
+  assert.ok(catchUp?.kind === 'message');
   assert.equal(
     (catchUp.message?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
       ?.origin,
     'scheduled',
   );
-  assert.equal(catchUp.input, 'cancel catch-up');
+  assert.equal(messageText(catchUp), 'cancel catch-up');
 });
 
 test('an overdue occurrence waits for approval before materializing', async (t) => {
@@ -1758,18 +1809,16 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   await scheduler.fire(wake.id);
   assert.deepEqual(h.queue.turns, []);
 
-  await runtime.approve(conversation, {
-    toolCallId: 'call-publish-needs approval',
-  });
+  await submitApproval(runtime, conversation, 'call-publish-needs approval');
   await h.queue.runNext();
   const [catchUp] = h.queue.turns as TurnRef[];
-  assert.ok(catchUp?.kind === 'ask');
+  assert.ok(catchUp?.kind === 'message');
   assert.equal(
     (catchUp.message?.metadata as { zukhruf?: { origin?: string } })?.zukhruf
       ?.origin,
     'scheduled',
   );
-  assert.equal(catchUp.input, 'approval catch-up');
+  assert.equal(messageText(catchUp), 'approval catch-up');
 });
 
 test('a non-recurring cron fires once and removes its definition', async (t) => {
@@ -1979,7 +2028,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
 
   await runTurn(runtime, h.queue, root, 'spawn owner');
   const ownerTurn = h.queue.turns[0];
-  assert.ok(ownerTurn && ownerTurn.kind === 'ask');
+  assert.ok(ownerTurn && ownerTurn.kind === 'message');
   const owner = { chatId: ownerTurn.chatId, userId: ownerTurn.userId };
   await h.queue.runNext();
   const ownerWake = [...scheduler.wakes.values()][0];
@@ -1989,7 +2038,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   while (h.queue.turns.length > 0) await h.queue.runNext();
   await runTurn(runtime, h.queue, root, 'spawn sibling');
   const siblingTurn = h.queue.turns[0];
-  assert.ok(siblingTurn && siblingTurn.kind === 'ask');
+  assert.ok(siblingTurn && siblingTurn.kind === 'message');
   const sibling = { chatId: siblingTurn.chatId, userId: siblingTurn.userId };
   assert.notEqual(sibling.chatId, owner.chatId);
   await h.queue.runNext();

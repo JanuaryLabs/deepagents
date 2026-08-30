@@ -84,9 +84,17 @@ const turn = await runtime.enqueue(
     userId: process.env.USER ?? 'local',
   },
   {
-    id: crypto.randomUUID(),
-    input:
-      'Moderate the proposal discussion. Select each next speaker, maintain the public transcript, and return the final consensus.',
+    message: {
+      id: crypto.randomUUID(),
+      role: 'user',
+      parts: [
+        {
+          type: 'text',
+          text: 'Moderate the proposal discussion. Select each next speaker, maintain the public transcript, and return the final consensus.',
+        },
+      ],
+    },
+    trigger: 'submit-message',
   },
 );
 

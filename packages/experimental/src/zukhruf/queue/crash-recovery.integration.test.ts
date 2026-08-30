@@ -26,6 +26,15 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
 const usage = {
   inputTokens: {
     total: 1,
@@ -160,10 +169,10 @@ describe(
         let childExit: Promise<unknown[]> | undefined;
         let worker: AsyncDisposable | undefined;
         try {
-          const first = await runtime.enqueue(conversation, {
-            id: crypto.randomUUID(),
-            input: 'a very long task',
-          });
+          const first = await runtime.enqueue(
+            conversation,
+            userTurn(crypto.randomUUID(), 'a very long task'),
+          );
 
           child = spawn(
             process.execPath,
@@ -193,10 +202,10 @@ describe(
           const failed = await streamStore.getStream(first.id);
           assert.ok(failed?.error, 'orphaned stream carries an error message');
 
-          const second = await runtime.enqueue(conversation, {
-            id: crypto.randomUUID(),
-            input: 'after the crash',
-          });
+          const second = await runtime.enqueue(
+            conversation,
+            userTurn(crypto.randomUUID(), 'after the crash'),
+          );
           const text = await collectText(second.stream);
           assert.equal(text, 'reply:after the crash', 'chat unblocked');
           assert.deepStrictEqual(

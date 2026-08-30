@@ -10,10 +10,7 @@ import {
 
 import type { AgentDeclaration } from '../agent.ts';
 import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
-import {
-  AgentControlPlane,
-  type TurnInput,
-} from '../control-plane/agent-control-plane.ts';
+import { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import { AgentDeclarationRegistry } from '../control-plane/agent-declaration-registry.ts';
 import { AgentDirectory } from '../control-plane/agent-directory.ts';
 import { AgentHistoryForker } from '../control-plane/agent-history-forker.ts';
@@ -31,7 +28,7 @@ import {
   type MultiAgentHostConfig,
   resolveMultiAgentHostConfig,
 } from '../multi-agent-config.ts';
-import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
+import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
 import { loadPluginSkills } from './agent-skills.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
@@ -50,7 +47,7 @@ export interface AgentPluginHost {
   readonly info: AgentRuntimeInfo;
   enqueue(
     conversation: ConversationId,
-    turn: TurnInput,
+    turn: TurnRequest,
   ): Promise<{ id: string; stream: ReadableStream<StreamPart> }>;
   conversationExists(conversation: ConversationId): Promise<boolean>;
   isConversationAvailable(conversation: ConversationId): Promise<boolean>;
@@ -585,7 +582,7 @@ export class AgentRuntime {
     return (await this.#directory.load(conversation))?.path.isRoot ?? false;
   }
 
-  async enqueue(conversation: ConversationId, turn: TurnInput) {
+  async enqueue(conversation: ConversationId, turn: TurnRequest) {
     const streamId = await this.#controlPlane.enqueue(conversation, turn);
     return { id: streamId, stream: this.#streams.watch(streamId) };
   }
@@ -596,17 +593,6 @@ export class AgentRuntime {
   ): Promise<void> {
     await this.#directory.assertOwnerIfExists(communication.recipient);
     await this.#mailbox.deliver(communication, mode);
-  }
-
-  approve(conversation: ConversationId, input: { toolCallId: string }) {
-    return this.#approvals.approve(conversation, input);
-  }
-
-  deny(
-    conversation: ConversationId,
-    input: { toolCallId: string; reason?: string },
-  ) {
-    return this.#approvals.deny(conversation, input);
   }
 
   observe(conversation: ConversationId): AgentObservation {
@@ -755,9 +741,12 @@ export class AgentRuntime {
         stream = await this.#streams.store.getStream(turn.streamId);
       }
       let declaration: AgentDeclaration | undefined;
+      const continuation =
+        turn.kind === 'recovery' ||
+        (turn.kind === 'message' && turn.message.role === 'assistant');
       if (
-        (turn.kind === 'approval' ||
-          (turn.kind === 'continuation' && turn.recovery !== 'idempotent')) &&
+        continuation &&
+        !(turn.kind === 'recovery' && turn.mode === 'idempotent') &&
         stream?.status === 'failed'
       ) {
         try {
@@ -777,7 +766,7 @@ export class AgentRuntime {
         return;
       }
       if (
-        (turn.kind === 'approval' || turn.kind === 'continuation') &&
+        continuation &&
         stream?.status === 'completed' &&
         (await this.#approvals.recoverUnstartedContinuation(
           turn,
@@ -788,7 +777,7 @@ export class AgentRuntime {
       }
       stream = await this.#streams.store.getStream(turn.streamId);
       if (
-        (turn.kind === 'approval' || turn.kind === 'continuation') &&
+        continuation &&
         (stream?.status === 'completed' ||
           stream?.status === 'failed' ||
           stream?.status === 'cancelled')
@@ -814,7 +803,10 @@ export class AgentRuntime {
       await this.#controlPlane.projectTerminal(turn, thread);
     } finally {
       try {
-        if (turn.kind === 'approval' || turn.kind === 'continuation') {
+        if (
+          turn.kind === 'recovery' ||
+          (turn.kind === 'message' && turn.message.role === 'assistant')
+        ) {
           await this.#queue.resumeParked(turn.chatId);
         }
       } finally {

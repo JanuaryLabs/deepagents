@@ -19,7 +19,7 @@ This plan delivers:
 - conversation-scoped scheduling state in existing `ContextStore` metadata;
 - fixed cron and dynamic one-shot coordination;
 - the four agreed model-facing tools;
-- lazily materialized, provenance-carrying scheduled asks through the normal Zukhruf turn path;
+- lazily materialized, provenance-carrying scheduled messages through the normal Zukhruf turn path;
 - receipt-first state transitions across the metadata/wake dual-write boundary;
 - public-boundary integration coverage over PGlite and real PostgreSQL.
 
@@ -39,7 +39,7 @@ This plan does not deliver:
 - `TurnQueue` is the built durable execution-ordering authority. It accepts immediate work only and
   enforces strict FIFO per chat plus cross-chat concurrency.
 - `AgentRuntime.enqueue()` is the correct path for a fired prompt: it derives conversation-scoped
-  turn identity, registers the stream, and pushes an ask. `MailboxCoordinator` is not a timer and
+  turn identity, registers the stream, and pushes a message turn. `MailboxCoordinator` is not a timer and
   must not be reused for timed scheduling.
 - `ContextStore.updateChat()` already provides an atomic synchronous metadata updater: SQLite uses
   `BEGIN IMMEDIATE`; PostgreSQL uses `SELECT ... FOR UPDATE`; SQL Server uses its transaction lock.
@@ -143,11 +143,11 @@ ScheduleWakeup(
 - Each occurrence has a deterministic identity derived from conversation, definition ID,
   generation, and intended fire time.
 - A due prompt remains scheduling metadata while the conversation is running, queued, or
-  approval-paused. Once eligible, exactly one catch-up becomes `kind: 'ask'` and
+  approval-paused. Once eligible, exactly one catch-up becomes `kind: 'message'` and
   `origin: 'scheduled'` in the same conversation.
 - Scheduled origin is persisted in the user message metadata before queue cleanup, not left only on
   the pg-boss job.
-- The materialized ask uses normal FIFO ordering. Work already waiting runs first; work arriving
+- The materialized message uses normal FIFO ordering. Work already waiting runs first; work arriving
   later cannot overtake it. Approval/continuation retain their separate protocol priority.
 - Duplicate wake delivery or duplicate TurnQueue receipts may occur, but one deterministic stream ID
   prevents a second model execution.
@@ -376,10 +376,10 @@ nx run @deepagents/experimental:test
 
 #### Work
 
-- [x] Extend the trusted internal ask ref with scheduled origin and occurrence metadata; ordinary
+- [x] Extend the trusted internal message ref with scheduled origin and occurrence metadata; ordinary
       asks need no explicit origin.
 - [x] Keep due occurrences in authoritative scheduling metadata while their conversation has active
-      or queued work, then materialize one normal FIFO ask after settlement.
+      or queued work, then materialize one normal FIFO message after settlement.
 - [x] Enqueue each occurrence through `AgentRuntime`/`AgentControlPlane`, never by calling
       `TurnQueue.push()` directly.
 - [x] Persist scheduled origin and schedule/occurrence identity in the created user message metadata
@@ -393,8 +393,8 @@ nx run @deepagents/experimental:test
 
 - [x] A due occurrence is not materialized during an active turn or while ordinary work is queued.
 - [x] A 35-minute busy window over three ten-minute ticks produces one catch-up after queued user
-      work, not three scheduled asks.
-- [x] Once materialized, the scheduled ask retains normal FIFO position against later arrivals.
+      work, not three scheduled messages.
+- [x] Once materialized, the scheduled message retains normal FIFO position against later arrivals.
 - [x] Duplicate wake and TurnQueue delivery produces one assistant execution and one durable
       scheduled-origin user message.
 - [x] Cancelling an already-enqueued scheduled turn uses the existing observation/cancellation path.

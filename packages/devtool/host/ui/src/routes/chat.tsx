@@ -11,7 +11,6 @@ import {
   Messages,
   PendingToolInput,
   SubmitButton,
-  serializeToolsRegistry,
   useAgent,
   useAgentMessages,
   useAgentMeta,
@@ -97,7 +96,6 @@ function ChatSession({
       new ZukhrufChatTransport({
         api,
         sessionId,
-        tools: serializeToolsRegistry(TOOL_REGISTRY),
         onSession: (acceptedSessionId) => {
           void navigate(`/chat/${encodeURIComponent(acceptedSessionId)}`, {
             replace: true,

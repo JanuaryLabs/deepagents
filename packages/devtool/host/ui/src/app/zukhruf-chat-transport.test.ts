@@ -50,7 +50,16 @@ test('ZukhrufChatTransport creates, continues, streams, and cancels a session', 
   const message: UIMessage = {
     id: 'message-1',
     role: 'user',
-    parts: [{ type: 'text', text: '  Hello  ' }],
+    parts: [
+      { type: 'text', text: '  Hello  ' },
+      {
+        type: 'file',
+        mediaType: 'text/plain',
+        filename: 'note.txt',
+        url: 'data:text/plain;base64,bm90ZQ==',
+      },
+    ],
+    metadata: { locale: { language: 'Arabic' } },
   };
   const abort = new AbortController();
 
@@ -71,26 +80,43 @@ test('ZukhrufChatTransport creates, continues, streams, and cancels a session', 
   assert.deepEqual(sessions, [sessionId]);
   assert.equal(requests[0].url, api);
   assert.equal(requests[0].method, 'POST');
-  assert.equal(requests[0].headers.get('idempotency-key'), message.id);
-  assert.deepEqual(requests[0].body, { input: 'Hello' });
+  assert.equal(requests[0].headers.get('idempotency-key'), null);
+  assert.deepEqual(requests[0].body, {
+    message,
+    trigger: 'submit-message',
+  });
   assert.equal(requests[1].url, `${api}/${sessionId}/stream`);
+
+  const continuation: UIMessage = {
+    id: 'message-2',
+    role: 'user',
+    parts: [{ type: 'text', text: 'Continue' }],
+  };
+  await transport.sendMessages({
+    abortSignal: undefined,
+    chatId: 'draft-1',
+    messageId: continuation.id,
+    messages: [message, continuation],
+    trigger: 'submit-message',
+  });
+  assert.equal(requests[2].url, `${api}/${sessionId}`);
+  assert.deepEqual(requests[2].body, {
+    message: continuation,
+    trigger: 'submit-message',
+  });
 
   await transport.sendMessages({
     abortSignal: undefined,
     chatId: 'draft-1',
-    messageId: 'message-2',
-    messages: [
-      message,
-      {
-        id: 'message-2',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Continue' }],
-      },
-    ],
-    trigger: 'submit-message',
+    messageId: 'assistant-1',
+    messages: [message, continuation],
+    trigger: 'regenerate-message',
   });
-  assert.equal(requests[2].url, `${api}/${sessionId}`);
-  assert.deepEqual(requests[2].body, { input: 'Continue' });
+  assert.equal(requests[4].url, `${api}/${sessionId}`);
+  assert.deepEqual(requests[4].body, {
+    message: continuation,
+    trigger: 'regenerate-message',
+  });
 
   abort.abort();
   await t.waitFor(

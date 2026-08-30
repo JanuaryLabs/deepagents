@@ -30,7 +30,7 @@
 - [x] **Root metadata initialization CAS**: worker initialization preserves a concurrent host
       metadata write and retries against the fresh snapshot.
 - [ ] **Startup reconciliation sweep**: non-terminal stream rows with no live/queued job → `failed`
-      (covers register→push orphans beyond the retried-ask self-heal).
+      (covers register→push orphans beyond the retried-message self-heal).
 - [x] **Host cancel reaches the queue**: `interrupt_agent` and `AgentObservation.cancel()` cancel the
       exact queue job as well as the durable stream. Queued copies are removed immediately while
       active work retains FIFO ownership through handler exit.
@@ -59,19 +59,18 @@
 
 - [x] SDK-native approval verified (probe): needsApproval pauses through agent()/chat() untouched;
       approval-responded → SDK executes tool on continuation; deny → output-denied.
-- [x] Runtime `approve()`/`deny()` asynchronous command helpers with deterministic approval job IDs.
-- [x] `AgentTurnExecutor` gate (park before chain/sandbox) + queue-native approval path; TurnRef
-      ask/approval/recovery-continuation union.
+- [x] Use AI SDK React `addToolApprovalResponse()` plus
+      `lastAssistantMessageIsCompleteWithApprovalResponses()`; submit the resulting assistant
+      `UIMessage` through the ordinary message path.
+- [x] `AgentTurnExecutor` gate (park before chain/sandbox); TurnRef contains message, internal
+      recovery, and mailbox work only.
 - [x] Port: `ConsumeContext.park()` + `TurnQueue.resumeParked(chatId)`; pg-boss self-cancel/resume,
-      approval `priority: 1`; two contract tests (park/revive order; approval outranks).
-- [x] Runtime integration coverage for pause, approve, deny, queue-behind ordering, and concurrent/double approval.
-- [x] Make the approval worker own response persistence, direct original-turn resumption, and
-      parked-turn revival. Recovery-only continuation jobs repair a crash after the durable claim.
-- [x] Deduplicate concurrent approve-versus-deny with
-      `uuidv5("approval:" + approvalId, conversationNamespace)` while preserving distinct sibling
-      jobs and waiting for every sibling before resuming exactly once.
-- [x] Keep the assistant message as the permanent decision record after pg-boss deletes the job.
-      API processes only read and queue; the worker rechecks and applies the winning command.
+      plus recovery `priority: 1`; two contract tests (park/revive order; recovery outranks).
+- [x] Runtime integration coverage for pause, approval, denial, sibling responses, and queue-behind
+      ordering through complete assistant messages.
+- [x] Make the assistant-message worker own response persistence, original-turn resumption, and
+      parked-turn revival. Recovery jobs repair a crash after the durable claim.
+- [x] Keep the assistant message as the permanent approval decision record.
 - [x] Suppress child terminal projection while an approval remains unresolved, report Codex's
       model-facing `running`, and prove exactly one post-continuation `FINAL_ANSWER`.
 - [x] A failed or cancelled continuation overrides approval-pause projection: parents receive the
@@ -143,7 +142,10 @@
       no claim/ack/lease/redelivery protocol or startup crash reconciliation.
 - [x] Migrate `demo/zukhruf-durable-turns` from blocking `agent.asTool()` composition to a durable
       independent specialist chat and asynchronous `FINAL_ANSWER` consumption.
-- [ ] `TurnRef.input: string` → rich message (UIMessage-shaped: parts, attachments-as-references) + host context (agentId, modelId, surface context, tools, elements).
+- [x] `TurnRef` carries the complete UI message, including parts, attachment references, and
+      metadata.
+- [ ] Keep host run context (agentId, modelId, surface context, tools, elements) separate from
+      message metadata when the runtime begins accepting it.
 - [ ] Port stays payload-opaque: contract requires JSON-round-trip fidelity only.
 - [ ] Add dedicated child lifecycle/activity events for spawn, message/follow-up, interrupt, and
       terminal completion. Keep mailbox storage transport-only; expose events through the existing

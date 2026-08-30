@@ -69,8 +69,12 @@ const conversation = {
 resources.use(await runtime.work());
 
 const turn = await runtime.enqueue(conversation, {
-  id: crypto.randomUUID(),
-  input: prompt,
+  message: {
+    id: crypto.randomUUID(),
+    role: 'user',
+    parts: [{ type: 'text', text: prompt }],
+  },
+  trigger: 'submit-message',
 });
 console.log(
   `\n[turn ${turn.id} enqueued] the worker is generating the animated SVG — streaming below:\n`,

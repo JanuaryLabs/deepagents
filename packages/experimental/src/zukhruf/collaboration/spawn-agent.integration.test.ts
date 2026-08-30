@@ -21,6 +21,15 @@ import {
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
     store,
@@ -41,7 +50,6 @@ class ControlledTurnQueue extends TurnQueue {
       throw new Error('queue unavailable');
     }
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -207,7 +215,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Spawn the worker twice concurrently' },
+    userTurn('root-turn', 'Spawn the worker twice concurrently'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -289,19 +297,19 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn-1', input: 'Spawn the worker' },
+    userTurn('root-turn-1', 'Spawn the worker'),
   );
   await queue.runNext();
   assert.equal(queue.turns.length, 0, 'the first child enqueue failed');
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn-2', input: 'Retry spawning the same worker' },
+    userTurn('root-turn-2', 'Retry spawning the same worker'),
   );
   await queue.runNext();
 
   assert.equal(queue.turns.length, 1);
-  assert.equal(queue.turns[0]?.kind, 'ask');
+  assert.equal(queue.turns[0]?.kind, 'message');
   const childAttempts = queue.attemptedTurns.filter(
     (turn) => turn.chatId !== 'root-chat',
   );
@@ -321,7 +329,7 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
   await queue.runNext();
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn-3', input: 'Spawn the completed path again' },
+    userTurn('root-turn-3', 'Spawn the completed path again'),
   );
   await queue.runNext();
 

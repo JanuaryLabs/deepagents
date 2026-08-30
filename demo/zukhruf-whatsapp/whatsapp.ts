@@ -200,8 +200,17 @@ export class WhatsAppGroup implements AsyncDisposable {
           const turn = await participant.runtime.enqueue(
             participant.conversation,
             {
-              id: randomUUID(),
-              input: WhatsAppGroup.#notification(notifications),
+              message: {
+                id: randomUUID(),
+                role: 'user',
+                parts: [
+                  {
+                    type: 'text',
+                    text: WhatsAppGroup.#notification(notifications),
+                  },
+                ],
+              },
+              trigger: 'submit-message',
             },
           );
           await turn.stream.pipeTo(new WritableStream());

@@ -1,41 +1,43 @@
 import type { UIMessage } from 'ai';
 
-/** Optional persisted user-message identity and metadata for a queued ask. */
-export type TurnInputMessage = Pick<
-  UIMessage<Record<string, unknown>>,
-  'id' | 'metadata'
->;
+import type { ClientToolSet } from '../tool.ts';
+
+export type TurnRequest = {
+  /** Client-declared tools available to the model and completed by that client. */
+  tools?: ClientToolSet;
+} & (
+  | {
+      message: UIMessage & { role: 'user' };
+      trigger: 'submit-message' | 'regenerate-message';
+    }
+  | {
+      message: UIMessage & { role: 'assistant' };
+      trigger: 'submit-message';
+    }
+);
 
 export type TurnRef = {
   streamId: string;
   chatId: string;
   userId: string;
 } & (
-  | {
-      kind: 'ask';
+  | ({
+      kind: 'message';
       /**
-       * The user message, carried by the queue until the turn executes. It
+       * The complete UI message, carried by the queue until the turn executes. It
        * enters the context chain only when the turn RUNS — enqueue-time
        * persistence would let a queued turn's message leak into the running
        * turn's prompt (and `chat()` streams into the chain head, which must
        * be THIS turn's placeholder).
        */
-      input: string;
-      message?: TurnInputMessage;
-    }
+    } & TurnRequest)
   | {
       /**
-       * Recovery-only re-execution of an existing stream. Normal approval
-       * responses resume directly inside their approval job.
+       * Internal re-execution of an existing assistant stream after a worker
+       * handoff or a proven-idempotent tool failure.
        */
-      kind: 'continuation';
-      recovery?: 'handoff' | 'idempotent';
-    }
-  | {
-      kind: 'approval';
-      toolCallId: string;
-      approvalId: string;
-      decision: { approved: true } | { approved: false; reason?: string };
+      kind: 'recovery';
+      mode: 'handoff' | 'idempotent';
     }
   | {
       /**
@@ -45,13 +47,6 @@ export type TurnRef = {
       kind: 'mailbox';
     }
 );
-
-export interface TurnPushResult {
-  jobId: string;
-  inserted: boolean;
-}
-
-export type ApprovalTurnRef = Extract<TurnRef, { kind: 'approval' }>;
 
 export interface ConsumeContext {
   signal: AbortSignal;
@@ -86,14 +81,11 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  *
  * Contract every implementation must honor:
  * - `push` is durable: a pushed turn survives process death until consumed.
- * - Delivery is AT-LEAST-ONCE: a pushed non-approval turn is delivered until settled, and
+ * - Delivery is AT-LEAST-ONCE: a pushed turn is delivered until settled, and
  *   duplicate pushes of the same `streamId` may each be delivered. Consumers
  *   MUST be idempotent on `streamId` (the zukhruf runtime skips turns whose
  *   stream row is terminal — a check that, unlike queue-side dedup, never
  *   expires with job retention).
- * - Approval pushes use their persisted approval id as a deterministic job
- *   identity. The first decision inserts; later decisions for that approval
- *   report the existing job instead of adding a row.
  * - Per chat, at most ONE handler invocation is active at a time, and turns
  *   run in the order they were pushed (strict FIFO per `chatId`) — this
  *   covers duplicates too: they can never run concurrently or out of order.
@@ -114,13 +106,13 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  *   authority.
  * - A parked turn (`context.park()`) is not delivered again until
  *   `resumeParked(chatId)`; revived turns keep their original FIFO order,
- *   and approval/recovery turns pushed for the chat outrank them.
+ *   and recovery turns pushed for the chat outrank them.
  *
  * On platforms with native per-conversation serialization (e.g. Durable
  * Objects) this port is absorbed by the host rather than implemented.
  */
 export abstract class TurnQueue {
-  abstract push(turn: TurnRef): Promise<TurnPushResult>;
+  abstract push(turn: TurnRef): Promise<void>;
 
   /** Whether this conversation currently has queued or active scheduler work. */
   abstract getTurnActivity(

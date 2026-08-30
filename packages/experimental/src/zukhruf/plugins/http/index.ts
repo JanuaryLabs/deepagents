@@ -1,4 +1,9 @@
-import { createUIMessageStreamResponse } from 'ai';
+import {
+  type JSONSchema7,
+  type UIMessage,
+  createUIMessageStreamResponse,
+  safeValidateUIMessages,
+} from 'ai';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
@@ -55,19 +60,27 @@ export const ZUKHRUF_SESSION_ID_HEADER = 'x-zukhruf-session-id';
 export const ZUKHRUF_TURN_ID_HEADER = 'x-zukhruf-turn-id';
 
 const MAX_BODY_BYTES = 10 * 1024;
-const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
-const MAX_INPUT_LENGTH = 8_000;
 const SESSION_NAMESPACE = uuidv5('urn:deepagents:zukhruf:sessions', uuidv5.URL);
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 const sessionIdSchema = z.string().refine(validateUuid);
+const jsonSchema = z.custom<JSONSchema7>(
+  (value) =>
+    typeof value === 'object' && value !== null && !Array.isArray(value),
+);
+const clientToolsSchema = z
+  .record(
+    z.string().min(1),
+    z.strictObject({
+      inputSchema: jsonSchema,
+      description: z.string().min(1),
+    }),
+  )
+  .optional();
 const turnBodySchema = z.strictObject({
-  input: z.string().trim().min(1).max(MAX_INPUT_LENGTH),
+  message: z.unknown(),
+  trigger: z.enum(['submit-message', 'regenerate-message']),
+  tools: clientToolsSchema,
 });
-const idempotencyKeySchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(MAX_IDEMPOTENCY_KEY_LENGTH);
 const limitTurnBody = bodyLimit({
   maxSize: MAX_BODY_BYTES,
   onError: () => {
@@ -199,24 +212,24 @@ export function http(
         select: payload.body,
         against: turnBodySchema,
       },
-      idempotencyKey: {
-        select: payload.headers['idempotency-key'],
-        against: idempotencyKeySchema,
-      },
     })),
     async (context) => {
-      const { body, idempotencyKey } = context.var.input;
+      const { body } = context.var.input;
+      const request = await validateTurnRequest(body);
+      if (request.message.role !== 'user') {
+        throw invalidMessage('A new session must start with a user message');
+      }
+      if (request.trigger !== 'submit-message') {
+        throw invalidMessage('A new session cannot regenerate a response');
+      }
       const userId = context.get('userId');
       const sessionId = uuidv5(
-        JSON.stringify([userId, idempotencyKey]),
+        JSON.stringify([userId, request.message.id]),
         SESSION_NAMESPACE,
       );
       const conversation = { chatId: sessionId, userId };
       await runtime.createSession(conversation);
-      const turn = await runtime.enqueue(conversation, {
-        id: idempotencyKey,
-        input: body.input.trim(),
-      });
+      const turn = await runtime.enqueue(conversation, request);
 
       return accepted(context, sessionId, turn.id);
     },
@@ -258,26 +271,22 @@ export function http(
         select: payload.body,
         against: turnBodySchema,
       },
-      idempotencyKey: {
-        select: payload.headers['idempotency-key'],
-        against: idempotencyKeySchema,
-      },
       sessionId: {
         select: payload.params.sessionId,
         against: sessionIdSchema,
       },
     })),
     async (context) => {
-      const { body, idempotencyKey, sessionId } = context.var.input;
+      const { body, sessionId } = context.var.input;
       const conversation = {
         chatId: sessionId,
         userId: context.get('userId'),
       };
       await requireSession(runtime, conversation);
-      const turn = await runtime.enqueue(conversation, {
-        id: idempotencyKey,
-        input: body.input.trim(),
-      });
+      const turn = await runtime.enqueue(
+        conversation,
+        await validateTurnRequest(body),
+      );
 
       return accepted(context, sessionId, turn.id);
     },
@@ -424,6 +433,46 @@ function accepted<Env extends HttpEnv>(
     ...NO_STORE,
     [ZUKHRUF_SESSION_ID_HEADER]: sessionId,
     [ZUKHRUF_TURN_ID_HEADER]: turnId,
+  });
+}
+
+async function validateTurnMessage(
+  value: unknown,
+): Promise<Parameters<HttpRuntime['enqueue']>[1]['message']> {
+  const result = await safeValidateUIMessages({ messages: [value] });
+  if (!result.success) throw invalidMessage(result.error.message);
+  const message = result.data[0];
+  if (!isTurnMessage(message))
+    throw invalidMessage('System messages are not accepted');
+  return message;
+}
+
+async function validateTurnRequest(
+  body: z.infer<typeof turnBodySchema>,
+): Promise<Parameters<HttpRuntime['enqueue']>[1]> {
+  const message = await validateTurnMessage(body.message);
+  const tools = body.tools === undefined ? {} : { tools: body.tools };
+  if (message.role === 'assistant') {
+    if (body.trigger === 'regenerate-message') {
+      throw invalidMessage(
+        'Regeneration requires the user message preceding the assistant response',
+      );
+    }
+    return { message, trigger: 'submit-message', ...tools };
+  }
+  return { message, trigger: body.trigger, ...tools };
+}
+
+function isTurnMessage(
+  message: UIMessage,
+): message is Parameters<HttpRuntime['enqueue']>[1]['message'] {
+  return message.role === 'user' || message.role === 'assistant';
+}
+
+function invalidMessage(detail: string): HTTPException {
+  return new HTTPException(400, {
+    message: 'Invalid message',
+    cause: { code: 'api/validation-failed', detail },
   });
 }
 

@@ -1,3 +1,4 @@
+import type { UIMessage } from 'ai';
 import { v5 as uuidv5 } from 'uuid';
 
 import type { StreamManager } from '@deepagents/context';
@@ -10,11 +11,7 @@ import {
   InterAgentCommunicationType,
   createInterAgentCommunication,
 } from '../mailbox/types.ts';
-import type {
-  TurnInputMessage,
-  TurnQueue,
-  TurnRef,
-} from '../queue/turn-queue.ts';
+import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentHistoryForker } from './agent-history-forker.ts';
@@ -41,14 +38,6 @@ export interface AgentActor {
   turn: TurnRef;
   thread: AgentThread;
   declaration: AgentDeclaration;
-}
-
-export interface TurnInput {
-  /** Caller-supplied idempotency key; enqueue returns its scoped durable id. */
-  id: string;
-  input: string;
-  /** Persist this identity and metadata on the user message created when the turn runs. */
-  message?: TurnInputMessage;
 }
 
 export interface SpawnAgentInput {
@@ -108,25 +97,48 @@ export class AgentControlPlane {
 
   async enqueue(
     conversation: ConversationId,
-    turn: TurnInput,
+    turn: TurnRequest,
   ): Promise<string> {
-    if (!turn.id.trim()) {
-      throw new Error(
-        'enqueue: turn id is required — it names the ask, making retries idempotent',
-      );
-    }
+    const message = turn.message;
+    if (!message.id.trim()) throw new Error('enqueue: message id is required');
     await this.#directory.assertOwnerIfExists(conversation);
-    const streamId = AgentTurnId.fromRequest(conversation, turn.id).toString();
-    await this.#streams.register(streamId);
-    const ask = {
-      kind: 'ask',
+
+    const streamId =
+      message.role === 'assistant'
+        ? await this.#continuationStreamId(conversation, message)
+        : AgentTurnId.fromRequest(conversation, message.id).toString();
+
+    if (message.role === 'assistant' || turn.trigger === 'regenerate-message') {
+      const status = await this.#streams.store.getStreamStatus(streamId);
+      if (status === undefined)
+        throw new Error('enqueue: continuation stream does not exist');
+      if (status === 'queued' || status === 'running') return streamId;
+      await this.#streams.reopen(streamId);
+    } else {
+      await this.#streams.register(streamId);
+    }
+
+    await this.#queue.push({
+      kind: 'message',
       streamId,
       chatId: conversation.chatId,
       userId: conversation.userId,
-      input: turn.input,
-      ...(turn.message === undefined ? {} : { message: turn.message }),
-    } as const;
-    await this.#queue.push(ask);
+      ...turn,
+    });
+    return streamId;
+  }
+
+  async #continuationStreamId(
+    conversation: ConversationId,
+    message: UIMessage,
+  ): Promise<string> {
+    const streamId = (await this.#directory.load(conversation))?.lastTurnId;
+    if (!streamId)
+      throw new Error('enqueue: assistant continuation has no previous turn');
+    if (message.id !== streamId)
+      throw new Error(
+        'enqueue: assistant continuation must update the current assistant message',
+      );
     return streamId;
   }
 
@@ -196,8 +208,12 @@ export class AgentControlPlane {
     }
     await this.#historyForker.fork(actor.thread, child, input.forkTurns);
     await this.enqueue(child.conversation, {
-      id: requestId,
-      input: input.message,
+      message: {
+        id: requestId,
+        role: 'user',
+        parts: [{ type: 'text', text: input.message }],
+      },
+      trigger: 'submit-message',
     });
     return { task_name: childPath };
   }

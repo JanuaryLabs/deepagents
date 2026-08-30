@@ -1,4 +1,4 @@
-import { isToolUIPart, simulateReadableStream } from 'ai';
+import { type UIMessage, isToolUIPart, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -29,6 +29,47 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { settleWithin } from '@deepagents/test';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
+async function submitApprovals(
+  runtime: AgentRuntime,
+  conversation: ConversationId,
+  decisions: ReadonlyMap<string, boolean>,
+) {
+  const head = (await runtime.observe(conversation).engine.getMessages()).at(
+    -1,
+  );
+  assert.equal(head?.role, 'assistant');
+  const message: UIMessage & { role: 'assistant' } = {
+    ...head,
+    role: 'assistant',
+    parts: head.parts.map((part) => {
+      if (!isToolUIPart(part) || part.state !== 'approval-requested') {
+        return part;
+      }
+      const approved = decisions.get(part.toolCallId);
+      return approved === undefined
+        ? part
+        : {
+            ...part,
+            state: 'approval-responded',
+            approval: { ...part.approval, approved },
+          };
+    }),
+  };
+  return runtime.enqueue(conversation, {
+    message,
+    trigger: 'submit-message',
+  });
+}
+
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
     store,
@@ -44,7 +85,6 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async consume(
@@ -151,7 +191,6 @@ class SharedControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef) {
     this.#state.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async consume(
@@ -494,7 +533,7 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
 
   await runtime.enqueue(
     { chatId: 'child-chat', userId: 'user-1' },
-    { id: 'child-turn', input: 'research this' },
+    userTurn('child-turn', 'research this'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -536,21 +575,21 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
     { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
-  const first = await runtime.enqueue(conversation, {
-    id: 'caller-turn-a',
-    input: 'first',
-  });
+  const first = await runtime.enqueue(
+    conversation,
+    userTurn('caller-turn-a', 'first'),
+  );
   await using _worker = await runtime.work();
   await queue.runNext();
-  const second = await runtime.enqueue(conversation, {
-    id: 'caller-turn-b',
-    input: 'second',
-  });
+  const second = await runtime.enqueue(
+    conversation,
+    userTurn('caller-turn-b', 'second'),
+  );
   await queue.runNext();
-  const duplicate = await runtime.enqueue(conversation, {
-    id: 'caller-turn-a',
-    input: 'must not run again',
-  });
+  const duplicate = await runtime.enqueue(
+    conversation,
+    userTurn('caller-turn-a', 'must not run again'),
+  );
   assert.equal(duplicate.id, first.id);
   await queue.runNext();
 
@@ -627,7 +666,7 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Delegate this research' },
+    userTurn('root-turn', 'Delegate this research'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -636,10 +675,12 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
   assert.equal(childCalls.length, 0);
   assert.equal(queue.turns.length, 1);
   const childTurn = queue.turns[0];
-  assert.ok(childTurn && childTurn.kind === 'ask');
+  assert.ok(childTurn && childTurn.kind === 'message');
   assert.notEqual(childTurn.chatId, 'root-chat');
   assert.equal(childTurn.userId, 'user-1');
-  assert.equal(childTurn.input, 'Research the market');
+  assert.deepEqual(childTurn.message.parts, [
+    { type: 'text', text: 'Research the market' },
+  ]);
   assert.match(JSON.stringify(promptAfterSpawn), /\/root\/market_research/);
 
   const childChat = await store.getChat(childTurn.chatId);
@@ -730,7 +771,7 @@ test('a completed child queues its final answer to the parent without waking it'
 
   await runtime.enqueue(
     { chatId: 'child-chat', userId: 'user-1' },
-    { id: 'child-turn', input: 'Research this' },
+    userTurn('child-turn', 'Research this'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -829,7 +870,7 @@ test('an approval-paused child sends one final answer only after continuation', 
 
   await runtime.enqueue(
     { chatId: 'paused-child-chat', userId: 'user-1' },
-    { id: 'paused-child-turn', input: 'Research and publish' },
+    userTurn('paused-child-turn', 'Research and publish'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -849,15 +890,16 @@ test('an approval-paused child sends one final answer only after continuation', 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'list-paused-turn', input: 'List the agents' },
+    userTurn('list-paused-turn', 'List the agents'),
   );
   await queue.runNext();
   assert.match(JSON.stringify(listedPrompt), /"agent_status":"running"/);
   assert.doesNotMatch(JSON.stringify(listedPrompt), /waiting_approval/);
 
-  await runtime.approve(
+  await submitApprovals(
+    runtime,
     { chatId: 'paused-child-chat', userId: 'user-1' },
-    { toolCallId: 'publish-report' },
+    new Map([['publish-report', true]]),
   );
   await queue.runNext();
   const completions = await mailboxStore.drain({
@@ -940,13 +982,17 @@ test('a failed approval continuation reports failure instead of remaining paused
     chatId: 'failed-continuation-child',
     userId: 'user-1',
   };
-  const initial = await runtime.enqueue(childConversation, {
-    id: 'failed-continuation-turn',
-    input: 'Research and publish',
-  });
+  const initial = await runtime.enqueue(
+    childConversation,
+    userTurn('failed-continuation-turn', 'Research and publish'),
+  );
   await using _worker = await runtime.work();
   await queue.runNext();
-  await runtime.approve(childConversation, { toolCallId: 'failed-publish' });
+  await submitApprovals(
+    runtime,
+    childConversation,
+    new Map([['failed-publish', true]]),
+  );
   const resumesBeforeFailure = queue.resumeCalls;
   await queue.runNext();
 
@@ -969,7 +1015,7 @@ test('a failed approval continuation reports failure instead of remaining paused
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'list-failed-continuation', input: 'Inspect failed agents' },
+    userTurn('list-failed-continuation', 'Inspect failed agents'),
   );
   await queue.runNext();
   assert.match(
@@ -978,10 +1024,13 @@ test('a failed approval continuation reports failure instead of remaining paused
   );
   assert.doesNotMatch(JSON.stringify(listedPrompts[0]), /waiting_approval/);
 
-  const recovery = await runtime.enqueue(childConversation, {
-    id: 'recover-after-failed-continuation',
-    input: 'Continue with a new request',
-  });
+  const recovery = await runtime.enqueue(
+    childConversation,
+    userTurn(
+      'recover-after-failed-continuation',
+      'Continue with a new request',
+    ),
+  );
   await queue.runNext();
   assert.equal(await streamStore.getStreamStatus(recovery.id), 'completed');
   assert.equal(researcherCalls, 2);
@@ -1034,13 +1083,17 @@ test('a cancelled approval continuation clears the gate and revives parked turns
     { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'cancelled-continuation', userId: 'user-1' };
-  const initial = await runtime.enqueue(conversation, {
-    id: 'cancelled-continuation-turn',
-    input: 'publish after approval',
-  });
+  const initial = await runtime.enqueue(
+    conversation,
+    userTurn('cancelled-continuation-turn', 'publish after approval'),
+  );
   await using _worker = await runtime.work();
   await queue.runNext();
-  await runtime.approve(conversation, { toolCallId: 'cancelled-publish' });
+  await submitApprovals(
+    runtime,
+    conversation,
+    new Map([['cancelled-publish', true]]),
+  );
   const resumesBeforeCancellation = queue.resumeCalls;
   const continuation = queue.runNext();
   await continuationSandboxStarted.promise;
@@ -1058,10 +1111,10 @@ test('a cancelled approval continuation clears the gate and revives parked turns
   );
   assert.ok(queue.resumeCalls > resumesBeforeCancellation);
 
-  const recovery = await runtime.enqueue(conversation, {
-    id: 'after-cancelled-continuation',
-    input: 'start a fresh ask',
-  });
+  const recovery = await runtime.enqueue(
+    conversation,
+    userTurn('after-cancelled-continuation', 'start a fresh ask'),
+  );
   await queue.runNext();
   assert.equal(await streamStore.getStreamStatus(recovery.id), 'completed');
   assert.equal(modelCalls, 2);
@@ -1130,15 +1183,20 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
     { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'failed-siblings', userId: 'user-1' };
-  const initial = await runtime.enqueue(conversation, {
-    id: 'failed-sibling-turn',
-    input: 'run both tools',
-  });
+  const initial = await runtime.enqueue(
+    conversation,
+    userTurn('failed-sibling-turn', 'run both tools'),
+  );
   await using _worker = await runtime.work();
   await queue.runNext();
-  await runtime.approve(conversation, { toolCallId: 'approved-sibling' });
-  await runtime.deny(conversation, { toolCallId: 'denied-sibling' });
-  await queue.runNext();
+  await submitApprovals(
+    runtime,
+    conversation,
+    new Map([
+      ['approved-sibling', true],
+      ['denied-sibling', false],
+    ]),
+  );
   await queue.runNext();
 
   const message = (
@@ -1208,7 +1266,7 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
 
   const childTurn = await runtime.enqueue(
     { chatId: 'child-chat', userId: 'user-1' },
-    { id: 'child-terminal-turn', input: 'Research durably' },
+    userTurn('child-terminal-turn', 'Research durably'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -1300,10 +1358,10 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
   ]);
 
   const child = { chatId: 'orphan-race-child', userId: 'user-1' };
-  await runtime.enqueue(child, {
-    id: 'stale-orphan-turn',
-    input: 'Produce the old result',
-  });
+  await runtime.enqueue(
+    child,
+    userTurn('stale-orphan-turn', 'Produce the old result'),
+  );
   const staleTurn = queue.turns[0];
   assert.ok(staleTurn);
   await using _worker = await runtime.work();
@@ -1328,10 +1386,10 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
     'retry the stale orphan callback',
   );
   await store.staleWriteStarted.promise;
-  const successorTurn = await runtime.enqueue(child, {
-    id: 'successor-turn',
-    input: 'Produce the successor result',
-  });
+  const successorTurn = await runtime.enqueue(
+    child,
+    userTurn('successor-turn', 'Produce the successor result'),
+  );
   const successor = queue.runNext();
   await successorStarted.promise;
   try {
@@ -1434,7 +1492,7 @@ test('terminal child recovery does not duplicate a completion committed before a
 
   await runtime.enqueue(
     { chatId: 'child-chat', userId: 'user-1' },
-    { id: 'idempotent-child-turn', input: 'Research once' },
+    userTurn('idempotent-child-turn', 'Research once'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -1518,7 +1576,7 @@ test('a failed child asynchronously notifies its parent with the terminal status
 
   const failedTurn = await runtime.enqueue(
     { chatId: 'failed-child-chat', userId: 'user-1' },
-    { id: 'failed-child-turn', input: 'Run the risky research' },
+    userTurn('failed-child-turn', 'Run the risky research'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -1535,7 +1593,7 @@ test('a failed child asynchronously notifies its parent with the terminal status
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'list-failed-child', input: 'Inspect failed agents' },
+    userTurn('list-failed-child', 'Inspect failed agents'),
   );
   await queue.runNext();
   assert.match(
@@ -1607,7 +1665,7 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
 
   const failedTurn = await runtime.enqueue(
     { chatId: 'setup-failed-child', userId: 'user-1' },
-    { id: 'setup-failed-turn', input: 'Start the child' },
+    userTurn('setup-failed-turn', 'Start the child'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -1617,7 +1675,7 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'list-setup-failed-child', input: 'Inspect failed agents' },
+    userTurn('list-setup-failed-child', 'Inspect failed agents'),
   );
   await queue.runNext();
   assert.match(
@@ -1696,7 +1754,7 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
 
   const cancelledTurn = await runtime.enqueue(
     { chatId: 'cancelled-child-chat', userId: 'user-1' },
-    { id: 'cancelled-child-turn', input: 'Start long research' },
+    userTurn('cancelled-child-turn', 'Start long research'),
   );
   await using _worker = await runtime.work();
   const executing = queue.runNext();
@@ -1721,7 +1779,7 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'list-cancelled-child', input: 'Inspect interrupted agents' },
+    userTurn('list-cancelled-child', 'Inspect interrupted agents'),
   );
   await queue.runNext();
   assert.match(
@@ -1790,7 +1848,14 @@ test('a child cancelled while queued notifies its parent once without running th
   }
 
   const conversation = { chatId: 'queued-child-chat', userId: 'user-1' };
-  const turn = { id: 'cancelled-before-start', input: 'Never start this' };
+  const turn = {
+    message: {
+      id: 'cancelled-before-start',
+      role: 'user' as const,
+      parts: [{ type: 'text' as const, text: 'Never start this' }],
+    },
+    trigger: 'submit-message' as const,
+  };
   const cancelledTurn = await runtime.enqueue(conversation, turn);
   await runtime.observe(conversation).cancel(cancelledTurn.id);
   await runtime.enqueue(conversation, turn);
@@ -1910,7 +1975,7 @@ test('send_message resolves a canonical sibling path and queues mail without wak
 
   await runtime.enqueue(
     { chatId: 'sender-chat', userId: 'user-1' },
-    { id: 'sender-turn', input: 'Send the review request' },
+    userTurn('sender-turn', 'Send the review request'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -2024,7 +2089,7 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Assign follow-up work' },
+    userTurn('root-turn', 'Assign follow-up work'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -2120,11 +2185,11 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
 
   const child = await runtime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'child-turn', input: 'research this' },
+    userTurn('child-turn', 'research this'),
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'stop the child' },
+    userTurn('root-turn', 'stop the child'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('root-chat');
@@ -2145,7 +2210,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'reuse-root-turn', input: 'assign fresh work' },
+    userTurn('reuse-root-turn', 'assign fresh work'),
   );
   await queue.runNextFor('root-chat');
   assert.equal(queue.turns.length, 1);
@@ -2219,11 +2284,11 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
 
   const child = await runtime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'retryable-interrupt-child', input: 'research this' },
+    userTurn('retryable-interrupt-child', 'research this'),
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'retryable-interrupt-root', input: 'stop the child' },
+    userTurn('retryable-interrupt-root', 'stop the child'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('root-chat');
@@ -2340,13 +2405,13 @@ test('interrupt_agent aborts a running child across runtime instances without qu
 
   const child = await childRuntime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'active-child-turn', input: 'start long research' },
+    userTurn('active-child-turn', 'start long research'),
   );
   const activeChild = childQueue.runNextFor('researcher-chat');
   await settleWithin(childStarted.promise, 'running child starts');
   await rootRuntime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'interrupting-root-turn', input: 'interrupt the child' },
+    userTurn('interrupting-root-turn', 'interrupt the child'),
   );
   await rootQueue.runNextFor('root-chat');
   await settleWithin(activeChild, 'running child stops after interruption');
@@ -2425,7 +2490,7 @@ test('interrupt_agent rejects root and self targets', async (t) => {
 
   await runtime.enqueue(
     { chatId: 'caller-chat', userId: 'user-1' },
-    { id: 'invalid-interrupts', input: 'try invalid targets' },
+    userTurn('invalid-interrupts', 'try invalid targets'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('caller-chat');
@@ -2525,11 +2590,11 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
 
   const completedTurn = await runtime.enqueue(
     { chatId: 'completed-chat', userId: 'user-1' },
-    { id: 'completed-turn', input: 'finish' },
+    userTurn('completed-turn', 'finish'),
   );
   const pausedTurn = await runtime.enqueue(
     { chatId: 'paused-chat', userId: 'user-1' },
-    { id: 'paused-turn', input: 'prepare publication' },
+    userTurn('paused-turn', 'prepare publication'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('completed-chat');
@@ -2538,7 +2603,7 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'inspect-terminal-interrupts', input: 'interrupt terminal children' },
+    userTurn('inspect-terminal-interrupts', 'interrupt terminal children'),
   );
   await queue.runNextFor('root-chat');
 
@@ -2603,10 +2668,10 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
     queue,
   });
 
-  await runtime.enqueue(conversation, {
-    id: 'wait-for-pending-mail',
-    input: 'Wait for an agent response',
-  });
+  await runtime.enqueue(
+    conversation,
+    userTurn('wait-for-pending-mail', 'Wait for an agent response'),
+  );
   await using _worker = await runtime.work();
   await queue.runNext();
 
@@ -2671,10 +2736,10 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
   await using _callerWorker = await callerRuntime.work();
   await using _deliveryWorker = await deliveryRuntime.work();
 
-  await callerRuntime.enqueue(conversation, {
-    id: 'cross-runtime-wait',
-    input: 'Wait for the remote result',
-  });
+  await callerRuntime.enqueue(
+    conversation,
+    userTurn('cross-runtime-wait', 'Wait for the remote result'),
+  );
   const running = callerQueue.runNextFor(conversation.chatId);
   await settleWithin(waitRequested.promise, 'wait_agent tool is requested');
   await deliveryRuntime.deliver(
@@ -2751,7 +2816,7 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'bounded-wait', input: 'Wait briefly' },
+    userTurn('bounded-wait', 'Wait briefly'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -2792,10 +2857,10 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
     queue,
   });
   const conversation = { chatId: 'root-chat', userId: 'user-1' };
-  const enqueued = await runtime.enqueue(conversation, {
-    id: 'cancel-wait',
-    input: 'Wait until cancelled',
-  });
+  const enqueued = await runtime.enqueue(
+    conversation,
+    userTurn('cancel-wait', 'Wait until cancelled'),
+  );
   await using _worker = await runtime.work();
   const running = queue.runNext();
   await settleWithin(
@@ -2912,14 +2977,14 @@ test('send_message crosses runtime instances and reaches an active recipient at 
 
   await recipientRuntime.enqueue(
     { chatId: 'recipient-chat', userId: 'user-1' },
-    { id: 'recipient-active-turn', input: 'Start reviewing' },
+    userTurn('recipient-active-turn', 'Start reviewing'),
   );
   const activeRecipient = recipientQueue.runNextFor('recipient-chat');
   await recipientStarted.promise;
 
   await senderRuntime.enqueue(
     { chatId: 'sender-chat', userId: 'user-1' },
-    { id: 'sender-message-turn', input: 'Send the new evidence' },
+    userTurn('sender-message-turn', 'Send the new evidence'),
   );
   await senderQueue.runNextFor('sender-chat');
 
@@ -3032,7 +3097,7 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
 
   await senderRuntime.enqueue(
     { chatId: 'sender-chat', userId: 'user-1' },
-    { id: 'sender-followup-turn', input: 'Assign the follow-up' },
+    userTurn('sender-followup-turn', 'Assign the follow-up'),
   );
   await senderQueue.runNextFor('sender-chat');
 
@@ -3143,11 +3208,11 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
 
   await runtime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'researcher-initial', input: 'Do the initial research' },
+    userTurn('researcher-initial', 'Do the initial research'),
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-followup', input: 'Assign follow-up work' },
+    userTurn('root-followup', 'Assign follow-up work'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('root-chat');
@@ -3228,7 +3293,7 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Try an invalid follow-up' },
+    userTurn('root-turn', 'Try an invalid follow-up'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -3330,11 +3395,11 @@ test('list_agents returns exact Codex items with canonical paths and current sta
   });
   await runtime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'queued-researcher-turn', input: 'Research after the root lists' },
+    userTurn('queued-researcher-turn', 'Research after the root lists'),
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Show the agent tree' },
+    userTurn('root-turn', 'Show the agent tree'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('root-chat');
@@ -3455,7 +3520,7 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
   }
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Show the planner subtree' },
+    userTurn('root-turn', 'Show the planner subtree'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -3555,13 +3620,13 @@ test('list_agents reports a completed child with its result', async (t) => {
   }
   await runtime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'researcher-turn', input: 'Verify the storage claim' },
+    userTurn('researcher-turn', 'Verify the storage claim'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Show completed work' },
+    userTurn('root-turn', 'Show completed work'),
   );
   await queue.runNext();
 
@@ -3659,7 +3724,7 @@ test('list_agents reports a completed child with a queued follow-up as running',
 
   await runtime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
-    { id: 'researcher-initial', input: 'Do the initial research' },
+    userTurn('researcher-initial', 'Do the initial research'),
   );
   await using _worker = await runtime.work();
   await queue.runNextFor('researcher-chat');
@@ -3673,7 +3738,7 @@ test('list_agents reports a completed child with a queued follow-up as running',
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-list-scheduled', input: 'Show current work' },
+    userTurn('root-list-scheduled', 'Show current work'),
   );
   await queue.runNextFor('root-chat');
 
@@ -3781,7 +3846,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-delegate', input: 'Delegate the investigation' },
+    userTurn('root-delegate', 'Delegate the investigation'),
   );
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -3789,7 +3854,11 @@ test('nested agents run independently, consume sibling mail, and remain visible 
   assert.equal(rootCalls, 3);
   assert.equal(queue.turns.length, 2);
   assert.deepEqual(
-    queue.turns.map((turn) => (turn.kind === 'ask' ? turn.input : turn.kind)),
+    queue.turns.map((turn) =>
+      turn.kind === 'message'
+        ? turn.message.parts.find((part) => part.type === 'text')?.text
+        : turn.kind,
+    ),
     ['Plan the investigation', 'Review the evidence'],
   );
 
@@ -3834,7 +3903,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-inspect-tree', input: 'Inspect all completed agents' },
+    userTurn('root-inspect-tree', 'Inspect all completed agents'),
   );
   await queue.runNext();
 

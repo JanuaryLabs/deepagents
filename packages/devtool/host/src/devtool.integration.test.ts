@@ -19,7 +19,6 @@ import {
   AgentRuntime,
   SqliteMailboxStore,
   type TurnActivity,
-  type TurnPushResult,
   TurnQueue,
   type TurnRef,
   defineAgent,
@@ -27,8 +26,8 @@ import {
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
 class AcceptingTurnQueue extends TurnQueue {
-  push(turn: TurnRef): Promise<TurnPushResult> {
-    return Promise.resolve({ jobId: turn.streamId, inserted: true });
+  push(_turn: TurnRef): Promise<void> {
+    return Promise.resolve();
   }
 
   getTurnActivity(): Promise<TurnActivity> {
@@ -130,8 +129,12 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     title: 'First conversation',
   }));
   const turn = await runtime.enqueue(conversation, {
-    id: 'message-1',
-    input: 'Hello',
+    message: {
+      id: 'message-1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Hello' }],
+    },
+    trigger: 'submit-message',
   });
   await writeFile(telemetry, telemetryRecords(conversation, turn.id));
   resources.use(await runtime.work());

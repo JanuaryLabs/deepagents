@@ -15,8 +15,10 @@ If the turn's queue job is deleted by pg-boss retention before it executes, the 
 
 **Cause — two durable rows with different owners and lifetimes.** `enqueue` writes:
 
-- a StreamStore row: `id` + status `queued`, **no `input`** (`AgentControlPlane.enqueue` registers it);
-- a pg-boss job: carries the user message `input` (`queue.push({kind:'ask', …, input})`).
+- a StreamStore row: `id` + status `queued`, **no message payload**
+  (`AgentControlPlane.enqueue` registers it);
+- a pg-boss job: carries the complete UI message
+  (`queue.push({kind:'message', …, message, trigger})`).
 
 The user message content lives **only** in the pg-boss job. A still-`created` job is deleted on its
 retention clock (`start_after + retentionSeconds`, ~14d). Zukhruf disables time deletion for
@@ -27,7 +29,7 @@ the half that could (content) is gone.
 
 **Why nothing recovers it.** Retention deletion is a silent maintenance `DELETE` — no dead-letter and no `AgentRuntime` orphan callback (those fire only for crashed _running_ jobs). Nothing flips an orphaned `queued` stream to a terminal state.
 
-**Repro sketch.** Enqueue a turn; before a worker executes it, delete its queue job (or let retention expire it). Hold the returned `watch(id)` stream → it never resolves. StreamStore status stays `queued`; the turn is un-runnable (no `input`).
+**Repro sketch.** Enqueue a turn; before a worker executes it, delete its queue job (or let retention expire it). Hold the returned `watch(id)` stream → it never resolves. StreamStore status stays `queued`; the turn is un-runnable (no message payload).
 
 **Reference.** pg-boss retention semantics (verified): drop query `plans.js:2004-2006`;
 `keep_until = start_after + retentionSeconds` (`plans.js:1458`); defaults `retentionSeconds` 14d

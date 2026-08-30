@@ -29,6 +29,15 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
     store,
@@ -42,7 +51,6 @@ class ControlledTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -235,7 +243,7 @@ test('host config injects root guidance, spawn guidance, namespace, and wait bou
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'work' },
+    userTurn('root-turn', 'work'),
   );
   await using worker = await runtime.work();
   void worker;
@@ -332,10 +340,7 @@ test('wait_agent clamps a below-minimum timeout and reports it to the model', as
         },
       },
     );
-    await runtime.enqueue(conversation, {
-      id: 'short-wait',
-      input: 'Wait briefly',
-    });
+    await runtime.enqueue(conversation, userTurn('short-wait', 'Wait briefly'));
     await using worker = await runtime.work();
     void worker;
     await queue.runNext();
@@ -415,7 +420,7 @@ test('subagent guidance replaces root guidance on a child turn', async (t) => {
   });
   await runtime.enqueue(
     { chatId: 'child-chat', userId: 'user-1' },
-    { id: 'child-turn', input: 'work' },
+    userTurn('child-turn', 'work'),
   );
   await using worker = await runtime.work();
   void worker;
@@ -462,7 +467,7 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'delegate' },
+    userTurn('root-turn', 'delegate'),
   );
   await using worker = await runtime.work();
   void worker;
@@ -516,7 +521,7 @@ test('file-loaded subagent uses AI SDK code mode collaboration', async (t) => {
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'Delegate the review.' },
+    userTurn('root-turn', 'Delegate the review.'),
   );
   await using worker = await runtime.work();
   void worker;
@@ -571,7 +576,7 @@ test('interrupt_agent reports not_found for a missing target', async (t) => {
   );
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'root-turn', input: 'interrupt missing' },
+    userTurn('root-turn', 'interrupt missing'),
   );
   await using worker = await runtime.work();
   void worker;

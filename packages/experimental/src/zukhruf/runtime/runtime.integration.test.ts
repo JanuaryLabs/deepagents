@@ -1,4 +1,4 @@
-import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import type { JSONSchema7, LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { PGlite } from '@electric-sql/pglite';
 import {
   type ToolSet,
@@ -40,6 +40,7 @@ import {
   type AgentPluginDefinition,
   AgentRuntime,
   AgentThread,
+  type ClientToolSet,
   PgBossTurnQueue,
   SqliteMailboxStore,
   type TurnRef,
@@ -64,7 +65,14 @@ const usage = {
   outputTokens: { total: 2, text: 2, reasoning: undefined },
 } as const;
 
-const turn = (input: string) => ({ id: `ask:${crypto.randomUUID()}`, input });
+const turn = (text: string) => ({
+  message: {
+    id: `message:${crypto.randomUUID()}`,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
 
 interface ModelTrack {
   active: number;
@@ -339,6 +347,50 @@ async function pausedToolCall(
   return { head, part };
 }
 
+type ApprovalResponse =
+  | { toolCallId: string; approved: true }
+  | { toolCallId: string; approved: false; reason?: string };
+
+async function submitApprovalResponses(
+  runtime: AgentRuntime,
+  conversation: { chatId: string; userId: string },
+  ...responses: ApprovalResponse[]
+) {
+  const head = (await runtime.observe(conversation).engine.getMessages()).at(
+    -1,
+  );
+  assert.equal(head?.role, 'assistant');
+  const byToolCallId = new Map(
+    responses.map((response) => [response.toolCallId, response]),
+  );
+  const message: UIMessage & { role: 'assistant' } = {
+    ...head,
+    role: 'assistant',
+    parts: head.parts.map((part) => {
+      if (!isToolUIPart(part) || part.state !== 'approval-requested') {
+        return part;
+      }
+      const response = byToolCallId.get(part.toolCallId);
+      if (!response) return part;
+      return {
+        ...part,
+        state: 'approval-responded',
+        approval: response.approved
+          ? { ...part.approval, approved: true }
+          : {
+              ...part.approval,
+              approved: false,
+              reason: response.reason,
+            },
+      };
+    }),
+  };
+  return runtime.enqueue(conversation, {
+    message,
+    trigger: 'submit-message',
+  });
+}
+
 function declaration(
   model: AgentDeclaration['model'],
   tools?: ToolSet,
@@ -537,8 +589,12 @@ describe('zukhruf runtime — host sessions', () => {
     });
 
     const pending = await h.runtime.enqueue(conversation, {
-      id: 'message-1',
-      input: 'hello',
+      message: {
+        id: 'message-1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'hello' }],
+      },
+      trigger: 'submit-message',
     });
     assert.deepEqual(await h.runtime.observe(conversation).status(pending.id), {
       status: 'queued',
@@ -667,8 +723,12 @@ describe('zukhruf runtime — host sessions', () => {
     await collectText(
       (
         await h.runtime.enqueue(conversation, {
-          id: 'existing-turn',
-          input: 'existing context',
+          message: {
+            id: 'existing-turn',
+            role: 'user',
+            parts: [{ type: 'text', text: 'existing context' }],
+          },
+          trigger: 'submit-message',
         })
       ).stream,
     );
@@ -1437,6 +1497,98 @@ describe('zukhruf runtime — background executor', () => {
     assert.deepStrictEqual(texts, ['one', 'reply:one', 'two', 'reply:two']);
   });
 
+  it('preserves a complete user UIMessage through the queue and context store', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await using _worker = await h.runtime.work();
+
+    const conversation = { chatId: 'rich-message', userId: 'u1' };
+    const message: UIMessage & { role: 'user' } = {
+      id: 'rich-message-1',
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'Read the attachment' },
+        {
+          type: 'file',
+          mediaType: 'text/plain',
+          filename: 'note.txt',
+          url: 'data:text/plain;base64,bm90ZQ==',
+        },
+      ],
+      metadata: { locale: { language: 'Arabic' } },
+    };
+
+    const result = await h.runtime.enqueue(conversation, {
+      message,
+      trigger: 'submit-message',
+    });
+    await collectText(result.stream);
+
+    const messages = await h.runtime.observe(conversation).engine.getMessages();
+    assert.deepEqual(messages[0], message);
+  });
+
+  it('regenerates from the existing user message on the same stream', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await using _worker = await h.runtime.work();
+
+    const conversation = { chatId: 'regenerate', userId: 'u1' };
+    const request = turn('try again');
+    const first = await h.runtime.enqueue(conversation, request);
+    assert.equal(await collectText(first.stream), 'reply:try again');
+
+    const regenerated = await h.runtime.enqueue(conversation, {
+      message: request.message,
+      trigger: 'regenerate-message',
+    });
+    assert.equal(regenerated.id, first.id);
+    const regeneratedText = await collectText(regenerated.stream);
+    assert.equal(
+      regeneratedText,
+      'reply:try again',
+      JSON.stringify(await h.streamStore.getStream(regenerated.id)),
+    );
+    assert.deepEqual(track.calls, ['try again', 'try again']);
+
+    const messages = await h.runtime.observe(conversation).engine.getMessages();
+    assert.equal(messages.length, 2);
+    assert.deepEqual(messages[0], request.message);
+  });
+
+  it('continues from a complete assistant UIMessage on the same stream', async () => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await using _worker = await h.runtime.work();
+
+    const conversation = { chatId: 'assistant-continuation', userId: 'u1' };
+    const first = await h.runtime.enqueue(conversation, turn('continue'));
+    assert.equal(await collectText(first.stream), 'reply:continue');
+
+    const message: UIMessage & { role: 'assistant' } = {
+      id: first.id,
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Client supplied continuation' }],
+      metadata: { clientState: 'ready' },
+    };
+    const continued = await h.runtime.enqueue(conversation, {
+      message,
+      trigger: 'submit-message',
+    });
+
+    assert.equal(continued.id, first.id);
+    assert.equal(await collectText(continued.stream), 'reply:continue');
+    assert.deepEqual(track.calls, ['continue', 'continue']);
+    const head = (
+      await h.runtime.observe(conversation).engine.getMessages()
+    ).at(-1);
+    assert.equal(head?.id, first.id);
+    assert.equal(
+      (head?.metadata as { clientState?: string } | undefined)?.clientState,
+      'ready',
+    );
+  });
+
   it('turns in different chats run concurrently', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     const gate = Promise.withResolvers<void>();
@@ -1505,7 +1657,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await h.streamStore.getStreamStatus(successor.id), 'queued');
   });
 
-  it('enqueue is idempotent on the turn id — duplicates reattach, never re-run', async () => {
+  it('enqueue is idempotent on the message id — duplicates reattach, never re-run', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
@@ -1526,8 +1678,12 @@ describe('zukhruf runtime — background executor', () => {
     assert.deepStrictEqual(track.calls, ['once'], 'model ran exactly once');
 
     const resubmit = await h.runtime.enqueue(conversation, {
-      id: ask.id,
-      input: 'a different input under the same id',
+      message: {
+        id: ask.message.id,
+        role: 'user',
+        parts: [{ type: 'text', text: 'a different input under the same id' }],
+      },
+      trigger: 'submit-message',
     });
     const text = await collectText(resubmit.stream);
     assert.equal(text, 'reply:once', 'post-completion resubmit replays');
@@ -1563,18 +1719,22 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('enqueue rejects a missing turn id', async () => {
+  it('enqueue rejects a missing message id', async () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await assert.rejects(
       h.runtime.enqueue(
         { chatId: 'c10', userId: 'u1' },
         {
-          id: '',
-          input: 'hi',
+          message: {
+            id: '',
+            role: 'user',
+            parts: [{ type: 'text', text: 'hi' }],
+          },
+          trigger: 'submit-message',
         },
       ),
-      /turn id is required/,
+      /message id is required/,
     );
   });
 
@@ -1598,7 +1758,128 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(track.toolRuns, 0, 'tool did not execute');
   });
 
-  it('approve() resumes the turn: tool executes once, same assistant message accumulates', async () => {
+  it('continues a client tool output through the assistant message', async () => {
+    const inputSchema: JSONSchema7 = {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: {
+        questions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { question: { type: 'string' } },
+            required: ['question'],
+          },
+        },
+      },
+      required: ['questions'],
+    };
+    const clientTools = {
+      ask_user_question: {
+        description: 'Ask the user a question',
+        inputSchema,
+      },
+    } satisfies ClientToolSet;
+    let calls = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt, tools }) => {
+        calls++;
+        const clientTool = tools?.find(
+          (candidate) =>
+            candidate.type === 'function' &&
+            candidate.name === 'ask_user_question',
+        );
+        assert.ok(
+          clientTool &&
+            'description' in clientTool &&
+            'inputSchema' in clientTool,
+          'client tool is exposed to every model call',
+        );
+        assert.equal(clientTool.description, 'Ask the user a question');
+        assert.deepStrictEqual(clientTool.inputSchema, inputSchema);
+
+        const chunks: LanguageModelV4StreamPart[] =
+          calls === 1
+            ? [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'ask-1',
+                  toolName: 'ask_user_question',
+                  input: JSON.stringify({
+                    questions: [{ question: 'What should I prioritize?' }],
+                  }),
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'tool-calls', raw: '' },
+                  usage,
+                },
+              ]
+            : [
+                { type: 'text-start', id: 't1' },
+                {
+                  type: 'text-delta',
+                  id: 't1',
+                  delta: JSON.stringify(prompt).includes('Deep work')
+                    ? 'Prioritize deep work.'
+                    : 'Missing answer.',
+                },
+                { type: 'text-end', id: 't1' },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage,
+                },
+              ];
+        return { stream: simulateReadableStream({ chunks }) };
+      },
+    });
+    await using h = await harness(model);
+    await using _worker = await h.runtime.work();
+    const conversation = { chatId: 'client-tool', userId: 'u1' };
+    const ask = await h.runtime.enqueue(conversation, {
+      ...turn('Help me prioritize'),
+      tools: clientTools,
+    });
+    assert.equal(await collectText(ask.stream), '');
+    const { head, part } = await pausedToolCall(h.runtime, conversation);
+    assert.equal(part.state, 'input-available');
+
+    const message: UIMessage & { role: 'assistant' } = {
+      ...head,
+      role: 'assistant',
+      parts: head.parts.map((candidate) =>
+        isToolUIPart(candidate) &&
+        candidate.state === 'input-available' &&
+        candidate.toolCallId === part.toolCallId
+          ? {
+              ...candidate,
+              state: 'output-available' as const,
+              output: {
+                answers: [
+                  {
+                    type: 'choice',
+                    question: 'What should I prioritize?',
+                    multiSelect: false,
+                    choice: { label: 'Deep work', value: 'deep-work' },
+                  },
+                ],
+              },
+            }
+          : candidate,
+      ),
+    };
+    const resumed = await h.runtime.enqueue(conversation, {
+      message,
+      tools: clientTools,
+      trigger: 'submit-message',
+    });
+    assert.equal(resumed.id, ask.id, 'continuation reuses the turn id');
+    await waitForText(h.runtime, conversation, 'Prioritize deep work.');
+    assert.equal(calls, 2, 'the client result triggers one continuation');
+  });
+
+  it('continues an AI SDK approval response through the assistant message', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -1608,12 +1889,11 @@ describe('zukhruf runtime — background executor', () => {
     await collectText(ask.stream);
     const { part } = await pausedToolCall(h.runtime, conversation);
 
-    const resumed = await h.runtime.approve(conversation, {
+    const resumed = await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
     assert.equal(resumed.id, ask.id, 'continuation reuses the turn id');
-    assert.equal(resumed.status, 'queued');
-    assert.match(resumed.jobId, /^[0-9a-f-]{36}$/);
     await waitForText(h.runtime, conversation, 'done:send it');
 
     assert.equal(track.toolRuns, 1, 'tool executed exactly once');
@@ -1626,7 +1906,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
   });
 
-  it('waits for every sibling approval before resuming the original turn once', async () => {
+  it('continues once after AI SDK submits every sibling approval response', async () => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -1634,46 +1914,22 @@ describe('zukhruf runtime — background executor', () => {
     const ask = await h.runtime.enqueue(conversation, turn('send both'));
     await collectText(ask.stream);
 
-    const first = await h.runtime.approve(conversation, {
-      toolCallId: 'first-email',
-    });
-    assert.equal(first.status, 'queued');
-    await waitForConversation(
+    await submitApprovalResponses(
       h.runtime,
       conversation,
-      (messages) =>
-        messages
-          .at(-1)
-          ?.parts.filter(isToolUIPart)
-          .map((part) => part.state)
-          .join(',') === 'approval-responded,approval-requested',
-      'the first sibling approval',
+      { toolCallId: 'first-email', approved: true },
+      {
+        toolCallId: 'second-email',
+        approved: false,
+        reason: 'skip the second',
+      },
     );
-    assert.equal(
-      await h.streamStore.getStreamStatus(ask.id),
-      'completed',
-      'the original pause remains terminal until every sibling is answered',
-    );
-    assert.equal(track.calls.length, 1, 'no continuation was sampled early');
-
-    const pending = (
-      await h.runtime.observe(conversation).engine.getMessages()
-    ).at(-1)!;
-    assert.deepStrictEqual(
-      pending.parts.filter(isToolUIPart).map((part) => part.state),
-      ['approval-responded', 'approval-requested'],
-    );
-
-    await h.runtime.deny(conversation, {
-      toolCallId: 'second-email',
-      reason: 'skip the second',
-    });
     await waitForText(h.runtime, conversation, 'both approved');
     assert.equal(track.toolRuns, 1, 'only the approved sibling executed');
     assert.equal(track.calls.length, 2, 'exactly one continuation was sampled');
   });
 
-  it('persists concurrent decisions for different sibling approvals', async (t) => {
+  it('persists the sibling decisions carried by the assistant message', async (t) => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -1684,13 +1940,16 @@ describe('zukhruf runtime — background executor', () => {
     const ask = await h.runtime.enqueue(conversation, turn('send both'));
     await collectText(ask.stream);
 
-    await Promise.all([
-      h.runtime.approve(conversation, { toolCallId: 'first-email' }),
-      h.runtime.deny(conversation, {
+    await submitApprovalResponses(
+      h.runtime,
+      conversation,
+      { toolCallId: 'first-email', approved: true },
+      {
         toolCallId: 'second-email',
+        approved: false,
         reason: 'skip the second',
-      }),
-    ]);
+      },
+    );
     await t.waitFor(() => assert.equal(track.calls.length, 2), {
       interval: 25,
       timeout: 3_000,
@@ -1744,10 +2003,10 @@ describe('zukhruf runtime — background executor', () => {
     }
     assert.equal(parkedState, 'cancelled', 'the follow-up is parked first');
 
-    const queued = await h.runtime.approve(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
-    assert.equal(queued.status, 'queued');
     await t.waitFor(() => assert.equal(track.calls.length, 3), {
       interval: 25,
       timeout: 5_000,
@@ -1760,7 +2019,7 @@ describe('zukhruf runtime — background executor', () => {
     ]);
   });
 
-  it('deny() resumes without executing: output-denied, model sees the denial', async () => {
+  it('continues an AI SDK denial without executing the tool', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -1771,8 +2030,9 @@ describe('zukhruf runtime — background executor', () => {
     );
     const { part } = await pausedToolCall(h.runtime, conversation);
 
-    await h.runtime.deny(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: false,
       reason: 'not today',
     });
     await waitForText(h.runtime, conversation, 'denied:send it');
@@ -1812,8 +2072,9 @@ describe('zukhruf runtime — background executor', () => {
       'gated turns parked — model untouched while approval pends',
     );
 
-    await h.runtime.approve(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
     const [, b, c] = await Promise.all([
       waitForText(h.runtime, conversation, 'done:send it'),
@@ -1829,35 +2090,7 @@ describe('zukhruf runtime — background executor', () => {
     );
   });
 
-  it('double-approve is idempotent: one continuation, one tool execution', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
-    await using _worker = await h.runtime.work();
-
-    const conversation = { chatId: 'a5', userId: 'u1' };
-    await collectText(
-      (await h.runtime.enqueue(conversation, turn('send it'))).stream,
-    );
-    const { part } = await pausedToolCall(h.runtime, conversation);
-
-    const first = await h.runtime.approve(conversation, {
-      toolCallId: part.toolCallId,
-    });
-    const again = await h.runtime.approve(conversation, {
-      toolCallId: part.toolCallId,
-    });
-    assert.equal(again.id, first.id);
-    assert.equal(again.jobId, first.jobId);
-    await waitForText(h.runtime, conversation, 'done:send it');
-    const applied = await h.runtime.approve(conversation, {
-      toolCallId: part.toolCallId,
-    });
-    assert.equal(applied.status, 'already-applied');
-    assert.equal(applied.jobId, first.jobId);
-    assert.equal(track.toolRuns, 1, 'tool executed exactly once');
-  });
-
-  it('a paused turn leaves no queue job, and approving cleans up the approval job too', async () => {
+  it('an AI SDK approval continuation leaves no queue job behind', async () => {
     const { tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
@@ -1877,8 +2110,9 @@ describe('zukhruf runtime — background executor', () => {
       'the paused turn committed to the chain, so its job is gone — the pause lives only in the chain',
     );
 
-    await h.runtime.approve(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
     await waitForText(h.runtime, conversation, 'done:send it');
     await sleep(400);
@@ -1889,7 +2123,7 @@ describe('zukhruf runtime — background executor', () => {
     assert.deepStrictEqual(
       afterApprove.map((j) => j.state),
       [],
-      'the approval job is deleted once it commits — nothing accumulates',
+      'the assistant-message continuation is deleted once it commits',
     );
   });
 
@@ -1904,8 +2138,9 @@ describe('zukhruf runtime — background executor', () => {
     );
     const { part } = await pausedToolCall(h.runtime, conversation);
 
-    await h.runtime.deny(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: false,
       reason: 'nope',
     });
     await waitForText(h.runtime, conversation, 'denied:send it');
@@ -2001,8 +2236,9 @@ describe('zukhruf runtime — background executor', () => {
       'parked follow-ups survive maintenance — no retention deadline',
     );
 
-    await h.runtime.approve(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
     const [, b, c, d] = await Promise.all([
       waitForText(h.runtime, conversation, 'done:send it'),
@@ -2080,8 +2316,9 @@ describe('zukhruf runtime — background executor', () => {
     // Approving revives every cancelled job for the chat — including the
     // user-cancelled follow-up — but executeTurn's terminal-stream check skips
     // it, so it never reaches the model and its job is cleaned up.
-    await h.runtime.approve(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
     await waitForText(h.runtime, conversation, 'done:send it');
     await sleep(600);
@@ -2123,141 +2360,12 @@ describe('zukhruf runtime — background executor', () => {
       'pause survived the cancel',
     );
 
-    await h.runtime.approve(conversation, {
+    await submitApprovalResponses(h.runtime, conversation, {
       toolCallId: part.toolCallId,
+      approved: true,
     });
     await waitForText(h.runtime, conversation, 'done:send it');
     assert.equal(track.toolRuns, 1, 'still approvable after the no-op cancel');
-  });
-
-  it('concurrent double-approve is idempotent: one continuation, one tool execution, no leftover jobs', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
-    await using _worker = await h.runtime.work();
-
-    const conversation = { chatId: 'gc-concappr', userId: 'u1' };
-    await collectText(
-      (await h.runtime.enqueue(conversation, turn('send it'))).stream,
-    );
-    const { part } = await pausedToolCall(h.runtime, conversation);
-
-    // Both calls calculate the same deterministic approval job identity.
-    const [a, b] = await Promise.all([
-      h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
-      h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
-    ]);
-    assert.equal(a.id, b.id, 'both approves resolve to the same turn');
-    assert.equal(a.jobId, b.jobId, 'both approves address the same queue job');
-    await waitForText(h.runtime, conversation, 'done:send it');
-    await sleep(600);
-
-    assert.equal(
-      track.toolRuns,
-      1,
-      'tool executed exactly once despite concurrent approves',
-    );
-    const messages = await h.runtime.observe(conversation).engine.getMessages();
-    assert.equal(
-      messages.length,
-      2,
-      'one user + one assistant — no duplicate continuation',
-    );
-    const leftover = await h.boss.findJobs(h.queue.queue, {
-      key: 'gc-concappr',
-    });
-    assert.deepStrictEqual(
-      leftover.map((j) => j.state),
-      [],
-      'no duplicate or leftover approval jobs',
-    );
-  });
-
-  it('queues concurrent approve and deny as the same command so one durable decision wins', async () => {
-    const { track, tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
-    const conversation = { chatId: 'approval-decision-race', userId: 'u1' };
-    let ask: Awaited<ReturnType<typeof h.runtime.enqueue>>;
-    let part: Awaited<ReturnType<typeof pausedToolCall>>['part'];
-    {
-      await using _worker = await h.runtime.work();
-      ask = await h.runtime.enqueue(conversation, turn('send it'));
-      await collectText(ask.stream);
-      ({ part } = await pausedToolCall(h.runtime, conversation));
-    }
-
-    const outcomes = await Promise.allSettled([
-      h.runtime.approve(conversation, { toolCallId: part.toolCallId }),
-      h.runtime.deny(conversation, {
-        toolCallId: part.toolCallId,
-        reason: 'deny raced with approve',
-      }),
-    ]);
-    assert.equal(
-      outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
-      2,
-      outcomes
-        .map((outcome) =>
-          outcome.status === 'fulfilled'
-            ? outcome.value.status
-            : `rejected:${String(outcome.reason)}`,
-        )
-        .join(', '),
-    );
-    const commands = outcomes.flatMap((outcome) =>
-      outcome.status === 'fulfilled' ? [outcome.value] : [],
-    );
-    assert.equal(commands[0]?.jobId, commands[1]?.jobId);
-    assert.deepStrictEqual(
-      commands.map((command) => command.status).toSorted(),
-      ['already-queued', 'queued'],
-    );
-
-    {
-      await using _worker = await h.runtime.work();
-      await waitForConversation(
-        h.runtime,
-        conversation,
-        (messages) =>
-          messages
-            .at(-1)
-            ?.parts.some(
-              (candidate) =>
-                isToolUIPart(candidate) &&
-                candidate.toolCallId === part.toolCallId &&
-                candidate.state !== 'approval-requested',
-            ) === true,
-        'the queued decision',
-      );
-    }
-    const final = (
-      await h.runtime.observe(conversation).engine.getMessages()
-    ).at(-1)!;
-    const decided = final.parts.find(isToolUIPart)!;
-    assert.equal(track.toolRuns, decided.approval?.approved === true ? 1 : 0);
-    assert.equal(track.calls.length, 2, 'the winning decision continued once');
-  });
-
-  it('approve and deny reject when there is no matching paused approval', async () => {
-    const { tools, model } = approvalSetup();
-    await using h = await harness(model, tools);
-    await using _worker = await h.runtime.work();
-
-    const conversation = { chatId: 'gc-apprerr', userId: 'u1' };
-    await assert.rejects(
-      h.runtime.approve(conversation, { toolCallId: 'whatever' }),
-      /ApprovalController\.approve: no paused turn/,
-      'approve with no turn at all rejects',
-    );
-
-    await collectText(
-      (await h.runtime.enqueue(conversation, turn('send it'))).stream,
-    );
-    await pausedToolCall(h.runtime, conversation);
-    await assert.rejects(
-      h.runtime.deny(conversation, { toolCallId: 'wrong-id' }),
-      /ApprovalController\.deny: no tool call/,
-      'deny with an unknown toolCallId rejects',
-    );
   });
 
   it('a crashed turn is marked failed and unblocks the next turn in the chat', async () => {

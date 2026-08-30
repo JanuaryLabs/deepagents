@@ -1,12 +1,10 @@
 import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import { v7 as uuidv7 } from 'uuid';
 
-import { approvalJobId } from '../runtime/approval-job-id.ts';
 import {
   type ConsumeContext,
   type ConsumeOptions,
   type TurnActivity,
-  type TurnPushResult,
   TurnQueue,
   type TurnRef,
 } from './turn-queue.ts';
@@ -159,31 +157,22 @@ export class PgBossTurnQueue extends TurnQueue {
     }
   }
 
-  async push(turn: TurnRef): Promise<TurnPushResult> {
+  async push(turn: TurnRef): Promise<void> {
     // pg-boss fetches `ORDER BY priority desc, created_on, id`. A monotonic
     // UUIDv7 job id makes the id tiebreak follow push order, so FIFO survives
     // created_on timestamp ties (millisecond-resolution clocks like PGlite).
-    // Non-approval pushes create new jobs for at-least-once delivery. Approval
-    // pushes use the persisted approval id, so pg-boss's id uniqueness makes
-    // concurrent commands converge on the first inserted decision.
-    // Approval and recovery jobs outrank waiting turns: revived parked jobs
-    // keep their original (older) created_on, so priority is what puts the
-    // command/recovery first.
-    const jobId =
-      turn.kind === 'approval'
-        ? approvalJobId(turn, turn.approvalId)
-        : uuidv7();
+    // Recovery jobs outrank waiting turns: revived parked jobs keep their
+    // original (older) created_on, so priority puts recovery first.
+    const jobId = uuidv7();
     const inserted = await this.#boss.send(this.#queue, turn, {
       id: jobId,
       singletonKey: turn.chatId,
       group: { id: turn.chatId },
-      priority:
-        turn.kind === 'approval' || turn.kind === 'continuation' ? 1 : 0,
+      priority: turn.kind === 'recovery' ? 1 : 0,
     });
-    if (inserted === null && turn.kind !== 'approval') {
+    if (inserted === null) {
       throw new Error(`PgBossTurnQueue job id collision: ${jobId}`);
     }
-    return { jobId, inserted: inserted !== null };
   }
 
   override async getTurnActivity(

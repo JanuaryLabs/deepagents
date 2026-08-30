@@ -139,7 +139,7 @@ The store is **mandatory** — the caller must provide it; no in-memory default.
 ### TurnQueue port _(Built — `queue/turn-queue.ts`)_
 
 A Zukhruf-owned port; StreamStore stays the generic turn state machine, the queue row carries the
-Zukhruf addressing **and the turn's input**. The port is **handler-shaped, not fetch-shaped**:
+Zukhruf addressing **and the complete UI message**. The port is **handler-shaped, not fetch-shaped**:
 claiming, heartbeating, and settlement belong to the implementation (pg-boss does all three
 natively; re-deriving them behind a `claim/heartbeat/complete` surface would fight the library).
 On Durable Objects the port is **absorbed** (the actor invokes the handler directly).
@@ -150,13 +150,12 @@ type TurnRef = {
   chatId;
   userId;
 } & (
-  | { kind: 'ask'; input }
-  | { kind: 'approval'; toolCallId; approvalId; decision }
-  | { kind: 'continuation'; recovery }
+  | { kind: 'message'; message; trigger }
+  | { kind: 'recovery'; mode: 'handoff' | 'idempotent' }
   | { kind: 'mailbox' }
 );
 abstract class TurnQueue {
-  push(turn: TurnRef): Promise<{ jobId: string; inserted: boolean }>;
+  push(turn: TurnRef): Promise<void>;
   consume(
     handler: (turn, { signal }) => Promise<void>,
     options: { concurrency?; onOrphaned(turn, error) },
@@ -167,8 +166,8 @@ abstract class TurnQueue {
 
 Contract: per chat at most ONE active handler, strict FIFO per chat, cross-chat concurrency; a
 crashed handler/worker surfaces once through `onOrphaned` (no retry), then the chat unblocks.
-Approval commands use deterministic job identity from their persisted approval ID, so concurrent
-API processes converge on one queued command without mutating context themselves.
+User submissions, regeneration, client tool output, and approval responses all arrive as AI SDK
+`UIMessage` requests. `recovery` and `mailbox` are internal work, not alternate client protocols.
 
 ### pg-boss implementation _(Built — `queue/pg-boss.turn-queue.ts`)_
 
@@ -185,10 +184,6 @@ semantics live-verified):
 - **`group.id = chatId` + global `groupConcurrency: 1`** — pg-boss filters active chats before
   selecting the next job, so a blocked same-chat successor cannot starve ready turns from other
   chats.
-- **Approval IDs are queue IDs** — an approval job uses
-  `uuidv5("approval:" + approvalId, conversationNamespace)` and `singletonKey = chatId`.
-  pg-boss's job-ID uniqueness makes approve, deny, and duplicates for one approval converge on the
-  first inserted command. Different sibling approval IDs remain distinct jobs.
 - **`retryLimit: 0`** — the stale-turn decision in config: a crashed turn is never silently re-run
   (its bash already executed); it dead-letters instead.
 - **Heartbeats are the lease** — `heartbeatSeconds` + `work()`'s automatic heartbeat; the pg-boss
@@ -201,10 +196,10 @@ semantics live-verified):
 
 ```
 enqueue (any short-lived process):
-  enqueue({chatId,userId}, {id, input})            // id: REQUIRED caller idempotency key
-    → AgentTurnId.fromRequest(conversation, id)    // deterministic, conversation-scoped durable id
+  enqueue({chatId,userId}, {message, trigger})
+    → AgentTurnId.fromRequest(conversation, message.id)
     → manager.register(streamId)                   // stream row: 'queued' (ON CONFLICT DO NOTHING)
-    → queue.push({kind: 'ask', streamId, chatId, userId, input})
+    → queue.push({kind: 'message', streamId, chatId, userId, message, trigger})
     → { id: streamId, stream: watch(streamId) }    // caller may watch immediately
 
 deliver (any host process):
@@ -216,7 +211,7 @@ work (long-running executor process):
   AgentTurnExecutor.execute: stream terminal? skip (cancel-while-queued)
     → mailbox.beginTurn(conversation, streamId)   // attempt-scoped cross-worker activity boundary
     → resolve chat metadata → selected declaration
-    → ask drains the leading queue-only FIFO prefix; mailbox turns drain all
+    → user message turns drain the leading queue-only FIFO prefix; mailbox turns drain all
     → engine.set(user(input), assistant placeholder id=streamId); save()
     → sandbox = declaration.sandbox({chatId, userId}) // per-chat, attach-or-create; never disposed here
     → terminal stream? project/skip                // closes cancel-during-setup race
@@ -231,7 +226,7 @@ observe (anywhere): AgentObservation { engine, resume(), status(streamId?), canc
 
 **Enqueue is idempotent on a caller key, and that key is caller-supplied by necessity.** Idempotency
 is only achievable by the sender: the hop between caller and enqueue is the unreliable part, so
-only the party _before_ that hop can mark two arrivals as the same ask. A runtime-minted id makes
+only the party _before_ that hop can mark two arrivals as the same message. A runtime-minted id makes
 dedup impossible by construction (every retry looks new). The id is any unique string (a client
 message id, or `crypto.randomUUID()` absent a natural key). `AgentTurnId` then derives a stable
 conversation-scoped durable id, preventing one user's equal raw key from replaying or cancelling
@@ -419,7 +414,7 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   receive no raw stores, queue callbacks, or `AsyncLocalStorage` state.
 - `spawn_agent` validates the selected direct subagent and derives deterministic child-chat and
   initial-turn IDs from the user, tree, and canonical path. Concurrent calls and queue retries
-  therefore converge on one durable child and one initial ask. It returns the Codex shape
+  therefore converge on one durable child and one initial message turn. It returns the Codex shape
   `{task_name}` where the value is the canonical `/root/...` child path, without awaiting child
   execution. The history snapshot and cloned message IDs are persisted
   deterministically before enqueue, so a queue-push gap retries the original snapshot instead of
@@ -494,40 +489,25 @@ A `needsApproval` tool call ends the agent loop mid-answer (SDK-native — probe
 message commits with an `approval-requested` tool part (chain head) and the stream goes terminal —
 nothing is in-flight, so the pause survives crashes/restarts for free.
 
-`approve()` and `deny()` are asynchronous command helpers. The API process reads the tool part,
-derives the deterministic job ID from `approval.id`, and queues `{kind: 'approval', ...decision}`.
-It never mutates ContextEngine or reopens the stream. The return value identifies the original turn
-and command:
-
-```ts
-{ id, jobId, status: 'queued' | 'already-queued' | 'already-applied' }
-```
-
-The worker re-reads the paused tool part, applies the winning decision, and persists
-`approval-responded`. It finishes immediately while sibling approvals remain. The final sibling's
-approval job reopens and resumes the original turn directly; normal approval does not create a
-separate continuation job. On re-run **the AI SDK itself executes an approved tool**
+AI SDK React owns the client transition. `addToolApprovalResponse()` updates the last assistant
+message to `approval-responded`; `lastAssistantMessageIsCompleteWithApprovalResponses()` can be
+used as `sendAutomaticallyWhen`, which submits that complete assistant message through the normal
+`{message, trigger: 'submit-message'}` transport. Zukhruf has no separate approve/deny API or
+approval queue job. On continuation **the AI SDK itself executes an approved tool**
 (`output-available`, real output), while denial settles as `output-denied` and never executes it.
 Note: `reopenStream` wipes the prior chunk log (FK cascade) — each segment is a fresh streaming
 surface; full history lives in the chain, which is the source of truth anyway.
 
-- **ContextEngine is permanent deduplication state.** While the part is
-  `approval-requested`, the API may enqueue the deterministic command. The same persisted decision
-  returns `already-applied`; the opposite persisted decision is a conflict. A queued opposite
-  command cannot report an immediate conflict because both decisions address the same job ID; the
-  worker's recheck makes the first queued command durable. After pg-boss deletes the command,
-  `approval-responded` still prevents retries from creating another job.
 - **Mid-approval user messages: QUEUE BEHIND** _(decided, built)_. The FIFO alone can't enforce
   this (the paused turn's job completed, so the key unblocks), so gated turns **park**:
   `AgentTurnExecutor` sees a pending tool part at the chain head and calls `context.park()` — before
   touching the chain or sandbox.
 - **Parking = park-as-cancelled** _(built; contract-tested)_: `park()` self-cancels the claimed job
-  (clean, no worker errors); cancelled jobs don't block the key, so the approval command runs;
-  approval commands use `priority: 1` (outranks parked rows' older
-  `created_on`) and `resumeParked(chatId)` revives parked jobs with their original `created_on` —
+  (clean, no worker errors); cancelled jobs don't block the key, so the assistant-message
+  continuation runs. `resumeParked(chatId)` revives parked jobs with their original `created_on` —
   FIFO order reassembles for free. No polling, no new storage. `park`/`resumeParked` are port
   surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by two contract tests
-  (no redelivery until revival + original order; approval command outranks revived turns).
+  (no redelivery until revival + original order; recovery outranks revived turns).
 - **Disambiguation**: parked turn = job `cancelled` + stream row `queued`; user-cancelled turn =
   stream row `cancelled` (its job is also `cancelled`). `resumeParked` revives **every** cancelled
   job for the chat without inspecting stream rows — a revived user-cancelled turn is harmless because
@@ -545,7 +525,7 @@ surface; full history lives in the chain, which is the source of truth anyway.
   (config, commit-GC no-accumulation, parked-survives-maintenance-then-revives, and a real-time
   load-bearing proof — a control job with `deleteAfterSeconds: 1` is deleted by retention while the
   parked turn survives, polled via `timebox`) plus the runtime approval scenarios
-  (pause/approve/deny/queue-behind/cancel-while-queued all leave no jobs behind).
+  (pause/assistant continuation/queue-behind/cancel-while-queued all leave no jobs behind).
   (`retentionSeconds`, which governs still-`created` jobs, cannot be zero. A sufficiently deep or
   blocked backlog can still outlive its 14-day default; startup reconciliation for that remaining
   orphan case is tracked in BUGS.md and TODO.md. A gated follow-up becomes `cancelled`, not
@@ -558,9 +538,9 @@ surface; full history lives in the chain, which is the source of truth anyway.
 - **Still Open here**: an abandoned approval keeps its parked job forever (bounded by abandoned
   gated chats; folds into the per-chat GC item, not a time TTL); cancel-of-paused-turn semantics
   (paused stream is terminal, cancel no-ops — semantically it should probably mean deny).
-- **Recoverable handoff**: the approval job owns response persistence, stream reopening, direct
-  resumption, and parked-turn revival. A worker crash after `approval-responded` but before direct
-  resumption is detected from durable state and schedules a recovery-only continuation job.
+- **Recoverable handoff**: the assistant-message job owns response persistence, stream reopening,
+  direct resumption, and parked-turn revival. A worker crash after `approval-responded` but before
+  direct resumption is detected from durable state and schedules an internal `recovery` job.
   Continuation completion always reconciles parked turns. The regression suite covers sibling
   approvals, mixed concurrent decisions, worker crashes, queue/revival failure, and child terminal
   projection.
@@ -586,7 +566,7 @@ conversationScheduling() plugin
 │                                      ├─ ConversationScheduler ─→ WakeScheduler
 └─ ScheduleWakeup ─────────────────────┘                              │
                                                                     └─ timed wake
-                                                                       → scheduled ask
+                                                                       → scheduled message
                                                                        → TurnQueue
 ```
 
@@ -595,7 +575,7 @@ conversationScheduling() plugin
   model tools.
 - **`ConversationScheduler`** is private plugin application logic. It owns conversation-scoped
   definitions, cron calculation, dynamic-wake replacement, expiry, and conversion of a fired
-  occurrence into a normal Zukhruf ask.
+  occurrence into a normal Zukhruf message turn.
 - **`conversationScheduling()`** is the model-facing capability bundle. Its tools bind implicitly
   to the calling agent's current conversation and are injected into root and child agents only when
   the plugin is installed. The core runtime and model never see the raw `WakeScheduler`.
@@ -721,10 +701,10 @@ wake becomes a no-op when its definition generation or intended time no longer m
 
 A due occurrence remains scheduling metadata while its conversation is running, queued, or paused
 for approval. After the final waiting turn settles, the coordinator materializes exactly one
-catch-up occurrence through the generic plugin enqueue path as an ordinary FIFO ask with
+catch-up occurrence through the generic plugin enqueue path as an ordinary FIFO message turn with
 `message.metadata.zukhruf.origin: 'scheduled'`. Scheduled provenance is durable and available to later authorization or
 telemetry policy; origin is not accepted from the public HTTP session input. The TurnQueue remains
-the only execution serializer: scheduled asks never enter an active model turn, already-waiting
+the only execution serializer: scheduled message turns never enter an active model turn, already-waiting
 ordinary work runs first, and ordinary work arriving after materialization cannot overtake it.
 
 Wake delivery, settlement catch-up, coordinator retries, and duplicate TurnQueue receipts are
@@ -732,7 +712,7 @@ at-least-once. The deterministic occurrence turn id plus the StreamStore termina
 execution idempotent. A busy window or downtime produces at most one catch-up occurrence, then
 advances to the next future match; it never expands every missed tick into a prompt backlog. Deleting a
 definition or stopping a dynamic wake prevents future occurrences but does not cancel a scheduled
-ask already enqueued or running. Normal turn cancellation remains a separate operation.
+message turn already enqueued or running. Normal turn cancellation remains a separate operation.
 
 The future `/loop` feature is deliberately **not** part of this design slice. It is a skill—an
 instruction layer that teaches the model how to compose `CronCreate` for fixed cadence and
@@ -838,9 +818,8 @@ Node+Postgres bundle; the DO adapter).
   and do not implicitly pass to subagents.
 - `runtime/agent-runtime.ts` —
   `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, plugins?})` →
-  `{ enqueue(conv, {id, input}) → {id, stream},
+  `{ enqueue(conv, {message, trigger}) → {id, stream},
 deliver(communication, mode) → void,
-approve(conv, {toolCallId}) / deny(conv, {toolCallId, reason?}) → {id, stream},
 observe(conv) → AgentObservation {engine, resume, status(streamId?), cancel(streamId?)},
 initialize() → void,
 work({concurrency?}) → AsyncDisposable }`.

@@ -26,6 +26,15 @@ import {
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
 
+const userTurn = (id: string, text: string) => ({
+  message: {
+    id,
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text }],
+  },
+  trigger: 'submit-message' as const,
+});
+
 function streamsFor(store: StreamStore): StreamManager {
   return new StreamManager({
     store,
@@ -39,7 +48,6 @@ class RecordingTurnQueue extends TurnQueue {
 
   override async push(turn: TurnRef) {
     this.turns.push(turn);
-    return { jobId: turn.streamId, inserted: true };
   }
 
   override async getTurnActivity(
@@ -190,7 +198,7 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
 
   const enqueued = await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
-    { id: 'turn-1', input: 'hello' },
+    userTurn('turn-1', 'hello'),
   );
 
   assert.deepEqual((await store.getChat('root-chat'))?.metadata, {
@@ -247,7 +255,7 @@ test('an existing chat can only be used by its stored owner', async (t) => {
   const intruder = { chatId: 'shared-chat', userId: 'bob' };
 
   await assert.rejects(
-    runtime.enqueue(intruder, { id: 'intruder-turn', input: 'hello' }),
+    runtime.enqueue(intruder, userTurn('intruder-turn', 'hello')),
     /chat "shared-chat" belongs to user "alice", not "bob"/,
   );
   assert.equal(queue.turns.length, 0);
@@ -255,10 +263,6 @@ test('an existing chat can only be used by its stored owner', async (t) => {
 
   await assert.rejects(
     runtime.observe(intruder).engine.getMessages(),
-    /chat "shared-chat" belongs to user "alice", not "bob"/,
-  );
-  await assert.rejects(
-    runtime.approve(intruder, { toolCallId: 'call-1' }),
     /chat "shared-chat" belongs to user "alice", not "bob"/,
   );
 });
@@ -284,11 +288,11 @@ test('caller turn ids are scoped to their owning conversation', async (t) => {
 
   const alice = await runtime.enqueue(
     { chatId: 'alice-chat', userId: 'alice' },
-    { id: 'shared-caller-id', input: 'alice secret' },
+    userTurn('shared-caller-id', 'alice secret'),
   );
   const bob = await runtime.enqueue(
     { chatId: 'bob-chat', userId: 'bob' },
-    { id: 'shared-caller-id', input: 'bob request' },
+    userTurn('shared-caller-id', 'bob request'),
   );
 
   assert.notEqual(alice.id, bob.id);
@@ -315,7 +319,7 @@ test('explicit cancellation rejects a stream owned by another conversation', asy
   );
   const alice = await runtime.enqueue(
     { chatId: 'alice-chat', userId: 'alice' },
-    { id: 'alice-turn', input: 'alice secret' },
+    userTurn('alice-turn', 'alice secret'),
   );
 
   await assert.rejects(
@@ -359,7 +363,7 @@ test('reserved but malformed agent metadata fails closed at enqueue', async (t) 
   await assert.rejects(
     runtime.enqueue(
       { chatId: 'corrupt-child', userId: 'user-1' },
-      { id: 'must-not-queue', input: 'hello' },
+      userTurn('must-not-queue', 'hello'),
     ),
     /invalid Zukhruf metadata for chat "corrupt-child"/,
   );
@@ -389,7 +393,7 @@ test('enqueue rejects an empty conversation before registering a stream', async 
   await assert.rejects(
     runtime.enqueue(
       { chatId: '', userId: 'user-1' },
-      { id: 'must-not-register', input: 'hello' },
+      userTurn('must-not-register', 'hello'),
     ),
     /conversation requires non-empty chatId and userId/,
   );
@@ -434,7 +438,7 @@ test('root initialization preserves a concurrent host metadata write', async (t)
   );
   await runtime.enqueue(
     { chatId: 'root-cas', userId: 'user-1' },
-    { id: 'root-cas-turn', input: 'hello' },
+    userTurn('root-cas-turn', 'hello'),
   );
 
   await using _worker = await runtime.work();
@@ -492,7 +496,7 @@ test('a child must point to the immediate ancestor of its canonical path', async
   await assert.rejects(
     runtime.enqueue(
       { chatId: 'skips-parent', userId: 'user-1' },
-      { id: 'must-not-skip-parent', input: 'hello' },
+      userTurn('must-not-skip-parent', 'hello'),
     ),
     /invalid Zukhruf parent for chat "skips-parent"/,
   );
@@ -558,7 +562,7 @@ test('explicit cancellation rejects a conversation that does not own the stored 
   );
   const alice = await runtime.enqueue(
     { chatId: 'shared-chat', userId: 'alice' },
-    { id: 'alice-turn', input: 'hello' },
+    userTurn('alice-turn', 'hello'),
   );
 
   await assert.rejects(
@@ -612,10 +616,10 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
     { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'cancel-setup', userId: 'user-1' };
-  const enqueued = await runtime.enqueue(conversation, {
-    id: 'cancel-during-sandbox',
-    input: 'never sample this',
-  });
+  const enqueued = await runtime.enqueue(
+    conversation,
+    userTurn('cancel-during-sandbox', 'never sample this'),
+  );
   await using _worker = await runtime.work();
   const running = queue.runNext();
   await sandboxStarted.promise;
@@ -668,10 +672,10 @@ test('cancellation that wins the execution claim prevents model sampling', async
     { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'cancel-claim', userId: 'user-1' };
-  const enqueued = await runtime.enqueue(conversation, {
-    id: 'cancel-before-claim',
-    input: 'never sample this either',
-  });
+  const enqueued = await runtime.enqueue(
+    conversation,
+    userTurn('cancel-before-claim', 'never sample this either'),
+  );
 
   await using _worker = await runtime.work();
   await queue.runNext();
@@ -719,10 +723,10 @@ test('cancellation after execution claim aborts pending provider setup', async (
     { store, streams: streamsFor(streamStore), mailboxStore, queue },
   );
   const conversation = { chatId: 'cancel-provider', userId: 'user-1' };
-  const enqueued = await runtime.enqueue(conversation, {
-    id: 'cancel-pending-provider',
-    input: 'start slowly',
-  });
+  const enqueued = await runtime.enqueue(
+    conversation,
+    userTurn('cancel-pending-provider', 'start slowly'),
+  );
   await using _worker = await runtime.work();
   const running = queue.runNext();
   await providerStarted.promise;

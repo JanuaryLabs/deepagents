@@ -13,13 +13,8 @@ import {
 } from '@deepagents/context';
 
 import type { ConversationId } from '../mailbox/types.ts';
-import type {
-  ApprovalTurnRef,
-  TurnQueue,
-  TurnRef,
-} from '../queue/turn-queue.ts';
+import type { TurnQueue, TurnRef } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
-import { approvalJobId } from './approval-job-id.ts';
 
 export interface ApprovalControllerOptions {
   store: ContextStore;
@@ -55,22 +50,6 @@ export class ApprovalController {
     return this.isPaused(
       (await this.#engineFor(conversation).getMessages()).at(-1),
     );
-  }
-
-  approve(conversation: ConversationId, input: { toolCallId: string }) {
-    return this.#respond('approve', conversation, input.toolCallId, {
-      approved: true,
-    });
-  }
-
-  deny(
-    conversation: ConversationId,
-    input: { toolCallId: string; reason?: string },
-  ) {
-    return this.#respond('deny', conversation, input.toolCallId, {
-      approved: false,
-      reason: input.reason,
-    });
   }
 
   async settleDeniedApprovals(
@@ -190,45 +169,19 @@ export class ApprovalController {
     if (!retryable) return false;
 
     await this.#queue.push({
-      kind: 'continuation',
+      kind: 'recovery',
       streamId,
       chatId: conversation.chatId,
       userId: conversation.userId,
-      recovery: 'idempotent',
+      mode: 'idempotent',
     });
     return true;
-  }
-
-  async applyDecision(turn: ApprovalTurnRef): Promise<boolean> {
-    const engine = this.#engineFor(turn);
-    const head = (await engine.getMessages()).at(-1);
-    if (head?.role !== 'assistant' || head.id !== turn.streamId) return false;
-
-    const part = this.#findToolPart(head, turn.toolCallId);
-    if (part?.approval?.id !== turn.approvalId) return false;
-    if (part.approval.approved !== undefined) return false;
-    if (part.state !== 'approval-requested') return false;
-
-    const responded: ApprovalToolPart = {
-      ...part,
-      state: 'approval-responded',
-      approval: { ...part.approval, ...turn.decision },
-    };
-    const updated: UIMessage = {
-      ...head,
-      parts: head.parts.map((candidate) =>
-        candidate === part ? responded : candidate,
-      ),
-    };
-    await engine.continue(assistant(updated));
-    return !this.#hasUnansweredApprovals(updated);
   }
 
   async recoverUnstartedContinuation(
     turn: TurnRef,
     streamId: string,
   ): Promise<boolean> {
-    if (turn.kind === 'approval') await this.applyDecision(turn);
     const head = (await this.#engineFor(turn).getMessages()).at(-1);
     if (
       head?.role !== 'assistant' ||
@@ -242,69 +195,13 @@ export class ApprovalController {
     }
 
     await this.#queue.push({
-      kind: 'continuation',
+      kind: 'recovery',
       streamId,
       chatId: turn.chatId,
       userId: turn.userId,
-      recovery: 'handoff',
+      mode: 'handoff',
     });
     return true;
-  }
-
-  async #respond(
-    operation: 'approve' | 'deny',
-    conversation: ConversationId,
-    toolCallId: string,
-    approval: { approved: true } | { approved: false; reason?: string },
-  ) {
-    const head = (await this.#engineFor(conversation).getMessages()).at(-1);
-    if (head?.role !== 'assistant') {
-      throw new Error(
-        `ApprovalController.${operation}: no paused turn — the chain head is not an assistant message`,
-      );
-    }
-    const part = this.#findToolPart(head, toolCallId);
-    if (!part) {
-      throw new Error(
-        `ApprovalController.${operation}: no tool call "${toolCallId}" on the paused turn`,
-      );
-    }
-    if (!part.approval) {
-      throw new Error(
-        `ApprovalController.${operation}: tool call "${toolCallId}" is not awaiting approval`,
-      );
-    }
-    const jobId = approvalJobId(conversation, part.approval.id);
-    if (part.approval.approved !== undefined) {
-      if (part.approval.approved !== approval.approved) {
-        throw new Error(
-          `ApprovalController.${operation}: approval already answered with a different decision`,
-        );
-      }
-      return { id: head.id, jobId, status: 'already-applied' as const };
-    }
-    if (part.state !== 'approval-requested') {
-      throw new Error(
-        `ApprovalController.${operation}: tool call "${toolCallId}" is not awaiting approval`,
-      );
-    }
-
-    const result = await this.#queue.push({
-      kind: 'approval',
-      streamId: head.id,
-      chatId: conversation.chatId,
-      userId: conversation.userId,
-      toolCallId,
-      approvalId: part.approval.id,
-      decision: approval,
-    });
-    return {
-      id: head.id,
-      jobId,
-      status: result.inserted
-        ? ('queued' as const)
-        : ('already-queued' as const),
-    };
   }
 
   #pendingToolPart(message: UIMessage) {
@@ -318,16 +215,6 @@ export class ApprovalController {
   #hasUnansweredApprovals(message: UIMessage): boolean {
     return message.parts.some(
       (part) => isToolUIPart(part) && part.state === 'approval-requested',
-    );
-  }
-
-  #findToolPart(
-    message: UIMessage,
-    toolCallId: string,
-  ): ApprovalToolPart | undefined {
-    return message.parts.find(
-      (part): part is ApprovalToolPart =>
-        isToolUIPart(part) && part.toolCallId === toolCallId,
     );
   }
 

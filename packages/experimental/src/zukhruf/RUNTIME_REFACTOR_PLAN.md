@@ -239,7 +239,7 @@ Create the agreed application-level class after its durable primitives have conc
   - send a waking follow-up task;
   - list agents and project their current statuses;
   - project successful child completion to its parent.
-- Derive public ask stream IDs with `AgentTurnId`, scoped by conversation ownership, before stream
+- Derive public message stream IDs with `AgentTurnId`, scoped by conversation ownership, before stream
   registration or queueing.
 - Replace the raw-store-heavy `AgentToolContext` with:
   - the control plane;
@@ -277,7 +277,7 @@ Separate the execution/data plane from host lifecycle and multi-agent coordinati
   - terminal-stream idempotency checks;
   - approval gating and parking checks;
   - ContextEngine construction and instruction seeding;
-  - ask, mailbox, and continuation chain preparation;
+  - message, mailbox, and continuation chain preparation;
   - mailbox-to-UIMessage rendering as private methods;
   - sandbox acquisition;
   - atomic StreamStore execution claim after sandbox acquisition and before model construction;
@@ -310,15 +310,15 @@ Isolate the durable approval continuation state machine from the runtime façade
 ### Work
 
 - Add `approval-controller.ts` containing `ApprovalController`.
-- Move pending-tool lookup, approval/denial mutation, chain continuation, stream reopening,
-  continuation queueing, benign race reattachment, and parked-turn revival into it.
+- Keep pending-tool classification, terminal approval settlement, recovery queueing, and
+  parked-turn revival in it.
 - Make pending-tool classification a private method owned by the controller.
-- Expose explicit `approve(conversation, input)` and `deny(conversation, input)` methods.
+- Use AI SDK React approval responses submitted as complete assistant messages; do not expose a
+  second approval command API.
 
 ### Behavioral proof
 
-- Approval, denial, double approval, queue-behind, cancellation, and concurrent-approval tests remain
-  green.
+- Approval, denial, sibling-response, queue-behind, and cancellation tests remain green.
 - Tool output and denial message shapes remain unchanged.
 
 ### Exit criteria

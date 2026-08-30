@@ -24,7 +24,6 @@ import {
   type ConsumeOptions,
   SqliteMailboxStore,
   type TurnActivity,
-  type TurnPushResult,
   TurnQueue,
   type TurnRef,
   defineAgent,
@@ -46,9 +45,9 @@ class ControlledTurnQueue extends TurnQueue {
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
   #options?: ConsumeOptions;
 
-  push(turn: TurnRef): Promise<TurnPushResult> {
+  push(turn: TurnRef): Promise<void> {
     this.#turns.push(turn);
-    return Promise.resolve({ jobId: turn.streamId, inserted: true });
+    return Promise.resolve();
   }
 
   getTurnActivity(): Promise<TurnActivity> {
@@ -259,8 +258,12 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
   const conversation = { chatId: 'chat-1', userId: 'user-1' };
   await runtime.createSession(conversation);
   const turn = await runtime.enqueue(conversation, {
-    id: 'message-1',
-    input: 'Check the system.',
+    message: {
+      id: 'message-1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Check the system.' }],
+    },
+    trigger: 'submit-message',
   });
   await queue.runNext();
   assert.equal(
@@ -346,8 +349,12 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
   assert(trace.spans.some((span) => span.output !== undefined));
 
   const failedTurn = await runtime.enqueue(conversation, {
-    id: 'message-2',
-    input: 'Fail this turn.',
+    message: {
+      id: 'message-2',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Fail this turn.' }],
+    },
+    trigger: 'submit-message',
   });
   await queue.runNext();
   assert.equal(

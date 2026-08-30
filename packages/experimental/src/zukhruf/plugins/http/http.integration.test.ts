@@ -92,7 +92,7 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
   const created: Array<{ chatId: string; userId: string }> = [];
   const enqueued: Array<{
     conversation: { chatId: string; userId: string };
-    turn: { id: string; input: string };
+    turn: Parameters<TestRuntime['enqueue']>[1];
   }> = [];
   const runtime = createRuntime({
     async createSession(conversation) {
@@ -108,13 +108,24 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
   });
 
   const app = createApp(runtime);
+  const message = {
+    id: 'message-1',
+    role: 'user' as const,
+    parts: [
+      { type: 'text' as const, text: 'Hello' },
+      {
+        type: 'file' as const,
+        mediaType: 'text/plain',
+        filename: 'note.txt',
+        url: 'data:text/plain;base64,bm90ZQ==',
+      },
+    ],
+    metadata: { locale: { language: 'Arabic' } },
+  };
   const create = () =>
     app.request(mounted('/session'), {
-      body: JSON.stringify({ input: '  Hello  ' }),
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': 'message-1',
-      },
+      body: JSON.stringify({ message, trigger: 'submit-message' }),
+      headers: { 'content-type': 'application/json' },
       method: 'POST',
     });
 
@@ -143,11 +154,11 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
   assert.deepEqual(enqueued, [
     {
       conversation: { chatId: firstBody.sessionId, userId: 'user-1' },
-      turn: { id: 'message-1', input: 'Hello' },
+      turn: { message, trigger: 'submit-message' },
     },
     {
       conversation: { chatId: firstBody.sessionId, userId: 'user-1' },
-      turn: { id: 'message-1', input: 'Hello' },
+      turn: { message, trigger: 'submit-message' },
     },
   ]);
 
@@ -174,9 +185,12 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
     assert.equal(response.headers.get('allow'), 'POST');
   });
 
-  await t.test('requires an idempotency key', async () => {
+  await t.test('requires a valid AI SDK message', async () => {
     const response = await request({
-      body: JSON.stringify({ input: 'Hello' }),
+      body: JSON.stringify({
+        message: { id: 'message-1', role: 'user', parts: [] },
+        trigger: 'submit-message',
+      }),
       headers: { 'content-type': 'application/json' },
     });
     assert.equal(response.status, 400);
@@ -184,13 +198,51 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
     assert.equal(body.cause.code, 'api/validation-failed');
   });
 
-  await t.test('accepts only the input field', async () => {
+  await t.test('accepts only message, trigger, and client tools', async () => {
     const response = await request({
-      body: JSON.stringify({ continuationToken: 'no', input: 'Hello' }),
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': 'message-1',
-      },
+      body: JSON.stringify({
+        input: 'legacy',
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        trigger: 'submit-message',
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('validates client tool definitions', async () => {
+    const response = await request({
+      body: JSON.stringify({
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        tools: {
+          ask_user_question: { description: '', inputSchema: [] },
+        },
+        trigger: 'submit-message',
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('does not regenerate before a session exists', async () => {
+    const response = await request({
+      body: JSON.stringify({
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        trigger: 'regenerate-message',
+      }),
+      headers: { 'content-type': 'application/json' },
     });
     assert.equal(response.status, 400);
   });
@@ -198,10 +250,7 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
   await t.test('reports malformed JSON with a stable error code', async () => {
     const response = await request({
       body: '{',
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': 'message-1',
-      },
+      headers: { 'content-type': 'application/json' },
     });
     assert.equal(response.status, 400);
     const body = (await response.json()) as { cause: { code: string } };
@@ -210,11 +259,15 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
 
   await t.test('bounds the request body', async () => {
     const response = await request({
-      body: JSON.stringify({ input: 'x'.repeat(11 * 1024) }),
-      headers: {
-        'content-type': 'application/json',
-        'idempotency-key': 'message-1',
-      },
+      body: JSON.stringify({
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'x'.repeat(11 * 1024) }],
+        },
+        trigger: 'submit-message',
+      }),
+      headers: { 'content-type': 'application/json' },
     });
     assert.equal(response.status, 413);
     const body = (await response.json()) as { cause: { code: string } };
@@ -226,7 +279,7 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
   const sessionId = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
   const enqueued: Array<{
     conversation: { chatId: string; userId: string };
-    turn: { id: string; input: string };
+    turn: Parameters<TestRuntime['enqueue']>[1];
   }> = [];
   const runtime = createRuntime({
     async enqueue(conversation, turn) {
@@ -238,12 +291,26 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
     },
   });
   const path = mounted('/session/:sessionId').replace(':sessionId', sessionId);
-  const response = await createApp(runtime).request(path, {
-    body: JSON.stringify({ input: '  Continue  ' }),
-    headers: {
-      'content-type': 'application/json',
-      'idempotency-key': 'message-2',
+  const message = {
+    id: 'message-2',
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text: 'Continue' }],
+    metadata: { locale: { language: 'Arabic' } },
+  };
+  const tools = {
+    ask_user_question: {
+      description: 'Ask the user a question',
+      inputSchema: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: { question: { type: 'string' } },
+        required: ['question'],
+      },
     },
+  };
+  const response = await createApp(runtime).request(path, {
+    body: JSON.stringify({ message, tools, trigger: 'submit-message' }),
+    headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
 
@@ -256,18 +323,56 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
   assert.deepEqual(enqueued, [
     {
       conversation: { chatId: sessionId, userId: 'user-1' },
-      turn: { id: 'message-2', input: 'Continue' },
+      turn: { message, tools, trigger: 'submit-message' },
     },
   ]);
+
+  const regenerated = await createApp(runtime).request(path, {
+    body: JSON.stringify({ message, trigger: 'regenerate-message' }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  assert.equal(regenerated.status, 202);
+  assert.deepEqual(enqueued[1], {
+    conversation: { chatId: sessionId, userId: 'user-1' },
+    turn: { message, trigger: 'regenerate-message' },
+  });
+
+  const assistant = {
+    id: 'internal-turn-id',
+    role: 'assistant' as const,
+    parts: [{ type: 'text' as const, text: 'Client supplied continuation' }],
+  };
+  const continued = await createApp(runtime).request(path, {
+    body: JSON.stringify({ message: assistant, trigger: 'submit-message' }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  assert.equal(continued.status, 202);
+  assert.deepEqual(enqueued[2], {
+    conversation: { chatId: sessionId, userId: 'user-1' },
+    turn: { message: assistant, trigger: 'submit-message' },
+  });
+
+  const invalidAssistantRegeneration = await createApp(runtime).request(path, {
+    body: JSON.stringify({
+      message: {
+        id: 'assistant-1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Old response' }],
+      },
+      trigger: 'regenerate-message',
+    }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  assert.equal(invalidAssistantRegeneration.status, 400);
 
   const missing = await createApp(
     createRuntime({ sessionExists: async () => false }),
   ).request(path, {
-    body: JSON.stringify({ input: 'Continue' }),
-    headers: {
-      'content-type': 'application/json',
-      'idempotency-key': 'message-2',
-    },
+    body: JSON.stringify({ message, trigger: 'submit-message' }),
+    headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
   assert.equal(missing.status, 404);

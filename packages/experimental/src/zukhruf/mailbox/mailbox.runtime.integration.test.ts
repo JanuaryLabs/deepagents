@@ -353,8 +353,12 @@ describe('zukhruf runtime mailbox delivery', () => {
     await using _worker = await h.runtime.work({ concurrency: 2 });
 
     const running = await h.runtime.enqueue(researcher, {
-      id: 'active-turn',
-      input: 'already working',
+      message: {
+        id: 'active-turn',
+        role: 'user',
+        parts: [{ type: 'text', text: 'already working' }],
+      },
+      trigger: 'submit-message',
     });
     await firstStarted.promise;
 
