@@ -3,18 +3,22 @@
   "version": "6.2.0",
   "private": true,
   "type": "module",
-  "description": "Runnable Zukhruf schedule-files showcase backed by pg-boss and PGlite.",
+  "description": "Runnable Zukhruf Scheduled Tasks showcase managed from the DevTool, backed by pg-boss and PGlite.",
   "scripts": {
-    "start": "node run.ts",
-    "list": "node run.ts --list",
-    "daemon": "node run.ts --daemon"
+    "start": "node server.ts",
+    "start:no-schedules": "node server.ts --no-schedules"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.41",
+    "@ai-sdk/openai": "^4.0.52",
     "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@electric-sql/pglite": "^0.5.4",
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1"
+  },
+  "devDependencies": {
+    "@deepagents/devtool": "6.2.0",
+    "@hono/node-server": "^2.0.10",
+    "hono": "^4.12.33"
   }
 }

@@ -65,6 +65,13 @@ resources.use(await runtime.work({ concurrency: 4 }));
 
 const turn = await runtime.enqueue(
   { chatId: crypto.randomUUID(), userId: process.env.USER ?? 'demo' },
-  { id: crypto.randomUUID(), input },
+  {
+    message: {
+      id: crypto.randomUUID(),
+      role: 'user',
+      parts: [{ type: 'text', text: input }],
+    },
+    trigger: 'submit-message',
+  },
 );
 await renderTurn(turn.stream);

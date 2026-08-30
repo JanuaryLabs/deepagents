@@ -84,6 +84,7 @@ export function NewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
 }
 
 function PrimaryNavigation() {
+  const { discovery } = useRuntimeData();
   return (
     <nav aria-label="Devtool views">
       <SidebarGroup>
@@ -96,12 +97,14 @@ function PrimaryNavigation() {
                 <span>History</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton render={<NavLink to="/scheduled" />}>
-                <CalendarClockIcon />
-                <span>Scheduled</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {discovery?.capabilities.schedules ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton render={<NavLink to="/scheduled/tasks" />}>
+                  <CalendarClockIcon />
+                  <span>Scheduled</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>

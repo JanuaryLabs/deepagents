@@ -8,7 +8,7 @@
     "start": "node run.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.41",
+    "@ai-sdk/openai": "^4.0.52",
     "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@electric-sql/pglite": "^0.5.4",

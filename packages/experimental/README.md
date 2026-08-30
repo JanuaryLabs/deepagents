@@ -128,10 +128,8 @@ deployable unit),
 executor: enqueue, detach, resume, strict per-chat FIFO),
 [`demo/zukhruf-research-bot`](../../demo/zukhruf-research-bot) (durable
 planner and researcher chats with mailbox-delivered findings),
-[`demo/zukhruf-claude-code`](../../demo/zukhruf-claude-code) (Claude Code owns
-the model/tool loop while Zukhruf owns persistence, streaming, and HTTP),
-[`demo/zukhruf-schedules`](../../demo/zukhruf-schedules) (file-declared
-recurring work launched into fresh root tasks),
+[`demo/zukhruf-schedules`](../../demo/zukhruf-schedules) (recurring work
+managed from the DevTool and launched into fresh root tasks),
 [`demo/zukhruf-group-chat`](../../demo/zukhruf-group-chat) (managed group-chat
 orchestration over a shared transcript),
 [`demo/zukhruf-whatsapp`](../../demo/zukhruf-whatsapp) (manager-free group

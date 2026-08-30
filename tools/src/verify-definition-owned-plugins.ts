@@ -109,6 +109,7 @@ import {
   schedules,
   schedulesCapabilities,
 } from '@deepagents/experimental/zukhruf/schedules';
+import { schedulesHttp } from '@deepagents/experimental/zukhruf/schedules/http';
 
 class ConsumerWakeScheduler extends WakeScheduler<SchedulingWake> {
   schedule(): Promise<void> {
@@ -171,6 +172,15 @@ if (first.plugin(traceDefinition) === second.plugin(traceDefinition)) {
 }
 if (typeof http(first, tracesHttp(traceDefinition)).fetch !== 'function') {
   throw new Error('HTTP transport plugin is not mountable');
+}
+if (typeof http(first, schedulesHttp(scheduled)).fetch !== 'function') {
+  throw new Error('schedules HTTP projection is not mountable');
+}
+if (
+  Object.keys(schedulesHttp(scheduled).project(first as never).capabilities)[0] !==
+  'schedules'
+) {
+  throw new Error('schedules capability is not advertised');
 }
 if (typeof devtool().fetch !== 'function') throw new Error('devtool is not mountable');
 if (first.plugin(files) === second.plugin(files)) throw new Error('shared file-agents instance');

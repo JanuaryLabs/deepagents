@@ -77,6 +77,18 @@
     },
     {
       "path": "./packages/devtool/host/ui"
+    },
+    {
+      "path": "./demo/zukhruf-durable-turns"
+    },
+    {
+      "path": "./demo/zukhruf-schedules"
+    },
+    {
+      "path": "./demo/zukhruf-simple"
+    },
+    {
+      "path": "./demo/zukhruf-research-bot"
     }
   ]
 }

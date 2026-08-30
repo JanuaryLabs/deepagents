@@ -29,7 +29,7 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/react": "4.0.73",
+    "@ai-sdk/react": "4.0.88",
     "@deepagents/react-input": "6.2.0",
     "@deepagents/context": "6.2.0",
     "@deepagents/react-elements": "6.2.0",
@@ -37,7 +37,7 @@
     "@deepagents/react-shadcn": "6.2.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@types/mdast": "^4.0.4",
-    "ai": "7.0.70",
+    "ai": "7.0.85",
     "class-variance-authority": "^0.7.1",
     "html-to-image": "1.11.13",
     "lodash-es": "^4.18.1",

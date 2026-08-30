@@ -70,6 +70,10 @@ const DDL = `
 
   CREATE INDEX IF NOT EXISTS zukhruf_scheduled_runs_task
     ON zukhruf_scheduled_runs (owner_id, task_id, occurrence_at DESC, id);
+
+  CREATE INDEX IF NOT EXISTS zukhruf_scheduled_runs_pending_review
+    ON zukhruf_scheduled_runs (owner_id, finished_at DESC, id)
+    WHERE review_status = 'pending_review';
 `;
 
 export type ScheduledTaskStatus =
@@ -78,6 +82,28 @@ export type ScheduledRunStatus =
   'dispatching' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ScheduledRunReviewStatus =
   'pending_review' | 'reviewed' | 'archived';
+
+export type ScheduledTasksErrorCode =
+  'invalid-input' | 'not-found' | 'conflict';
+export type ScheduledTasksResource = 'task' | 'run';
+
+/** Domain rejection a transport can categorise without matching messages. */
+export class ScheduledTasksError extends Error {
+  override readonly name = 'ScheduledTasksError';
+  readonly code: ScheduledTasksErrorCode;
+  readonly resource: ScheduledTasksResource;
+
+  constructor(
+    code: ScheduledTasksErrorCode,
+    resource: ScheduledTasksResource,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.code = code;
+    this.resource = resource;
+  }
+}
 
 export interface ScheduledTask<ExecutionConfig extends object> {
   id: string;
@@ -138,7 +164,10 @@ export interface ScheduledExecutionAdapter<ExecutionConfig extends object> {
   /** Repeated calls with the same run ID must return the same execution. */
   launch(input: {
     runId: string;
+    taskId: string;
     ownerId: string;
+    trigger: 'scheduled' | 'manual';
+    occurrenceAt: number;
     prompt: string;
     executionConfig: ExecutionConfig;
   }): Promise<{ executionId: string }>;
@@ -303,7 +332,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       Date.now(),
     );
     if (nextRunAt === null) {
-      throw new Error('Scheduled Task recurrence has no future occurrence');
+      throw new ScheduledTasksError(
+        'invalid-input',
+        'task',
+        'Scheduled Task recurrence has no future occurrence',
+      );
     }
 
     return this.#transaction(async (database) => {
@@ -412,6 +445,23 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     return this.#requiredRun(this.#database, ownerId, runId, false);
   }
 
+  /**
+   * Owner-wide review queue. `review_status` is only written when a run reaches
+   * a terminal state, so pending runs are exactly the unreviewed terminal ones,
+   * including runs whose task has since been archived.
+   */
+  async listPendingReview(
+    ownerId: string,
+  ): Promise<ScheduledRun<ExecutionConfig>[]> {
+    const { rows } = await this.#database.executeSql(
+      `SELECT * FROM zukhruf_scheduled_runs
+        WHERE owner_id = $1 AND review_status = 'pending_review'
+        ORDER BY finished_at DESC, id`,
+      [required(ownerId, 'Scheduled Task owner')],
+    );
+    return (rows as RunRow[]).map(toRun<ExecutionConfig>);
+  }
+
   async pause(
     ownerId: string,
     taskId: string,
@@ -420,7 +470,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       const task = await this.#requiredTask(database, ownerId, taskId, true);
       if (task.status === 'paused') return task;
       if (task.status !== 'active') {
-        throw new Error(`Scheduled Task "${task.id}" is ${task.status}`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
+          `Scheduled Task "${task.id}" is ${task.status}`,
+        );
       }
       const row = await this.#taskRow(database, task.id, task.ownerId, true);
       if (!row) throw new Error(`Scheduled Task "${task.id}" was not found`);
@@ -446,7 +500,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       const task = await this.#requiredTask(database, ownerId, taskId, true);
       if (task.status === 'active') return task;
       if (task.status === 'archived') {
-        throw new Error(`Scheduled Task "${task.id}" is archived`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
+          `Scheduled Task "${task.id}" is archived`,
+        );
       }
       const nextRunAt = nextOccurrence(
         task.recurrence,
@@ -454,7 +512,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
         Date.now(),
       );
       if (nextRunAt === null) {
-        throw new Error('Scheduled Task recurrence has no future occurrence');
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
+          'Scheduled Task recurrence has no future occurrence',
+        );
       }
       const generation = task.generation + 1;
       const wakeId = await this.#sendAt(
@@ -486,12 +548,20 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     input: UpdateScheduledTaskInput<ExecutionConfig>,
   ): Promise<ScheduledTask<ExecutionConfig>> {
     if (Object.values(input).every((value) => value === undefined)) {
-      throw new Error('Scheduled Task update cannot be empty');
+      throw new ScheduledTasksError(
+        'invalid-input',
+        'task',
+        'Scheduled Task update cannot be empty',
+      );
     }
     return this.#transaction(async (database) => {
       const task = await this.#requiredTask(database, ownerId, taskId, true);
       if (task.status === 'archived') {
-        throw new Error(`Scheduled Task "${task.id}" is archived`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
+          `Scheduled Task "${task.id}" is archived`,
+        );
       }
       const row = await this.#taskRow(database, task.id, task.ownerId, true);
       if (!row) throw new Error(`Scheduled Task "${task.id}" was not found`);
@@ -574,7 +644,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     return this.#transaction(async (database) => {
       const task = await this.#requiredTask(database, ownerId, taskId, true);
       if (task.status === 'archived') {
-        throw new Error(`Scheduled Task "${task.id}" is archived`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
+          `Scheduled Task "${task.id}" is archived`,
+        );
       }
       const existing = await this.#manualRun(database, task.id, key);
       if (existing) return existing;
@@ -644,7 +718,9 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     await this.#transaction(async (database) => {
       const task = await this.#requiredTask(database, ownerId, taskId, true);
       if (task.status !== 'archived') {
-        throw new Error(
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
           `Scheduled Task "${task.id}" must be archived before purge`,
         );
       }
@@ -662,7 +738,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
           ({ status }) => status === 'dispatching' || status === 'running',
         )
       ) {
-        throw new Error(`Scheduled Task "${task.id}" has active runs`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'task',
+          `Scheduled Task "${task.id}" has active runs`,
+        );
       }
       const jobs = runs.flatMap(({ dispatch_job_id, reconciliation_job_id }) =>
         reconciliation_job_id
@@ -701,7 +781,11 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       });
     }
     if (!run.externalExecutionId) {
-      throw new Error(`Scheduled Run "${run.id}" has no external execution`);
+      throw new ScheduledTasksError(
+        'conflict',
+        'run',
+        `Scheduled Run "${run.id}" has no external execution`,
+      );
     }
     await this.#executor.cancel({
       runId: run.id,
@@ -864,7 +948,10 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     try {
       const launched = await this.#executor.launch({
         runId: run.id,
+        taskId: run.taskId,
         ownerId: run.ownerId,
+        trigger: run.trigger,
+        occurrenceAt: run.occurrenceAt,
         prompt: run.prompt,
         executionConfig: run.executionConfig,
       });
@@ -1071,11 +1158,19 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     return this.#transaction(async (database) => {
       const run = await this.#requiredRun(database, ownerId, runId, true);
       if (!isTerminal(run.status) || run.reviewStatus === null) {
-        throw new Error(`Scheduled Run "${run.id}" is not ready for review`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'run',
+          `Scheduled Run "${run.id}" is not ready for review`,
+        );
       }
       if (run.reviewStatus === 'archived') {
         if (reviewStatus === 'archived') return run;
-        throw new Error(`Scheduled Run "${run.id}" is archived`);
+        throw new ScheduledTasksError(
+          'conflict',
+          'run',
+          `Scheduled Run "${run.id}" is archived`,
+        );
       }
       const { rows } = await database.executeSql(
         `UPDATE zukhruf_scheduled_runs
@@ -1142,7 +1237,13 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       required(ownerId, 'Scheduled Task owner'),
       forUpdate,
     );
-    if (!row) throw new Error(`Scheduled Task "${taskId}" was not found`);
+    if (!row) {
+      throw new ScheduledTasksError(
+        'not-found',
+        'task',
+        `Scheduled Task "${taskId}" was not found`,
+      );
+    }
     return toTask<ExecutionConfig>(row);
   }
 
@@ -1186,7 +1287,13 @@ export class ScheduledTasks<ExecutionConfig extends object> {
       required(ownerId, 'Scheduled Task owner'),
       forUpdate,
     );
-    if (!row) throw new Error(`Scheduled Run "${runId}" was not found`);
+    if (!row) {
+      throw new ScheduledTasksError(
+        'not-found',
+        'run',
+        `Scheduled Run "${runId}" was not found`,
+      );
+    }
     return toRun<ExecutionConfig>(row);
   }
 
@@ -1240,18 +1347,29 @@ function normalizeCreate<ExecutionConfig extends object>(
 
 function serializeExecutionConfig(value: object): string {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Scheduled Task execution config must be a JSON object');
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Scheduled Task execution config must be a JSON object',
+    );
   }
   let json: string;
   try {
     json = JSON.stringify(value);
   } catch (error) {
-    throw new Error('Scheduled Task execution config must be JSON', {
-      cause: error,
-    });
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Scheduled Task execution config must be JSON',
+      { cause: error },
+    );
   }
   if (!json || !isDeepStrictEqual(JSON.parse(json), value)) {
-    throw new Error('Scheduled Task execution config must be a JSON object');
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Scheduled Task execution config must be a JSON object',
+    );
   }
   return json;
 }
@@ -1267,7 +1385,11 @@ function assertSameTask<ExecutionConfig extends object>(
     task.timezone !== input.timezone ||
     !isDeepStrictEqual(task.executionConfig, input.executionConfig)
   ) {
-    throw new Error('Scheduled Task idempotency key was reused');
+    throw new ScheduledTasksError(
+      'conflict',
+      'task',
+      'Scheduled Task idempotency key was reused',
+    );
   }
 }
 
@@ -1282,7 +1404,11 @@ function validateTimezone(value: string): string {
   try {
     new Intl.DateTimeFormat('en', { timeZone: timezone }).format();
   } catch {
-    throw new Error(`Scheduled Task timezone "${timezone}" is invalid`);
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      `Scheduled Task timezone "${timezone}" is invalid`,
+    );
   }
   return timezone;
 }
@@ -1296,7 +1422,9 @@ function nextOccurrence(
   const start = /^DTSTART(?:;TZID=([^:]+))?:(\S+)$/m.exec(recurrence);
   if (!start) {
     if (recurrence.split(/\s+/).length !== 5) {
-      throw new Error(
+      throw new ScheduledTasksError(
+        'invalid-input',
+        'task',
         'Scheduled Task recurrence must include DTSTART or contain exactly five cron fields',
       );
     }
@@ -1311,7 +1439,9 @@ function nextOccurrence(
         .next()
         .getTime();
     } catch (cause) {
-      throw new Error(
+      throw new ScheduledTasksError(
+        'invalid-input',
+        'task',
         'Scheduled Task recurrence must be a valid five-field cron expression with a match in the next year',
         { cause },
       );
@@ -1319,7 +1449,9 @@ function nextOccurrence(
   }
   const embeddedTimezone = start[1] ?? (start[2]?.endsWith('Z') ? 'UTC' : null);
   if (embeddedTimezone !== timezone) {
-    throw new Error(
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
       `Scheduled Task recurrence DTSTART timezone must be "${timezone}"`,
     );
   }
@@ -1327,7 +1459,12 @@ function nextOccurrence(
   try {
     rule = rrulestr(recurrence);
   } catch (error) {
-    throw new Error('Scheduled Task recurrence is invalid', { cause: error });
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Scheduled Task recurrence is invalid',
+      { cause: error },
+    );
   }
   const cursor = new Date(after);
   const occurrence = rule.after(

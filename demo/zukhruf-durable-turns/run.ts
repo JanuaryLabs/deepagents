@@ -65,8 +65,12 @@ const conversation = {
 resources.use(await runtime.work({ concurrency: 4 }));
 
 const first = await runtime.enqueue(conversation, {
-  id: crypto.randomUUID(),
-  input,
+  message: {
+    id: crypto.randomUUID(),
+    role: 'user',
+    parts: [{ type: 'text', text: input }],
+  },
+  trigger: 'submit-message',
 });
 console.log(
   `\n[root turn ${first.id} enqueued] reading a few chunks, then detaching…\n`,
@@ -102,8 +106,17 @@ console.log(
 await waitForSpecialistCompletion();
 
 const second = await runtime.enqueue(conversation, {
-  id: crypto.randomUUID(),
-  input: 'Summarize the specialist FINAL_ANSWER in one short sentence.',
+  message: {
+    id: crypto.randomUUID(),
+    role: 'user',
+    parts: [
+      {
+        type: 'text',
+        text: 'Summarize the specialist FINAL_ANSWER in one short sentence.',
+      },
+    ],
+  },
+  trigger: 'submit-message',
 });
 console.log(
   `[root turn ${second.id} enqueued] it drains the durable child completion before sampling:\n`,

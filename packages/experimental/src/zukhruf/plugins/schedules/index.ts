@@ -14,12 +14,19 @@ import {
   type ScheduledTask,
   type ScheduledTaskTransaction,
   ScheduledTasks,
+  ScheduledTasksError,
   type ScheduledTasksOptions,
   type UpdateScheduledTaskInput,
 } from './scheduled-tasks.ts';
 
 export * from './schedule-files.ts';
 export * from './scheduled-tasks.ts';
+
+/**
+ * Distinguishes host-owned Scheduled Tasks from the Conversation Schedule
+ * origin written by `conversationScheduling()`.
+ */
+export const SCHEDULED_TASK_ORIGIN = 'scheduled-task';
 
 export type ScheduleTarget =
   | { kind: 'new-conversation' }
@@ -39,6 +46,7 @@ export type ScheduleControl = Pick<
   | 'list'
   | 'listRuns'
   | 'getRun'
+  | 'listPendingReview'
   | 'pause'
   | 'resume'
   | 'update'
@@ -162,6 +170,10 @@ class SchedulesPlugin implements Schedules {
     return this.#scheduled.getRun(ownerId, runId);
   }
 
+  listPendingReview(ownerId: string): Promise<ScheduledRun<ExecutionConfig>[]> {
+    return this.#scheduled.listPendingReview(ownerId);
+  }
+
   pause(
     ownerId: string,
     taskId: string,
@@ -240,12 +252,18 @@ class SchedulesPlugin implements Schedules {
 
   async #launch({
     runId,
+    taskId,
     ownerId,
+    trigger,
+    occurrenceAt,
     prompt,
     executionConfig,
   }: {
     runId: string;
+    taskId: string;
     ownerId: string;
+    trigger: 'scheduled' | 'manual';
+    occurrenceAt: number;
     prompt: string;
     executionConfig: ExecutionConfig;
   }): Promise<{ executionId: string }> {
@@ -260,8 +278,18 @@ class SchedulesPlugin implements Schedules {
       );
     }
     const execution = await host.enqueue(conversation, {
-      id: runId,
-      input: prompt,
+      message: {
+        id: runId,
+        role: 'user',
+        parts: [{ type: 'text', text: prompt }],
+        metadata: {
+          zukhruf: {
+            origin: SCHEDULED_TASK_ORIGIN,
+            scheduledTask: { taskId, runId, trigger, occurrenceAt },
+          },
+        },
+      },
+      trigger: 'submit-message',
     });
     return { executionId: execution.id };
   }
@@ -348,7 +376,9 @@ class SchedulesPlugin implements Schedules {
       userId: ownerId,
     };
     if (await this.#requiredHost().conversationExists(conversation)) return;
-    throw new Error(
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
       `Scheduled target conversation "${conversation.chatId}" was not found`,
     );
   }
@@ -378,17 +408,35 @@ function normalizeExecutionConfig(
   value: ScheduleExecutionConfig,
 ): ScheduleExecutionConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Schedule execution config must be an object');
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Schedule execution config must be an object',
+    );
   }
   if (Object.keys(value).some((key) => key !== 'target')) {
-    throw new Error('Schedule execution config contains an unknown field');
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Schedule execution config contains an unknown field',
+    );
   }
   const { target } = value;
   if (!target || target.kind === 'new-conversation') return {};
   if (target.kind !== 'existing-conversation') {
-    throw new Error('Schedule target kind is invalid');
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Schedule target kind is invalid',
+    );
   }
   const chatId = target.chatId.trim();
-  if (!chatId) throw new Error('Schedule target chatId cannot be empty');
+  if (!chatId) {
+    throw new ScheduledTasksError(
+      'invalid-input',
+      'task',
+      'Schedule target chatId cannot be empty',
+    );
+  }
   return { target: { kind: 'existing-conversation', chatId } };
 }

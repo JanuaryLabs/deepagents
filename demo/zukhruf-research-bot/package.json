@@ -5,12 +5,12 @@
   "type": "module",
   "description": "Asynchronous multi-agent research bot on Zukhruf: a root spawns a planner, the planner spawns independent web researchers, and findings return through durable mailboxes.",
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.41",
+    "@ai-sdk/openai": "^4.0.52",
     "@deepagents/context": "6.2.0",
     "@deepagents/devtool-traces": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@electric-sql/pglite": "^0.5.4",
-    "ai": "^7.0.64",
+    "ai": "^7.0.85",
     "just-bash": "^3.2.0",
     "pg-boss": "^12.26.1",
     "zod": "^4.4.3"

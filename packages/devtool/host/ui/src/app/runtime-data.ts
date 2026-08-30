@@ -11,6 +11,7 @@ type Discovery = {
     chat: { href: string };
     history: { href: string };
     traces?: { href: string };
+    schedules?: { href: string };
   };
 };
 

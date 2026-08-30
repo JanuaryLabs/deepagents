@@ -14,10 +14,13 @@
       "path": "../../traces"
     },
     {
+      "path": "../../../react/input"
+    },
+    {
       "path": "../../../react/genai"
     },
     {
-      "path": "../../../react/input"
+      "path": "../../../experimental"
     },
     {
       "path": "../../history"

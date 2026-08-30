@@ -33,16 +33,16 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^4.0.28",
-    "@ai-sdk/openai": "^4.0.41",
-    "@ai-sdk/openai-compatible": "^3.0.30",
-    "ai": "^7.0.64",
+    "@ai-sdk/groq": "^4.0.35",
+    "@ai-sdk/openai": "^4.0.52",
+    "@ai-sdk/openai-compatible": "^3.0.41",
+    "ai": "^7.0.85",
     "chalk": "^5.6.2",
     "dedent": "1.7.2",
     "listr2": "^10.2.2",
     "lodash-es": "^4.18.1",
     "stringcase": "^4.3.1",
-    "@ai-sdk/provider": "^4.0.7"
+    "@ai-sdk/provider": "^4.0.9"
   },
   "peerDependencies": {
     "zod": "^4.4.3"

@@ -1,7 +1,6 @@
 export * from './agent.ts';
 export * from './control-plane/agent-path.ts';
 export * from './control-plane/agent-thread.ts';
-export type { TurnInput } from './control-plane/agent-control-plane.ts';
 export * from './instructions.ts';
 export * from './mailbox/sqlite.store.ts';
 export * from './mailbox/store.ts';

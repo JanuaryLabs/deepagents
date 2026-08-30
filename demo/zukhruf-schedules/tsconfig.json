@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  "references": [
+    {
+      "path": "../../packages/devtool/host"
+    },
+    {
+      "path": "../../packages/experimental"
+    },
+    {
+      "path": "../../packages/context"
+    }
+  ]
+}

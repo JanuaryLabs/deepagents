@@ -44,7 +44,10 @@ class TestExecutor {
   >();
   readonly launches: Array<{
     runId: string;
+    taskId: string;
     ownerId: string;
+    trigger: 'scheduled' | 'manual';
+    occurrenceAt: number;
     prompt: string;
     executionConfig: TestExecutionConfig;
   }> = [];
@@ -54,7 +57,10 @@ class TestExecutor {
 
   async launch(input: {
     runId: string;
+    taskId: string;
     ownerId: string;
+    trigger: 'scheduled' | 'manual';
+    occurrenceAt: number;
     prompt: string;
     executionConfig: TestExecutionConfig;
   }): Promise<{ executionId: string }> {
@@ -199,7 +205,10 @@ test('Run now launches one generic execution without moving the recurrence curso
   );
   assert.deepEqual(executor.launches[0], {
     runId: run.id,
+    taskId: task.id,
     ownerId: 'owner-1',
+    trigger: 'manual',
+    occurrenceAt: run.occurrenceAt,
     prompt: 'Prepare the report',
     executionConfig: { destination: 'reports' },
   });
