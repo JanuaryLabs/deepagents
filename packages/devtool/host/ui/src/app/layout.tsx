@@ -1,5 +1,5 @@
-import { type CSSProperties, useState } from 'react';
-import { Outlet } from 'react-router';
+import { type CSSProperties, useEffect, useState } from 'react';
+import { type LoaderFunctionArgs, Outlet, useRevalidator } from 'react-router';
 
 import {
   SIDEBAR_COOKIE_NAME,
@@ -10,6 +10,11 @@ import {
 } from '@deepagents/react-shadcn';
 
 import { DevtoolSidebar, NewChatButton } from './sidebar.tsx';
+import { loadRuntime } from './runtime-data.ts';
+
+export function loader({ request }: LoaderFunctionArgs) {
+  return loadRuntime(request.signal);
+}
 
 function getSidebarStateFromCookie() {
   const cookie = document.cookie
@@ -20,6 +25,12 @@ function getSidebarStateFromCookie() {
 
 export function AppLayout() {
   const [sidebarOpen] = useState(getSidebarStateFromCookie);
+  const { revalidate } = useRevalidator();
+  useEffect(() => {
+    const interval = setInterval(() => void revalidate(), 3_000);
+    return () => clearInterval(interval);
+  }, [revalidate]);
+
   return (
     <SidebarProvider
       defaultOpen={sidebarOpen}

@@ -1,6 +1,14 @@
-import type { UIMessage } from 'ai';
+import { type UIMessage, validateUIMessages } from 'ai';
 import { useState, useSyncExternalStore } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import {
+  type LoaderFunctionArgs,
+  type ShouldRevalidateFunctionArgs,
+  useLoaderData,
+  useLocation,
+  useNavigate,
+  useParams,
+  useRevalidator,
+} from 'react-router';
 
 import {
   AgentHeader,
@@ -20,14 +28,60 @@ import {
 import { Composer, useComposer } from '@deepagents/react-input/browser';
 import { cn } from '@deepagents/react-shadcn';
 
-import {
-  queryClient,
-  useRuntimeData,
-  useSessionMessages,
-} from '../app/runtime-data.ts';
+import { loadRuntime } from '../app/runtime-data.ts';
 import { ZukhrufChatTransport } from '../app/zukhruf-chat-transport.ts';
 
 const TOOL_REGISTRY = {};
+
+export async function loader(args: LoaderFunctionArgs) {
+  const { params, request } = args;
+  const runtime = await loadRuntime(request.signal);
+  const conversation = params.sessionId
+    ? runtime.history.find(({ chatId }) => chatId === params.sessionId)
+    : runtime.history[0];
+  const api = runtime.discovery?.capabilities.chat.href;
+  if (!api || !params.sessionId) {
+    return {
+      ...runtime,
+      conversation,
+      initialMessages: undefined,
+      sessionError: false,
+    };
+  }
+  try {
+    const response = await fetch(
+      `${api}/${encodeURIComponent(params.sessionId)}`,
+      { signal: request.signal },
+    );
+    if (!response.ok) {
+      throw new Error(`Session request failed: ${response.status}`);
+    }
+    const body = (await response.json()) as { messages?: unknown };
+    if (!Array.isArray(body.messages)) {
+      throw new Error('Session response did not include messages');
+    }
+    return {
+      ...runtime,
+      conversation,
+      initialMessages: await validateUIMessages({ messages: body.messages }),
+      sessionError: false,
+    };
+  } catch {
+    return {
+      ...runtime,
+      conversation,
+      initialMessages: undefined,
+      sessionError: true,
+    };
+  }
+}
+
+export function shouldRevalidate({
+  currentParams,
+  nextParams,
+}: ShouldRevalidateFunctionArgs) {
+  return currentParams.sessionId !== nextParams.sessionId;
+}
 
 export function ChatRoute() {
   const { sessionId } = useParams();
@@ -55,17 +109,14 @@ function ChatSessionBoundary({
   sessionId?: string;
 }) {
   const [initialSessionId] = useState(sessionId);
-  const { discovery, discoveryPending } = useRuntimeData();
+  const { discovery, initialMessages, sessionError } =
+    useLoaderData<typeof loader>();
   const api = discovery?.capabilities.chat.href;
-  const session = useSessionMessages(api, initialSessionId);
 
-  if (discoveryPending || (initialSessionId && session.isPending)) {
-    return <ChatStatus>Loading chat…</ChatStatus>;
-  }
   if (!api) {
     return <ChatStatus>Development runtime unavailable.</ChatStatus>;
   }
-  if (session.isError) {
+  if (sessionError) {
     return <ChatStatus>Unable to load this conversation.</ChatStatus>;
   }
 
@@ -73,7 +124,7 @@ function ChatSessionBoundary({
     <ChatSession
       api={api}
       chatKey={chatKey}
-      initialMessages={session.data}
+      initialMessages={initialMessages}
       sessionId={initialSessionId}
     />
   );
@@ -91,6 +142,7 @@ function ChatSession({
   sessionId?: string;
 }) {
   const navigate = useNavigate();
+  const { revalidate } = useRevalidator();
   const [transport] = useState(
     () =>
       new ZukhrufChatTransport({
@@ -101,9 +153,7 @@ function ChatSession({
             replace: true,
             state: { chatKey },
           });
-          void queryClient.invalidateQueries({
-            queryKey: ['runtime', 'history'],
-          });
+          void revalidate();
         },
       }),
   );

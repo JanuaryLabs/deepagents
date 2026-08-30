@@ -17,7 +17,9 @@ import {
 } from 'lucide-react';
 import { type ReactElement, type ReactNode, useState } from 'react';
 import {
+  type LoaderFunctionArgs,
   NavLink,
+  useLoaderData,
   useLocation,
   useNavigate,
   useParams,
@@ -55,7 +57,7 @@ import {
   cn,
 } from '@deepagents/react-shadcn';
 
-import { useRuntimeData } from '../app/runtime-data.ts';
+import { loadRuntime } from '../app/runtime-data.ts';
 import {
   type ScheduleCommand,
   type ScheduleDefinitionInput,
@@ -66,7 +68,6 @@ import {
   useScheduleCommand,
   useScheduledRun,
   useScheduledTasks,
-  useSchedulesHref,
   useTaskRuns,
 } from '../app/schedules-data.ts';
 import { RuntimeStatus } from './history.tsx';
@@ -74,10 +75,15 @@ import { RuntimeStatus } from './history.tsx';
 const FILTERS = ['all', 'active', 'paused', 'completed', 'archived'] as const;
 type Filter = (typeof FILTERS)[number];
 
+export async function loader({ request }: LoaderFunctionArgs) {
+  const runtime = await loadRuntime(request.signal);
+  return { ...runtime, conversation: runtime.history[0] };
+}
+
 export function ScheduledRoute() {
-  const href = useSchedulesHref();
-  const { discoveryPending } = useRuntimeData();
-  if (!href) return discoveryPending ? <WorkspaceLoading /> : <RuntimeStatus />;
+  const href = useLoaderData<typeof loader>().discovery?.capabilities.schedules
+    ?.href;
+  if (!href) return <RuntimeStatus />;
   return <ScheduledWorkspace href={href} />;
 }
 
@@ -233,7 +239,7 @@ function TaskDetail({
   command: ScheduleMutation;
 }) {
   const navigate = useNavigate();
-  const { history } = useRuntimeData();
+  const { history } = useLoaderData<typeof loader>();
   const runs = useTaskRuns(href, taskId);
   const task = tasks.find(({ id }) => id === taskId);
   if (!task) {
@@ -652,7 +658,7 @@ function CreateTaskDialog({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const { history } = useRuntimeData();
+  const { history } = useLoaderData<typeof loader>();
   const [draft, setDraft] = useState(blankDefinition);
   const patch = (values: Partial<ScheduleDefinitionInput>) =>
     setDraft((current) => ({ ...current, ...values }));

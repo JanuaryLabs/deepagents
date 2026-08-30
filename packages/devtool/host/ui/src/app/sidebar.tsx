@@ -3,9 +3,9 @@ import { useCallback } from 'react';
 import {
   NavLink,
   generatePath,
-  useLocation,
+  useLoaderData,
+  useMatches,
   useNavigate,
-  useParams,
 } from 'react-router';
 
 import {
@@ -29,7 +29,7 @@ import {
   cn,
 } from '@deepagents/react-shadcn';
 
-import { selectConversation, useRuntimeData } from './runtime-data.ts';
+import type { loader } from './layout.tsx';
 
 export function DevtoolSidebar() {
   return (
@@ -84,7 +84,7 @@ export function NewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
 }
 
 function PrimaryNavigation() {
-  const { discovery } = useRuntimeData();
+  const { discovery } = useLoaderData<typeof loader>();
   return (
     <nav aria-label="Devtool views">
       <SidebarGroup>
@@ -113,13 +113,13 @@ function PrimaryNavigation() {
 }
 
 function RunsNavigation() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const route = useParams();
-  const { discovery, history, historyError } = useRuntimeData();
-  const selected = location.pathname.startsWith('/chat')
-    ? history.find(({ chatId }) => chatId === route.sessionId)
-    : selectConversation(history, route);
+  const { discovery, history, historyError } = useLoaderData<typeof loader>();
+  const selected = (
+    useMatches().at(-1)?.loaderData as
+      | { conversation?: HistoryRecord }
+      | undefined
+  )?.conversation;
   const select = useCallback(
     (entry: HistoryRecord) =>
       navigate(generatePath('/chat/:sessionId', { sessionId: entry.chatId })),

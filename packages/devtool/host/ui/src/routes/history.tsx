@@ -1,4 +1,4 @@
-import { useParams } from 'react-router';
+import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
 
 import {
   type HistoryRecord,
@@ -6,16 +6,22 @@ import {
   formatTimestamp,
 } from '@deepagents/devtool-history';
 
-import {
-  selectConversation,
-  useHealth,
-  useRuntimeData,
-} from '../app/runtime-data.ts';
+import { loadRuntime, useHealth } from '../app/runtime-data.ts';
+
+export async function loader({ params, request }: LoaderFunctionArgs) {
+  const runtime = await loadRuntime(request.signal);
+  return {
+    ...runtime,
+    conversation:
+      runtime.history.find(
+        ({ chatId, userId }) =>
+          chatId === params.chatId && userId === params.userId,
+      ) ?? runtime.history[0],
+  };
+}
 
 export function HistoryRoute() {
-  const route = useParams();
-  const { history } = useRuntimeData();
-  const conversation = selectConversation(history, route);
+  const { conversation } = useLoaderData<typeof loader>();
   return conversation ? (
     <ConversationSummary conversation={conversation} />
   ) : (
