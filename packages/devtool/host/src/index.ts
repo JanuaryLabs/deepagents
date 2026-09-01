@@ -12,11 +12,22 @@ const shell = await readFile(
 );
 
 /**
- * Static DevTool UI. Mount with `app.route(path, devtool())` on the same origin
- * that mounts `http(runtime)`; the browser discovers every runtime capability
- * through `GET /zukhruf/v1/info`.
+ * Static DevTool UI. Mount with `app.route(path, devtool({ protocolPath }))` on
+ * the same origin that mounts `http(runtime)` at `protocolPath`.
  */
-export function devtool() {
+export function devtool({
+  protocolPath = '/zukhruf/v1',
+}: { protocolPath?: string } = {}) {
+  const parsed = new URL(protocolPath, 'http://localhost');
+  if (
+    parsed.origin !== 'http://localhost' ||
+    parsed.pathname !== protocolPath
+  ) {
+    throw new TypeError(
+      'devtool: protocolPath must be a same-origin absolute path',
+    );
+  }
+  const infoPath = `${protocolPath.replace(/\/+$/, '')}/info`;
   return new Hono()
     .use(
       '/assets/*',
@@ -30,6 +41,12 @@ export function devtool() {
     .get('*', async (context) => {
       const mount = basePath(context).replace(/\/$/, '');
       const base = await html`<base href="${mount}/" />`;
-      return context.html(shell.replace('<head>', `<head>${base}`));
+      const configuration = await html`<meta
+        name="deepagents-zukhruf-info"
+        content="${infoPath}"
+      />`;
+      return context.html(
+        shell.replace('<head>', `<head>${base}${configuration}`),
+      );
     });
 }

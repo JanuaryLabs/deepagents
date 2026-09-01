@@ -6,7 +6,7 @@ import {
   formatTimestamp,
 } from '@deepagents/devtool-history';
 
-import { loadRuntime, useHealth } from '../app/runtime-data.ts';
+import { loadRuntime } from '../app/runtime-data.ts';
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const runtime = await loadRuntime(request.signal);
@@ -25,7 +25,7 @@ export function HistoryRoute() {
   return conversation ? (
     <ConversationSummary conversation={conversation} />
   ) : (
-    <RuntimeStatus />
+    null
   );
 }
 
@@ -58,18 +58,5 @@ export function ConversationSummary({
         <dd>{formatTimestamp(conversation.updatedAt)}</dd>
       </dl>
     </div>
-  );
-}
-
-export function RuntimeStatus() {
-  const health = useHealth();
-  return (
-    <p className="text-muted-foreground p-8 text-sm">
-      {health.isPending
-        ? 'Checking development runtime.'
-        : health.data
-          ? 'Development runtime connected.'
-          : 'Development runtime unavailable.'}
-    </p>
   );
 }

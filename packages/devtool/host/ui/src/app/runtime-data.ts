@@ -1,9 +1,6 @@
-import { QueryClient, useQuery } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 
 import type { HistoryRecord } from '@deepagents/devtool-history';
-
-const ZUKHRUF_INFO_URL = '/zukhruf/v1/info';
-const ZUKHRUF_HEALTH_URL = '/zukhruf/v1/health';
 
 export type Discovery = {
   capabilities: {
@@ -24,11 +21,17 @@ export const queryClient = new QueryClient({
 });
 
 export async function loadRuntime(signal: AbortSignal) {
+  const infoPath = document.querySelector<HTMLMetaElement>(
+    'meta[name="deepagents-zukhruf-info"]',
+  )?.content;
+  if (!infoPath) {
+    throw new Error('DevTool host did not configure the Zukhruf protocol path');
+  }
   let discovery: Discovery | undefined;
   try {
     const loadedDiscovery = await queryClient.fetchQuery({
-      queryKey: ['runtime', 'discovery'],
-      queryFn: () => read<Discovery>(ZUKHRUF_INFO_URL, signal),
+      queryKey: ['runtime', 'discovery', infoPath],
+      queryFn: () => read<Discovery>(infoPath, signal),
     });
     discovery = loadedDiscovery;
     const history = await queryClient.fetchQuery({
@@ -47,14 +50,6 @@ export async function loadRuntime(signal: AbortSignal) {
   } catch {
     return { discovery, history: [], historyError: true };
   }
-}
-
-export function useHealth() {
-  return useQuery({
-    queryKey: ['runtime', 'health'],
-    queryFn: async ({ signal }) =>
-      (await fetch(ZUKHRUF_HEALTH_URL, { signal })).ok,
-  });
 }
 
 async function read<T>(url: string, signal: AbortSignal) {

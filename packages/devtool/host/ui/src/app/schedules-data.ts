@@ -10,7 +10,7 @@ import type {
   ScheduledTaskView,
 } from '@deepagents/experimental/zukhruf/schedules/http';
 
-import { queryClient, useRuntimeData } from './runtime-data.ts';
+import { queryClient } from './runtime-data.ts';
 
 export type { ScheduledRunView, ScheduledTaskView };
 
@@ -25,10 +25,6 @@ export interface ScheduleDefinitionInput {
 }
 
 const REFETCH_MS = 3_000;
-
-export function useSchedulesHref() {
-  return useRuntimeData().discovery?.capabilities.schedules?.href;
-}
 
 export function useScheduledTasks(href: string | undefined) {
   return useQuery({

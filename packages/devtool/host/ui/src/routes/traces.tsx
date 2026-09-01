@@ -11,7 +11,7 @@ import type { HistoryRecord } from '@deepagents/devtool-history';
 import { TracesView } from '@deepagents/devtool-traces/ui';
 
 import { loadRuntime } from '../app/runtime-data.ts';
-import { ConversationSummary, RuntimeStatus } from './history.tsx';
+import { ConversationSummary } from './history.tsx';
 
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const runtime = await loadRuntime(request.signal);
@@ -33,7 +33,7 @@ export function TracesRoute() {
   ) : conversation ? (
     <ConversationSummary conversation={conversation} />
   ) : (
-    <RuntimeStatus />
+    null
   );
 }
 

@@ -258,15 +258,26 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   }
 });
 
-test('devtool follows the host-selected Hono mount', async () => {
+test('devtool follows the host-selected UI and protocol mounts', async () => {
   const mount = '/host/selected/devtool';
-  const app = new Hono().route(mount, devtool());
+  const protocolPath = '/host/selected/zukhruf';
+  const app = new Hono().route(mount, devtool({ protocolPath }));
   const shell = await (await app.request(`${mount}/history/user-1`)).text();
 
   assert.match(shell, new RegExp(`<base href="${mount}/"`));
+  assert.match(
+    shell,
+    new RegExp(
+      `<meta name="deepagents-zukhruf-info" content="${protocolPath}/info"`,
+    ),
+  );
   const asset = shell.match(/(?:src|href)="(\.\/assets\/[^"]+)"/);
   assert(asset);
   const response = await app.request(`${mount}/${asset[1].slice(2)}`);
   assert.equal(response.status, 200);
   assert((await response.arrayBuffer()).byteLength > 0);
+  assert.throws(
+    () => devtool({ protocolPath: '//example.com/zukhruf' }),
+    /same-origin absolute path/,
+  );
 });

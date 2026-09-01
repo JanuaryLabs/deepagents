@@ -70,7 +70,6 @@ import {
   useScheduledTasks,
   useTaskRuns,
 } from '../app/schedules-data.ts';
-import { RuntimeStatus } from './history.tsx';
 
 const FILTERS = ['all', 'active', 'paused', 'completed', 'archived'] as const;
 type Filter = (typeof FILTERS)[number];
@@ -83,7 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export function ScheduledRoute() {
   const href = useLoaderData<typeof loader>().discovery?.capabilities.schedules
     ?.href;
-  if (!href) return <RuntimeStatus />;
+  if (!href) return null;
   return <ScheduledWorkspace href={href} />;
 }
 
@@ -110,7 +109,7 @@ function ScheduledWorkspace({ href }: { href: string }) {
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <section className="flex min-h-0 flex-col border-r">
-        <div className="flex items-center gap-1 px-4 pt-3 pb-2">
+        <div className="flex flex-wrap items-center gap-1 px-4 pt-3 pb-2">
           <FilterTab
             active={reviewing}
             render={<NavLink to="/scheduled/review" />}
@@ -134,7 +133,7 @@ function ScheduledWorkspace({ href }: { href: string }) {
             </FilterTab>
           ))}
           <Button
-            className="ml-auto"
+            className="ml-auto shrink-0"
             size="sm"
             onClick={() => setCreating(true)}
           >
@@ -884,7 +883,7 @@ function FilterTab({
       variant="ghost"
       onClick={onClick}
       className={cn(
-        'text-muted-foreground hover:text-foreground rounded-full px-2.5 font-normal',
+        'text-muted-foreground hover:text-foreground shrink-0 rounded-full px-2.5 font-normal',
         active && 'text-foreground font-medium',
       )}
     >
@@ -1059,7 +1058,8 @@ function taskSubtitle(task: ScheduledTaskView): string {
   const schedule = describe(task.recurrence);
   if (task.status === 'archived') return `${schedule} · Archived`;
   if (task.status === 'paused') return `${schedule} · Paused`;
-  if (task.nextRunAt) return `${schedule} · Next run ${relative(task.nextRunAt)}`;
+  if (task.nextRunAt)
+    return `${schedule} · Next run ${relative(task.nextRunAt)}`;
   return `${schedule} · No further runs`;
 }
 

@@ -3,7 +3,7 @@
 Development-only Zukhruf DevTool UI. `devtool()` returns a mountable Hono app
 containing only the bundled browser assets and their SPA fallback; consumers do
 not import React or CSS, and the DevTool owns no listener, port, runtime
-object, runtime URL, credentials, or proxy.
+object, credentials, or proxy.
 
 ```sh
 npm install --save-dev @deepagents/devtool @deepagents/devtool-traces
@@ -39,7 +39,7 @@ app.use('/zukhruf/v1/*', (context, next) => {
   return next();
 });
 app.route('/zukhruf/v1', http(runtime, tracesHttp(traceTelemetry)));
-app.route('/devtool', devtool());
+app.route('/devtool', devtool({ protocolPath: '/zukhruf/v1' }));
 
 await using server = serve({
   fetch: app.fetch,
@@ -82,8 +82,18 @@ sends a user ID. Without the plugin, `/info` omits `traces` and the UI hides
 every **Traces** link. Recording controls are honored and disabled payloads are
 labelled as not recorded.
 
-The UI follows the host-selected Hono mount. `devtool()` injects that effective
-mount as the document base, so assets, React Router, deep links, refresh, and
-Back work beneath any path. For this example, `/devtool` and `/devtool/` load
-the shell, assets load beneath `/devtool/assets/`, and `/devtool` redirects to
-`/devtool/history`. The **Scheduled** view is present but remains a placeholder.
+`schedules` appears only when the runtime installs `schedules()` and the host
+passes `schedulesHttp(scheduled)` from
+`@deepagents/experimental/zukhruf/schedules/http` to `http()`. The authenticated
+projection provides task creation and editing, pause/resume, archive/purge, Run
+now, per-task runs, cancellation, explicit review, and the owner-wide
+pending-review inbox. Omitting the projection removes the discovery capability
+and hides **Scheduled** navigation.
+
+The UI follows both host-selected Hono mounts. `devtool({ protocolPath })`
+injects its effective UI mount as the document base and the same-origin absolute
+protocol path as the discovery target. `protocolPath` defaults to
+`/zukhruf/v1`. Assets, React Router, deep links, refresh, and Back therefore work
+beneath any UI path while runtime requests follow the configured protocol mount.
+For this example, `/devtool` and `/devtool/` load the shell, assets load beneath
+`/devtool/assets/`, and `/devtool` redirects to `/devtool/history`.
