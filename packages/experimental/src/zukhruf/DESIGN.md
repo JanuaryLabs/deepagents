@@ -181,9 +181,9 @@ semantics live-verified):
   preprovisioned least-privilege deployments do not need catalog-write permission at startup.
 - **`key_strict_fifo` policy + `singletonKey = chatId`** — per-chat serialization is structural:
   1 active per key, unlimited queued, strict push order, failed job blocks the key.
-- **`group.id = chatId` + global `groupConcurrency: 1`** — pg-boss filters active chats before
-  selecting the next job, so a blocked same-chat successor cannot starve ready turns from other
-  chats.
+- **Native per-key head selection** — pg-boss 12.29 considers one eligible head per key, so a
+  blocked same-chat successor cannot starve ready turns from other chats. No group claim layer is
+  needed.
 - **`retryLimit: 0`** — the stale-turn decision in config: a crashed turn is never silently re-run
   (its bash already executed); it dead-letters instead.
 - **Heartbeats are the lease** — `heartbeatSeconds` + `work()`'s automatic heartbeat; the pg-boss
@@ -247,10 +247,10 @@ is already the turn's permanent state machine.
 (at-least-once: never lost, never concurrent, never out of order), strict FIFO per chat,
 cross-chat overlap, concurrency cap, orphan-exactly-once chat unblock, and dispose/backlog-pickup.
 It runs against PGlite and, when Docker is available, real Postgres through `withPostgresContainer`.
-The real-Postgres same-chat FIFO case is currently an executable TODO because pg-boss workers can
-claim same-key jobs out of order (`1, 3, 2`) on pg-boss 12.26.4. The suite already caught one real
-coupling: pg-boss fetch orders by `created_on, id`, so same-millisecond pushes scrambled under
-random ids on ms-resolution clocks (PGlite) — which is why job ids are monotonic UUIDv7.
+The real-Postgres concurrent same-chat cases are active regressions and pass on pg-boss 12.29.0.
+The suite also caught one real coupling: pg-boss fetch orders by `created_on, id`, so
+same-millisecond pushes scrambled under random ids on ms-resolution clocks (PGlite) — which is why
+job ids are monotonic UUIDv7.
 
 **Identity invariant (and its tripwire).** The raw request key maps deterministically to one
 conversation-scoped durable id. That durable id carries two identities: the stream ("this
@@ -506,8 +506,8 @@ surface; full history lives in the chain, which is the source of truth anyway.
   (clean, no worker errors); cancelled jobs don't block the key, so the assistant-message
   continuation runs. `resumeParked(chatId)` revives parked jobs with their original `created_on` —
   FIFO order reassembles for free. No polling, no new storage. `park`/`resumeParked` are port
-  surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by two contract tests
-  (no redelivery until revival + original order; recovery outranks revived turns).
+  surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by the contract test for no
+  redelivery until revival and original order.
 - **Disambiguation**: parked turn = job `cancelled` + stream row `queued`; user-cancelled turn =
   stream row `cancelled` (its job is also `cancelled`). `resumeParked` revives **every** cancelled
   job for the chat without inspecting stream rows — a revived user-cancelled turn is harmless because
@@ -916,7 +916,7 @@ work({concurrency?}) → AsyncDisposable }`.
   into the observe/reconnect UX item.
 
 _Resolved by the executor build:_ **mid-turn message contract** → queue (strict FIFO per chat,
-structural via `key_strict_fifo`, with grouped claims preventing cross-chat starvation);
+structural via `key_strict_fifo`, whose per-key head selection prevents cross-chat starvation);
 **sandbox lifetime** → per-chat, named by chatId, attach-or-create; **workspace durability** → the
 per-chat container persists, so the FS survives across turns, workers, and restarts (durable volumes
 only needed once containers are reclaimed).\_

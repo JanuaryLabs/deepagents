@@ -5,14 +5,9 @@
 
 ## 1. Evidence (no behavior changes)
 
-- [ ] Adopt the upstream pg-boss same-chat FIFO fix once
-      [timgit/pg-boss#871](https://github.com/timgit/pg-boss/pull/871) is released. The Docker-gated
-      `queue/pg-boss.turn-queue.contract.test.ts` cases reproduce concurrent workers claiming one
-      chat out of order (`1, 3, 2`) on pg-boss 12.26.x. Until then, FIFO-safe deployment means one
-      runtime instance using the default concurrency of `1`. This is an accepted temporary boundary:
-      do not add per-chat workers, encode sequence into priority, or couple Zukhruf to pg-boss's
-      private SQL. Close this item only after upgrading pg-boss and passing both real-Postgres
-      concurrent FIFO regressions.
+- [x] Adopted pg-boss 12.29.0 with the upstream same-chat FIFO fix from
+      [timgit/pg-boss#871](https://github.com/timgit/pg-boss/pull/871). Both Docker-gated concurrent
+      FIFO regressions pass on real PostgreSQL, and the temporary group claim layer is removed.
 - [x] **Process-kill crash test** — SHIPPED (`queue/crash-recovery.integration.test.ts`, docker-gated): real child worker SIGKILLed mid-turn on real Postgres; heartbeat lapse → monitor fails job → DLQ → `onOrphaned` flips stream `failed` (with error) → chat unblocks → next turn runs; crashed turn never re-ran. ~16s.
 - [ ] Multi-process contract run: two workers on one Postgres — serialization + concurrency cap hold across processes. (The crash test partially covers this: parent + child workers shared one queue.)
 
@@ -65,7 +60,7 @@
 - [x] `AgentTurnExecutor` gate (park before chain/sandbox); TurnRef contains message, internal
       recovery, and mailbox work only.
 - [x] Port: `ConsumeContext.park()` + `TurnQueue.resumeParked(chatId)`; pg-boss self-cancel/resume,
-      plus recovery `priority: 1`; two contract tests (park/revive order; recovery outranks).
+      contract-tested for park/revive order.
 - [x] Runtime integration coverage for pause, approval, denial, sibling responses, and queue-behind
       ordering through complete assistant messages.
 - [x] Make the assistant-message worker own response persistence, original-turn resumption, and

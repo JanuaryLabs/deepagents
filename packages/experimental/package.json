@@ -77,7 +77,7 @@
     "fast-content-type-parse": "^3.0.0",
     "hono": "^4.12.33",
     "just-bash": "^3.2.0",
-    "pg-boss": "^12.26.1",
+    "pg-boss": "^12.29.0",
     "rrule": "^2.8.1",
     "tiny-tfidf": "^1.0.0",
     "uuid": "^14.0.1",

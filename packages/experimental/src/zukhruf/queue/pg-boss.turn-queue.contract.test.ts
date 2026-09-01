@@ -50,7 +50,6 @@ interface TurnQueueContract {
   name: string;
   makeQueue: () => Promise<TurnQueueHarness>;
   skip?: TestOptions['skip'];
-  sameChatFifoTodo?: TestOptions['todo'];
 }
 
 function waitFor(
@@ -105,16 +104,6 @@ function ref(chat: string, n: number): MessageRef {
   };
 }
 
-function recoveryRef(chat: string): Extract<TurnRef, { kind: 'recovery' }> {
-  return {
-    kind: 'recovery',
-    mode: 'handoff',
-    streamId: `turn/${chat}#recovery:${crypto.randomUUID()}`,
-    chatId: chat,
-    userId: 'u1',
-  };
-}
-
 const noOrphans = { onOrphaned: async () => {} };
 const dockerAvailable = await isDockerAvailable();
 
@@ -123,8 +112,6 @@ const turnQueueContracts = [
     name: 'PgBossTurnQueue (postgres)',
     makeQueue: postgresQueueHarness,
     skip: dockerAvailable ? false : 'Docker is unavailable',
-    sameChatFifoTodo:
-      'pg-boss workers can claim same-key jobs out of FIFO order',
   },
   {
     name: 'PgBossTurnQueue (pglite)',
@@ -350,38 +337,30 @@ for (const contract of turnQueueContracts) {
         assert.equal(maxActive, 1, 'duplicates never run concurrently');
       });
 
-      test(
-        'turns in one chat run strictly FIFO, one at a time',
-        { todo: contract.sameChatFifoTodo },
-        async (t) => {
-          await using h = await contract.makeQueue();
-          for (const n of [1, 2, 3]) await h.queue.push(ref('fifo', n));
+      test('turns in one chat run strictly FIFO, one at a time', async (t) => {
+        await using h = await contract.makeQueue();
+        for (const n of [1, 2, 3]) await h.queue.push(ref('fifo', n));
 
-          const events: string[] = [];
-          await using _consumer = await h.queue.consume(
-            async (turn) => {
-              events.push(`start ${textOf(turn)}`);
-              await sleep(250);
-              events.push(`end ${textOf(turn)}`);
-            },
-            { ...noOrphans, concurrency: 4 },
-          );
+        const events: string[] = [];
+        await using _consumer = await h.queue.consume(
+          async (turn) => {
+            events.push(`start ${textOf(turn)}`);
+            await sleep(250);
+            events.push(`end ${textOf(turn)}`);
+          },
+          { ...noOrphans, concurrency: 4 },
+        );
 
-          await waitFor(
-            t,
-            () => events.length === 6,
-            'all three turns finished',
-          );
-          assert.deepStrictEqual(events, [
-            'start input-1',
-            'end input-1',
-            'start input-2',
-            'end input-2',
-            'start input-3',
-            'end input-3',
-          ]);
-        },
-      );
+        await waitFor(t, () => events.length === 6, 'all three turns finished');
+        assert.deepStrictEqual(events, [
+          'start input-1',
+          'end input-1',
+          'start input-2',
+          'end input-2',
+          'start input-3',
+          'end input-3',
+        ]);
+      });
 
       test('turns in different chats can overlap', async (t) => {
         await using h = await contract.makeQueue();
@@ -599,34 +578,6 @@ for (const contract of turnQueueContracts) {
           ran,
           ['input-1', 'input-2'],
           'original FIFO order preserved',
-        );
-      });
-
-      test('a recovery outranks revived parked turns of its chat', async (t) => {
-        await using h = await contract.makeQueue();
-        const ran: string[] = [];
-
-        let parkCount = 0;
-        const gatekeeper = await h.queue.consume(async (_turn, context) => {
-          parkCount++;
-          await context.park();
-        }, noOrphans);
-        await h.queue.push(ref('ranked', 1));
-        await waitFor(t, () => parkCount === 1, 'turn parked');
-        await gatekeeper[Symbol.asyncDispose]();
-
-        await h.queue.push(recoveryRef('ranked'));
-        await h.queue.resumeParked('ranked');
-
-        await using _consumer = await h.queue.consume(async (turn) => {
-          ran.push(turn.kind);
-        }, noOrphans);
-
-        await waitFor(t, () => ran.length === 2, 'both delivered');
-        assert.deepStrictEqual(
-          ran,
-          ['recovery', 'message'],
-          'recovery runs before the revived (older created_on) parked turn',
         );
       });
 

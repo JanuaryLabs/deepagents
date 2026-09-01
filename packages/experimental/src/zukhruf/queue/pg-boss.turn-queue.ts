@@ -27,13 +27,8 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
  *
  * - `key_strict_fifo` policy with `singletonKey = chatId` expresses the
  *   per-chat serialization contract: one active turn per chat and strict push
- *   order. pg-boss 12.26.x can violate that order under concurrent claims; see
- *   timgit/pg-boss#871. Until its fix is released and adopted, the accepted
- *   FIFO-safe boundary is one runtime instance at the default concurrency of
- *   1—not per-chat workers, priority encoding, or private pg-boss SQL here.
- * - `group.id = chatId` with global `groupConcurrency: 1` excludes an active
- *   chat before pg-boss selects the next job, so its queued successor cannot
- *   block ready turns from other chats.
+ *   order. An active/retrying/failed key blocks only its own successors, so
+ *   ready turns from other chats remain fetchable.
  * - `retryLimit: 0` — a crashed turn is never silently re-run (its bash
  *   already executed). It dead-letters instead.
  * - A failed job blocks its chat's key until acknowledged; the dead-letter
@@ -44,9 +39,8 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
  *   awaits its approval for as long as it takes, with no retention deadline.
  *   Cleanup is commit-driven instead — `consume` deletes a job the moment its
  *   turn runs and commits to the chain — so completed jobs don't accumulate.
- *   (`retentionSeconds`, which governs still-`created` jobs, can't be 0; its
- *   default 14d is never approached because a queued turn only waits behind one
- *   running turn.)
+ *   (`retentionSeconds`, which governs still-`created` jobs, can't be 0; the
+ *   remaining deep-backlog orphan case is tracked for startup reconciliation.)
  * - Interrupting an active turn aborts the adapter-local handler but leaves its
  *   pg-boss row `active` until that handler exits. Cancelling the row itself
  *   would surrender the strict-FIFO key early and let the successor overlap.
@@ -161,14 +155,10 @@ export class PgBossTurnQueue extends TurnQueue {
     // pg-boss fetches `ORDER BY priority desc, created_on, id`. A monotonic
     // UUIDv7 job id makes the id tiebreak follow push order, so FIFO survives
     // created_on timestamp ties (millisecond-resolution clocks like PGlite).
-    // Recovery jobs outrank waiting turns: revived parked jobs keep their
-    // original (older) created_on, so priority puts recovery first.
     const jobId = uuidv7();
     const inserted = await this.#boss.send(this.#queue, turn, {
       id: jobId,
       singletonKey: turn.chatId,
-      group: { id: turn.chatId },
-      priority: turn.kind === 'recovery' ? 1 : 0,
     });
     if (inserted === null) {
       throw new Error(`PgBossTurnQueue job id collision: ${jobId}`);
@@ -247,7 +237,6 @@ export class PgBossTurnQueue extends TurnQueue {
       this.#queue,
       {
         localConcurrency: options.concurrency ?? 1,
-        groupConcurrency: 1,
         pollingIntervalSeconds: this.#pollingIntervalSeconds,
       },
       async ([job]) => {
