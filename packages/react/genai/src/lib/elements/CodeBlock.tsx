@@ -5,7 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import {
   oneDark,
   oneLight,
-} from 'react-syntax-highlighter/dist/esm/styles/prism';
+} from 'react-syntax-highlighter/dist/esm/styles/prism/index.js';
 
 import { Button, cn } from '@deepagents/react-shadcn';
 
