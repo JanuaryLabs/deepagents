@@ -268,7 +268,7 @@ test('devtool follows the host-selected UI and protocol mounts', async () => {
   assert.match(
     shell,
     new RegExp(
-      `<meta name="deepagents-zukhruf-info" content="${protocolPath}/info"`,
+      `<meta\\s+name="deepagents-zukhruf-info"\\s+content="${protocolPath}/info"`,
     ),
   );
   const asset = shell.match(/(?:src|href)="(\.\/assets\/[^"]+)"/);
