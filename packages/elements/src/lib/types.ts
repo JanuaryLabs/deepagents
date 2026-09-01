@@ -1,15 +1,11 @@
-import type { ComponentType } from 'react';
-
-export type ToolTip = {
-  text: string;
-  cooldown: 'frequent' | 'moderate' | 'rare';
-  visibility?: 'always' | 'before-interaction' | 'after-interaction';
-};
-
-export interface GenAIInteractiveElement {
+/**
+ * The platform-neutral, serializable description of one interactive element:
+ * the vocabulary a model may write as inline HTML-style tags. Rendering
+ * concerns (e.g. a React component) belong to host adapters that extend this
+ * shape — never to this package.
+ */
+export interface ElementDescriptor {
   name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- allowedAttributes defines the runtime prop interface for each registered element
-  component: ComponentType<any>;
   /**
    * HTML attributes the model may write on this element. Must not contain
    * {@link RESERVED_ELEMENT_ATTRIBUTES}: the markdown sanitizer rewrites
@@ -19,7 +15,6 @@ export interface GenAIInteractiveElement {
    */
   allowedAttributes: string[];
   description?: string;
-  tips?: ToolTip[];
 }
 
 /**
@@ -34,8 +29,19 @@ export const RESERVED_ELEMENT_ATTRIBUTES = new Set([
   'aria-labelledby',
 ]);
 
+export function findDuplicateName(
+  elements: Iterable<Pick<ElementDescriptor, 'name'>>,
+): string | undefined {
+  const seen = new Set<string>();
+  for (const { name } of elements) {
+    if (seen.has(name)) return name;
+    seen.add(name);
+  }
+  return undefined;
+}
+
 export function assertNoReservedAttributes(
-  element: Pick<GenAIInteractiveElement, 'name' | 'allowedAttributes'>,
+  element: Pick<ElementDescriptor, 'name' | 'allowedAttributes'>,
 ): void {
   const reserved = element.allowedAttributes.filter((attribute) =>
     RESERVED_ELEMENT_ATTRIBUTES.has(attribute),
@@ -48,8 +54,3 @@ export function assertNoReservedAttributes(
     );
   }
 }
-
-export type ElementDescriptor = Pick<
-  GenAIInteractiveElement,
-  'name' | 'allowedAttributes' | 'description'
->;

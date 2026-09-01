@@ -9,13 +9,13 @@ chat flows, local retrieval, and Text2SQL assistants.
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `@deepagents/agent`            | Compose AI agents with tools, handoffs, streaming, and structured output.                                                           |
 | `@deepagents/context`          | Store, render, and resolve context fragments; persist chat history; run agent bash tools in virtual, Docker, or Agent OS sandboxes. |
+| `@deepagents/elements`         | Define, validate, and serialize interactive-element catalogs shared by server runtimes and React renderers.                         |
 | `@deepagents/text2sql`         | Convert natural language to SQL, index database schemas, and run validated SQL through the package `sql` CLI inside a sandbox.      |
 | `@deepagents/retrieval`        | Ingest local files and external sources into a SQLite vector store for semantic search.                                             |
 | `@deepagents/evals`            | Run LLM evals with datasets, scorers, persistence, and reports.                                                                     |
 | `@deepagents/devtool`          | Serve the Zukhruf development UI on the same origin as the authenticated runtime protocol.                                          |
 | `@deepagents/devtool-traces`   | Record file telemetry and expose correlated, authenticated Zukhruf traces.                                                          |
 | `@deepagents/react-input`      | Provide the reusable structured prompt composer used by browser chat surfaces.                                                      |
-| `@deepagents/react-elements`   | Serialize and validate GenAI element descriptors for React renderers.                                                               |
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                        |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                                    |
 | `@deepagents/react-shadcn`     | Publish the shared Base UI-backed Shadcn primitive set and `cn()` helper.                                                           |

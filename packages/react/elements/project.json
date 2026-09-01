@@ -1,7 +1,0 @@
-{
-  "name": "@deepagents/react-elements",
-  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/react/elements/src",
-  "projectType": "library",
-  "tags": ["scope:public"]
-}

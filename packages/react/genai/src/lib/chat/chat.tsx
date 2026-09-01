@@ -1,6 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import {
   type ChatOnDataCallback,
+  type ChatOnFinishCallback,
   type ChatTransport,
   type UIDataTypes,
   type UIMessage,
@@ -16,7 +17,7 @@ import { cn } from '@deepagents/react-shadcn';
 
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { useAgentMeta } from './agent-context.tsx';
-import { handleToolAutoApproval } from './tool-auto-approval.ts';
+import { completeRenderedClientTool } from './client-tool-output.ts';
 
 export function useAgentChatSetup(props: {
   chatId: string;
@@ -24,6 +25,7 @@ export function useAgentChatSetup(props: {
   initialMessages?: UIMessage<unknown, UIDataTypes, UITools>[];
   registry?: ComponentRegistry;
   onData?: ChatOnDataCallback<UIMessage<unknown, UIDataTypes, UITools>>;
+  onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
 }) {
   const chat = useChat({
     id: props.chatId,
@@ -34,9 +36,10 @@ export function useAgentChatSetup(props: {
       lastAssistantMessageIsCompleteWithToolCalls(options) ||
       lastAssistantMessageIsCompleteWithApprovalResponses(options),
     async onToolCall({ toolCall }) {
-      await handleToolAutoApproval(chat, props.registry, toolCall);
+      await completeRenderedClientTool(chat, props.registry, toolCall);
     },
     onData: props.onData,
+    onFinish: props.onFinish,
   });
 
   return chat;

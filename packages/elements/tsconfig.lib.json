@@ -8,19 +8,9 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "exclude": [
-    "src/**/*.test.ts",
-    "src/**/*.contract.ts",
-    "src/**/*.fixture.ts"
-  ],
-  "include": ["src/**/*.ts", "../../global.d.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "include": ["src/**/*.ts"],
   "references": [
-    {
-      "path": "../test/tsconfig.lib.json"
-    },
-    {
-      "path": "../elements/tsconfig.lib.json"
-    },
     {
       "path": "../context/tsconfig.lib.json"
     }

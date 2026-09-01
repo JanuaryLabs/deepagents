@@ -1,4 +1,15 @@
-import { type Tool, type ToolExecuteFunction, type ToolSet, tool } from 'ai';
+import {
+  type JSONSchema7,
+  type Tool,
+  type ToolExecuteFunction,
+  type ToolSet,
+  tool,
+} from 'ai';
+
+export type ClientToolSet = Record<
+  string,
+  { inputSchema: JSONSchema7; description: string }
+>;
 
 export type ToolRecovery = 'idempotent';
 

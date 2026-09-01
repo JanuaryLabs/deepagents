@@ -32,7 +32,7 @@ export function useActivePendingToolInput(): ActivePendingTool | null {
         const toolKey = part.type.replace('tool-', '');
         const entry = registry[toolKey];
         if (!entry || entry.static !== false) continue;
-        if (!entry.needsApproval) continue;
+        if (!entry.requiresUserInput) continue;
 
         return { part, entry };
       }

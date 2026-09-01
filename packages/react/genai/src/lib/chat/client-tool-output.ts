@@ -10,16 +10,16 @@ interface ToolCall {
   toolName: string;
 }
 
-export async function handleToolAutoApproval(
+export async function completeRenderedClientTool(
   chat: ChatHelpers,
   registry: ComponentRegistry | undefined,
   toolCall: ToolCall,
 ): Promise<void> {
-  const uiTool = registry?.[toolCall.toolName];
+  const clientTool = registry?.[toolCall.toolName];
   if (
     toolCall.toolName.startsWith('render') &&
-    uiTool?.static === false &&
-    uiTool?.needsApproval !== true
+    clientTool?.static === false &&
+    clientTool.requiresUserInput !== true
   ) {
     await chat.addToolOutput({
       toolCallId: toolCall.toolCallId,

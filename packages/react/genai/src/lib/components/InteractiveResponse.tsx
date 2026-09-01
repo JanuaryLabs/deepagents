@@ -1,12 +1,10 @@
 import { useMemo } from 'react';
 
-import {
-  type GenAIInteractiveElement,
-  assertNoReservedAttributes,
-} from '@deepagents/react-elements';
+import { assertNoReservedAttributes } from '@deepagents/elements';
 
 import { MarkdownParagraph } from '../chat/markdown-paragraph.tsx';
 import { Response, type ResponseProps } from '../elements/Response.tsx';
+import type { GenAIInteractiveElement } from '../elements/interactive-element.ts';
 
 export type { GenAIInteractiveElement };
 

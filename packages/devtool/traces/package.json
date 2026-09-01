@@ -48,6 +48,7 @@
   "dependencies": {
     "@deepagents/devtool-history": "6.2.0",
     "@deepagents/react-shadcn": "6.2.0",
+    "ai": "7.0.85",
     "hono": "^4.12.33",
     "lucide-react": "^1.33.0"
   },
@@ -61,7 +62,6 @@
     "@deepagents/context": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@types/react": "19.2.18",
-    "ai": "7.0.85",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3",
     "zod": "4.4.3"

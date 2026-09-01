@@ -133,9 +133,10 @@ test('resume reconnects through the injected transport once on mount', async () 
   }
 });
 
-test('onData observes streamed data parts, transient ones included', async () => {
+test('forwards data and finish callbacks from the chat', async () => {
   const user = userEvent.setup();
   const onData = vi.fn();
+  const onFinish = vi.fn();
   const transport = new RecordingTransport([
     [
       { type: 'data-probe', data: { hit: 1 }, transient: true },
@@ -149,6 +150,7 @@ test('onData observes streamed data parts, transient ones included', async () =>
         chatId="chat-1"
         transport={transport}
         onData={onData}
+        onFinish={onFinish}
         onResetChat={() => {}}
       >
         <SubmitHarness />
@@ -159,6 +161,7 @@ test('onData observes streamed data parts, transient ones included', async () =>
 
     await vi.waitFor(() => {
       expect(onData).toHaveBeenCalledTimes(2);
+      expect(onFinish).toHaveBeenCalledOnce();
     });
     expect(onData).toHaveBeenNthCalledWith(1, {
       type: 'data-probe',
@@ -170,6 +173,9 @@ test('onData observes streamed data parts, transient ones included', async () =>
       id: 'p2',
       data: { hit: 2 },
     });
+    expect(onFinish).toHaveBeenCalledWith(
+      expect.objectContaining({ isAbort: false, isError: false }),
+    );
   } finally {
     cleanup();
   }

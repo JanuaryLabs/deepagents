@@ -1,17 +1,29 @@
-import type { ElementDescriptor, GenAIInteractiveElement } from './types.ts';
+import { type ElementDescriptor, findDuplicateName } from './types.ts';
 
-export function toDescriptor(
-  element: GenAIInteractiveElement,
+export function toDescriptor<T extends ElementDescriptor>(
+  element: T,
 ): ElementDescriptor {
   const { name, allowedAttributes, description } = element;
   return { name, allowedAttributes, description };
 }
 
-export function mergeElements(
-  base: GenAIInteractiveElement[],
-  extras: GenAIInteractiveElement[] | undefined,
-): GenAIInteractiveElement[] {
+/**
+ * Base-wins merging: an extra whose name collides with a base element is
+ * dropped, so a platform's defaults cannot be hijacked by app extras.
+ * Duplicate names WITHIN extras throw — silently keeping either copy would
+ * make the prompt catalog and the render registry disagree.
+ */
+export function mergeElements<T extends ElementDescriptor>(
+  base: T[],
+  extras: T[] | undefined,
+): T[] {
   if (!extras || extras.length === 0) return base;
+  const duplicate = findDuplicateName(extras);
+  if (duplicate !== undefined) {
+    throw new Error(
+      `Duplicate extra element <${duplicate}>: a catalog must map each tag to exactly one element.`,
+    );
+  }
   const baseNames = new Set(base.map((el) => el.name));
   const additions = extras.filter((el) => !baseNames.has(el.name));
   return [...base, ...additions];

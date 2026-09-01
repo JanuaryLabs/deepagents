@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'vitest';
+import { describe, it } from 'node:test';
 
 import {
-  type GenAIInteractiveElement,
+  type ElementDescriptor,
   formatElementsCatalog,
   mergeElements,
   toDescriptor,
-} from '@deepagents/react-elements';
+} from '@deepagents/elements';
 
-const stub = (name: string, attrs: string[] = []): GenAIInteractiveElement => ({
+type RenderableElement = ElementDescriptor & {
+  component: () => null;
+  tips?: Array<{ text: string; cooldown: string }>;
+};
+
+const stub = (name: string, attrs: string[] = []): RenderableElement => ({
   name,
   component: () => null,
   allowedAttributes: attrs,
@@ -16,7 +21,7 @@ const stub = (name: string, attrs: string[] = []): GenAIInteractiveElement => ({
 
 describe('toDescriptor', () => {
   it('strips component and tips', () => {
-    const element: GenAIInteractiveElement = {
+    const element: RenderableElement = {
       ...stub('open-invoice', ['invoice-id']),
       tips: [{ text: 't', cooldown: 'rare' }],
     };
@@ -74,6 +79,16 @@ describe('mergeElements', () => {
 
     assert.equal(merged.length, 1);
     assert.equal(merged[0].allowedAttributes[0], 'title');
+  });
+
+  it('throws when extras contain duplicate names', () => {
+    const base = [stub('bar-chart')];
+    const extras = [stub('open-invoice', ['a']), stub('open-invoice', ['b'])];
+
+    assert.throws(
+      () => mergeElements(base, extras),
+      /Duplicate extra element <open-invoice>/,
+    );
   });
 });
 

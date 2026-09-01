@@ -6,7 +6,7 @@ import { useAgentStatus } from '../agent-context.tsx';
 
 export type MessagesContextValue = {
   messages: UIMessage[];
-  components?: GenAIInteractiveElement[];
+  elements?: GenAIInteractiveElement[];
   status?: ChatStatus;
 };
 

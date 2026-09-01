@@ -28,6 +28,9 @@
       "path": "./packages/context"
     },
     {
+      "path": "./packages/elements"
+    },
+    {
       "path": "./packages/test"
     },
     {
@@ -71,9 +74,6 @@
     },
     {
       "path": "./packages/react/input"
-    },
-    {
-      "path": "./packages/react/elements"
     },
     {
       "path": "./packages/devtool/host/ui"

@@ -6,8 +6,8 @@
 /* nx-tailwind-sources:start */
 @source "../../../../agent";
 @source "../../../../context";
+@source "../../../../elements";
 @source "../../../../experimental";
-@source "../../../../react/elements";
 @source "../../../../react/formatters";
 @source "../../../../react/genai";
 @source "../../../../react/input";

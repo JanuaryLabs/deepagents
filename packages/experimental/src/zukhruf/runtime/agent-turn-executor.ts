@@ -1,6 +1,7 @@
 import { experimental_codeModeTool } from '@ai-sdk/code-mode';
 import { type UIMessage, jsonSchema, tool } from 'ai';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 import {
   type AvailableSkill,
@@ -13,6 +14,11 @@ import {
   role,
   user,
 } from '@deepagents/context';
+import { type ElementDescriptor, elementsSchema } from '@deepagents/elements';
+import {
+  elementsFragment,
+  elementsStreamTransform,
+} from '@deepagents/elements/context';
 
 import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
@@ -153,6 +159,10 @@ export class AgentTurnExecutor {
     });
     const agentSkills = await this.#skillsFor(turn, sandbox, signal);
     engine.set(...agentSkills.fragments);
+    const elements = await this.#elementsFor(turn);
+    if (elements.length > 0) {
+      engine.set(elementsFragment(elements));
+    }
 
     if (await this.#projectSkippedTerminalTurn(turn)) return;
     if (!(await this.#streams.claim(turn.streamId))) {
@@ -248,6 +258,9 @@ export class AgentTurnExecutor {
           {
             abortSignal: abort.signal,
             toolsContext: collaborationToolsContext,
+            ...(elements.length > 0
+              ? { transform: [elementsStreamTransform] }
+              : {}),
           },
         );
       } finally {
@@ -372,6 +385,32 @@ export class AgentTurnExecutor {
         );
   }
 
+  /**
+   * Resolve the interactive-element catalog for this turn and keep the
+   * chat's durable snapshot current. A `message` turn carrying an `elements`
+   * key is authoritative (an empty array clears the snapshot); every other
+   * turn — recovery and mailbox included — renders with the stored snapshot,
+   * so re-executions see the same catalog as the turn they replay.
+   */
+  async #elementsFor(turn: TurnRef): Promise<ElementDescriptor[]> {
+    if (turn.kind === 'message' && turn.elements !== undefined) {
+      const declared = turn.elements;
+      await this.#store.updateChat(turn.chatId, ({ metadata }) => {
+        const zukhruf = isRecord(metadata?.zukhruf) ? metadata.zukhruf : {};
+        if (isDeepStrictEqual(zukhruf.elements, declared)) return undefined;
+        return {
+          metadata: {
+            ...metadata,
+            zukhruf: { ...zukhruf, elements: declared },
+          },
+        };
+      });
+      return declared;
+    }
+    const chat = await this.#store.getChat(turn.chatId);
+    return readElements(chat?.metadata) ?? [];
+  }
+
   async #skillsFor(
     turn: TurnRef,
     sandbox: ZukhrufSandbox,
@@ -471,6 +510,20 @@ export class AgentTurnExecutor {
       typeof authorPath === 'string' ? authorPath : communication.author.chatId;
     return `Message Type: ${communication.type}\nTask name: ${taskName}\nSender: ${sender}\nPayload:\n${communication.content}`;
   }
+}
+
+function readElements(
+  metadata: Record<string, unknown> | undefined,
+): ElementDescriptor[] | undefined {
+  const zukhruf = metadata?.zukhruf;
+  if (!isRecord(zukhruf) || !Object.hasOwn(zukhruf, 'elements')) {
+    return undefined;
+  }
+  const parsed = elementsSchema.safeParse(zukhruf.elements);
+  if (!parsed.success || parsed.data === undefined) {
+    throw new Error('AgentRuntime: stored element catalog is invalid');
+  }
+  return parsed.data;
 }
 
 function readSkills(

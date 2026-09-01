@@ -13,19 +13,19 @@ import {
 export function MessagesRoot({
   messages,
   className,
-  components,
+  elements,
   status,
   children,
 }: {
   messages: UIMessage[];
   className?: string;
-  components?: GenAIInteractiveElement[];
+  elements?: GenAIInteractiveElement[];
   status?: ChatStatus;
   children: React.ReactNode;
 }) {
   const value = useMemo<MessagesContextValue>(
-    () => ({ messages, components, status }),
-    [messages, components, status],
+    () => ({ messages, elements, status }),
+    [messages, elements, status],
   );
 
   return (

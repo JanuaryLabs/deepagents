@@ -2,7 +2,7 @@ import type { ToolUIPart } from 'ai';
 import type { ComponentType } from 'react';
 import type { ZodTypeAny } from 'zod';
 
-import type { ToolTip } from '@deepagents/react-elements';
+import type { ToolTip } from '../elements/interactive-element.ts';
 
 export type ToolLabel = {
   name: string;
@@ -25,7 +25,7 @@ export type ComponentTool<TSchema extends ZodTypeAny = ZodTypeAny> = {
   label?: (part: ToolUIPart) => ToolLabel;
   inputSchema: TSchema;
   description: string;
-  needsApproval?: boolean;
+  requiresUserInput?: boolean;
   tips?: ToolTip[];
   static?: false;
 };

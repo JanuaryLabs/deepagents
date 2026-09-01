@@ -103,6 +103,7 @@
           "@deepagents/retrieval",
           "@deepagents/orchestrator",
           "@deepagents/context",
+          "@deepagents/elements",
           "@deepagents/devtool-history",
           "@deepagents/devtool-traces",
           "@deepagents/react-shadcn",

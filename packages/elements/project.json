@@ -1,0 +1,17 @@
+{
+  "name": "@deepagents/elements",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/elements/src",
+  "projectType": "library",
+  "tags": ["scope:public"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "additionalEntryPoints": ["packages/elements/src/context/index.ts"],
+        "assets": []
+      }
+    }
+  }
+}

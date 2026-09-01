@@ -1,3 +1,3 @@
-export type { ToolTip } from '@deepagents/react-elements';
+export type { ToolTip } from '../../elements/interactive-element.ts';
 export * from './TipLine.tsx';
 export * from './TipProvider.tsx';

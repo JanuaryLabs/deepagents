@@ -70,6 +70,7 @@
   "dependencies": {
     "@ai-sdk/code-mode": "^1.0.42",
     "@deepagents/context": "6.2.0",
+    "@deepagents/elements": "6.2.0",
     "ai": "^7.0.85",
     "cron-parser": "5.6.2",
     "cronstrue": "^3.24.0",

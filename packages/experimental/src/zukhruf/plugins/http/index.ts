@@ -5,11 +5,12 @@ import {
   safeValidateUIMessages,
 } from 'ai';
 import { type Context, Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { basePath } from 'hono/route';
-import { v5 as uuidv5, validate as validateUuid } from 'uuid';
+import { validate as validateUuid } from 'uuid';
 import z from 'zod';
+
+import { elementsSchema } from '@deepagents/elements';
 
 import type { ConversationId } from '../../mailbox/types.ts';
 import type {
@@ -46,7 +47,6 @@ export function projectHttp<Instance extends object>(
   };
 }
 
-const CREATE_SESSION_ROUTE_PATH = '/session';
 const SESSION_ROUTE_PATH = '/session/:sessionId';
 const SESSION_CANCEL_ROUTE_PATH = '/session/:sessionId/cancel';
 const SESSION_STREAM_ROUTE_PATH = '/session/:sessionId/stream';
@@ -59,8 +59,6 @@ const HEALTH_ROUTE_PATH = '/health';
 export const ZUKHRUF_SESSION_ID_HEADER = 'x-zukhruf-session-id';
 export const ZUKHRUF_TURN_ID_HEADER = 'x-zukhruf-turn-id';
 
-const MAX_BODY_BYTES = 10 * 1024;
-const SESSION_NAMESPACE = uuidv5('urn:deepagents:zukhruf:sessions', uuidv5.URL);
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 const sessionIdSchema = z.string().refine(validateUuid);
 const jsonSchema = z.custom<JSONSchema7>(
@@ -77,21 +75,11 @@ const clientToolsSchema = z
   )
   .optional();
 const turnBodySchema = z.strictObject({
+  sessionId: sessionIdSchema,
   message: z.unknown(),
   trigger: z.enum(['submit-message', 'regenerate-message']),
   tools: clientToolsSchema,
-});
-const limitTurnBody = bodyLimit({
-  maxSize: MAX_BODY_BYTES,
-  onError: () => {
-    throw new HTTPException(413, {
-      message: 'Request body is too large',
-      cause: {
-        code: 'api/payload-too-large',
-        detail: `Request body exceeds ${MAX_BODY_BYTES} bytes`,
-      },
-    });
-  },
+  elements: elementsSchema,
 });
 
 export interface HttpRuntime extends Pick<
@@ -121,7 +109,7 @@ export function http(
   );
   const capabilities: Record<string, { path: string }> = {
     history: { path: HISTORY_ROUTE_PATH },
-    chat: { path: CREATE_SESSION_ROUTE_PATH },
+    chat: { path: '/session' },
   };
   for (const { capabilities: contributed } of contributions) {
     for (const [name, capability] of Object.entries(contributed)) {
@@ -204,40 +192,6 @@ export function http(
   );
   app.all(HISTORY_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
-  app.post(
-    CREATE_SESSION_ROUTE_PATH,
-    limitTurnBody,
-    validate('application/json', (payload) => ({
-      body: {
-        select: payload.body,
-        against: turnBodySchema,
-      },
-    })),
-    async (context) => {
-      const { body } = context.var.input;
-      const request = await validateTurnRequest(body);
-      if (request.message.role !== 'user') {
-        throw invalidMessage('A new session must start with a user message');
-      }
-      if (request.trigger !== 'submit-message') {
-        throw invalidMessage('A new session cannot regenerate a response');
-      }
-      const userId = context.get('userId');
-      const sessionId = uuidv5(
-        JSON.stringify([userId, request.message.id]),
-        SESSION_NAMESPACE,
-      );
-      const conversation = { chatId: sessionId, userId };
-      await runtime.createSession(conversation);
-      const turn = await runtime.enqueue(conversation, request);
-
-      return accepted(context, sessionId, turn.id);
-    },
-  );
-  app.all(CREATE_SESSION_ROUTE_PATH, (context) =>
-    methodNotAllowed(context, 'POST'),
-  );
-
   app.get(
     SESSION_ROUTE_PATH,
     validate((payload) => ({
@@ -265,7 +219,6 @@ export function http(
   );
   app.post(
     SESSION_ROUTE_PATH,
-    limitTurnBody,
     validate('application/json', (payload) => ({
       body: {
         select: payload.body,
@@ -278,15 +231,24 @@ export function http(
     })),
     async (context) => {
       const { body, sessionId } = context.var.input;
+      if (body.sessionId !== sessionId) {
+        throw invalidSessionId('Route and body session IDs must match');
+      }
       const conversation = {
         chatId: sessionId,
         userId: context.get('userId'),
       };
-      await requireSession(runtime, conversation);
-      const turn = await runtime.enqueue(
-        conversation,
-        await validateTurnRequest(body),
-      );
+      const request = await validateTurnRequest(body);
+      if (!(await runtime.sessionExists(conversation))) {
+        if (request.message.role !== 'user') {
+          throw invalidMessage('A new session must start with a user message');
+        }
+        if (request.trigger !== 'submit-message') {
+          throw invalidMessage('A new session cannot regenerate a response');
+        }
+        await runtime.createSession(conversation);
+      }
+      const turn = await runtime.enqueue(conversation, request);
 
       return accepted(context, sessionId, turn.id);
     },
@@ -452,15 +414,17 @@ async function validateTurnRequest(
 ): Promise<Parameters<HttpRuntime['enqueue']>[1]> {
   const message = await validateTurnMessage(body.message);
   const tools = body.tools === undefined ? {} : { tools: body.tools };
+  const elements =
+    body.elements === undefined ? {} : { elements: body.elements };
   if (message.role === 'assistant') {
     if (body.trigger === 'regenerate-message') {
       throw invalidMessage(
         'Regeneration requires the user message preceding the assistant response',
       );
     }
-    return { message, trigger: 'submit-message', ...tools };
+    return { message, trigger: 'submit-message', ...tools, ...elements };
   }
-  return { message, trigger: body.trigger, ...tools };
+  return { message, trigger: body.trigger, ...tools, ...elements };
 }
 
 function isTurnMessage(
@@ -472,6 +436,13 @@ function isTurnMessage(
 function invalidMessage(detail: string): HTTPException {
   return new HTTPException(400, {
     message: 'Invalid message',
+    cause: { code: 'api/validation-failed', detail },
+  });
+}
+
+function invalidSessionId(detail: string): HTTPException {
+  return new HTTPException(400, {
+    message: 'Invalid session ID',
     cause: { code: 'api/validation-failed', detail },
   });
 }

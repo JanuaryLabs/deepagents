@@ -27,10 +27,20 @@
   ],
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
-    { "path": "../elements/tsconfig.lib.json" },
-    { "path": "../formatters/tsconfig.lib.json" },
-    { "path": "../shadcn/tsconfig.lib.json" },
-    { "path": "../input/tsconfig.lib.json" },
-    { "path": "../../context/tsconfig.lib.json" }
+    {
+      "path": "../shadcn/tsconfig.lib.json"
+    },
+    {
+      "path": "../input/tsconfig.lib.json"
+    },
+    {
+      "path": "../formatters/tsconfig.lib.json"
+    },
+    {
+      "path": "../../elements/tsconfig.lib.json"
+    },
+    {
+      "path": "../../context/tsconfig.lib.json"
+    }
   ]
 }

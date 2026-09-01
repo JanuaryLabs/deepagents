@@ -4,10 +4,9 @@ import {
   type LoaderFunctionArgs,
   type ShouldRevalidateFunctionArgs,
   useLoaderData,
-  useLocation,
   useNavigate,
-  useParams,
   useRevalidator,
+  redirect,
 } from 'react-router';
 
 import {
@@ -19,6 +18,8 @@ import {
   Messages,
   PendingToolInput,
   SubmitButton,
+  ZukhrufChatTransport,
+  serializeToolsRegistry,
   useAgent,
   useAgentMessages,
   useAgentMeta,
@@ -28,31 +29,46 @@ import {
 import { Composer, useComposer } from '@deepagents/react-input/browser';
 import { cn } from '@deepagents/react-shadcn';
 
+import { INTERACTIVE_ELEMENTS } from '../app/elements.tsx';
 import { loadRuntime } from '../app/runtime-data.ts';
-import { ZukhrufChatTransport } from '../app/zukhruf-chat-transport.ts';
-
-const TOOL_REGISTRY = {};
+import { TOOL_REGISTRY } from '../app/tools.tsx';
 
 export async function loader(args: LoaderFunctionArgs) {
   const { params, request } = args;
+  const chatId =
+    params.sessionId ?? new URL(request.url).searchParams.get('chatId');
+  if (!chatId) {
+    throw redirect(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
+  }
   const runtime = await loadRuntime(request.signal);
-  const conversation = params.sessionId
-    ? runtime.history.find(({ chatId }) => chatId === params.sessionId)
-    : runtime.history[0];
+  const conversation = runtime.history.find(
+    (entry) => entry.chatId === chatId,
+  );
   const api = runtime.discovery?.capabilities.chat.href;
-  if (!api || !params.sessionId) {
+  if (!api) {
     return {
       ...runtime,
+      chatId,
       conversation,
       initialMessages: undefined,
+      sessionExists: false,
       sessionError: false,
     };
   }
   try {
-    const response = await fetch(
-      `${api}/${encodeURIComponent(params.sessionId)}`,
-      { signal: request.signal },
-    );
+    const response = await fetch(`${api}/${encodeURIComponent(chatId)}`, {
+      signal: request.signal,
+    });
+    if (response.status === 404 && !params.sessionId) {
+      return {
+        ...runtime,
+        chatId,
+        conversation,
+        initialMessages: undefined,
+        sessionExists: false,
+        sessionError: false,
+      };
+    }
     if (!response.ok) {
       throw new Error(`Session request failed: ${response.status}`);
     }
@@ -62,15 +78,19 @@ export async function loader(args: LoaderFunctionArgs) {
     }
     return {
       ...runtime,
+      chatId,
       conversation,
       initialMessages: await validateUIMessages({ messages: body.messages }),
+      sessionExists: true,
       sessionError: false,
     };
   } catch {
     return {
       ...runtime,
+      chatId,
       conversation,
       initialMessages: undefined,
+      sessionExists: false,
       sessionError: true,
     };
   }
@@ -78,38 +98,24 @@ export async function loader(args: LoaderFunctionArgs) {
 
 export function shouldRevalidate({
   currentParams,
+  currentUrl,
   nextParams,
+  nextUrl,
 }: ShouldRevalidateFunctionArgs) {
-  return currentParams.sessionId !== nextParams.sessionId;
-}
-
-export function ChatRoute() {
-  const { sessionId } = useParams();
-  const location = useLocation();
-  const locationState = location.state as { chatKey?: string } | null;
-  const chatKey =
-    locationState?.chatKey ??
-    sessionId ??
-    new URLSearchParams(location.search).get('draft') ??
-    location.key;
   return (
-    <ChatSessionBoundary
-      key={chatKey}
-      chatKey={chatKey}
-      sessionId={sessionId}
-    />
+    currentParams.sessionId !== nextParams.sessionId ||
+    currentUrl.searchParams.get('chatId') !==
+      nextUrl.searchParams.get('chatId')
   );
 }
 
-function ChatSessionBoundary({
-  chatKey,
-  sessionId,
-}: {
-  chatKey: string;
-  sessionId?: string;
-}) {
-  const [initialSessionId] = useState(sessionId);
-  const { discovery, initialMessages, sessionError } =
+export function ChatRoute() {
+  const { chatId } = useLoaderData<typeof loader>();
+  return <ChatSessionBoundary key={chatId} chatId={chatId} />;
+}
+
+function ChatSessionBoundary({ chatId }: { chatId: string }) {
+  const { discovery, initialMessages, sessionError, sessionExists } =
     useLoaderData<typeof loader>();
   const api = discovery?.capabilities.chat.href;
 
@@ -123,23 +129,23 @@ function ChatSessionBoundary({
   return (
     <ChatSession
       api={api}
-      chatKey={chatKey}
+      chatId={chatId}
       initialMessages={initialMessages}
-      sessionId={initialSessionId}
+      sessionExists={sessionExists}
     />
   );
 }
 
 function ChatSession({
   api,
-  chatKey,
+  chatId,
   initialMessages,
-  sessionId,
+  sessionExists,
 }: {
   api: string;
-  chatKey: string;
+  chatId: string;
   initialMessages?: UIMessage[];
-  sessionId?: string;
+  sessionExists: boolean;
 }) {
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
@@ -147,25 +153,20 @@ function ChatSession({
     () =>
       new ZukhrufChatTransport({
         api,
-        sessionId,
-        onSession: (acceptedSessionId) => {
-          void navigate(`/chat/${encodeURIComponent(acceptedSessionId)}`, {
-            replace: true,
-            state: { chatKey },
-          });
-          void revalidate();
-        },
+        tools: serializeToolsRegistry(TOOL_REGISTRY),
+        elements: INTERACTIVE_ELEMENTS,
       }),
   );
 
   return (
     <AgentProvider
-      chatId={sessionId ?? chatKey}
+      chatId={chatId}
       initialMessages={initialMessages}
-      onResetChat={() =>
-        navigate(`/chat?draft=${encodeURIComponent(crypto.randomUUID())}`)
+      onFinish={() => void revalidate()}
+      onResetChat={(nextChatId) =>
+        navigate(`/chat?chatId=${encodeURIComponent(nextChatId)}`)
       }
-      resume={Boolean(sessionId)}
+      resume={sessionExists}
       registry={TOOL_REGISTRY}
       transport={transport}
     >
@@ -187,6 +188,7 @@ function ChatMessages() {
     <Messages.Root
       className="mx-auto mb-4 min-h-0 w-full max-w-3xl flex-1 px-6"
       messages={messages}
+      elements={INTERACTIVE_ELEMENTS}
       status={status}
     >
       <Messages.List>

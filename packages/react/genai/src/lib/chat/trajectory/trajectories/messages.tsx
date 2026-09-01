@@ -9,7 +9,7 @@ import { TextShimmer } from '../../../components/text-shimmer.tsx';
 import { DynamicToolDebug } from '../../../components/tool-debug.tsx';
 import { Response } from '../../../elements/Response.tsx';
 import {
-  isActiveApprovalTool,
+  isActiveClientInputTool,
   resolveToolEntry,
 } from '../../../tools/helpers.ts';
 import { useAgent } from '../../agent-context.tsx';
@@ -61,7 +61,7 @@ function StaticToolPart({ part }: { part: ToolUIPart }) {
   const config = useAgent();
   const { toolEntry } = resolveToolEntry(part, config.registry);
 
-  if (toolEntry && isActiveApprovalTool(toolEntry, part.state)) {
+  if (toolEntry && isActiveClientInputTool(toolEntry, part.state)) {
     const label = toolEntry.label?.(part);
     if (!label) return null;
 
@@ -110,14 +110,14 @@ function ReasoningPart({ part }: { part: ReasoningUIPart }) {
 }
 
 function AssistantPart({ part }: { part: UIMessage['parts'][number] }) {
-  const { components } = useMessagesContext();
+  const { elements } = useMessagesContext();
   const debugMode = useShowDebug();
 
   if (part.type === 'text') {
     if (part.providerMetadata?.openai?.phase === 'commentary') {
       return null;
     }
-    return <AssistantTextPart text={part.text} components={components} />;
+    return <AssistantTextPart text={part.text} elements={elements} />;
   }
 
   if (part.type === 'dynamic-tool') {

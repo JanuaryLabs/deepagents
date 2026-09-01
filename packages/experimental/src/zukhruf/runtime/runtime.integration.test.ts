@@ -1879,6 +1879,108 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(calls, 2, 'the client result triggers one continuation');
   });
 
+  it('injects the element catalog, streams whole elements, and keeps a durable snapshot', async () => {
+    const elements = [
+      {
+        name: 'followup',
+        description: 'Suggest a follow-up question',
+        allowedAttributes: ['question'],
+      },
+    ];
+    const prompts: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        prompts.push(JSON.stringify(prompt));
+        const call = prompts.length;
+        const chunks: LanguageModelV4StreamPart[] =
+          call === 1
+            ? [
+                { type: 'text-start', id: 't1' },
+                { type: 'text-delta', id: 't1', delta: 'Answer. <followup ' },
+                {
+                  type: 'text-delta',
+                  id: 't1',
+                  delta: 'question="What next?"',
+                },
+                { type: 'text-delta', id: 't1', delta: ' /> done ' },
+                { type: 'text-end', id: 't1' },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage,
+                },
+              ]
+            : [
+                { type: 'text-start', id: 't1' },
+                {
+                  type: 'text-delta',
+                  id: 't1',
+                  delta: call === 2 ? 'Second reply. ' : 'Third reply. ',
+                },
+                { type: 'text-end', id: 't1' },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage,
+                },
+              ];
+        return { stream: simulateReadableStream({ chunks }) };
+      },
+    });
+    await using h = await harness(model);
+    await using _worker = await h.runtime.work();
+    const conversation = { chatId: 'elements-chat', userId: 'u1' };
+
+    const first = await h.runtime.enqueue(conversation, {
+      ...turn('Hi'),
+      elements,
+    });
+    const deltas: string[] = [];
+    for await (const part of first.stream) {
+      if (part.type === 'text-delta') deltas.push(part.delta);
+    }
+    for (const delta of deltas) {
+      assert.equal(
+        delta.includes('<followup'),
+        delta.includes('/>'),
+        `partial element leaked to the stream: ${JSON.stringify(delta)}`,
+      );
+    }
+    assert.ok(
+      deltas.includes('<followup question="What next?" />'),
+      'the element arrives as one whole chunk',
+    );
+    assert.match(prompts[0], /Never invent elements/);
+    assert.match(prompts[0], /followup/);
+
+    const second = await h.runtime.enqueue(conversation, turn('And then?'));
+    assert.notEqual(second.id, first.id);
+    await waitForText(h.runtime, conversation, 'Second reply.');
+    assert.match(
+      prompts[1],
+      /Never invent elements/,
+      'a turn without elements inherits the durable catalog snapshot',
+    );
+    const snapshot = await h.store.getChat(conversation.chatId);
+    assert.deepEqual(
+      (snapshot?.metadata?.zukhruf as { elements: unknown }).elements,
+      elements,
+    );
+
+    await h.runtime.enqueue(conversation, { ...turn('Bye'), elements: [] });
+    await waitForText(h.runtime, conversation, 'Third reply.');
+    assert.doesNotMatch(
+      prompts[2],
+      /Never invent elements/,
+      'an explicit empty catalog clears the snapshot',
+    );
+    const cleared = await h.store.getChat(conversation.chatId);
+    assert.deepEqual(
+      (cleared?.metadata?.zukhruf as { elements: unknown }).elements,
+      [],
+    );
+  });
+
   it('continues an AI SDK approval response through the assistant message', async () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);

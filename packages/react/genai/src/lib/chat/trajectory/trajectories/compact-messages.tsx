@@ -775,7 +775,7 @@ function CompactTrajectorySegment({
   item: CompactTrajectorySegmentItem;
   textClassName?: string;
 }) {
-  const { components } = useMessagesContext();
+  const { elements } = useMessagesContext();
   const { segment } = item;
 
   if (segment.kind === 'text') {
@@ -786,7 +786,7 @@ function CompactTrajectorySegment({
     return (
       <Segment.Text
         segment={{ ...segment, parts: visibleParts }}
-        components={components}
+        elements={elements}
         className={textClassName}
       />
     );

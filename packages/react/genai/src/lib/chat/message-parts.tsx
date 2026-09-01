@@ -29,11 +29,11 @@ export function FilePart({
 
 export function AssistantTextPart({
   text,
-  components,
+  elements,
   className,
 }: {
   text: string;
-  components?: GenAIInteractiveElement[];
+  elements?: GenAIInteractiveElement[];
   className?: string;
 }) {
   const { status } = useAgentStatus();
@@ -42,7 +42,7 @@ export function AssistantTextPart({
   return (
     <div className={cn('text-sm', className)}>
       <InteractiveResponse
-        elements={components}
+        elements={elements}
         animated={SLIDE_UP_ANIMATED}
         isAnimating={!isSnapshotRender && status === 'streaming'}
       >

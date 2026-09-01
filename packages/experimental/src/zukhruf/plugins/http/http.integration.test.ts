@@ -88,15 +88,18 @@ function createUnauthenticatedApp(
   return app;
 }
 
-test('POST /zukhruf/v1/session creates one idempotent durable session', async () => {
+test('POST /zukhruf/v1/session/:sessionId creates, retries, and continues one client-named session', async () => {
+  const sessionId = '9d1f5c40-f250-4aa9-8979-2e0ef4fc2c15';
   const created: Array<{ chatId: string; userId: string }> = [];
   const enqueued: Array<{
     conversation: { chatId: string; userId: string };
     turn: Parameters<TestRuntime['enqueue']>[1];
   }> = [];
+  let exists = false;
   const runtime = createRuntime({
     async createSession(conversation) {
       created.push(conversation);
+      exists = true;
     },
     async enqueue(conversation, turn) {
       enqueued.push({ conversation, turn });
@@ -104,6 +107,9 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
         id: 'internal-turn-id',
         stream: new ReadableStream<StreamPart>(),
       };
+    },
+    async sessionExists() {
+      return exists;
     },
   });
 
@@ -122,35 +128,47 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
     ],
     metadata: { locale: { language: 'Arabic' } },
   };
-  const create = () =>
-    app.request(mounted('/session'), {
-      body: JSON.stringify({ message, trigger: 'submit-message' }),
+  const path = mounted('/session/:sessionId').replace(':sessionId', sessionId);
+  const send = (
+    nextMessage: Parameters<TestRuntime['enqueue']>[1]['message'] = message,
+  ) =>
+    app.request(path, {
+      body: JSON.stringify({
+        sessionId,
+        message: nextMessage,
+        trigger: 'submit-message',
+      }),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     });
 
-  const first = await create();
+  const first = await send();
   const firstBody = (await first.json()) as {
     ok: boolean;
     sessionId: string;
     turnId: string;
   };
-  const retry = await create();
+  const retry = await send();
   const retryBody = (await retry.json()) as typeof firstBody;
+  const continuation = {
+    id: 'message-2',
+    role: 'user' as const,
+    parts: [{ type: 'text' as const, text: 'Continue' }],
+  };
+  const continued = await send(continuation);
 
   assert.equal(first.status, 202);
+  assert.equal(retry.status, 202);
+  assert.equal(continued.status, 202);
   assert.equal(firstBody.ok, true);
-  assert.match(firstBody.sessionId, /^[0-9a-f-]{36}$/);
+  assert.equal(firstBody.sessionId, sessionId);
   assert.equal(
     first.headers.get(ZUKHRUF_SESSION_ID_HEADER),
     firstBody.sessionId,
   );
   assert.equal(retryBody.sessionId, firstBody.sessionId);
   assert.equal(firstBody.turnId, 'internal-turn-id');
-  assert.deepEqual(created, [
-    { chatId: firstBody.sessionId, userId: 'user-1' },
-    { chatId: firstBody.sessionId, userId: 'user-1' },
-  ]);
+  assert.deepEqual(created, [{ chatId: sessionId, userId: 'user-1' }]);
   assert.deepEqual(enqueued, [
     {
       conversation: { chatId: firstBody.sessionId, userId: 'user-1' },
@@ -160,6 +178,10 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
       conversation: { chatId: firstBody.sessionId, userId: 'user-1' },
       turn: { message, trigger: 'submit-message' },
     },
+    {
+      conversation: { chatId: sessionId, userId: 'user-1' },
+      turn: { message: continuation, trigger: 'submit-message' },
+    },
   ]);
 
   const health = await app.request('/health');
@@ -168,40 +190,59 @@ test('POST /zukhruf/v1/session creates one idempotent durable session', async ()
 });
 
 test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
-  const app = createApp(createRuntime());
+  const sessionId = '9d1f5c40-f250-4aa9-8979-2e0ef4fc2c15';
+  const app = createApp(createRuntime({ sessionExists: async () => false }));
   const request = (input: {
     body?: string;
     headers?: Record<string, string>;
     method?: string;
   }) =>
-    app.request(mounted('/session'), {
-      ...input,
-      method: input.method ?? 'POST',
-    });
+    app.request(
+      mounted('/session/:sessionId').replace(':sessionId', sessionId),
+      {
+        ...input,
+        method: input.method ?? 'POST',
+      },
+    );
 
-  await t.test('requires POST', async () => {
-    const response = await request({ method: 'GET' });
-    assert.equal(response.status, 405);
-    assert.equal(response.headers.get('allow'), 'POST');
-  });
-
-  await t.test('requires a valid AI SDK message', async () => {
-    const response = await request({
+  await t.test('requires the client UUID in the route', async () => {
+    const response = await app.request(mounted('/session'), {
       body: JSON.stringify({
-        message: { id: 'message-1', role: 'user', parts: [] },
+        sessionId,
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
         trigger: 'submit-message',
       }),
       headers: { 'content-type': 'application/json' },
+      method: 'POST',
     });
-    assert.equal(response.status, 400);
-    const body = (await response.json()) as { cause: { code: string } };
-    assert.equal(body.cause.code, 'api/validation-failed');
+    assert.equal(response.status, 404);
   });
 
-  await t.test('accepts only message, trigger, and client tools', async () => {
+  await t.test('requires a valid client UUID', async () => {
+    const response = await app.request(mounted('/session/not-a-uuid'), {
+      body: JSON.stringify({
+        sessionId: 'not-a-uuid',
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        trigger: 'submit-message',
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('requires matching route and body UUIDs', async () => {
     const response = await request({
       body: JSON.stringify({
-        input: 'legacy',
+        sessionId: '497f6eca-6276-4993-bfeb-53cbbbba6f08',
         message: {
           id: 'message-1',
           role: 'user',
@@ -214,9 +255,44 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
     assert.equal(response.status, 400);
   });
 
+  await t.test('requires a valid AI SDK message', async () => {
+    const response = await request({
+      body: JSON.stringify({
+        sessionId,
+        message: { id: 'message-1', role: 'user', parts: [] },
+        trigger: 'submit-message',
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { cause: { code: string } };
+    assert.equal(body.cause.code, 'api/validation-failed');
+  });
+
+  await t.test(
+    'accepts only sessionId, message, trigger, tools, and elements',
+    async () => {
+      const response = await request({
+        body: JSON.stringify({
+          sessionId,
+          input: 'legacy',
+          message: {
+            id: 'message-1',
+            role: 'user',
+            parts: [{ type: 'text', text: 'Hello' }],
+          },
+          trigger: 'submit-message',
+        }),
+        headers: { 'content-type': 'application/json' },
+      });
+      assert.equal(response.status, 400);
+    },
+  );
+
   await t.test('validates client tool definitions', async () => {
     const response = await request({
       body: JSON.stringify({
+        sessionId,
         message: {
           id: 'message-1',
           role: 'user',
@@ -235,6 +311,7 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
   await t.test('does not regenerate before a session exists', async () => {
     const response = await request({
       body: JSON.stringify({
+        sessionId,
         message: {
           id: 'message-1',
           role: 'user',
@@ -257,9 +334,10 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
     assert.equal(body.cause.code, 'api/invalid-json');
   });
 
-  await t.test('bounds the request body', async () => {
+  await t.test('accepts a large request body', async () => {
     const response = await request({
       body: JSON.stringify({
+        sessionId,
         message: {
           id: 'message-1',
           role: 'user',
@@ -269,9 +347,65 @@ test('POST /zukhruf/v1/session validates its public boundary', async (t) => {
       }),
       headers: { 'content-type': 'application/json' },
     });
-    assert.equal(response.status, 413);
-    const body = (await response.json()) as { cause: { code: string } };
-    assert.equal(body.cause.code, 'api/payload-too-large');
+    assert.equal(response.status, 202);
+  });
+
+  const elementsRequest = (elements: unknown) =>
+    request({
+      body: JSON.stringify({
+        sessionId,
+        message: {
+          id: 'message-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        },
+        elements,
+        trigger: 'submit-message',
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+  await t.test('rejects an invalid element descriptor', async () => {
+    const response = await elementsRequest([
+      { name: 'BadName', allowedAttributes: [] },
+    ]);
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('rejects executable fields on element descriptors', async () => {
+    const response = await elementsRequest([
+      {
+        name: 'sneaky',
+        allowedAttributes: [],
+        component: 'globalThis.alert("owned")',
+      },
+    ]);
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('rejects duplicate element names', async () => {
+    const response = await elementsRequest([
+      { name: 'twin', allowedAttributes: ['a'] },
+      { name: 'twin', allowedAttributes: ['b'] },
+    ]);
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('rejects an oversized element catalog', async () => {
+    const response = await elementsRequest(
+      Array.from({ length: 101 }, (_, i) => ({
+        name: `el-${i}`,
+        allowedAttributes: ['a'],
+      })),
+    );
+    assert.equal(response.status, 400);
+  });
+
+  await t.test('rejects reserved element attributes', async () => {
+    const response = await elementsRequest([
+      { name: 'clobbered', allowedAttributes: ['id'] },
+    ]);
+    assert.equal(response.status, 400);
   });
 });
 
@@ -308,8 +442,21 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
       },
     },
   };
+  const elements = [
+    {
+      name: 'followup',
+      description: 'Suggest a follow-up question',
+      allowedAttributes: ['question'],
+    },
+  ];
   const response = await createApp(runtime).request(path, {
-    body: JSON.stringify({ message, tools, trigger: 'submit-message' }),
+    body: JSON.stringify({
+      sessionId,
+      message,
+      tools,
+      elements,
+      trigger: 'submit-message',
+    }),
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
@@ -323,12 +470,16 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
   assert.deepEqual(enqueued, [
     {
       conversation: { chatId: sessionId, userId: 'user-1' },
-      turn: { message, tools, trigger: 'submit-message' },
+      turn: { message, tools, elements, trigger: 'submit-message' },
     },
   ]);
 
   const regenerated = await createApp(runtime).request(path, {
-    body: JSON.stringify({ message, trigger: 'regenerate-message' }),
+    body: JSON.stringify({
+      sessionId,
+      message,
+      trigger: 'regenerate-message',
+    }),
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
@@ -344,7 +495,11 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
     parts: [{ type: 'text' as const, text: 'Client supplied continuation' }],
   };
   const continued = await createApp(runtime).request(path, {
-    body: JSON.stringify({ message: assistant, trigger: 'submit-message' }),
+    body: JSON.stringify({
+      sessionId,
+      message: assistant,
+      trigger: 'submit-message',
+    }),
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
@@ -356,6 +511,7 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
 
   const invalidAssistantRegeneration = await createApp(runtime).request(path, {
     body: JSON.stringify({
+      sessionId,
       message: {
         id: 'assistant-1',
         role: 'assistant',
@@ -367,19 +523,6 @@ test('POST /zukhruf/v1/session/:sessionId continues an existing session', async 
     method: 'POST',
   });
   assert.equal(invalidAssistantRegeneration.status, 400);
-
-  const missing = await createApp(
-    createRuntime({ sessionExists: async () => false }),
-  ).request(path, {
-    body: JSON.stringify({ message, trigger: 'submit-message' }),
-    headers: { 'content-type': 'application/json' },
-    method: 'POST',
-  });
-  assert.equal(missing.status, 404);
-  assert.equal(
-    ((await missing.json()) as { cause: { code: string } }).cause.code,
-    'zukhruf/session-not-found',
-  );
 });
 
 test('GET /zukhruf/v1/session/:sessionId returns the authenticated conversation', async () => {

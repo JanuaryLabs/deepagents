@@ -55,7 +55,7 @@ export function DevtoolSidebar() {
 export function NewChatButton({ iconOnly = false }: { iconOnly?: boolean }) {
   const navigate = useNavigate();
   const startNewChat = () =>
-    navigate(`/chat?draft=${encodeURIComponent(crypto.randomUUID())}`);
+    navigate(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
 
   if (iconOnly) {
     return (
@@ -115,11 +115,10 @@ function PrimaryNavigation() {
 function RunsNavigation() {
   const navigate = useNavigate();
   const { discovery, history, historyError } = useLoaderData<typeof loader>();
-  const selected = (
-    useMatches().at(-1)?.loaderData as
-      | { conversation?: HistoryRecord }
-      | undefined
-  )?.conversation;
+  const selected = useMatches().at(-1)?.loaderData as
+    | { chatId?: string; conversation?: HistoryRecord }
+    | undefined;
+  const selectedChatId = selected?.conversation?.chatId ?? selected?.chatId;
   const select = useCallback(
     (entry: HistoryRecord) =>
       navigate(generatePath('/chat/:sessionId', { sessionId: entry.chatId })),
@@ -133,14 +132,14 @@ function RunsNavigation() {
         <span className="ml-auto font-mono">{history.length}</span>
       </SidebarGroupLabel>
       <SidebarGroupContent>
-        <History.Root activeChatId={selected?.chatId} onSelect={select}>
+        <History.Root activeChatId={selectedChatId} onSelect={select}>
           {historyError && history.length === 0 ? (
             <History.Empty>Runs unavailable</History.Empty>
           ) : history.length === 0 ? (
             <History.Empty>No conversations yet</History.Empty>
           ) : (
             history.map((entry) => {
-              const active = selected?.chatId === entry.chatId;
+              const active = selectedChatId === entry.chatId;
               return (
                 <History.Item
                   key={`${entry.userId}:${entry.chatId}`}

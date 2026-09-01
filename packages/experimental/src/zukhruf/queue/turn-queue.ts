@@ -1,10 +1,19 @@
 import type { UIMessage } from 'ai';
 
+import type { ElementDescriptor } from '@deepagents/elements';
+
 import type { ClientToolSet } from '../tool.ts';
 
 export type TurnRequest = {
   /** Client-declared tools available to the model and completed by that client. */
   tools?: ClientToolSet;
+  /**
+   * Interactive-element catalog declared by the client. When present it
+   * overwrites the chat's durable catalog snapshot (an empty array clears
+   * it); when absent the turn inherits the stored snapshot, so recovery and
+   * later turns keep rendering with the same catalog.
+   */
+  elements?: ElementDescriptor[];
 } & (
   | {
       message: UIMessage & { role: 'user' };

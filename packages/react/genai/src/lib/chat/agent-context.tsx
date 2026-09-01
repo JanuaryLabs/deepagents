@@ -1,6 +1,7 @@
 import { type UIMessage, type UseChatHelpers } from '@ai-sdk/react';
 import type {
   ChatOnDataCallback,
+  ChatOnFinishCallback,
   ChatStatus,
   ChatTransport,
   UIDataTypes,
@@ -59,6 +60,7 @@ export function AgentProvider({
   transport,
   resume,
   onData,
+  onFinish,
   onResetChat,
   queueEnabled = true,
 }: {
@@ -73,6 +75,8 @@ export function AgentProvider({
   resume?: boolean;
   /** Observes every streamed data part, transient ones included. */
   onData?: ChatOnDataCallback<UIMessage<unknown, UIDataTypes, UITools>>;
+  /** Observes completion of each assistant response. */
+  onFinish?: ChatOnFinishCallback<UIMessage<unknown, UIDataTypes, UITools>>;
   onResetChat: (chatId: string) => void;
   queueEnabled?: boolean;
 }) {
@@ -82,6 +86,7 @@ export function AgentProvider({
     registry,
     initialMessages,
     onData,
+    onFinish,
   });
 
   const [debugMode, setDebugMode] = useState(debugOn);

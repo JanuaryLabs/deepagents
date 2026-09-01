@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'vitest';
+import { describe, it } from 'node:test';
 
-import { elementSchema, elementsSchema } from '@deepagents/react-elements';
+import { elementSchema, elementsSchema } from '@deepagents/elements';
 
 describe('elementSchema', () => {
   it('accepts a minimal valid entry', () => {
@@ -157,6 +157,16 @@ describe('elementSchema', () => {
 
     assert.equal(result.success, false);
   });
+
+  it('rejects unknown keys such as executable component code', () => {
+    const result = elementSchema.safeParse({
+      name: 'sneaky',
+      allowedAttributes: [],
+      component: 'globalThis.alert("owned")',
+    });
+
+    assert.equal(result.success, false);
+  });
 });
 
 describe('elementsSchema', () => {
@@ -198,6 +208,15 @@ describe('elementsSchema', () => {
     const result = elementsSchema.safeParse([
       { name: 'valid', allowedAttributes: [] },
       { name: 'INVALID', allowedAttributes: [] },
+    ]);
+
+    assert.equal(result.success, false);
+  });
+
+  it('rejects duplicate element names', () => {
+    const result = elementsSchema.safeParse([
+      { name: 'twin', allowedAttributes: ['a'] },
+      { name: 'twin', allowedAttributes: ['b'] },
     ]);
 
     assert.equal(result.success, false);

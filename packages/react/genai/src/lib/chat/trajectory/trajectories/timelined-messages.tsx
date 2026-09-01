@@ -29,7 +29,7 @@ const TimelinedAssistantContent = memo(function TimelinedAssistantContent({
   className?: string;
 }) {
   const { message } = useMessageItem();
-  const { components } = useMessagesContext();
+  const { elements } = useMessagesContext();
   const { debugMode } = useAgent();
   const showDebug = useShowDebug();
   const isSnapshotRender = useIsAssistantSnapshotRender();
@@ -48,7 +48,7 @@ const TimelinedAssistantContent = memo(function TimelinedAssistantContent({
             <Segment.Text
               key={key}
               segment={segment}
-              components={components}
+              elements={elements}
               className="my-4"
             />
           );

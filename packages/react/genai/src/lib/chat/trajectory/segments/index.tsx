@@ -14,7 +14,7 @@ import { DynamicToolDebug } from '../../../components/tool-debug.tsx';
 import { useIsAssistantSnapshotRender } from '../../../copy/assistant-snapshot.tsx';
 import { Response } from '../../../elements/Response.tsx';
 import {
-  isActiveApprovalTool,
+  isActiveClientInputTool,
   resolveToolEntry,
 } from '../../../tools/helpers.ts';
 import type { ToolLabel } from '../../../tools/registry.ts';
@@ -45,11 +45,11 @@ export function isCommentaryTextPart(part: UIMessage['parts'][number]) {
 
 function SegmentText({
   segment,
-  components,
+  elements,
   className,
 }: {
   segment: Extract<MessageTrajectorySegment, { kind: 'text' }>;
-  components?: MessagesContextValue['components'];
+  elements?: MessagesContextValue['elements'];
   className?: string;
 }) {
   return (
@@ -60,7 +60,7 @@ function SegmentText({
           <AssistantTextPart
             key={`${idx}-text`}
             text={part.text}
-            components={components}
+            elements={elements}
             className={className}
           />
         );
@@ -147,7 +147,7 @@ type ToolSegmentContextValue = {
   part: ToolUIPart;
   label: ToolLabel | undefined;
   aborted: boolean;
-  activeApproval: boolean;
+  activeClientInput: boolean;
   defaultOpen: boolean;
 };
 
@@ -183,8 +183,11 @@ function SegmentTool({
   const { toolEntry } = resolveToolEntry(segment.part, agent.registry);
   const { part: toolPart } = segment;
   if (!isStaticToolUIPart(toolPart)) return null;
-  const activeApproval = isActiveApprovalTool(toolEntry, toolPart.state);
-  const aborted = !activeApproval && isToolAborted(toolPart, status);
+  const activeClientInput = isActiveClientInputTool(
+    toolEntry,
+    toolPart.state,
+  );
+  const aborted = !activeClientInput && isToolAborted(toolPart, status);
   const baseLabel = toolEntry?.label?.(toolPart);
   const label = aborted
     ? {
@@ -195,12 +198,12 @@ function SegmentTool({
     : baseLabel;
   const defaultOpen =
     toolEntry?.static === false &&
-    !!toolEntry?.needsApproval &&
-    !activeApproval;
+    !!toolEntry?.requiresUserInput &&
+    !activeClientInput;
 
   return (
     <ToolSegmentContext
-      value={{ part: toolPart, label, aborted, activeApproval, defaultOpen }}
+      value={{ part: toolPart, label, aborted, activeClientInput, defaultOpen }}
     >
       <ToolSegmentMarkerContext
         value={{ label, state: toolPart.state, aborted }}
@@ -212,8 +215,8 @@ function SegmentTool({
 }
 
 function SegmentToolContent() {
-  const { part, activeApproval } = useToolSegment();
-  if (activeApproval) return null;
+  const { part, activeClientInput } = useToolSegment();
+  if (activeClientInput) return null;
   return <ToolPartContent part={part} />;
 }
 

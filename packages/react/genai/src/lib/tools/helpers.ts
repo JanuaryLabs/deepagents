@@ -26,13 +26,13 @@ export function resolveToolEntry(
   return { toolKey, toolEntry };
 }
 
-export function isActiveApprovalTool(
+export function isActiveClientInputTool(
   toolEntry: ComponentRegistry[string] | undefined,
   state: ToolUIPart['state'] | undefined,
 ): boolean {
   return (
     toolEntry?.static === false &&
-    !!toolEntry?.needsApproval &&
+    !!toolEntry?.requiresUserInput &&
     state === 'input-available'
   );
 }
