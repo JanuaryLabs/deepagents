@@ -8,21 +8,24 @@ canonical implementation and continuation record. Chat context is disposable;
 update this file whenever a decision, finding, completed phase, or next action
 changes.
 
-## Current state — 2026-08-28 (definition-bound transport projections)
+## Current state — 2026-08-31 (host-configurable protocol mount)
 
 - The approved one-server, HTTP-only topology is implemented in the working
   tree. The host owns one Hono server and one `@hono/node-server` listener,
   chooses `/zukhruf/v1` for the authenticated Zukhruf protocol with
   `http(runtime, tracesHttp(traceTelemetry))`, and mounts the DevTool UI at
-  `/devtool` with `devtool()`. One terminal prints one `/devtool` URL.
+  `/devtool` with `devtool({ protocolPath: '/zukhruf/v1' })`. One terminal prints
+  one `/devtool` URL.
 - `@deepagents/devtool` (`packages/devtool/host`) is a mountable static UI app.
   `devtool()` uses Hono's effective mount for its static-file rewrite and
   injects it as the document base. Vite emits relative asset URLs and React
   Router reads the document base, so the host chooses the UI path while assets,
   deep links, refresh, and Back remain scoped beneath it. The package exports no
-  route prefix. It receives no runtime object, runtime URL, credentials,
-  hostname, port, headers, or proxy configuration and owns no plugin lifecycle.
-- The browser uses same-origin HTTP only: discovery `GET /zukhruf/v1/info`,
+  route prefix. It receives only the host-selected same-origin protocol mount,
+  not a runtime object, credentials, hostname, port, headers, or proxy
+  configuration, and owns no plugin lifecycle.
+- The browser uses same-origin HTTP only: discovery at the host-configured
+  protocol mount (default `GET /zukhruf/v1/info`),
   health `GET /zukhruf/v1/health`, History via `capabilities.history.href`,
   chat via `capabilities.chat.href` (the unchanged `ZukhrufChatTransport`),
   and traces via `capabilities.traces.href`. Trace list/detail URLs carry no
@@ -53,7 +56,7 @@ changes.
   before serving; each `server.ts` owns the HTTP composition (the host
   chooses `/zukhruf/v1`, scopes its `userId` middleware to that route, mounts
   `http(runtime, tracesHttp(traceTelemetry))` there, mounts
-  `devtool()` at `/devtool`, and owns the one listener on
+  `devtool({ protocolPath: '/zukhruf/v1' })` at `/devtool`, and owns the one listener on
   `127.0.0.1:4317`), returns the `/devtool` URL, and `run.ts` disposes worker and
   server through the existing `AsyncDisposableStack`.
   `tools/src/verify-definition-owned-plugins.ts` packs
@@ -67,8 +70,12 @@ changes.
   trace-discovery plugin, `mountTraceRoutes`, and the proxy-focused tests and
   documentation. The core-owned plugin HTTP contract and root HTTP exports are
   also removed. No compatibility path remains.
-- The `/scheduled` route remains the unchanged placeholder. Scheduled Tasks
-  stay a later slice; see [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md).
+- Scheduled Tasks are implemented in the working tree as an optional
+  `schedulesHttp(scheduled)` capability. When composed, discovery exposes the
+  authenticated schedule root and the routed workspace provides task creation,
+  editing, pause/resume, archive/purge, Run now, per-task runs, cancellation,
+  and an owner-wide pending-review inbox. When omitted, Scheduled navigation is
+  hidden. See [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md).
 - Separate overlapping work in the same dirty tree (the shared component
   stylesheet imports in `host/ui/src/styles.css` and the
   `shimmer-styles.integration.test.ts` bundle proof) is preserved untouched.
@@ -374,8 +381,9 @@ implementing, but the behavior is fixed:
 - [x] Consolidate shared display primitives in `@deepagents/react-shadcn`
       without adding speculative devtool components.
 - [x] Keep devtool status formatting in History and theme values in the host.
-- [ ] Add the Scheduled Tasks and run-inbox UI only after their HTTP,
-      notification, and cross-run-memory contracts are approved.
+- [x] Add the Scheduled Tasks management and run-inbox UI after approving the
+      optional HTTP projection; notifications and cross-run memory remain out
+      of scope.
 
 ### Phase 7 — One-server hard cutover (approved, implemented 2026-08-27; transport seam replaced in Phase 8)
 
@@ -414,6 +422,26 @@ implementing, but the behavior is fixed:
       trace reader and telemetry integration as transport-neutral plugin data.
 - [x] Migrate both demos and the DevTool host composition to
       `http(runtime, tracesHttp(traceTelemetry))`.
+
+### Phase 9 — DevTool integration hardening (implemented 2026-08-31)
+
+- [x] Make the protocol mount an explicit validated host-to-UI contract while
+      preserving `/zukhruf/v1` as the default.
+- [x] Keep a newly created query-URL chat selected when its History row arrives.
+- [x] Prove the published `@deepagents/react-genai` Node ESM entry imports
+      without unsupported directory resolution.
+
+### Phase 10 — Scheduled Tasks core (implemented 2026-08-31)
+
+- [x] Add the owner-scoped `schedulesHttp(scheduled)` projection with optional
+      discovery, strict validation, lifecycle routes, and public-boundary
+      integration coverage.
+- [x] Add exact run conversation references, scheduled provenance, per-task run
+      history, and the owner-wide pending-review query.
+- [x] Replace the placeholder route with the capability-gated task management
+      and review workspace.
+- [x] Add the public `zukhruf-schedules` demo with `--no-schedules` proving the
+      absent-capability path.
 
 ## Non-goals
 
@@ -489,9 +517,8 @@ execution.
 ## Continuation record
 
 **Exact next action:** keep the one-server composition as the only supported
-topology. The next product slice is still Scheduled Tasks: obtain approval or
-corrections for its wireframes and notification scope, then implement Phase 1
-of [`plans/scheduled-tasks.md`](./plans/scheduled-tasks.md) as an installed
-runtime plugin with a typed transport-neutral instance and an explicit,
-definition-bound HTTP projection. Do not stage or commit without explicit
+topology and browser-smoke the implemented Scheduled Tasks demo across task
+management, the pending-review inbox, exact-conversation navigation, capability
+absence, Back/Forward, and console/accessibility checks. No Scheduled Tasks
+implementation phase remains. Do not stage or commit without explicit
 authorization.
