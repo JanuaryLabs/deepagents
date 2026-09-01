@@ -31,7 +31,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/devtool.xml"],
       "options": {
-        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/devtool.xml --test-force-exit",
+        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/devtool.xml",
         "cwd": "{projectRoot}"
       }
     }
