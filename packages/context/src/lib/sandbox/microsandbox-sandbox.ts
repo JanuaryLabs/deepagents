@@ -37,14 +37,6 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
    * fully removed on `dispose()`.
    */
   name?: string;
-  /** OCI image to boot (default `'bash:5.3-alpine3.24'`). Ignored when attaching. */
-  image?: string;
-  /** Number of virtual CPUs. */
-  cpus?: number;
-  /** Memory in MiB. */
-  memory?: number;
-  /** Environment variables baked into the sandbox at boot. */
-  env?: Record<string, string>;
   /**
    * Default working directory, created at boot (default `'/workspace'`).
    * Microsandbox images default to `/`, and common images ship no
@@ -60,10 +52,14 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
   /** Per-command timeout in milliseconds for `executeCommand`. */
   commandTimeout?: number;
   /**
-   * Escape hatch over the SDK builder for everything without a plain option
-   * (volumes, network policy, secrets, user, idle timeout, …). Applied after
-   * the factory's own setters, except the required Bash shell which is applied
-   * last. Existing sandbox configuration wins when connecting.
+   * Fluent access to the SDK builder for everything the factory does not
+   * own: image (default `'bash:5.3-alpine3.24'`), cpus, memory, env,
+   * volumes, network policy, secrets, user, idle timeout, ….
+   *
+   * The factory applies its own setters after this callback — `workdir`,
+   * the persistence implied by `name`, and the required Bash shell — so
+   * `configure` cannot change what the lifecycle logic relies on. Runs on
+   * every connect; existing sandbox configuration wins when connecting.
    */
   configure?: (builder: SandboxBuilder) => SandboxBuilder;
 }
@@ -148,16 +144,17 @@ export async function createMicrosandboxSandbox(
     // `workdir()` alone fails boot validation when the image lacks the
     // directory, so patch it into the rootfs first.
     let builder = sdk.Sandbox.builder(name)
-      .image(options.image ?? MICROSANDBOX_DEFAULT_IMAGE)
-      .patch((patch) => patch.mkdir(workdir))
-      .workdir(workdir);
-    if (ephemeral) builder = builder.ephemeral(true);
-    if (replace) builder = builder.replace();
-    if (options.cpus !== undefined) builder = builder.cpus(options.cpus);
-    if (options.memory !== undefined) builder = builder.memory(options.memory);
-    if (options.env) builder = builder.envs(options.env);
+      .image(MICROSANDBOX_DEFAULT_IMAGE)
+      .patch((patch) => patch.mkdir(workdir));
     if (options.configure) builder = options.configure(builder);
-    return builder.shell('bash');
+    // Factory-owned setters go last so `configure` cannot override what the
+    // lifecycle logic reads: `name` decides persistence (an ephemeral flag
+    // from `configure` lets the runtime remove a named sandbox on stop, and
+    // the reconnect then boots a fresh one), `workdir` is the bash
+    // destination, and Bash is required. The SDK rejects a stray `replace()`
+    // on the `connectOrCreate` path.
+    builder = builder.workdir(workdir).ephemeral(ephemeral).shell('bash');
+    return replace ? builder.replace() : builder;
   };
 
   let vm: MicrosandboxVm;

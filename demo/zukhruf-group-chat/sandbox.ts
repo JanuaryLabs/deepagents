@@ -15,10 +15,10 @@ function sandbox(readonly: boolean) {
     ({ chatId }) =>
       createMicrosandboxSandbox({
         name: `zukhruf-group-chat-${chatId}`,
-        image: 'alpine',
         workdir: groupChatDirectory,
         configure: (builder) =>
           builder
+            .image('alpine')
             .label(sandboxRunLabel, groupChatRunId)
             .network((network) => network.policy(NetworkPolicy.none()))
             .volume(groupChatDirectory, (mount) => {

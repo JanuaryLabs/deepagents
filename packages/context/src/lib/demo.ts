@@ -13,7 +13,7 @@ import { SqliteContextStore } from './store/sqlite.store.ts';
 import { createFileTelemetry } from './telemetry/file/file-telemetry.ts';
 
 await using backend = await createMicrosandboxSandbox({
-  image: 'node:lts-alpine',
+  configure: (builder) => builder.image('node:lts-alpine'),
 });
 const sandbox = await createBashTool({
   sandbox: backend,

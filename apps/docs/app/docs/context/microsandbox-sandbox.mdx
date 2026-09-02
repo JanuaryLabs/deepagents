@@ -54,7 +54,7 @@ import {
 
 const backend = await createMicrosandboxSandbox({
   name: 'chat-123',
-  image: 'node:lts-bookworm-slim',
+  configure: (builder) => builder.image('node:lts-bookworm-slim'),
 });
 
 const sandbox = await createBashTool({
@@ -73,7 +73,7 @@ Pass `name` when a chat or workflow should resume the same microVM:
 ```typescript
 const sandbox = await createMicrosandboxSandbox({
   name: 'analytics-session',
-  image: 'python:3.12-slim',
+  configure: (builder) => builder.image('python:3.12-slim').memory(2048),
 });
 ```
 
@@ -92,21 +92,24 @@ stops and removes the microVM.
 
 ## Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `name` | `string` | Stable sandbox name for get-or-create reuse |
-| `image` | `string` | OCI image to boot; defaults to `bash:5.3-alpine3.24`; ignored when attaching to an existing sandbox |
-| `cpus` | `number` | Number of virtual CPUs |
-| `memory` | `number` | Memory in MiB |
-| `env` | `Record<string, string>` | Environment variables baked into the sandbox at boot |
-| `workdir` | `string` | Default working directory; defaults to `/workspace` |
-| `replace` | `boolean` | Replace an existing named sandbox instead of attaching |
-| `commandTimeout` | `number` | Per-command timeout for `executeCommand`, in milliseconds |
-| `readiness` | `(sandbox) => void \| Promise<void>` | Hook that must pass before the factory returns |
-| `configure` | `(builder) => builder` | Escape hatch for SDK builder options such as volumes, network policy, secrets, user, and idle timeout |
+| Option           | Type                                 | Description                                                                                                                                          |
+| ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`           | `string`                             | Stable sandbox name for get-or-create reuse                                                                                                          |
+| `workdir`        | `string`                             | Default working directory; defaults to `/workspace`                                                                                                  |
+| `replace`        | `boolean`                            | Replace an existing named sandbox instead of attaching                                                                                               |
+| `commandTimeout` | `number`                             | Per-command timeout for `executeCommand`, in milliseconds                                                                                            |
+| `readiness`      | `(sandbox) => void \| Promise<void>` | Hook that must pass before the factory returns                                                                                                       |
+| `configure`      | `(builder) => builder`               | Fluent access to the SDK builder: image (defaults to `bash:5.3-alpine3.24`), cpus, memory, env, volumes, network policy, secrets, user, idle timeout |
 
-`configure` runs only when creating a sandbox, not when attaching to an existing
-named sandbox.
+The options are the inputs the factory itself reads. Everything else is set
+fluently on the SDK builder through `configure`, which runs on every connect;
+the SDK applies builder options only when creating, so an existing named
+sandbox keeps its configuration.
+
+The factory applies `workdir`, the persistence implied by `name`, and the
+Bash shell after `configure`. A named sandbox therefore stays persistent even
+if `configure` calls `ephemeral(true)`, and the factory's `workdir` wins over
+one set in `configure`.
 
 ## Command Execution APIs
 
@@ -145,7 +148,7 @@ agent gets the sandbox:
 ```typescript
 const sandbox = await createMicrosandboxSandbox({
   name: 'daemon-backed-chat',
-  image: 'my-daemon-image:0.1.0',
+  configure: (builder) => builder.image('my-daemon-image:0.1.0'),
   readiness: async (sandbox) => {
     const result = await sandbox.executeCommand('start-daemon && wait-ready');
     if (result.exitCode !== 0) throw new Error(result.stderr);
@@ -167,18 +170,18 @@ node demo/microsandbox-text2sql/demo-microsandbox.ts
 `bootstrap.ts` exports the shared daemon image from Buildx as an OCI archive and
 loads it directly into the local Microsandbox cache with the SDK's
 `Image.load()`. The demo then uses
-`createMicrosandboxSandbox({ image, configure })` with `pullPolicy('never')` so a
+`createMicrosandboxSandbox({ configure })` with `image(...)` and `pullPolicy('never')` so a
 missing local image fails clearly instead of trying a registry pull.
 
 ## Error Handling
 
 All package-owned errors extend `MicrosandboxSandboxError`:
 
-| Error | When |
-|-------|------|
-| `MicrosandboxNotAvailableError` | The optional dependency or runtime is unavailable |
-| `MicrosandboxCreationError` | Sandbox creation fails outside a known SDK error |
-| `MicrosandboxCommandError` | File reads or writes through the VM filesystem fail |
+| Error                           | When                                                |
+| ------------------------------- | --------------------------------------------------- |
+| `MicrosandboxNotAvailableError` | The optional dependency or runtime is unavailable   |
+| `MicrosandboxCreationError`     | Sandbox creation fails outside a known SDK error    |
+| `MicrosandboxCommandError`      | File reads or writes through the VM filesystem fail |
 
 SDK-owned errors from `microsandbox` are preserved when possible, so callers can
 also handle specific SDK failure classes.

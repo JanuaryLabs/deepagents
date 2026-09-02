@@ -31,21 +31,6 @@ const backend = await createMicrosandboxSandbox({
   // Stable name → get-or-create: re-runs resume this one microVM (dispose()
   // stops it with rootfs state intact instead of removing it).
   name: 'deepagents-text2sql-demo',
-  // Build + load this image first: `node demo/microsandbox-text2sql/bootstrap.ts`.
-  image: demoImage,
-  memory: 2048,
-  env: {
-    NODE_NO_WARNINGS: '1',
-    TEXT2SQL_OUT_DIR: text2SqlOutDir,
-    TEXT2SQL_DAEMON_URL: daemonUrl,
-    PORT: String(daemonPort),
-    PGPORT: process.env.PGPORT ?? '5432',
-    PGUSER: process.env.PGUSER ?? 'postgres',
-    PGPASSWORD: process.env.PGPASSWORD ?? 'postgres',
-    // PGHOST is only baked when the caller pins one; otherwise startDaemon
-    // resolves the host via the guest's default-route gateway.
-    ...(process.env.PGHOST ? { PGHOST: process.env.PGHOST } : {}),
-  },
   // microsandbox boots the microVM with its guest agent as PID 1 rather than
   // the image CMD, so the daemon must be started explicitly; the factory
   // returns only once it's ready and disposes the microVM if startup fails.
@@ -53,9 +38,24 @@ const backend = await createMicrosandboxSandbox({
     startDaemon(sandbox, { prelude: resolvePghostFromGateway }),
   configure: (builder) =>
     builder
-      // The image was loaded into the local cache by bootstrap.ts; a registry
-      // pull of this name would fail confusingly, so forbid it outright.
+      // Build + load this image first: `node demo/microsandbox-text2sql/bootstrap.ts`.
+      // It was loaded into the local cache, so a registry pull of this name
+      // would fail confusingly — forbid it outright.
+      .image(demoImage)
       .pullPolicy('never')
+      .memory(2048)
+      .envs({
+        NODE_NO_WARNINGS: '1',
+        TEXT2SQL_OUT_DIR: text2SqlOutDir,
+        TEXT2SQL_DAEMON_URL: daemonUrl,
+        PORT: String(daemonPort),
+        PGPORT: process.env.PGPORT ?? '5432',
+        PGUSER: process.env.PGUSER ?? 'postgres',
+        PGPASSWORD: process.env.PGPASSWORD ?? 'postgres',
+        // PGHOST is only baked when the caller pins one; otherwise startDaemon
+        // resolves the host via the guest's default-route gateway.
+        ...(process.env.PGHOST ? { PGHOST: process.env.PGHOST } : {}),
+      })
       // Reach host-side Postgres without opening the whole private network.
       .network((network) =>
         network.policy(NetworkPolicy.fromProfiles(['public', 'host'])),

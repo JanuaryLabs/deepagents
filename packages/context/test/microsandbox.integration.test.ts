@@ -181,7 +181,9 @@ describe('Microsandbox Sandbox', async () => {
     describe('failure modes', () => {
       it('fails clearly when the image does not contain Bash', async () => {
         await assert.rejects(
-          createMicrosandboxSandbox({ image: 'alpine' }),
+          createMicrosandboxSandbox({
+            configure: (builder) => builder.image('alpine'),
+          }),
           /Bash is required to execute sandbox commands/,
         );
       });
@@ -426,6 +428,47 @@ describe('Microsandbox Sandbox', async () => {
               name.startsWith('deepagents-msb-') && !namesBefore.has(name),
           );
         assert.deepStrictEqual(leftovers, []);
+      });
+    });
+
+    describe('configure', () => {
+      it('keeps a named sandbox persistent when configure() marks it ephemeral', async () => {
+        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const name = `deepagents-test-${randomUUID()}`;
+        const sandbox = await createMicrosandboxSandbox({
+          name,
+          configure: (builder) => builder.detached(true).ephemeral(true),
+        });
+
+        try {
+          await sandbox.writeFiles([
+            { path: '/workspace/persist.txt', content: 'survives the stop' },
+          ]);
+          await (await sdk.Sandbox.get(name)).stop();
+          assert.strictEqual(
+            await sandbox.readFile('/workspace/persist.txt'),
+            'survives the stop',
+          );
+        } finally {
+          await sandbox.dispose().catch(() => {});
+          const handle = await sdk.Sandbox.get(name).catch(() => undefined);
+          if (handle) {
+            await (await handle.connectOrStart()).destroy().catch(() => {});
+          }
+        }
+      });
+
+      it('applies the factory workdir after configure()', async () => {
+        await using sandbox = await createMicrosandboxSandbox({
+          workdir: '/workspace',
+          configure: (builder) => builder.workdir('/tmp'),
+        });
+        const result = await sandbox.executeCommand('pwd');
+        assert.deepStrictEqual(result, {
+          stdout: '/workspace\n',
+          stderr: '',
+          exitCode: 0,
+        });
       });
     });
   });
