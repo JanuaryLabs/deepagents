@@ -47,11 +47,7 @@ export type HookPredicate = (
 export type AsyncHookPredicate = (ctx: ClaudeHookInput) => Promise<boolean>;
 
 export type ReminderTarget =
-  | 'session'
-  | 'prompt'
-  | 'tool-result'
-  | 'tool-batch'
-  | 'stop-feedback';
+  'session' | 'prompt' | 'tool-result' | 'tool-batch' | 'stop-feedback';
 
 export type ReminderRule = {
   id: string;
@@ -88,9 +84,7 @@ export type CountSpec = { gte?: number; lte?: number; eq?: number };
 export type ToolNameSpec = string | ((name: string) => boolean);
 
 export type ToolCallState =
-  | 'input-available'
-  | 'output-available'
-  | 'output-error';
+  'input-available' | 'output-available' | 'output-error';
 
 export type ToolCallOptions = {
   name?: ToolNameSpec;

@@ -113,6 +113,7 @@ export function validate<T extends ValidatorConfig>(
     typeof expectedContentTypeOrSelector === 'function'
       ? expectedContentTypeOrSelector
       : selector;
+  void _selector;
   if (!_selector) {
     throw new Error('Selector function is required');
   }

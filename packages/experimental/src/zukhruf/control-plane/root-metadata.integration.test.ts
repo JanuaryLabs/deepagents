@@ -81,6 +81,7 @@ class RecordingTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     _options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
+    void _options;
     this.#handler = handler;
     return {
       [Symbol.asyncDispose]: async () => {
@@ -206,6 +207,8 @@ test('enqueue only queues; worker execution initializes root metadata', async (t
   });
 
   await using _worker = await runtime.work();
+
+  void _worker;
   await queue.runNext();
 
   const chat = await store.getChat('root-chat');
@@ -442,6 +445,8 @@ test('root initialization preserves a concurrent host metadata write', async (t)
   );
 
   await using _worker = await runtime.work();
+
+  void _worker;
   await queue.runNext();
 
   const metadata = (await store.getChat('root-cas'))?.metadata;
@@ -621,6 +626,7 @@ test('cancelling during sandbox setup prevents model sampling', async (t) => {
     userTurn('cancel-during-sandbox', 'never sample this'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   const running = queue.runNext();
   await sandboxStarted.promise;
 
@@ -678,6 +684,8 @@ test('cancellation that wins the execution claim prevents model sampling', async
   );
 
   await using _worker = await runtime.work();
+
+  void _worker;
   await queue.runNext();
 
   assert.equal(await streamStore.getStreamStatus(enqueued.id), 'cancelled');
@@ -728,6 +736,7 @@ test('cancellation after execution claim aborts pending provider setup', async (
     userTurn('cancel-pending-provider', 'start slowly'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   const running = queue.runNext();
   await providerStarted.promise;
 

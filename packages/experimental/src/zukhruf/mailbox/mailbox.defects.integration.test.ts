@@ -309,6 +309,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const h = runtimeHarness({ model });
     try {
       await using _worker = await h.runtime.work();
+      void _worker;
       await h.runtime.enqueue(
         researcher,
         userTurn('active-safe-boundary-turn', 'start working'),
@@ -393,6 +394,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const h = runtimeHarness({ model });
     try {
       await using _worker = await h.runtime.work();
+      void _worker;
       await h.runtime.enqueue(
         researcher,
         userTurn('active-final-boundary-turn', 'finish this response'),
@@ -479,6 +481,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const senderRuntime = new AgentRuntime(agent, runtimeOptions);
     try {
       await using _worker = await workerRuntime.work();
+      void _worker;
       await workerRuntime.enqueue(
         researcher,
         userTurn('cross-runtime-active-turn', 'finish this response'),
@@ -553,6 +556,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const senderRuntime = new AgentRuntime(agent, runtimeOptions);
     try {
       await using _worker = await workerRuntime.work();
+      void _worker;
 
       await senderRuntime.deliver(
         mail('first triggered task'),
@@ -598,6 +602,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     const senderRuntime = new AgentRuntime(agent, runtimeOptions);
     try {
       await using _worker = await workerRuntime.work();
+      void _worker;
       const completed = await workerRuntime.enqueue(
         researcher,
         userTurn('completed-before-queue-only-mail', 'finish first'),
@@ -721,6 +726,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
     });
     try {
       await using _worker = await h.runtime.work();
+      void _worker;
       await h.runtime.enqueue(
         researcher,
         userTurn('approval-mailbox-turn', 'send it'),
@@ -754,6 +760,7 @@ describe('zukhruf mailbox durability and delivery contracts', () => {
         MessageDeliveryMode.TriggerTurn,
       );
       await using _worker = await h.runtime.work();
+      void _worker;
       await h.queue.runNext();
 
       assert.equal(

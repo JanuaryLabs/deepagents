@@ -647,6 +647,7 @@ describe('zukhruf runtime — host sessions', () => {
       executionConfig: {},
     });
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const cancelled = await scheduleControl.runNow(
       'user-1',
@@ -720,6 +721,7 @@ describe('zukhruf runtime — host sessions', () => {
     const scheduleControl = h.runtime.plugin(scheduled);
     const conversation = { chatId: 'existing-chat', userId: 'user-1' };
     await using _worker = await h.runtime.work();
+    void _worker;
     await collectText(
       (
         await h.runtime.enqueue(conversation, {
@@ -800,6 +802,7 @@ describe('zukhruf runtime — host sessions', () => {
       executionConfig: {},
     });
     await using _worker = await h.runtime.work();
+    void _worker;
     const launched = await scheduleControl.runNow(
       'user-1',
       task.id,
@@ -877,6 +880,8 @@ Prepare the engineering report.
     assert.equal(task.recurrence, '0 9 * * 1');
 
     await using _worker = await h.runtime.work();
+
+    void _worker;
     const run = await scheduleControl.runNow('user-1', task.id, 'first-run');
     await timebox(
       async () => {
@@ -1343,9 +1348,10 @@ describe('zukhruf runtime — background executor', () => {
       return createBashTool({ sandbox: backend });
     };
     agentDeclaration.instructions = [
-      fragment('files', async ({ sandbox }) =>
-        sandbox!.sandbox.readFile('/workspace/README.md'),
-      ),
+      fragment('files', async ({ sandbox }) => {
+        assert.ok(sandbox);
+        return sandbox.sandbox.readFile('/workspace/README.md');
+      }),
     ];
 
     await using h = await harness(model, undefined, {
@@ -1407,6 +1413,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'c1', userId: 'u1' };
     const { id, stream } = await h.runtime.enqueue(conversation, turn('hi'));
@@ -1445,6 +1452,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(slowModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'c3', userId: 'u1' };
     const { id, stream } = await h.runtime.enqueue(conversation, turn('go'));
@@ -1458,6 +1466,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'c4', userId: 'u1' };
     const { id, stream } = await h.runtime.enqueue(conversation, turn('hi'));
@@ -1473,6 +1482,7 @@ describe('zukhruf runtime — background executor', () => {
       scriptedModel(track, { chunkDelayInMs: 150 }),
     );
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
 
     const conversation = { chatId: 'c5', userId: 'u1' };
     const first = await h.runtime.enqueue(conversation, turn('one'));
@@ -1501,6 +1511,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'rich-message', userId: 'u1' };
     const message: UIMessage & { role: 'user' } = {
@@ -1532,6 +1543,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'regenerate', userId: 'u1' };
     const request = turn('try again');
@@ -1560,6 +1572,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'assistant-continuation', userId: 'u1' };
     const first = await h.runtime.enqueue(conversation, turn('continue'));
@@ -1594,6 +1607,7 @@ describe('zukhruf runtime — background executor', () => {
     const gate = Promise.withResolvers<void>();
     await using h = await harness(scriptedModel(track, { gate }));
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
 
     const waiting = await h.runtime.enqueue(
       { chatId: 'c6a', userId: 'u1' },
@@ -1626,6 +1640,8 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await h.streamStore.getStreamStatus(id), 'cancelled');
 
     await using _worker = await h.runtime.work();
+
+    void _worker;
     await collectText(stream);
     await sleep(1500);
 
@@ -1661,6 +1677,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'c9', userId: 'u1' };
     const ask = turn('once');
@@ -1701,6 +1718,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'gc1', userId: 'u1' };
     await collectText(
@@ -1742,6 +1760,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'a1', userId: 'u1' };
     const { id, stream } = await h.runtime.enqueue(
@@ -1836,6 +1855,7 @@ describe('zukhruf runtime — background executor', () => {
     });
     await using h = await harness(model);
     await using _worker = await h.runtime.work();
+    void _worker;
     const conversation = { chatId: 'client-tool', userId: 'u1' };
     const ask = await h.runtime.enqueue(conversation, {
       ...turn('Help me prioritize'),
@@ -1929,6 +1949,7 @@ describe('zukhruf runtime — background executor', () => {
     });
     await using h = await harness(model);
     await using _worker = await h.runtime.work();
+    void _worker;
     const conversation = { chatId: 'elements-chat', userId: 'u1' };
 
     const first = await h.runtime.enqueue(conversation, {
@@ -1985,6 +2006,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'a2', userId: 'u1' };
     const ask = await h.runtime.enqueue(conversation, turn('send it'));
@@ -2001,8 +2023,10 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(track.toolRuns, 1, 'tool executed exactly once');
     const messages = await h.runtime.observe(conversation).engine.getMessages();
     assert.equal(messages.length, 2, 'one user + ONE assistant message');
-    const final = messages.at(-1)!;
-    const toolPart = final.parts.find(isToolUIPart)!;
+    const final = messages.at(-1);
+    assert.ok(final);
+    const toolPart = final.parts.find(isToolUIPart);
+    assert.ok(toolPart);
     assert.equal(toolPart.state, 'output-available');
     assert.equal(toolPart.output, 'sent:a@b.c');
     assert.equal(await h.streamStore.getStreamStatus(ask.id), 'completed');
@@ -2012,6 +2036,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
     const conversation = { chatId: 'sibling-approvals', userId: 'u1' };
     const ask = await h.runtime.enqueue(conversation, turn('send both'));
     await collectText(ask.stream);
@@ -2035,6 +2060,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = siblingApprovalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
     const conversation = {
       chatId: 'concurrent-sibling-approvals',
       userId: 'u1',
@@ -2083,6 +2109,7 @@ describe('zukhruf runtime — background executor', () => {
         }),
     });
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
     const conversation = { chatId: 'approval-revival-retry', userId: 'u1' };
     const ask = await h.runtime.enqueue(conversation, turn('send it'));
     await collectText(ask.stream);
@@ -2125,6 +2152,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'a3', userId: 'u1' };
     await collectText(
@@ -2142,8 +2170,10 @@ describe('zukhruf runtime — background executor', () => {
 
     const final = (
       await h.runtime.observe(conversation).engine.getMessages()
-    ).at(-1)!;
-    const toolPart = final.parts.find(isToolUIPart)!;
+    ).at(-1);
+    assert.ok(final);
+    const toolPart = final.parts.find(isToolUIPart);
+    assert.ok(toolPart);
     assert.equal(toolPart.state, 'output-denied');
     assert.deepStrictEqual(
       {
@@ -2158,6 +2188,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
 
     const conversation = { chatId: 'a4', userId: 'u1' };
     await collectText(
@@ -2196,6 +2227,7 @@ describe('zukhruf runtime — background executor', () => {
     const { tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'gc-pause', userId: 'u1' };
     await collectText(
@@ -2233,6 +2265,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'gc-deny', userId: 'u1' };
     await collectText(
@@ -2280,6 +2313,8 @@ describe('zukhruf runtime — background executor', () => {
     );
 
     await using _worker = await h.runtime.work();
+
+    void _worker;
     const reader = queued.stream.getReader();
     try {
       let text = '';
@@ -2304,6 +2339,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
 
     const conversation = { chatId: 'gc-behind', userId: 'u1' };
     await collectText(
@@ -2375,6 +2411,8 @@ describe('zukhruf runtime — background executor', () => {
     await h.runtime.observe(conversation).cancel(id);
 
     await using _worker = await h.runtime.work();
+
+    void _worker;
     await collectText(stream);
     await sleep(500);
 
@@ -2391,6 +2429,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
 
     const conversation = { chatId: 'gc-parkcancel', userId: 'u1' };
     await collectText(
@@ -2444,6 +2483,7 @@ describe('zukhruf runtime — background executor', () => {
     const { track, tools, model } = approvalSetup();
     await using h = await harness(model, tools);
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'gc-cancelpaused', userId: 'u1' };
     const paused = await h.runtime.enqueue(conversation, turn('send it'));
@@ -2474,6 +2514,7 @@ describe('zukhruf runtime — background executor', () => {
     const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
     await using h = await harness(scriptedModel(track));
     await using _worker = await h.runtime.work();
+    void _worker;
 
     const conversation = { chatId: 'c8', userId: 'u1' };
     const crashed = await h.runtime.enqueue(conversation, turn('boom'));

@@ -102,6 +102,7 @@ async function runtimeHarness(
 
 async function drainStream(stream: ReadableStream): Promise<void> {
   for await (const _part of stream) {
+    void _part;
     // Execution is driven by the runtime; this only waits for terminal output.
   }
 }
@@ -230,7 +231,8 @@ describe('zukhruf runtime mailbox delivery', () => {
       'one trigger schedules exactly one target turn',
     );
     const wake = jobs[0]?.data as TurnRef | undefined;
-    assert.equal(wake?.kind, 'mailbox');
+    assert.ok(wake);
+    assert.equal(wake.kind, 'mailbox');
     assert.deepStrictEqual(
       wakePushObservations,
       [true],
@@ -238,6 +240,8 @@ describe('zukhruf runtime mailbox delivery', () => {
     );
 
     await using _worker = await h.runtime.work();
+
+    void _worker;
     await t.waitFor(() => assert.equal(prompts.length, 1), {
       interval: 20,
       timeout: 5_000,
@@ -252,7 +256,7 @@ describe('zukhruf runtime mailbox delivery', () => {
       positions.toSorted((a, b) => a - b),
       positions,
     );
-    await waitForStatus(h.streamStore, wake!.streamId, 'completed');
+    await waitForStatus(h.streamStore, wake.streamId, 'completed');
     const resumed = await h.runtime.observe(researcher).resume();
     assert.ok(
       resumed,
@@ -351,6 +355,7 @@ describe('zukhruf runtime mailbox delivery', () => {
     });
     await using h = await runtimeHarness(model);
     await using _worker = await h.runtime.work({ concurrency: 2 });
+    void _worker;
 
     const running = await h.runtime.enqueue(researcher, {
       message: {
