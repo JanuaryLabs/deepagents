@@ -1,4 +1,3 @@
-import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { mkdir } from 'node:fs/promises';
@@ -16,23 +15,7 @@ import {
   pkg,
 } from '@deepagents/context';
 
-async function isDockerAvailable(): Promise<boolean> {
-  try {
-    await spawn('docker', ['info']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-describe('bin installer', async () => {
-  const dockerAvailable = await isDockerAvailable();
-
-  if (!dockerAvailable) {
-    console.log('Skipping bin installer tests: Docker not available');
-    return;
-  }
-
+describe('bin installer', () => {
   let tempDir: string;
   const HELLO_BINARY = '/mnt/bin/hello.js';
 

@@ -33,18 +33,6 @@ import {
   useSandbox,
 } from '@deepagents/context';
 
-/**
- * Check if Docker is available on this machine.
- */
-async function isDockerAvailable(): Promise<boolean> {
-  try {
-    await spawn('docker', ['info']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function testVolumeName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -77,16 +65,9 @@ class DeleteVolumeThenFailInstaller extends Installer {
  * Integration tests for Docker sandbox.
  *
  * These tests require Docker to be installed and running.
- * Tests are skipped gracefully if Docker is not available.
+ * Tests fail explicitly if Docker is not available.
  */
-describe('Docker Sandbox', async () => {
-  const dockerAvailable = await isDockerAvailable();
-
-  if (!dockerAvailable) {
-    console.log('Skipping Docker sandbox tests: Docker not available');
-    return;
-  }
-
+describe('Docker Sandbox', () => {
   describe('createDockerSandbox', () => {
     describe('container creation', () => {
       it('creates container with default settings', async () => {

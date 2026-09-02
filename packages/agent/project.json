@@ -14,7 +14,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/agent.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/agent.xml --test-force-exit",
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/agent.xml",
         "cwd": "{projectRoot}"
       }
     }

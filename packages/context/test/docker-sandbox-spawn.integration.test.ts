@@ -1,4 +1,3 @@
-import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { after, before, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -9,15 +8,6 @@ import {
   createBashTool,
   createDockerSandbox,
 } from '@deepagents/context';
-
-async function isDockerAvailable(): Promise<boolean> {
-  try {
-    await spawn('docker', ['info']);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function readAllText(
   stream: ReadableStream<Uint8Array>,
@@ -44,14 +34,7 @@ async function readFirstChunk(
   }
 }
 
-describe('Docker Sandbox — spawn', async () => {
-  const dockerAvailable = await isDockerAvailable();
-
-  if (!dockerAvailable) {
-    console.log('Skipping Docker spawn tests: Docker not available');
-    return;
-  }
-
+describe('Docker Sandbox — spawn', () => {
   let sandbox: DisposableSandbox;
   let dockerSpawn: NonNullable<DisposableSandbox['spawn']>;
 

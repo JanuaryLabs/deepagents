@@ -7,10 +7,6 @@ import { startPostgresContainer } from '@deepagents/test';
 describe('startPostgresContainer readiness contract', () => {
   it('resolves to a container that accepts TCP queries immediately, no retry', async () => {
     await using container = await startPostgresContainer();
-    if (!container) {
-      return; // Docker not available.
-    }
-
     // The contract every caller relies on: the moment startPostgresContainer
     // resolves, the connection string is usable over TCP — no retry loop. A
     // readiness probe that trusted the init-time socket-only server would let

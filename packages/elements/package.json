@@ -23,7 +23,7 @@
           "{workspaceRoot}/test-results/elements.xml"
         ],
         "options": {
-          "command": "node ../../tools/src/run-node-tests.ts ../../test-results/elements.xml --test-force-exit"
+          "command": "node ../../tools/src/run-node-tests.ts ../../test-results/elements.xml"
         }
       }
     }

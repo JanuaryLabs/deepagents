@@ -24,7 +24,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/evals.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/evals.xml --test-force-exit"
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/evals.xml"
       }
     }
   }

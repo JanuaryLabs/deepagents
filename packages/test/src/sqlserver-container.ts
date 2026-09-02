@@ -2,7 +2,7 @@ import sql from 'mssql';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-import { checkDockerAvailable, startContainer } from './container.ts';
+import { startContainer } from './container.ts';
 import { timebox } from './timebox.ts';
 
 export const SQL_SERVER_FULL_IMAGE =
@@ -167,7 +167,7 @@ async function createDatabase(
  * Helper to run a test function with a SQL Server container.
  * Automatically handles setup and cleanup.
  *
- * If Docker is not available, returns undefined and logs a skip message.
+ * Docker is required. If it is unavailable, the test fails explicitly.
  *
  * @example
  * ```typescript
@@ -182,12 +182,8 @@ async function createDatabase(
 export async function withSqlServerContainer<T>(
   fn: (container: SqlServerContainer) => Promise<T>,
   config?: SqlServerContainerConfig,
-): Promise<T | undefined> {
+): Promise<T> {
   const shared = await resolveSharedSqlServer(config);
-  if (!shared) {
-    return undefined;
-  }
-
   const database = `test_${randomUUID().replace(/-/g, '')}`;
   await createDatabase(shared.host, shared.port, shared.password, database);
 
@@ -295,7 +291,7 @@ function sqlServerConfigMatches(
 
 function resolveSharedSqlServer(
   config?: SqlServerContainerConfig,
-): Promise<SqlServerContainer | undefined> {
+): Promise<SqlServerContainer> {
   const provisioned = sqlServerFromEnv();
   if (provisioned && sqlServerConfigMatches(provisioned, config)) {
     return Promise.resolve(provisioned);
@@ -305,22 +301,20 @@ function resolveSharedSqlServer(
 
 const sharedSqlServerContainers = new Map<
   string,
-  Promise<SqlServerContainer | undefined>
+  Promise<SqlServerContainer>
 >();
 const sharedSqlServerContainerIds = new Set<string>();
 let sqlServerExitHookRegistered = false;
 
 function sharedSqlServerContainer(
   config?: SqlServerContainerConfig,
-): Promise<SqlServerContainer | undefined> {
+): Promise<SqlServerContainer> {
   const key = JSON.stringify(config ?? {});
   let pending = sharedSqlServerContainers.get(key);
   if (!pending) {
     pending = startSqlServerContainer(config).then((container) => {
-      if (container) {
-        sharedSqlServerContainerIds.add(container.containerId);
-        registerSqlServerExitCleanup();
-      }
+      sharedSqlServerContainerIds.add(container.containerId);
+      registerSqlServerExitCleanup();
       return container;
     });
     sharedSqlServerContainers.set(key, pending);
@@ -350,12 +344,7 @@ function registerSqlServerExitCleanup(): void {
  */
 export async function startSqlServerContainer(
   config?: SqlServerContainerConfig,
-): Promise<SqlServerContainer | undefined> {
-  const dockerAvailable = await checkDockerAvailable('SQL Server tests');
-  if (!dockerAvailable) {
-    return undefined;
-  }
-
+): Promise<SqlServerContainer> {
   const image = config?.image ?? defaultSqlServerImage();
   const password = config?.password ?? 'StrongP@ssw0rd123!';
   const database = config?.database ?? 'testdb';

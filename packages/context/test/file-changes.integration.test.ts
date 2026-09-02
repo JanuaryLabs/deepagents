@@ -2,7 +2,6 @@ import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
 import { generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { build } from 'esbuild';
-import spawn from 'nano-spawn';
 import assert from 'node:assert';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,24 +17,12 @@ import {
   withStraceFileChanges,
 } from '@deepagents/context';
 
-async function isDockerAvailable(): Promise<boolean> {
-  try {
-    await spawn('docker', ['info']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Native-arch image with strace + python3 baked in. ContainerfileStrategy
 // content-hash-caches the build, so the apt install runs once per machine.
 const STRACE_IMAGE =
   'FROM debian:stable-slim\n' +
   'RUN apt-get update && apt-get install -y --no-install-recommends strace python3 ' +
   '&& rm -rf /var/lib/apt/lists/*\n';
-
-const dockerAvailable = await isDockerAvailable();
-const dockerSuite = dockerAvailable ? describe : describe.skip;
 
 // `selfTestStrace` runs in-process (nano-spawn + node:fs), so the probe tests
 // exercise it the way the real consumer does: a node process inside the
@@ -76,7 +63,7 @@ async function buildProbeBundle(): Promise<string> {
   return result.outputFiles[0].text;
 }
 
-const probeBundle = dockerAvailable ? await buildProbeBundle() : '';
+const probeBundle = await buildProbeBundle();
 
 type DockerBackend = Awaited<ReturnType<typeof createDockerSandbox>>;
 
@@ -161,7 +148,7 @@ interface Recorder {
   readonly calls: FileChange[][];
 }
 
-dockerSuite('strace file-change tracking (docker backend)', () => {
+describe('strace file-change tracking (docker backend)', () => {
   const ROOT = `/work-${process.pid}`;
 
   // The public surface is the onFileChanges callback (fired per command); the
@@ -490,7 +477,7 @@ dockerSuite('strace file-change tracking (docker backend)', () => {
   });
 });
 
-dockerSuite('onFileChanges failure handling (docker backend)', () => {
+describe('onFileChanges failure handling (docker backend)', () => {
   const ROOT = `/iso-${process.pid}`;
 
   const throwBoom = () => {
@@ -777,7 +764,7 @@ dockerSuite('onFileChanges failure handling (docker backend)', () => {
 // on arm64.
 const emulatesAmd64 = process.arch === 'arm64';
 
-dockerSuite('selfTestStrace (in-container)', () => {
+describe('selfTestStrace (in-container)', () => {
   it('reports OK on a real strace-capable container', async () => {
     const backend = await createDockerSandbox({
       dockerfile: NODE_STRACE_IMAGE,

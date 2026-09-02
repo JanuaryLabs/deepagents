@@ -2,7 +2,7 @@ import spawn from 'nano-spawn';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-import { checkDockerAvailable, startContainer } from './container.ts';
+import { startContainer } from './container.ts';
 import { timebox } from './timebox.ts';
 
 /**
@@ -52,7 +52,7 @@ export interface PostgresContainer extends AsyncDisposable {
  * instead of a fresh container (~2s). Each call still sees an empty database, so
  * existing per-test suites keep their isolation while paying the boot once.
  *
- * If Docker is not available, returns undefined and logs a skip message.
+ * Docker is required. If it is unavailable, the test fails explicitly.
  *
  * @example
  * ```typescript
@@ -67,12 +67,8 @@ export interface PostgresContainer extends AsyncDisposable {
 export async function withPostgresContainer<T>(
   fn: (container: PostgresContainer) => Promise<T>,
   config?: PostgresContainerConfig,
-): Promise<T | undefined> {
+): Promise<T> {
   const shared = await resolveSharedPostgres(config);
-  if (!shared) {
-    return undefined;
-  }
-
   const database = `test_${randomUUID().replace(/-/g, '')}`;
   await psql(shared, `CREATE DATABASE ${database}`);
 
@@ -160,7 +156,7 @@ function postgresConfigMatches(
 
 function resolveSharedPostgres(
   config?: PostgresContainerConfig,
-): Promise<PostgresContainer | undefined> {
+): Promise<PostgresContainer> {
   const provisioned = postgresFromEnv();
   if (provisioned && postgresConfigMatches(provisioned, config)) {
     return Promise.resolve(provisioned);
@@ -168,24 +164,19 @@ function resolveSharedPostgres(
   return sharedPostgresContainer(config);
 }
 
-const sharedPostgresContainers = new Map<
-  string,
-  Promise<PostgresContainer | undefined>
->();
+const sharedPostgresContainers = new Map<string, Promise<PostgresContainer>>();
 const sharedPostgresContainerIds = new Set<string>();
 let postgresExitHookRegistered = false;
 
 function sharedPostgresContainer(
   config?: PostgresContainerConfig,
-): Promise<PostgresContainer | undefined> {
+): Promise<PostgresContainer> {
   const key = JSON.stringify(config ?? {});
   let pending = sharedPostgresContainers.get(key);
   if (!pending) {
     pending = startPostgresContainer(config).then((container) => {
-      if (container) {
-        sharedPostgresContainerIds.add(container.containerId);
-        registerPostgresExitCleanup();
-      }
+      sharedPostgresContainerIds.add(container.containerId);
+      registerPostgresExitCleanup();
       return container;
     });
     sharedPostgresContainers.set(key, pending);
@@ -240,11 +231,7 @@ async function dropDatabase(
  */
 export async function startPostgresContainer(
   config?: PostgresContainerConfig,
-): Promise<PostgresContainer | undefined> {
-  if (!(await checkDockerAvailable('PostgreSQL tests'))) {
-    return undefined;
-  }
-
+): Promise<PostgresContainer> {
   const image = config?.image ?? 'postgres:18-alpine';
   const password = config?.password ?? 'testpassword';
   const database = config?.database ?? 'testdb';

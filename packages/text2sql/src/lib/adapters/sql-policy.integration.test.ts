@@ -564,7 +564,6 @@ const adapterCases: AdapterCase[] = [
     name: 'postgres',
     setup: async () => {
       const container = await startPostgresContainer();
-      if (!container) return undefined;
       const pool = new pg.Pool({
         connectionString: container.connectionString,
       });
@@ -594,7 +593,6 @@ const adapterCases: AdapterCase[] = [
     name: 'mysql',
     setup: async () => {
       const container = await startMysqlContainer();
-      if (!container) return undefined;
       try {
         await container.query(policyMysqlDdl);
       } catch (error) {
@@ -618,7 +616,6 @@ const adapterCases: AdapterCase[] = [
     name: 'sqlserver',
     setup: async () => {
       const container = await startSqlServerContainer();
-      if (!container) return undefined;
       const pool = new sql.ConnectionPool(container.connectionString);
       try {
         await pool.connect();

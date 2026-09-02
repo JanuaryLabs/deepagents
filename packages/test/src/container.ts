@@ -158,22 +158,6 @@ export async function createContainer(
   }
 }
 
-/**
- * Check if Docker is available and optionally log a skip message.
- * Returns true if Docker is available, false otherwise.
- *
- * @internal
- */
-export async function checkDockerAvailable(
-  testName?: string,
-): Promise<boolean> {
-  const available = await isDockerAvailable();
-  if (!available && testName) {
-    console.log(`Skipping ${testName}: Docker not available`);
-  }
-  return available;
-}
-
 export interface StartContainerOptions extends Omit<
   ContainerConfig,
   'name' | 'env'
@@ -202,22 +186,18 @@ function dockerNameSlug(image: string): string {
  * required. Maps the internal port to a random host port, waits for the
  * `healthy` probe, and returns an {@link AsyncDisposable} handle.
  *
- * Throws if Docker is unavailable, so the result is always usable (no null
- * check). Guard the suite once with {@link isDockerAvailable} instead:
+ * Docker is required. If it is unavailable, the test fails explicitly.
  *
  * @example
  * ```typescript
- * const hasDocker = await isDockerAvailable();
- * describe('redis', { skip: hasDocker ? false : 'Docker not available' }, () => {
- *   it('pings', async () => {
- *     await using redis = await startContainer({
- *       image: 'redis:7-alpine',
- *       internalPort: 6379,
- *       healthy: ({ exec }) => timebox(() => exec(['redis-cli', 'ping'])),
- *     });
- *     const url = `redis://localhost:${redis.port}`;
- *     // ... auto-disposed at scope exit
+ * it('pings', async () => {
+ *   await using redis = await startContainer({
+ *     image: 'redis:7-alpine',
+ *     internalPort: 6379,
+ *     healthy: ({ exec }) => timebox(() => exec(['redis-cli', 'ping'])),
  *   });
+ *   const url = `redis://localhost:${redis.port}`;
+ *   // ... auto-disposed at scope exit
  * });
  * ```
  */
@@ -225,9 +205,7 @@ export async function startContainer(
   options: StartContainerOptions,
 ): Promise<Container> {
   if (!(await isDockerAvailable())) {
-    throw new Error(
-      'Docker is not available. Guard the suite with `describe(name, { skip: !(await isDockerAvailable()) && "Docker not available" }, ...)`.',
-    );
+    throw new Error('Docker is required for container-backed tests');
   }
 
   const name =

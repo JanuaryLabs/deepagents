@@ -8,7 +8,7 @@ import { withPostgresContainer } from '@deepagents/test';
  * Integration tests for PostgreSQL ContextStore.
  *
  * These tests require Docker to be installed and running.
- * Tests are skipped gracefully if Docker is not available.
+ * Tests fail explicitly if Docker is not available.
  */
 describe('PostgreSQL ContextStore Integration', () => {
   // ==========================================================================

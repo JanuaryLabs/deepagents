@@ -21,8 +21,7 @@ const ALPINE = 'docker.io/library/bash:5.3-alpine3.24';
  * The Apple `container` backend only works on Apple silicon (macOS 26+) with
  * the service running and a guest kernel configured. Probe by actually booting
  * a throwaway container — anything short of that (Linux CI, stopped service,
- * missing kernel) returns false and skips the runtime suite, mirroring the
- * Docker suite's `isDockerAvailable()` guard.
+ * missing kernel) returns false and skips the runtime suite.
  */
 async function isAppleContainerUsable(): Promise<boolean> {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return false;

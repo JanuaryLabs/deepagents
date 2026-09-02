@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const [reportPath, ...testArguments] = process.argv.slice(2);
@@ -9,9 +9,9 @@ if (!reportPath) {
 }
 
 const report = resolve(reportPath);
-await mkdir(dirname(report), { recursive: true });
+mkdirSync(dirname(report), { recursive: true });
 
-const child = spawn(
+const child = spawnSync(
   process.execPath,
   [
     '--test',
@@ -25,14 +25,6 @@ const child = spawn(
   { stdio: 'inherit' },
 );
 
-child.once('error', (error) => {
-  throw error;
-});
+if (child.error) throw child.error;
 
-const exitCode = await new Promise<number>((resolveExitCode) => {
-  child.once('exit', (code, signal) => {
-    resolveExitCode(code ?? (signal ? 1 : 0));
-  });
-});
-
-process.exitCode = exitCode;
+process.exitCode = child.status ?? (child.signal ? 1 : 0);

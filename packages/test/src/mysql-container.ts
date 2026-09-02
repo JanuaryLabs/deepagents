@@ -2,7 +2,7 @@ import spawn from 'nano-spawn';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-import { checkDockerAvailable, startContainer } from './container.ts';
+import { startContainer } from './container.ts';
 import { timebox } from './timebox.ts';
 
 export interface MysqlContainerConfig {
@@ -82,12 +82,8 @@ function makeMysqlQuery(
 export async function withMysqlContainer<T>(
   fn: (container: MysqlContainer) => Promise<T>,
   config?: MysqlContainerConfig,
-): Promise<T | undefined> {
+): Promise<T> {
   const shared = await resolveSharedMysql(config);
-  if (!shared) {
-    return undefined;
-  }
-
   const database = `test_${randomUUID().replace(/-/g, '')}`;
   await createMysqlDatabase(shared, database);
 
@@ -211,7 +207,7 @@ function mysqlConfigMatches(
 
 function resolveSharedMysql(
   config?: MysqlContainerConfig,
-): Promise<MysqlContainer | undefined> {
+): Promise<MysqlContainer> {
   const provisioned = mysqlFromEnv();
   if (provisioned && mysqlConfigMatches(provisioned, config)) {
     return Promise.resolve(provisioned);
@@ -219,24 +215,19 @@ function resolveSharedMysql(
   return sharedMysqlContainer(config);
 }
 
-const sharedMysqlContainers = new Map<
-  string,
-  Promise<MysqlContainer | undefined>
->();
+const sharedMysqlContainers = new Map<string, Promise<MysqlContainer>>();
 const sharedMysqlContainerIds = new Set<string>();
 let mysqlExitHookRegistered = false;
 
 function sharedMysqlContainer(
   config?: MysqlContainerConfig,
-): Promise<MysqlContainer | undefined> {
+): Promise<MysqlContainer> {
   const key = JSON.stringify(config ?? {});
   let pending = sharedMysqlContainers.get(key);
   if (!pending) {
     pending = startMysqlContainer(config).then((container) => {
-      if (container) {
-        sharedMysqlContainerIds.add(container.containerId);
-        registerMysqlExitCleanup();
-      }
+      sharedMysqlContainerIds.add(container.containerId);
+      registerMysqlExitCleanup();
       return container;
     });
     sharedMysqlContainers.set(key, pending);
@@ -262,11 +253,7 @@ function registerMysqlExitCleanup(): void {
 
 export async function startMysqlContainer(
   config?: MysqlContainerConfig,
-): Promise<MysqlContainer | undefined> {
-  if (!(await checkDockerAvailable('MySQL tests'))) {
-    return undefined;
-  }
-
+): Promise<MysqlContainer> {
   const image = config?.image ?? 'mysql:8.4';
   const password = config?.password ?? 'testpassword';
   const database = config?.database ?? 'app';

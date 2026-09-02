@@ -9,7 +9,7 @@ import { waitForFtsReady, withSqlServerContainer } from '@deepagents/test';
  * Integration tests for SQL Server ContextStore.
  *
  * These tests require Docker to be installed and running.
- * Tests are skipped gracefully if Docker is not available.
+ * Tests fail explicitly if Docker is not available.
  */
 describe('SQL Server ContextStore Integration', () => {
   // ==========================================================================

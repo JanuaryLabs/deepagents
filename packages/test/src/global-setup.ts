@@ -38,10 +38,8 @@ const provisioned: ProvisionedContainer[] = [];
  */
 export async function postgresGlobalSetup(): Promise<void> {
   const container = await startPostgresContainer();
-  if (container) {
-    publishPostgresEnv(container);
-    provisioned.push(container);
-  }
+  publishPostgresEnv(container);
+  provisioned.push(container);
 }
 
 /**
@@ -51,10 +49,8 @@ export async function postgresGlobalSetup(): Promise<void> {
  */
 export async function sqlServerGlobalSetup(): Promise<void> {
   const container = await startSqlServerContainer();
-  if (container) {
-    publishSqlServerEnv(container);
-    provisioned.push(container);
-  }
+  publishSqlServerEnv(container);
+  provisioned.push(container);
 }
 
 /**
@@ -64,10 +60,8 @@ export async function sqlServerGlobalSetup(): Promise<void> {
  */
 export async function mysqlGlobalSetup(): Promise<void> {
   const container = await startMysqlContainer();
-  if (container) {
-    publishMysqlEnv(container);
-    provisioned.push(container);
-  }
+  publishMysqlEnv(container);
+  provisioned.push(container);
 }
 
 /**
