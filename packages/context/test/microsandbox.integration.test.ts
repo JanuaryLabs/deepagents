@@ -306,6 +306,82 @@ describe('Microsandbox Sandbox', async () => {
     });
 
     describe('lifecycle', () => {
+      it('keeps a detached named sandbox running across client disposal and restart', async () => {
+        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const name = `deepagents-test-${randomUUID()}`;
+        const [first, peer] = await Promise.all([
+          createMicrosandboxSandbox({
+            name,
+            configure: (builder) => builder.detached(true),
+          }),
+          createMicrosandboxSandbox({
+            name,
+            configure: (builder) => builder.detached(true),
+          }),
+        ]);
+
+        try {
+          await first.dispose();
+          assert.strictEqual(
+            (await peer.executeCommand('printf alive')).stdout,
+            'alive',
+          );
+
+          await (await sdk.Sandbox.get(name)).stop();
+          const resumed = await createMicrosandboxSandbox({
+            name,
+            configure: (builder) => builder.detached(true),
+          });
+          await resumed.dispose();
+
+          assert.strictEqual((await sdk.Sandbox.get(name)).status, 'running');
+        } finally {
+          await first.dispose().catch(() => {});
+          await peer.dispose().catch(() => {});
+          const handle = await sdk.Sandbox.get(name).catch(() => undefined);
+          if (handle) {
+            await (await handle.connectOrStart()).destroy().catch(() => {});
+          }
+        }
+      });
+
+      it('reacquires a named sandbox for concurrent operations after its endpoint stops', async () => {
+        const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
+        const name = `deepagents-test-${randomUUID()}`;
+        const sandbox = await createMicrosandboxSandbox({
+          name,
+          configure: (builder) => builder.detached(true),
+        });
+
+        try {
+          await (await sdk.Sandbox.get(name)).stop();
+          const [result] = await Promise.all([
+            sandbox.executeCommand('printf recovered'),
+            sandbox.writeFiles([
+              { path: '/workspace/recovered.txt', content: 'still writable' },
+            ]),
+          ]);
+          assert.deepStrictEqual(result, {
+            stdout: 'recovered',
+            stderr: '',
+            exitCode: 0,
+          });
+          assert.strictEqual(
+            await sandbox.readFile('/workspace/recovered.txt'),
+            'still writable',
+          );
+
+          await sandbox.dispose();
+          assert.strictEqual((await sdk.Sandbox.get(name)).status, 'running');
+        } finally {
+          await sandbox.dispose().catch(() => {});
+          const handle = await sdk.Sandbox.get(name).catch(() => undefined);
+          if (handle) {
+            await (await handle.connectOrStart()).destroy().catch(() => {});
+          }
+        }
+      });
+
       it('resumes a named sandbox with rootfs state intact after dispose', async () => {
         const sdk = (await importMicrosandboxSdk()) as MicrosandboxSdk;
         const name = `deepagents-test-${randomUUID()}`;

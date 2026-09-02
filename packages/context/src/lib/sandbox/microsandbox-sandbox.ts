@@ -2,7 +2,6 @@ import type {
   ExecHandle,
   Sandbox as MicrosandboxVm,
   SandboxBuilder,
-  SandboxHandle,
 } from 'microsandbox';
 import { randomUUID } from 'node:crypto';
 
@@ -22,14 +21,17 @@ const MICROSANDBOX_MAX_NAME_BYTES = 128;
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 
 type MicrosandboxSdk = typeof import('microsandbox');
+type RunMicrosandboxOperation = <T>(
+  operation: (vm: MicrosandboxVm) => Promise<T>,
+) => Promise<T>;
 
 export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
   /**
-   * Stable sandbox name. When provided, creation uses get-or-create
-   * semantics: attach to the running sandbox of this name, resume it if it is
-   * stopped (rootfs state intact), otherwise create it fresh. `dispose()`
-   * stops the microVM but never removes it — the next
-   * `createMicrosandboxSandbox({ name })` resumes where it left off.
+   * Stable sandbox name. When provided, the SDK connects to the running
+   * sandbox of this name, resumes it if stopped (rootfs state intact), or
+   * creates it. `dispose()` follows SDK lifecycle ownership and never removes
+   * a named sandbox. Configure the builder with `detached(true)` when the
+   * sandbox must outlive the client that creates or resumes it.
    *
    * When omitted, an ephemeral sandbox with a generated name is created and
    * fully removed on `dispose()`.
@@ -61,7 +63,7 @@ export interface MicrosandboxSandboxOptions extends SandboxReadinessOptions {
    * Escape hatch over the SDK builder for everything without a plain option
    * (volumes, network policy, secrets, user, idle timeout, …). Applied after
    * the factory's own setters, except the required Bash shell which is applied
-   * last. Only runs on creation, not when attaching to an existing sandbox.
+   * last. Existing sandbox configuration wins when connecting.
    */
   configure?: (builder: SandboxBuilder) => SandboxBuilder;
 }
@@ -142,9 +144,28 @@ export async function createMicrosandboxSandbox(
   const name = options.name ?? `deepagents-msb-${randomUUID()}`;
   const workdir = options.workdir ?? MICROSANDBOX_DEFAULT_DESTINATION;
 
+  const sandboxBuilder = (replace: boolean) => {
+    // `workdir()` alone fails boot validation when the image lacks the
+    // directory, so patch it into the rootfs first.
+    let builder = sdk.Sandbox.builder(name)
+      .image(options.image ?? MICROSANDBOX_DEFAULT_IMAGE)
+      .patch((patch) => patch.mkdir(workdir))
+      .workdir(workdir);
+    if (ephemeral) builder = builder.ephemeral(true);
+    if (replace) builder = builder.replace();
+    if (options.cpus !== undefined) builder = builder.cpus(options.cpus);
+    if (options.memory !== undefined) builder = builder.memory(options.memory);
+    if (options.env) builder = builder.envs(options.env);
+    if (options.configure) builder = options.configure(builder);
+    return builder.shell('bash');
+  };
+
   let vm: MicrosandboxVm;
   try {
-    vm = await acquireSandbox(sdk, { ...options, name, ephemeral, workdir });
+    const builder = sandboxBuilder(options.replace === true);
+    vm = await (ephemeral || options.replace
+      ? builder.create()
+      : builder.connectOrCreate());
   } catch (error) {
     throw normalizeMicrosandboxError(error, sdk);
   }
@@ -153,7 +174,7 @@ export async function createMicrosandboxSandbox(
     await vm.fs().mkdir(workdir);
     await assertMicrosandboxBash(vm);
   } catch (error) {
-    await vm.stop().catch(() => {});
+    await vm[Symbol.asyncDispose]().catch(() => {});
     if (ephemeral) await sdk.Sandbox.remove(name).catch(() => {});
     throw normalizeMicrosandboxError(error, sdk);
   }
@@ -164,6 +185,9 @@ export async function createMicrosandboxSandbox(
     name,
     ephemeral,
     commandTimeout: options.commandTimeout,
+    reconnect: ephemeral
+      ? undefined
+      : () => sandboxBuilder(false).connectOrCreate(),
   });
 
   if (options.readiness) {
@@ -183,88 +207,6 @@ async function importMicrosandbox(): Promise<MicrosandboxSdk> {
   } catch (error) {
     throw new MicrosandboxNotAvailableError(toError(error));
   }
-}
-
-async function acquireSandbox(
-  sdk: MicrosandboxSdk,
-  options: MicrosandboxSandboxOptions & {
-    name: string;
-    ephemeral: boolean;
-    workdir: string;
-  },
-): Promise<MicrosandboxVm> {
-  if (options.ephemeral || options.replace) {
-    return buildSandbox(sdk, options);
-  }
-
-  let handle: SandboxHandle;
-  try {
-    handle = await sdk.Sandbox.get(options.name);
-  } catch (error) {
-    if (error instanceof sdk.SandboxNotFoundError) {
-      return createFreshSandbox(sdk, options);
-    }
-    throw error;
-  }
-
-  if (handle.status === 'running') {
-    return handle.connect();
-  }
-  if (handle.status === 'draining') {
-    await handle.waitUntilStopped();
-  }
-
-  // A sandbox whose resume keeps failing would poison the name forever, so
-  // mirror the Daytona adapter: drop it and rebuild from scratch.
-  try {
-    return await handle.start();
-  } catch {
-    await sdk.Sandbox.remove(options.name).catch(() => {});
-    return buildSandbox(sdk, options);
-  }
-}
-
-async function createFreshSandbox(
-  sdk: MicrosandboxSdk,
-  options: MicrosandboxSandboxOptions & {
-    name: string;
-    ephemeral: boolean;
-    workdir: string;
-  },
-): Promise<MicrosandboxVm> {
-  try {
-    return await buildSandbox(sdk, options);
-  } catch (error) {
-    // Lost a create race against a concurrent caller — attach instead.
-    if (error instanceof sdk.SandboxAlreadyExistsError) {
-      const handle = await sdk.Sandbox.get(options.name);
-      return handle.status === 'running' ? handle.connect() : handle.start();
-    }
-    throw error;
-  }
-}
-
-function buildSandbox(
-  sdk: MicrosandboxSdk,
-  options: MicrosandboxSandboxOptions & {
-    name: string;
-    ephemeral: boolean;
-    workdir: string;
-  },
-): Promise<MicrosandboxVm> {
-  // `workdir()` alone fails boot validation when the image lacks the
-  // directory, so patch it into the rootfs first.
-  let builder = sdk.Sandbox.builder(options.name)
-    .image(options.image ?? MICROSANDBOX_DEFAULT_IMAGE)
-    .patch((patch) => patch.mkdir(options.workdir))
-    .workdir(options.workdir);
-  if (options.ephemeral) builder = builder.ephemeral(true);
-  if (options.replace) builder = builder.replace();
-  if (options.cpus !== undefined) builder = builder.cpus(options.cpus);
-  if (options.memory !== undefined) builder = builder.memory(options.memory);
-  if (options.env) builder = builder.envs(options.env);
-  if (options.configure) builder = options.configure(builder);
-  return builder.shell('bash').create();
 }
 
 async function assertMicrosandboxBash(vm: MicrosandboxVm): Promise<void> {
@@ -320,14 +262,32 @@ function createMicrosandboxMethods(args: {
   name: string;
   ephemeral: boolean;
   commandTimeout?: number;
+  reconnect?: () => Promise<MicrosandboxVm>;
 }): DisposableSandbox {
-  const { sdk, vm, name, ephemeral, commandTimeout } = args;
+  const { sdk, name, ephemeral, commandTimeout, reconnect } = args;
+  let vm = args.vm;
+  let reconnecting: Promise<MicrosandboxVm> | undefined;
+
+  const run: RunMicrosandboxOperation = async (operation) => {
+    try {
+      return await operation(vm);
+    } catch (error) {
+      if (!reconnect || !(error instanceof sdk.SandboxNotRunningError)) {
+        throw error;
+      }
+      reconnecting ??= reconnect().finally(() => {
+        reconnecting = undefined;
+      });
+      vm = await reconnecting;
+      return operation(vm);
+    }
+  };
 
   const spawn = (
     command: string,
     options: SpawnOptions = {},
   ): SandboxProcess => {
-    return spawnMicrosandboxProcess(sdk, vm, command, {
+    return spawnMicrosandboxProcess(sdk, run, command, {
       ...options,
       commandTimeout,
     });
@@ -359,7 +319,7 @@ function createMicrosandboxMethods(args: {
 
     async readFile(path: string): Promise<string> {
       try {
-        return await vm.fs().readToString(path);
+        return await run((vm) => vm.fs().readToString(path));
       } catch (error) {
         throw new MicrosandboxCommandError(
           `Failed to read file "${path}": ${toError(error).message}`,
@@ -370,13 +330,15 @@ function createMicrosandboxMethods(args: {
 
     async writeFiles(files): Promise<void> {
       try {
-        const fs = vm.fs();
-        for (const dir of uniqueParentDirectories(files.map((f) => f.path))) {
-          await fs.mkdir(dir);
-        }
-        for (const file of files) {
-          await fs.write(file.path, file.content);
-        }
+        await run(async (vm) => {
+          const fs = vm.fs();
+          for (const dir of uniqueParentDirectories(files.map((f) => f.path))) {
+            await fs.mkdir(dir);
+          }
+          for (const file of files) {
+            await fs.write(file.path, file.content);
+          }
+        });
       } catch (error) {
         const err = toError(error);
         throw new MicrosandboxCommandError(
@@ -387,11 +349,7 @@ function createMicrosandboxMethods(args: {
     },
 
     async dispose(): Promise<void> {
-      try {
-        await vm.stop();
-      } catch {
-        // Already stopped or mid-shutdown.
-      }
+      await vm[Symbol.asyncDispose]();
       if (ephemeral) {
         await sdk.Sandbox.remove(name).catch(() => {});
       }
@@ -405,25 +363,25 @@ function createMicrosandboxMethods(args: {
 
 function spawnMicrosandboxProcess(
   sdk: MicrosandboxSdk,
-  vm: MicrosandboxVm,
+  run: RunMicrosandboxOperation,
   command: string,
   options: SpawnOptions & { commandTimeout?: number },
 ): SandboxProcess {
   const stdout = createByteReadable();
   const stderr = createByteReadable();
-  const exit = pumpExecStream({ sdk, vm, command, options, stdout, stderr });
+  const exit = pumpExecStream({ sdk, run, command, options, stdout, stderr });
   return { stdout: stdout.stream, stderr: stderr.stream, exit };
 }
 
 async function pumpExecStream(args: {
   sdk: MicrosandboxSdk;
-  vm: MicrosandboxVm;
+  run: RunMicrosandboxOperation;
   command: string;
   options: SpawnOptions & { commandTimeout?: number };
   stdout: ByteReadable;
   stderr: ByteReadable;
 }): Promise<ExitInfo> {
-  const { sdk, vm, command, options, stdout, stderr } = args;
+  const { sdk, run, command, options, stdout, stderr } = args;
   const { signal } = options;
 
   let handle: ExecHandle | undefined;
@@ -443,12 +401,14 @@ async function pumpExecStream(args: {
   signal?.addEventListener('abort', abort, { once: true });
 
   try {
-    handle = await vm.execStreamWith('bash', (builder) => {
-      builder.args(['-lc', command]).stdinNull();
-      if (options.cwd) builder.cwd(options.cwd);
-      if (options.env) builder.envs(options.env);
-      return builder;
-    });
+    handle = await run((vm) =>
+      vm.execStreamWith('bash', (builder) => {
+        builder.args(['-lc', command]).stdinNull();
+        if (options.cwd) builder.cwd(options.cwd);
+        if (options.env) builder.envs(options.env);
+        return builder;
+      }),
+    );
     if (aborted) {
       return abortedExitInfo();
     }
