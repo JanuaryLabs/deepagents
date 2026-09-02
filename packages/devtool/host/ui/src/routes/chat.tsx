@@ -109,7 +109,7 @@ export function shouldRevalidate({
   );
 }
 
-export function ChatRoute() {
+export function Component() {
   const { chatId } = useLoaderData<typeof loader>();
   return <ChatSessionBoundary key={chatId} chatId={chatId} />;
 }

@@ -1,11 +1,6 @@
 import { createBrowserRouter, redirect } from 'react-router';
 
 import { AppLayout, loader as appLoader } from './app/layout.tsx';
-import {
-  ChatRoute,
-  loader as chatLoader,
-  shouldRevalidate as shouldRevalidateChat,
-} from './routes/chat.tsx';
 import { HistoryRoute, loader as historyLoader } from './routes/history.tsx';
 import {
   ScheduledRoute,
@@ -18,14 +13,13 @@ export const router = createBrowserRouter(
     {
       id: 'app',
       Component: AppLayout,
+      HydrateFallback: () => null,
       loader: appLoader,
       children: [
         { index: true, loader: () => redirect('/history') },
         {
           path: 'chat/:sessionId?',
-          Component: ChatRoute,
-          loader: chatLoader,
-          shouldRevalidate: shouldRevalidateChat,
+          lazy: () => import('./routes/chat.tsx'),
         },
         {
           path: 'history/:userId?/:chatId?',
