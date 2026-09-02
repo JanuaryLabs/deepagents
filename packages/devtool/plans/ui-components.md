@@ -36,8 +36,10 @@ Ownership:
 - [`../host/ui/src/main.tsx`](../host/ui/src/main.tsx),
   [`../host/ui/src/router.tsx`](../host/ui/src/router.tsx), and
   [`../host/ui/src/app`](../host/ui/src/app) own the application shell,
-  discovery/history polling, routing, navigation, and placeholder Scheduled
-  route.
+  capability discovery, routing, navigation, and shared application state.
+- [`../host/ui/src/routes/scheduled.tsx`](../host/ui/src/routes/scheduled.tsx)
+  and [`../host/ui/src/app/schedules-data.ts`](../host/ui/src/app/schedules-data.ts)
+  own the capability-gated Scheduled workspace and its data access.
 - [`../history/src/index.tsx`](../history/src/index.tsx) owns `History.Root`,
   `History.Item`, `History.ItemTrigger`, `History.Empty`, `HistoryStatusIcon`,
   and the `HistoryRecord` model.
@@ -58,8 +60,8 @@ The shared sidebar preserves provider state, desktop off-canvas behavior,
 inset restore trigger, rail, Ctrl/Cmd+B, cookie persistence, and a responsive
 sheet.
 
-Implication: scheduled-task UI belongs in feature packages, while only proven
-cross-product primitives should enter `@deepagents/react-shadcn`.
+Implication: scheduled-task composition remains DevTool-owned, while only
+proven cross-product primitives should enter `@deepagents/react-shadcn`.
 
 ### `apps/evals-web-runner/frontend`
 

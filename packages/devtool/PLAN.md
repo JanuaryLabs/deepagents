@@ -507,7 +507,8 @@ execution.
 ### Selected storage and retention
 
 - The declaration's JSONL file is the only durable telemetry store. Its path is
-  exposed locally as a `file:` URI through discovery.
+  private to the runtime process; discovery advertises only the authenticated
+  trace route.
 - The devtool file adapter is read-only and stateless. Restart persistence
   follows the file, and deleting or rotating that file deletes or rotates the
   traces.
