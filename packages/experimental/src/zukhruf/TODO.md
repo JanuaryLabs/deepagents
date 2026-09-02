@@ -60,7 +60,7 @@
 - [x] `AgentTurnExecutor` gate (park before chain/sandbox); TurnRef contains message, internal
       recovery, and mailbox work only.
 - [x] Port: `ConsumeContext.park()` + `TurnQueue.resumeParked(chatId)`; pg-boss self-cancel/resume,
-      contract-tested for park/revive order.
+      recovery-aware revival, and two contract tests (park/revive order; recovery outranks).
 - [x] Runtime integration coverage for pause, approval, denial, sibling responses, and queue-behind
       ordering through complete assistant messages.
 - [x] Make the assistant-message worker own response persistence, original-turn resumption, and
@@ -121,9 +121,9 @@
       returns the previous status, and leaves the target reusable. Terminal and approval-paused
       targets no-op; no broader close/resume/shutdown lifecycle was added.
 - [x] Port Codex host configuration for separate root/subagent guidance, spawn usage text,
-      validated OpenAI Responses tool namespaces, and wait bounds. Keep collaboration tools on the
-      direct model surface when `nonCodeModeOnly` is true and expose them through native AI SDK
-      code mode when false.
+      validated OpenAI Responses tool namespaces, and wait bounds. Require every spawn to choose
+      `fork_turns`. Keep collaboration tools on the direct model surface by default and expose them
+      through native AI SDK code mode when `nonCodeModeOnly` is false.
 - [ ] Add explicit spawn-context contracts for dedicated subagent developer instructions and the
       current turn's host execution context/environment. Reuse existing Zukhruf declaration,
       instruction-fragment, sandbox, and fork-snapshot primitives; do not copy Codex's Rust

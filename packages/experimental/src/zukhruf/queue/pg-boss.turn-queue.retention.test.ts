@@ -83,6 +83,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
     await using _consumer = await h.queue.consume(async (turn) => {
       seen.push(turn.streamId); // commit: handler returns without parking
     }, noOrphans);
+    void _consumer;
 
     await h.queue.push(ref('c1', 1));
     await h.queue.push(ref('c1', 2));
@@ -110,6 +111,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
       }
       ran.push(turn.streamId);
     }, noOrphans);
+    void _consumer;
 
     await h.queue.push(ref('gchat', 1));
     await waitFor(t, () => parkCount === 1, 'turn parked');
@@ -160,6 +162,7 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
       parkCount += 1;
       await ctx.park();
     }, noOrphans);
+    void _consumer;
     await h.queue.push(ref('gchat', 1));
     await waitFor(t, () => parkCount === 1, 'turn parked on the durable queue');
 
@@ -169,15 +172,16 @@ describe('PgBossTurnQueue — retention & commit-GC (pglite)', () => {
       { t: 'c' },
       { singletonKey: 'k' },
     );
+    assert.ok(controlId);
     await h.boss.fetch(control, {}); // → active
-    await h.boss.cancel(control, controlId!); // → cancelled
+    await h.boss.cancel(control, controlId); // → cancelled
 
     // Poll real wall-clock time until retention actually deletes the control
     // job — that is the proof the retention window has elapsed for real.
     await timebox(
       async () => {
         await h.boss.supervise(control);
-        if (await h.boss.getJobById(control, controlId!)) {
+        if (await h.boss.getJobById(control, controlId)) {
           throw new Error('control job not deleted yet');
         }
       },

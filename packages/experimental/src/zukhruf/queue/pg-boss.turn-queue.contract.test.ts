@@ -1,7 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { type TestContext, type TestOptions, suite, test } from 'node:test';
+import { type TestContext, suite, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   type ConstructorOptions,
@@ -17,7 +17,7 @@ import type {
   TurnRef,
 } from '@deepagents/experimental/zukhruf';
 import { PgBossTurnQueue } from '@deepagents/experimental/zukhruf';
-import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
+import { withPostgresContainer } from '@deepagents/test';
 
 /**
  * Behavioral contract every TurnQueue implementation must pass.
@@ -49,7 +49,6 @@ interface PostgresQueueHarnessOptions {
 interface TurnQueueContract {
   name: string;
   makeQueue: () => Promise<TurnQueueHarness>;
-  skip?: TestOptions['skip'];
 }
 
 function waitFor(
@@ -104,14 +103,22 @@ function ref(chat: string, n: number): MessageRef {
   };
 }
 
+function recoveryRef(chat: string): Extract<TurnRef, { kind: 'recovery' }> {
+  return {
+    kind: 'recovery',
+    mode: 'handoff',
+    streamId: `turn/${chat}#recovery:${crypto.randomUUID()}`,
+    chatId: chat,
+    userId: 'u1',
+  };
+}
+
 const noOrphans = { onOrphaned: async () => {} };
-const dockerAvailable = await isDockerAvailable();
 
 const turnQueueContracts = [
   {
     name: 'PgBossTurnQueue (postgres)',
     makeQueue: postgresQueueHarness,
-    skip: dockerAvailable ? false : 'Docker is unavailable',
   },
   {
     name: 'PgBossTurnQueue (pglite)',
@@ -120,74 +127,134 @@ const turnQueueContracts = [
 ] satisfies TurnQueueContract[];
 
 for (const contract of turnQueueContracts) {
-  suite(
-    `TurnQueue contract — ${contract.name}`,
-    { skip: contract.skip },
-    () => {
-      test('delivers a turn pushed before any consumer existed, payload intact', async (t) => {
-        await using h = await contract.makeQueue();
-        const pushed = ref('durable', 1);
-        await h.queue.push(pushed);
-        await sleep(300);
+  suite(`TurnQueue contract — ${contract.name}`, () => {
+    test('delivers a turn pushed before any consumer existed, payload intact', async (t) => {
+      await using h = await contract.makeQueue();
+      const pushed = ref('durable', 1);
+      await h.queue.push(pushed);
+      await sleep(300);
 
-        const seen: TurnRef[] = [];
-        await using _consumer = await h.queue.consume(async (turn) => {
-          seen.push(turn);
-        }, noOrphans);
+      const seen: TurnRef[] = [];
+      await using _consumer = await h.queue.consume(async (turn) => {
+        seen.push(turn);
+      }, noOrphans);
+      void _consumer;
 
-        await waitFor(
-          t,
-          () => seen.length === 1,
-          'late consumer receives turn',
+      await waitFor(t, () => seen.length === 1, 'late consumer receives turn');
+      assert.deepStrictEqual(seen[0], pushed);
+    });
+
+    test('reports queued and active scheduler work until the turn settles', async () => {
+      await using h = await contract.makeQueue();
+      const turn = ref('status', 1);
+      const conversation = { chatId: turn.chatId, userId: turn.userId };
+      assert.equal(await h.queue.getTurnActivity(conversation), 'idle');
+
+      await h.queue.push(turn);
+      assert.equal(await h.queue.getTurnActivity(conversation), 'queued');
+
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      await using _consumer = await h.queue.consume(async () => {
+        started.resolve();
+        await release.promise;
+      }, noOrphans);
+      void _consumer;
+      try {
+        assert.equal(
+          await Promise.race([
+            started.promise.then(() => true),
+            sleep(5_000).then(() => false),
+          ]),
+          true,
+          'active handler starts',
         );
-        assert.deepStrictEqual(seen[0], pushed);
-      });
+        assert.equal(await h.queue.getTurnActivity(conversation), 'running');
 
-      test('reports queued and active scheduler work until the turn settles', async () => {
-        await using h = await contract.makeQueue();
-        const turn = ref('status', 1);
-        const conversation = { chatId: turn.chatId, userId: turn.userId };
-        assert.equal(await h.queue.getTurnActivity(conversation), 'idle');
+        release.resolve();
+        await waitForAsync(
+          async () => (await h.queue.getTurnActivity(conversation)) === 'idle',
+          'settled turn disappears from scheduler status',
+        );
+      } finally {
+        release.resolve();
+      }
+    });
 
-        await h.queue.push(turn);
-        assert.equal(await h.queue.getTurnActivity(conversation), 'queued');
+    test('finds and cancels every copy of the oldest queued stream id', async (t) => {
+      await using h = await contract.makeQueue();
+      const first = ref('interrupt-queued', 1);
+      const second = ref('interrupt-queued', 2);
+      await h.queue.push(first);
+      await h.queue.push(first);
+      await h.queue.push(second);
 
-        const started = Promise.withResolvers<void>();
-        const release = Promise.withResolvers<void>();
-        await using _consumer = await h.queue.consume(async () => {
+      assert.deepStrictEqual(
+        await h.queue.getCurrentTurn({
+          chatId: first.chatId,
+          userId: first.userId,
+        }),
+        first,
+      );
+      await h.queue.cancel(first.streamId);
+      assert.deepStrictEqual(
+        await h.queue.getCurrentTurn({
+          chatId: first.chatId,
+          userId: first.userId,
+        }),
+        second,
+      );
+
+      const seen: TurnRef[] = [];
+      await using _consumer = await h.queue.consume(async (turn) => {
+        seen.push(turn);
+      }, noOrphans);
+      void _consumer;
+      await waitFor(
+        t,
+        () => seen.length === 1,
+        'successor runs after cancellation',
+      );
+      assert.deepStrictEqual(seen, [second]);
+    });
+
+    test('cancelling an active turn aborts its handler without overlapping its successor', async (t) => {
+      await using h = await contract.makeQueue();
+      const first = ref('interrupt-active', 1);
+      const second = ref('interrupt-active', 2);
+      await h.queue.push(first);
+      await h.queue.push(second);
+
+      const started = Promise.withResolvers<void>();
+      const aborted = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const successorStarted = Promise.withResolvers<void>();
+      const seen: TurnRef[] = [];
+      await using _consumer = await h.queue.consume(
+        async (turn, context) => {
+          if (turn.streamId !== first.streamId) {
+            seen.push(turn);
+            successorStarted.resolve();
+            return;
+          }
           started.resolve();
+          await once(context.signal, 'abort');
+          aborted.resolve();
           await release.promise;
-        }, noOrphans);
-        try {
-          assert.equal(
-            await Promise.race([
-              started.promise.then(() => true),
-              sleep(5_000).then(() => false),
-            ]),
-            true,
-            'active handler starts',
-          );
-          assert.equal(await h.queue.getTurnActivity(conversation), 'running');
+        },
+        { ...noOrphans, concurrency: 2 },
+      );
+      void _consumer;
 
-          release.resolve();
-          await waitForAsync(
-            async () =>
-              (await h.queue.getTurnActivity(conversation)) === 'idle',
-            'settled turn disappears from scheduler status',
-          );
-        } finally {
-          release.resolve();
-        }
-      });
-
-      test('finds and cancels every copy of the oldest queued stream id', async (t) => {
-        await using h = await contract.makeQueue();
-        const first = ref('interrupt-queued', 1);
-        const second = ref('interrupt-queued', 2);
-        await h.queue.push(first);
-        await h.queue.push(first);
-        await h.queue.push(second);
-
+      try {
+        assert.equal(
+          await Promise.race([
+            started.promise.then(() => true),
+            sleep(5_000).then(() => false),
+          ]),
+          true,
+          'active handler starts',
+        );
         assert.deepStrictEqual(
           await h.queue.getCurrentTurn({
             chatId: first.chatId,
@@ -196,452 +263,472 @@ for (const contract of turnQueueContracts) {
           first,
         );
         await h.queue.cancel(first.streamId);
-        assert.deepStrictEqual(
-          await h.queue.getCurrentTurn({
-            chatId: first.chatId,
-            userId: first.userId,
-          }),
-          second,
+        assert.equal(
+          await Promise.race([
+            aborted.promise.then(() => true),
+            sleep(5_000).then(() => false),
+          ]),
+          true,
+          'active handler observes cancellation',
         );
-
-        const seen: TurnRef[] = [];
-        await using _consumer = await h.queue.consume(async (turn) => {
-          seen.push(turn);
-        }, noOrphans);
+        const overlapped = await Promise.race([
+          successorStarted.promise.then(() => true),
+          sleep(1_200).then(() => false),
+        ]);
+        const ownerWhileInterrupted = await h.queue.getCurrentTurn({
+          chatId: first.chatId,
+          userId: first.userId,
+        });
+        release.resolve();
+        assert.equal(
+          overlapped,
+          false,
+          'strict FIFO key stays owned until the interrupted handler exits',
+        );
+        assert.deepStrictEqual(
+          ownerWhileInterrupted,
+          first,
+          'the active row remains the scheduler owner while its handler exits',
+        );
         await waitFor(
           t,
           () => seen.length === 1,
-          'successor runs after cancellation',
+          'successor runs after active abort',
         );
         assert.deepStrictEqual(seen, [second]);
-      });
-
-      test('cancelling an active turn aborts its handler without overlapping its successor', async (t) => {
-        await using h = await contract.makeQueue();
-        const first = ref('interrupt-active', 1);
-        const second = ref('interrupt-active', 2);
-        await h.queue.push(first);
-        await h.queue.push(second);
-
-        const started = Promise.withResolvers<void>();
-        const aborted = Promise.withResolvers<void>();
-        const release = Promise.withResolvers<void>();
-        const successorStarted = Promise.withResolvers<void>();
-        const seen: TurnRef[] = [];
-        await using _consumer = await h.queue.consume(
-          async (turn, context) => {
-            if (turn.streamId !== first.streamId) {
-              seen.push(turn);
-              successorStarted.resolve();
-              return;
-            }
-            started.resolve();
-            await once(context.signal, 'abort');
-            aborted.resolve();
-            await release.promise;
-          },
-          { ...noOrphans, concurrency: 2 },
-        );
-
-        try {
-          assert.equal(
-            await Promise.race([
-              started.promise.then(() => true),
-              sleep(5_000).then(() => false),
-            ]),
-            true,
-            'active handler starts',
-          );
-          assert.deepStrictEqual(
-            await h.queue.getCurrentTurn({
+        await waitForAsync(
+          async () =>
+            (await h.queue.getTurnActivity({
               chatId: first.chatId,
               userId: first.userId,
-            }),
-            first,
-          );
-          await h.queue.cancel(first.streamId);
-          assert.equal(
-            await Promise.race([
-              aborted.promise.then(() => true),
-              sleep(5_000).then(() => false),
-            ]),
-            true,
-            'active handler observes cancellation',
-          );
-          const overlapped = await Promise.race([
-            successorStarted.promise.then(() => true),
-            sleep(1_200).then(() => false),
-          ]);
-          const ownerWhileInterrupted = await h.queue.getCurrentTurn({
-            chatId: first.chatId,
-            userId: first.userId,
-          });
-          release.resolve();
-          assert.equal(
-            overlapped,
-            false,
-            'strict FIFO key stays owned until the interrupted handler exits',
-          );
-          assert.deepStrictEqual(
-            ownerWhileInterrupted,
-            first,
-            'the active row remains the scheduler owner while its handler exits',
-          );
-          await waitFor(
-            t,
-            () => seen.length === 1,
-            'successor runs after active abort',
-          );
-          assert.deepStrictEqual(seen, [second]);
-          await waitForAsync(
-            async () =>
-              (await h.queue.getTurnActivity({
-                chatId: first.chatId,
-                userId: first.userId,
-              })) === 'idle',
-            'interrupted and successor rows are commit-deleted',
-          );
-        } finally {
-          release.resolve();
-        }
-      });
-
-      test('a duplicate push never delivers concurrently, out of order, or not at all', async (t) => {
-        await using h = await contract.makeQueue();
-        const ask = ref('dup', 1);
-        await h.queue.push(ask);
-        await h.queue.push(ask);
-
-        let deliveries = 0;
-        let active = 0;
-        let maxActive = 0;
-        await using _consumer = await h.queue.consume(
-          async () => {
-            active++;
-            maxActive = Math.max(maxActive, active);
-            await sleep(150);
-            active--;
-            deliveries++;
-          },
-          { ...noOrphans, concurrency: 4 },
+            })) === 'idle',
+          'interrupted and successor rows are commit-deleted',
         );
+      } finally {
+        release.resolve();
+      }
+    });
 
-        await waitFor(t, () => deliveries >= 1, 'turn delivered at least once');
-        await sleep(1500);
-        // At-least-once: an implementation may dedup (1) or redeliver (2),
-        // but never lose the turn, exceed the duplicate count, or interleave.
-        assert.ok(
-          deliveries >= 1 && deliveries <= 2,
-          `deliveries: ${deliveries}`,
-        );
-        assert.equal(maxActive, 1, 'duplicates never run concurrently');
-      });
+    test('a duplicate push never delivers concurrently, out of order, or not at all', async (t) => {
+      await using h = await contract.makeQueue();
+      const ask = ref('dup', 1);
+      await h.queue.push(ask);
+      await h.queue.push(ask);
 
-      test('turns in one chat run strictly FIFO, one at a time', async (t) => {
-        await using h = await contract.makeQueue();
-        for (const n of [1, 2, 3]) await h.queue.push(ref('fifo', n));
+      let deliveries = 0;
+      let active = 0;
+      let maxActive = 0;
+      await using _consumer = await h.queue.consume(
+        async () => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await sleep(150);
+          active--;
+          deliveries++;
+        },
+        { ...noOrphans, concurrency: 4 },
+      );
+      void _consumer;
 
-        const events: string[] = [];
-        await using _consumer = await h.queue.consume(
-          async (turn) => {
-            events.push(`start ${textOf(turn)}`);
-            await sleep(250);
-            events.push(`end ${textOf(turn)}`);
-          },
-          { ...noOrphans, concurrency: 4 },
-        );
+      await waitFor(t, () => deliveries >= 1, 'turn delivered at least once');
+      await sleep(1500);
+      // At-least-once: an implementation may dedup (1) or redeliver (2),
+      // but never lose the turn, exceed the duplicate count, or interleave.
+      assert.ok(
+        deliveries >= 1 && deliveries <= 2,
+        `deliveries: ${deliveries}`,
+      );
+      assert.equal(maxActive, 1, 'duplicates never run concurrently');
+    });
 
-        await waitFor(t, () => events.length === 6, 'all three turns finished');
-        assert.deepStrictEqual(events, [
-          'start input-1',
-          'end input-1',
-          'start input-2',
-          'end input-2',
-          'start input-3',
-          'end input-3',
-        ]);
-      });
+    test('turns in one chat run strictly FIFO, one at a time', async (t) => {
+      await using h = await contract.makeQueue();
+      for (const n of [1, 2, 3]) await h.queue.push(ref('fifo', n));
 
-      test('turns in different chats can overlap', async (t) => {
-        await using h = await contract.makeQueue();
-        const gate = Promise.withResolvers<void>();
-        const outcome: Record<string, string> = {};
+      const events: string[] = [];
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          events.push(`start ${textOf(turn)}`);
+          await sleep(250);
+          events.push(`end ${textOf(turn)}`);
+        },
+        { ...noOrphans, concurrency: 4 },
+      );
+      void _consumer;
 
-        await h.queue.push(ref('over-a', 1));
-        await h.queue.push(ref('over-b', 2));
+      await waitFor(t, () => events.length === 6, 'all three turns finished');
+      assert.deepStrictEqual(events, [
+        'start input-1',
+        'end input-1',
+        'start input-2',
+        'end input-2',
+        'start input-3',
+        'end input-3',
+      ]);
+    });
 
-        await using _consumer = await h.queue.consume(
-          async (turn) => {
-            if (turn.chatId === 'over-a') {
-              outcome.a = await Promise.race([
-                gate.promise.then(() => 'overlapped'),
-                sleep(5000).then(() => 'timed-out'),
-              ]);
-            } else {
-              gate.resolve();
-              outcome.b = 'done';
-            }
-          },
-          { ...noOrphans, concurrency: 2 },
-        );
+    test('turns in different chats can overlap', async (t) => {
+      await using h = await contract.makeQueue();
+      const gate = Promise.withResolvers<void>();
+      const outcome: Record<string, string> = {};
 
+      await h.queue.push(ref('over-a', 1));
+      await h.queue.push(ref('over-b', 2));
+
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          if (turn.chatId === 'over-a') {
+            outcome.a = await Promise.race([
+              gate.promise.then(() => 'overlapped'),
+              sleep(5000).then(() => 'timed-out'),
+            ]);
+          } else {
+            gate.resolve();
+            outcome.b = 'done';
+          }
+        },
+        { ...noOrphans, concurrency: 2 },
+      );
+      void _consumer;
+
+      await waitFor(
+        t,
+        () => Boolean(outcome.a && outcome.b),
+        'both chats done',
+      );
+      assert.equal(
+        outcome.a,
+        'overlapped',
+        'chat A finished only after chat B started — cross-chat concurrency',
+      );
+    });
+
+    test('one busy chat does not block a ready turn in another chat', async (t) => {
+      await using h = await contract.makeQueue();
+      const active = ref('busy-chat', 1);
+      const blockedSuccessor = ref('busy-chat', 2);
+      const independent = ref('independent-chat', 3);
+      const releaseActive = Promise.withResolvers<void>();
+      const started: TurnRef[] = [];
+      let successorsQueued = false;
+
+      await h.queue.push(active);
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          started.push(turn);
+          if (turn.streamId !== active.streamId) return;
+
+          await h.queue.push(blockedSuccessor);
+          await h.queue.push(independent);
+          successorsQueued = true;
+          await releaseActive.promise;
+        },
+        { ...noOrphans, concurrency: 4 },
+      );
+      void _consumer;
+
+      try {
+        await waitFor(t, () => successorsQueued, 'successors are queued');
         await waitFor(
           t,
-          () => Boolean(outcome.a && outcome.b),
-          'both chats done',
+          () => started.some((turn) => turn.streamId === independent.streamId),
+          'ready turn in the independent chat',
+          3_000,
         );
-        assert.equal(
-          outcome.a,
-          'overlapped',
-          'chat A finished only after chat B started — cross-chat concurrency',
+        assert.deepStrictEqual(
+          started.map((turn) => turn.streamId),
+          [active.streamId, independent.streamId],
         );
-      });
+      } finally {
+        releaseActive.resolve();
+      }
+    });
 
-      test('one busy chat does not block a ready turn in another chat', async (t) => {
-        await using h = await contract.makeQueue();
-        const active = ref('busy-chat', 1);
-        const blockedSuccessor = ref('busy-chat', 2);
-        const independent = ref('independent-chat', 3);
-        const releaseActive = Promise.withResolvers<void>();
-        const started: TurnRef[] = [];
-        let successorsQueued = false;
+    test('caps active handlers at the consume concurrency', async (t) => {
+      await using h = await contract.makeQueue();
+      for (const n of [1, 2, 3, 4, 5, 6]) {
+        await h.queue.push(ref(`cap-${n}`, n));
+      }
 
-        await h.queue.push(active);
-        await using _consumer = await h.queue.consume(
-          async (turn) => {
-            started.push(turn);
-            if (turn.streamId !== active.streamId) return;
+      let done = 0;
+      let active = 0;
+      let maxActive = 0;
+      await using _consumer = await h.queue.consume(
+        async () => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await sleep(300);
+          active--;
+          done++;
+        },
+        { ...noOrphans, concurrency: 2 },
+      );
+      void _consumer;
 
-            await h.queue.push(blockedSuccessor);
-            await h.queue.push(independent);
-            successorsQueued = true;
-            await releaseActive.promise;
+      await waitFor(t, () => done === 6, 'all six chats processed', 20_000);
+      assert.ok(
+        maxActive <= 2,
+        `never more than the configured concurrency (saw ${maxActive})`,
+      );
+    });
+
+    test('a crashing handler surfaces exactly once via onOrphaned, then the chat unblocks', async (t) => {
+      await using h = await contract.makeQueue();
+      const boom = ref('crash', 1);
+      const next = ref('crash', 2);
+      await h.queue.push(boom);
+      await h.queue.push(next);
+
+      const invocations: string[] = [];
+      const orphans: Array<{ streamId: string; error: string }> = [];
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          invocations.push(textOf(turn));
+          if (turn.streamId === boom.streamId) throw new Error('kaput');
+        },
+        {
+          onOrphaned: async (turn, error) => {
+            orphans.push({ streamId: turn.streamId, error });
           },
-          { ...noOrphans, concurrency: 4 },
-        );
+        },
+      );
+      void _consumer;
 
-        try {
-          await waitFor(t, () => successorsQueued, 'successors are queued');
-          await waitFor(
-            t,
-            () =>
-              started.some((turn) => turn.streamId === independent.streamId),
-            'ready turn in the independent chat',
-            3_000,
+      await waitFor(
+        t,
+        () => invocations.includes(textOf(next)) && orphans.length === 1,
+        'orphan reported and chat unblocked',
+        20_000,
+      );
+      await sleep(500);
+      assert.deepStrictEqual(
+        invocations,
+        [textOf(boom), textOf(next)],
+        'crashed turn ran exactly once (no retry), successor ran after it',
+      );
+      assert.equal(orphans.length, 1, 'orphan surfaced exactly once');
+      assert.equal(orphans[0].streamId, boom.streamId);
+      assert.match(orphans[0].error, /kaput/);
+    });
+
+    test('an orphan callback failure cannot keep the next same-chat turn blocked', async (t) => {
+      await using h = await contract.makeQueue();
+      const boom = ref('orphan-callback-failure', 1);
+      const next = ref('orphan-callback-failure', 2);
+      await h.queue.push(boom);
+      await h.queue.push(next);
+
+      const invocations: string[] = [];
+      let orphanAttempts = 0;
+      await using _consumer = await h.queue.consume(
+        async (turn) => {
+          invocations.push(textOf(turn));
+          if (turn.streamId === boom.streamId) throw new Error('kaput');
+        },
+        {
+          onOrphaned: async () => {
+            orphanAttempts++;
+            throw new Error('projection unavailable');
+          },
+        },
+      );
+      void _consumer;
+
+      await waitFor(
+        t,
+        () => invocations.includes(textOf(next)),
+        'source acknowledgement unblocks the successor despite callback failure',
+        5_000,
+      );
+      assert.ok(orphanAttempts >= 1);
+      assert.deepStrictEqual(invocations, [textOf(boom), textOf(next)]);
+    });
+
+    test('a parked turn is not redelivered until resumeParked; revival preserves order', async (t) => {
+      await using h = await contract.makeQueue();
+      let gateOpen = false;
+      const parked: string[] = [];
+      const ran: string[] = [];
+      await using _consumer = await h.queue.consume(
+        async (turn, context) => {
+          if (turn.kind !== 'message') return;
+          if (!gateOpen) {
+            parked.push(textOf(turn));
+            await context.park();
+            return;
+          }
+          ran.push(textOf(turn));
+        },
+        { ...noOrphans, concurrency: 2 },
+      );
+      void _consumer;
+
+      await h.queue.push(ref('gated', 1));
+      await h.queue.push(ref('gated', 2));
+      await waitFor(t, () => parked.length === 2, 'both turns parked');
+      await sleep(1500);
+      assert.deepStrictEqual(
+        parked,
+        ['input-1', 'input-2'],
+        'parked once each — no redelivery',
+      );
+      assert.deepStrictEqual(ran, [], 'nothing executed while parked');
+
+      gateOpen = true;
+      await sleep(1200);
+      assert.deepStrictEqual(ran, [], 'opening the gate alone revives nothing');
+
+      await h.queue.resumeParked('gated');
+      await waitFor(t, () => ran.length === 2, 'parked turns revived');
+      assert.deepStrictEqual(
+        ran,
+        ['input-1', 'input-2'],
+        'original FIFO order preserved',
+      );
+    });
+
+    test('a recovery outranks revived parked turns of its chat', async (t) => {
+      await using h = await contract.makeQueue();
+      const ran: string[] = [];
+
+      let parkCount = 0;
+      const gatekeeper = await h.queue.consume(async (_turn, context) => {
+        parkCount++;
+        await context.park();
+      }, noOrphans);
+      await h.queue.push(ref('ranked', 1));
+      await waitFor(t, () => parkCount === 1, 'turn parked');
+      await gatekeeper[Symbol.asyncDispose]();
+
+      await h.queue.push(recoveryRef('ranked'));
+      await h.queue.resumeParked('ranked');
+
+      await using _consumer = await h.queue.consume(async (turn) => {
+        ran.push(turn.kind);
+      }, noOrphans);
+      void _consumer;
+
+      await waitFor(t, () => ran.length === 2, 'both delivered');
+      assert.deepStrictEqual(
+        ran,
+        ['recovery', 'message'],
+        'recovery runs before the revived (older created_on) parked turn',
+      );
+    });
+
+    test('settlement releases FIFO ownership before follow-up reconciliation', async (t) => {
+      await using h = await contract.makeQueue();
+      const first = ref('settlement', 1);
+      const second = ref('settlement', 2);
+      const settled: string[] = [];
+
+      await h.queue.push(first);
+      await h.queue.push(second);
+      await using _consumer = await h.queue.consume(async () => {}, {
+        ...noOrphans,
+        onSettled: async (turn) => {
+          settled.push(turn.streamId);
+          assert.notEqual(
+            await h.queue.getTurnActivity(turn),
+            'running',
+            'the completed job no longer owns the conversation',
           );
-          assert.deepStrictEqual(
-            started.map((turn) => turn.streamId),
-            [active.streamId, independent.streamId],
-          );
-        } finally {
-          releaseActive.resolve();
-        }
+        },
       });
+      void _consumer;
 
-      test('caps active handlers at the consume concurrency', async (t) => {
-        await using h = await contract.makeQueue();
-        for (const n of [1, 2, 3, 4, 5, 6]) {
-          await h.queue.push(ref(`cap-${n}`, n));
-        }
+      await waitFor(t, () => settled.length === 2, 'both turns settle');
+      assert.deepStrictEqual(settled, [first.streamId, second.streamId]);
+    });
 
-        let done = 0;
-        let active = 0;
-        let maxActive = 0;
-        await using _consumer = await h.queue.consume(
-          async () => {
-            active++;
-            maxActive = Math.max(maxActive, active);
-            await sleep(300);
-            active--;
-            done++;
-          },
-          { ...noOrphans, concurrency: 2 },
-        );
+    test('disposal stops delivery; a later consumer picks up the backlog', async (t) => {
+      await using h = await contract.makeQueue();
+      let executions = 0;
+      const consumer = await h.queue.consume(async () => {
+        executions++;
+      }, noOrphans);
+      await consumer[Symbol.asyncDispose]();
 
-        await waitFor(t, () => done === 6, 'all six chats processed', 20_000);
-        assert.ok(
-          maxActive <= 2,
-          `never more than the configured concurrency (saw ${maxActive})`,
-        );
-      });
+      await h.queue.push(ref('backlog', 1));
+      await sleep(1500);
+      assert.equal(executions, 0, 'disposed consumer receives nothing');
 
-      test('a crashing handler surfaces exactly once via onOrphaned, then the chat unblocks', async (t) => {
-        await using h = await contract.makeQueue();
-        const boom = ref('crash', 1);
-        const next = ref('crash', 2);
-        await h.queue.push(boom);
-        await h.queue.push(next);
-
-        const invocations: string[] = [];
-        const orphans: Array<{ streamId: string; error: string }> = [];
-        await using _consumer = await h.queue.consume(
-          async (turn) => {
-            invocations.push(textOf(turn));
-            if (turn.streamId === boom.streamId) throw new Error('kaput');
-          },
-          {
-            onOrphaned: async (turn, error) => {
-              orphans.push({ streamId: turn.streamId, error });
-            },
-          },
-        );
-
-        await waitFor(
-          t,
-          () => invocations.includes(textOf(next)) && orphans.length === 1,
-          'orphan reported and chat unblocked',
-          20_000,
-        );
-        await sleep(500);
-        assert.deepStrictEqual(
-          invocations,
-          [textOf(boom), textOf(next)],
-          'crashed turn ran exactly once (no retry), successor ran after it',
-        );
-        assert.equal(orphans.length, 1, 'orphan surfaced exactly once');
-        assert.equal(orphans[0].streamId, boom.streamId);
-        assert.match(orphans[0].error, /kaput/);
-      });
-
-      test('an orphan callback failure cannot keep the next same-chat turn blocked', async (t) => {
-        await using h = await contract.makeQueue();
-        const boom = ref('orphan-callback-failure', 1);
-        const next = ref('orphan-callback-failure', 2);
-        await h.queue.push(boom);
-        await h.queue.push(next);
-
-        const invocations: string[] = [];
-        let orphanAttempts = 0;
-        await using _consumer = await h.queue.consume(
-          async (turn) => {
-            invocations.push(textOf(turn));
-            if (turn.streamId === boom.streamId) throw new Error('kaput');
-          },
-          {
-            onOrphaned: async () => {
-              orphanAttempts++;
-              throw new Error('projection unavailable');
-            },
-          },
-        );
-
-        await waitFor(
-          t,
-          () => invocations.includes(textOf(next)),
-          'source acknowledgement unblocks the successor despite callback failure',
-          5_000,
-        );
-        assert.ok(orphanAttempts >= 1);
-        assert.deepStrictEqual(invocations, [textOf(boom), textOf(next)]);
-      });
-
-      test('a parked turn is not redelivered until resumeParked; revival preserves order', async (t) => {
-        await using h = await contract.makeQueue();
-        let gateOpen = false;
-        const parked: string[] = [];
-        const ran: string[] = [];
-        await using _consumer = await h.queue.consume(
-          async (turn, context) => {
-            if (turn.kind !== 'message') return;
-            if (!gateOpen) {
-              parked.push(textOf(turn));
-              await context.park();
-              return;
-            }
-            ran.push(textOf(turn));
-          },
-          { ...noOrphans, concurrency: 2 },
-        );
-
-        await h.queue.push(ref('gated', 1));
-        await h.queue.push(ref('gated', 2));
-        await waitFor(t, () => parked.length === 2, 'both turns parked');
-        await sleep(1500);
-        assert.deepStrictEqual(
-          parked,
-          ['input-1', 'input-2'],
-          'parked once each — no redelivery',
-        );
-        assert.deepStrictEqual(ran, [], 'nothing executed while parked');
-
-        gateOpen = true;
-        await sleep(1200);
-        assert.deepStrictEqual(
-          ran,
-          [],
-          'opening the gate alone revives nothing',
-        );
-
-        await h.queue.resumeParked('gated');
-        await waitFor(t, () => ran.length === 2, 'parked turns revived');
-        assert.deepStrictEqual(
-          ran,
-          ['input-1', 'input-2'],
-          'original FIFO order preserved',
-        );
-      });
-
-      test('settlement releases FIFO ownership before follow-up reconciliation', async (t) => {
-        await using h = await contract.makeQueue();
-        const first = ref('settlement', 1);
-        const second = ref('settlement', 2);
-        const settled: string[] = [];
-
-        await h.queue.push(first);
-        await h.queue.push(second);
-        await using _consumer = await h.queue.consume(async () => {}, {
-          ...noOrphans,
-          onSettled: async (turn) => {
-            settled.push(turn.streamId);
-            assert.notEqual(
-              await h.queue.getTurnActivity(turn),
-              'running',
-              'the completed job no longer owns the conversation',
-            );
-          },
-        });
-
-        await waitFor(t, () => settled.length === 2, 'both turns settle');
-        assert.deepStrictEqual(settled, [first.streamId, second.streamId]);
-      });
-
-      test('disposal stops delivery; a later consumer picks up the backlog', async (t) => {
-        await using h = await contract.makeQueue();
-        let executions = 0;
-        const consumer = await h.queue.consume(async () => {
-          executions++;
-        }, noOrphans);
-        await consumer[Symbol.asyncDispose]();
-
-        await h.queue.push(ref('backlog', 1));
-        await sleep(1500);
-        assert.equal(executions, 0, 'disposed consumer receives nothing');
-
-        await using _revived = await h.queue.consume(async () => {
-          executions++;
-        }, noOrphans);
-        await waitFor(
-          t,
-          () => executions === 1,
-          'new consumer drains the backlog',
-        );
-      });
-    },
-  );
+      await using _revived = await h.queue.consume(async () => {
+        executions++;
+      }, noOrphans);
+      void _revived;
+      await waitFor(
+        t,
+        () => executions === 1,
+        'new consumer drains the backlog',
+      );
+    });
+  });
 }
 
-suite(
-  'PgBossTurnQueue real PostgreSQL scheduler regressions',
-  { skip: dockerAvailable ? false : 'Docker is unavailable' },
-  () => {
-    test('preserves each chat insertion order under concurrent consumption', async (t) => {
-      await using h = await postgresQueueHarness();
+suite('PgBossTurnQueue real PostgreSQL scheduler regressions', () => {
+  test('preserves each chat insertion order under concurrent consumption', async (t) => {
+    await using h = await postgresQueueHarness();
+    const chatIds = Array.from(
+      { length: 8 },
+      (_, index) => `fifo-regression-${index}`,
+    );
+    const turnNumbers = [1, 2, 3, 4, 5];
+    const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
+
+    for (const chatId of chatIds) {
+      for (const turnNumber of turnNumbers) {
+        await h.queue.push(ref(chatId, turnNumber));
+      }
+    }
+
+    let deliveries = 0;
+    await using _consumer = await h.queue.consume(
+      async (turn) => {
+        const chat = seen.get(turn.chatId);
+        assert.ok(chat, `unexpected chat: ${turn.chatId}`);
+        chat.push(textOf(turn));
+        deliveries++;
+        await sleep(50);
+      },
+      { ...noOrphans, concurrency: 8 },
+    );
+    void _consumer;
+
+    await waitFor(
+      t,
+      () => deliveries === chatIds.length * turnNumbers.length,
+      'all real-Postgres FIFO regression turns',
+      30_000,
+    );
+    const expected = turnNumbers.map((number) => `input-${number}`);
+    for (const chatId of chatIds) {
+      assert.deepStrictEqual(seen.get(chatId), expected, chatId);
+    }
+  });
+
+  test('preserves per-chat FIFO across independent consumer instances', async (t) => {
+    await using h = await postgresQueueHarness();
+    const peerBoss = new PgBoss({ connectionString: h.connectionString });
+    peerBoss.on('error', () => {});
+    let firstConsumer: AsyncDisposable | undefined;
+    let secondConsumer: AsyncDisposable | undefined;
+
+    try {
+      await peerBoss.start();
+      const peerQueue = new PgBossTurnQueue(peerBoss, {
+        pollingIntervalSeconds: 0.5,
+      });
+      await peerQueue.initialize();
+
       const chatIds = Array.from(
         { length: 8 },
-        (_, index) => `fifo-regression-${index}`,
+        (_, index) => `multi-consumer-fifo-${index}`,
       );
       const turnNumbers = [1, 2, 3, 4, 5];
       const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
+      const active = new Map(chatIds.map((chatId) => [chatId, 0]));
+      const maxActive = new Map(chatIds.map((chatId) => [chatId, 0]));
 
       for (const chatId of chatIds) {
         for (const turnNumber of turnNumbers) {
@@ -650,277 +737,221 @@ suite(
       }
 
       let deliveries = 0;
-      await using _consumer = await h.queue.consume(
-        async (turn) => {
+      const handle = async (turn: TurnRef) => {
+        const current = (active.get(turn.chatId) ?? 0) + 1;
+        active.set(turn.chatId, current);
+        maxActive.set(
+          turn.chatId,
+          Math.max(maxActive.get(turn.chatId) ?? 0, current),
+        );
+        try {
           const chat = seen.get(turn.chatId);
           assert.ok(chat, `unexpected chat: ${turn.chatId}`);
           chat.push(textOf(turn));
           deliveries++;
           await sleep(50);
-        },
-        { ...noOrphans, concurrency: 8 },
-      );
+        } finally {
+          active.set(turn.chatId, current - 1);
+        }
+      };
+
+      firstConsumer = await h.queue.consume(handle, {
+        ...noOrphans,
+        concurrency: 4,
+      });
+      secondConsumer = await peerQueue.consume(handle, {
+        ...noOrphans,
+        concurrency: 4,
+      });
 
       await waitFor(
         t,
         () => deliveries === chatIds.length * turnNumbers.length,
-        'all real-Postgres FIFO regression turns',
+        'all turns consumed across both PgBoss instances',
         30_000,
       );
       const expected = turnNumbers.map((number) => `input-${number}`);
       for (const chatId of chatIds) {
         assert.deepStrictEqual(seen.get(chatId), expected, chatId);
-      }
-    });
-
-    test('preserves per-chat FIFO across independent consumer instances', async (t) => {
-      await using h = await postgresQueueHarness();
-      const peerBoss = new PgBoss({ connectionString: h.connectionString });
-      peerBoss.on('error', () => {});
-      let firstConsumer: AsyncDisposable | undefined;
-      let secondConsumer: AsyncDisposable | undefined;
-
-      try {
-        await peerBoss.start();
-        const peerQueue = new PgBossTurnQueue(peerBoss, {
-          pollingIntervalSeconds: 0.5,
-        });
-        await peerQueue.initialize();
-
-        const chatIds = Array.from(
-          { length: 8 },
-          (_, index) => `multi-consumer-fifo-${index}`,
-        );
-        const turnNumbers = [1, 2, 3, 4, 5];
-        const seen = new Map(chatIds.map((chatId) => [chatId, [] as string[]]));
-        const active = new Map(chatIds.map((chatId) => [chatId, 0]));
-        const maxActive = new Map(chatIds.map((chatId) => [chatId, 0]));
-
-        for (const chatId of chatIds) {
-          for (const turnNumber of turnNumbers) {
-            await h.queue.push(ref(chatId, turnNumber));
-          }
-        }
-
-        let deliveries = 0;
-        const handle = async (turn: TurnRef) => {
-          const current = (active.get(turn.chatId) ?? 0) + 1;
-          active.set(turn.chatId, current);
-          maxActive.set(
-            turn.chatId,
-            Math.max(maxActive.get(turn.chatId) ?? 0, current),
-          );
-          try {
-            const chat = seen.get(turn.chatId);
-            assert.ok(chat, `unexpected chat: ${turn.chatId}`);
-            chat.push(textOf(turn));
-            deliveries++;
-            await sleep(50);
-          } finally {
-            active.set(turn.chatId, current - 1);
-          }
-        };
-
-        firstConsumer = await h.queue.consume(handle, {
-          ...noOrphans,
-          concurrency: 4,
-        });
-        secondConsumer = await peerQueue.consume(handle, {
-          ...noOrphans,
-          concurrency: 4,
-        });
-
-        await waitFor(
-          t,
-          () => deliveries === chatIds.length * turnNumbers.length,
-          'all turns consumed across both PgBoss instances',
-          30_000,
-        );
-        const expected = turnNumbers.map((number) => `input-${number}`);
-        for (const chatId of chatIds) {
-          assert.deepStrictEqual(seen.get(chatId), expected, chatId);
-          assert.equal(
-            maxActive.get(chatId),
-            1,
-            `${chatId} never overlaps across consumer instances`,
-          );
-        }
-      } finally {
-        await firstConsumer?.[Symbol.asyncDispose]();
-        await secondConsumer?.[Symbol.asyncDispose]();
-        await peerBoss.stop({ graceful: false });
-      }
-    });
-
-    test('isolates a handler failure from another active chat', async (t) => {
-      await using h = await postgresQueueHarness();
-      const failing = ref('failure-isolation-a', 1);
-      const healthy = ref('failure-isolation-b', 1);
-      const failingStarted = Promise.withResolvers<void>();
-      const healthyStarted = Promise.withResolvers<void>();
-      const releaseHealthy = Promise.withResolvers<void>();
-      const completed: string[] = [];
-      const orphaned: string[] = [];
-
-      await h.queue.push(failing);
-      await h.queue.push(healthy);
-      await using _consumer = await h.queue.consume(
-        async (turn) => {
-          if (turn.streamId === failing.streamId) {
-            failingStarted.resolve();
-            await healthyStarted.promise;
-            throw new Error('isolated failure');
-          }
-
-          healthyStarted.resolve();
-          await failingStarted.promise;
-          await releaseHealthy.promise;
-          completed.push(turn.streamId);
-        },
-        {
-          concurrency: 2,
-          onOrphaned: async (turn) => {
-            orphaned.push(turn.streamId);
-          },
-        },
-      );
-
-      try {
-        await Promise.all([failingStarted.promise, healthyStarted.promise]);
-        releaseHealthy.resolve();
-        await waitFor(
-          t,
-          () => completed.length === 1 && orphaned.length === 1,
-          'healthy completion and isolated orphan reconciliation',
-          20_000,
-        );
-        assert.deepStrictEqual(completed, [healthy.streamId]);
-        assert.deepStrictEqual(orphaned, [failing.streamId]);
-      } finally {
-        releaseHealthy.resolve();
-      }
-    });
-
-    test('heartbeats every concurrently active handler', async (t) => {
-      await using h = await postgresQueueHarness({
-        boss: { monitorIntervalSeconds: 2, superviseIntervalSeconds: 2 },
-        queue: { heartbeatSeconds: 10 },
-      });
-      const turns = [ref('heartbeat-a', 1), ref('heartbeat-b', 1)];
-      const release = Promise.withResolvers<void>();
-      const started = new Set<string>();
-      const completed: string[] = [];
-      const orphaned: string[] = [];
-
-      for (const turn of turns) await h.queue.push(turn);
-      await using _consumer = await h.queue.consume(
-        async (turn) => {
-          started.add(turn.streamId);
-          await release.promise;
-          completed.push(turn.streamId);
-        },
-        {
-          concurrency: 2,
-          onOrphaned: async (turn) => {
-            orphaned.push(turn.streamId);
-          },
-        },
-      );
-
-      try {
-        await waitFor(
-          t,
-          () => started.size === 2,
-          'both heartbeat turns active',
-        );
-        await sleep(13_000);
-        assert.deepStrictEqual(
-          orphaned,
-          [],
-          'live handlers never appear orphaned',
-        );
-        for (const turn of turns) {
-          assert.equal(
-            await h.queue.getTurnActivity(turn),
-            'running',
-            `${turn.chatId} remains active past the heartbeat deadline`,
-          );
-        }
-
-        release.resolve();
-        await waitFor(
-          t,
-          () => completed.length === 2,
-          'both live handlers finish',
-        );
-      } finally {
-        release.resolve();
-      }
-    });
-
-    test('disposal returns during active work and stops new claims', async (t) => {
-      await using h = await postgresQueueHarness();
-      const active = ref('dispose-active', 1);
-      const queued = ref('dispose-queued', 1);
-      const activeStarted = Promise.withResolvers<void>();
-      const releaseActive = Promise.withResolvers<void>();
-      const seen: string[] = [];
-      let consumer: AsyncDisposable | undefined;
-      let disposing: Promise<void> | undefined;
-      let replacement: AsyncDisposable | undefined;
-
-      try {
-        await h.queue.push(active);
-        consumer = await h.queue.consume(async (turn) => {
-          seen.push(turn.streamId);
-          activeStarted.resolve();
-          await releaseActive.promise;
-        }, noOrphans);
-        await activeStarted.promise;
-        await h.queue.push(queued);
-
-        disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
         assert.equal(
-          await Promise.race([
-            disposing.then(() => 'disposed'),
-            sleep(2_000).then(() => 'timed-out'),
-          ]),
-          'disposed',
-          'disposal does not wait for the active handler',
+          maxActive.get(chatId),
+          1,
+          `${chatId} never overlaps across consumer instances`,
         );
-        consumer = undefined;
-        await sleep(500);
-        assert.deepStrictEqual(
-          seen,
-          [active.streamId],
-          'the stopped consumer does not claim queued work',
-        );
+      }
+    } finally {
+      await firstConsumer?.[Symbol.asyncDispose]();
+      await secondConsumer?.[Symbol.asyncDispose]();
+      await peerBoss.stop({ graceful: false });
+    }
+  });
+
+  test('isolates a handler failure from another active chat', async (t) => {
+    await using h = await postgresQueueHarness();
+    const failing = ref('failure-isolation-a', 1);
+    const healthy = ref('failure-isolation-b', 1);
+    const failingStarted = Promise.withResolvers<void>();
+    const healthyStarted = Promise.withResolvers<void>();
+    const releaseHealthy = Promise.withResolvers<void>();
+    const completed: string[] = [];
+    const orphaned: string[] = [];
+
+    await h.queue.push(failing);
+    await h.queue.push(healthy);
+    await using _consumer = await h.queue.consume(
+      async (turn) => {
+        if (turn.streamId === failing.streamId) {
+          failingStarted.resolve();
+          await healthyStarted.promise;
+          throw new Error('isolated failure');
+        }
+
+        healthyStarted.resolve();
+        await failingStarted.promise;
+        await releaseHealthy.promise;
+        completed.push(turn.streamId);
+      },
+      {
+        concurrency: 2,
+        onOrphaned: async (turn) => {
+          orphaned.push(turn.streamId);
+        },
+      },
+    );
+    void _consumer;
+
+    try {
+      await Promise.all([failingStarted.promise, healthyStarted.promise]);
+      releaseHealthy.resolve();
+      await waitFor(
+        t,
+        () => completed.length === 1 && orphaned.length === 1,
+        'healthy completion and isolated orphan reconciliation',
+        20_000,
+      );
+      assert.deepStrictEqual(completed, [healthy.streamId]);
+      assert.deepStrictEqual(orphaned, [failing.streamId]);
+    } finally {
+      releaseHealthy.resolve();
+    }
+  });
+
+  test('heartbeats every concurrently active handler', async (t) => {
+    await using h = await postgresQueueHarness({
+      boss: { monitorIntervalSeconds: 2, superviseIntervalSeconds: 2 },
+      queue: { heartbeatSeconds: 10 },
+    });
+    const turns = [ref('heartbeat-a', 1), ref('heartbeat-b', 1)];
+    const release = Promise.withResolvers<void>();
+    const started = new Set<string>();
+    const completed: string[] = [];
+    const orphaned: string[] = [];
+
+    for (const turn of turns) await h.queue.push(turn);
+    await using _consumer = await h.queue.consume(
+      async (turn) => {
+        started.add(turn.streamId);
+        await release.promise;
+        completed.push(turn.streamId);
+      },
+      {
+        concurrency: 2,
+        onOrphaned: async (turn) => {
+          orphaned.push(turn.streamId);
+        },
+      },
+    );
+    void _consumer;
+
+    try {
+      await waitFor(t, () => started.size === 2, 'both heartbeat turns active');
+      await sleep(13_000);
+      assert.deepStrictEqual(
+        orphaned,
+        [],
+        'live handlers never appear orphaned',
+      );
+      for (const turn of turns) {
         assert.equal(
-          await h.queue.getTurnActivity(active),
+          await h.queue.getTurnActivity(turn),
           'running',
-          'the active handler keeps its claim until it exits',
+          `${turn.chatId} remains active past the heartbeat deadline`,
         );
-
-        releaseActive.resolve();
-
-        replacement = await h.queue.consume(async (turn) => {
-          seen.push(turn.streamId);
-        }, noOrphans);
-        await waitFor(
-          t,
-          () => seen.length === 2,
-          'replacement consumes queued turn',
-        );
-        assert.deepStrictEqual(seen, [active.streamId, queued.streamId]);
-      } finally {
-        releaseActive.resolve();
-        await disposing;
-        await consumer?.[Symbol.asyncDispose]();
-        await replacement?.[Symbol.asyncDispose]();
       }
-    });
-  },
-);
+
+      release.resolve();
+      await waitFor(
+        t,
+        () => completed.length === 2,
+        'both live handlers finish',
+      );
+    } finally {
+      release.resolve();
+    }
+  });
+
+  test('disposal returns during active work and stops new claims', async (t) => {
+    await using h = await postgresQueueHarness();
+    const active = ref('dispose-active', 1);
+    const queued = ref('dispose-queued', 1);
+    const activeStarted = Promise.withResolvers<void>();
+    const releaseActive = Promise.withResolvers<void>();
+    const seen: string[] = [];
+    let consumer: AsyncDisposable | undefined;
+    let disposing: Promise<void> | undefined;
+    let replacement: AsyncDisposable | undefined;
+
+    try {
+      await h.queue.push(active);
+      consumer = await h.queue.consume(async (turn) => {
+        seen.push(turn.streamId);
+        activeStarted.resolve();
+        await releaseActive.promise;
+      }, noOrphans);
+      await activeStarted.promise;
+      await h.queue.push(queued);
+
+      disposing = Promise.resolve(consumer[Symbol.asyncDispose]());
+      assert.equal(
+        await Promise.race([
+          disposing.then(() => 'disposed'),
+          sleep(2_000).then(() => 'timed-out'),
+        ]),
+        'disposed',
+        'disposal does not wait for the active handler',
+      );
+      consumer = undefined;
+      await sleep(500);
+      assert.deepStrictEqual(
+        seen,
+        [active.streamId],
+        'the stopped consumer does not claim queued work',
+      );
+      assert.equal(
+        await h.queue.getTurnActivity(active),
+        'running',
+        'the active handler keeps its claim until it exits',
+      );
+
+      releaseActive.resolve();
+
+      replacement = await h.queue.consume(async (turn) => {
+        seen.push(turn.streamId);
+      }, noOrphans);
+      await waitFor(
+        t,
+        () => seen.length === 2,
+        'replacement consumes queued turn',
+      );
+      assert.deepStrictEqual(seen, [active.streamId, queued.streamId]);
+    } finally {
+      releaseActive.resolve();
+      await disposing;
+      await consumer?.[Symbol.asyncDispose]();
+      await replacement?.[Symbol.asyncDispose]();
+    }
+  });
+});
 
 async function postgresQueueHarness(
   options: PostgresQueueHarnessOptions = {},

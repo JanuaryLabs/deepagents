@@ -402,9 +402,9 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   preserving concurrent host metadata. Terminal reconciliation updates only the state it observes
   under the row lock, so duplicate or stale callbacks cannot rewind a successor.
   `spawn_agent` creates a separate child chat with its own path, parent, declaration name, context
-  history, stream, mailbox, and TurnQueue key. Its optional `fork_turns` string controls the initial
-  history snapshot: `all` (the default), `none`, or a positive number of recent user-turn
-  boundaries. The selected `agent_type` still determines the child declaration independently.
+  history, stream, mailbox, and TurnQueue key. Its required `fork_turns` string controls the initial
+  history snapshot: `all`, `none`, or a positive number of recent user-turn boundaries. The
+  selected `agent_type` still determines the child declaration independently.
 - Reserved metadata fails closed. Every non-root thread must name an existing same-user,
   same-tree parent whose canonical path is the immediate ancestor; self-parenting and skipped
   ancestors are rejected before work is queued. Persisted paths must already be canonical rather
@@ -506,8 +506,8 @@ surface; full history lives in the chain, which is the source of truth anyway.
   (clean, no worker errors); cancelled jobs don't block the key, so the assistant-message
   continuation runs. `resumeParked(chatId)` revives parked jobs with their original `created_on` —
   FIFO order reassembles for free. No polling, no new storage. `park`/`resumeParked` are port
-  surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by the contract test for no
-  redelivery until revival and original order.
+  surface now (`ConsumeContext.park`, `TurnQueue.resumeParked`), pinned by two contract tests
+  (no redelivery until revival + original order; recovery outranks revived turns).
 - **Disambiguation**: parked turn = job `cancelled` + stream row `queued`; user-cancelled turn =
   stream row `cancelled` (its job is also `cancelled`). `resumeParked` revives **every** cancelled
   job for the chat without inspecting stream rows — a revived user-cancelled turn is harmless because

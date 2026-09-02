@@ -114,7 +114,8 @@ export type TurnActivity = 'idle' | 'queued' | 'running';
  *   durable wake request; the target MailboxStore remains the pending-input
  *   authority.
  * - A parked turn (`context.park()`) is not delivered again until
- *   `resumeParked(chatId)`; revived turns keep their original FIFO order.
+ *   `resumeParked(chatId)`; revived turns keep their original FIFO order,
+ *   and recovery turns pushed for the chat outrank them.
  *
  * On platforms with native per-conversation serialization (e.g. Durable
  * Objects) this port is absorbed by the host rather than implemented.

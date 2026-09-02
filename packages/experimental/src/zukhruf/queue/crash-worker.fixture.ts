@@ -94,4 +94,7 @@ const runtime = new AgentRuntime(declaration, {
 await runtime.work();
 console.log('WORKER READY');
 
-setInterval(() => {}, 1 << 30);
+const ownerPid = process.ppid;
+setInterval(() => {
+  if (process.ppid !== ownerPid) process.exit(0);
+}, 100);

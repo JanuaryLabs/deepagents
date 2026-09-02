@@ -275,6 +275,9 @@ export class PgBossTurnQueue extends TurnQueue {
         // revive it. A throwing handler is skipped too — the throw propagates to
         // pg-boss and the turn dead-letters.
         if (!parked) {
+          if (job.data.kind === 'recovery') {
+            await this.resumeParked(job.data.chatId);
+          }
           await this.#boss.deleteJob(this.#queue, job.id);
           await this.#notifySettled(options, job.data);
         }
@@ -316,8 +319,18 @@ export class PgBossTurnQueue extends TurnQueue {
   async resumeParked(chatId: string): Promise<void> {
     // Revives every cancelled job for the chat. A revived USER-cancelled
     // turn is harmless — the consumer's terminal-stream check skips it —
-    // so no parked-vs-cancelled bookkeeping is needed here.
-    const jobs = await this.#boss.findJobs(this.#queue, { key: chatId });
+    // so no parked-vs-cancelled bookkeeping is needed here. A queued recovery
+    // runs first; its settlement calls this again while it owns the FIFO key.
+    const jobs = await this.#boss.findJobs<TurnRef>(this.#queue, {
+      key: chatId,
+    });
+    if (
+      jobs.some(
+        (job) => job.state === 'created' && job.data.kind === 'recovery',
+      )
+    ) {
+      return;
+    }
     const parked = jobs
       .filter((job) => job.state === 'cancelled')
       .map((job) => job.id);

@@ -41,7 +41,7 @@ import {
   conversationScheduling,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
+import { withPostgresContainer } from '@deepagents/test';
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -82,12 +82,16 @@ async function submitApproval(
   });
 }
 
-const dockerAvailable = await isDockerAvailable();
-
 function messageText(turn: Extract<TurnRef, { kind: 'message' }>): string {
   const part = turn.message.parts.find((part) => part.type === 'text');
   assert.ok(part);
   return part.text;
+}
+
+function last<T>(values: readonly T[]): T {
+  const value = values.at(-1);
+  assert.ok(value);
+  return value;
 }
 
 const usage = {
@@ -505,6 +509,7 @@ test('configured runtime injects top-level Claude-compatible scheduling tools', 
     userTurn('turn-1', 'show tools'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await h.queue.runNext();
 
   const schedulingTools = modelTools.filter(({ name }) =>
@@ -553,6 +558,7 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
   );
   const conversation = { chatId: 'cron-tools', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'create cron');
   assert.equal(scheduler.wakes.size, 1);
@@ -564,9 +570,9 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
   );
 
   await runTurn(runtime, h.queue, conversation, 'list cron');
-  const listTool = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const listTool = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(listTool?.output, {
     jobs: [
       {
@@ -589,9 +595,9 @@ test('CronCreate, CronList, and CronDelete run through the model loop in one con
 
   commands.set('list empty', { name: 'CronList', input: {} });
   await runTurn(runtime, h.queue, conversation, 'list empty');
-  const emptyList = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const emptyList = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(emptyList?.output, { jobs: [] });
 });
 
@@ -633,12 +639,13 @@ test('CronCreate reports the exact next run and timezone for a one-shot cron', a
   );
   const conversation = { chatId: 'passed-one-shot', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'create passed one shot');
 
-  const result = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const result = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(result?.output, {
     id: [...scheduler.wakes.values()][0].data.definitionId,
     humanSchedule: 'At 03:08 PM, on day 13 of the month, only in August',
@@ -732,6 +739,7 @@ test('parallel model tool calls preserve concurrent cron creates and deletes', a
   );
   const conversation = { chatId: 'parallel-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'create two');
   definitionIds = [...scheduler.wakes.values()]
@@ -778,13 +786,12 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
   );
   const conversation = { chatId: 'dynamic-tools', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'schedule dynamic');
-  const scheduleTool = (
-    await runtime.observe(conversation).engine.getMessages()
-  )
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const scheduleTool = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(
     {
       clampedDelaySeconds: (
@@ -810,7 +817,7 @@ test('ScheduleWakeup fires an ask and persists scheduled provenance', async (t) 
 
   await h.queue.runNext();
   assert.equal(seenUserText.at(-1), 'scheduled prompt');
-  assert.ok(!seenUserText.at(-1)!.includes('check after enough time'));
+  assert.ok(!last(seenUserText).includes('check after enough time'));
   const messages = await runtime.observe(conversation).engine.getMessages();
   const scheduledUser = messages.find(
     (message) =>
@@ -860,13 +867,14 @@ test('ScheduleWakeup rejects delays outside its supported window', async (t) => 
   );
   const conversation = { chatId: 'invalid-dynamic-delay', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'schedule immediately');
 
   assert.equal(scheduler.wakes.size, 0);
-  const result = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const result = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.equal(result?.state, 'output-error');
 });
 
@@ -930,7 +938,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     metadata: {
       ...metadata,
       zukhruf: {
-        ...(metadata!.zukhruf as Record<string, unknown>),
+        ...(metadata?.zukhruf as Record<string, unknown>),
         scheduling: {
           cron: {
             '00000000-0000-4000-8000-000000000001': {
@@ -950,6 +958,7 @@ test('a busy cron window materializes one catch-up ask after queued user work', 
     },
   }));
   await using _worker = await runtime.work();
+  void _worker;
 
   await runtime.enqueue(
     conversation,
@@ -1051,6 +1060,7 @@ test('unconfigured runtime exposes no scheduling tools', async (t) => {
     userTurn('turn-1', 'show tools'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await h.queue.runNext();
   assert.deepEqual(
     toolNames.filter((name) =>
@@ -1148,6 +1158,7 @@ test('conversation availability reaches every plugin before reporting failures',
     userTurn('turn-1', 'settle'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await assert.rejects(h.queue.runNext(), /availability failed/);
   assert.deepEqual(calls, ['failing', 'following']);
 });
@@ -1182,6 +1193,7 @@ test('failed wake insertion does not commit a cron definition', async (t) => {
   );
   const conversation = { chatId: 'create-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   scheduler.scheduleFailuresRemaining = 1;
   await runTurn(runtime, h.queue, conversation, 'create during outage');
   assert.equal(scheduler.wakes.size, 0);
@@ -1227,11 +1239,13 @@ test('retrying a completed CronCreate tool call reuses its definition and wake',
     bindings: schedulingBindings(scheduler, 'UTC'),
   });
   await using _retriedWorker = await retriedRuntime.work();
+  void _retriedWorker;
   await runTurn(retriedRuntime, h.queue, conversation, 'retry create response');
   assert.deepEqual([...scheduler.wakes.values()], [firstWake]);
   const chat = await h.store.getChat(conversation.chatId);
+  assert.ok(chat?.metadata);
   const scheduling = (
-    chat!.metadata!.zukhruf as {
+    chat.metadata.zukhruf as {
       scheduling: { cron: Record<string, unknown> };
     }
   ).scheduling;
@@ -1275,6 +1289,7 @@ test('retry after enqueue-before-dispatch-clear executes one scheduled turn', as
   );
   const conversation = { chatId: 'advance-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'schedule crash window');
   const wake = [...scheduler.wakes.values()][0];
 
@@ -1350,6 +1365,7 @@ test('retry after claim-before-enqueue executes one scheduled turn', async (t) =
   );
   const conversation = { chatId: 'claim-enqueue-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'schedule claim crash window');
   const wake = [...scheduler.wakes.values()][0];
 
@@ -1396,6 +1412,7 @@ test('deleting a claimed cron before materialization prevents its scheduled ask'
   );
   const conversation = { chatId: 'claimed-delete-race', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'create deletion race');
   const wake = [...scheduler.wakes.values()][0];
   assert.ok(wake.data.definitionId);
@@ -1449,6 +1466,7 @@ test('deleting a claimed cron during successor insertion prevents its scheduled 
   );
   const conversation = { chatId: 'successor-delete-race', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'create successor race');
   const wake = [...scheduler.wakes.values()][0];
   assert.ok(wake.data.definitionId);
@@ -1507,6 +1525,7 @@ test('failed successor insertion leaves the current cron retryable', async (t) =
   );
   const conversation = { chatId: 'successor-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(
     runtime,
     h.queue,
@@ -1566,6 +1585,7 @@ test('pg-boss can retry successor insertion through a prolonged outage', async (
   );
   const conversation = { chatId: 'prolonged-successor-gap', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'create prolonged outage cron');
   const first = [...scheduler.wakes.values()][0];
 
@@ -1633,28 +1653,35 @@ test('ScheduleWakeup replacement and stop leave cron definitions active', async 
   );
   const conversation = { chatId: 'replace-stop', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'create fixed');
-  const cronWakeId = [...scheduler.wakes.values()].find(
+  const cronWake = [...scheduler.wakes.values()].find(
     ({ data }) => data.kind === 'cron',
-  )!.id;
+  );
+  assert.ok(cronWake);
+  const cronWakeId = cronWake.id;
   await runTurn(runtime, h.queue, conversation, 'schedule first');
   const firstDynamic = [...scheduler.wakes.values()].find(
     ({ data }) => data.kind === 'dynamic',
-  )!;
+  );
+  assert.ok(firstDynamic);
   await runTurn(runtime, h.queue, conversation, 'schedule replacement');
   const replacement = [...scheduler.wakes.values()].find(
     ({ data }) => data.kind === 'dynamic',
-  )!;
+  );
+  assert.ok(replacement);
   assert.notEqual(replacement.id, firstDynamic.id);
   assert.equal(replacement.runAt.getTime() - replacement.data.scheduledFor, 0);
   assert.equal(scheduler.wakes.has(firstDynamic.id), false);
-  await scheduler.handler!(firstDynamic);
+  const handler = scheduler.handler;
+  assert.ok(handler);
+  await handler(firstDynamic);
   assert.equal(h.queue.turns.length, 0, 'a replaced receipt must be stale');
 
   await runTurn(runtime, h.queue, conversation, 'stop dynamic');
   assert.deepEqual([...scheduler.wakes.keys()], [cronWakeId]);
-  await scheduler.handler!(replacement);
+  await handler(replacement);
   assert.equal(h.queue.turns.length, 0, 'a stopped receipt must be stale');
 });
 
@@ -1693,6 +1720,7 @@ test('a queued scheduled turn can be cancelled through AgentObservation', async 
   );
   const conversation = { chatId: 'scheduled-cancel', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'schedule cancellable');
   await scheduler.fire([...scheduler.wakes.keys()][0]);
   const scheduled = h.queue.turns[0];
@@ -1737,6 +1765,7 @@ test('cancelling the last queued user turn materializes one overdue occurrence',
   );
   const conversation = { chatId: 'cancel-user-for-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'create catch-up cron');
   const wake = [...scheduler.wakes.values()][0];
   const queued = await runtime.enqueue(
@@ -1802,6 +1831,7 @@ test('an overdue occurrence waits for approval before materializing', async (t) 
   );
   const conversation = { chatId: 'approval-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'create approval cron');
   const wake = [...scheduler.wakes.values()][0];
   await runTurn(runtime, h.queue, conversation, 'needs approval');
@@ -1855,6 +1885,7 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
   );
   const conversation = { chatId: 'cron-one-shot', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, conversation, 'create one shot');
   const wake = [...scheduler.wakes.values()][0];
@@ -1864,9 +1895,9 @@ test('a non-recurring cron fires once and removes its definition', async (t) => 
 
   commands.set('list after one shot', { name: 'CronList', input: {} });
   await runTurn(runtime, h.queue, conversation, 'list after one shot');
-  const list = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const list = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(list?.output, { jobs: [] });
 });
 
@@ -1904,6 +1935,7 @@ test('recurrence keeps the timezone persisted at creation across runtime restart
     bindings: schedulingBindings(scheduler, 'UTC'),
   });
   await using _restartedWorker = await restarted.work();
+  void _restartedWorker;
   await scheduler.fire(firstWake.id);
   const successor = [...scheduler.wakes.values()][0];
   assert.equal(successor.data.kind, 'cron');
@@ -1952,11 +1984,12 @@ test('cron definitions are isolated by conversation and user across runtimes', a
     bindings: schedulingBindings(scheduler, 'UTC'),
   });
   await using _otherWorker = await otherRuntime.work();
+  void _otherWorker;
   const other = { chatId: 'private-b', userId: 'user-b' };
   await runTurn(otherRuntime, h.queue, other, 'list other conversation');
-  const result = (await otherRuntime.observe(other).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const result = last(
+    await otherRuntime.observe(other).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(result?.output, { jobs: [] });
 });
 
@@ -2025,6 +2058,7 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   );
   const root = { chatId: 'scheduling-root', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
 
   await runTurn(runtime, h.queue, root, 'spawn owner');
   const ownerTurn = h.queue.turns[0];
@@ -2033,7 +2067,8 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   await h.queue.runNext();
   const ownerWake = [...scheduler.wakes.values()][0];
   assert.deepEqual(ownerWake.data.conversation, owner);
-  const definitionId = ownerWake.data.definitionId!;
+  const definitionId = ownerWake.data.definitionId;
+  assert.ok(definitionId);
 
   while (h.queue.turns.length > 0) await h.queue.runNext();
   await runTurn(runtime, h.queue, root, 'spawn sibling');
@@ -2042,9 +2077,9 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   const sibling = { chatId: siblingTurn.chatId, userId: siblingTurn.userId };
   assert.notEqual(sibling.chatId, owner.chatId);
   await h.queue.runNext();
-  const siblingList = (await runtime.observe(sibling).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const siblingList = last(
+    await runtime.observe(sibling).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(siblingList?.output, { jobs: [] });
 
   commands.set('delete sibling cron', {
@@ -2053,17 +2088,17 @@ test('scheduling tools bind to the current root, child, and sibling conversation
   });
   while (h.queue.turns.length > 0) await h.queue.runNext();
   await runTurn(runtime, h.queue, sibling, 'delete sibling cron');
-  const siblingDelete = (await runtime.observe(sibling).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const siblingDelete = last(
+    await runtime.observe(sibling).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.equal(siblingDelete?.state, 'output-error');
   assert.equal(scheduler.wakes.has(ownerWake.id), true);
 
   while (h.queue.turns.length > 0) await h.queue.runNext();
   await runTurn(runtime, h.queue, root, 'list root cron');
-  const rootList = (await runtime.observe(root).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const rootList = last(
+    await runtime.observe(root).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.deepEqual(rootList?.output, { jobs: [] });
 });
 
@@ -2095,12 +2130,13 @@ test('resume ignores scheduling metadata while scheduling tools fail closed', as
     metadata: {
       ...metadata,
       zukhruf: {
-        ...(metadata!.zukhruf as Record<string, unknown>),
+        ...(metadata?.zukhruf as Record<string, unknown>),
         scheduling: { version: 99, cron: {} },
       },
     },
   }));
   await using _worker = await runtime.work();
+  void _worker;
   assert.equal(await runtime.observe(conversation).resume(), null);
   await assert.rejects(
     runTurn(runtime, h.queue, conversation, 'list malformed'),
@@ -2152,6 +2188,7 @@ test('CronCreate rejects six-field and unreachable expressions', async (t) => {
   );
   const conversation = { chatId: 'invalid-cron', userId: 'user-1' };
   await using _worker = await runtime.work();
+  void _worker;
   await runTurn(runtime, h.queue, conversation, 'six fields');
   await runTurn(runtime, h.queue, conversation, 'unreachable');
   await runTurn(runtime, h.queue, conversation, 'missing dynamic reason');
@@ -2216,19 +2253,20 @@ test('CronCreate enforces the 50-definition conversation cap', async (t) => {
     metadata: {
       ...metadata,
       zukhruf: {
-        ...(metadata!.zukhruf as Record<string, unknown>),
+        ...(metadata?.zukhruf as Record<string, unknown>),
         scheduling: { cron },
       },
     },
   }));
   await using _worker = await runtime.work();
+  void _worker;
   assert.equal(scheduler.wakes.size, 0);
 
   await runTurn(runtime, h.queue, conversation, 'create fifty first');
   assert.equal(scheduler.wakes.size, 0);
-  const result = (await runtime.observe(conversation).engine.getMessages())
-    .at(-1)!
-    .parts.find(isToolUIPart);
+  const result = last(
+    await runtime.observe(conversation).engine.getMessages(),
+  ).parts.find(isToolUIPart);
   assert.equal(result?.state, 'output-error');
 });
 
@@ -2285,6 +2323,7 @@ test('a dynamic wake remains usable across a context-store restart', async (t) =
     bindings: schedulingBindings(scheduler, 'UTC'),
   });
   await using _restartedWorker = await restarted.work();
+  void _restartedWorker;
   assert.equal(scheduler.wakes.size, 1);
   await scheduler.fire([...scheduler.wakes.keys()][0]);
   await h.queue.runNext();
@@ -2336,6 +2375,7 @@ test('a cron wake remains usable across a context-store restart', async (t) => {
     bindings: schedulingBindings(scheduler, 'UTC'),
   });
   await using _restartedWorker = await restarted.work();
+  void _restartedWorker;
   assert.equal(scheduler.wakes.size, 1);
   const persisted = [...scheduler.wakes.values()][0];
 
@@ -2384,6 +2424,7 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
     );
     const conversation = { chatId: 'sparse-expiry', userId: 'user-1' };
     await using _worker = await runtime.work();
+    void _worker;
     await runTurn(runtime, h.queue, conversation, 'create sparse cron');
     const wake = [...scheduler.wakes.values()][0];
     assert.ok(wake.runAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1_000);
@@ -2393,94 +2434,90 @@ test('a recurring cron does not fire when its first occurrence is beyond its sev
     assert.deepEqual(h.queue.turns, []);
 
     await runTurn(runtime, h.queue, conversation, 'list sparse cron');
-    const result = (await runtime.observe(conversation).engine.getMessages())
-      .at(-1)!
-      .parts.find(isToolUIPart);
+    const result = last(
+      await runtime.observe(conversation).engine.getMessages(),
+    ).parts.find(isToolUIPart);
     assert.deepEqual(result?.output, { jobs: [] });
   } finally {
     mock.timers.reset();
   }
 });
 
-test(
-  'duplicate wake delivery across runtimes advances PostgreSQL state once',
-  { skip: dockerAvailable ? false : 'Docker is unavailable' },
-  async (t) => {
-    await withPostgresContainer(async (container) => {
-      const firstStore = new PostgresContextStore({
-        pool: container.connectionString,
-      });
-      const secondStore = new PostgresContextStore({
-        pool: container.connectionString,
-      });
-      await firstStore.initialize();
-      await secondStore.initialize();
-      const scheduler = new RecordingWakeScheduler();
-      const h = harness(t, scheduler, firstStore);
-      const commands = new Map<string, { name: string; input: unknown }>([
-        [
-          'schedule postgres duplicate',
-          {
-            name: 'ScheduleWakeup',
-            input: {
-              delaySeconds: 60,
-              reason: 'concurrency proof',
-              prompt: 'postgres scheduled prompt',
-            },
-          },
-        ],
-      ]);
-      const seenUserText: string[] = [];
-      const declaration = defineAgent({
-        name: 'root',
-        model: toolModel(commands, seenUserText),
-        sandbox: async () => ({}) as AgentSandbox,
-        instructions: [],
-        plugins: [conversationScheduling()],
-      });
-      const firstRuntime = new AgentRuntime(declaration, {
-        ...h,
-        bindings: schedulingBindings(scheduler, 'UTC'),
-      });
-      const secondRuntime = new AgentRuntime(declaration, {
-        ...h,
-        store: secondStore,
-        bindings: schedulingBindings(scheduler, 'UTC'),
-      });
-      const conversation = {
-        chatId: 'postgres-duplicate',
-        userId: 'user-1',
-      };
-      const firstWorker = await firstRuntime.work();
-      let secondWorker: AsyncDisposable | undefined;
-      try {
-        await runTurn(
-          firstRuntime,
-          h.queue,
-          conversation,
-          'schedule postgres duplicate',
-        );
-        secondWorker = await secondRuntime.work();
-        assert.equal(scheduler.handlers.size, 2);
-        const wake = [...scheduler.wakes.values()][0];
-        await scheduler.deliverAcrossConsumers(wake.id);
-        assert.equal(h.queue.turns.length, 2);
-
-        await h.queue.runNext();
-        await h.queue.runNext();
-        assert.equal(
-          seenUserText.filter((text) => text === 'postgres scheduled prompt')
-            .length,
-          1,
-        );
-        const chat = await secondStore.getChat(conversation.chatId);
-        assert.equal(dynamicState(chat?.metadata), undefined);
-      } finally {
-        await secondWorker?.[Symbol.asyncDispose]();
-        await firstWorker[Symbol.asyncDispose]();
-        await secondStore.close();
-        await firstStore.close();
-      }
+test('duplicate wake delivery across runtimes advances PostgreSQL state once', async (t) => {
+  await withPostgresContainer(async (container) => {
+    const firstStore = new PostgresContextStore({
+      pool: container.connectionString,
     });
-  },
-);
+    const secondStore = new PostgresContextStore({
+      pool: container.connectionString,
+    });
+    await firstStore.initialize();
+    await secondStore.initialize();
+    const scheduler = new RecordingWakeScheduler();
+    const h = harness(t, scheduler, firstStore);
+    const commands = new Map<string, { name: string; input: unknown }>([
+      [
+        'schedule postgres duplicate',
+        {
+          name: 'ScheduleWakeup',
+          input: {
+            delaySeconds: 60,
+            reason: 'concurrency proof',
+            prompt: 'postgres scheduled prompt',
+          },
+        },
+      ],
+    ]);
+    const seenUserText: string[] = [];
+    const declaration = defineAgent({
+      name: 'root',
+      model: toolModel(commands, seenUserText),
+      sandbox: async () => ({}) as AgentSandbox,
+      instructions: [],
+      plugins: [conversationScheduling()],
+    });
+    const firstRuntime = new AgentRuntime(declaration, {
+      ...h,
+      bindings: schedulingBindings(scheduler, 'UTC'),
+    });
+    const secondRuntime = new AgentRuntime(declaration, {
+      ...h,
+      store: secondStore,
+      bindings: schedulingBindings(scheduler, 'UTC'),
+    });
+    const conversation = {
+      chatId: 'postgres-duplicate',
+      userId: 'user-1',
+    };
+    const firstWorker = await firstRuntime.work();
+    let secondWorker: AsyncDisposable | undefined;
+    try {
+      await runTurn(
+        firstRuntime,
+        h.queue,
+        conversation,
+        'schedule postgres duplicate',
+      );
+      secondWorker = await secondRuntime.work();
+      assert.equal(scheduler.handlers.size, 2);
+      const wake = [...scheduler.wakes.values()][0];
+      await scheduler.deliverAcrossConsumers(wake.id);
+      assert.equal(h.queue.turns.length, 2);
+
+      await h.queue.runNext();
+      await h.queue.runNext();
+      assert.equal(
+        seenUserText.filter((text) => text === 'postgres scheduled prompt')
+          .length,
+        1,
+      );
+      const chat = await secondStore.getChat(conversation.chatId);
+      assert.equal(dynamicState(chat?.metadata), undefined);
+    } finally {
+      await secondWorker?.[Symbol.asyncDispose]();
+      await firstWorker[Symbol.asyncDispose]();
+      await secondStore.close();
+      await firstStore.close();
+    }
+  });
+});

@@ -10,9 +10,8 @@ import {
   type ScheduledTaskTransaction,
   ScheduledTasks,
 } from '@deepagents/experimental/zukhruf/schedules';
-import { isDockerAvailable, withPostgresContainer } from '@deepagents/test';
+import { withPostgresContainer } from '@deepagents/test';
 
-const dockerAvailable = await isDockerAvailable();
 const FAST_POLLING = {
   batchSize: 3,
   pollingIntervalSeconds: 0.5,
@@ -187,6 +186,7 @@ test('Run now launches one generic execution without moving the recurrence curso
   await using harness = await pgliteHarness();
   const { executor, scheduled } = harness;
   await using _worker = await scheduled.work(FAST_POLLING);
+  void _worker;
   const task = await scheduled.create('owner-1', {
     idempotencyKey: 'daily-report',
     name: 'Daily report',
@@ -241,6 +241,7 @@ test('missed occurrences collapse into one catch-up while later runs may overlap
   });
   await sleep(3_000);
   await using _worker = await scheduled.work(FAST_POLLING);
+  void _worker;
   await t.waitFor(
     async () =>
       assert.equal((await scheduled.listRuns('owner-1', catchUp.id)).length, 1),
@@ -303,6 +304,7 @@ test('duplicate delivery of one occurrence creates one run and one successor', a
       }
     });
   await using _worker = await scheduled.work(FAST_POLLING);
+  void _worker;
   mutableBoss.work = originalWork;
 
   await t.waitFor(
@@ -331,6 +333,7 @@ test('management changes future work while archive preserves independently revie
   await using harness = await pgliteHarness();
   const { executor, scheduled } = harness;
   await using _worker = await scheduled.work(FAST_POLLING);
+  void _worker;
   const task = await scheduled.create('owner-1', {
     idempotencyKey: 'managed',
     name: 'Managed',
@@ -426,6 +429,7 @@ test('cancelling during launch cancels the external execution instead of orphani
   executor.launchStarted = started.resolve;
   executor.launchGate = release.promise;
   await using _worker = await scheduled.work(FAST_POLLING);
+  void _worker;
   const task = await scheduled.create('owner-1', {
     idempotencyKey: 'cancel-race',
     name: 'Cancel race',
@@ -470,6 +474,7 @@ test('a crash after idempotent launch retries the same run and external executio
   });
   const { executor, scheduled } = harness;
   await using _worker = await scheduled.work(FAST_POLLING);
+  void _worker;
   const task = await scheduled.create('owner-1', {
     idempotencyKey: 'launch-crash',
     name: 'Launch crash',
@@ -555,6 +560,7 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
   await restarted.initialize();
   try {
     await using _worker = await restarted.work(FAST_POLLING);
+    void _worker;
     await waitForRun(t, restarted, 'owner-1', run.id, 'running');
     assert.equal(executor.executions.size, 1);
   } finally {
@@ -563,152 +569,146 @@ test('a queued run survives coordinator and pg-boss restart', async (t) => {
   }
 });
 
-test(
-  'real PostgreSQL competing workers launch one execution for one run',
-  { skip: !dockerAvailable },
-  async (t) => {
-    await withPostgresContainer(async ({ connectionString }) => {
-      const pool = new Pool({ connectionString });
-      const firstBoss = new PgBoss({ connectionString, schedule: false });
-      const secondBoss = new PgBoss({ connectionString, schedule: false });
-      firstBoss.on('error', () => {});
-      secondBoss.on('error', () => {});
-      await firstBoss.start();
-      await secondBoss.start();
-      const transaction: ScheduledTaskTransaction = async (operation) => {
-        const client = await pool.connect();
-        try {
-          await client.query('BEGIN');
-          const database: Db = {
-            executeSql: (text, values) => client.query(text, values),
-          };
-          const result = await operation(database);
-          await client.query('COMMIT');
-          return result;
-        } catch (error) {
-          await client.query('ROLLBACK');
-          throw error;
-        } finally {
-          client.release();
-        }
-      };
-      const executor = new TestExecutor();
-      const queue = `scheduled-workers-${randomUUID()}`;
-      const first = new ScheduledTasks({
-        boss: firstBoss,
-        queue,
-        reconciliationIntervalMs: 50,
-        transaction,
-        executor,
-      });
-      const second = new ScheduledTasks({
-        boss: secondBoss,
-        queue,
-        reconciliationIntervalMs: 50,
-        transaction,
-        executor,
-      });
-      await first.initialize();
-      await second.initialize();
+test('real PostgreSQL competing workers launch one execution for one run', async (t) => {
+  await withPostgresContainer(async ({ connectionString }) => {
+    const pool = new Pool({ connectionString });
+    const firstBoss = new PgBoss({ connectionString, schedule: false });
+    const secondBoss = new PgBoss({ connectionString, schedule: false });
+    firstBoss.on('error', () => {});
+    secondBoss.on('error', () => {});
+    await firstBoss.start();
+    await secondBoss.start();
+    const transaction: ScheduledTaskTransaction = async (operation) => {
+      const client = await pool.connect();
       try {
-        await using _firstWorker = await first.work(FAST_POLLING);
-        await using _secondWorker = await second.work(FAST_POLLING);
-        const task = await first.create('owner-1', {
-          idempotencyKey: 'competing-workers',
-          name: 'Competing workers',
-          prompt: 'Launch once',
-          recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
-          timezone: 'UTC',
-          executionConfig: { destination: 'postgres' },
-        });
-        const run = await first.runNow('owner-1', task.id, 'one-run');
-
-        await waitForRun(t, first, 'owner-1', run.id, 'running');
-        assert.equal(executor.launches.length, 1);
-        assert.equal(executor.executions.size, 1);
-      } finally {
-        await secondBoss.stop({ graceful: false });
-        await firstBoss.stop({ graceful: false });
-        await pool.end();
-      }
-    });
-  },
-);
-
-test(
-  'real PostgreSQL commits duplicate management calls as one schedule and run',
-  { skip: !dockerAvailable },
-  async () => {
-    await withPostgresContainer(async ({ connectionString }) => {
-      const pool = new Pool({ connectionString });
-      const boss = new PgBoss({ connectionString, schedule: false });
-      boss.on('error', () => {});
-      await boss.start();
-      const transaction: ScheduledTaskTransaction = async (operation) => {
-        const client = await pool.connect();
-        try {
-          await client.query('BEGIN');
-          const database: Db = {
-            executeSql: (text, values) => client.query(text, values),
-          };
-          const result = await operation(database);
-          await client.query('COMMIT');
-          return result;
-        } catch (error) {
-          await client.query('ROLLBACK');
-          throw error;
-        } finally {
-          client.release();
-        }
-      };
-      const executor = new TestExecutor();
-      const queue = `scheduled-postgres-${randomUUID()}`;
-      const scheduled = new ScheduledTasks({
-        boss,
-        queue,
-        reconciliationIntervalMs: 50,
-        transaction,
-        executor,
-      });
-      await scheduled.initialize();
-      try {
-        const input = {
-          idempotencyKey: 'same-create',
-          name: 'Same create',
-          prompt: 'Persist once',
-          recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
-          timezone: 'UTC',
-          executionConfig: { destination: 'postgres' },
+        await client.query('BEGIN');
+        const database: Db = {
+          executeSql: (text, values) => client.query(text, values),
         };
-        const [first, second] = await Promise.all([
-          scheduled.create('owner-1', input),
-          scheduled.create('owner-1', input),
-        ]);
-        assert.equal(first.id, second.id);
-        const [firstRun, secondRun] = await Promise.all([
-          scheduled.runNow('owner-1', first.id, 'same-run'),
-          scheduled.runNow('owner-1', first.id, 'same-run'),
-        ]);
-        assert.equal(firstRun.id, secondRun.id);
-        const jobs = await boss.findJobs<{ kind: string }>(queue);
-        const claimable = jobs.filter(
-          ({ state }) => state !== 'cancelled' && state !== 'failed',
-        );
-        assert.equal(
-          claimable.filter(({ data }) => data.kind === 'occurrence').length,
-          1,
-        );
-        assert.equal(
-          claimable.filter(({ data }) => data.kind === 'dispatch').length,
-          1,
-        );
+        const result = await operation(database);
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
       } finally {
-        await boss.stop({ graceful: false });
-        await pool.end();
+        client.release();
       }
+    };
+    const executor = new TestExecutor();
+    const queue = `scheduled-workers-${randomUUID()}`;
+    const first = new ScheduledTasks({
+      boss: firstBoss,
+      queue,
+      reconciliationIntervalMs: 50,
+      transaction,
+      executor,
     });
-  },
-);
+    const second = new ScheduledTasks({
+      boss: secondBoss,
+      queue,
+      reconciliationIntervalMs: 50,
+      transaction,
+      executor,
+    });
+    await first.initialize();
+    await second.initialize();
+    try {
+      await using _firstWorker = await first.work(FAST_POLLING);
+      void _firstWorker;
+      await using _secondWorker = await second.work(FAST_POLLING);
+      void _secondWorker;
+      const task = await first.create('owner-1', {
+        idempotencyKey: 'competing-workers',
+        name: 'Competing workers',
+        prompt: 'Launch once',
+        recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
+        timezone: 'UTC',
+        executionConfig: { destination: 'postgres' },
+      });
+      const run = await first.runNow('owner-1', task.id, 'one-run');
+
+      await waitForRun(t, first, 'owner-1', run.id, 'running');
+      assert.equal(executor.launches.length, 1);
+      assert.equal(executor.executions.size, 1);
+    } finally {
+      await secondBoss.stop({ graceful: false });
+      await firstBoss.stop({ graceful: false });
+      await pool.end();
+    }
+  });
+});
+
+test('real PostgreSQL commits duplicate management calls as one schedule and run', async () => {
+  await withPostgresContainer(async ({ connectionString }) => {
+    const pool = new Pool({ connectionString });
+    const boss = new PgBoss({ connectionString, schedule: false });
+    boss.on('error', () => {});
+    await boss.start();
+    const transaction: ScheduledTaskTransaction = async (operation) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const database: Db = {
+          executeSql: (text, values) => client.query(text, values),
+        };
+        const result = await operation(database);
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    };
+    const executor = new TestExecutor();
+    const queue = `scheduled-postgres-${randomUUID()}`;
+    const scheduled = new ScheduledTasks({
+      boss,
+      queue,
+      reconciliationIntervalMs: 50,
+      transaction,
+      executor,
+    });
+    await scheduled.initialize();
+    try {
+      const input = {
+        idempotencyKey: 'same-create',
+        name: 'Same create',
+        prompt: 'Persist once',
+        recurrence: futureRecurrence(60_000, 'FREQ=DAILY;COUNT=2'),
+        timezone: 'UTC',
+        executionConfig: { destination: 'postgres' },
+      };
+      const [first, second] = await Promise.all([
+        scheduled.create('owner-1', input),
+        scheduled.create('owner-1', input),
+      ]);
+      assert.equal(first.id, second.id);
+      const [firstRun, secondRun] = await Promise.all([
+        scheduled.runNow('owner-1', first.id, 'same-run'),
+        scheduled.runNow('owner-1', first.id, 'same-run'),
+      ]);
+      assert.equal(firstRun.id, secondRun.id);
+      const jobs = await boss.findJobs<{ kind: string }>(queue);
+      const claimable = jobs.filter(
+        ({ state }) => state !== 'cancelled' && state !== 'failed',
+      );
+      assert.equal(
+        claimable.filter(({ data }) => data.kind === 'occurrence').length,
+        1,
+      );
+      assert.equal(
+        claimable.filter(({ data }) => data.kind === 'dispatch').length,
+        1,
+      );
+    } finally {
+      await boss.stop({ graceful: false });
+      await pool.end();
+    }
+  });
+});
 
 async function waitForRun(
   t: TestContext,
