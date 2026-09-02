@@ -155,7 +155,7 @@
     }
   },
   "release": {
-    "projects": ["*", "!packages/test"],
+    "projects": ["*", "!packages/test", "!@deepagents/devtool-ui"],
     "conventionalCommits": {
       "types": {
         "chore": {

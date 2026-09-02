@@ -19,6 +19,7 @@ try {
   const tarballs = [
     pack('packages/agent'),
     pack('packages/context'),
+    pack('packages/elements'),
     pack('packages/experimental'),
     pack('packages/react/shadcn'),
     pack('packages/devtool/history'),
@@ -76,12 +77,17 @@ try {
 }
 
 function pack(directory: string): string {
-  const [{ filename }] = JSON.parse(
+  // npm 11 prints an array of packed manifests; npm 12 prints an object keyed
+  // by package name. Both carry the tarball `filename`.
+  const packed: unknown = JSON.parse(
     execFileSync('npm', ['pack', '--json', '--pack-destination', packs], {
       cwd: join(workspace, directory),
       encoding: 'utf8',
       env: npmEnvironment,
     }),
+  );
+  const [{ filename }] = (
+    Array.isArray(packed) ? packed : Object.values(packed as object)
   ) as [{ filename: string }];
   return join(packs, filename);
 }
