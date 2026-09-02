@@ -99,6 +99,10 @@ const turn = await runtime.enqueue(
 );
 
 await renderTurn(turn.stream);
+const status = await streamStore.getStream(turn.id);
+if (status?.status === 'failed') {
+  throw new Error(status.error ?? 'Group chat turn failed');
+}
 console.log(
   `\n\n--- shared transcript (${hostTranscriptPath}, mounted at ${transcriptPath}) ---\n${await readFile(hostTranscriptPath, 'utf8')}`,
 );

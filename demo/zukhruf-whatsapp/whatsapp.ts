@@ -46,6 +46,8 @@ interface RunningParticipant {
   runtime: AgentRuntime;
 }
 
+const HUMAN_AUTHOR = 'user';
+
 class ReplyInbox {
   #replies: WhatsAppMessage[] = [];
 
@@ -185,7 +187,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
     this.#replies.drain();
     let pending: WhatsAppMessage[] = [
-      { id: randomUUID(), author: 'user', content: message },
+      { id: randomUUID(), author: HUMAN_AUTHOR, content: message },
     ];
     await this.#publish(pending);
 
@@ -261,6 +263,11 @@ export class WhatsAppGroup implements AsyncDisposable {
       ) {
         throw new Error(
           'WhatsAppGroup participant names must be non-empty and unpadded',
+        );
+      }
+      if (participant.name === HUMAN_AUTHOR) {
+        throw new Error(
+          `WhatsAppGroup participant name "${HUMAN_AUTHOR}" is reserved for the human author`,
         );
       }
       if (names.has(participant.name)) {

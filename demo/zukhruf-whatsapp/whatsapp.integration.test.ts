@@ -16,6 +16,24 @@ const usage = {
   outputTokens: { total: 1, text: 1, reasoning: undefined },
 } as const;
 
+test('reserves the human author name from participants', async () => {
+  await assert.rejects(
+    WhatsAppGroup.create({
+      userId: 'user-1',
+      participants: [
+        {
+          name: 'user',
+          specialty: 'Should receive human messages.',
+          model: new MockLanguageModelV4({
+            doStream: async () => textResponse('unused'),
+          }),
+        },
+      ],
+    }),
+    /participant name "user" is reserved for the human author/,
+  );
+});
+
 test('every member sees a group message concurrently and only volunteers publish replies', async () => {
   const firstNotificationStarted = Promise.withResolvers<void>();
   const firstParticipants = new Set<string>();
