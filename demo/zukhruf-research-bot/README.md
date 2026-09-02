@@ -17,9 +17,9 @@ to the user. Its planner runs in a separate chat, chooses three complementary
 research angles, and spawns three independent researcher chats. Each researcher
 uses OpenAI's hosted `web_search`, then calls `send_message` with the canonical
 target `/root`. Successful researcher turns also return `FINAL_ANSWER` to their
-direct parent planner. Spawned agents inherit forked parent-turn history by
-default; `fork_turns` can choose all history, none, or a bounded number of recent
-user-turn boundaries.
+direct parent planner. Every spawn sets `fork_turns` to all history, none, or a
+bounded number of recent user-turn boundaries. This demo uses `none` because
+each child receives a standalone task.
 
 Nothing waits for a child agent. The runtime host only loads these declarations
 and keeps the worker alive; it does not create a conversation or submit a turn.

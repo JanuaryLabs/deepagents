@@ -83,6 +83,7 @@ class ControlledTurnQueue extends TurnQueue {
     handler: (turn: TurnRef, context: ConsumeContext) => Promise<void>,
     _options: ConsumeOptions,
   ): Promise<AsyncDisposable> {
+    void _options;
     this.#handler = handler;
     return {
       [Symbol.asyncDispose]: async () => {
@@ -166,6 +167,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
                   agent_type: 'worker',
                   task_name: 'same',
                   message: 'Do the work',
+                  fork_turns: 'all',
                 }),
               },
               {
@@ -176,6 +178,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
                   agent_type: 'worker',
                   task_name: 'same',
                   message: 'Do the work',
+                  fork_turns: 'all',
                 }),
               },
               {
@@ -218,6 +221,7 @@ test('concurrent identical spawn_agent calls reserve one canonical child path', 
     userTurn('root-turn', 'Spawn the worker twice concurrently'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   const tree = await store.listChats({
@@ -257,6 +261,7 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
                   agent_type: 'worker',
                   task_name: 'retryable',
                   message: 'Do the work',
+                  fork_turns: 'all',
                 }),
               },
               {
@@ -294,6 +299,7 @@ test('spawn_agent retries an enqueue gap but does not restart a completed child 
     queue,
   });
   await using _worker = await runtime.work();
+  void _worker;
 
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },

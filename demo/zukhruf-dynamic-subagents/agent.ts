@@ -25,7 +25,8 @@ export function createCodingAgent(workspaceDirectory: string) {
 For non-trivial feature work, read the discovered
 \`skills/feature-development/SKILL.md\` before acting. Use \`spawn_agent\` only
 when a declared specialist can answer a focused question independently.
-Specialists are advisory; you own every file change.
+Every spawn must set \`fork_turns\` explicitly. Specialists are advisory; you
+own every file change.
 
 Understand the real implementation and call sites before editing. Prefer
 existing modules and installed package capabilities over new machinery. Make

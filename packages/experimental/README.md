@@ -137,8 +137,8 @@ notifications where specialists volunteer public replies),
 [`demo/zukhruf-dynamic-subagents`](../../demo/zukhruf-dynamic-subagents)
 (Markdown root agent, Markdown subagents, and a mounted skill discovered at
 startup).
-`spawn_agent` can fork all parent turns, no parent turns, or a bounded number of
-recent user-turn boundaries into a child chat through its `fork_turns` input.
+Every `spawn_agent` call chooses all parent turns, no parent turns, or a bounded
+number of recent user-turn boundaries through its required `fork_turns` input.
 Collaboration tools stay on the direct model surface by default; set
 `multiAgent.nonCodeModeOnly: false` to expose them through AI SDK code mode
 instead.

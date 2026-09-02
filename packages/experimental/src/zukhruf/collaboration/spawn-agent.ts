@@ -26,10 +26,9 @@ const spawnAgentInputSchema = z.object({
   fork_turns: z
     .string()
     .trim()
-    .default('all')
     .refine((value) => parseForkTurns(value) !== undefined, forkTurnsError)
     .describe(
-      'Optional number of parent turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3`.',
+      'Required number of parent turns to fork. Use `none`, `all`, or a positive integer string such as `3`.',
     ),
 });
 

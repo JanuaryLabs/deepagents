@@ -536,6 +536,7 @@ test('worker dispatches a child chat to the declaration named by its metadata', 
     userTurn('child-turn', 'research this'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(rootCalls.length, 0);
@@ -580,6 +581,7 @@ test('a terminal duplicate cannot replace a newer latest turn', async (t) => {
     userTurn('caller-turn-a', 'first'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
   const second = await runtime.enqueue(
     conversation,
@@ -627,6 +629,7 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
                   agent_type: ' researcher ',
                   task_name: ' market_research ',
                   message: 'Research the market',
+                  fork_turns: 'all',
                 }),
               },
               {
@@ -669,6 +672,7 @@ test('spawn_agent queues an independent child turn and returns before it runs', 
     userTurn('root-turn', 'Delegate this research'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(rootCalls, 2);
@@ -774,6 +778,7 @@ test('a completed child queues its final answer to the parent without waking it'
     userTurn('child-turn', 'Research this'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(queue.turns.length, 0, 'completion is queue-only');
@@ -873,6 +878,7 @@ test('an approval-paused child sends one final answer only after continuation', 
     userTurn('paused-child-turn', 'Research and publish'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.deepStrictEqual(
@@ -884,7 +890,8 @@ test('an approval-paused child sends one final answer only after continuation', 
     await runtime
       .observe({ chatId: 'paused-child-chat', userId: 'user-1' })
       .engine.getMessages()
-  ).at(-1)!;
+  ).at(-1);
+  assert.ok(paused);
   const toolPart = paused.parts.find(isToolUIPart);
   assert.equal(toolPart?.state, 'approval-requested');
 
@@ -987,6 +994,7 @@ test('a failed approval continuation reports failure instead of remaining paused
     userTurn('failed-continuation-turn', 'Research and publish'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
   await submitApprovals(
     runtime,
@@ -1088,6 +1096,7 @@ test('a cancelled approval continuation clears the gate and revives parked turns
     userTurn('cancelled-continuation-turn', 'publish after approval'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
   await submitApprovals(
     runtime,
@@ -1188,6 +1197,7 @@ test('failed continuation preserves denied sibling semantics', async (t) => {
     userTurn('failed-sibling-turn', 'run both tools'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
   await submitApprovals(
     runtime,
@@ -1269,6 +1279,7 @@ test('a terminal child completion survives a transient parent-mailbox failure', 
     userTurn('child-terminal-turn', 'Research durably'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(await streamStore.getStreamStatus(childTurn.id), 'completed');
@@ -1365,6 +1376,7 @@ test('a stale orphan retry cannot clear or supersede a successor turn', async (t
   const staleTurn = queue.turns[0];
   assert.ok(staleTurn);
   await using _worker = await runtime.work();
+  void _worker;
   await assert.rejects(
     queue.runNext(),
     /simulated repeated completion mailbox failure/,
@@ -1495,6 +1507,7 @@ test('terminal child recovery does not duplicate a completion committed before a
     userTurn('idempotent-child-turn', 'Research once'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   const completions = await mailboxStore.drain({
@@ -1579,6 +1592,7 @@ test('a failed child asynchronously notifies its parent with the terminal status
     userTurn('failed-child-turn', 'Run the risky research'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(await streamStore.getStreamStatus(failedTurn.id), 'failed');
@@ -1668,6 +1682,7 @@ test('list_agents reports a child whose turn fails before setup completes', asyn
     userTurn('setup-failed-turn', 'Start the child'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(childCalls.length, 0);
@@ -1757,6 +1772,7 @@ test('a cancelled child asynchronously notifies its parent with the terminal sta
     userTurn('cancelled-child-turn', 'Start long research'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   const executing = queue.runNext();
   await samplingStarted.promise;
   await runtime
@@ -1861,6 +1877,8 @@ test('a child cancelled while queued notifies its parent once without running th
   await runtime.enqueue(conversation, turn);
 
   await using _worker = await runtime.work();
+
+  void _worker;
   await queue.runNext();
 
   assert.equal(childCalls.length, 0);
@@ -1978,6 +1996,7 @@ test('send_message resolves a canonical sibling path and queues mail without wak
     userTurn('sender-turn', 'Send the review request'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(senderCalls, 2);
@@ -2092,6 +2111,7 @@ test('followup_task wakes a non-root target with a new task', async (t) => {
     userTurn('root-turn', 'Assign follow-up work'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(rootCalls, 2);
@@ -2192,6 +2212,7 @@ test('interrupt_agent cancels the oldest queued child turn and reports its prior
     userTurn('root-turn', 'stop the child'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('root-chat');
 
   const prompt = JSON.stringify(promptAfterInterrupt);
@@ -2291,6 +2312,7 @@ test('interrupt_agent can retry terminal projection before deleting a queued chi
     userTurn('retryable-interrupt-root', 'stop the child'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('root-chat');
 
   const prompt = JSON.stringify(promptAfterRetry);
@@ -2401,7 +2423,9 @@ test('interrupt_agent aborts a running child across runtime instances without qu
     queue: childQueue,
   });
   await using _rootWorker = await rootRuntime.work();
+  void _rootWorker;
   await using _childWorker = await childRuntime.work();
+  void _childWorker;
 
   const child = await childRuntime.enqueue(
     { chatId: 'researcher-chat', userId: 'user-1' },
@@ -2493,6 +2517,7 @@ test('interrupt_agent rejects root and self targets', async (t) => {
     userTurn('invalid-interrupts', 'try invalid targets'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('caller-chat');
 
   const prompt = JSON.stringify(finalPrompt);
@@ -2597,6 +2622,7 @@ test('interrupt_agent leaves terminal and approval-paused children unchanged', a
     userTurn('paused-turn', 'prepare publication'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('completed-chat');
   await queue.runNextFor('paused-chat');
   await mailboxStore.drain({ chatId: 'root-chat', userId: 'user-1' });
@@ -2673,6 +2699,7 @@ test('wait_agent returns for pending caller mail without consuming it', async (t
     userTurn('wait-for-pending-mail', 'Wait for an agent response'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(calls, 2);
@@ -2734,7 +2761,9 @@ test('wait_agent is released by cross-runtime mail that reaches the next model s
     queue: deliveryQueue,
   });
   await using _callerWorker = await callerRuntime.work();
+  void _callerWorker;
   await using _deliveryWorker = await deliveryRuntime.work();
+  void _deliveryWorker;
 
   await callerRuntime.enqueue(
     conversation,
@@ -2819,6 +2848,7 @@ test('wait_agent reports a bounded timeout when no mail arrives', async (t) => {
     userTurn('bounded-wait', 'Wait briefly'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(calls, 2);
@@ -2862,6 +2892,7 @@ test('cancelling the caller aborts an active wait_agent call', async (t) => {
     userTurn('cancel-wait', 'Wait until cancelled'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   const running = queue.runNext();
   await settleWithin(
     mailboxStore.pendingChecked.promise,
@@ -2973,7 +3004,9 @@ test('send_message crosses runtime instances and reaches an active recipient at 
     queue: recipientQueue,
   });
   await using _senderWorker = await senderRuntime.work();
+  void _senderWorker;
   await using _recipientWorker = await recipientRuntime.work();
+  void _recipientWorker;
 
   await recipientRuntime.enqueue(
     { chatId: 'recipient-chat', userId: 'user-1' },
@@ -3093,7 +3126,9 @@ test('followup_task crosses runtime instances and wakes an idle recipient', asyn
     queue: recipientQueue,
   });
   await using _senderWorker = await senderRuntime.work();
+  void _senderWorker;
   await using _recipientWorker = await recipientRuntime.work();
+  void _recipientWorker;
 
   await senderRuntime.enqueue(
     { chatId: 'sender-chat', userId: 'user-1' },
@@ -3215,6 +3250,7 @@ test('followup_task stays behind an unstarted initial ask as a distinct later tu
     userTurn('root-followup', 'Assign follow-up work'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('root-chat');
 
   assert.equal(
@@ -3296,6 +3332,7 @@ test('followup_task rejects the root agent without storing mail or scheduling a 
     userTurn('root-turn', 'Try an invalid follow-up'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(calls, 2);
@@ -3402,6 +3439,7 @@ test('list_agents returns exact Codex items with canonical paths and current sta
     userTurn('root-turn', 'Show the agent tree'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('root-chat');
 
   assert.equal(calls, 2);
@@ -3523,6 +3561,7 @@ test('list_agents resolves a relative path prefix and returns only that subtree'
     userTurn('root-turn', 'Show the planner subtree'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   const prompt = JSON.stringify(promptAfterList);
@@ -3623,6 +3662,7 @@ test('list_agents reports a completed child with its result', async (t) => {
     userTurn('researcher-turn', 'Verify the storage claim'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
   await runtime.enqueue(
     { chatId: 'root-chat', userId: 'user-1' },
@@ -3727,6 +3767,7 @@ test('list_agents reports a completed child with a queued follow-up as running',
     userTurn('researcher-initial', 'Do the initial research'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNextFor('researcher-chat');
   await runtime.deliver(
     createInterAgentCommunication({
@@ -3769,12 +3810,14 @@ test('nested agents run independently, consume sibling mail, and remain visible 
             agent_type: 'planner',
             task_name: 'planner',
             message: 'Plan the investigation',
+            fork_turns: 'all',
           });
         case 2:
           return toolCallResponse('spawn_agent', 'spawn-reviewer', {
             agent_type: 'reviewer',
             task_name: 'reviewer',
             message: 'Review the evidence',
+            fork_turns: 'all',
           });
         case 3:
           return textResponse('root delegated');
@@ -3797,6 +3840,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
             agent_type: 'researcher',
             task_name: 'researcher',
             message: 'Research the edge case',
+            fork_turns: 'all',
           });
         case 2:
           return toolCallResponse('send_message', 'message-reviewer', {
@@ -3849,6 +3893,7 @@ test('nested agents run independently, consume sibling mail, and remain visible 
     userTurn('root-delegate', 'Delegate the investigation'),
   );
   await using _worker = await runtime.work();
+  void _worker;
   await queue.runNext();
 
   assert.equal(rootCalls, 3);

@@ -247,7 +247,12 @@ async function spawnAfter(
       tools: options.tools,
       subagents: [worker],
     }),
-    { store, streams: streamsFor(streamStore), mailboxStore, queue },
+    {
+      store,
+      streams: streamsFor(streamStore),
+      mailboxStore,
+      queue,
+    },
   );
   await using workerHandle = await runtime.work();
   void workerHandle;
@@ -297,29 +302,14 @@ async function spawnAfter(
   };
 }
 
-test('spawn_agent defaults fork_turns to all parent turns', async (t) => {
+test('spawn_agent rejects omitted fork_turns before creating a child', async (t) => {
   const result = await spawnAfter(t, {
     history: [{ input: 'first question', answer: 'first answer' }],
+    expectSpawn: false,
   });
 
-  assert.deepEqual(
-    result.forkedHistory.map((message) => message.role),
-    ['user', 'assistant', 'user'],
-    JSON.stringify({
-      child: result.childChat?.metadata,
-      parent: textOf(result.parentHistory),
-    }),
-  );
-  assert.equal(
-    textOf(result.forkedHistory),
-    'first question\nfirst answer\ndelegate current request',
-  );
-
-  const prompt = JSON.stringify(result.childPrompts[0]);
-  assert.match(prompt, /first question/);
-  assert.match(prompt, /first answer/);
-  assert.match(prompt, /delegate current request/);
-  assert.match(prompt, /child task/);
+  assert.equal(result.tree.length, 1);
+  assert.match(JSON.stringify(result.parentHistory), /"state":"output-error"/);
 });
 
 test('spawn_agent fork_turns none starts the child with no parent history', async (t) => {
@@ -358,7 +348,7 @@ test('forked history keeps final assistant content without tool traffic', async 
     rootResponses: [
       toolCallResponse('private_lookup'),
       textResponse('public conclusion'),
-      spawnResponse(),
+      spawnResponse('all'),
       textResponse('spawn submitted'),
     ],
     tools: {
