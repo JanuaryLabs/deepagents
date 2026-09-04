@@ -28,6 +28,16 @@ participants respond to the public, authored contributions of earlier
 participants. Their shared context is not limited to private task inputs and
 results held by the root.
 
+## Files
+
+- `agent.ts`, `instructions.ts`, and `sandbox.ts` form the manager declaration.
+- `subagents/participant/` owns the shared parameterized participant
+  declaration, instructions, and read-only sandbox.
+- `run.ts` owns runtime initialization and the executable scenario.
+- `environment.ts` and `telemetry.ts` hold run-local paths and telemetry.
+- `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
+  reserved declaration slots.
+
 ## Run
 
 Microsandbox must be installed and available:

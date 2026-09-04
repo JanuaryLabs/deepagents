@@ -10,8 +10,9 @@ The **durable-turns** showcase for the Zukhruf harness
   declaration with its own instructions, skills, sandbox, durable chat,
   history, stream, mailbox, and TurnQueue key.
 - `run.ts` — the executor showcase: PGlite-backed pg-boss, concurrent
-  in-process `work()`, detach/resume the root turn, wait for the independently
-  queued child completion, then enqueue a second root turn that drains it.
+  in-process `work()`, detach/resume the root turn, and print every
+  conversation status change the runtime publishes for the root and the
+  specialist.
 - `files/` — the sandbox workspace seed.
 
 The root calls the implicit `spawn_agent` collaboration tool. It returns
@@ -20,9 +21,12 @@ Every spawn sets `fork_turns` to choose `all`, `none`, or a positive count of
 recent user-turn boundaries. This demo uses `none` because the specialist
 receives a standalone task.
 The specialist runs independently and sends its terminal text back as
-queue-only `FINAL_ANSWER` mail. The demo waits until that completion is durable,
-then starts a second root turn. Normal mailbox draining makes the result part of
-the root's history before the model samples.
+queue-only `FINAL_ANSWER` mail. As in Codex, that mail never wakes an idle
+parent, so the root calls `wait_agent` inside the same turn; the next model
+step drains the mailbox and the result becomes part of the root's history
+before the model samples. The host does not poll the mailbox or start a second
+turn: it subscribes to `runtime.subscribeConversationStatus()` and watches the
+root and the specialist go `active` and `idle`.
 
 The root and specialist deliberately use different sandboxes. The root keeps a
 per-chat Docker workspace, while the specialist gets a private in-memory

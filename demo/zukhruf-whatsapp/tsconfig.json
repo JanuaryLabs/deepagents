@@ -6,7 +6,7 @@
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["*.ts"],
+  "include": ["**/*.ts"],
   "references": [
     {
       "path": "../../packages/experimental"

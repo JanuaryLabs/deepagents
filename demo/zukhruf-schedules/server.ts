@@ -3,16 +3,15 @@ import { Hono } from 'hono';
 import { styleText } from 'node:util';
 
 import { devtool } from '@deepagents/devtool';
+import { tracesHttp } from '@deepagents/devtool-traces/http';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import { schedulesHttp } from '@deepagents/experimental/zukhruf/schedules/http';
 
-import { scheduled } from './agent.ts';
+import { scheduled, traceTelemetry } from './agent.ts';
 import runtime, { resources } from './run.ts';
 
 await using runtimeResources = resources;
 
-/** `--no-schedules` omits the projection so DevTool hides Scheduled navigation. */
-const withSchedules = !process.argv.includes('--no-schedules');
 const ownerId = process.env.USER ?? 'local';
 
 const app = new Hono<HttpEnv>();
@@ -21,9 +20,10 @@ app.use('/zukhruf/v1/*', (context, next) => {
   context.set('userId', ownerId);
   return next();
 });
+
 app.route(
   '/zukhruf/v1',
-  withSchedules ? http(runtime, schedulesHttp(scheduled)) : http(runtime),
+  http(runtime, schedulesHttp(scheduled), tracesHttp(traceTelemetry)),
 );
 app.route(devtoolPath, devtool());
 
@@ -37,9 +37,7 @@ console.log(styleText('bold', `Open ${(await started.promise).href}`));
 console.log(
   styleText(
     'dim',
-    withSchedules
-      ? 'Scheduled tasks are managed from the browser. Press Ctrl+C to stop.'
-      : 'Started without schedulesHttp(); Scheduled navigation is hidden.',
+    'Scheduled tasks are managed from the browser. Press Ctrl+C to stop.',
   ),
 );
 

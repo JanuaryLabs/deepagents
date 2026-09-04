@@ -21,6 +21,10 @@ Because it now runs on the runtime, the turn is durable and resumable for free
 (persisted stream + per-chat FIFO), though this single-shot demo doesn't lean on
 that.
 
+`agent.ts`, `instructions.ts`, and `sandbox.ts` form the declaration while
+`run.ts` owns execution. `channels/`, `connections/`, `schedules/`, `skills/`,
+`subagents/`, and `tools/` are the standard reserved declaration slots.
+
 The one deviation from the original is the model: it uses
 `openrouter('deepseek/deepseek-v4-flash')` instead of the original's
 `qwen/qwen3-32b`, which is a reasoning model that tends to spend the whole turn

@@ -5,7 +5,7 @@ import { defineAgent } from '@deepagents/experimental/zukhruf';
 
 import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
-import { planner } from './subagents/planner.ts';
+import planner from './subagents/planner/agent.ts';
 
 export const traceTelemetry = fileTelemetry({
   includeTimestamp: true,

@@ -64,6 +64,33 @@ const conversation = {
 };
 resources.use(await runtime.work({ concurrency: 4 }));
 
+const statusAbort = new AbortController();
+const rootIdleAgain = Promise.withResolvers<void>();
+const statusLog = (async () => {
+  let rootTurns = 0;
+  try {
+    for await (const change of runtime.subscribeConversationStatus(
+      statusAbort.signal,
+    )) {
+      const isRoot = change.conversation.chatId === conversation.chatId;
+      const flags =
+        change.status.type === 'active' && change.status.activeFlags.length > 0
+          ? ` [${change.status.activeFlags.join(', ')}]`
+          : '';
+      console.log(
+        `[status] ${isRoot ? '/root' : change.conversation.chatId} ${change.status.type}${flags}`,
+      );
+      if (!isRoot) continue;
+      if (change.status.type === 'active') rootTurns += 1;
+      if (change.status.type === 'idle' && rootTurns > 0) {
+        rootIdleAgain.resolve();
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Error && error.name === 'AbortError')) throw error;
+  }
+})();
+
 const first = await runtime.enqueue(conversation, {
   message: {
     id: crypto.randomUUID(),
@@ -88,7 +115,7 @@ while (deltas < 5) {
 }
 await reader.cancel();
 console.log(
-  `\n\n[detached after ${deltas} chunks] the root keeps running, and spawn_agent can start the specialist in a separate chat.\n`,
+  `\n\n[detached after ${deltas} chunks] the root keeps running: it spawns the specialist in a separate chat and waits for its FINAL_ANSWER with wait_agent.\n`,
 );
 
 const resumed = await runtime.observe(conversation).resume();
@@ -100,52 +127,9 @@ console.log(
 );
 await printer.readableStream(resumed);
 
+await rootIdleAgain.promise;
+statusAbort.abort();
+await statusLog;
 console.log(
-  '\n[root turn done] waiting for the independently queued specialist FINAL_ANSWER…\n',
+  `\n[done] the specialist's FINAL_ANSWER was consumed inside the root turn; root and specialist used independent histories, streams, mailboxes, and queue keys. Root container "sandbox-${conversation.chatId}" remains attached to its chat.\n`,
 );
-await waitForSpecialistCompletion();
-
-const second = await runtime.enqueue(conversation, {
-  message: {
-    id: crypto.randomUUID(),
-    role: 'user',
-    parts: [
-      {
-        type: 'text',
-        text: 'Summarize the specialist FINAL_ANSWER in one short sentence.',
-      },
-    ],
-  },
-  trigger: 'submit-message',
-});
-console.log(
-  `[root turn ${second.id} enqueued] it drains the durable child completion before sampling:\n`,
-);
-await printer.readableStream(second.stream);
-console.log(
-  `\n[done] root and specialist used independent histories, streams, mailboxes, and queue keys. Root container "sandbox-${conversation.chatId}" remains attached to its chat.\n`,
-);
-
-async function waitForSpecialistCompletion(): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    if (await mailboxStore.hasPending(conversation)) return;
-
-    const history = await runtime.observe(conversation).engine.getMessages();
-    if (
-      history.some((message) => {
-        if (!isRecord(message.metadata)) return false;
-        const communication = message.metadata.interAgentCommunication;
-        return isRecord(communication) && communication.type === 'FINAL_ANSWER';
-      })
-    ) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error('timed out waiting for the specialist FINAL_ANSWER');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

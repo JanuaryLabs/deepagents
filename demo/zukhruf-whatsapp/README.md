@@ -26,6 +26,16 @@ have nothing to add” out of the public conversation.
 
 There is deliberately no maximum round or message count in this demo.
 
+## Files
+
+- `agent.ts`, `instructions.ts`, and `sandbox.ts` form the parameterized
+  participant declaration.
+- `tools/reply-to-group.ts` owns the public reply tool declaration.
+- `whatsapp.ts` owns the group host and durable runtime lifecycle.
+- `run.ts` owns the executable five-participant scenario.
+- `channels/`, `connections/`, `schedules/`, `skills/`, and `subagents/` are
+  reserved declaration slots.
+
 ## Run
 
 ```sh

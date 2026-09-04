@@ -1,32 +1,22 @@
 import { PGlite } from '@electric-sql/pglite';
-import { InMemoryFs } from 'just-bash';
 import { randomUUID } from 'node:crypto';
 import { PgBoss, fromPglite } from 'pg-boss';
-import { z } from 'zod';
 
 import {
-  type AgentModel,
   InMemoryContextStore,
   PollingChangeSource,
   SqliteStreamStore,
   StreamManager,
-  createVirtualSandbox,
-  role,
 } from '@deepagents/context';
 import {
   AgentRuntime,
   PgBossTurnQueue,
   SqliteMailboxStore,
-  defineAgent,
-  defineSandbox,
-  defineTool,
 } from '@deepagents/experimental/zukhruf';
 
-export interface WhatsAppParticipant {
-  name: string;
-  specialty: string;
-  model: AgentModel;
-}
+import { type WhatsAppParticipant, createParticipantAgent } from './agent.ts';
+
+export type { WhatsAppParticipant } from './agent.ts';
 
 export interface WhatsAppMessage {
   id: string;
@@ -122,38 +112,9 @@ export class WhatsAppGroup implements AsyncDisposable {
       await queue.initialize();
 
       const runtime = new AgentRuntime(
-        defineAgent({
-          name: participant.name,
-          model: participant.model,
-          sandbox: defineSandbox(() =>
-            createVirtualSandbox({ fs: new InMemoryFs() }),
-          ),
-          instructions: [
-            role(
-              [
-                `You are ${participant.name} in a WhatsApp-style group chat. ${participant.specialty}`,
-                'Every turn is a notification containing new public group messages.',
-                'Read them and decide autonomously whether your specialty gives you something useful and non-duplicative to add.',
-                'If yes, call reply_to_group with the concise message you want everyone to see.',
-                'If no, do not call reply_to_group. Do not reply merely to agree, repeat, acknowledge, or announce silence.',
-                'Your ordinary assistant text is private and never appears in the group.',
-              ].join(' '),
-            ),
-          ],
-          tools: {
-            reply_to_group: defineTool({
-              description:
-                'Post one useful contribution to the public group chat.',
-              inputSchema: z.object({
-                message: z.string().trim().min(1),
-              }),
-              execute: async ({ message }) => {
-                replies.post(participant.name, message);
-                return { posted: true };
-              },
-            }),
-          },
-        }),
+        createParticipantAgent(participant, (message) =>
+          replies.post(participant.name, message),
+        ),
         {
           store,
           streams,

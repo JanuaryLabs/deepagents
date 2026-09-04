@@ -45,16 +45,18 @@ remain `running` until the continuation settles.
 
 - `agent.ts` — the root declaration and its permitted planner subagent.
 - `instructions.ts` — root dispatch and report-synthesis behavior.
-- `subagents/planner.ts` — an independent planner declaration whose permitted
+- `subagents/planner/` — a self-contained planner declaration whose permitted
   subagent is the researcher.
-- `subagents/researcher.ts` — an independent web researcher that sends sourced
-  findings directly to `/root`.
-- `sandbox.ts` and `subagents/sandbox.ts` — per-chat in-memory sandboxes.
+- `subagents/researcher/` — a self-contained web researcher declaration that
+  sends sourced findings directly to `/root`.
+- Each agent folder owns its declaration, instructions, and per-chat sandbox.
 - `run.ts` — initializes and exports the runtime, stores, queue, and concurrent
   worker; it contains no turn submission.
 - `server.ts` — the top-level process that imports the runtime, mounts the
   authenticated Zukhruf protocol at `/zukhruf/v1` and the DevTool UI at
   `/devtool`, and owns shutdown.
+- `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
+  reserved declaration slots.
 
 ## Run
 

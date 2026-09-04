@@ -4,10 +4,6 @@
   "private": true,
   "type": "module",
   "description": "Runnable Zukhruf Scheduled Tasks showcase managed from the DevTool, backed by pg-boss and PGlite.",
-  "scripts": {
-    "start": "node server.ts",
-    "start:no-schedules": "node server.ts --no-schedules"
-  },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.52",
     "@deepagents/context": "6.2.0",
