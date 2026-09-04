@@ -466,6 +466,17 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
 Parity means matching Codex's model-facing collaboration contract where the same capability exists,
 not copying its process-local implementation:
 
+- **Execution capacity (Codex `AgentExecutionLimiter`):** `multiAgent.maxConcurrentThreadsPerSession`
+  (default 4, root included, zero rejected) caps in-flight sub-agent turns per tree at N minus one;
+  the root implicitly holds one slot. The count is read from the queue (`running` activity of every
+  non-root tree member), so it is correct from any process; queued turns count zero as in Codex.
+  Checked at `spawn_agent` (`collab spawn failed: agent thread limit reached`), at `followup_task`
+  when the target has no turn in flight (`collab tool failed: agent thread limit reached`), and at
+  host `enqueue` on a sub-agent conversation (`agent thread limit reached`); `send_message` is never
+  checked. Both default hints end with Codex's sentence: "There are N available concurrency slots,
+  meaning that up to N agents can be active at once, including you." The worker pool
+  (`work({concurrency})`, default 1) is a separate host knob: Codex has no pool, so a host that
+  wants N agents active must size the pool itself.
 - **Intentional Zukhruf divergences:** a spawn selects a declared `agent_type`; path segments use
   Zukhruf's persisted-name rules; `wait_agent` is always present and has no steer channel; queue-only
   mail that misses the final sampling boundary schedules a serialized fallback turn; interrupted

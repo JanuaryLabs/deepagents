@@ -631,8 +631,87 @@ test('host config rejects invalid namespaces and wait bounds', () => {
         }),
       /defaultWaitTimeoutMs.*minWaitTimeoutMs/,
     );
+    assert.throws(
+      () =>
+        new AgentRuntime(declaration, {
+          ...h,
+          multiAgent: { maxConcurrentThreadsPerSession: 0 },
+        }),
+      /maxConcurrentThreadsPerSession must be a positive integer/,
+    );
   } finally {
     streamStore.close();
     h.mailboxStore.close();
   }
+});
+
+test('default guidance tells root and child agents the Codex concurrency slots', async (t) => {
+  const h = harness(t);
+  const prompts: Record<string, unknown> = {};
+  const capturing = (name: string) =>
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        prompts[name] = prompt;
+        return textResponse('done');
+      },
+    });
+  const child = defineAgent({
+    name: 'worker',
+    model: capturing('worker'),
+    sandbox: async () => ({}) as AgentSandbox,
+    instructions: [],
+  });
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: capturing('root'),
+      sandbox: child.sandbox,
+      instructions: [],
+      subagents: [child],
+    }),
+    h,
+  );
+  await h.store.createChat({
+    id: 'root-chat',
+    userId: 'user-1',
+    metadata: {
+      zukhrufTreeId: 'root-chat',
+      zukhruf: { path: '/root', parentChatId: null, declarationName: 'root' },
+    },
+  });
+  await h.store.createChat({
+    id: 'child-chat',
+    userId: 'user-1',
+    metadata: {
+      zukhrufTreeId: 'root-chat',
+      zukhruf: {
+        path: '/root/worker',
+        parentChatId: 'root-chat',
+        declarationName: 'worker',
+      },
+    },
+  });
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('root-turn', 'work'),
+  );
+  await runtime.enqueue(
+    { chatId: 'child-chat', userId: 'user-1' },
+    userTurn('child-turn', 'work'),
+  );
+  await using worker = await runtime.work();
+  void worker;
+  await h.queue.runNext();
+  await h.queue.runNext();
+
+  const sentence =
+    'There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.';
+  assert.ok(
+    systemText(prompts.root).includes(sentence),
+    `root guidance carries the concurrency sentence:\n${systemText(prompts.root)}`,
+  );
+  assert.ok(
+    systemText(prompts.worker).includes(sentence),
+    `child guidance carries the concurrency sentence:\n${systemText(prompts.worker)}`,
+  );
 });

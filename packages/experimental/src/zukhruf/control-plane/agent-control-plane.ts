@@ -32,6 +32,8 @@ export interface AgentControlPlaneOptions {
   directory: AgentDirectory;
   statusProjector: AgentStatusProjector;
   historyForker: AgentHistoryForker;
+  /** Codex `max_concurrent_threads_per_session`, root included. */
+  maxConcurrentThreadsPerSession: number;
 }
 
 export interface AgentActor {
@@ -66,6 +68,7 @@ export class AgentControlPlane {
   readonly #directory: AgentDirectory;
   readonly #statusProjector: AgentStatusProjector;
   readonly #historyForker: AgentHistoryForker;
+  readonly #maxConcurrentThreadsPerSession: number;
 
   constructor(options: AgentControlPlaneOptions) {
     this.#root = options.root;
@@ -76,6 +79,8 @@ export class AgentControlPlane {
     this.#directory = options.directory;
     this.#statusProjector = options.statusProjector;
     this.#historyForker = options.historyForker;
+    this.#maxConcurrentThreadsPerSession =
+      options.maxConcurrentThreadsPerSession;
   }
 
   async resolve(conversation: ConversationId): Promise<{
@@ -102,6 +107,17 @@ export class AgentControlPlane {
     const message = turn.message;
     if (!message.id.trim()) throw new Error('enqueue: message id is required');
     await this.#directory.assertOwnerIfExists(conversation);
+    // Codex checks capacity on every turn submission of a sub-agent thread
+    // that has no turn in flight; the root is never limited.
+    const thread = await this.#directory.load(conversation);
+    if (
+      thread &&
+      !thread.path.isRoot &&
+      (await this.#queue.getTurnActivity(conversation)) !== 'running' &&
+      !(await this.#hasExecutionCapacity(thread))
+    ) {
+      throw new Error('agent thread limit reached');
+    }
 
     const streamId =
       message.role === 'assistant'
@@ -172,6 +188,9 @@ export class AgentControlPlane {
       throw new Error(
         `spawn_agent: agent type "${input.agentType}" is not a subagent of "${actor.declaration.name}"`,
       );
+    }
+    if (!(await this.#hasExecutionCapacity(actor.thread))) {
+      throw new Error('collab spawn failed: agent thread limit reached');
     }
 
     let child: AgentThread;
@@ -328,6 +347,15 @@ export class AgentControlPlane {
         'followup_task: the root agent cannot receive a follow-up',
       );
     }
+    // Codex checks capacity only for mail that starts a turn, and skips the
+    // check when the target already has one in flight.
+    if (
+      options.mode === DeliveryMode.TriggerTurn &&
+      (await this.#queue.getTurnActivity(target.conversation)) !== 'running' &&
+      !(await this.#hasExecutionCapacity(actor.thread))
+    ) {
+      throw new Error('collab tool failed: agent thread limit reached');
+    }
     await this.#mailbox.deliver(
       createInterAgentCommunication({
         type: options.type,
@@ -342,6 +370,22 @@ export class AgentControlPlane {
       options.mode,
     );
     return { target: target.path.toString() };
+  }
+
+  /**
+   * Codex `AgentExecutionLimiter`: one slot per in-flight sub-agent turn in
+   * the tree; the root holds one of the configured slots implicitly, so the
+   * cap on sub-agents is the configured total minus one.
+   */
+  async #hasExecutionCapacity(thread: AgentThread): Promise<boolean> {
+    const members = await this.#directory.listTree(thread);
+    const activity = await Promise.all(
+      members
+        .filter((member) => !member.path.isRoot)
+        .map((member) => this.#queue.getTurnActivity(member.conversation)),
+    );
+    const inFlight = activity.filter((state) => state === 'running').length;
+    return inFlight < this.#maxConcurrentThreadsPerSession - 1;
   }
 
   static #initialTurnId(chatId: string): string {

@@ -3964,3 +3964,473 @@ test('nested agents run independently, consume sibling mail, and remain visible 
   assert.match(listed, /"completed":"researcher complete"/);
   assert.match(listed, /"completed":"reviewer complete"/);
 });
+
+test('spawn_agent is rejected with the Codex limit error while the tree has no free execution slot', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queueState = new SharedTurnQueueState();
+  const rootQueue = new SharedControlledTurnQueue(queueState);
+  const childQueue = new SharedControlledTurnQueue(queueState);
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const childStarted = Promise.withResolvers<void>();
+  const childModel = new MockLanguageModelV4({
+    doStream: async () => {
+      childStarted.resolve();
+      return {
+        stream: simulateReadableStream({
+          initialDelayInMs: 5_000,
+          chunks: [
+            { type: 'text-start', id: 'child-text' },
+            { type: 'text-delta', id: 'child-text', delta: 'still working' },
+            { type: 'text-end', id: 'child-text' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage,
+            },
+          ],
+        }),
+      };
+    },
+  });
+  let rootCalls = 0;
+  let promptAfterSpawn: unknown;
+  const rootModel = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      rootCalls++;
+      if (rootCalls === 1) {
+        return toolCallResponse('spawn_agent', 'spawn-second', {
+          agent_type: 'researcher',
+          task_name: 'second',
+          message: 'Research something else',
+          fork_turns: 'none',
+        });
+      }
+      promptAfterSpawn = prompt;
+      return textResponse('root noted the limit');
+    },
+  });
+  const sandbox = async () => ({}) as AgentSandbox;
+  const researcher = defineAgent({
+    name: 'researcher',
+    model: childModel,
+    sandbox,
+    instructions: [],
+  });
+  const root = defineAgent({
+    name: 'root',
+    model: rootModel,
+    sandbox,
+    instructions: [],
+    subagents: [researcher],
+  });
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'researcher-chat',
+      path: '/root/researcher',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+  ]);
+  const options = {
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    multiAgent: { maxConcurrentThreadsPerSession: 2 },
+  };
+  const rootRuntime = new AgentRuntime(root, { ...options, queue: rootQueue });
+  const childRuntime = new AgentRuntime(root, {
+    ...options,
+    queue: childQueue,
+  });
+  await using _rootWorker = await rootRuntime.work();
+  void _rootWorker;
+  await using _childWorker = await childRuntime.work();
+  void _childWorker;
+
+  const child = await childRuntime.enqueue(
+    { chatId: 'researcher-chat', userId: 'user-1' },
+    userTurn('occupying-child-turn', 'start long research'),
+  );
+  const activeChild = childQueue.runNextFor('researcher-chat');
+  await settleWithin(childStarted.promise, 'running child starts');
+  await rootRuntime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('spawn-over-limit', 'spawn another researcher'),
+  );
+  await rootQueue.runNextFor('root-chat');
+  try {
+    const prompt = JSON.stringify(promptAfterSpawn);
+    assert.equal(rootCalls, 2);
+    assert.match(prompt, /collab spawn failed: agent thread limit reached/);
+    assert.doesNotMatch(prompt, /\/root\/second/);
+    assert.deepStrictEqual(
+      (await store.listChats({ userId: 'user-1' }))
+        .map((chat) => chat.id)
+        .toSorted(),
+      ['researcher-chat', 'root-chat'],
+      'no child chat is created when the limit is reached',
+    );
+    assert.deepStrictEqual(
+      queueState.turns.map((turn) => turn.chatId),
+      [],
+      'no child turn is queued when the limit is reached',
+    );
+  } finally {
+    await childRuntime
+      .observe({ chatId: 'researcher-chat', userId: 'user-1' })
+      .cancel(child.id);
+    await settleWithin(activeChild, 'occupying child stops');
+  }
+});
+
+test('followup_task is rejected with the Codex limit error while send_message still queues mail', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queueState = new SharedTurnQueueState();
+  const rootQueue = new SharedControlledTurnQueue(queueState);
+  const childQueue = new SharedControlledTurnQueue(queueState);
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const childStarted = Promise.withResolvers<void>();
+  const childModel = new MockLanguageModelV4({
+    doStream: async () => {
+      childStarted.resolve();
+      return {
+        stream: simulateReadableStream({
+          initialDelayInMs: 5_000,
+          chunks: [
+            { type: 'text-start', id: 'child-text' },
+            { type: 'text-delta', id: 'child-text', delta: 'still working' },
+            { type: 'text-end', id: 'child-text' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage,
+            },
+          ],
+        }),
+      };
+    },
+  });
+  let rootCalls = 0;
+  let finalPrompt: unknown;
+  const rootModel = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      rootCalls++;
+      if (rootCalls === 1) {
+        return toolCallResponse('followup_task', 'followup-idle', {
+          target: '/root/idle',
+          message: 'Take another look',
+        });
+      }
+      if (rootCalls === 2) {
+        return toolCallResponse('send_message', 'message-idle', {
+          target: '/root/idle',
+          message: 'For your records',
+        });
+      }
+      finalPrompt = prompt;
+      return textResponse('root noted the limit');
+    },
+  });
+  const sandbox = async () => ({}) as AgentSandbox;
+  const researcher = defineAgent({
+    name: 'researcher',
+    model: childModel,
+    sandbox,
+    instructions: [],
+  });
+  const root = defineAgent({
+    name: 'root',
+    model: rootModel,
+    sandbox,
+    instructions: [],
+    subagents: [researcher],
+  });
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'researcher-chat',
+      path: '/root/researcher',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+    {
+      id: 'idle-chat',
+      path: '/root/idle',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+  ]);
+  const options = {
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    multiAgent: { maxConcurrentThreadsPerSession: 2 },
+  };
+  const rootRuntime = new AgentRuntime(root, { ...options, queue: rootQueue });
+  const childRuntime = new AgentRuntime(root, {
+    ...options,
+    queue: childQueue,
+  });
+  await using _rootWorker = await rootRuntime.work();
+  void _rootWorker;
+  await using _childWorker = await childRuntime.work();
+  void _childWorker;
+
+  const child = await childRuntime.enqueue(
+    { chatId: 'researcher-chat', userId: 'user-1' },
+    userTurn('occupying-child-turn', 'start long research'),
+  );
+  const activeChild = childQueue.runNextFor('researcher-chat');
+  await settleWithin(childStarted.promise, 'running child starts');
+  await rootRuntime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('followup-over-limit', 'nudge the idle agent'),
+  );
+  await rootQueue.runNextFor('root-chat');
+  try {
+    const prompt = JSON.stringify(finalPrompt);
+    assert.equal(rootCalls, 3);
+    assert.match(prompt, /collab tool failed: agent thread limit reached/);
+    assert.deepStrictEqual(
+      queueState.turns.map((turn) => turn.chatId),
+      [],
+      'a rejected follow-up schedules no wake',
+    );
+    const mail = await mailboxStore.drain({
+      chatId: 'idle-chat',
+      userId: 'user-1',
+    });
+    assert.deepStrictEqual(
+      mail.map(({ type, content }) => ({ type, content })),
+      [{ type: 'MESSAGE', content: 'For your records' }],
+      'send_message is never subject to the execution limit',
+    );
+  } finally {
+    await childRuntime
+      .observe({ chatId: 'researcher-chat', userId: 'user-1' })
+      .cancel(child.id);
+    await settleWithin(activeChild, 'occupying child stops');
+  }
+});
+
+test('a settled child frees its execution slot for the next spawn', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queue = new ControlledTurnQueue();
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  let rootCalls = 0;
+  let promptAfterSpawn: unknown;
+  const rootModel = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      rootCalls++;
+      if (rootCalls === 1) {
+        return toolCallResponse('spawn_agent', 'spawn-after-release', {
+          agent_type: 'researcher',
+          task_name: 'second',
+          message: 'Research something else',
+          fork_turns: 'none',
+        });
+      }
+      promptAfterSpawn = prompt;
+      return textResponse('root delegated again');
+    },
+  });
+  const childCalls: unknown[] = [];
+  const sandbox = async () => ({}) as AgentSandbox;
+  const researcher = defineAgent({
+    name: 'researcher',
+    model: textModel('research complete', childCalls),
+    sandbox,
+    instructions: [],
+  });
+  const root = defineAgent({
+    name: 'root',
+    model: rootModel,
+    sandbox,
+    instructions: [],
+    subagents: [researcher],
+  });
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'researcher-chat',
+      path: '/root/researcher',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+  ]);
+  const runtime = new AgentRuntime(root, {
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue,
+    multiAgent: { maxConcurrentThreadsPerSession: 2 },
+  });
+  await using _worker = await runtime.work();
+  void _worker;
+
+  await runtime.enqueue(
+    { chatId: 'researcher-chat', userId: 'user-1' },
+    userTurn('first-child-turn', 'research this'),
+  );
+  await queue.runNextFor('researcher-chat');
+  assert.equal(childCalls.length, 1, 'the first child ran to completion');
+
+  await runtime.enqueue(
+    { chatId: 'root-chat', userId: 'user-1' },
+    userTurn('spawn-after-release', 'spawn another researcher'),
+  );
+  await queue.runNextFor('root-chat');
+
+  assert.equal(rootCalls, 2);
+  assert.match(JSON.stringify(promptAfterSpawn), /\/root\/second/);
+  assert.deepStrictEqual(
+    queue.turns.map((turn) => turn.kind),
+    ['message'],
+    'the second child turn is queued once the first child settled',
+  );
+});
+
+test('a host cannot start a sub-agent turn while the tree has no free execution slot', async (t) => {
+  const store = new InMemoryContextStore();
+  const streamStore = new SqliteStreamStore(':memory:');
+  const mailboxStore = new SqliteMailboxStore(':memory:');
+  const queueState = new SharedTurnQueueState();
+  const childQueue = new SharedControlledTurnQueue(queueState);
+  t.after(() => {
+    streamStore.close();
+    mailboxStore.close();
+  });
+
+  const childStarted = Promise.withResolvers<void>();
+  const childModel = new MockLanguageModelV4({
+    doStream: async () => {
+      childStarted.resolve();
+      return {
+        stream: simulateReadableStream({
+          initialDelayInMs: 5_000,
+          chunks: [
+            { type: 'text-start', id: 'child-text' },
+            { type: 'text-delta', id: 'child-text', delta: 'still working' },
+            { type: 'text-end', id: 'child-text' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: '' },
+              usage,
+            },
+          ],
+        }),
+      };
+    },
+  });
+  const sandbox = async () => ({}) as AgentSandbox;
+  const researcher = defineAgent({
+    name: 'researcher',
+    model: childModel,
+    sandbox,
+    instructions: [],
+  });
+  const root = defineAgent({
+    name: 'root',
+    model: textModel('unused', []),
+    sandbox,
+    instructions: [],
+    subagents: [researcher],
+  });
+  await createAgentChats(store, [
+    {
+      id: 'root-chat',
+      path: '/root',
+      parentChatId: null,
+      declarationName: 'root',
+    },
+    {
+      id: 'researcher-chat',
+      path: '/root/researcher',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+    {
+      id: 'idle-chat',
+      path: '/root/idle',
+      parentChatId: 'root-chat',
+      declarationName: 'researcher',
+    },
+  ]);
+  const runtime = new AgentRuntime(root, {
+    store,
+    streams: streamsFor(streamStore),
+    mailboxStore,
+    queue: childQueue,
+    multiAgent: { maxConcurrentThreadsPerSession: 2 },
+  });
+  await using _worker = await runtime.work();
+  void _worker;
+
+  const child = await runtime.enqueue(
+    { chatId: 'researcher-chat', userId: 'user-1' },
+    userTurn('occupying-child-turn', 'start long research'),
+  );
+  const activeChild = childQueue.runNextFor('researcher-chat');
+  await settleWithin(childStarted.promise, 'running child starts');
+  try {
+    await assert.rejects(
+      runtime.enqueue(
+        { chatId: 'idle-chat', userId: 'user-1' },
+        userTurn('idle-turn-over-limit', 'start while full'),
+      ),
+      { message: 'agent thread limit reached' },
+    );
+    assert.deepStrictEqual(
+      queueState.turns.map((turn) => turn.chatId),
+      [],
+      'a rejected sub-agent turn is not queued',
+    );
+    await runtime.enqueue(
+      { chatId: 'root-chat', userId: 'user-1' },
+      userTurn('root-turn-while-full', 'the root is never limited'),
+    );
+    assert.deepStrictEqual(
+      queueState.turns.map((turn) => turn.chatId),
+      ['root-chat'],
+    );
+  } finally {
+    await runtime
+      .observe({ chatId: 'researcher-chat', userId: 'user-1' })
+      .cancel(child.id);
+    await settleWithin(activeChild, 'occupying child stops');
+  }
+});

@@ -482,6 +482,7 @@ export class AgentRuntime {
       directory,
       statusProjector,
       historyForker,
+      maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
     });
     this.#store = options.store;
     this.#queue = options.queue;

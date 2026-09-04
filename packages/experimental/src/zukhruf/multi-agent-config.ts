@@ -1,6 +1,16 @@
 const DEFAULT_MIN_WAIT_TIMEOUT_MS = 10_000;
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_WAIT_TIMEOUT_MS = 3_600_000;
+/** Codex `DEFAULT_MULTI_AGENT_V2_MAX_CONCURRENT_THREADS_PER_SESSION`. */
+const DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION = 4;
+/** Verbatim Codex guidance (`core/src/session/multi_agents.rs`). */
+const WAIT_AGENT_USAGE_HINT_TEXT =
+  'When calling `wait_agent`, prefer longer waits (minutes) to avoid busy polling.';
+
+/** Verbatim Codex `resolve_usage_hints` closing sentence. */
+function concurrencySlotsText(maxConcurrency: number): string {
+  return `There are ${maxConcurrency} available concurrency slots, meaning that up to ${maxConcurrency} agents can be active at once, including you.`;
+}
 
 const RESERVED_TOOL_NAMESPACES = new Set([
   'api_tool',
@@ -24,6 +34,11 @@ export interface MultiAgentHostConfig {
   minWaitTimeoutMs?: number;
   defaultWaitTimeoutMs?: number;
   maxWaitTimeoutMs?: number;
+  /**
+   * Codex `max_concurrent_threads_per_session`: how many agents of one tree
+   * may run turns at once, including the root. Defaults to 4.
+   */
+  maxConcurrentThreadsPerSession?: number;
   /** Additional guidance appended to the spawn_agent tool description. */
   usageHintText?: string;
   /** Complete root guidance override. An empty string disables the hint. */
@@ -43,6 +58,7 @@ export interface ResolvedMultiAgentHostConfig {
   minWaitTimeoutMs: number;
   defaultWaitTimeoutMs: number;
   maxWaitTimeoutMs: number;
+  maxConcurrentThreadsPerSession: number;
   usageHintText?: string;
   rootAgentUsageHintText?: string;
   subagentUsageHintText?: string;
@@ -62,6 +78,17 @@ export function resolveMultiAgentHostConfig(
   assertTimeout('minWaitTimeoutMs', minWaitTimeoutMs);
   assertTimeout('defaultWaitTimeoutMs', defaultWaitTimeoutMs);
   assertTimeout('maxWaitTimeoutMs', maxWaitTimeoutMs);
+  const maxConcurrentThreadsPerSession =
+    input.maxConcurrentThreadsPerSession ??
+    DEFAULT_MAX_CONCURRENT_THREADS_PER_SESSION;
+  if (
+    !Number.isSafeInteger(maxConcurrentThreadsPerSession) ||
+    maxConcurrentThreadsPerSession < 1
+  ) {
+    throw new Error(
+      'AgentRuntime: multiAgent.maxConcurrentThreadsPerSession must be a positive integer',
+    );
+  }
   if (minWaitTimeoutMs > maxWaitTimeoutMs) {
     throw new Error(
       'AgentRuntime: multiAgent.minWaitTimeoutMs must be at most maxWaitTimeoutMs',
@@ -118,14 +145,15 @@ All agents share the same workspace, current working directory, and filesystem.`
     minWaitTimeoutMs,
     defaultWaitTimeoutMs,
     maxWaitTimeoutMs,
+    maxConcurrentThreadsPerSession,
     usageHintText: nonEmptyText(input.usageHintText),
     rootAgentUsageHintText:
       input.rootAgentUsageHintText === undefined
-        ? defaultRootUsageHint(tool, shared)
+        ? defaultRootUsageHint(tool, shared, maxConcurrentThreadsPerSession)
         : nonEmptyText(input.rootAgentUsageHintText),
     subagentUsageHintText:
       input.subagentUsageHintText === undefined
-        ? defaultSubagentUsageHint(tool, shared)
+        ? defaultSubagentUsageHint(tool, shared, maxConcurrentThreadsPerSession)
         : nonEmptyText(input.subagentUsageHintText),
     toolNamespace,
     codeMode,
@@ -162,6 +190,7 @@ function nonEmptyText(value: string | undefined): string | undefined {
 function defaultRootUsageHint(
   tool: (name: string) => string,
   shared: string,
+  maxConcurrency: number,
 ): string {
   return `You are \`/root\`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -171,12 +200,17 @@ Use \`${tool('spawn_agent')}\` to create an agent, \`${tool('followup_task')}\` 
 
 Child messages arrive as \`MESSAGE\` or \`FINAL_ANSWER\` mailbox envelopes with their task name, sender, and payload preserved.
 
-${shared}`;
+${shared}
+
+${WAIT_AGENT_USAGE_HINT_TEXT}
+
+${concurrencySlotsText(maxConcurrency)}`;
 }
 
 function defaultSubagentUsageHint(
   tool: (name: string) => string,
   shared: string,
+  maxConcurrency: number,
 ): string {
   return `You are an agent in a team collaborating to complete a task.
 
@@ -184,5 +218,9 @@ You can spawn declared sub-agents recursively. All agents are equally capable an
 
 Your final response is delivered automatically to your parent agent. Mailbox messages arrive as \`NEW_TASK\`, \`MESSAGE\`, or \`FINAL_ANSWER\` envelopes with their task name, sender, and payload preserved.
 
-${shared}`;
+${shared}
+
+${WAIT_AGENT_USAGE_HINT_TEXT}
+
+${concurrencySlotsText(maxConcurrency)}`;
 }
