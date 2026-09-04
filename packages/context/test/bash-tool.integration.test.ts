@@ -11,11 +11,15 @@ import { describe, it } from 'node:test';
 import {
   type BashToolInput,
   type CommandResult,
+  type ReadFileContent,
+  type ReadFileEncoding,
+  type ReadFileOptions,
   type ReadFileTool,
   type ReadFileToolResult,
   type WrappedBashTool,
   createBashTool,
   createVirtualSandbox,
+  readFileContent,
 } from '@deepagents/context';
 
 const testUsage = {
@@ -38,10 +42,17 @@ class RecordingSandbox {
     return this.result;
   }
 
-  async readFile(path: string) {
+  async readFile<Encoding extends ReadFileEncoding = 'utf-8'>(
+    path: string,
+    options?: ReadFileOptions<Encoding>,
+  ): Promise<ReadFileContent<Encoding>> {
     const content = this.files.get(path);
     if (content === undefined) throw new Error(`Missing file: ${path}`);
-    return content;
+    return readFileContent(new TextEncoder().encode(content), options);
+  }
+
+  async exists(path: string) {
+    return this.files.has(path);
   }
 
   async writeFiles(files: Array<{ path: string; content: string | Buffer }>) {
@@ -375,5 +386,151 @@ describe('bash toolkit', () => {
         },
       },
     ]);
+  });
+});
+
+describe('readFile tool', () => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    'base64',
+  );
+
+  it('hands a PNG to the model as an image file part', async () => {
+    const { tools, sandbox } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+    await sandbox.writeFiles([{ path: '/workspace/pixel.png', content: png }]);
+    const model: MockLanguageModelV4 = new MockLanguageModelV4({
+      doGenerate: async () =>
+        model.doGenerateCalls.length === 1
+          ? {
+              finishReason: { unified: 'tool-calls' as const, raw: undefined },
+              usage: testUsage,
+              content: [
+                {
+                  type: 'tool-call' as const,
+                  toolCallId: 'read-png',
+                  toolName: 'readFile',
+                  input: JSON.stringify({ path: 'pixel.png' }),
+                },
+              ],
+              warnings: [],
+            }
+          : {
+              finishReason: { unified: 'stop' as const, raw: undefined },
+              usage: testUsage,
+              content: [{ type: 'text' as const, text: 'a single pixel' }],
+              warnings: [],
+            },
+    });
+
+    const generated = await generateText({
+      model,
+      tools,
+      prompt: 'what is in pixel.png?',
+      stopWhen: isStepCount(2),
+    });
+
+    const base64 = png.toString('base64');
+    const output = await executeReadFile(
+      tools.readFile,
+      'pixel.png',
+      'read-png',
+    );
+    assert.deepStrictEqual(output, { mediaType: 'image/png', base64 });
+    assert.deepStrictEqual(generated.steps[0].toolResults[0].output, output);
+    const toModelOutput = tools.readFile.toModelOutput;
+    assert.ok(toModelOutput);
+    assert.deepStrictEqual(
+      await toModelOutput({
+        toolCallId: 'read-png',
+        input: { path: 'pixel.png' },
+        output,
+      }),
+      {
+        type: 'content',
+        value: [
+          {
+            type: 'file',
+            data: { type: 'data', data: base64 },
+            mediaType: 'image/png',
+            filename: 'pixel.png',
+          },
+        ],
+      },
+    );
+    const [forwarded] = toolResultOutputs(model.doGenerateCalls[1].prompt);
+    assert.ok(forwarded?.type === 'content');
+    const [filePart] = forwarded.value;
+    assert.ok(filePart?.type === 'file');
+    assert.strictEqual(filePart.mediaType, 'image/png');
+    assert.strictEqual(filePart.filename, 'pixel.png');
+    assert.deepStrictEqual(filePart.data, { type: 'data', data: base64 });
+  });
+
+  it('returns a text file as content and sends it to the model as json', async () => {
+    const { tools } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      files: { 'notes.txt': 'plain text' },
+    });
+
+    const output = await executeReadFile(
+      tools.readFile,
+      'notes.txt',
+      'read-text',
+    );
+
+    assert.deepStrictEqual(output, { content: 'plain text' });
+    const toModelOutput = tools.readFile.toModelOutput;
+    assert.ok(toModelOutput);
+    assert.deepStrictEqual(
+      await toModelOutput({
+        toolCallId: 'read-text',
+        input: { path: 'notes.txt' },
+        output,
+      }),
+      { type: 'json', value: { content: 'plain text' } },
+    );
+  });
+
+  it('hands a PDF to the model as a document file part', async () => {
+    const pdf = Buffer.from(
+      '%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n',
+    );
+    const { tools, sandbox } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+    await sandbox.writeFiles([{ path: '/workspace/report.pdf', content: pdf }]);
+
+    const output = await executeReadFile(
+      tools.readFile,
+      'report.pdf',
+      'read-pdf',
+    );
+
+    assert.deepStrictEqual(output, {
+      mediaType: 'application/pdf',
+      base64: pdf.toString('base64'),
+    });
+    const toModelOutput = tools.readFile.toModelOutput;
+    assert.ok(toModelOutput);
+    assert.deepStrictEqual(
+      await toModelOutput({
+        toolCallId: 'read-pdf',
+        input: { path: 'report.pdf' },
+        output,
+      }),
+      {
+        type: 'content',
+        value: [
+          {
+            type: 'file',
+            data: { type: 'data', data: pdf.toString('base64') },
+            mediaType: 'application/pdf',
+            filename: 'report.pdf',
+          },
+        ],
+      },
+    );
   });
 });

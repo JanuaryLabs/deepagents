@@ -8,16 +8,19 @@ import z from 'zod';
 import { withHostOnlyToolMetadata } from '@deepagents/agent';
 
 import { BashException } from './bash-exception.ts';
+import { readFileContent } from './read-file.ts';
 import { shellQuote } from './shell-quote.ts';
-import type {
-  AgentSandbox,
-  BashToolResult,
-  CommandResult,
-  CreateBashToolOptions,
-  DisposableSandbox,
-  ReadFileTool,
-  WrappedBashTool,
-  WriteFileTool,
+import {
+  type AgentSandbox,
+  type BashToolResult,
+  type CommandResult,
+  type CreateBashToolOptions,
+  type DisposableSandbox,
+  type ReadFileMediaType,
+  type ReadFileTool,
+  type ReadFileToolResult,
+  type WrappedBashTool,
+  type WriteFileTool,
 } from './types.ts';
 
 const DEFAULT_DESTINATION = '/workspace';
@@ -119,8 +122,9 @@ function withBashExceptionCatch(sandbox: DisposableSandbox): DisposableSandbox {
         throw error;
       }
     },
-    readFile: (filePath) => sandbox.readFile(filePath),
+    readFile: (filePath, options) => sandbox.readFile(filePath, options),
     writeFiles: (files) => sandbox.writeFiles(files),
+    exists: (filePath) => sandbox.exists(filePath),
     dispose: () => sandbox.dispose(),
     [Symbol.asyncDispose]() {
       return decorated.dispose();
@@ -388,16 +392,62 @@ export async function createBashTool(
     },
   });
 
+  const startsWith = (bytes: Uint8Array, signature: number[], offset = 0) =>
+    signature.every((byte, index) => bytes[offset + index] === byte);
+  const ascii = (text: string) => [...text].map((char) => char.charCodeAt(0));
+  const sniffReadFileMediaType = (
+    bytes: Uint8Array,
+  ): ReadFileMediaType | undefined => {
+    if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+      return 'image/png';
+    }
+    if (startsWith(bytes, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+    if (
+      startsWith(bytes, ascii('GIF87a')) ||
+      startsWith(bytes, ascii('GIF89a'))
+    ) {
+      return 'image/gif';
+    }
+    if (
+      startsWith(bytes, ascii('RIFF')) &&
+      startsWith(bytes, ascii('WEBP'), 8)
+    ) {
+      return 'image/webp';
+    }
+    if (startsWith(bytes, ascii('%PDF-'))) return 'application/pdf';
+    return undefined;
+  };
+
   const readFile: ReadFileTool = tool({
-    description: 'Read the contents of a file from the sandbox.',
+    description:
+      'Read a file from the sandbox. Text is returned as content; PNG, JPEG, GIF, WebP, and PDF files are returned as attachments you can view.',
     inputSchema: z.object({
       path: z.string().describe('The path to the file to read'),
     }),
-    execute: async ({ path: filePath }) => ({
-      content: await sandbox.readFile(
+    execute: async ({ path: filePath }): Promise<ReadFileToolResult> => {
+      const bytes = await sandbox.readFile(
         path.posix.resolve(destination, filePath),
-      ),
-    }),
+        { encoding: 'binary' },
+      );
+      const mediaType = sniffReadFileMediaType(bytes);
+      return mediaType === undefined
+        ? { content: readFileContent(bytes, { encoding: 'utf-8' }) }
+        : { mediaType, base64: Buffer.from(bytes).toString('base64') };
+    },
+    toModelOutput: ({ input, output }) =>
+      'base64' in output
+        ? {
+            type: 'content',
+            value: [
+              {
+                type: 'file',
+                data: { type: 'data', data: output.base64 },
+                mediaType: output.mediaType,
+                filename: path.posix.basename(input.path),
+              },
+            ],
+          }
+        : { type: 'json', value: output },
   });
 
   const writeFile: WriteFileTool = tool({

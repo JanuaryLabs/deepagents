@@ -21,6 +21,16 @@ export interface ExecuteCommandOptions {
   signal?: AbortSignal;
 }
 
+export type ReadFileEncoding = 'utf-8' | 'binary';
+
+export interface ReadFileOptions<Encoding extends ReadFileEncoding = 'utf-8'> {
+  /** `'utf-8'` (default) decodes text; `'binary'` returns the raw bytes. */
+  encoding?: Encoding;
+}
+
+export type ReadFileContent<Encoding extends ReadFileEncoding> =
+  Encoding extends 'binary' ? Uint8Array : string;
+
 export interface Sandbox {
   /**
    * Execute `command` with Bash semantics. Process-backed implementations must
@@ -30,10 +40,19 @@ export interface Sandbox {
     command: string,
     options?: ExecuteCommandOptions,
   ): Promise<CommandResult>;
-  readFile(path: string): Promise<string>;
+  /**
+   * Read the file at `path` as UTF-8 text, or as raw bytes with
+   * `{ encoding: 'binary' }`. Rejects when nothing readable is at `path`.
+   */
+  readFile<Encoding extends ReadFileEncoding = 'utf-8'>(
+    path: string,
+    options?: ReadFileOptions<Encoding>,
+  ): Promise<ReadFileContent<Encoding>>;
   writeFiles(
     files: Array<{ path: string; content: string | Buffer }>,
   ): Promise<void>;
+  /** Whether a file or directory exists at `path`; resolves `false` (never rejects) when missing. */
+  exists(path: string): Promise<boolean>;
 }
 
 export interface SpawnOptions {
@@ -114,9 +133,23 @@ export interface ReadFileToolInput {
   path: string;
 }
 
-export interface ReadFileToolResult {
-  content: string;
-}
+export const READ_FILE_MEDIA_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+] as const;
+
+export type ReadFileMediaType = (typeof READ_FILE_MEDIA_TYPES)[number];
+
+/**
+ * Text decodes to `content`. A file whose leading bytes match one of
+ * {@link READ_FILE_MEDIA_TYPES} is carried as base64 so the result survives
+ * JSON persistence and replays to the model as a file part.
+ */
+export type ReadFileToolResult =
+  { content: string } | { mediaType: ReadFileMediaType; base64: string };
 
 export interface WriteFileToolInput {
   path: string;

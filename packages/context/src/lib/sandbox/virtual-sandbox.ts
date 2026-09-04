@@ -5,6 +5,7 @@ import {
   type IFileSystem,
 } from 'just-bash';
 
+import { readFileContent } from './read-file.ts';
 import type { DisposableSandbox, SandboxReadinessOptions } from './types.ts';
 
 export interface CreateVirtualSandboxOptions extends SandboxReadinessOptions {
@@ -18,13 +19,17 @@ export interface CreateVirtualSandboxOptions extends SandboxReadinessOptions {
 export async function createVirtualSandbox(
   options: CreateVirtualSandboxOptions,
 ): Promise<DisposableSandbox> {
+  const { fs } = options;
   const bash = new Bash({
-    fs: options.fs,
+    fs,
     cwd: options.cwd,
     env: options.env,
     javascript: options.javascript,
     customCommands: options.customCommands,
   });
+  // Same path resolution as `bash.readFile`/`bash.writeFile`, but straight to
+  // the filesystem so binary content never round-trips through a string.
+  const resolve = (path: string) => fs.resolvePath(bash.getCwd(), path);
 
   const sandbox: DisposableSandbox = {
     async executeCommand(command, options) {
@@ -39,19 +44,21 @@ export async function createVirtualSandbox(
       };
     },
 
-    async readFile(path) {
-      return bash.readFile(path);
+    async readFile(path, readOptions) {
+      return readFileContent(
+        await fs.readFileBuffer(resolve(path)),
+        readOptions,
+      );
     },
 
     async writeFiles(files) {
       for (const file of files) {
-        await bash.writeFile(
-          file.path,
-          typeof file.content === 'string'
-            ? file.content
-            : Buffer.from(file.content).toString('utf-8'),
-        );
+        await fs.writeFile(resolve(file.path), file.content);
       }
+    },
+
+    async exists(path) {
+      return fs.exists(resolve(path));
     },
 
     async dispose() {},

@@ -93,3 +93,12 @@ export function base64WriteCommands(
 export function base64ReadCommand(path: string): string {
   return `base64 ${shellQuote(path)}`;
 }
+
+/**
+ * Build the command that prints `true` or `false` for whether `path` exists.
+ * The answer travels on stdout rather than the exit code because a failed
+ * `exec` (engine down, container gone) also exits 1 and would read as "missing".
+ */
+export function existsCommand(path: string): string {
+  return `test -e ${shellQuote(path)} && printf true || printf false`;
+}

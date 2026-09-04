@@ -264,6 +264,39 @@ describe('Apple container sandbox (runtime)', async () => {
     assert.strictEqual(read, big);
   });
 
+  it('reads raw bytes with the binary encoding', async () => {
+    const sandbox = await createAppleContainerSandbox();
+    try {
+      const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+      await sandbox.writeFiles([
+        { path: '/workspace/blob.bin', content: bytes },
+      ]);
+
+      const content = await sandbox.readFile('/workspace/blob.bin', {
+        encoding: 'binary',
+      });
+
+      assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
+    } finally {
+      await sandbox.dispose();
+    }
+  });
+
+  it('reports whether a path exists', async () => {
+    const sandbox = await createAppleContainerSandbox();
+    try {
+      await sandbox.writeFiles([
+        { path: '/workspace/present.txt', content: 'x' },
+      ]);
+
+      assert.strictEqual(await sandbox.exists('/workspace/present.txt'), true);
+      assert.strictEqual(await sandbox.exists('/workspace'), true);
+      assert.strictEqual(await sandbox.exists('/workspace/missing.txt'), false);
+    } finally {
+      await sandbox.dispose();
+    }
+  });
+
   it('creates and removes a managed named volume', async () => {
     const volName = `mvol-${process.pid}`;
     await useAppleContainerSandbox(

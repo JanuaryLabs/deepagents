@@ -6,6 +6,7 @@ import type {
 } from '@daytona/sdk';
 import { randomUUID } from 'node:crypto';
 
+import { readFileContent } from './read-file.ts';
 import { shellQuote } from './shell-quote.ts';
 import type {
   CommandResult,
@@ -121,6 +122,7 @@ export async function createDaytonaSandbox(
   await assertDaytonaBash(sandbox, options.commandTimeout);
 
   const backend = createDaytonaSandboxMethods({
+    sdk,
     sandbox,
     commandTimeout: options.commandTimeout,
   });
@@ -312,10 +314,11 @@ function validateDaytonaOptions(options: DaytonaSandboxOptions): void {
 }
 
 function createDaytonaSandboxMethods(args: {
+  sdk: DaytonaSdk;
   sandbox: Sandbox;
   commandTimeout?: number;
 }): DisposableSandbox {
-  const { sandbox, commandTimeout } = args;
+  const { sdk, sandbox, commandTimeout } = args;
 
   const executeCommand = async (
     command: string,
@@ -375,13 +378,26 @@ function createDaytonaSandboxMethods(args: {
       });
     },
 
-    async readFile(path: string): Promise<string> {
+    async readFile(path, options) {
       try {
         const bytes = await sandbox.fs.downloadFile(path);
-        return Buffer.from(bytes).toString('utf-8');
+        return readFileContent(bytes, options);
       } catch (error) {
         throw new DaytonaCommandError(
           `Failed to read file "${path}": ${toError(error).message}`,
+          toError(error),
+        );
+      }
+    },
+
+    async exists(path) {
+      try {
+        await sandbox.fs.getFileDetails(path);
+        return true;
+      } catch (error) {
+        if (error instanceof sdk.DaytonaNotFoundError) return false;
+        throw new DaytonaCommandError(
+          `Failed to check "${path}": ${toError(error).message}`,
           toError(error),
         );
       }

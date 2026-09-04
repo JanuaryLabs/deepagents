@@ -23,6 +23,42 @@ describe('createVirtualSandbox', () => {
     assert.strictEqual(content, 'one');
   });
 
+  it('round-trips bytes that are not valid UTF-8 when reading as binary', async () => {
+    const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
+    const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+
+    await sandbox.writeFiles([{ path: '/tmp/blob.bin', content: bytes }]);
+    const content = await sandbox.readFile('/tmp/blob.bin', {
+      encoding: 'binary',
+    });
+
+    assert.ok(content instanceof Uint8Array);
+    assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
+  });
+
+  it('reads text as a string by default and with an explicit utf-8 encoding', async () => {
+    const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
+    await sandbox.writeFiles([{ path: '/tmp/text.txt', content: 'héllo' }]);
+
+    const implicit = await sandbox.readFile('/tmp/text.txt');
+    const explicit = await sandbox.readFile('/tmp/text.txt', {
+      encoding: 'utf-8',
+    });
+
+    assert.strictEqual(typeof implicit, 'string');
+    assert.strictEqual(implicit, 'héllo');
+    assert.strictEqual(explicit, 'héllo');
+  });
+
+  it('reports whether a file or directory exists', async () => {
+    const sandbox = await createVirtualSandbox({ fs: new InMemoryFs() });
+    await sandbox.writeFiles([{ path: '/tmp/present/a.txt', content: 'one' }]);
+
+    assert.strictEqual(await sandbox.exists('/tmp/present/a.txt'), true);
+    assert.strictEqual(await sandbox.exists('/tmp/present'), true);
+    assert.strictEqual(await sandbox.exists('/tmp/missing.txt'), false);
+  });
+
   it('honors cwd and env options', async () => {
     const sandbox = await createVirtualSandbox({
       fs: new InMemoryFs(),

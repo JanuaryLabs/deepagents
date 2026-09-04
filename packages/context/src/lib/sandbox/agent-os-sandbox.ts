@@ -1,5 +1,6 @@
 import { PassThrough, Readable } from 'node:stream';
 
+import { readFileContent } from './read-file.ts';
 import type {
   CommandResult,
   DisposableSandbox,
@@ -8,8 +9,6 @@ import type {
   SandboxReadinessOptions,
   SpawnOptions,
 } from './types.ts';
-
-const decoder = new TextDecoder();
 
 interface KernelExecOptions {
   env?: Record<string, string>;
@@ -32,6 +31,7 @@ interface AgentOsInstance {
   writeFiles(
     files: Array<{ path: string; content: string | Uint8Array }>,
   ): Promise<Array<{ path: string; success: boolean; error?: string }>>;
+  exists(path: string): Promise<boolean>;
   dispose(): Promise<void>;
 }
 
@@ -306,15 +306,19 @@ export async function createAgentOsSandbox(
       };
     },
 
-    async readFile(path: string): Promise<string> {
+    async readFile(path, options) {
       try {
         const bytes = await os.readFile(path);
-        return decoder.decode(bytes);
+        return readFileContent(bytes, options);
       } catch (error) {
         throw new Error(
           `Failed to read file "${path}": ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+    },
+
+    async exists(path) {
+      return os.exists(path);
     },
 
     async writeFiles(

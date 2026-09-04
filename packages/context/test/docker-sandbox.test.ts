@@ -293,6 +293,39 @@ describe('Docker Sandbox', () => {
       });
     });
 
+    describe('binary reads and existence checks', () => {
+      it('reads raw bytes with the binary encoding', async () => {
+        const sandbox = await createDockerSandbox();
+        try {
+          const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+          await sandbox.writeFiles([{ path: '/tmp/blob.bin', content: bytes }]);
+
+          const content = await sandbox.readFile('/tmp/blob.bin', {
+            encoding: 'binary',
+          });
+
+          assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('reports whether a path exists', async () => {
+        const sandbox = await createDockerSandbox();
+        try {
+          await sandbox.writeFiles([
+            { path: '/tmp/present.txt', content: 'x' },
+          ]);
+
+          assert.strictEqual(await sandbox.exists('/tmp/present.txt'), true);
+          assert.strictEqual(await sandbox.exists('/tmp'), true);
+          assert.strictEqual(await sandbox.exists('/tmp/missing.txt'), false);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
     describe('volumes', () => {
       let tempDir: string;
 

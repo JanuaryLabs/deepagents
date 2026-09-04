@@ -120,6 +120,36 @@ describe('Daytona Sandbox', async () => {
         );
         assert.strictEqual(content, 'hello world');
       });
+
+      it('reads raw bytes with the binary encoding', async () => {
+        const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+        await sandbox.writeFiles([
+          { path: '/tmp/deepagents-daytona-blob.bin', content: bytes },
+        ]);
+
+        const content = await sandbox.readFile(
+          '/tmp/deepagents-daytona-blob.bin',
+          { encoding: 'binary' },
+        );
+
+        assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
+      });
+
+      it('reports whether a path exists', async () => {
+        await sandbox.writeFiles([
+          { path: '/tmp/deepagents-daytona-present.txt', content: 'x' },
+        ]);
+
+        assert.strictEqual(
+          await sandbox.exists('/tmp/deepagents-daytona-present.txt'),
+          true,
+        );
+        assert.strictEqual(await sandbox.exists('/tmp'), true);
+        assert.strictEqual(
+          await sandbox.exists('/tmp/deepagents-daytona-missing.txt'),
+          false,
+        );
+      });
     });
 
     describe('failure modes', () => {

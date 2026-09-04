@@ -5,6 +5,7 @@ import type {
 } from 'microsandbox';
 import { randomUUID } from 'node:crypto';
 
+import { readFileContent } from './read-file.ts';
 import type {
   CommandResult,
   DisposableSandbox,
@@ -314,12 +315,24 @@ function createMicrosandboxMethods(args: {
 
     spawn,
 
-    async readFile(path: string): Promise<string> {
+    async readFile(path, options) {
       try {
-        return await run((vm) => vm.fs().readToString(path));
+        const bytes = await run((vm) => vm.fs().read(path));
+        return readFileContent(bytes, options);
       } catch (error) {
         throw new MicrosandboxCommandError(
           `Failed to read file "${path}": ${toError(error).message}`,
+          toError(error),
+        );
+      }
+    },
+
+    async exists(path) {
+      try {
+        return await run((vm) => vm.fs().exists(path));
+      } catch (error) {
+        throw new MicrosandboxCommandError(
+          `Failed to check "${path}": ${toError(error).message}`,
           toError(error),
         );
       }

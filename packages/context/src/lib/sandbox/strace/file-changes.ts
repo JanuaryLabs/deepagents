@@ -97,7 +97,6 @@ export async function withStraceFileChanges(
   const onError = options.onError ?? warnOnFileChangesError;
   const traceDir = options.traceDir ?? DEFAULT_TRACE_DIR;
   const innerExecute = sandbox.executeCommand.bind(sandbox);
-  const innerReadFile = sandbox.readFile.bind(sandbox);
   const innerWriteFiles = sandbox.writeFiles.bind(sandbox);
 
   // Delete the trace file with a fresh executeCommand (no caller signal) so an
@@ -110,7 +109,7 @@ export async function withStraceFileChanges(
   // does next. Returns [] on an empty or unparseable trace.
   const readChanges = async (traceFile: string): Promise<FileChange[]> => {
     try {
-      return parseStraceTrace(await innerReadFile(traceFile), {
+      return parseStraceTrace(await sandbox.readFile(traceFile), {
         include,
         exclude,
         traceFile,
@@ -189,7 +188,8 @@ export async function withStraceFileChanges(
       }
       return result;
     },
-    readFile: innerReadFile,
+    readFile: (path, options) => sandbox.readFile(path, options),
+    exists: (path) => sandbox.exists(path),
     // The writeFile tool mutates the filesystem outside strace's view, so
     // observe it directly: synthesize a `write` change per file (under the
     // observation root) and run it through onFileChanges. A throw propagates to

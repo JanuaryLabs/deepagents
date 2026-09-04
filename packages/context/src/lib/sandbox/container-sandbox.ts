@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
   base64ReadCommand,
   base64WriteCommands,
+  existsCommand,
   toSandboxProcess,
 } from './cli-process.ts';
 import type {
@@ -16,6 +17,7 @@ import type {
 } from './container-engine.ts';
 import { ContainerSandboxError } from './container-sandbox-errors.ts';
 import { type Installer } from './installers/installer.ts';
+import { readFileContent } from './read-file.ts';
 import { shellQuote } from './shell-quote.ts';
 import type {
   CommandResult,
@@ -476,12 +478,19 @@ export abstract class ContainerSandboxStrategy<
       executeCommand: async (command, options) => this.exec(command, options),
       spawn: (command, options) => this.spawnProcess(command, options),
 
-      readFile: async (path: string): Promise<string> => {
+      readFile: async (path, options) => {
         const result = await sandbox.executeCommand(base64ReadCommand(path));
         if (result.exitCode !== 0) {
           throw new Error(`Failed to read file "${path}": ${result.stderr}`);
         }
-        return Buffer.from(result.stdout, 'base64').toString('utf-8');
+        return readFileContent(Buffer.from(result.stdout, 'base64'), options);
+      },
+
+      exists: async (path) => {
+        const result = await sandbox.executeCommand(existsCommand(path));
+        if (result.stdout === 'true') return true;
+        if (result.stdout === 'false') return false;
+        throw new Error(`Failed to check "${path}": ${result.stderr}`);
       },
 
       writeFiles: async (

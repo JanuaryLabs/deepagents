@@ -323,6 +323,43 @@ describe('Agent OS Sandbox', async () => {
       });
     });
 
+    describe('binary reads and existence checks', () => {
+      it('reads raw bytes with the binary encoding', async () => {
+        const { default: software } =
+          await import('@rivet-dev/agent-os-common');
+        const sandbox = await createAgentOsSandbox({ software: [software] });
+        try {
+          const bytes = Buffer.from([0x89, 0x50, 0x00, 0xff]);
+          await sandbox.writeFiles([{ path: '/tmp/blob.bin', content: bytes }]);
+
+          const content = await sandbox.readFile('/tmp/blob.bin', {
+            encoding: 'binary',
+          });
+
+          assert.deepStrictEqual(Array.from(content), [0x89, 0x50, 0x00, 0xff]);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+
+      it('reports whether a path exists', async () => {
+        const { default: software } =
+          await import('@rivet-dev/agent-os-common');
+        const sandbox = await createAgentOsSandbox({ software: [software] });
+        try {
+          await sandbox.writeFiles([
+            { path: '/tmp/present.txt', content: 'x' },
+          ]);
+
+          assert.strictEqual(await sandbox.exists('/tmp/present.txt'), true);
+          assert.strictEqual(await sandbox.exists('/tmp'), true);
+          assert.strictEqual(await sandbox.exists('/tmp/missing.txt'), false);
+        } finally {
+          await sandbox.dispose();
+        }
+      });
+    });
+
     describe('cleanup', () => {
       it('dispose is idempotent', async () => {
         const sandbox = await createAgentOsSandbox({
