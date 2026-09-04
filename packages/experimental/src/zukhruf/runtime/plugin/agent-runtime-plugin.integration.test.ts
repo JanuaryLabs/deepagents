@@ -238,6 +238,16 @@ test('AgentRuntime rejects duplicate plugin skills during construction', async (
   );
 });
 
+test('AgentRuntime rejects unknown agent plugin skill selections', () => {
+  const agent = declaration();
+  agent.skills = ['missing'];
+
+  assert.throws(
+    () => new AgentRuntime(agent, options),
+    /agent "root" references unknown plugin skill "missing"/,
+  );
+});
+
 test('AgentRuntime loads deterministic plugin-scoped agents before startup', async () => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'zukhruf-plugin-agents-'),

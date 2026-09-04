@@ -1079,13 +1079,19 @@ describe('zukhruf runtime — setup failure durability', () => {
 });
 
 describe('zukhruf runtime — background executor', () => {
-  it('installs plugin skills into the agent sandbox', async () => {
+  it('installs only the plugin skills selected by each agent', async () => {
     await using directory = await mkdtempDisposable(
       join(tmpdir(), 'zukhruf-plugin-skill-'),
     );
-    const skillDirectory = join(directory.path, 'manage-schedules');
-    await mkdir(join(skillDirectory, 'scripts'), { recursive: true });
-    const skillMd = [
+    const schedulesSkill = join(directory.path, 'manage-schedules');
+    const reviewSkill = join(directory.path, 'review-code');
+    const agentsDirectory = join(directory.path, 'agents');
+    await Promise.all([
+      mkdir(join(schedulesSkill, 'scripts'), { recursive: true }),
+      mkdir(reviewSkill),
+      mkdir(agentsDirectory),
+    ]);
+    const schedulesSkillMd = [
       '---',
       'name: manage-schedules',
       'description: Create and maintain conversation schedules.',
@@ -1093,11 +1099,33 @@ describe('zukhruf runtime — background executor', () => {
       '',
       '# Manage schedules',
     ].join('\n');
+    const reviewSkillMd = [
+      '---',
+      'name: review-code',
+      'description: Review code for correctness.',
+      '---',
+      '',
+      '# Review code',
+    ].join('\n');
     await Promise.all([
-      writeFile(join(skillDirectory, 'SKILL.md'), skillMd),
+      writeFile(join(schedulesSkill, 'SKILL.md'), schedulesSkillMd),
       writeFile(
-        join(skillDirectory, 'scripts', 'validate.js'),
+        join(schedulesSkill, 'scripts', 'validate.js'),
         'console.log("valid");',
+      ),
+      writeFile(join(reviewSkill, 'SKILL.md'), reviewSkillMd),
+      writeFile(
+        join(agentsDirectory, 'reviewer.md'),
+        [
+          '---',
+          'name: reviewer',
+          'description: Reviews code.',
+          'skills:',
+          '  - review-code',
+          '---',
+          '',
+          'Review the code.',
+        ].join('\n'),
       ),
     ]);
 
@@ -1115,9 +1143,7 @@ describe('zukhruf runtime — background executor', () => {
       backends.push(backend);
       return backend;
     });
-    agentDeclaration.subagents = [
-      defineAgent({ ...agentDeclaration, name: 'worker' }),
-    ];
+    agentDeclaration.skills = ['manage-schedules'];
 
     await using h = await harness(model, undefined, {
       declaration: agentDeclaration,
@@ -1125,7 +1151,13 @@ describe('zukhruf runtime — background executor', () => {
         definitions: [
           {
             name: 'scheduling-skills',
-            create: () => ({ skills: [pathToFileURL(skillDirectory)] }),
+            create: () => ({
+              agents: [pathToFileURL(agentsDirectory)],
+              skills: [
+                pathToFileURL(schedulesSkill),
+                pathToFileURL(reviewSkill),
+              ],
+            }),
           },
         ],
       }),
@@ -1144,9 +1176,9 @@ describe('zukhruf runtime — background executor', () => {
       metadata: {
         zukhrufTreeId: 'plugin-skills',
         zukhruf: {
-          path: '/root/worker',
+          path: '/root/reviewer',
           parentChatId: 'plugin-skills',
-          declarationName: 'worker',
+          declarationName: 'scheduling-skills:reviewer',
         },
       },
     });
@@ -1157,22 +1189,40 @@ describe('zukhruf runtime — background executor', () => {
     assert.equal(await collectText(childResult.stream), 'ok');
 
     assert.equal(prompts.length, 2);
-    for (const prompt of prompts) {
-      assert.match(prompt, /<available_skills>/);
-      assert.match(prompt, /Create and maintain conversation schedules/);
-    }
-    for (const backend of backends) {
-      assert.equal(
-        await backend.readFile('/workspace/skills/manage-schedules/SKILL.md'),
-        skillMd,
-      );
-      assert.equal(
-        await backend.readFile(
-          '/workspace/skills/manage-schedules/scripts/validate.js',
-        ),
-        'console.log("valid");',
-      );
-    }
+    const [rootPrompt, reviewerPrompt] = prompts;
+    assert.ok(rootPrompt);
+    assert.ok(reviewerPrompt);
+    assert.match(rootPrompt, /Create and maintain conversation schedules/);
+    assert.doesNotMatch(rootPrompt, /Review code for correctness/);
+    assert.match(reviewerPrompt, /Review code for correctness/);
+    assert.doesNotMatch(
+      reviewerPrompt,
+      /Create and maintain conversation schedules/,
+    );
+
+    const [rootSandbox, reviewerSandbox] = backends;
+    assert.ok(rootSandbox);
+    assert.ok(reviewerSandbox);
+    assert.equal(
+      await rootSandbox.readFile('/workspace/skills/manage-schedules/SKILL.md'),
+      schedulesSkillMd,
+    );
+    assert.equal(
+      await rootSandbox.readFile(
+        '/workspace/skills/manage-schedules/scripts/validate.js',
+      ),
+      'console.log("valid");',
+    );
+    await assert.rejects(
+      rootSandbox.readFile('/workspace/skills/review-code/SKILL.md'),
+    );
+    assert.equal(
+      await reviewerSandbox.readFile('/workspace/skills/review-code/SKILL.md'),
+      reviewSkillMd,
+    );
+    await assert.rejects(
+      reviewerSandbox.readFile('/workspace/skills/manage-schedules/SKILL.md'),
+    );
   });
 
   it('discovers explicitly uploaded sandbox skills once per conversation', async () => {

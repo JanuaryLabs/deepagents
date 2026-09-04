@@ -22,6 +22,7 @@ export interface PluginSkills {
 }
 
 const EMPTY_SKILLS: AgentSkills = { available: [], fragments: [] };
+const EMPTY_PLUGIN_SKILLS: PluginSkills = { available: [], files: [] };
 
 export function loadPluginSkills(
   directories: readonly (string | URL)[],
@@ -66,6 +67,37 @@ export function loadPluginSkills(
       left.name.localeCompare(right.name),
     ),
     files: files.toSorted((left, right) => left.path.localeCompare(right.path)),
+  };
+}
+
+export function selectPluginSkills(
+  catalog: PluginSkills,
+  names: readonly string[],
+  agentName: string,
+): PluginSkills {
+  if (names.length === 0) return EMPTY_PLUGIN_SKILLS;
+  const selectedNames = new Set(names);
+  if (selectedNames.size !== names.length) {
+    throw new Error(
+      `AgentRuntime: agent "${agentName}" cannot select the same plugin skill more than once`,
+    );
+  }
+  const availableByName = new Map(
+    catalog.available.map((available) => [available.name, available]),
+  );
+  for (const name of names) {
+    if (!availableByName.has(name)) {
+      throw new Error(
+        `AgentRuntime: agent "${agentName}" references unknown plugin skill "${name}"`,
+      );
+    }
+  }
+  return {
+    available: catalog.available.filter(({ name }) => selectedNames.has(name)),
+    files: catalog.files.filter(({ path: file }) => {
+      const [, skillName] = file.split('/');
+      return skillName !== undefined && selectedNames.has(skillName);
+    }),
   };
 }
 

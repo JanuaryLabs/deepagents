@@ -68,7 +68,8 @@ function loadAgent(
   }
 
   const unknownField = Object.keys(parsed.frontmatter).find(
-    (field) => field !== 'name' && field !== 'description',
+    (field) =>
+      field !== 'name' && field !== 'description' && field !== 'skills',
   );
   if (unknownField) {
     throw new Error(
@@ -90,6 +91,21 @@ function loadAgent(
       `Invalid agent declaration ${fileName}: instructions cannot be empty`,
     );
   }
+  const skills = parsed.frontmatter.skills;
+  if (
+    skills !== undefined &&
+    (!Array.isArray(skills) ||
+      skills.some((skill) => typeof skill !== 'string' || !skill.trim()))
+  ) {
+    throw new Error(
+      `Invalid agent declaration ${fileName}: frontmatter skills must be a list of non-empty strings`,
+    );
+  }
+  if (skills && new Set(skills).size !== skills.length) {
+    throw new Error(
+      `Invalid agent declaration ${fileName}: frontmatter skills must not contain duplicates`,
+    );
+  }
 
   return {
     name: `${plugin}:${parsed.frontmatter.name}`,
@@ -97,5 +113,6 @@ function loadAgent(
     model: root.model,
     sandbox: root.sandbox,
     instructions: [role(parsed.body)],
+    ...(skills ? { skills } : {}),
   };
 }

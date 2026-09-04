@@ -808,7 +808,7 @@ therefore a **per-conversation executor**: native as a DO, leased on Node.
 the executor and timed-scheduling sections). Still designed-not-built: the stacks (a real
 Node+Postgres bundle; the DO adapter).
 
-- `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, subagents?})`
+- `agent.ts` — `defineAgent({name, model, sandbox, instructions, tools?, skills?, subagents?})`
   returns a pure declaration with caller tools and a normalized subagent list. `sandbox` is a
   factory `(ctx: {chatId, userId}) => Promise<ZukhrufSandbox>` so each independent chat owns its
   backend. `name` is the stable declaration identity persisted in chat metadata.
@@ -817,16 +817,16 @@ Node+Postgres bundle; the DO adapter).
   working directory to the runtime and leaves uploads explicit through the existing
   `uploadDirectory` option; proven over docker + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
-- `runtime/plugin/agent-skills.ts` — discovers immediate `skills/<name>/SKILL.md` children from the
-  configured sandbox on the conversation's first executable turn, requires frontmatter names to
-  match their directories, and persists the ordered `{name, description, path}` catalog under the
-  chat's Zukhruf metadata. Later turns and process restarts reconstruct the same stable
-  `@deepagents/context` skills fragment from that snapshot without rediscovery. `path` remains an
-  explicit catalog field rather than being derived from `name`, so the durable format is not
-  coupled to today's single discovery root. The sandbox is authoritative: providers may preinstall
-  or mount skills, while host-directory users opt into `uploadDirectory`. The executor never copies
-  or persists `SKILL.md` bodies, scripts, references, or assets. Skills belong to one agent sandbox
-  and do not implicitly pass to subagents.
+- `runtime/plugin/plugin-agents.ts` — snapshots each plugin's immediate Markdown agent files during
+  runtime construction. Agent frontmatter accepts `name`, `description`, and a `skills` list;
+  instructions remain the Markdown body.
+- `runtime/plugin/agent-skills.ts` — loads and validates plugin-contributed skill directories once
+  during runtime construction. Each declaration selects skill names explicitly, and the executor
+  copies only those files into that agent's sandbox and prompt. Plugin skills never implicitly pass
+  to subagents. Separately, it discovers preinstalled `skills/<name>/SKILL.md` children from a
+  configured sandbox on the conversation's first executable turn, persists the ordered
+  `{name, description, path}` catalog, and reconstructs the same stable `@deepagents/context` skills
+  fragment on later turns without rediscovery.
 - `runtime/agent-runtime.ts` —
   `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, plugins?})` →
   `{ enqueue(conv, {message, trigger}) → {id, stream},

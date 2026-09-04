@@ -38,7 +38,7 @@ import {
   type ConversationStatusEvent,
   ConversationStatusProjector,
 } from './conversation-status.ts';
-import { loadPluginSkills } from './plugin/agent-skills.ts';
+import { loadPluginSkills, selectPluginSkills } from './plugin/agent-skills.ts';
 import { loadPluginAgents } from './plugin/plugin-agents.ts';
 import { StatusPublishingTurnQueue } from './status-publishing-turn-queue.ts';
 
@@ -111,7 +111,7 @@ export interface AgentPluginInstance {
   telemetry?(context: AgentPluginToolContext): Telemetry;
   /** Directories whose immediate Markdown files declare plugin-scoped agents. */
   readonly agents?: readonly (string | URL)[];
-  /** Skill directories installed into every agent sandbox. */
+  /** Skill directories available for agents to select by frontmatter name. */
   readonly skills?: readonly (string | URL)[];
   /** Static namespaced context merged into every model call made by this runtime. */
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -505,6 +505,17 @@ export class AgentRuntime {
       };
     }
     const declarations = new AgentDeclarationRegistry(configuredRoot);
+    const loadedPluginSkills = loadPluginSkills(pluginSkills);
+    const pluginSkillsByAgent = new Map(
+      Array.from(declarations.values(), (declaration) => [
+        declaration.name,
+        selectPluginSkills(
+          loadedPluginSkills,
+          declaration.skills ?? [],
+          declaration.name,
+        ),
+      ]),
+    );
     for (const declaration of declarations.values()) {
       for (const name of Object.keys(declaration.tools ?? {})) {
         const owner = injectedTools.get(name);
@@ -596,7 +607,7 @@ export class AgentRuntime {
       multiAgent,
       collaborationTools,
       pluginTools,
-      pluginSkills: loadPluginSkills(pluginSkills),
+      pluginSkillsByAgent,
       pluginRuntimeContext,
       publishConversationStatus: (conversation) =>
         conversationStatus.publish(conversation),

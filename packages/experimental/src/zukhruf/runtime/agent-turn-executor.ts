@@ -50,7 +50,7 @@ export interface AgentTurnExecutorOptions {
   multiAgent: ResolvedMultiAgentHostConfig;
   collaborationTools: ReturnType<typeof createCollaborationTools>;
   pluginTools: ZukhrufToolSet;
-  pluginSkills: PluginSkills;
+  pluginSkillsByAgent: ReadonlyMap<string, PluginSkills>;
   pluginRuntimeContext?: Readonly<Record<string, unknown>>;
   configureTelemetry: (
     context: AgentPluginToolContext,
@@ -72,7 +72,7 @@ export class AgentTurnExecutor {
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
   readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
   readonly #pluginTools: ZukhrufToolSet;
-  readonly #pluginSkills: PluginSkills;
+  readonly #pluginSkillsByAgent: ReadonlyMap<string, PluginSkills>;
   readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
   readonly #configureTelemetry: AgentTurnExecutorOptions['configureTelemetry'];
 
@@ -85,7 +85,7 @@ export class AgentTurnExecutor {
     this.#multiAgent = options.multiAgent;
     this.#collaborationTools = options.collaborationTools;
     this.#pluginTools = options.pluginTools;
-    this.#pluginSkills = options.pluginSkills;
+    this.#pluginSkillsByAgent = options.pluginSkillsByAgent;
     this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
     this.#configureTelemetry = options.configureTelemetry;
   }
@@ -157,7 +157,12 @@ export class AgentTurnExecutor {
       chatId: turn.chatId,
       userId: turn.userId,
     });
-    const agentSkills = await this.#skillsFor(turn, sandbox, signal);
+    const agentSkills = await this.#skillsFor(
+      turn,
+      declaration.name,
+      sandbox,
+      signal,
+    );
     engine.set(...agentSkills.fragments);
     const elements = await this.#elementsFor(turn);
     if (elements.length > 0) {
@@ -413,15 +418,16 @@ export class AgentTurnExecutor {
 
   async #skillsFor(
     turn: TurnRef,
+    agentName: string,
     sandbox: ZukhrufSandbox,
     signal: AbortSignal,
   ): Promise<AgentSkills> {
     const chat = await this.#store.getChat(turn.chatId);
     const existing = readSkills(chat?.metadata);
     if (existing !== undefined)
-      return this.#withPluginSkills(existing, sandbox);
+      return this.#withPluginSkills(existing, agentName, sandbox);
     if (sandbox.workingDirectory === undefined) {
-      return this.#withPluginSkills([], sandbox);
+      return this.#withPluginSkills([], agentName, sandbox);
     }
 
     const discovered = await discoverAgentSkills(sandbox, signal);
@@ -441,14 +447,16 @@ export class AgentTurnExecutor {
         },
       };
     });
-    return this.#withPluginSkills(available, sandbox);
+    return this.#withPluginSkills(available, agentName, sandbox);
   }
 
   async #withPluginSkills(
     available: readonly AvailableSkill[],
+    agentName: string,
     sandbox: ZukhrufSandbox,
   ): Promise<AgentSkills> {
-    if (this.#pluginSkills.available.length === 0) {
+    const pluginSkills = this.#pluginSkillsByAgent.get(agentName);
+    if (!pluginSkills || pluginSkills.available.length === 0) {
       return createAgentSkills(available);
     }
     if (sandbox.workingDirectory === undefined) {
@@ -458,20 +466,20 @@ export class AgentTurnExecutor {
     }
     const workingDirectory = sandbox.workingDirectory;
     const names = new Set(available.map(({ name }) => name));
-    const duplicate = this.#pluginSkills.available.find(({ name }) =>
+    const duplicate = pluginSkills.available.find(({ name }) =>
       names.has(name),
     );
     if (duplicate) {
       throw new Error(`AgentRuntime: duplicate skill "${duplicate.name}"`);
     }
     await sandbox.sandbox.writeFiles(
-      this.#pluginSkills.files.map(({ path: relativePath, content }) => ({
+      pluginSkills.files.map(({ path: relativePath, content }) => ({
         path: path.posix.join(workingDirectory, relativePath),
         content,
       })),
     );
     return createAgentSkills(
-      [...available, ...this.#pluginSkills.available].toSorted((left, right) =>
+      [...available, ...pluginSkills.available].toSorted((left, right) =>
         left.name.localeCompare(right.name),
       ),
     );

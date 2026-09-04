@@ -7,7 +7,6 @@ import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 export interface WorkspaceSandboxOptions {
   workspaceDirectory: string;
-  skillsDirectory: string;
 }
 
 /** Give one durable agent chat an isolated container over the shared host workspace. */
@@ -15,10 +14,6 @@ export function createWorkspaceSandbox(options: WorkspaceSandboxOptions) {
   const workspaceDirectory = existingDirectory(
     options.workspaceDirectory,
     'workspaceDirectory',
-  );
-  const skillsDirectory = existingDirectory(
-    options.skillsDirectory,
-    'skillsDirectory',
   );
 
   return defineSandbox(
@@ -38,12 +33,6 @@ export function createWorkspaceSandbox(options: WorkspaceSandboxOptions) {
             hostPath: workspaceDirectory,
             containerPath: '/agent/workspace',
             readOnly: false,
-          },
-          {
-            type: 'bind',
-            hostPath: skillsDirectory,
-            containerPath: '/agent/skills',
-            readOnly: true,
           },
         ],
       }),

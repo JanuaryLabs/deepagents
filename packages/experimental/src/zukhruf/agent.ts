@@ -36,6 +36,8 @@ export interface AgentDeclaration {
   sandbox: (context: SandboxContext) => Promise<ZukhrufSandbox>;
   instructions: ContextFragment[];
   tools?: ZukhrufToolSet;
+  /** Names of plugin-provided skills installed for this agent. */
+  skills?: readonly string[];
   subagents?: AgentDeclaration[];
   /** Runtime plugins owned by this declaration when it is the root agent. */
   plugins?: readonly AgentPluginDefinition[];
