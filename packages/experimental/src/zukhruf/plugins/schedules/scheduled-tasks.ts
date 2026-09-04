@@ -10,7 +10,11 @@ import type {
 } from 'pg-boss';
 import rrulePackage from 'rrule';
 
+import { pgBossNotifications } from '../../queue/pg-boss-notifications.ts';
+
 const { rrulestr } = rrulePackage;
+
+export const SCHEDULE_CHANGES_CHANNEL = 'zukhruf_schedule_changes';
 
 const DDL = `
   CREATE TABLE IF NOT EXISTS zukhruf_scheduled_tasks (
@@ -74,6 +78,42 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS zukhruf_scheduled_runs_pending_review
     ON zukhruf_scheduled_runs (owner_id, finished_at DESC, id)
     WHERE review_status = 'pending_review';
+
+  CREATE OR REPLACE FUNCTION zukhruf_publish_schedule_change()
+  RETURNS trigger AS $$
+  BEGIN
+    IF TG_TABLE_NAME = 'zukhruf_scheduled_tasks' THEN
+      PERFORM pg_notify(
+        '${SCHEDULE_CHANGES_CHANNEL}',
+        json_build_object(
+          'resource', 'schedule-task',
+          'ownerId', COALESCE(NEW.owner_id, OLD.owner_id),
+          'id', COALESCE(NEW.id, OLD.id)
+        )::text
+      );
+    ELSE
+      PERFORM pg_notify(
+        '${SCHEDULE_CHANGES_CHANNEL}',
+        json_build_object(
+          'resource', 'schedule-run',
+          'ownerId', COALESCE(NEW.owner_id, OLD.owner_id),
+          'id', COALESCE(NEW.id, OLD.id),
+          'taskId', COALESCE(NEW.task_id, OLD.task_id)
+        )::text
+      );
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+
+  CREATE OR REPLACE TRIGGER zukhruf_scheduled_tasks_changed
+    AFTER INSERT OR UPDATE OR DELETE ON zukhruf_scheduled_tasks
+    FOR EACH ROW EXECUTE FUNCTION zukhruf_publish_schedule_change();
+
+  CREATE OR REPLACE TRIGGER zukhruf_scheduled_runs_changed
+    AFTER INSERT OR UPDATE OR DELETE ON zukhruf_scheduled_runs
+    FOR EACH ROW EXECUTE FUNCTION zukhruf_publish_schedule_change();
 `;
 
 export type ScheduledTaskStatus =
@@ -203,6 +243,16 @@ export interface UpdateScheduledTaskInput<ExecutionConfig extends object> {
   executionConfig?: ExecutionConfig;
 }
 
+export type ScheduledChange =
+  | { type: 'reset' }
+  | { type: 'change'; resource: 'schedule-task'; id: string }
+  | {
+      type: 'change';
+      resource: 'schedule-run';
+      id: string;
+      taskId: string;
+    };
+
 export interface ScheduledTaskTransaction {
   <T>(operation: (database: Db) => Promise<T>): Promise<T>;
 }
@@ -318,6 +368,30 @@ export class ScheduledTasks<ExecutionConfig extends object> {
     // pg-boss resolves queue metadata before honoring a transaction-bound `db`.
     // Prime that public lookup before entering PGlite's single-connection transaction.
     await this.#boss.findJobs(this.#queue, { id: randomUUID() });
+  }
+
+  async subscribeChanges(
+    ownerId: string,
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<ScheduledChange>> {
+    const owner = required(ownerId, 'Scheduled Task owner');
+    const notifications = await pgBossNotifications(
+      this.#boss,
+      SCHEDULE_CHANGES_CHANNEL,
+      parseScheduledChange,
+      signal,
+    );
+    return {
+      async *[Symbol.asyncIterator]() {
+        for await (const notification of notifications) {
+          if (notification.type === 'reset') {
+            yield notification;
+          } else if (notification.value.ownerId === owner) {
+            yield notification.value.change;
+          }
+        }
+      },
+    };
   }
 
   async create(
@@ -1526,6 +1600,55 @@ function validateJob(value: unknown): ScheduledJob {
     return job as OccurrenceJob;
   }
   throw new Error('Scheduled Tasks job payload is invalid');
+}
+
+type PersistedScheduledChange = {
+  ownerId: string;
+  change: Exclude<ScheduledChange, { type: 'reset' }>;
+};
+
+function parseScheduledChange(
+  payload: string,
+): PersistedScheduledChange | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(payload);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('resource' in value) ||
+    !('ownerId' in value) ||
+    !('id' in value) ||
+    typeof value.ownerId !== 'string' ||
+    typeof value.id !== 'string'
+  ) {
+    return undefined;
+  }
+  if (value.resource === 'schedule-task') {
+    return {
+      ownerId: value.ownerId,
+      change: { type: 'change', resource: value.resource, id: value.id },
+    };
+  }
+  if (
+    value.resource === 'schedule-run' &&
+    'taskId' in value &&
+    typeof value.taskId === 'string'
+  ) {
+    return {
+      ownerId: value.ownerId,
+      change: {
+        type: 'change',
+        resource: value.resource,
+        id: value.id,
+        taskId: value.taskId,
+      },
+    };
+  }
+  return undefined;
 }
 
 function toTask<ExecutionConfig extends object>(

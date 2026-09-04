@@ -39,8 +39,12 @@ import {
   type AgentPluginBinding,
   type AgentPluginDefinition,
   AgentRuntime,
+  type AgentRuntimeOptions,
   AgentThread,
   type ClientToolSet,
+  type ConversationActiveFlag,
+  type ConversationStatus,
+  PgBossConversationStatusChangeSource,
   PgBossTurnQueue,
   SqliteMailboxStore,
   type TurnRef,
@@ -351,6 +355,89 @@ type ApprovalResponse =
   | { toolCallId: string; approved: true }
   | { toolCallId: string; approved: false; reason?: string };
 
+/**
+ * A client tool the runtime cannot execute: the first model call asks the
+ * user a question; the continuation answers from the client-supplied output.
+ */
+function clientToolSetup() {
+  const inputSchema: JSONSchema7 = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { question: { type: 'string' } },
+          required: ['question'],
+        },
+      },
+    },
+    required: ['questions'],
+  };
+  const clientTools = {
+    ask_user_question: {
+      description: 'Ask the user a question',
+      inputSchema,
+    },
+  } satisfies ClientToolSet;
+  const track = { calls: 0 };
+  const model = new MockLanguageModelV4({
+    doStream: async ({ prompt, tools }) => {
+      track.calls++;
+      const clientTool = tools?.find(
+        (candidate) =>
+          candidate.type === 'function' &&
+          candidate.name === 'ask_user_question',
+      );
+      assert.ok(
+        clientTool &&
+          'description' in clientTool &&
+          'inputSchema' in clientTool,
+        'client tool is exposed to every model call',
+      );
+      assert.equal(clientTool.description, 'Ask the user a question');
+      assert.deepStrictEqual(clientTool.inputSchema, inputSchema);
+
+      const chunks: LanguageModelV4StreamPart[] =
+        track.calls === 1
+          ? [
+              {
+                type: 'tool-call',
+                toolCallId: 'ask-1',
+                toolName: 'ask_user_question',
+                input: JSON.stringify({
+                  questions: [{ question: 'What should I prioritize?' }],
+                }),
+              },
+              {
+                type: 'finish',
+                finishReason: { unified: 'tool-calls', raw: '' },
+                usage,
+              },
+            ]
+          : [
+              { type: 'text-start', id: 't1' },
+              {
+                type: 'text-delta',
+                id: 't1',
+                delta: JSON.stringify(prompt).includes('Deep work')
+                  ? 'Prioritize deep work.'
+                  : 'Missing answer.',
+              },
+              { type: 'text-end', id: 't1' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: '' },
+                usage,
+              },
+            ];
+      return { stream: simulateReadableStream({ chunks }) };
+    },
+  });
+  return { clientTools, model, track };
+}
+
 async function submitApprovalResponses(
   runtime: AgentRuntime,
   conversation: { chatId: string; userId: string },
@@ -424,6 +511,9 @@ async function harness(
   tools?: ToolSet,
   options?: {
     queueFactory?: (boss: PgBoss) => PgBossTurnQueue;
+    runtime?: (infrastructure: {
+      boss: PgBoss;
+    }) => Partial<AgentRuntimeOptions>;
     declaration?: AgentDeclaration;
     composition?: (infrastructure: { boss: PgBoss; database: PGlite }) => {
       definitions: readonly AgentPluginDefinition[];
@@ -468,11 +558,14 @@ async function harness(
       queue,
       mailboxStore,
       ...(composition?.bindings ? { bindings: composition.bindings } : {}),
+      ...options?.runtime?.({ boss }),
     },
   );
   return {
     runtime,
     store,
+    streams,
+    mailboxStore,
     database: pglite,
     streamStore,
     boss,
@@ -2574,5 +2667,406 @@ describe('zukhruf runtime — background executor', () => {
     const text = await collectText(next.stream);
     assert.equal(text, 'reply:after', 'chat unblocked after the failure');
     assert.equal(await h.streamStore.getStreamStatus(crashed.id), 'failed');
+  });
+});
+
+describe('zukhruf runtime — conversation status', () => {
+  const idle: ConversationStatus = { type: 'idle' };
+  const systemError: ConversationStatus = { type: 'systemError' };
+  const active = (
+    ...activeFlags: ConversationActiveFlag[]
+  ): ConversationStatus => ({ type: 'active', activeFlags });
+
+  function recordStatuses(
+    runtime: AgentRuntime,
+    conversation: { chatId: string; userId: string },
+    signal: AbortSignal,
+  ) {
+    const seen: ConversationStatus[] = [];
+    const done = (async () => {
+      try {
+        for await (const change of await runtime.subscribeConversationStatus(
+          signal,
+        )) {
+          if (change.type === 'reset') continue;
+          if (change.conversation.chatId === conversation.chatId) {
+            seen.push(change.status);
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          throw error;
+        }
+      }
+    })();
+    return { seen, done };
+  }
+
+  const STATUS_WAIT = { interval: 25, timeout: 10_000 };
+
+  it('publishes active then idle for one turn and agrees with the pull view', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'status-turn', userId: 'u1' };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const { stream } = await h.runtime.enqueue(conversation, turn('hi'));
+      assert.equal(await collectText(stream), 'reply:hi');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), idle),
+        STATUS_WAIT,
+      );
+
+      assert.deepStrictEqual(seen, [active(), idle]);
+      assert.deepStrictEqual(
+        await h.runtime.observe(conversation).conversationStatus(),
+        idle,
+      );
+      assert.deepStrictEqual(
+        (await h.runtime.listHistory(conversation.userId)).find(
+          ({ chatId }) => chatId === conversation.chatId,
+        )?.status,
+        idle,
+      );
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+
+  it('reports systemError after a failed turn and clears it on the next successful turn', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(scriptedModel(track));
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'status-failure', userId: 'u1' };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const crashed = await h.runtime.enqueue(conversation, turn('boom'));
+      await waitForStatus(h.streamStore, crashed.id, ['failed']);
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), systemError),
+        STATUS_WAIT,
+      );
+      assert.deepStrictEqual(seen, [active(), systemError]);
+      assert.deepStrictEqual(
+        await h.runtime.observe(conversation).conversationStatus(),
+        systemError,
+      );
+
+      const next = await h.runtime.enqueue(conversation, turn('after'));
+      assert.equal(await collectText(next.stream), 'reply:after');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), idle),
+        STATUS_WAIT,
+      );
+
+      assert.deepStrictEqual(seen, [active(), systemError, active(), idle]);
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+
+  it('reports waitingOnApproval while paused, keeps it across a parked ask, and clears it after the continuation', async (t) => {
+    const { track, tools, model } = approvalSetup();
+    await using h = await harness(model, tools);
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'status-approval', userId: 'u1' };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const paused = await h.runtime.enqueue(conversation, turn('send it'));
+      assert.equal(await collectText(paused.stream), 'working ');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), active('waitingOnApproval')),
+        STATUS_WAIT,
+      );
+      assert.deepStrictEqual(seen, [active(), active('waitingOnApproval')]);
+      const { part } = await pausedToolCall(h.runtime, conversation);
+
+      await h.runtime.enqueue(conversation, turn('while paused'));
+      await t.waitFor(
+        async () =>
+          assert.equal(await h.queue.getTurnActivity(conversation), 'idle'),
+        STATUS_WAIT,
+      );
+      assert.deepStrictEqual(
+        seen,
+        [active(), active('waitingOnApproval')],
+        'a parked ask does not change the paused status',
+      );
+      assert.deepStrictEqual(
+        await h.runtime.observe(conversation).conversationStatus(),
+        active('waitingOnApproval'),
+      );
+      assert.deepStrictEqual(
+        (await h.runtime.listHistory(conversation.userId)).find(
+          ({ chatId }) => chatId === conversation.chatId,
+        )?.status,
+        active('waitingOnApproval'),
+      );
+
+      await submitApprovalResponses(h.runtime, conversation, {
+        toolCallId: part.toolCallId,
+        approved: true,
+      });
+      await waitForText(h.runtime, conversation, 'done:send it');
+      await waitForText(h.runtime, conversation, 'reply:while paused');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), idle),
+        STATUS_WAIT,
+      );
+
+      assert.deepStrictEqual(seen, [
+        active(),
+        active('waitingOnApproval'),
+        active(),
+        idle,
+      ]);
+      assert.equal(track.toolRuns, 1);
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+
+  it('reports waitingOnUserInput while a client tool awaits its output', async (t) => {
+    const { clientTools, model, track } = clientToolSetup();
+    await using h = await harness(model);
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'status-client-tool', userId: 'u1' };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const ask = await h.runtime.enqueue(conversation, {
+        ...turn('Help me prioritize'),
+        tools: clientTools,
+      });
+      assert.equal(await collectText(ask.stream), '');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), active('waitingOnUserInput')),
+        STATUS_WAIT,
+      );
+      assert.deepStrictEqual(seen, [active(), active('waitingOnUserInput')]);
+      const { head, part } = await pausedToolCall(h.runtime, conversation);
+
+      const message: UIMessage & { role: 'assistant' } = {
+        ...head,
+        role: 'assistant',
+        parts: head.parts.map((candidate) =>
+          isToolUIPart(candidate) &&
+          candidate.state === 'input-available' &&
+          candidate.toolCallId === part.toolCallId
+            ? {
+                ...candidate,
+                state: 'output-available' as const,
+                output: {
+                  answers: [
+                    {
+                      type: 'choice',
+                      question: 'What should I prioritize?',
+                      multiSelect: false,
+                      choice: { label: 'Deep work', value: 'deep-work' },
+                    },
+                  ],
+                },
+              }
+            : candidate,
+        ),
+      };
+      await h.runtime.enqueue(conversation, {
+        message,
+        tools: clientTools,
+        trigger: 'submit-message',
+      });
+      await waitForText(h.runtime, conversation, 'Prioritize deep work.');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), idle),
+        STATUS_WAIT,
+      );
+
+      assert.deepStrictEqual(seen, [
+        active(),
+        active('waitingOnUserInput'),
+        active(),
+        idle,
+      ]);
+      assert.equal(track.calls, 2);
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+
+  it('returns to idle after the running turn is cancelled', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    await using h = await harness(slowModel(track));
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'status-cancel', userId: 'u1' };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const { id } = await h.runtime.enqueue(conversation, turn('go'));
+      await waitForStatus(h.streamStore, id, ['running']);
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), active()),
+        STATUS_WAIT,
+      );
+
+      await h.runtime.observe(conversation).cancel(id);
+      await waitForStatus(h.streamStore, id, ['cancelled']);
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), idle),
+        STATUS_WAIT,
+      );
+
+      assert.deepStrictEqual(seen, [active(), idle]);
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+
+  it('reports systemError when turn setup fails before the model runs', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const model = scriptedModel(track);
+    const agentDeclaration = declaration(model);
+    let sandboxCalls = 0;
+    agentDeclaration.sandbox = async (): Promise<AgentSandbox> => {
+      if (++sandboxCalls === 2) throw new Error('sandbox setup failed');
+      return createBashTool({
+        sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+      });
+    };
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'status-setup-failure', userId: 'u1' };
+    const abort = new AbortController();
+    const { seen, done } = recordStatuses(
+      h.runtime,
+      conversation,
+      abort.signal,
+    );
+    try {
+      const first = await h.runtime.enqueue(conversation, turn('first'));
+      assert.equal(await collectText(first.stream), 'reply:first');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), idle),
+        STATUS_WAIT,
+      );
+
+      const failed = await h.runtime.enqueue(conversation, turn('second'));
+      await waitForStatus(h.streamStore, failed.id, ['failed']);
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), systemError),
+        STATUS_WAIT,
+      );
+
+      assert.deepStrictEqual(seen, [active(), idle, active(), systemError]);
+      assert.deepStrictEqual(
+        await h.runtime.observe(conversation).conversationStatus(),
+        systemError,
+      );
+      assert.deepEqual(track.calls, ['first']);
+    } finally {
+      abort.abort();
+      await done;
+    }
+  });
+});
+
+describe('zukhruf runtime — cross-process conversation status', () => {
+  it('a runtime without a worker observes turns executed by another runtime over the shared database', async (t) => {
+    const track: ModelTrack = { active: 0, maxActive: 0, calls: [] };
+    const model = scriptedModel(track);
+    await using h = await harness(model, undefined, {
+      runtime: ({ boss }) => ({
+        conversationStatusChanges: new PgBossConversationStatusChangeSource(
+          boss,
+        ),
+      }),
+    });
+    const observerQueue = new PgBossTurnQueue(h.boss, {
+      pollingIntervalSeconds: 0.5,
+      schema: 'pgboss',
+    });
+    await observerQueue.initialize();
+    const observer = new AgentRuntime(declaration(model), {
+      store: h.store,
+      streams: h.streams,
+      queue: observerQueue,
+      mailboxStore: h.mailboxStore,
+      conversationStatusChanges: new PgBossConversationStatusChangeSource(
+        h.boss,
+      ),
+    });
+    await using _worker = await h.runtime.work();
+    void _worker;
+    const conversation = { chatId: 'cross-process-status', userId: 'u1' };
+    const abort = new AbortController();
+    const seen: ConversationStatus[] = [];
+    const done = (async () => {
+      try {
+        for await (const change of await observer.subscribeConversationStatus(
+          abort.signal,
+        )) {
+          if (change.type === 'reset') continue;
+          if (change.conversation.chatId === conversation.chatId) {
+            seen.push(change.status);
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          throw error;
+        }
+      }
+    })();
+    try {
+      const { stream } = await h.runtime.enqueue(conversation, turn('hi'));
+      assert.equal(await collectText(stream), 'reply:hi');
+      await t.waitFor(
+        () => assert.deepStrictEqual(seen.at(-1), { type: 'idle' }),
+        { interval: 25, timeout: 10_000 },
+      );
+
+      assert.deepStrictEqual(seen, [
+        { type: 'active', activeFlags: [] },
+        { type: 'idle' },
+      ]);
+    } finally {
+      abort.abort();
+      await done;
+    }
   });
 });

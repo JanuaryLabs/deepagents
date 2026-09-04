@@ -35,7 +35,7 @@ implemented first useful core.
   definition-bound HTTP projections contribute authenticated routes and
   discovery entries to `http(runtime, ...projections)`. It has React Router
   routes under the injected document base, a persistent History sidebar, and a
-  capability-gated Scheduled workspace with three-second polling.
+  capability-gated Scheduled workspace refreshed by the owner event stream.
 - `schedulesHttp(scheduled)` contributes strict owner-scoped task, run, and
   pending-review routes plus `capabilities.schedules`. Omitting the projection
   removes both the capability and Scheduled navigation.
@@ -85,7 +85,8 @@ Read these before implementing a phase:
 
 - capability-gated Scheduled navigation;
 - the management, per-task runs, and pending-review UI;
-- polling and browser navigation over the discovered capability URL.
+- event-driven cache invalidation and browser navigation over the discovered
+  capability URL.
 
 ### Host owns
 
@@ -287,7 +288,7 @@ Work:
 
 - [x] add the approved Scheduled navigation, inbox, task list, task editor, and
       run detail;
-- [x] reuse the existing polling loop and browser-history routing;
+- [x] use the owner event stream and browser-history routing;
 - [x] derive review work from `pending_review`;
 - [x] default new tasks to fresh conversations while allowing an existing
       History conversation to be selected explicitly;
@@ -331,8 +332,8 @@ remaining required work.
 
 - Reproduce a failing public flow before each behavior change.
 - Drive tests through package specifiers and public runtime/devtool surfaces.
-- Reuse Hono, Zod, native browser APIs, the current polling loop, and current
-  UI composition. Add no dependency unless those prove insufficient.
+- Reuse Hono, Zod, native browser APIs, and current UI composition. Add no
+  dependency unless those prove insufficient.
 - Keep scheduler state authoritative; HTTP responses and browser state are
   projections.
 - Preserve unrelated staged and unstaged work. Leave new changes unstaged

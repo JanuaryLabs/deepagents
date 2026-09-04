@@ -24,15 +24,12 @@ export interface ScheduleDefinitionInput {
   target: ScheduleTargetInput;
 }
 
-const REFETCH_MS = 3_000;
-
 export function useScheduledTasks(href: string | undefined) {
   return useQuery({
     queryKey: ['schedules', 'tasks', href],
     queryFn: href
       ? ({ signal }) => read<ScheduledTaskView[]>(`${href}/tasks`, { signal })
       : skipToken,
-    refetchInterval: REFETCH_MS,
   });
 }
 
@@ -43,7 +40,6 @@ export function usePendingReview(href: string | undefined) {
       ? ({ signal }) =>
           read<ScheduledRunView[]>(`${href}/runs/inbox`, { signal })
       : skipToken,
-    refetchInterval: REFETCH_MS,
   });
 }
 
@@ -55,7 +51,6 @@ export function useTaskRuns(href: string | undefined, taskId?: string) {
         ? ({ signal }) =>
             read<ScheduledRunView[]>(`${href}/tasks/${taskId}/runs`, { signal })
         : skipToken,
-    refetchInterval: REFETCH_MS,
   });
 }
 
@@ -67,7 +62,6 @@ export function useScheduledRun(href: string | undefined, runId?: string) {
         ? ({ signal }) =>
             read<ScheduledRunView>(`${href}/runs/${runId}`, { signal })
         : skipToken,
-    refetchInterval: REFETCH_MS,
   });
 }
 

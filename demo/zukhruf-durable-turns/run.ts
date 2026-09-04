@@ -69,9 +69,10 @@ const rootIdleAgain = Promise.withResolvers<void>();
 const statusLog = (async () => {
   let rootTurns = 0;
   try {
-    for await (const change of runtime.subscribeConversationStatus(
+    for await (const change of await runtime.subscribeConversationStatus(
       statusAbort.signal,
     )) {
+      if (change.type === 'reset') continue;
       const isRoot = change.conversation.chatId === conversation.chatId;
       const flags =
         change.status.type === 'active' && change.status.activeFlags.length > 0

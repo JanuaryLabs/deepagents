@@ -56,6 +56,8 @@ export interface AgentTurnExecutorOptions {
     context: AgentPluginToolContext,
     telemetry: AgentDeclaration['telemetry'],
   ) => AgentDeclaration['telemetry'];
+  /** Signals that the conversation's status may have changed. Never rejects. */
+  publishConversationStatus: (conversation: ConversationId) => Promise<void>;
 }
 
 interface SamplingMailboxState {
@@ -75,6 +77,7 @@ export class AgentTurnExecutor {
   readonly #pluginSkillsByAgent: ReadonlyMap<string, PluginSkills>;
   readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
   readonly #configureTelemetry: AgentTurnExecutorOptions['configureTelemetry'];
+  readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
 
   constructor(options: AgentTurnExecutorOptions) {
     this.#store = options.store;
@@ -88,6 +91,7 @@ export class AgentTurnExecutor {
     this.#pluginSkillsByAgent = options.pluginSkillsByAgent;
     this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
     this.#configureTelemetry = options.configureTelemetry;
+    this.#publishConversationStatus = options.publishConversationStatus;
   }
 
   async execute(turn: TurnRef, context: ConsumeContext): Promise<void> {
@@ -104,6 +108,9 @@ export class AgentTurnExecutor {
         park: async () => {
           parked = true;
           await context.park();
+          // A parked turn never settles through the queue, so its
+          // "waiting on approval" status is published here.
+          await this.#publishConversationStatus(turn);
         },
       });
     } finally {
@@ -174,6 +181,9 @@ export class AgentTurnExecutor {
       await this.#projectSkippedTerminalTurn(turn);
       return;
     }
+    // Claimed = genuinely running. Parked, skipped, and empty-wake turns never
+    // reach this point, so they cannot flash an "active" status.
+    await this.#publishConversationStatus(turn);
     const agentContext = {
       controlPlane: this.#controlPlane,
       actor: { turn, thread, declaration },

@@ -293,8 +293,8 @@ implementing, but the behavior is fixed:
   (`GET /zukhruf/v1/traces/:chatId/:traceId`);
 - reject a trace that does not belong to the requested conversation;
 - expose no mutation or runtime control endpoint in this slice;
-- polling is sufficient initially and reuses the current History refresh
-  pattern. Do not add WebSocket or SSE infrastructure.
+- keep trace reads request-driven. This projection contributes no events to the
+  runtime's owner-wide SSE endpoint.
 
 ## Implementation phases
 

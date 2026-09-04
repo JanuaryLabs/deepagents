@@ -3,7 +3,9 @@ import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
 import {
   type HistoryRecord,
   StatusBadge,
+  conversationStatusLabel,
   formatTimestamp,
+  useConversationStatus,
 } from '@deepagents/devtool-history';
 
 import { loadRuntime } from '../app/runtime-data.ts';
@@ -24,9 +26,7 @@ export function HistoryRoute() {
   const { conversation } = useLoaderData<typeof loader>();
   return conversation ? (
     <ConversationSummary conversation={conversation} />
-  ) : (
-    null
-  );
+  ) : null;
 }
 
 export function ConversationSummary({
@@ -34,6 +34,10 @@ export function ConversationSummary({
 }: {
   conversation: HistoryRecord;
 }) {
+  const status = useConversationStatus(
+    conversation.chatId,
+    conversation.status,
+  );
   return (
     <div className="max-w-2xl p-8">
       <div className="flex items-start justify-between gap-6 border-b pb-5">
@@ -45,7 +49,7 @@ export function ConversationSummary({
             {conversation.title ?? conversation.chatId}
           </h2>
         </div>
-        <StatusBadge status={conversation.status} />
+        <StatusBadge status={conversationStatusLabel(status)} />
       </div>
       <dl className="grid grid-cols-[7rem_1fr] gap-x-5 gap-y-3 py-5 text-sm">
         <dt className="text-muted-foreground">User</dt>

@@ -132,6 +132,7 @@ export function schedulesHttp(
   return projectHttp(definition, (plugin) => ({
     capabilities: { schedules: { path: SCHEDULES_PATH } },
     authenticatedRoutes: scheduleRoutes(plugin),
+    events: (userId, signal) => plugin.subscribeChanges(userId, signal),
   }));
 }
 

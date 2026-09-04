@@ -6,6 +6,7 @@ export type Discovery = {
   capabilities: {
     chat: { href: string };
     history: { href: string };
+    events: { href: string };
     traces?: { href: string };
     schedules?: { href: string };
     uploads?: { href: string };
@@ -33,6 +34,7 @@ export async function loadRuntime(signal: AbortSignal) {
     const loadedDiscovery = await queryClient.fetchQuery({
       queryKey: ['runtime', 'discovery', infoPath],
       queryFn: () => read<Discovery>(infoPath, signal),
+      staleTime: Infinity,
     });
     discovery = loadedDiscovery;
     const history = await queryClient.fetchQuery({

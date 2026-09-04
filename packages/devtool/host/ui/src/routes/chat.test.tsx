@@ -1,14 +1,15 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
 import {
-  Outlet,
   MemoryRouter,
-  RouterProvider,
+  Outlet,
   RouterContextProvider,
+  RouterProvider,
   createMemoryRouter,
   useLocation,
 } from 'react-router';
+import { afterEach, expect, it, vi } from 'vitest';
 
+import { RuntimeEventsProvider } from '@deepagents/devtool-history';
 import { SidebarProvider } from '@deepagents/react-shadcn';
 
 import { DevtoolSidebar, NewChatButton } from '../app/sidebar.tsx';
@@ -20,6 +21,20 @@ vi.mock('../app/runtime-data.ts', () => ({ loadRuntime }));
 
 const sessionId = '9d1f5c40-f250-4aa9-8979-2e0ef4fc2c15';
 const api = '/zukhruf/v1/session';
+const eventsHref = '/zukhruf/v1/events';
+const capabilities = {
+  chat: { href: api },
+  history: { href: '/zukhruf/v1/history' },
+  events: { href: eventsHref },
+};
+
+class FakeEventSource extends EventTarget {
+  constructor(readonly url: string) {
+    super();
+  }
+
+  close() {}
+}
 
 afterEach(() => {
   cleanup();
@@ -57,16 +72,16 @@ it('loads the same query chat ID before creation and after reload', async () => 
     createdAt: 1,
     updatedAt: 2,
     messageCount: 1,
-    status: 'idle' as const,
+    status: { type: 'idle' as const },
   };
   loadRuntime
     .mockResolvedValueOnce({
-      discovery: { capabilities: { chat: { href: api } } },
+      discovery: { capabilities },
       history: [],
       historyError: false,
     })
     .mockResolvedValueOnce({
-      discovery: { capabilities: { chat: { href: api } } },
+      discovery: { capabilities },
       history: [history],
       historyError: false,
     });
@@ -108,20 +123,23 @@ it('highlights a query chat as soon as it appears in Runs', async () => {
     createdAt: 1,
     updatedAt: 2,
     messageCount: 1,
-    status: 'idle' as const,
+    status: { type: 'idle' as const },
   };
+  vi.stubGlobal('EventSource', FakeEventSource);
   const router = createMemoryRouter(
     [
       {
         path: '/',
         element: (
-          <SidebarProvider>
-            <DevtoolSidebar />
-            <Outlet />
-          </SidebarProvider>
+          <RuntimeEventsProvider href={eventsHref} onEvent={() => {}}>
+            <SidebarProvider>
+              <DevtoolSidebar />
+              <Outlet />
+            </SidebarProvider>
+          </RuntimeEventsProvider>
         ),
         loader: () => ({
-          discovery: { capabilities: { chat: { href: api } } },
+          discovery: { capabilities },
           history: [history],
           historyError: false,
         }),
@@ -140,9 +158,9 @@ it('highlights a query chat as soon as it appears in Runs', async () => {
   render(<RouterProvider router={router} />);
 
   expect(
-    (await screen.findByRole('button', { name: /New conversation/ })).getAttribute(
-      'aria-current',
-    ),
+    (
+      await screen.findByRole('button', { name: /New conversation/ })
+    ).getAttribute('aria-current'),
   ).toBe('true');
 });
 

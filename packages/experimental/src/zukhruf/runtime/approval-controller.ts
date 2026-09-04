@@ -23,6 +23,24 @@ export interface ApprovalControllerOptions {
 
 type ApprovalToolPart = DynamicToolUIPart | ToolUIPart;
 
+/** The head assistant message holds a tool call the host has not approved or denied. */
+export function hasUnansweredApprovals(message: UIMessage): boolean {
+  return message.parts.some(
+    (part) => isToolUIPart(part) && part.state === 'approval-requested',
+  );
+}
+
+/**
+ * The head assistant message holds a tool call whose output must come from
+ * outside the runtime. Every server-side tool executes before its turn
+ * completes, so `input-available` at a completed head is a client tool.
+ */
+export function hasPendingClientInput(message: UIMessage): boolean {
+  return message.parts.some(
+    (part) => isToolUIPart(part) && part.state === 'input-available',
+  );
+}
+
 /** Durable approval-response and continuation state machine. */
 export class ApprovalController {
   static readonly #settledToolStates = new Set([
@@ -186,7 +204,7 @@ export class ApprovalController {
     if (
       head?.role !== 'assistant' ||
       head.id !== streamId ||
-      this.#hasUnansweredApprovals(head) ||
+      hasUnansweredApprovals(head) ||
       !head.parts.some(
         (part) => isToolUIPart(part) && part.state === 'approval-responded',
       )
@@ -209,12 +227,6 @@ export class ApprovalController {
       (part) =>
         isToolUIPart(part) &&
         !ApprovalController.#settledToolStates.has(part.state),
-    );
-  }
-
-  #hasUnansweredApprovals(message: UIMessage): boolean {
-    return message.parts.some(
-      (part) => isToolUIPart(part) && part.state === 'approval-requested',
     );
   }
 

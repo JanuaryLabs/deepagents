@@ -161,6 +161,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
     capabilities: {
       history: { href: HISTORY_URL },
       chat: { href: CREATE_SESSION_URL },
+      events: { href: `${ZUKHRUF_MOUNT_PATH}/events` },
       traces: { href: `${ZUKHRUF_MOUNT_PATH}/traces` },
     },
   });
@@ -172,6 +173,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   const [entry] = (await history.json()) as Array<Record<string, unknown>>;
   assert.equal(entry.chatId, conversation.chatId);
   assert.equal(entry.title, 'First conversation');
+  assert.deepEqual(entry.status, { type: 'idle' });
 
   const traceList = await app.request(
     `${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}`,

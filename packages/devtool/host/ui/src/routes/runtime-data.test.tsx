@@ -20,6 +20,7 @@ it('loads discovery from the host-configured protocol mount', async () => {
         capabilities: {
           chat: { href: '/custom/zukhruf/session' },
           history: { href: '/custom/zukhruf/history' },
+          events: { href: '/custom/zukhruf/events' },
         },
       }),
     )

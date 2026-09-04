@@ -11,6 +11,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   type HistoryRecord,
   StatusBadge,
+  conversationStatusLabel,
   formatTimestamp,
 } from '@deepagents/devtool-history';
 import { cn } from '@deepagents/react-shadcn';
@@ -118,7 +119,11 @@ export function TracesView({
             Traces · {traces.length} {traces.length === 1 ? 'turn' : 'turns'}
           </p>
         </div>
-        <StatusBadge status={activeDetail?.status ?? conversation.status} />
+        <StatusBadge
+          status={
+            activeDetail?.status ?? conversationStatusLabel(conversation.status)
+          }
+        />
       </div>
       <div className="flex items-center gap-3 border-b px-6 py-3">
         <label

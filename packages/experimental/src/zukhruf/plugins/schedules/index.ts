@@ -49,6 +49,7 @@ export type ScheduleControl = Pick<
   | 'listPendingReview'
   | 'pause'
   | 'resume'
+  | 'subscribeChanges'
   | 'update'
   | 'runNow'
   | 'archive'
@@ -172,6 +173,10 @@ class SchedulesPlugin implements Schedules {
 
   listPendingReview(ownerId: string): Promise<ScheduledRun<ExecutionConfig>[]> {
     return this.#scheduled.listPendingReview(ownerId);
+  }
+
+  subscribeChanges(ownerId: string, signal: AbortSignal) {
+    return this.#scheduled.subscribeChanges(ownerId, signal);
   }
 
   pause(

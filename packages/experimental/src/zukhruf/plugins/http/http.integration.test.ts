@@ -33,6 +33,17 @@ const emptyEngine = {
   getMessages: () => Promise.resolve([]),
 };
 
+const idleObservation = {
+  engine: emptyEngine,
+  async cancel() {},
+  async resume() {
+    return null;
+  },
+  async status() {
+    return undefined;
+  },
+};
+
 function createRuntime(overrides: Partial<TestRuntime> = {}) {
   const runtime: TestRuntime = {
     info: runtimeInfo,
@@ -50,19 +61,15 @@ function createRuntime(overrides: Partial<TestRuntime> = {}) {
       return [];
     },
     observe() {
-      return {
-        engine: emptyEngine,
-        async cancel() {},
-        async resume() {
-          return null;
-        },
-        async status() {
-          return undefined;
-        },
-      };
+      return idleObservation;
     },
     async sessionExists() {
       return true;
+    },
+    async subscribeConversationStatus() {
+      return {
+        async *[Symbol.asyncIterator]() {},
+      };
     },
   };
   return Object.assign(runtime, overrides);
@@ -539,14 +546,8 @@ test('GET /zukhruf/v1/session/:sessionId returns the authenticated conversation'
     observe(conversation) {
       observed.push(conversation);
       return {
+        ...idleObservation,
         engine: { getMessages: () => Promise.resolve(messages) },
-        async cancel() {},
-        async resume() {
-          return null;
-        },
-        async status() {
-          return undefined;
-        },
       };
     },
   });
@@ -566,15 +567,9 @@ test('POST /zukhruf/v1/session/:sessionId/cancel cancels the current turn', asyn
   const runtime = createRuntime({
     observe(conversation) {
       return {
-        engine: emptyEngine,
+        ...idleObservation,
         async cancel() {
           cancelled.push(conversation);
-        },
-        async resume() {
-          return null;
-        },
-        async status() {
-          return undefined;
         },
       };
     },
@@ -602,11 +597,7 @@ test('GET /zukhruf/v1/session/:sessionId/turn/:turnId exposes the exact durable 
   const runtime = createRuntime({
     observe() {
       return {
-        engine: emptyEngine,
-        async cancel() {},
-        async resume() {
-          return null;
-        },
+        ...idleObservation,
         async status(id?: string) {
           observed.push(id ?? 'current');
           return {
@@ -643,15 +634,9 @@ test('POST /zukhruf/v1/session/:sessionId/turn/:turnId/cancel cancels only that 
   const runtime = createRuntime({
     observe() {
       return {
-        engine: emptyEngine,
+        ...idleObservation,
         async cancel(id?: string) {
           cancelled.push(id);
-        },
-        async resume() {
-          return null;
-        },
-        async status() {
-          return undefined;
         },
       };
     },
@@ -671,8 +656,7 @@ test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authentica
     observe(conversation) {
       observed.push(conversation);
       return {
-        engine: emptyEngine,
-        async cancel() {},
+        ...idleObservation,
         async resume() {
           return new ReadableStream<StreamPart>({
             start(controller) {
@@ -684,9 +668,6 @@ test('GET /zukhruf/v1/session/:sessionId/stream replays and tails the authentica
               controller.close();
             },
           });
-        },
-        async status() {
-          return undefined;
         },
       };
     },
@@ -742,6 +723,7 @@ test('GET /zukhruf/v1/info and health expose runtime and deployment metadata', a
     capabilities: {
       history: { href: mounted('/history') },
       chat: { href: mounted('/session') },
+      events: { href: mounted('/events') },
     },
   });
 
@@ -780,6 +762,7 @@ test('discovery follows the host-selected Hono mount', async () => {
   assert.deepEqual(discovery.capabilities, {
     history: { href: '/chosen/by-host/history' },
     chat: { href: '/chosen/by-host/session' },
+    events: { href: '/chosen/by-host/events' },
   });
 });
 
@@ -796,7 +779,7 @@ test('GET /zukhruf/v1/history exposes runtime observations', async () => {
           createdAt: 1,
           updatedAt: 2,
           messageCount: 1,
-          status: 'running',
+          status: { type: 'active' as const, activeFlags: [] },
         },
       ];
     },
@@ -900,4 +883,105 @@ test('HTTP discovery rejects invalid contributed capabilities', () => {
       }),
     /must use an absolute path/,
   );
+});
+
+test('GET /zukhruf/v1/events multiplexes owner changes after every source is ready', async () => {
+  const ownSession = '9d1f5c40-f250-5aa9-8979-2e0ef4fc2c15';
+  const otherSession = 'e4ee8b3c-9054-5bc1-9d88-a0db1a40f759';
+  let subscribed = 0;
+  const sourceSignals: AbortSignal[] = [];
+  const runtime = createRuntime({
+    async subscribeConversationStatus(signal) {
+      subscribed++;
+      sourceSignals.push(signal);
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: 'change' as const,
+            conversation: { chatId: otherSession, userId: 'user-2' },
+            status: { type: 'idle' as const },
+          };
+          yield {
+            type: 'change' as const,
+            conversation: { chatId: ownSession, userId: 'user-1' },
+            status: { type: 'active' as const, activeFlags: [] },
+          };
+        },
+      };
+    },
+  });
+  const projection: HttpProjection = {
+    project: () => ({
+      capabilities: {},
+      events: async (_userId, signal) => {
+        sourceSignals.push(signal);
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              type: 'change' as const,
+              resource: 'schedule-task',
+              id: 'task-1',
+            };
+          },
+        };
+      },
+    }),
+  };
+  const app = createApp(runtime, projection);
+  const path = mounted('/events');
+
+  const response = await app.request(path);
+  assert.equal(response.status, 200);
+  assert.match(
+    response.headers.get('content-type') ?? '',
+    /^text\/event-stream/,
+  );
+  assert.ok(response.body);
+  const received = await response.text();
+  assert.equal(subscribed, 1);
+  assert.equal(sourceSignals.length, 2);
+  assert.equal(
+    sourceSignals.every(({ aborted }) => aborted),
+    true,
+  );
+  const events = received
+    .trim()
+    .split('\n\n')
+    .map((frame) => JSON.parse(frame.slice('data: '.length)));
+  assert.deepEqual(events[0], { type: 'ready' });
+  assert.deepEqual(
+    events.slice(1).toSorted((a, b) => a.resource.localeCompare(b.resource)),
+    [
+      {
+        type: 'change',
+        resource: 'conversation',
+        id: ownSession,
+        status: { type: 'active', activeFlags: [] },
+      },
+      { type: 'change', resource: 'schedule-task', id: 'task-1' },
+    ],
+  );
+
+  const wrongMethod = await app.request(path, { method: 'POST' });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get('allow'), 'GET');
+});
+
+test('GET /zukhruf/v1/events publishes ready again after a source reconnects', async () => {
+  const runtime = createRuntime({
+    async subscribeConversationStatus() {
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'reset' as const };
+        },
+      };
+    },
+  });
+
+  const response = await createApp(runtime).request(mounted('/events'));
+  const events = (await response.text())
+    .trim()
+    .split('\n\n')
+    .map((frame) => JSON.parse(frame.slice('data: '.length)));
+  assert.deepEqual(events, [{ type: 'ready' }, { type: 'ready' }]);
 });

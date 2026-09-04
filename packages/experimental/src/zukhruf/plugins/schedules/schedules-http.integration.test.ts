@@ -24,7 +24,11 @@ import {
   type TurnRef,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
-import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
+import {
+  type HttpEnv,
+  type OwnerEvent,
+  http,
+} from '@deepagents/experimental/zukhruf/http';
 import {
   schedules,
   schedulesCapabilities,
@@ -238,13 +242,43 @@ async function createTask(
   app: Hono<HttpEnv>,
   overrides: Partial<typeof definition> = {},
   key = randomUUID(),
+  user = OWNER,
 ) {
   const response = await request(app, `${SCHEDULES}/tasks`, {
     ...json({ ...definition, ...overrides }),
     idempotencyKey: key,
+    user,
   });
   assert.equal(response.status, 200);
   return { key, task: (await response.json()) as ScheduledTaskView };
+}
+
+function eventReader(response: Response) {
+  assert.ok(response.body);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  return {
+    async next(): Promise<OwnerEvent> {
+      while (true) {
+        const boundary = buffered.indexOf('\n\n');
+        if (boundary >= 0) {
+          const frame = buffered.slice(0, boundary);
+          buffered = buffered.slice(boundary + 2);
+          if (frame.startsWith('data: ')) {
+            return JSON.parse(frame.slice('data: '.length)) as OwnerEvent;
+          }
+          continue;
+        }
+        const { done, value } = await reader.read();
+        assert.equal(done, false, 'event stream ended');
+        buffered += decoder.decode(value, { stream: true });
+      }
+    },
+    close() {
+      void reader.cancel();
+    },
+  };
 }
 
 test('discovery advertises the schedules capability only when it is composed', async () => {
@@ -276,6 +310,57 @@ test('discovery advertises the schedules capability only when it is composed', a
     (await withCapability.app.request(`${SCHEDULES}/tasks`)).status,
     401,
   );
+});
+
+test('owner events announce schedule task and worker-run changes without leaking another owner', async (t) => {
+  await using h = await harness();
+  const response = await request(h.app, `${MOUNT}/events`);
+  assert.equal(response.status, 200);
+  const events = eventReader(response);
+  try {
+    assert.deepEqual(await events.next(), { type: 'ready' });
+
+    const foreign = await createTask(h.app, {}, randomUUID(), 'owner-2');
+    const { task } = await createTask(h.app);
+    assert.notEqual(foreign.task.id, task.id);
+    assert.deepEqual(await events.next(), {
+      type: 'change',
+      resource: 'schedule-task',
+      id: task.id,
+    });
+
+    const accepted = await request(h.app, `${SCHEDULES}/tasks/${task.id}/run`, {
+      method: 'POST',
+      idempotencyKey: randomUUID(),
+    });
+    const run = (await accepted.json()) as ScheduledRunView;
+    assert.deepEqual(await events.next(), {
+      type: 'change',
+      resource: 'schedule-run',
+      id: run.id,
+      taskId: task.id,
+    });
+    await t.waitFor(() => assert.equal(h.queue.turns.length, 1), {
+      interval: 20,
+      timeout: 10_000,
+    });
+    let workerChange = await events.next();
+    while (
+      workerChange.type !== 'change' ||
+      workerChange.resource !== 'schedule-run' ||
+      workerChange.id !== run.id
+    ) {
+      workerChange = await events.next();
+    }
+    assert.deepEqual(workerChange, {
+      type: 'change',
+      resource: 'schedule-run',
+      id: run.id,
+      taskId: task.id,
+    });
+  } finally {
+    events.close();
+  }
 });
 
 test('task lifecycle is idempotent, owner-scoped, and free of scheduler bookkeeping', async () => {

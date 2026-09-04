@@ -145,6 +145,14 @@
 - [ ] Add dedicated child lifecycle/activity events for spawn, message/follow-up, interrupt, and
       terminal completion. Keep mailbox storage transport-only; expose events through the existing
       telemetry/host boundary rather than restoring the removed mailbox activity subscription.
+- [x] Conversation status changed (Codex `thread/status/changed` shape) through
+      `subscribeConversationStatus` on the runtime and plugin host, `observe().conversationStatus()`,
+      history snapshots, and the owner notification SSE `GET /events`.
+  - [x] Cross-process status push: `conversationStatusChanges` accepts a `ConversationStatusChangeSource`;
+        `PgBossConversationStatusChangeSource` uses `pg_notify` + pg-boss `IDatabase.listen` (Postgres
+        and PGlite), waits until LISTEN is live, and asks clients to resync after reconnect.
+  - [x] Schedule task/run table triggers contribute post-commit changes to `/events`, including
+        worker-owned transitions; Devtool invalidates the affected queries without polling.
 - [ ] Add a bounded host-facing child progress projection after lifecycle events exist. It must not
       inject progress into the parent model mailbox or make UI concerns part of the runtime core.
 - [x] Multi-agent shape: public `defineAgent({name, subagents})` with a required stable name, one

@@ -11,6 +11,9 @@
   "references": [
     {
       "path": "../../react/shadcn/tsconfig.lib.json"
+    },
+    {
+      "path": "../../experimental/tsconfig.lib.json"
     }
   ]
 }

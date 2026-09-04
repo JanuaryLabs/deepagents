@@ -754,9 +754,9 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
 - Core knows neither Hono nor gRPC. The plugin instance exposes transport-neutral operations, not
   protocol metadata, routes, serializers, or authentication policy.
 - The `@deepagents/experimental/zukhruf/http` transport plugin owns Hono, authentication, SSE,
-  built-in session routes, and discovery. `projectHttp(definition, project)` resolves the installed
-  instance and explicitly adapts it into HTTP-owned `publicRoutes`, `authenticatedRoutes`, and
-  capability paths.
+  built-in session routes, the user-scoped owner notification stream `GET /events`, and discovery.
+  `projectHttp(definition, project)` resolves the installed instance and explicitly adapts it into
+  HTTP-owned `publicRoutes`, `authenticatedRoutes`, capability paths, and optional event sources.
 - `http(runtime, ...projections)` mounts built-in and projected routes at the host-selected Hono
   path. It rejects relative paths and duplicate capability names, mounts public routes before its
   authentication boundary, and mounts authenticated routes after it so handlers use the trusted
@@ -831,7 +831,8 @@ Node+Postgres bundle; the DO adapter).
   `new AgentRuntime(rootDeclaration, {store, streams, queue, mailboxStore, plugins?})` →
   `{ enqueue(conv, {message, trigger}) → {id, stream},
 deliver(communication, mode) → void,
-observe(conv) → AgentObservation {engine, resume, status(streamId?), cancel(streamId?)},
+observe(conv) → AgentObservation {engine, resume, status(streamId?), conversationStatus(), cancel(streamId?)},
+subscribeConversationStatus(signal) → Promise<AsyncIterable<ConversationStatusEvent>>,
 initialize() → void,
 work({concurrency?}) → AsyncDisposable }`.
   It wires `AgentControlPlane`, `AgentTurnExecutor`, `ApprovalController`,
@@ -856,6 +857,8 @@ work({concurrency?}) → AsyncDisposable }`.
   authoritative state. The opt-in plugin owns its initialization and worker lifecycle, launches
   each run as a fresh root task by default or into an explicitly configured owner-scoped existing
   conversation, and exposes the same management API directly.
+  Database triggers publish owner-scoped task/run change hints after commit, including worker-owned
+  transitions; its HTTP projection contributes those hints to the shared `/events` stream.
   Its `scheduleFiles` source compiles top-level `agent/schedules/*.md` declarations during runtime
   initialization; removed files pause rather than delete their durable tasks. The AgentRuntime
   adapter supports new- and existing-conversation targets; other execution targets remain
@@ -881,6 +884,29 @@ work({concurrency?}) → AsyncDisposable }`.
   an actor host may absorb both capabilities (see the executor section).
 - `demo/zukhruf-durable-turns/agent.ts`, `instructions.ts`, and sandbox factories are pure
   declarations (no top-level await; importing spins no container or agent turn).
+- `runtime/conversation-status.ts` — Codex `thread/status/changed` for hosts. `ConversationStatus`
+  is `idle | active{activeFlags: waitingOnApproval | waitingOnUserInput} | systemError`, derived
+  from durable state (queue activity, unsettled tool parts at a completed chain head, the latest
+  stream's status), so `observe(conv).conversationStatus()` is correct from any process.
+  `subscribeConversationStatus(signal)` resolves only after its cross-process listener is live, then
+  yields the changes this process observes: every durable
+  `push` (`runtime/status-publishing-turn-queue.ts` decorates the `TurnQueue`, so host asks, spawns,
+  mailbox wakes, and recovery pushes all count), the executor's stream claim, approval parking, queue
+  settle (`onSettled` is always wired now; status publishes before plugin availability
+  reconciliation), and `observe().cancel()`. Each signal re-reads and dedupes, so duplicates are free
+  and a publish never rejects into `onSettled`. Cross-process push is opt-in through
+  `conversationStatusChanges: ConversationStatusChangeSource` (`runtime/conversation-status-change-source.ts`):
+  a local change also `notify`s a wake hint carrying only `{chatId, userId}`, and a subscribing process
+  re-reads on each hint, so the payload can never be stale. `PgBossConversationStatusChangeSource`
+  (`queue/pg-boss.conversation-status-change-source.ts`) raises `pg_notify` through the pg-boss
+  database and subscribes through pg-boss's `IDatabase.listen`, which the pooled Postgres driver and the
+  PGlite adapter both implement; the remote subscription is held only while a local subscriber exists.
+  HTTP folds status changes into the user-scoped SSE `GET /events`
+  (`capabilities.events`); history uses the same projected status shape for its
+  initial snapshot. Event sources attach before `ready`; a source reconnect is
+  another `ready`, so the browser repairs missed lossy notifications by
+  rereading authoritative history and schedule APIs. Schedule table triggers
+  contribute task/run changes after commit without browser polling.
 - `demo/zukhruf-durable-turns/run.ts` — the **independent-agent showcase**: PGlite-backed pg-boss
   (self-contained, no server), concurrent in-process `work()`, detach/resume a root turn that calls
   nonblocking `spawn_agent`, wait until the specialist's queue-only `FINAL_ANSWER` is durable, then
@@ -909,8 +935,9 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Non-idempotent post-crash continuation recovery** — process-kill detection, one automatic replay
   for opted-in idempotent approval tools, terminal failure, and chat unblocking are built. Provider
   reconciliation and exact resumption through a tool-call journal remain deliberately deferred.
-- **Observe / reconnect UX** — how a reconnecting client discovers the in-flight turn (head message +
-  stream status) and what it sees at each turn state; notifications when a turn finishes while away.
+- **Observe / reconnect UX** — the owner event reconnect protocol and snapshot resync are built; how
+  a reconnecting client discovers an in-flight turn's content (head message + stream status) and what
+  it sees at each queued/executing state remains open.
 - **General pause vs cancel** — approval parking is built, while arbitrary suspend/resume of a
   running model turn remains undecided. Cancel is terminal for queued/running streams.
 - **Per-turn bounds** — step / token / wall-clock / no-progress caps as automatic terminals.
@@ -923,8 +950,9 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Per-chat sandbox GC** — sandboxes are per-chat, named by chatId, and never disposed by the
   runtime. Nothing reclaims a dead chat's container yet (chat deletion hook? idle TTL? host policy?).
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at
-  execution time). A reconnecting client can't discover turns that are queued but unstarted; folds
-  into the observe/reconnect UX item.
+  execution time). `conversationStatus()` reports a queued turn as `active`, but a reconnecting
+  client still can't stream a turn that is queued but unstarted; folds into the observe/reconnect
+  UX item.
 
 _Resolved by the executor build:_ **mid-turn message contract** → queue (strict FIFO per chat,
 structural via `key_strict_fifo`, whose per-key head selection prevents cross-chat starvation);

@@ -9,9 +9,9 @@ import {
 } from 'react-router';
 
 import {
+  ChatStatusIcon,
   History,
   type HistoryRecord,
-  StatusIcon,
 } from '@deepagents/devtool-history';
 import {
   Button,
@@ -29,7 +29,6 @@ import {
   cn,
 } from '@deepagents/react-shadcn';
 
-import { useLiveConversationStatus } from './conversation-status.tsx';
 import type { loader } from './layout.tsx';
 
 export function DevtoolSidebar() {
@@ -117,8 +116,7 @@ function RunsNavigation() {
   const navigate = useNavigate();
   const { discovery, history, historyError } = useLoaderData<typeof loader>();
   const selected = useMatches().at(-1)?.loaderData as
-    | { chatId?: string; conversation?: HistoryRecord }
-    | undefined;
+    { chatId?: string; conversation?: HistoryRecord } | undefined;
   const selectedChatId = selected?.conversation?.chatId ?? selected?.chatId;
   const select = useCallback(
     (entry: HistoryRecord) =>
@@ -153,7 +151,10 @@ function RunsNavigation() {
                     history={entry}
                     className="pb-0 hover:bg-transparent"
                   >
-                    <RunStatusIcon entry={entry} />
+                    <ChatStatusIcon
+                      chatId={entry.chatId}
+                      status={entry.status}
+                    />
                     <span className="text-foreground truncate">
                       {entry.title ?? entry.chatId}
                     </span>
@@ -182,9 +183,4 @@ function RunsNavigation() {
       </SidebarGroupContent>
     </SidebarGroup>
   );
-}
-
-function RunStatusIcon({ entry }: { entry: HistoryRecord }) {
-  const live = useLiveConversationStatus(entry.chatId);
-  return <StatusIcon status={live ?? entry.status} />;
 }
