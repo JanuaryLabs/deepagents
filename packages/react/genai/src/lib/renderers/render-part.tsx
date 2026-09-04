@@ -7,6 +7,7 @@ import {
   useAgent,
   useAgentMessages,
 } from '../chat/agent-context.tsx';
+import { ToolOutput } from '../elements/Tool.tsx';
 
 function ToolApproval({ part }: { part: ToolUIPart }) {
   const { addToolApprovalResponse } = useAgentMessages();
@@ -61,8 +62,12 @@ function ToolApproval({ part }: { part: ToolUIPart }) {
 export function RenderPart({ part }: { part: ToolUIPart }) {
   const { registry } = useAgent();
 
-  if (!part.input) {
-    return <Loader className="size-4 animate-spin" />;
+  if (part.input === undefined) {
+    return part.state === 'output-error' ? (
+      <ToolOutput output={part.output} errorText={part.errorText} />
+    ) : (
+      <Loader className="size-4 animate-spin" />
+    );
   }
 
   const approval = <ToolApproval part={part} />;

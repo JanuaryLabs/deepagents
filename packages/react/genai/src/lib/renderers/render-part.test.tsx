@@ -51,6 +51,20 @@ const approvalMessage: UIMessage = {
   ],
 };
 
+const terminalErrorMessage: UIMessage = {
+  id: 'terminal-tool-error',
+  role: 'assistant',
+  parts: [
+    {
+      type: 'tool-spawn_agent',
+      toolCallId: 'call-2',
+      state: 'output-error',
+      input: undefined,
+      errorText: 'Tool input could not be repaired.',
+    },
+  ],
+};
+
 function ApprovalHarness() {
   const { messages, status } = useAgentMessages();
   const message = messages[0];
@@ -65,11 +79,11 @@ function ApprovalHarness() {
   );
 }
 
-function renderApproval(transport: RecordingTransport) {
+function renderMessage(message: UIMessage, transport: RecordingTransport) {
   return render(
     <AgentProvider
-      chatId="approval-test"
-      initialMessages={[approvalMessage]}
+      chatId="render-part-test"
+      initialMessages={[message]}
       transport={transport}
       onResetChat={() => {}}
     >
@@ -83,7 +97,7 @@ test('user can approve a native tool request', async () => {
   const transport = new RecordingTransport();
 
   try {
-    renderApproval(transport);
+    renderMessage(approvalMessage, transport);
 
     expect(screen.getByText('Publish the report?')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Approve' }));
@@ -115,7 +129,7 @@ test('user can deny a native tool request without entering a reason', async () =
   const transport = new RecordingTransport();
 
   try {
-    renderApproval(transport);
+    renderMessage(approvalMessage, transport);
 
     await user.click(screen.getByRole('button', { name: 'Deny' }));
 
@@ -136,6 +150,22 @@ test('user can deny a native tool request without entering a reason', async () =
     expect(
       screen.queryByRole('button', { name: 'Deny' }),
     ).not.toBeInTheDocument();
+  } finally {
+    cleanup();
+  }
+});
+
+test('terminal tool errors without parsed input do not remain loading', () => {
+  try {
+    const { container } = renderMessage(
+      terminalErrorMessage,
+      new RecordingTransport(),
+    );
+
+    expect(container.querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Tool input could not be repaired.'),
+    ).toBeInTheDocument();
   } finally {
     cleanup();
   }
