@@ -1,8 +1,10 @@
 import {
   BanIcon,
   CircleAlertIcon,
+  CircleDotIcon,
+  CirclePauseIcon,
   Clock3Icon,
-  Loader2Icon,
+  MessageCircleQuestionIcon,
   MessageSquareIcon,
 } from 'lucide-react';
 import { type ReactNode, createContext, use, useMemo } from 'react';
@@ -18,6 +20,28 @@ export type HistoryRecord = {
   messageCount: number;
   status: 'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 };
+
+/** Mirror of the runtime's Codex-shaped conversation status. */
+export type ConversationStatus =
+  | { type: 'idle' }
+  | {
+      type: 'active';
+      activeFlags: readonly ('waitingOnApproval' | 'waitingOnUserInput')[];
+    }
+  | { type: 'systemError' };
+
+export function conversationStatusLabel(status: ConversationStatus) {
+  switch (status.type) {
+    case 'idle':
+      return 'idle';
+    case 'systemError':
+      return 'error';
+    case 'active':
+      if (status.activeFlags.includes('waitingOnApproval')) return 'approval';
+      if (status.activeFlags.includes('waitingOnUserInput')) return 'input';
+      return 'active';
+  }
+}
 
 type HistoryContextValue = {
   activeChatId: string | undefined;
@@ -115,22 +139,30 @@ function HistoryEmpty({
   );
 }
 
-export function HistoryStatusIcon({ status }: Pick<HistoryRecord, 'status'>) {
+export function StatusIcon({
+  status,
+}: {
+  status: HistoryRecord['status'] | ConversationStatus;
+}) {
   const className = 'size-3.5 shrink-0';
-  switch (status) {
+  const label =
+    typeof status === 'string' ? status : conversationStatusLabel(status);
+  switch (label) {
     case 'queued':
       return <Clock3Icon aria-label="Queued" className={className} />;
     case 'running':
+    case 'active':
       return (
-        <Loader2Icon
-          aria-label="Running"
-          className={cn(className, 'animate-spin')}
+        <CircleDotIcon
+          aria-label={label === 'running' ? 'Running' : 'Active'}
+          className={className}
         />
       );
     case 'failed':
+    case 'error':
       return (
         <CircleAlertIcon
-          aria-label="Failed"
+          aria-label={label === 'failed' ? 'Failed' : 'Error'}
           className={cn(className, 'text-destructive')}
         />
       );
@@ -138,7 +170,18 @@ export function HistoryStatusIcon({ status }: Pick<HistoryRecord, 'status'>) {
       return <BanIcon aria-label="Cancelled" className={className} />;
     case 'idle':
     case 'completed':
-      return <MessageSquareIcon aria-label={status} className={className} />;
+      return <MessageSquareIcon aria-label={label} className={className} />;
+    case 'approval':
+      return (
+        <CirclePauseIcon aria-label="Waiting on approval" className={className} />
+      );
+    case 'input':
+      return (
+        <MessageCircleQuestionIcon
+          aria-label="Waiting on user input"
+          className={className}
+        />
+      );
   }
 }
 
@@ -147,7 +190,8 @@ export function StatusBadge({ status }: { status: string }) {
     <span
       className={cn(
         'text-muted-foreground rounded-md border px-2 py-1 font-mono text-[0.6875rem] capitalize',
-        status === 'failed' && 'text-destructive border-destructive/30',
+        (status === 'failed' || status === 'error') &&
+          'text-destructive border-destructive/30',
       )}
     >
       {status}

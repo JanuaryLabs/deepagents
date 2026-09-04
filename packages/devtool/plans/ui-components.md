@@ -41,7 +41,7 @@ Ownership:
   and [`../host/ui/src/app/schedules-data.ts`](../host/ui/src/app/schedules-data.ts)
   own the capability-gated Scheduled workspace and its data access.
 - [`../history/src/index.tsx`](../history/src/index.tsx) owns `History.Root`,
-  `History.Item`, `History.ItemTrigger`, `History.Empty`, `HistoryStatusIcon`,
+  `History.Item`, `History.ItemTrigger`, `History.Empty`, `StatusIcon`,
   and the `HistoryRecord` model.
 - [`../traces/src/index.ts`](../traces/src/index.ts) owns trace discovery,
   telemetry decoration, and HTTP routes;
