@@ -62,10 +62,17 @@ type SelectedPasteRange = {
   selectedText?: string;
 };
 
-export function createComposerTiptapExtensions(options: {
+export type ComposerAttachImageFile = (file: File) => string | null;
+
+type ComposerClipboardOptions = {
   getRemoteImageCount: () => number;
   getMentionTrigger: () => string;
-}) {
+  attachImageFile: ComposerAttachImageFile;
+};
+
+export function createComposerTiptapExtensions(
+  options: ComposerClipboardOptions,
+) {
   return [
     StarterKit.configure({
       link: false,
@@ -197,7 +204,7 @@ const ComposerAtomNode = Node.create({
       detail: { default: '' },
       content: { default: '' },
       href: { default: '' },
-      path: { default: '' },
+      attachmentId: { default: '', rendered: false },
       metadata: { default: null },
     };
   },
@@ -225,10 +232,7 @@ const ComposerAtomNode = Node.create({
   },
 });
 
-function createComposerClipboardExtension(options: {
-  getRemoteImageCount: () => number;
-  getMentionTrigger: () => string;
-}) {
+function createComposerClipboardExtension(options: ComposerClipboardOptions) {
   return Extension.create({
     name: 'composerClipboard',
 
@@ -247,10 +251,11 @@ function createComposerClipboardExtension(options: {
               );
               if (imageFile) {
                 event.preventDefault();
-                insertImageAtomInView(
+                insertImageFileInView(
                   view,
                   options.getRemoteImageCount(),
-                  imageFile.name || 'pasted-image.png',
+                  imageFile,
+                  options.attachImageFile,
                 );
                 return true;
               }
@@ -293,16 +298,6 @@ function createComposerClipboardExtension(options: {
                   href,
                   linkMark,
                 );
-              }
-
-              if (isImagePath(trimmed) && !trimmed.includes('\n')) {
-                event.preventDefault();
-                insertImageAtomInView(
-                  view,
-                  options.getRemoteImageCount(),
-                  trimmed,
-                );
-                return true;
               }
 
               if (isFileReference(trimmed) && !trimmed.includes('\n')) {
@@ -354,6 +349,7 @@ function createComposerClipboardExtension(options: {
                   transfer,
                   options.getRemoteImageCount(),
                   options.getMentionTrigger(),
+                  options.attachImageFile,
                 )
               ) {
                 event.preventDefault();
@@ -373,16 +369,13 @@ export function handleComposerDropInView(
   transfer: ComposerDropTransfer,
   remoteImageCount: number,
   mentionTrigger: string,
+  attachImageFile: ComposerAttachImageFile,
 ) {
   const imageFile = Array.from(transfer.files).find((file) =>
     file.type.startsWith('image/'),
   );
   if (imageFile) {
-    insertImageAtomInView(
-      view,
-      remoteImageCount,
-      imageFile.name || 'dropped-image.png',
-    );
+    insertImageFileInView(view, remoteImageCount, imageFile, attachImageFile);
     return true;
   }
   const fileItem = Array.from(transfer.files).find(
@@ -403,10 +396,6 @@ export function handleComposerDropInView(
   ).trim();
   if (!dropped) {
     return false;
-  }
-  if (isImagePath(dropped) && !dropped.includes('\n')) {
-    insertImageAtomInView(view, remoteImageCount, dropped);
-    return true;
   }
   if (isFileReference(dropped) && !dropped.includes('\n')) {
     insertFileMentionInView(view, dropped, mentionTrigger);
@@ -456,7 +445,7 @@ export function contentFromStateOrText({
 function contentFromState(
   state: Pick<
     ComposerState,
-    'text' | 'elements' | 'mentionBindings' | 'localImages' | 'pendingPastes'
+    'text' | 'elements' | 'mentionBindings' | 'pendingPastes'
   >,
   slashCommands: ComposerItemEntry[],
   mentionCandidates: ComposerItemEntry[],
@@ -489,9 +478,6 @@ function contentFromState(
         item.id === element.id ||
         `${item.trigger}${item.value}` === element.label,
     );
-    const localImage = state.localImages.find(
-      (image) => image.placeholder === element.label,
-    );
     const paste = state.pendingPastes.find(
       (item) => item.placeholder === element.label,
     );
@@ -500,15 +486,6 @@ function contentFromState(
         mentionNodeContent(
           bindingToCandidate(binding, element, mentionCandidates),
         ),
-      );
-    } else if (element.kind === 'image' && localImage) {
-      content.push(
-        atomNodeContent({
-          kind: 'image',
-          label: localImage.placeholder,
-          detail: localImage.path,
-          path: localImage.path,
-        }),
       );
     } else if (element.kind === 'paste' && paste) {
       content.push(
@@ -690,13 +667,13 @@ export function serializeTiptapContent(
     text: string;
     elements: ComposerTextElement[];
     mentionBindings: ComposerItemBinding[];
-    localImages: ComposerState['localImages'];
+    imageAttachments: ComposerState['imageAttachments'];
     pendingPastes: ComposerState['pendingPastes'];
   } = {
     text: '',
     elements: [],
     mentionBindings: [],
-    localImages: [],
+    imageAttachments: [],
     pendingPastes: [],
   };
   serializeNodeContent(content, serialized, slashCommands);
@@ -711,7 +688,7 @@ export function serializeTiptapContent(
     cursor,
     elements: dedupeElements([...base.elements, ...serialized.elements]),
     mentionBindings: serialized.mentionBindings,
-    localImages: serialized.localImages,
+    imageAttachments: serialized.imageAttachments,
     remoteImages,
     pendingPastes: serialized.pendingPastes,
   };
@@ -723,7 +700,7 @@ function serializeNodeContent(
     text: string;
     elements: ComposerTextElement[];
     mentionBindings: ComposerItemBinding[];
-    localImages: ComposerState['localImages'];
+    imageAttachments: ComposerState['imageAttachments'];
     pendingPastes: ComposerState['pendingPastes'];
   },
   slashCommands: ComposerItemEntry[],
@@ -808,7 +785,11 @@ function serializeNodeContent(
     const label = String(node.attrs?.label ?? '');
     const kind = tokenKindFromAttr(node.attrs?.kind);
     const start = output.text.length;
-    const id = stableId(kind, label, start);
+    const attachmentId = String(node.attrs?.attachmentId ?? '');
+    if (kind === 'image' && !attachmentId) {
+      return;
+    }
+    const id = kind === 'image' ? attachmentId : stableId(kind, label, start);
     output.text += label;
     const metadata =
       kind === 'rich-link'
@@ -819,16 +800,13 @@ function serializeNodeContent(
       kind,
       label,
       range: { start, end: start + label.length },
-      detail: String(
-        node.attrs?.detail || node.attrs?.href || node.attrs?.path || '',
-      ),
+      detail: String(node.attrs?.detail || node.attrs?.href || ''),
       ...(metadata ? { metadata } : {}),
     });
     if (kind === 'image') {
-      output.localImages.push({
+      output.imageAttachments.push({
         id,
         placeholder: label,
-        path: String(node.attrs?.path || node.attrs?.detail || ''),
       });
     }
     if (kind === 'paste') {
@@ -963,15 +941,13 @@ export function atomNodeContent({
   detail = '',
   content = '',
   href = '',
-  path = '',
   metadata,
 }: {
-  kind: 'image' | 'paste' | 'rich-link';
+  kind: 'paste' | 'rich-link';
   label: string;
   detail?: string;
   content?: string;
   href?: string;
-  path?: string;
   metadata?: ComposerRichLinkMetadata;
 }): JSONContent {
   return {
@@ -982,9 +958,18 @@ export function atomNodeContent({
       detail,
       content,
       href,
-      path,
       metadata: metadata ?? null,
     },
+  };
+}
+
+export function imageAttachmentNodeContent(
+  id: string,
+  label: string,
+): JSONContent {
+  return {
+    type: 'composerAtom',
+    attrs: { kind: 'image', attachmentId: id, label },
   };
 }
 
@@ -1237,20 +1222,22 @@ function insertPlainTextInView(
   );
 }
 
-function insertImageAtomInView(
+function insertImageFileInView(
   view: EditorView,
   remoteImageCount: number,
-  path: string,
+  file: File,
+  attachImageFile: ComposerAttachImageFile,
 ) {
+  const id = attachImageFile(file);
+  if (id === null) {
+    return;
+  }
   const localCount = countAtomKind(view.state.doc.toJSON(), 'image');
   const number = remoteImageCount + localCount + 1;
   const placeholder = `[Image #${number}]`;
-  const node = view.state.schema.nodes.composerAtom?.create({
-    kind: 'image',
-    label: placeholder,
-    detail: path,
-    path,
-  });
+  const node = view.state.schema.nodeFromJSON(
+    imageAttachmentNodeContent(id, placeholder),
+  );
   if (!node) {
     return;
   }
@@ -1283,7 +1270,7 @@ function insertFileMentionInView(
   view.dispatch(transaction.scrollIntoView());
 }
 
-export function renumberLocalImageAtoms(
+export function renumberImageAttachmentAtoms(
   content: JSONContent,
   remoteCount: number,
 ) {
@@ -1311,6 +1298,28 @@ function mapJsonContent(
   return {
     ...mapped,
     content: mapped.content?.map((child) => mapJsonContent(child, mapNode)),
+  };
+}
+
+export function removeImageAttachmentAtom(content: JSONContent, id: string) {
+  return filterJsonContent(
+    content,
+    (node) =>
+      node.type !== 'composerAtom' ||
+      node.attrs?.kind !== 'image' ||
+      node.attrs?.attachmentId !== id,
+  );
+}
+
+function filterJsonContent(
+  node: JSONContent,
+  keep: (node: JSONContent) => boolean,
+): JSONContent {
+  return {
+    ...node,
+    content: node.content
+      ?.filter(keep)
+      .map((child) => filterJsonContent(child, keep)),
   };
 }
 
@@ -1646,10 +1655,6 @@ function normalizePastedText(text: string) {
 
 export function characterCount(text: string) {
   return Array.from(text).length;
-}
-
-function isImagePath(path: string) {
-  return /\.(png|jpe?g|gif|webp)$/i.test(path);
 }
 
 function isFileReference(path: string) {

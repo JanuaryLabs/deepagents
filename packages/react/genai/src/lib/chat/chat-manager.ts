@@ -4,12 +4,18 @@ import type { ChatStatus, UIDataTypes, UITools } from 'ai';
 import type { ComposerDraftSource } from '@deepagents/react-input/browser';
 
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
+import { prepareImageFile } from './prepare-image.ts';
+import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
+
+type UploadFile = ZukhrufChatTransport['uploadFile'];
 
 export interface ChatSubmission {
   prompt: string;
   persistedPrompt: string;
   editableSource?: ComposerDraftSource;
   metadata?: Record<string, unknown>;
+  /** Image files referenced from `prompt`, in `[Image #N]` order. */
+  files?: File[];
 }
 
 export interface QueuedMessage {
@@ -18,7 +24,11 @@ export interface QueuedMessage {
   persistedPrompt: string;
   editableSource?: ComposerDraftSource;
   metadata?: Record<string, unknown>;
+  /** Receipts for the submission's files, in `[Image #N]` order; sent as `metadata.uploads`. */
+  uploads?: Awaited<ReturnType<UploadFile>>[];
 }
+
+type PreparedSubmission = Omit<QueuedMessage, 'id'>;
 
 type Listener = () => void;
 
@@ -29,6 +39,7 @@ export interface ChatManagerOptions {
   hasSubmitted?: boolean;
   initialMessages?: UIMessage[];
   enableResume?: boolean;
+  uploadFile: UploadFile;
   onResetChat: (chatId: string) => void;
 }
 
@@ -47,6 +58,19 @@ export class ChatManager {
   private _initialMessagesApplied = false;
   private _enableResume: boolean;
   private _resumed = false;
+  private readonly uploadFile: UploadFile;
+  /**
+   * Submissions still preparing their files, in order. Later submissions chain
+   * behind it so a text-only message never overtakes an image that is
+   * uploading; `null` once nothing is in flight.
+   */
+  private pendingSubmissions: Promise<void> | null = null;
+  /**
+   * `sendMessage` ran but the bound helpers still report the pre-send status
+   * (they are a render snapshot), so treat the chat as busy until the next
+   * status sync.
+   */
+  private sentAwaitingStatus = false;
 
   onResetChat: (chatId: string) => void;
 
@@ -55,6 +79,7 @@ export class ChatManager {
     this._hasSubmitted = options.hasSubmitted ?? false;
     this._initialMessages = options.initialMessages;
     this._enableResume = options.enableResume ?? false;
+    this.uploadFile = options.uploadFile;
     this.onResetChat = options.onResetChat;
   }
 
@@ -63,6 +88,7 @@ export class ChatManager {
   }
 
   syncStatus(status: ChatStatus): void {
+    this.sentAwaitingStatus = false;
     const prev = this.prevStatus;
     this.prevStatus = status;
     if (isBusy(prev) && status === 'ready') {
@@ -94,32 +120,73 @@ export class ChatManager {
     if (chatId) this.consumePrefill(chatId);
   }
 
-  submit(submission: ChatSubmission): void {
+  /**
+   * Resolves once the message is queued or handed to the chat. Submissions
+   * without files keep the synchronous path; rejects, sending nothing, when a
+   * file cannot be prepared or uploaded.
+   */
+  submit(submission: ChatSubmission): Promise<void> {
+    if (!this.chat) return Promise.resolve();
+    const { files = [], ...message } = submission;
+    if (files.length === 0 && !this.pendingSubmissions) {
+      this.dispatch(message);
+      return Promise.resolve();
+    }
+    const chatId = this.chat.id;
+    const current = (this.pendingSubmissions ?? Promise.resolve()).then(
+      async () => {
+        if (files.length === 0) {
+          this.dispatch(message);
+          return;
+        }
+        const uploads = await this.uploadFiles(chatId, files);
+        this.dispatch({ ...message, uploads });
+      },
+    );
+    const settled: Promise<void> = current
+      .catch(() => undefined)
+      .then(() => {
+        if (this.pendingSubmissions === settled) this.pendingSubmissions = null;
+      });
+    this.pendingSubmissions = settled;
+    return current;
+  }
+
+  private async uploadFiles(chatId: string, files: readonly File[]) {
+    return Promise.all(
+      files.map(async (file) =>
+        this.uploadFile(chatId, await prepareImageFile(file)),
+      ),
+    );
+  }
+
+  private dispatch(message: PreparedSubmission): void {
     if (!this.chat) return;
-    if (this._queueEnabled && isBusy(this.chat.status)) {
-      this._queue = [
-        ...this._queue,
-        {
-          id: crypto.randomUUID(),
-          prompt: submission.prompt,
-          persistedPrompt: submission.persistedPrompt,
-          editableSource: submission.editableSource,
-          metadata: submission.metadata,
-        },
-      ];
+    if (this._queueEnabled && this.isChatBusy()) {
+      this._queue = [...this._queue, { id: crypto.randomUUID(), ...message }];
       this.notify();
       return;
     }
-    this.directSubmit(submission);
+    this.directSubmit(message);
   }
 
-  private directSubmit(submission: ChatSubmission): void {
+  private isChatBusy(): boolean {
+    return (
+      this.sentAwaitingStatus ||
+      (this.chat !== null && isBusy(this.chat.status))
+    );
+  }
+
+  private directSubmit(message: PreparedSubmission): void {
     if (!this.chat) return;
     this._hasSubmitted = true;
+    this.sentAwaitingStatus = true;
     this.chat.sendMessage({
       role: 'user',
-      parts: [{ text: submission.prompt, type: 'text' }],
-      metadata: submission.metadata,
+      parts: [{ type: 'text', text: message.prompt }],
+      metadata: message.uploads
+        ? { ...message.metadata, uploads: message.uploads }
+        : message.metadata,
     });
     this.notify();
   }
@@ -185,7 +252,7 @@ export class ChatManager {
     const prefill = readPrefill();
     if (!prefill || prefill.targetChatId !== chatId) return;
     clearPrefill();
-    this.submit({
+    void this.submit({
       prompt: prefill.prompt,
       persistedPrompt: prefill.prompt,
     });

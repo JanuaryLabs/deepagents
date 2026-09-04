@@ -15,7 +15,6 @@ import type {
   ComposerInitialDraft,
   ComposerItemBinding,
   ComposerItemEntry,
-  ComposerLocalImage,
   ComposerPendingPaste,
   ComposerState,
   ComposerSubmission,
@@ -79,7 +78,7 @@ export function createComposerState({
       ],
     ),
     mentionBindings: initialDraft?.mentionBindings ?? mentionBindings,
-    localImages: initialDraft?.localImages ?? [],
+    imageAttachments: [],
     remoteImages,
     pendingPastes: initialDraft?.pendingPastes ?? [],
     selectedRemoteImageId: null,
@@ -97,7 +96,7 @@ export function createComposerState({
 export function isComposerDraftEmpty(state: ComposerState) {
   return (
     state.text.length === 0 &&
-    state.localImages.length === 0 &&
+    state.imageAttachments.length === 0 &&
     state.remoteImages.length === 0 &&
     state.pendingPastes.length === 0
   );
@@ -142,7 +141,7 @@ function syncTextElements(
   const mentionBindings = state.mentionBindings.filter((binding) =>
     elements.some((element) => element.id === binding.id),
   );
-  const localImages = state.localImages.filter((image) =>
+  const imageAttachments = state.imageAttachments.filter((image) =>
     elements.some(
       (element) =>
         element.kind === 'image' && element.label === image.placeholder,
@@ -159,7 +158,10 @@ function syncTextElements(
     ...state,
     elements: sortElements(elements),
     mentionBindings,
-    localImages: renumberLocalImages(localImages, state.remoteImages.length),
+    imageAttachments: renumberImageAttachments(
+      imageAttachments,
+      state.remoteImages.length,
+    ),
     pendingPastes,
   };
 }
@@ -187,13 +189,14 @@ function preparePayload(
     trimmedText,
     expanded.elements,
   );
-  const liveLocalImages = state.localImages.filter((image) =>
+  const liveImageAttachments = state.imageAttachments.filter((image) =>
     state.text.includes(image.placeholder),
   );
+  const persistableDisplay = withoutImageElements(displayText, displayElements);
   const persistedPrompt = createPersistedTextFromDraft({
-    ...createDraftFromState(state),
-    text: displayText,
-    elements: displayElements,
+    text: persistableDisplay.text,
+    elements: persistableDisplay.elements,
+    mentionBindings: state.mentionBindings,
   });
   const serializedPrompt = createPersistedTextFromDraft({
     text: trimmedText,
@@ -203,7 +206,7 @@ function preparePayload(
 
   if (
     !trimmedText &&
-    liveLocalImages.length === 0 &&
+    liveImageAttachments.length === 0 &&
     state.remoteImages.length === 0
   ) {
     return null;
@@ -222,6 +225,22 @@ function preparePayload(
             mentionBindings: state.mentionBindings,
           })}`
         : slashCommand.prompt;
+  const customHistoryPrompt =
+    slashCommand?.prompt === undefined
+      ? null
+      : slashCommand.args
+        ? (() => {
+            const args = withoutImageElements(
+              slashCommand.args,
+              slashCommand.argsElements,
+            );
+            return `${slashCommand.prompt}\n\n${createPersistedTextFromDraft({
+              text: args.text,
+              elements: args.elements,
+              mentionBindings: state.mentionBindings,
+            })}`;
+          })()
+        : slashCommand.prompt;
   const prompt = customPrompt ?? serializedPrompt;
   const mode: ComposerSubmission['mode'] =
     slashCommand?.args !== undefined
@@ -233,11 +252,6 @@ function preparePayload(
     ...state.remoteImages.map((image) => ({
       type: 'remote_image' as const,
       url: image.url,
-    })),
-    ...liveLocalImages.map((image) => ({
-      type: 'local_image' as const,
-      path: image.path,
-      placeholder: image.placeholder,
     })),
   ];
 
@@ -286,7 +300,7 @@ function preparePayload(
     mode,
     prompt,
     persistedPrompt,
-    historyPrompt: customPrompt === null ? persistedPrompt : prompt,
+    historyPrompt: customHistoryPrompt ?? persistedPrompt,
     action:
       slashCommand?.args !== undefined
         ? 'CommandWithArgs'
@@ -514,6 +528,36 @@ function trimTextElements(
     }));
 }
 
+function withoutImageElements(text: string, elements: ComposerTextElement[]) {
+  const images = sortElements(
+    elements.filter((element) => element.kind === 'image'),
+  );
+  for (const image of images.toReversed()) {
+    text = replaceTextRange(text, image.range, '');
+  }
+  const removedBefore = (offset: number) =>
+    images.reduce(
+      (length, image) =>
+        length +
+        Math.max(0, Math.min(offset, image.range.end) - image.range.start),
+      0,
+    );
+  return {
+    text,
+    elements: sortElements(
+      elements.filter((element) => element.kind !== 'image'),
+    ).map((element) => {
+      return {
+        ...element,
+        range: {
+          start: element.range.start - removedBefore(element.range.start),
+          end: element.range.end - removedBefore(element.range.end),
+        },
+      };
+    }),
+  };
+}
+
 function rangesOverlap(
   start: number,
   end: number,
@@ -642,8 +686,8 @@ function sortElements(elements: ComposerTextElement[]) {
   return [...elements].sort((a, b) => a.range.start - b.range.start);
 }
 
-function renumberLocalImages(
-  images: ComposerLocalImage[],
+function renumberImageAttachments(
+  images: ComposerState['imageAttachments'],
   remoteCount: number,
 ) {
   return images.map((image, index) => ({
@@ -667,10 +711,6 @@ export function selectedRemoteImageIndex(
 
 export function characterCount(text: string) {
   return Array.from(text).length;
-}
-
-export function isImagePath(path: string) {
-  return /\.(png|jpe?g|gif|webp)$/i.test(path);
 }
 
 export function isFileReference(path: string) {
@@ -725,11 +765,11 @@ export function downloadUrlItem(downloadUrl: string) {
 export function createDraftFromState(
   state: ComposerState,
 ): ComposerInitialDraft {
+  const draft = withoutImageElements(state.text, state.elements);
   return {
-    text: state.text,
-    elements: cloneTextElements(state.elements),
+    text: draft.text,
+    elements: cloneTextElements(draft.elements),
     mentionBindings: cloneMentionBindings(state.mentionBindings),
-    localImages: cloneLocalImages(state.localImages),
     remoteImages: state.remoteImages.map((image) => ({ ...image })),
     pendingPastes: clonePendingPastes(state.pendingPastes),
   };
@@ -741,7 +781,6 @@ export function createComposerDraftSource(
 ): ComposerDraftSource {
   return {
     persistedPrompt,
-    localImages: cloneLocalImages(state.localImages),
     remoteImages: state.remoteImages.map((image) => ({ ...image })),
     pendingPastes: clonePendingPastes(state.pendingPastes),
   };
@@ -751,10 +790,15 @@ export function pushComposerHistory(
   state: ComposerState,
   persistedPrompt: string,
 ) {
-  return [
-    createComposerDraftSource(state, persistedPrompt),
-    ...state.history,
-  ].slice(0, 8);
+  const source = createComposerDraftSource(state, persistedPrompt);
+  if (
+    !source.persistedPrompt.trim() &&
+    source.remoteImages.length === 0 &&
+    source.pendingPastes.length === 0
+  ) {
+    return state.history;
+  }
+  return [source, ...state.history].slice(0, 8);
 }
 
 export function createDraftFromPersistedText({
@@ -805,17 +849,6 @@ export function createDraftFromSource({
     mentionCandidates,
   });
   const payloadElements = [
-    ...source.localImages.flatMap((image) => {
-      const element = elementForLabel(
-        'image',
-        image.placeholder,
-        draft.text ?? '',
-        {
-          detail: image.path,
-        },
-      );
-      return element ? [element] : [];
-    }),
     ...source.pendingPastes.flatMap((paste) => {
       const element = elementForLabel(
         'paste',
@@ -832,7 +865,6 @@ export function createDraftFromSource({
   return {
     ...draft,
     elements: sortElements([...(draft.elements ?? []), ...payloadElements]),
-    localImages: cloneLocalImages(source.localImages),
     remoteImages: source.remoteImages.map((image) => ({ ...image })),
     pendingPastes: clonePendingPastes(source.pendingPastes),
   };
@@ -1119,10 +1151,6 @@ function cloneTextElements(elements: ComposerTextElement[]) {
 
 function cloneMentionBindings(bindings: ComposerItemBinding[]) {
   return bindings.map((binding) => ({ ...binding }));
-}
-
-function cloneLocalImages(images: ComposerLocalImage[]) {
-  return images.map((image) => ({ ...image }));
 }
 
 function clonePendingPastes(pastes: ComposerPendingPaste[]) {

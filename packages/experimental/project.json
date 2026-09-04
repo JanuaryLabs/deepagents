@@ -14,9 +14,10 @@
           "packages/experimental/src/zukhruf/index.ts",
           "packages/experimental/src/zukhruf/plugins/http/index.ts",
           "packages/experimental/src/zukhruf/plugins/conversation-scheduling/index.ts",
-          "packages/experimental/src/zukhruf/plugins/file-agents/index.ts",
           "packages/experimental/src/zukhruf/plugins/schedules/index.ts",
-          "packages/experimental/src/zukhruf/plugins/schedules/http.ts"
+          "packages/experimental/src/zukhruf/plugins/schedules/http.ts",
+          "packages/experimental/src/zukhruf/plugins/uploads/index.ts",
+          "packages/experimental/src/zukhruf/plugins/uploads/http.ts"
         ],
         "assets": []
       }

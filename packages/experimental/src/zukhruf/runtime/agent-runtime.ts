@@ -8,7 +8,7 @@ import {
   type StreamStatus,
 } from '@deepagents/context';
 
-import type { AgentDeclaration } from '../agent.ts';
+import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
 import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import { AgentDeclarationRegistry } from '../control-plane/agent-declaration-registry.ts';
@@ -33,6 +33,14 @@ import type { ZukhrufToolSet } from '../tool.ts';
 import { loadPluginSkills } from './agent-skills.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
+import type { ConversationStatusChangeSource } from './conversation-status-change-source.ts';
+import {
+  type ConversationStatus,
+  type ConversationStatusEvent,
+  ConversationStatusProjector,
+} from './conversation-status.ts';
+import { loadPluginAgents } from './plugin-agents.ts';
+import { StatusPublishingTurnQueue } from './status-publishing-turn-queue.ts';
 
 export interface AgentPluginToolContext extends Readonly<
   Record<string, unknown>
@@ -49,6 +57,14 @@ export interface AgentPluginHost {
     conversation: ConversationId,
     turn: TurnRequest,
   ): Promise<{ id: string; stream: ReadableStream<StreamPart> }>;
+  /**
+   * Attach the root agent's sandbox for `conversation`. The handle is
+   * borrowed: a plugin must never dispose it. The backend is named by
+   * `chatId` and re-attached across turns, workers, and restarts (see
+   * `SandboxContext` in `agent.ts`), so this works before the conversation
+   * exists.
+   */
+  sandbox(conversation: ConversationId): Promise<ZukhrufSandbox>;
   conversationExists(conversation: ConversationId): Promise<boolean>;
   isConversationAvailable(conversation: ConversationId): Promise<boolean>;
   readConversationMetadata(
@@ -62,6 +78,10 @@ export interface AgentPluginHost {
   ): Promise<void>;
   listHistory(): Promise<readonly AgentHistoryItem[]>;
   observe(conversation: ConversationId): AgentObservation;
+  /** Status changes observed by this process; ends when `signal` aborts. */
+  subscribeConversationStatus(
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<ConversationStatusEvent>>;
 }
 
 export interface AgentPluginBinding {
@@ -89,6 +109,8 @@ export interface AgentPluginInstance {
   readonly tools?: ZukhrufToolSet;
   /** Per-turn AI SDK telemetry integration contributed by this plugin. */
   telemetry?(context: AgentPluginToolContext): Telemetry;
+  /** Directories whose immediate Markdown files declare plugin-scoped agents. */
+  readonly agents?: readonly (string | URL)[];
   /** Skill directories installed into every agent sandbox. */
   readonly skills?: readonly (string | URL)[];
   /** Static namespaced context merged into every model call made by this runtime. */
@@ -155,6 +177,11 @@ export interface AgentRuntimeOptions {
   multiAgent?: MultiAgentHostConfig;
   /** Host implementations for capabilities required by root-owned plugins. */
   bindings?: readonly AgentPluginBinding[];
+  /**
+   * Cross-process conversation status hints. Without it, status changes are
+   * observed only by the process where the transition happened.
+   */
+  conversationStatusChanges?: ConversationStatusChangeSource;
 }
 
 export interface AgentRuntimeWorkOptions {
@@ -166,6 +193,7 @@ export interface AgentRuntimeInfo {
   readonly agents: readonly {
     readonly name: string;
     readonly description?: string;
+    readonly plugin?: string;
     readonly model: {
       readonly provider: string;
       readonly modelId: string;
@@ -182,7 +210,7 @@ export interface AgentHistoryItem {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageCount: number;
-  readonly status: StreamStatus | 'idle';
+  readonly status: ConversationStatus;
 }
 
 export interface AgentTurnStatus {
@@ -192,6 +220,11 @@ export interface AgentTurnStatus {
   error: string | null;
 }
 
+interface AgentObservationStatus {
+  read: () => Promise<ConversationStatus>;
+  publish: () => Promise<void>;
+}
+
 /** Reconnect and cancellation view over one durable conversation. */
 export class AgentObservation {
   readonly engine: ContextEngine;
@@ -199,6 +232,7 @@ export class AgentObservation {
   readonly #store: ContextStore;
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
+  readonly #status: AgentObservationStatus;
   readonly #conversationAvailable?: () => Promise<void>;
 
   constructor(
@@ -206,6 +240,7 @@ export class AgentObservation {
     store: ContextStore,
     streams: StreamManager,
     queue: TurnQueue,
+    status: AgentObservationStatus,
     conversationAvailable?: () => Promise<void>,
   ) {
     this.engine = new ContextEngine({
@@ -217,7 +252,14 @@ export class AgentObservation {
     this.#store = store;
     this.#streams = streams;
     this.#queue = queue;
+    this.#status = status;
     this.#conversationAvailable = conversationAvailable;
+  }
+
+  /** Codex-shaped conversation status derived from durable state. */
+  async conversationStatus(): Promise<ConversationStatus> {
+    await this.#assertOwner();
+    return this.#status.read();
   }
 
   async resume() {
@@ -252,6 +294,7 @@ export class AgentObservation {
     if (status === 'queued' || status === 'running' || status === 'cancelled') {
       await this.#streams.cancel(id);
       await this.#queue.cancel(id);
+      await this.#status.publish();
       await this.#conversationAvailable?.();
     }
   }
@@ -292,7 +335,9 @@ export class AgentRuntime {
   readonly #directory: AgentDirectory;
   readonly #controlPlane: AgentControlPlane;
   readonly #approvals: ApprovalController;
+  readonly #conversationStatus: ConversationStatusProjector;
   readonly #executor: AgentTurnExecutor;
+  readonly #root: AgentDeclaration;
   readonly #plugins: readonly MaterializedAgentPlugin[];
   readonly #pluginTools: ZukhrufToolSet;
   readonly #pluginHost: AgentPluginHost;
@@ -442,6 +487,23 @@ export class AgentRuntime {
     }
     assertRootPluginComposition(root, configuredRoot);
     assertNoSubagentPlugins(configuredRoot);
+    const pluginAgents = loadPluginAgents(
+      configuredRoot,
+      plugins.flatMap(({ definition, instance }) =>
+        instance.agents
+          ? [{ plugin: definition.name, directories: instance.agents }]
+          : [],
+      ),
+    );
+    if (pluginAgents.declarations.length > 0) {
+      configuredRoot = {
+        ...configuredRoot,
+        subagents: [
+          ...(configuredRoot.subagents ?? []),
+          ...pluginAgents.declarations,
+        ],
+      };
+    }
     const declarations = new AgentDeclarationRegistry(configuredRoot);
     for (const declaration of declarations.values()) {
       for (const name of Object.keys(declaration.tools ?? {})) {
@@ -455,19 +517,31 @@ export class AgentRuntime {
     }
     const directory = new AgentDirectory(options.store);
     const streams = options.streams;
+    // Status reads go to the raw queue; every push through the decorated
+    // queue publishes the target conversation's status.
+    const conversationStatus = new ConversationStatusProjector({
+      store: options.store,
+      streams,
+      queue: options.queue,
+      directory,
+      changeSource: options.conversationStatusChanges,
+    });
+    const queue = new StatusPublishingTurnQueue(options.queue, (conversation) =>
+      conversationStatus.publish(conversation),
+    );
     const mailbox = new MailboxCoordinator({
       store: options.mailboxStore,
-      queue: options.queue,
+      queue,
       streams,
     });
     const approvals = new ApprovalController({
       store: options.store,
-      queue: options.queue,
+      queue,
     });
     const statusProjector = new AgentStatusProjector({
       store: options.store,
       streams,
-      queue: options.queue,
+      queue,
       mailbox,
       directory,
       approvals,
@@ -476,7 +550,7 @@ export class AgentRuntime {
     const controlPlane = new AgentControlPlane({
       root: declarations.root,
       streams,
-      queue: options.queue,
+      queue,
       mailbox,
       declarations,
       directory,
@@ -485,12 +559,14 @@ export class AgentRuntime {
       maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
     });
     this.#store = options.store;
-    this.#queue = options.queue;
+    this.#queue = queue;
     this.#streams = streams;
     this.#mailbox = mailbox;
     this.#directory = directory;
     this.#controlPlane = controlPlane;
     this.#approvals = approvals;
+    this.#conversationStatus = conversationStatus;
+    this.#root = declarations.root;
     this.#plugins = plugins;
     this.#pluginTools = pluginTools;
     this.info = {
@@ -500,6 +576,9 @@ export class AgentRuntime {
         ...(declaration.description === undefined
           ? {}
           : { description: declaration.description }),
+        ...(pluginAgents.owners.has(declaration.name)
+          ? { plugin: pluginAgents.owners.get(declaration.name) }
+          : {}),
         model: {
           provider: declaration.model.provider,
           modelId: declaration.model.modelId,
@@ -519,23 +598,15 @@ export class AgentRuntime {
       pluginTools,
       pluginSkills: loadPluginSkills(pluginSkills),
       pluginRuntimeContext,
+      publishConversationStatus: (conversation) =>
+        conversationStatus.publish(conversation),
       configureTelemetry: (context, telemetry) => {
-        const contributed = plugins.flatMap(
+        const integrations = plugins.flatMap(
           ({ instance }) => instance.telemetry?.(context) ?? [],
         );
-        if (contributed.length === 0) return telemetry;
-        const declared = telemetry?.integrations;
-        return {
-          ...telemetry,
-          integrations: [
-            ...(declared === undefined
-              ? []
-              : Array.isArray(declared)
-                ? declared
-                : [declared]),
-            ...contributed,
-          ],
-        };
+        return integrations.length === 0
+          ? telemetry
+          : { ...telemetry, integrations };
       },
     });
     this.#pluginHost = {
@@ -551,6 +622,15 @@ export class AgentRuntime {
         this.#updateConversationMetadata(conversation, update),
       listHistory: () => this.listHistory(),
       observe: (conversation) => this.observe(conversation),
+      subscribeConversationStatus: (signal) =>
+        this.subscribeConversationStatus(signal),
+      // Attaches through the declaration directly: resolving the conversation
+      // through the control plane would create its root thread.
+      sandbox: (conversation) =>
+        this.#root.sandbox({
+          chatId: conversation.chatId,
+          userId: conversation.userId,
+        }),
     };
   }
 
@@ -602,8 +682,24 @@ export class AgentRuntime {
       this.#store,
       this.#streams,
       this.#queue,
+      {
+        read: () => this.#conversationStatus.read(conversation),
+        publish: () => this.#conversationStatus.publish(conversation),
+      },
       () => this.#conversationAvailable(conversation),
     );
+  }
+
+  /**
+   * Conversation status changes observed by this process, in the shape of
+   * Codex's `thread/status/changed`. Execution transitions are observed by the
+   * process running `work()`; `observe(...).conversationStatus()` is always
+   * authoritative.
+   */
+  subscribeConversationStatus(
+    signal: AbortSignal,
+  ): Promise<AsyncIterable<ConversationStatusEvent>> {
+    return this.#conversationStatus.subscribe(signal);
   }
 
   async #isConversationAvailable(
@@ -657,25 +753,20 @@ export class AgentRuntime {
         return [];
       }
       return thread.path.isRoot && thread.declarationName === this.info.root
-        ? [{ chat, thread }]
+        ? [{ chat, conversation }]
         : [];
     });
 
     return Promise.all(
-      roots.map(async ({ chat, thread }) => {
-        const stream = thread.lastTurnId
-          ? await this.#streams.store.getStream(thread.lastTurnId)
-          : undefined;
-        return {
-          chatId: chat.id,
-          userId: chat.userId,
-          ...(chat.title === undefined ? {} : { title: chat.title }),
-          createdAt: chat.createdAt,
-          updatedAt: chat.updatedAt,
-          messageCount: chat.messageCount,
-          status: stream?.status ?? 'idle',
-        };
-      }),
+      roots.map(async ({ chat, conversation }) => ({
+        chatId: chat.id,
+        userId: chat.userId,
+        ...(chat.title === undefined ? {} : { title: chat.title }),
+        createdAt: chat.createdAt,
+        updatedAt: chat.updatedAt,
+        messageCount: chat.messageCount,
+        status: await this.#conversationStatus.read(conversation),
+      })),
     );
   }
 
@@ -688,16 +779,21 @@ export class AgentRuntime {
           workers.use(await instance.work(this.#pluginHost));
         }
       }
+      const reconcilesAvailability = this.#plugins.some(({ instance }) =>
+        Boolean(instance.conversationAvailable),
+      );
       workers.use(
         await this.#queue.consume(this.#executor.execute.bind(this.#executor), {
           concurrency: options?.concurrency,
           onOrphaned: this.#onOrphaned.bind(this),
-          onSettled: !this.#plugins.some(({ instance }) =>
-            Boolean(instance.conversationAvailable),
-          )
-            ? undefined
-            : ({ chatId, userId }) =>
-                this.#conversationAvailable({ chatId, userId }),
+          onSettled: async ({ chatId, userId }) => {
+            // Status first: a plugin reconciliation failure must not hide
+            // the settled transition from host subscribers.
+            await this.#conversationStatus.publish({ chatId, userId });
+            if (reconcilesAvailability) {
+              await this.#conversationAvailable({ chatId, userId });
+            }
+          },
         }),
       );
       return workers;

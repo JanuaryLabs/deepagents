@@ -37,11 +37,6 @@
       "import": "./dist/zukhruf/plugins/http/index.js",
       "default": "./dist/zukhruf/plugins/http/index.js"
     },
-    "./zukhruf/file-agents": {
-      "types": "./dist/zukhruf/plugins/file-agents/index.d.ts",
-      "import": "./dist/zukhruf/plugins/file-agents/index.js",
-      "default": "./dist/zukhruf/plugins/file-agents/index.js"
-    },
     "./zukhruf/conversation-scheduling": {
       "types": "./dist/zukhruf/plugins/conversation-scheduling/index.d.ts",
       "import": "./dist/zukhruf/plugins/conversation-scheduling/index.js",
@@ -56,6 +51,16 @@
       "types": "./dist/zukhruf/plugins/schedules/http.d.ts",
       "import": "./dist/zukhruf/plugins/schedules/http.js",
       "default": "./dist/zukhruf/plugins/schedules/http.js"
+    },
+    "./zukhruf/uploads": {
+      "types": "./dist/zukhruf/plugins/uploads/index.d.ts",
+      "import": "./dist/zukhruf/plugins/uploads/index.js",
+      "default": "./dist/zukhruf/plugins/uploads/index.js"
+    },
+    "./zukhruf/uploads/http": {
+      "types": "./dist/zukhruf/plugins/uploads/http.d.ts",
+      "import": "./dist/zukhruf/plugins/uploads/http.js",
+      "default": "./dist/zukhruf/plugins/uploads/http.js"
     }
   },
   "files": [

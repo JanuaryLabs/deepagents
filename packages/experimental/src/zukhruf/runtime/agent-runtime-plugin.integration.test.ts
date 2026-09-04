@@ -1,17 +1,26 @@
+import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtempDisposable, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtempDisposable, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import type { AgentModel, AgentSandbox } from '@deepagents/context';
+import {
+  type AgentModel,
+  type AgentSandbox,
+  createVirtualSandbox,
+} from '@deepagents/context';
 import {
   AgentPluginCapability,
   type AgentPluginDefinition,
+  type AgentPluginHost,
   AgentRuntime,
   type AgentRuntimeOptions,
+  type SandboxContext,
   defineAgent,
+  defineSandbox,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
 
@@ -229,6 +238,98 @@ test('AgentRuntime rejects duplicate plugin skills during construction', async (
   );
 });
 
+test('AgentRuntime loads deterministic plugin-scoped agents before startup', async () => {
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), 'zukhruf-plugin-agents-'),
+  );
+  await writeFile(join(directory.path, 'b.md'), agentDeclaration('b'));
+  await writeFile(join(directory.path, 'a.md'), agentDeclaration('a'));
+  await writeFile(
+    join(directory.path, '.hidden.md'),
+    agentDeclaration('hidden'),
+  );
+  await mkdir(join(directory.path, 'nested'));
+  await writeFile(
+    join(directory.path, 'nested', 'nested.md'),
+    agentDeclaration('nested'),
+  );
+  await symlink(
+    join(directory.path, 'a.md'),
+    join(directory.path, 'linked.md'),
+  );
+
+  const runtime = new AgentRuntime(
+    declaration([
+      plugin('engineering', () => ({
+        agents: [pathToFileURL(directory.path)],
+      })),
+    ]),
+    options,
+  );
+
+  assert.deepEqual(
+    runtime.info.agents.map(({ name, plugin }) => [name, plugin]),
+    [
+      ['root', undefined],
+      ['engineering:a', 'engineering'],
+      ['engineering:b', 'engineering'],
+    ],
+  );
+
+  await writeFile(join(directory.path, 'c.md'), agentDeclaration('c'));
+  assert.deepEqual(
+    runtime.info.agents.map(({ name }) => name),
+    ['root', 'engineering:a', 'engineering:b'],
+  );
+});
+
+test('AgentRuntime rejects malformed and duplicate plugin agent declarations', async () => {
+  await using malformed = await mkdtempDisposable(
+    join(tmpdir(), 'zukhruf-plugin-agent-malformed-'),
+  );
+  await writeFile(
+    join(malformed.path, 'reviewer.md'),
+    '---\nname: reviewer\ndescription: Reviewer.\ntools: []\n---\n\nReview.\n',
+  );
+  assert.throws(
+    () =>
+      new AgentRuntime(
+        declaration([
+          plugin('engineering', () => ({ agents: [malformed.path] })),
+        ]),
+        options,
+      ),
+    /unknown frontmatter field "tools"/,
+  );
+
+  await using first = await mkdtempDisposable(
+    join(tmpdir(), 'zukhruf-plugin-agent-first-'),
+  );
+  await using second = await mkdtempDisposable(
+    join(tmpdir(), 'zukhruf-plugin-agent-second-'),
+  );
+  await writeFile(
+    join(first.path, 'reviewer.md'),
+    agentDeclaration('reviewer'),
+  );
+  await writeFile(
+    join(second.path, 'reviewer.md'),
+    agentDeclaration('reviewer'),
+  );
+  assert.throws(
+    () =>
+      new AgentRuntime(
+        declaration([
+          plugin('engineering', () => ({
+            agents: [first.path, second.path],
+          })),
+        ]),
+        options,
+      ),
+    /duplicate agent declaration name "engineering:reviewer"/,
+  );
+});
+
 test('AgentRuntime rejects context collisions and subagent plugins', () => {
   assert.throws(
     () =>
@@ -274,3 +375,47 @@ test('AgentRuntime rejects context collisions and subagent plugins', () => {
     /subagent "child" cannot declare runtime plugins/,
   );
 });
+
+test('host.sandbox attaches the configured root sandbox before the conversation exists', async () => {
+  const hosts: AgentPluginHost[] = [];
+  const contexts: SandboxContext[] = [];
+  let configuredAttaches = 0;
+  const capturing = plugin('capturing', () => ({
+    configure: (root) => ({
+      ...root,
+      sandbox: (context) => {
+        configuredAttaches++;
+        return root.sandbox(context);
+      },
+    }),
+    initialize: async (host) => {
+      hosts.push(host);
+    },
+  }));
+  const runtime = new AgentRuntime(
+    defineAgent({
+      name: 'root',
+      model: {} as AgentModel,
+      sandbox: defineSandbox(async (context) => {
+        contexts.push(context);
+        return createVirtualSandbox({ fs: new InMemoryFs() });
+      }),
+      instructions: [],
+      plugins: [capturing],
+    }),
+    options,
+  );
+  await runtime.initialize();
+  const [host] = hosts;
+  assert.ok(host);
+
+  const sandbox = await host.sandbox({ chatId: 'c1', userId: 'u1' });
+
+  assert.equal(sandbox.workingDirectory, '/workspace');
+  assert.deepEqual(contexts, [{ chatId: 'c1', userId: 'u1' }]);
+  assert.equal(configuredAttaches, 1);
+});
+
+function agentDeclaration(name: string): string {
+  return `---\nname: ${name}\ndescription: ${name} agent.\n---\n\nInstructions for ${name}.\n`;
+}

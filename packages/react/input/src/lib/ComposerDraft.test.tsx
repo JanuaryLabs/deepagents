@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -134,9 +140,7 @@ describe('Composer.Root draftKey', () => {
       localStorage.clear();
       const user = userEvent.setup();
       const { promise, resolve } = Promise.withResolvers<void>();
-      render(
-        <DraftScenario draftKey="chat-1" send={() => promise} />,
-      );
+      render(<DraftScenario draftKey="chat-1" send={() => promise} />);
       await user.click(promptElement());
       await user.keyboard('mid flight');
       await user.keyboard('{Enter}');
@@ -157,9 +161,7 @@ describe('Composer.Root draftKey', () => {
       localStorage.clear();
       const user = userEvent.setup();
       const { promise, reject } = Promise.withResolvers<never>();
-      render(
-        <DraftScenario draftKey="chat-1" send={() => promise} />,
-      );
+      render(<DraftScenario draftKey="chat-1" send={() => promise} />);
       await user.click(promptElement());
       await user.keyboard('will fail');
       await user.keyboard('{Enter}');
@@ -172,6 +174,39 @@ describe('Composer.Root draftKey', () => {
       );
       expect(promptElement()).toHaveFocus();
       expect(localStorage.length).toBe(1);
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  it('persists the text without pretending an unpersistable attachment survived', async () => {
+    try {
+      localStorage.clear();
+      const user = userEvent.setup();
+      const first = render(<DraftScenario draftKey="chat-1" />);
+      await user.type(promptElement(), 'describe this ');
+      fireEvent.paste(promptElement(), {
+        clipboardData: {
+          files: [new File(['png'], 'clipboard.png', { type: 'image/png' })],
+          getData: () => '',
+        },
+      });
+      await waitFor(() =>
+        expect(localStorage.getItem('composer-draft:v1:chat-1')).toContain(
+          'describe this',
+        ),
+      );
+      const stored = localStorage.getItem('composer-draft:v1:chat-1');
+      expect(stored).not.toContain('[Image #1]');
+      expect(stored).not.toContain('clipboard.png');
+      first.unmount();
+
+      render(<DraftScenario draftKey="chat-1" />);
+      expect(promptElement()).toHaveTextContent('describe this');
+      expect(promptElement()).not.toHaveTextContent('[Image #1]');
+      expect(
+        screen.queryByRole('list', { name: 'Attached images' }),
+      ).not.toBeInTheDocument();
     } finally {
       localStorage.clear();
     }

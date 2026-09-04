@@ -301,3 +301,86 @@ it('resolves the default fetch implementation at request time', async () => {
   expect(request).toHaveBeenCalledTimes(2);
   vi.unstubAllGlobals();
 });
+
+it('uploads a file to the session uploads endpoint and returns the receipt', async () => {
+  const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+  const receipt = {
+    path: `/workspace/.uploads/${sessionId}/f1.png`,
+    name: 'shot 1.png',
+    mediaType: 'image/png',
+    size: 4,
+    url: `https://api.test${api}/${sessionId}/uploads/f1`,
+  };
+  const transport = new ZukhrufChatTransport({
+    api,
+    fetch: async (input, init) => {
+      requests.push({ url: String(input), init });
+      return Response.json(receipt, { status: 201 });
+    },
+  });
+  const file = new File(
+    [new Uint8Array([0x89, 0x50, 0x4e, 0x47])],
+    'shot 1.png',
+    {
+      type: 'image/png',
+    },
+  );
+
+  const returned = await transport.uploadFile(sessionId, file);
+
+  expect(returned).toEqual(receipt);
+  expect(requests).toHaveLength(1);
+  const [{ url, init }] = requests;
+  const headers = new Headers(init?.headers);
+  expect(url).toBe(`${api}/${sessionId}/uploads`);
+  expect(init?.method).toBe('POST');
+  expect(headers.get('content-type')).toBe('image/png');
+  expect(headers.get('x-upload-filename')).toBe('shot%201.png');
+  expect(init?.body).toBe(file);
+});
+
+it('rejects an upload response that is not a receipt', async () => {
+  const transport = new ZukhrufChatTransport({
+    api,
+    fetch: async () =>
+      Response.json(
+        { type: 'file', mediaType: 'image/jpeg', url: 'https://api.test/f2' },
+        { status: 201 },
+      ),
+  });
+
+  await expect(
+    transport.uploadFile(
+      sessionId,
+      new File([new Uint8Array([0xff, 0xd8])], 'shot.jpg', {
+        type: 'image/jpeg',
+      }),
+    ),
+  ).rejects.toThrow('invalid upload response');
+});
+
+it('surfaces the server error for a rejected upload', async () => {
+  const transport = new ZukhrufChatTransport({
+    api,
+    fetch: async () =>
+      Response.json(
+        {
+          error: 'Unsupported Media Type',
+          cause: {
+            code: 'zukhruf/unsupported-media-type',
+            detail: 'Uploads must be one of image/png, image/jpeg',
+          },
+        },
+        { status: 415 },
+      ),
+  });
+
+  await expect(
+    transport.uploadFile(
+      sessionId,
+      new File(['note'], 'notes.txt', { type: 'text/plain' }),
+    ),
+  ).rejects.toThrow(
+    'Uploading notes.txt failed with HTTP 415: zukhruf/unsupported-media-type — Uploads must be one of image/png, image/jpeg',
+  );
+});

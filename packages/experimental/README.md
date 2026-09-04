@@ -63,8 +63,8 @@ entries, while a future gRPC package can project the same plugin instance into
 services and streaming without changing core. The HTTP transport plugin rejects
 duplicate capability names and relative paths.
 Plugins may also contribute one AI SDK telemetry integration per turn through
-`telemetry(context)`; the runtime appends every contribution to the agent's
-declaration-local telemetry integrations.
+`telemetry(context)`; the runtime applies every contribution with the agent's
+declaration-local telemetry policy.
 
 The `schedules` runtime plugin owns durable task and run persistence,
 recurrence, workers, management, and execution into either new or existing
@@ -121,6 +121,13 @@ that were paused by an earlier synchronization, and pauses removed files while
 preserving their run history. An explicitly archived task is never restored by
 the filesystem.
 
+The optional `@deepagents/experimental/zukhruf/uploads` plugin stores
+composer image uploads in the conversation sandbox under a host-selected
+absolute directory. Compose
+`@deepagents/experimental/zukhruf/uploads/http` with `http(runtime, ...)` when
+the browser should upload image bytes; the model receives a turn-local reminder
+with the sandbox paths to read.
+
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete
 deployable unit),
@@ -135,8 +142,8 @@ orchestration over a shared transcript),
 [`demo/zukhruf-whatsapp`](../../demo/zukhruf-whatsapp) (manager-free group
 notifications where specialists volunteer public replies),
 [`demo/zukhruf-dynamic-subagents`](../../demo/zukhruf-dynamic-subagents)
-(Markdown root agent, Markdown subagents, and a mounted skill discovered at
-startup).
+(a code-defined root, plugin-contributed Markdown subagents, and a mounted
+skill discovered at startup).
 Every `spawn_agent` call chooses all parent turns, no parent turns, or a bounded
 number of recent user-turn boundaries through its required `fork_turns` input.
 Collaboration tools stay on the direct model surface by default; set

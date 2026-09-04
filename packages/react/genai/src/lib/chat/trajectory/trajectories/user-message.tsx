@@ -1,15 +1,16 @@
 import type { UIMessage } from 'ai';
 import { memo, useMemo, useState } from 'react';
 
-import { PersistedPromptText } from '@deepagents/react-input/browser';
 import {
   type UserReminderMetadata,
   stripReminders,
 } from '@deepagents/context/browser';
+import { PersistedPromptText } from '@deepagents/react-input/browser';
 import { cn } from '@deepagents/react-shadcn';
 
-import { FilePart } from '../../message-parts.tsx';
+import { MessageAttachmentPart } from '../../message-parts.tsx';
 import { formatUsageBreakdown, parseMetadataUsage } from '../../usage.ts';
+import { uploadReceiptSchema } from '../../zukhruf-chat-transport.ts';
 import { useMessageItem } from '../messages-context.ts';
 import { CollapsibleDisclosure } from './collapsible-disclosure.tsx';
 
@@ -44,6 +45,17 @@ function extractReminders(message: UIMessage): UserReminderMetadata[] {
       candidate.text.trim().length > 0
     );
   });
+}
+
+function extractUploads(message: UIMessage) {
+  const raw = (message.metadata as Record<string, unknown> | undefined)
+    ?.uploads;
+  return Array.isArray(raw)
+    ? raw.flatMap((value) => {
+        const receipt = uploadReceiptSchema.safeParse(value);
+        return receipt.success ? [receipt.data] : [];
+      })
+    : [];
 }
 
 function ReminderItem({ text }: { text: string }) {
@@ -146,28 +158,41 @@ export function UserMessageContent({
     <UserBubbleShell
       reminders={reminders}
       metadata={message.metadata}
-      body={message.parts.map((part, partIndex) => {
-        if (part.type === 'text') {
-          return (
-            <div
-              key={`${message.id}-${partIndex}-text`}
-              className="text-sm whitespace-pre-wrap"
-            >
-              <PersistedPromptText text={part.text} />
-            </div>
-          );
-        }
-        if (part.type === 'file') {
-          return (
-            <FilePart
-              key={`${message.id}-${partIndex}-file`}
-              filename={part.filename}
-              mediaType={part.mediaType}
+      body={
+        <>
+          {extractUploads(message).map((upload) => (
+            <MessageAttachmentPart
+              key={upload.path}
+              filename={upload.name}
+              mediaType={upload.mediaType}
+              url={upload.url}
             />
-          );
-        }
-        return null;
-      })}
+          ))}
+          {message.parts.map((part, partIndex) => {
+            if (part.type === 'text') {
+              return (
+                <div
+                  key={`${message.id}-${partIndex}-text`}
+                  className="text-sm whitespace-pre-wrap"
+                >
+                  <PersistedPromptText text={part.text} />
+                </div>
+              );
+            }
+            if (part.type === 'file') {
+              return (
+                <MessageAttachmentPart
+                  key={`${message.id}-${partIndex}-file`}
+                  filename={part.filename}
+                  mediaType={part.mediaType}
+                  url={part.url}
+                />
+              );
+            }
+            return null;
+          })}
+        </>
+      }
     />
   );
 }

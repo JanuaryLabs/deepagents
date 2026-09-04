@@ -5,12 +5,16 @@ export * from './lib/chat/citations.ts';
 export { defineElements, type ElementDescriptor } from '@deepagents/elements';
 export * from './lib/elements/interactive-element.ts';
 export * from './lib/chat/prefill.ts';
+export * from './lib/chat/prepare-image.ts';
 export * from './lib/chat/read-only-transport.ts';
 export * from './lib/chat/tool-abort.ts';
 export * from './lib/chat/tools-schema.ts';
 export * from './lib/chat/trajectory/index.ts';
 export * from './lib/chat/usage.ts';
-export * from './lib/chat/zukhruf-chat-transport.ts';
+export {
+  ZukhrufChatTransport,
+  type ZukhrufChatTransportOptions,
+} from './lib/chat/zukhruf-chat-transport.ts';
 export * from './lib/components/ChatAction.tsx';
 export * from './lib/components/ChatComposer.tsx';
 export * from './lib/components/ChatTextarea.tsx';

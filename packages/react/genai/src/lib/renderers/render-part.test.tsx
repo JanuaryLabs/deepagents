@@ -24,6 +24,14 @@ class RecordingTransport implements ChatTransport<UIMessage> {
 
   reconnectToStream: ChatTransport<UIMessage>['reconnectToStream'] = () =>
     Promise.resolve(null);
+
+  uploadFile = async (sessionId: string, file: File) => ({
+    path: `/workspace/.uploads/${sessionId}/${file.name}`,
+    name: file.name,
+    mediaType: file.type,
+    size: file.size,
+    url: `https://uploads.test/${sessionId}/${file.name}`,
+  });
 }
 
 const approvalMessage: UIMessage = {
@@ -57,7 +65,7 @@ function ApprovalHarness() {
   );
 }
 
-function renderApproval(transport: ChatTransport<UIMessage>) {
+function renderApproval(transport: RecordingTransport) {
   return render(
     <AgentProvider
       chatId="approval-test"

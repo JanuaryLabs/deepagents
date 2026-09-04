@@ -1,6 +1,7 @@
 import { Button } from '@base-ui/react/button';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
+import { X } from 'lucide-react';
 import {
   type ComponentPropsWithoutRef,
   type MouseEvent,
@@ -54,6 +55,7 @@ import type {
   ComposerSuggestion,
 } from './ComposerTypes.ts';
 import {
+  type ComposerAttachImageFile,
   type ComposerTiptapKillBuffer,
   activeEditorToken,
   atomNodeContent,
@@ -65,6 +67,7 @@ import {
   editorCursorOffset,
   emptyDoc,
   handleComposerDropInView,
+  imageAttachmentNodeContent,
   insertKilledContent,
   isEditorCursorAtStart,
   isPopupDownKey,
@@ -76,7 +79,8 @@ import {
   moveCursorToLineEnd,
   nextPastePlaceholderFromContent,
   queuedAction,
-  renumberLocalImageAtoms,
+  removeImageAttachmentAtom,
+  renumberImageAttachmentAtoms,
   serializeTiptapContent,
   stableId,
   wrapIndex,
@@ -114,6 +118,8 @@ export type ComposerToolbarProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'>;
 
+export type ComposerAttachedImagesProps = ComponentPropsWithoutRef<'div'>;
+
 export type ComposerEditorProps = ComponentPropsWithoutRef<'div'> & {
   placeholder?: string;
 };
@@ -128,8 +134,9 @@ export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
 
 type ComposerActionTriggerProps = Button.Props;
 
-export type ComposerAttachLocalImageProps = ComposerActionTriggerProps & {
-  path?: string;
+export type ComposerAttachImageFilesProps = ComposerActionTriggerProps & {
+  accept?: string;
+  multiple?: boolean;
 };
 
 export type ComposerAddRemoteImageProps = ComposerActionTriggerProps & {
@@ -167,7 +174,8 @@ export type ComposerActions = {
   acceptSuggestion: (options?: ComposerAcceptSuggestionOptions) => void;
   toggleSlashMenu: () => void;
   insertText: (text: string) => void;
-  attachLocalImage: (path?: string) => void;
+  attachImageFiles: (files: Iterable<File>) => void;
+  removeImageAttachment: (id: string) => void;
   addRemoteImage: (url: string) => void;
   handleDrop: (transfer: ComposerDropTransfer) => boolean;
   insertPaste: (content: string) => void;
@@ -205,6 +213,7 @@ type ComposerContextValue = {
   commandTriggers: string[];
   activePopup: ActivePopup | null;
   suggestions: ComposerSuggestion[];
+  attachedImages: ReadonlyMap<string, File>;
   actions: ComposerActions;
   meta: ComposerEditorMeta;
 };
@@ -343,6 +352,8 @@ function ComposerRootInner({
   const onStateChangeRef = useRef(onStateChange);
   const validateSubmissionRef = useRef(validateSubmission);
   const onSubmitRef = useRef(onSubmit);
+  const attachedImagesRef = useRef(new Map<string, File>());
+  const attachImageFileRef = useRef<ComposerAttachImageFile>(() => null);
 
   const refreshFromEditorRef = useRef<(editor: Editor) => void>(
     () => undefined,
@@ -359,6 +370,7 @@ function ComposerRootInner({
       createComposerTiptapExtensions({
         getMentionTrigger: () => mentionTriggersRef.current[0] ?? '@',
         getRemoteImageCount: () => remoteImagesRef.current.length,
+        attachImageFile: (file) => attachImageFileRef.current(file),
       }),
     [],
   );
@@ -756,27 +768,60 @@ function ComposerRootInner({
     editor.chain().focus().insertContent(text).run();
   }
 
-  function attachLocalImage(path?: string) {
-    if (disabled || !editor) {
+  function attachImageFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      setComposer((state) => ({
+        ...state,
+        error: `Only image files can be attached: ${file.name || 'unnamed file'}`,
+        shortcutsOpen: false,
+      }));
+      setActivePopup(null);
+      return null;
+    }
+    const id = crypto.randomUUID();
+    attachedImagesRef.current.set(id, file);
+    return id;
+  }
+
+  function insertImageAttachment(currentEditor: Editor, file: File) {
+    const id = attachImageFile(file);
+    if (id === null) {
       return;
     }
     const current = currentStateFromEditor();
-    const number = current.remoteImages.length + current.localImages.length + 1;
+    const number =
+      current.remoteImages.length + current.imageAttachments.length + 1;
     const placeholder = `[Image #${number}]`;
-    const imagePath = path ?? `composer-input-${number}.png`;
-    editor
+    currentEditor
       .chain()
       .focus()
       .insertContent([
-        atomNodeContent({
-          kind: 'image',
-          label: placeholder,
-          detail: imagePath,
-          path: imagePath,
-        }),
+        imageAttachmentNodeContent(id, placeholder),
         { type: 'text', text: ' ' },
       ])
       .run();
+  }
+
+  function attachImageFiles(files: Iterable<File>) {
+    if (disabled || !editor) {
+      return;
+    }
+    for (const file of files) {
+      insertImageAttachment(editor, file);
+    }
+  }
+
+  function removeImageAttachment(id: string) {
+    if (disabled || !editor) {
+      return;
+    }
+    attachedImagesRef.current.delete(id);
+    replaceEditorContent(
+      renumberImageAttachmentAtoms(
+        removeImageAttachmentAtom(editor.getJSON(), id),
+        remoteImagesRef.current.length,
+      ),
+    );
   }
 
   function addRemoteImage(url: string) {
@@ -793,7 +838,7 @@ function ComposerRootInner({
     remoteImagesRef.current = nextRemoteImages;
     setRemoteImages(nextRemoteImages);
     replaceEditorContent(
-      renumberLocalImageAtoms(editor.getJSON(), nextRemoteImages.length),
+      renumberImageAttachmentAtoms(editor.getJSON(), nextRemoteImages.length),
     );
   }
 
@@ -806,6 +851,7 @@ function ComposerRootInner({
       transfer,
       remoteImagesRef.current.length,
       mentionTriggers[0] ?? '@',
+      attachImageFile,
     );
   }
 
@@ -966,7 +1012,7 @@ function ComposerRootInner({
     remoteImagesRef.current = nextRemoteImages;
     setRemoteImages(nextRemoteImages);
     replaceEditorContent(
-      renumberLocalImageAtoms(editor.getJSON(), nextRemoteImages.length),
+      renumberImageAttachmentAtoms(editor.getJSON(), nextRemoteImages.length),
     );
     setComposer((state) => ({
       ...state,
@@ -1065,6 +1111,7 @@ function ComposerRootInner({
       return;
     }
     const current = currentStateFromEditor();
+    const submittedContent = editor?.getJSON() ?? emptyDoc();
     const shouldQueue = current.isTaskRunning || current.queueSubmissions;
     const unknownSlash = shouldQueue
       ? null
@@ -1108,6 +1155,30 @@ function ComposerRootInner({
       setActivePopup(null);
       return;
     }
+    const sentImageFiles = new Map<string, File>();
+    const imageItems: ComposerSubmission['items'] = [];
+    for (const image of current.imageAttachments) {
+      const file = attachedImagesRef.current.get(image.id);
+      if (!file) {
+        setComposer((state) => ({
+          ...state,
+          error: `Attached image is no longer available: ${image.placeholder}`,
+          shortcutsOpen: false,
+        }));
+        setActivePopup(null);
+        return;
+      }
+      sentImageFiles.set(image.id, file);
+      imageItems.push({ type: 'image', placeholder: image.placeholder, file });
+    }
+    const remoteItems = prepared.items.filter(
+      (item) => item.type === 'remote_image',
+    );
+    const items = [
+      ...remoteItems,
+      ...imageItems,
+      ...prepared.items.filter((item) => item.type !== 'remote_image'),
+    ];
     const event: ComposerSubmission = {
       id: crypto.randomUUID(),
       at: new Date().toLocaleTimeString(),
@@ -1119,10 +1190,13 @@ function ComposerRootInner({
         : prepared.action,
       command: prepared.command,
       args: prepared.args,
-      items: prepared.items,
+      items,
     };
     if (rejectInvalidSubmission(event)) {
       return;
+    }
+    for (const id of sentImageFiles.keys()) {
+      attachedImagesRef.current.delete(id);
     }
     const editableSource = createComposerDraftSource(
       current,
@@ -1134,16 +1208,13 @@ function ComposerRootInner({
       submitResult
         .then(() => writeStoredDraft(draftKey, null))
         .catch(() => {
+          for (const [id, file] of sentImageFiles) {
+            attachedImagesRef.current.set(id, file);
+          }
           writeStoredDraft(draftKey, editableSource);
           if (mountedRef.current) {
-            restoreDraft(
-              createDraftFromSource({
-                source: editableSource,
-                slashCommands,
-                mentionCandidates,
-              }),
-              null,
-            );
+            replaceEditorContent(submittedContent);
+            editor?.commands.focus('end');
           }
         })
         .finally(() => {
@@ -1164,7 +1235,7 @@ function ComposerRootInner({
       cursor: 0,
       elements: [],
       mentionBindings: [],
-      localImages: [],
+      imageAttachments: [],
       remoteImages: [],
       pendingPastes: [],
       selectedRemoteImageId: null,
@@ -1183,6 +1254,7 @@ function ComposerRootInner({
     const killBuffer = composerRef.current.killBuffer;
     historyCursorRef.current = null;
     reverseSearchStartRef.current = null;
+    attachedImagesRef.current.clear();
     remoteImagesRef.current = initialRemoteImagesRef.current;
     setRemoteImages(initialRemoteImagesRef.current);
     setActivePopup(null);
@@ -1442,6 +1514,7 @@ function ComposerRootInner({
         return true;
       }
     : handleRemoteImageKeyDown;
+  attachImageFileRef.current = attachImageFile;
 
   function onEditorKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (
@@ -1695,11 +1768,13 @@ function ComposerRootInner({
     commandTriggers,
     activePopup,
     suggestions,
+    attachedImages: attachedImagesRef.current,
     actions: {
       acceptSuggestion,
       toggleSlashMenu,
       insertText,
-      attachLocalImage,
+      attachImageFiles,
+      removeImageAttachment,
       addRemoteImage,
       handleDrop,
       insertPaste,
@@ -1744,6 +1819,7 @@ function ComposerDefaultLayout() {
       <ComposerPopup />
       <ComposerContent>
         <ComposerRemoteImages />
+        <ComposerAttachedImages />
         <ComposerEditor />
         <ComposerError />
       </ComposerContent>
@@ -1794,6 +1870,84 @@ function ComposerRemoteImages({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ComposerAttachedImages({
+  className,
+  ...props
+}: ComposerAttachedImagesProps) {
+  const { state, disabled, attachedImages, actions } = useComposerContext(
+    'Composer.AttachedImages',
+  );
+  const images = state.imageAttachments.flatMap((image) => {
+    const file = attachedImages.get(image.id);
+    return file ? [{ id: image.id, placeholder: image.placeholder, file }] : [];
+  });
+  if (images.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      role="list"
+      aria-label="Attached images"
+      className={cn('flex flex-wrap gap-2', className)}
+      {...props}
+    >
+      {images.map((image) => (
+        <ComposerAttachedImageThumbnail
+          key={image.id}
+          placeholder={image.placeholder}
+          file={image.file}
+          disabled={disabled}
+          onRemove={() => actions.removeImageAttachment(image.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ComposerAttachedImageThumbnail({
+  placeholder,
+  file,
+  disabled,
+  onRemove,
+}: {
+  placeholder: string;
+  file: File;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setObjectUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [file]);
+
+  return (
+    <div role="listitem" className="relative">
+      {objectUrl ? (
+        <img
+          src={objectUrl}
+          alt={placeholder}
+          title={file.name}
+          className="border-border size-16 rounded-md border object-cover"
+        />
+      ) : null}
+      <button
+        type="button"
+        aria-label={`Remove ${placeholder}`}
+        disabled={disabled}
+        onClick={onRemove}
+        className="bg-background text-foreground border-border hover:bg-muted absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border disabled:opacity-50"
+      >
+        <X aria-hidden className="size-3" />
+      </button>
     </div>
   );
 }
@@ -2115,16 +2269,40 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
   );
 }
 
-function ComposerAttachLocalImage({
-  path,
+function ComposerAttachImageFiles({
+  accept = 'image/*',
+  multiple = true,
+  disabled,
   ...props
-}: ComposerAttachLocalImageProps) {
-  const { actions } = useComposerContext('Composer.AttachLocalImage');
+}: ComposerAttachImageFilesProps) {
+  const { actions, disabled: rootDisabled } = useComposerContext(
+    'Composer.AttachImageFiles',
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <ComposerTiptapActionTrigger
-      action={() => actions.attachLocalImage(path)}
-      {...props}
-    />
+    <>
+      <ComposerTiptapActionTrigger
+        action={() => inputRef.current?.click()}
+        disabled={disabled}
+        {...props}
+      />
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        aria-label="Attach image files"
+        hidden
+        disabled={rootDisabled || disabled}
+        onChange={(event) => {
+          const input = event.currentTarget;
+          if (input.files) {
+            actions.attachImageFiles(input.files);
+          }
+          input.value = '';
+        }}
+      />
+    </>
   );
 }
 
@@ -2310,12 +2488,13 @@ export const Composer = {
   Content: ComposerContent,
   Toolbar: ComposerToolbar,
   RemoteImages: ComposerRemoteImages,
+  AttachedImages: ComposerAttachedImages,
   Editor: ComposerEditor,
   Error: ComposerError,
   Popup: ComposerPopup,
   Shortcuts: ComposerShortcuts,
   Footer: ComposerFooter,
-  AttachLocalImage: ComposerAttachLocalImage,
+  AttachImageFiles: ComposerAttachImageFiles,
   AddRemoteImage: ComposerAddRemoteImage,
   InsertPaste: ComposerInsertPaste,
   InsertRichLink: ComposerInsertRichLink,

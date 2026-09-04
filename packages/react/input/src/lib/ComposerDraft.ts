@@ -34,7 +34,6 @@ export function writeStoredDraft(
 function isEmptyDraftSource(source: ComposerDraftSource) {
   return (
     !source.persistedPrompt.trim() &&
-    source.localImages.length === 0 &&
     source.remoteImages.length === 0 &&
     source.pendingPastes.length === 0
   );
@@ -43,8 +42,10 @@ function isEmptyDraftSource(source: ComposerDraftSource) {
 function isComposerDraftSource(value: unknown): value is ComposerDraftSource {
   return (
     isRecord(value) &&
+    Object.keys(value).every((key) =>
+      ['persistedPrompt', 'remoteImages', 'pendingPastes'].includes(key),
+    ) &&
     typeof value.persistedPrompt === 'string' &&
-    Array.isArray(value.localImages) &&
     Array.isArray(value.remoteImages) &&
     Array.isArray(value.pendingPastes)
   );

@@ -1,6 +1,6 @@
 import type { ToolUIPart } from 'ai';
 
-import { cn } from '@deepagents/react-shadcn';
+import { Attachment, cn } from '@deepagents/react-shadcn';
 
 import {
   type GenAIInteractiveElement,
@@ -13,7 +13,29 @@ import { useAgent, useAgentStatus } from './agent-context.tsx';
 
 export const SLIDE_UP_ANIMATED = { animation: 'slideUp' } as const;
 
-export function FilePart({
+type MessageAttachmentPartProps = {
+  filename?: string;
+  mediaType: string;
+  url: string;
+};
+
+function ImageFilePart({
+  filename,
+  url,
+}: {
+  filename?: string;
+  url: string;
+}) {
+  return (
+    <img
+      src={url}
+      alt={filename ?? 'Attached image'}
+      className="max-h-64 rounded-md border object-contain"
+    />
+  );
+}
+
+function FileAttachmentPart({
   filename,
   mediaType,
 }: {
@@ -21,9 +43,21 @@ export function FilePart({
   mediaType: string;
 }) {
   return (
-    <div className="bg-muted/30 rounded-md border p-3 text-sm">
+    <Attachment className="bg-muted/30 block w-full rounded-md p-3 text-sm text-inherit">
       <strong>File:</strong> {filename || 'Untitled'} ({mediaType})
-    </div>
+    </Attachment>
+  );
+}
+
+export function MessageAttachmentPart({
+  filename,
+  mediaType,
+  url,
+}: MessageAttachmentPartProps) {
+  return mediaType.startsWith('image/') ? (
+    <ImageFilePart filename={filename} url={url} />
+  ) : (
+    <FileAttachmentPart filename={filename} mediaType={mediaType} />
   );
 }
 

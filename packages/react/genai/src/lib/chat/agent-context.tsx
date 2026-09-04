@@ -22,6 +22,7 @@ import {
 import type { ComponentRegistry } from '../tools/registry.ts';
 import { ChatManager, type ChatSubmission } from './chat-manager.ts';
 import { useAgentChatSetup } from './chat.tsx';
+import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
 export interface AgentConfigContextValue {
   chatId: string;
@@ -30,7 +31,8 @@ export interface AgentConfigContextValue {
   toggleDebugMode: () => void;
   clearChat: () => void;
   resetChat: (prompt?: string) => void;
-  submit: (submission: ChatSubmission) => void;
+  /** Settles once the submission is queued or sent; rejects when a file upload fails. */
+  submit: (submission: ChatSubmission) => Promise<void>;
   setChat: (messages: UIMessage[]) => void;
   getTriggeringUserMessage: (toolCallId: string) => UIMessage | null;
   getLastUserMessageId: () => string | null;
@@ -70,7 +72,8 @@ export function AgentProvider({
   debugMode?: boolean;
   registry?: ComponentRegistry;
   initialMessages?: UIMessage[];
-  transport: ChatTransport<UIMessage<unknown, UIDataTypes, UITools>>;
+  transport: ChatTransport<UIMessage<unknown, UIDataTypes, UITools>> &
+    Pick<ZukhrufChatTransport, 'uploadFile'>;
   /** Reconnect to the chat's active stream once, on mount. */
   resume?: boolean;
   /** Observes every streamed data part, transient ones included. */
@@ -108,6 +111,7 @@ export function AgentProvider({
         hasSubmitted: !!skipInitialView || (initialMessages?.length ?? 0) > 0,
         initialMessages,
         enableResume: resume,
+        uploadFile: transport.uploadFile.bind(transport),
         onResetChat: forwardResetChat,
       }),
   );

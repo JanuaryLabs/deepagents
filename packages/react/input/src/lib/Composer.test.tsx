@@ -12,10 +12,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   Composer,
-  type ComposerPreparedPayload,
   type ComposerInitialDraft,
   type ComposerItem,
   type ComposerItemEntry,
+  type ComposerPreparedPayload,
   type ComposerState,
   type ComposerSubmission,
   createComposerDraftSource,
@@ -145,7 +145,6 @@ SELECT status, sum(total_cents) FROM invoices GROUP BY status;`,
 ).join('\n\n');
 
 const REMOTE_IMAGE_URL = 'https://example.test/chart.png';
-const LOCAL_IMAGE_PATH = '/tmp/composer-rich-image.png';
 
 function registryTriggers({
   slashCommands = SLASH_COMMANDS,
@@ -173,7 +172,6 @@ function draftFromState(state: ComposerState): ComposerInitialDraft {
     text: state.text,
     elements: state.elements,
     mentionBindings: state.mentionBindings,
-    localImages: state.localImages,
     remoteImages: state.remoteImages,
     pendingPastes: state.pendingPastes,
   };
@@ -217,6 +215,7 @@ function renderRichInput(
     slashCommands?: ComposerItemEntry[];
     isTaskRunning?: boolean;
     maxExpandedTextChars?: number;
+    send?: (submission: ComposerSubmission) => Promise<unknown> | void;
   } = {},
 ) {
   const user = userEvent.setup();
@@ -239,6 +238,7 @@ function RichInputScenario({
   slashCommands = SLASH_COMMANDS,
   isTaskRunning = false,
   maxExpandedTextChars,
+  send,
 }: {
   disabled?: boolean;
   initialText?: string;
@@ -248,6 +248,7 @@ function RichInputScenario({
   slashCommands?: ComposerItemEntry[];
   isTaskRunning?: boolean;
   maxExpandedTextChars?: number;
+  send?: (submission: ComposerSubmission) => Promise<unknown> | void;
 }) {
   const [running, setRunning] = useState(isTaskRunning);
   const initialState =
@@ -281,17 +282,18 @@ function RichInputScenario({
         isTaskRunning={running}
         maxExpandedTextChars={maxExpandedTextChars}
         onStateChange={(state, prepared) => setSnapshot({ state, prepared })}
-        onSubmit={(submission) =>
-          setSubmissions((current) => [submission, ...current])
-        }
+        onSubmit={(submission) => {
+          setSubmissions((current) => [submission, ...current]);
+          return send?.(submission);
+        }}
       >
         {registryTriggers({ slashCommands, mentionCandidates })}
         <Composer.Popup />
         <Composer.Content>
           <Composer.Toolbar>
-            <Composer.AttachLocalImage path={LOCAL_IMAGE_PATH}>
-              Attach local image
-            </Composer.AttachLocalImage>
+            <Composer.AttachImageFiles>
+              Browse image files
+            </Composer.AttachImageFiles>
             <Composer.AddRemoteImage url={REMOTE_IMAGE_URL}>
               Add remote image
             </Composer.AddRemoteImage>
@@ -314,6 +316,7 @@ function RichInputScenario({
             <Composer.Reset>Reset rich prompt</Composer.Reset>
           </Composer.Toolbar>
           <Composer.RemoteImages />
+          <Composer.AttachedImages />
           <Composer.Editor />
           <Composer.Error />
         </Composer.Content>
@@ -326,6 +329,7 @@ function RichInputScenario({
       <SubmissionLog submissions={submissions} />
       <section aria-label="Rich composer snapshot">
         <p>Draft: {snapshot.state.text}</p>
+        <p>History: {snapshot.state.history.length}</p>
         <p>
           Prepared:{' '}
           {snapshot.prepared
@@ -552,8 +556,8 @@ function formatSubmissionItem(item: ComposerSubmission['items'][number]) {
   if (item.type === 'text') {
     return `text:${item.text}`;
   }
-  if (item.type === 'local_image') {
-    return `local_image:${item.path}`;
+  if (item.type === 'image') {
+    return `image:${item.file.name}:${item.file.size}`;
   }
   if (item.type === 'remote_image') {
     return `remote_image:${item.url}`;
@@ -1912,9 +1916,16 @@ describe('Composer editing shortcuts', () => {
     await user.click(prompt);
     await user.keyboard('keep @fro');
     await user.keyboard('{Tab}');
-    await user.click(
-      screen.getByRole('button', { name: /attach local image/i }),
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['local'], 'attached.png', { type: 'image/png' }),
     );
+    fireEvent.paste(prompt, {
+      clipboardData: {
+        files: [new File(['png'], 'clipboard.png', { type: 'image/png' })],
+        getData: () => '',
+      },
+    });
     await user.click(
       screen.getByRole('button', { name: /insert large paste/i }),
     );
@@ -1930,6 +1941,9 @@ describe('Composer editing shortcuts', () => {
       expect(snapshot).toHaveTextContent(placeholder);
       expect(snapshot).toHaveTextContent('openai/composer');
     });
+    expect(
+      await screen.findByRole('button', { name: 'Remove [Image #2]' }),
+    ).toBeInTheDocument();
 
     placeCursorAfterText(prompt, 'keep ');
     fireEditorKeyDown(prompt, { key: 'k', code: 'KeyK', ctrlKey: true });
@@ -1939,6 +1953,9 @@ describe('Composer editing shortcuts', () => {
         screen.getByRole('region', { name: /rich composer snapshot/i }),
       ).toHaveTextContent('Draft: keep ');
     });
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
 
     fireEditorKeyDown(prompt, { key: 'y', code: 'KeyY', ctrlKey: true });
 
@@ -1948,10 +1965,14 @@ describe('Composer editing shortcuts', () => {
       });
       expect(snapshot).toHaveTextContent('Draft: keep @frontend');
       expect(snapshot).toHaveTextContent('[Image #1]');
+      expect(snapshot).toHaveTextContent('[Image #2]');
       expect(snapshot).toHaveTextContent(placeholder);
       expect(snapshot).toHaveTextContent('openai/composer');
       expect(snapshot).toHaveTextContent('tail');
     });
+    expect(
+      await screen.findByRole('img', { name: '[Image #2]' }),
+    ).toHaveAttribute('title', 'clipboard.png');
 
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
 
@@ -1959,7 +1980,8 @@ describe('Composer editing shortcuts', () => {
       expect(submissions()).toHaveTextContent('Text: keep @frontend');
     });
     expect(submissions()).toHaveTextContent('item:@frontend');
-    expect(submissions()).toHaveTextContent(`local_image:${LOCAL_IMAGE_PATH}`);
+    expect(submissions()).toHaveTextContent('image:attached.png:5');
+    expect(submissions()).toHaveTextContent('image:clipboard.png:3');
     expect(submissions()).toHaveTextContent(
       'rich_link:openai/composer:https://github.com/openai/composer',
     );
@@ -1972,8 +1994,9 @@ describe('Composer editing shortcuts', () => {
     await user.click(prompt);
     await user.keyboard('keep @fro');
     await user.keyboard('{Tab}');
-    await user.click(
-      screen.getByRole('button', { name: /attach local image/i }),
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['local'], 'attached.png', { type: 'image/png' }),
     );
     await user.click(
       screen.getByRole('button', { name: /insert large paste/i }),
@@ -2024,7 +2047,7 @@ describe('Composer editing shortcuts', () => {
       expect(submissions()).toHaveTextContent('Text: keep @frontend');
     });
     expect(submissions()).toHaveTextContent('item:@frontend');
-    expect(submissions()).toHaveTextContent(`local_image:${LOCAL_IMAGE_PATH}`);
+    expect(submissions()).toHaveTextContent('image:attached.png:5');
     expect(submissions()).toHaveTextContent(
       'rich_link:openai/composer:https://github.com/openai/composer',
     );
@@ -2396,7 +2419,7 @@ describe('Composer history behavior', () => {
     ).toHaveTextContent('Draft: working draft');
   });
 
-  it('restores the canonical prompt and attachment payloads from history', async () => {
+  it('restores persistable history payloads without inventing file attachments', async () => {
     const { user, prompt, submissions } = renderRichInput();
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
 
@@ -2404,8 +2427,9 @@ describe('Composer history behavior', () => {
     await user.keyboard('inspect @fro');
     await user.keyboard('{Tab}');
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
-    await user.click(
-      screen.getByRole('button', { name: /attach local image/i }),
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['local'], 'attached.png', { type: 'image/png' }),
     );
     await user.click(
       screen.getByRole('button', { name: /insert large paste/i }),
@@ -2422,7 +2446,8 @@ describe('Composer history behavior', () => {
       const snapshot = screen.getByRole('region', {
         name: /rich composer snapshot/i,
       });
-      expect(snapshot).toHaveTextContent('Draft: inspect @frontend [Image #2]');
+      expect(snapshot).toHaveTextContent('Draft: inspect @frontend');
+      expect(snapshot).not.toHaveTextContent('[Image #2]');
       expect(
         screen.getByRole('region', { name: /rich composer snapshot/i }),
       ).toHaveTextContent(placeholder);
@@ -2431,6 +2456,9 @@ describe('Composer history behavior', () => {
       ).toHaveTextContent('openai/composer');
     });
     expect(screen.getByText(REMOTE_IMAGE_URL)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
 
     fireEditorKeyDown(prompt, { key: 'Enter', code: 'Enter' });
 
@@ -2438,9 +2466,7 @@ describe('Composer history behavior', () => {
       name: /submission 1/i,
     });
     expect(latestSubmission).toHaveTextContent('item:@frontend');
-    expect(latestSubmission).toHaveTextContent(
-      `local_image:${LOCAL_IMAGE_PATH}`,
-    );
+    expect(latestSubmission).not.toHaveTextContent('image:attached.png');
     expect(latestSubmission).toHaveTextContent(
       `remote_image:${REMOTE_IMAGE_URL}`,
     );
@@ -2448,14 +2474,14 @@ describe('Composer history behavior', () => {
       'link:openai/composer:https://github.com/openai/composer',
     );
     expect(latestSubmission).toHaveTextContent(
-      `Text: inspect @frontend [Image #2] ${placeholder}`,
+      `Text: inspect @frontend ${placeholder}`,
     );
     expect(latestSubmission).toHaveTextContent(
-      'Expanded: inspect @frontend [Image #2] -- batch 1',
+      'Expanded: inspect @frontend -- batch 1',
     );
   });
 
-  it('recalls an attachment-only submission from history', async () => {
+  it('recalls a remote-image-only submission from history', async () => {
     const { user, prompt } = renderRichInput();
 
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
@@ -2473,7 +2499,28 @@ describe('Composer history behavior', () => {
     });
   });
 
-  it('keeps repeated prompts with different attachment payloads distinct in history', async () => {
+  it('does not record a file-only submission that history cannot restore', async () => {
+    const { user, prompt } = renderRichInput();
+
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
+    );
+    await user.click(screen.getByRole('button', { name: /submit prompt/i }));
+
+    await user.click(prompt);
+    fireEditorKeyDown(prompt, { key: 'p', code: 'KeyP', ctrlKey: true });
+
+    expect(prompt).not.toHaveTextContent('[Image #1]');
+    expect(
+      screen.getByRole('region', { name: /rich composer snapshot/i }),
+    ).toHaveTextContent('History: 0');
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps repeated prompts with different persistable payloads distinct in history', async () => {
     const { user, prompt } = renderRichInput();
 
     await user.click(prompt);
@@ -2581,7 +2628,7 @@ describe('Composer disabled guard', () => {
     await user.keyboard('blocked text');
     await user.keyboard('{Enter}');
     await user.click(
-      screen.getByRole('button', { name: /attach local image/i }),
+      screen.getByRole('button', { name: /browse image files/i }),
     );
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
     await user.click(
@@ -2596,7 +2643,7 @@ describe('Composer disabled guard', () => {
       screen.getByRole('region', { name: /rich composer snapshot/i }),
     ).toHaveTextContent('Prepared: empty');
     expect(
-      screen.getByRole('button', { name: /attach local image/i }),
+      screen.getByRole('button', { name: /browse image files/i }),
     ).toBeDisabled();
     expect(
       screen.getByRole('button', { name: /add remote image/i }),
@@ -2893,35 +2940,15 @@ describe('Composer link and paste behavior', () => {
     const linkLabel = 'docs';
     const imageLabel = '[Image #1]';
     const text = `open ${linkLabel}${imageLabel} tail`;
-    const linkStart = text.indexOf(linkLabel);
-    const imageStart = text.indexOf(imageLabel);
-    const initialState = createComposerState({
-      commandTriggers: COMMAND_TRIGGERS,
-      text,
-      slashCommands: SLASH_COMMANDS,
-      mentionCandidates: MENTION_CANDIDATES,
+    const { user, prompt, submissions } = renderRichInput({
+      initialText: 'open docstail',
     });
-    const { prompt, submissions } = renderRichInput({
-      initialState: {
-        ...initialState,
-        elements: [
-          {
-            id: 'image-1',
-            kind: 'image',
-            label: imageLabel,
-            range: { start: imageStart, end: imageStart + imageLabel.length },
-            detail: LOCAL_IMAGE_PATH,
-          },
-        ],
-        localImages: [
-          {
-            id: 'image-1',
-            placeholder: imageLabel,
-            path: LOCAL_IMAGE_PATH,
-          },
-        ],
-      },
-    });
+
+    placeCursorAfterText(prompt, 'docs');
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
+    );
 
     await waitFor(() => {
       expect(
@@ -2952,9 +2979,7 @@ describe('Composer link and paste behavior', () => {
     expect(submissions()).toHaveTextContent(
       'Text: open [docs](https://example.test/docs) tail',
     );
-    expect(submissions()).not.toHaveTextContent(
-      `local_image:${LOCAL_IMAGE_PATH}`,
-    );
+    expect(submissions()).not.toHaveTextContent('image:chart.png');
     expect(submissions()).not.toHaveTextContent(`image:${imageLabel}`);
   });
 
@@ -3095,7 +3120,7 @@ describe('Composer link and paste behavior', () => {
     expect(submissions()).toHaveTextContent('item:@query.sql');
   });
 
-  it('pastes image clipboard files as local image atoms', async () => {
+  it('pastes image clipboard files as image attachments', async () => {
     const { prompt, submissions } = renderRichInput();
     const file = new File(['png'], 'clipboard.png', { type: 'image/png' });
 
@@ -3112,12 +3137,19 @@ describe('Composer link and paste behavior', () => {
       ).toHaveTextContent('Draft: [Image #1]');
     });
 
+    expect(
+      await screen.findByRole('img', { name: '[Image #1]' }),
+    ).toHaveAttribute('title', 'clipboard.png');
+
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
 
-    expect(submissions()).toHaveTextContent('local_image:clipboard.png');
+    expect(submissions()).toHaveTextContent('image:clipboard.png:3');
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
   });
 
-  it('pastes image paths as local image atoms', async () => {
+  it('treats pasted image paths as file references, not attachments', async () => {
     const { prompt, submissions } = renderRichInput();
     const path = '/Users/ezzabuzaid/project/chart.png';
 
@@ -3128,15 +3160,16 @@ describe('Composer link and paste behavior', () => {
     await waitFor(() => {
       expect(
         screen.getByRole('region', { name: /rich composer snapshot/i }),
-      ).toHaveTextContent('Draft: [Image #1]');
+      ).toHaveTextContent('Draft: @chart.png');
     });
 
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
 
-    expect(submissions()).toHaveTextContent(`local_image:${path}`);
+    expect(submissions()).toHaveTextContent('item:@chart.png');
+    expect(submissions()).not.toHaveTextContent('image:');
   });
 
-  it('drops image files as local image atoms', async () => {
+  it('drops image files as image attachments', async () => {
     const { user, prompt, submissions } = renderRichInput();
     const file = new File(['png'], 'dropped.png', { type: 'image/png' });
 
@@ -3156,7 +3189,7 @@ describe('Composer link and paste behavior', () => {
 
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
 
-    expect(submissions()).toHaveTextContent('local_image:dropped.png');
+    expect(submissions()).toHaveTextContent('image:dropped.png:3');
   });
 
   it('drops file URI references as structured file mentions', async () => {
@@ -3184,7 +3217,7 @@ describe('Composer link and paste behavior', () => {
     expect(submissions()).toHaveTextContent('item:@report.csv');
   });
 
-  it('drops image DownloadURL values as local image atoms', async () => {
+  it('treats image DownloadURL values as links, not attachments', async () => {
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
@@ -3201,14 +3234,15 @@ describe('Composer link and paste behavior', () => {
     await waitFor(() => {
       expect(
         screen.getByRole('region', { name: /rich composer snapshot/i }),
-      ).toHaveTextContent('Draft: [Image #1]');
+      ).toHaveTextContent('Draft: https://example.test/chart.png');
     });
 
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
 
     expect(submissions()).toHaveTextContent(
-      'local_image:https://example.test/chart.png',
+      'link:https://example.test/chart.png:https://example.test/chart.png',
     );
+    expect(submissions()).not.toHaveTextContent('image:');
   });
 
   it('drops file DownloadURL values as structured file mentions', async () => {
@@ -3321,11 +3355,12 @@ describe('Composer link and paste behavior', () => {
 });
 
 describe('Composer atomic token deletion', () => {
-  it('deletes a local image atom and prunes the image item', async () => {
+  it('deletes an image attachment atom and prunes the image item', async () => {
     const { user, prompt, submissions } = renderRichInput();
 
-    await user.click(
-      screen.getByRole('button', { name: /attach local image/i }),
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
     await waitFor(() => {
@@ -3350,15 +3385,16 @@ describe('Composer atomic token deletion', () => {
     expect(submissions()).not.toHaveTextContent('[Image #1]');
   });
 
-  it('backspaces from a local image atom edge and prunes the image item', async () => {
+  it('backspaces from an image attachment edge and prunes the image item', async () => {
     const { user, prompt, submissions } = renderRichInput({
       initialText: 'keep ',
     });
 
     await user.click(prompt);
     placeCursorAfterText(prompt, 'keep ');
-    await user.click(
-      screen.getByRole('button', { name: /attach local image/i }),
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
     await waitFor(() => {
@@ -3379,9 +3415,7 @@ describe('Composer atomic token deletion', () => {
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
 
     expect(submissions()).toHaveTextContent('Text: keep');
-    expect(submissions()).not.toHaveTextContent(
-      `local_image:${LOCAL_IMAGE_PATH}`,
-    );
+    expect(submissions()).not.toHaveTextContent('image:chart.png');
   });
 
   it('deletes a paste atom and prunes expanded pasted content', async () => {
@@ -3563,47 +3597,23 @@ describe('Composer atomic token deletion', () => {
     expect(submissions()).not.toHaveTextContent('openai/composer');
   });
 
-  it('deletes a selection spanning a text link and local image atom and prunes both structured items', async () => {
-    const text = 'open docs[Image #1]tail';
+  it('deletes a selection spanning a text link and image attachment and prunes both structured items', async () => {
+    const text = 'open docs[Image #1] tail';
     const linkLabel = 'docs';
     const imageLabel = '[Image #1]';
-    const linkStart = text.indexOf(linkLabel);
-    const imageStart = text.indexOf(imageLabel);
-    const initialState = createComposerState({
-      commandTriggers: COMMAND_TRIGGERS,
-      text,
-      slashCommands: SLASH_COMMANDS,
-      mentionCandidates: MENTION_CANDIDATES,
+    const { user, prompt, submissions } = renderRichInput({
+      initialText: 'open docstail',
     });
 
-    const { user, prompt, submissions } = renderRichInput({
-      initialState: {
-        ...initialState,
-        elements: [
-          {
-            id: 'link-docs',
-            kind: 'link',
-            label: linkLabel,
-            range: { start: linkStart, end: linkStart + linkLabel.length },
-            detail: 'https://example.test/docs',
-          },
-          {
-            id: 'image-1',
-            kind: 'image',
-            label: imageLabel,
-            range: { start: imageStart, end: imageStart + imageLabel.length },
-            detail: LOCAL_IMAGE_PATH,
-          },
-        ],
-        localImages: [
-          {
-            id: 'image-1',
-            placeholder: imageLabel,
-            path: LOCAL_IMAGE_PATH,
-          },
-        ],
-      },
+    selectText(prompt, linkLabel);
+    fireEvent.paste(prompt, {
+      clipboardData: clipboardText('https://example.test/docs'),
     });
+    placeCursorAfterText(prompt, 'docs');
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
+    );
 
     await waitFor(() => {
       expect(
@@ -3626,9 +3636,7 @@ describe('Composer atomic token deletion', () => {
     expect(submissions()).not.toHaveTextContent(
       'link:docs:https://example.test/docs',
     );
-    expect(submissions()).not.toHaveTextContent(
-      `local_image:${LOCAL_IMAGE_PATH}`,
-    );
+    expect(submissions()).not.toHaveTextContent('image:chart.png');
     expect(submissions()).not.toHaveTextContent(`image:${imageLabel}`);
     expect(submissions()).not.toHaveTextContent('rich_link:');
   });
@@ -3636,59 +3644,31 @@ describe('Composer atomic token deletion', () => {
   it('deletes a selection spanning image and paste atoms and prunes both payloads', async () => {
     const imageLabel = '[Image #1]';
     const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
-    const text = `keep ${imageLabel}${placeholder} tail`;
-    const imageStart = text.indexOf(imageLabel);
-    const pasteStart = text.indexOf(placeholder);
-    const initialState = createComposerState({
-      commandTriggers: COMMAND_TRIGGERS,
-      text,
-      slashCommands: SLASH_COMMANDS,
-      mentionCandidates: MENTION_CANDIDATES,
+    const { user, prompt, submissions } = renderRichInput({
+      initialText: 'keep ',
     });
 
-    const { user, prompt, submissions } = renderRichInput({
-      initialState: {
-        ...initialState,
-        elements: [
-          {
-            id: 'image-1',
-            kind: 'image',
-            label: imageLabel,
-            range: { start: imageStart, end: imageStart + imageLabel.length },
-            detail: LOCAL_IMAGE_PATH,
-          },
-          {
-            id: 'paste-1',
-            kind: 'paste',
-            label: placeholder,
-            range: {
-              start: pasteStart,
-              end: pasteStart + placeholder.length,
-            },
-            detail: `${Array.from(LARGE_PASTE).length} chars`,
-          },
-        ],
-        localImages: [
-          {
-            id: 'image-1',
-            placeholder: imageLabel,
-            path: LOCAL_IMAGE_PATH,
-          },
-        ],
-        pendingPastes: [
-          {
-            id: 'paste-1',
-            placeholder,
-            content: LARGE_PASTE,
-          },
-        ],
-      },
-    });
+    placeCursorAfterText(prompt, 'keep ');
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
+    );
+    await user.click(prompt);
+    fireEditorKeyDown(prompt, { key: 'e', code: 'KeyE', ctrlKey: true });
+    await user.click(
+      screen.getByRole('button', { name: /insert large paste/i }),
+    );
+    await user.click(prompt);
+    fireEditorKeyDown(prompt, { key: 'e', code: 'KeyE', ctrlKey: true });
+    await user.keyboard('tail');
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('region', { name: /rich composer snapshot/i }),
-      ).toHaveTextContent(`Draft: ${text}`);
+      const snapshot = screen.getByRole('region', {
+        name: /rich composer snapshot/i,
+      });
+      expect(snapshot).toHaveTextContent(imageLabel);
+      expect(snapshot).toHaveTextContent(placeholder);
+      expect(snapshot).toHaveTextContent('tail');
     });
 
     selectTextRange(prompt, imageLabel, placeholder);
@@ -3703,9 +3683,7 @@ describe('Composer atomic token deletion', () => {
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
 
     expect(submissions()).toHaveTextContent('Text: keep tail');
-    expect(submissions()).not.toHaveTextContent(
-      `local_image:${LOCAL_IMAGE_PATH}`,
-    );
+    expect(submissions()).not.toHaveTextContent('image:chart.png');
     expect(submissions()).not.toHaveTextContent('Expanded: -- batch 1');
   });
 
@@ -3809,7 +3787,6 @@ describe('Composer atomic token deletion', () => {
       expect(submissions()).toHaveTextContent('Text: hello /pan now');
     });
   });
-
 });
 
 describe('Composer remote image behavior', () => {
@@ -3918,59 +3895,180 @@ describe('Composer remote image behavior', () => {
     });
   });
 
-  it('renumbers local image atoms after a selected remote image is deleted', async () => {
-    const placeholder = '[Image #2]';
-    const initialState = createComposerState({
-      commandTriggers: COMMAND_TRIGGERS,
-      text: placeholder,
-      slashCommands: SLASH_COMMANDS,
-      mentionCandidates: MENTION_CANDIDATES,
-      remoteImageUrls: [REMOTE_IMAGE_URL],
-    });
-    const imageElement = {
-      id: `image:0:${placeholder}`,
-      kind: 'image' as const,
-      label: placeholder,
-      range: { start: 0, end: placeholder.length },
-      detail: LOCAL_IMAGE_PATH,
-    };
-    const { prompt, submissions } = renderRichInput({
-      initialState: {
-        ...initialState,
-        elements: [imageElement],
-        localImages: [
-          {
-            id: imageElement.id,
-            placeholder,
-            path: LOCAL_IMAGE_PATH,
-          },
-        ],
-      },
-    });
+  it('renumbers image attachments when a remote image is added', async () => {
+    const { user, prompt, submissions } = renderRichInput();
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('region', { name: /rich composer snapshot/i }),
-      ).toHaveTextContent('Draft: [Image #2]');
-    });
-
-    placeCursorAtStart(prompt);
-    fireEditorKeyDown(prompt, { key: 'ArrowUp', code: 'ArrowUp' });
-    fireEditorKeyDown(prompt, { key: 'Delete', code: 'Delete' });
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'chart.png', { type: 'image/png' }),
+    );
 
     await waitFor(() => {
       expect(
         screen.getByRole('region', { name: /rich composer snapshot/i }),
       ).toHaveTextContent('Draft: [Image #1]');
     });
-    expect(screen.queryByText(REMOTE_IMAGE_URL)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /add remote image/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #2]');
+    });
+    expect(screen.getByText(REMOTE_IMAGE_URL)).toBeInTheDocument();
 
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
 
-    expect(submissions()).toHaveTextContent(`local_image:${LOCAL_IMAGE_PATH}`);
-    expect(submissions()).not.toHaveTextContent(
-      `remote_image:${REMOTE_IMAGE_URL}`,
+    expect(submissions()).toHaveTextContent('image:chart.png:5');
+    expect(submissions()).toHaveTextContent(`remote_image:${REMOTE_IMAGE_URL}`);
+  });
+});
+
+describe('Composer image attachments', () => {
+  it('attaches images chosen from the file input and submits their bytes', async () => {
+    const { user, prompt, submissions } = renderRichInput();
+    const input = screen.getByLabelText<HTMLInputElement>('Attach image files');
+    const openFileDialog = vi.spyOn(input, 'click');
+
+    try {
+      await user.click(
+        screen.getByRole('button', { name: /browse image files/i }),
+      );
+      expect(openFileDialog).toHaveBeenCalledOnce();
+    } finally {
+      openFileDialog.mockRestore();
+    }
+
+    await user.upload(input, [
+      new File(['first'], 'first.png', { type: 'image/png' }),
+      new File(['second!'], 'second.jpg', { type: 'image/jpeg' }),
+    ]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #1] [Image #2]');
+    });
+    const strip = await screen.findByRole('list', { name: /attached images/i });
+    expect(
+      await within(strip).findByRole('img', { name: '[Image #1]' }),
+    ).toHaveAttribute('title', 'first.png');
+    expect(
+      within(strip).getByRole('img', { name: '[Image #2]' }),
+    ).toHaveAttribute('title', 'second.jpg');
+    expect(input.value).toBe('');
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent('image:first.png:5');
+    expect(submissions()).toHaveTextContent('image:second.jpg:7');
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rejects a non-image file from the file input with an inline error', async () => {
+    renderRichInput();
+    const user = userEvent.setup({ applyAccept: false });
+
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['a,b'], 'report.csv', { type: 'text/csv' }),
     );
+
+    expect(
+      await screen.findByText('Only image files can be attached: report.csv'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: /rich composer snapshot/i }),
+    ).not.toHaveTextContent('[Image #1]');
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('removes an attached image from the thumbnail strip and renumbers the rest', async () => {
+    const { user, prompt, submissions } = renderRichInput();
+
+    await user.upload(screen.getByLabelText('Attach image files'), [
+      new File(['first'], 'first.png', { type: 'image/png' }),
+      new File(['second!'], 'second.png', { type: 'image/png' }),
+    ]);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #1] [Image #2]');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Remove [Image #1]' }));
+
+    await waitFor(() => {
+      const snapshot = screen.getByRole('region', {
+        name: /rich composer snapshot/i,
+      });
+      expect(snapshot).toHaveTextContent('Draft: [Image #1]');
+      expect(snapshot).not.toHaveTextContent('[Image #2]');
+    });
+    expect(
+      await screen.findByRole('img', { name: '[Image #1]' }),
+    ).toHaveAttribute('title', 'second.png');
+    expect(
+      screen.queryByRole('button', { name: 'Remove [Image #2]' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent('image:second.png:7');
+    expect(submissions()).not.toHaveTextContent('first.png');
+  });
+
+  it('restores attached image bytes when the send is rejected', async () => {
+    const { promise, reject } = Promise.withResolvers<never>();
+    let sends = 0;
+    const { user, prompt, submissions } = renderRichInput({
+      send: () => {
+        sends += 1;
+        return sends === 1 ? promise : Promise.resolve();
+      },
+    });
+
+    await user.upload(
+      screen.getByLabelText('Attach image files'),
+      new File(['bytes'], 'retry.png', { type: 'image/png' }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #1]');
+    });
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent('image:retry.png:5');
+    expect(
+      screen.getByRole('region', { name: /rich composer snapshot/i }),
+    ).not.toHaveTextContent('[Image #1]');
+    expect(
+      screen.queryByRole('list', { name: /attached images/i }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => reject(new Error('offline')));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #1]');
+    });
+    expect(
+      await screen.findByRole('img', { name: '[Image #1]' }),
+    ).toHaveAttribute('title', 'retry.png');
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('image:retry.png:5')).toHaveLength(2);
+    });
   });
 });
 

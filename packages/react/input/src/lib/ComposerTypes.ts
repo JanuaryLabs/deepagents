@@ -39,12 +39,6 @@ export type ComposerItemBinding = {
   persistsAs?: string;
 };
 
-export type ComposerLocalImage = {
-  id: string;
-  placeholder: string;
-  path: string;
-};
-
 export type ComposerPendingPaste = {
   id: string;
   placeholder: string;
@@ -60,7 +54,6 @@ export type ComposerInitialDraft = {
   text?: string;
   elements?: ComposerTextElement[];
   mentionBindings?: ComposerItemBinding[];
-  localImages?: ComposerLocalImage[];
   remoteImages?: ComposerRemoteImage[];
   remoteImageUrls?: string[];
   pendingPastes?: ComposerPendingPaste[];
@@ -68,7 +61,6 @@ export type ComposerInitialDraft = {
 
 export type ComposerDraftSource = {
   persistedPrompt: string;
-  localImages: ComposerLocalImage[];
   remoteImages: ComposerRemoteImage[];
   pendingPastes: ComposerPendingPaste[];
 };
@@ -78,7 +70,10 @@ export type ComposerState = {
   cursor: number;
   elements: ComposerTextElement[];
   mentionBindings: ComposerItemBinding[];
-  localImages: ComposerLocalImage[];
+  imageAttachments: Array<{
+    id: string;
+    placeholder: string;
+  }>;
   remoteImages: ComposerRemoteImage[];
   pendingPastes: ComposerPendingPaste[];
   selectedRemoteImageId: string | null;
@@ -123,7 +118,11 @@ export type ComposerSuggestion = ComposerItemEntry;
 
 export type ComposerSubmissionItem =
   | { type: 'text'; text: string; textElements: ComposerTextElement[] }
-  | { type: 'local_image'; path: string; placeholder: string }
+  | {
+      type: 'image';
+      placeholder: string;
+      file: File;
+    }
   | { type: 'remote_image'; url: string }
   | { type: 'link'; text: string; href: string }
   | {

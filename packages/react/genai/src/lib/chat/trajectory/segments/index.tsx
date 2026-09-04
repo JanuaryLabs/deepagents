@@ -25,7 +25,7 @@ import {
 } from '../../citations.ts';
 import {
   AssistantTextPart,
-  FilePart,
+  MessageAttachmentPart,
   SLIDE_UP_ANIMATED,
   ToolPartContent,
   useShowDebug,
@@ -76,7 +76,13 @@ function SegmentFile({
 }) {
   const { part } = segment;
   if (part.type !== 'file') return null;
-  return <FilePart filename={part.filename} mediaType={part.mediaType} />;
+  return (
+    <MessageAttachmentPart
+      filename={part.filename}
+      mediaType={part.mediaType}
+      url={part.url}
+    />
+  );
 }
 
 function SegmentSource({
@@ -183,10 +189,7 @@ function SegmentTool({
   const { toolEntry } = resolveToolEntry(segment.part, agent.registry);
   const { part: toolPart } = segment;
   if (!isStaticToolUIPart(toolPart)) return null;
-  const activeClientInput = isActiveClientInputTool(
-    toolEntry,
-    toolPart.state,
-  );
+  const activeClientInput = isActiveClientInputTool(toolEntry, toolPart.state);
   const aborted = !activeClientInput && isToolAborted(toolPart, status);
   const baseLabel = toolEntry?.label?.(toolPart);
   const label = aborted

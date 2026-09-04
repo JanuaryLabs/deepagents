@@ -1,8 +1,10 @@
-import { Plus } from 'lucide-react';
+import { ImagePlus, Plus } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
 import {
   Composer,
+  type ComposerAttachImageFilesProps,
+  type ComposerAttachedImagesProps,
   type ComposerContentProps,
   type ComposerEditorProps,
   type ComposerRootProps,
@@ -61,9 +63,28 @@ function ChatComposerEditor({ className, ...props }: ComposerEditorProps) {
   );
 }
 
+function ChatComposerAttachedImages({
+  className,
+  ...props
+}: ComposerAttachedImagesProps) {
+  return (
+    <Composer.AttachedImages className={cn('pb-1.5', className)} {...props} />
+  );
+}
+
 function ChatComposerToolbar({ className, ...props }: ComposerToolbarProps) {
   return (
     <Composer.Toolbar className={cn('p-1.5 pt-0', className)} {...props} />
+  );
+}
+
+function ChatComposerAttachImage(props: ComposerAttachImageFilesProps) {
+  return (
+    <Composer.AttachImageFiles
+      aria-label="Attach image"
+      render={<ChatActionButton icon={<ImagePlus className="size-4" />} />}
+      {...props}
+    />
   );
 }
 
@@ -89,8 +110,10 @@ export const ChatComposer = {
   Root: ChatComposerRoot,
   Popup: Composer.Popup,
   Content: ChatComposerContent,
+  AttachedImages: ChatComposerAttachedImages,
   Editor: ChatComposerEditor,
   Error: Composer.Error,
   Toolbar: ChatComposerToolbar,
   CommandButton: ChatComposerCommandButton,
+  AttachImage: ChatComposerAttachImage,
 };

@@ -15,7 +15,7 @@ import {
 import { useAgent } from '../../agent-context.tsx';
 import {
   AssistantTextPart,
-  FilePart,
+  MessageAttachmentPart,
   ToolPartContent,
   useShowDebug,
 } from '../../message-parts.tsx';
@@ -133,7 +133,13 @@ function AssistantPart({ part }: { part: UIMessage['parts'][number] }) {
   }
 
   if (part.type === 'file') {
-    return <FilePart filename={part.filename} mediaType={part.mediaType} />;
+    return (
+      <MessageAttachmentPart
+        filename={part.filename}
+        mediaType={part.mediaType}
+        url={part.url}
+      />
+    );
   }
 
   return null;

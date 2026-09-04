@@ -7,6 +7,7 @@ import {
 import { type Context, Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { basePath } from 'hono/route';
+import { streamSSE } from 'hono/streaming';
 import { validate as validateUuid } from 'uuid';
 import z from 'zod';
 
@@ -23,10 +24,28 @@ import { validate } from './validator.ts';
 
 export type HttpEnv = { Variables: { userId: string } };
 
+export type OwnerEvent =
+  | { readonly type: 'ready' }
+  | {
+      readonly type: 'change';
+      readonly resource: string;
+      readonly id: string;
+      readonly [key: string]: unknown;
+    };
+
+type OwnerEventNotification =
+  Exclude<OwnerEvent, { type: 'ready' }> | { readonly type: 'reset' };
+
+export type OwnerEventSource = (
+  userId: string,
+  signal: AbortSignal,
+) => Promise<AsyncIterable<OwnerEventNotification>>;
+
 export interface HttpContribution {
   readonly capabilities: Readonly<Record<string, { readonly path: string }>>;
   readonly publicRoutes?: Hono<HttpEnv>;
   readonly authenticatedRoutes?: Hono<HttpEnv>;
+  readonly events?: OwnerEventSource;
 }
 
 export interface HttpProjection {
@@ -50,6 +69,7 @@ export function projectHttp<Instance extends object>(
 const SESSION_ROUTE_PATH = '/session/:sessionId';
 const SESSION_CANCEL_ROUTE_PATH = '/session/:sessionId/cancel';
 const SESSION_STREAM_ROUTE_PATH = '/session/:sessionId/stream';
+const EVENTS_ROUTE_PATH = '/events';
 const SESSION_TURN_ROUTE_PATH = '/session/:sessionId/turn/:turnId';
 const SESSION_TURN_CANCEL_ROUTE_PATH =
   '/session/:sessionId/turn/:turnId/cancel';
@@ -58,6 +78,11 @@ const INFO_ROUTE_PATH = '/info';
 const HEALTH_ROUTE_PATH = '/health';
 export const ZUKHRUF_SESSION_ID_HEADER = 'x-zukhruf-session-id';
 export const ZUKHRUF_TURN_ID_HEADER = 'x-zukhruf-turn-id';
+
+/** Where the host mounted this API, without a trailing slash; empty at `/`. */
+export function mountPath(context: Context): string {
+  return basePath(context).replace(/\/$/, '');
+}
 
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 const sessionIdSchema = z.string().refine(validateUuid);
@@ -90,6 +115,7 @@ export interface HttpRuntime extends Pick<
   | 'listHistory'
   | 'plugin'
   | 'sessionExists'
+  | 'subscribeConversationStatus'
 > {
   observe(conversation: ConversationId): Pick<
     AgentObservation,
@@ -110,6 +136,7 @@ export function http(
   const capabilities: Record<string, { path: string }> = {
     history: { path: HISTORY_ROUTE_PATH },
     chat: { path: '/session' },
+    events: { path: EVENTS_ROUTE_PATH },
   };
   for (const { capabilities: contributed } of contributions) {
     for (const [name, capability] of Object.entries(contributed)) {
@@ -166,7 +193,7 @@ export function http(
   });
 
   app.get(INFO_ROUTE_PATH, (context) => {
-    const mount = basePath(context).replace(/\/$/, '');
+    const mount = mountPath(context);
     return context.json(
       {
         ...runtime.info,
@@ -342,6 +369,77 @@ export function http(
   app.all(SESSION_CANCEL_ROUTE_PATH, (context) =>
     methodNotAllowed(context, 'POST'),
   );
+
+  const eventSources: OwnerEventSource[] = [
+    async (userId, signal) => {
+      const events = await runtime.subscribeConversationStatus(signal);
+      return {
+        async *[Symbol.asyncIterator]() {
+          for await (const event of events) {
+            if (event.type === 'reset') {
+              yield event;
+            } else if (event.conversation.userId === userId) {
+              yield {
+                type: 'change',
+                resource: 'conversation',
+                id: event.conversation.chatId,
+                status: event.status,
+              } satisfies OwnerEvent;
+            }
+          }
+        },
+      };
+    },
+    ...contributions.flatMap(({ events }) => (events ? [events] : [])),
+  ];
+
+  app.get(EVENTS_ROUTE_PATH, (context) => {
+    const userId = context.get('userId');
+    const abort = new AbortController();
+    const requestSignal = context.req.raw.signal;
+    const abortRequest = () => abort.abort();
+    requestSignal.addEventListener('abort', abortRequest, { once: true });
+    context.header('cache-control', 'no-store');
+    return streamSSE(context, async (stream) => {
+      stream.onAbort(abortRequest);
+      let lastWrite: Promise<unknown> = Promise.resolve();
+      const write = (event: OwnerEvent) => {
+        const next = lastWrite.then(() =>
+          stream.writeSSE({ data: JSON.stringify(event) }),
+        );
+        lastWrite = next.catch(() => {});
+        return next;
+      };
+      const heartbeat = setInterval(() => {
+        const next = lastWrite.then(async () => {
+          await stream.write(': heartbeat\n\n');
+        });
+        lastWrite = next.catch(() => {});
+      }, 15_000);
+      try {
+        const subscriptions = await Promise.all(
+          eventSources.map((subscribe) => subscribe(userId, abort.signal)),
+        );
+        await write({ type: 'ready' });
+        await Promise.all(
+          subscriptions.map(async (events) => {
+            for await (const event of events) {
+              await write(event.type === 'reset' ? { type: 'ready' } : event);
+            }
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          throw error;
+        }
+      } finally {
+        clearInterval(heartbeat);
+        abort.abort();
+        requestSignal.removeEventListener('abort', abortRequest);
+      }
+    });
+  });
+  app.all(EVENTS_ROUTE_PATH, (context) => methodNotAllowed(context, 'GET'));
 
   app.get(
     SESSION_STREAM_ROUTE_PATH,
