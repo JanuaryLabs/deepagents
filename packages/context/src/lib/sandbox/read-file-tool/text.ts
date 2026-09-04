@@ -12,17 +12,21 @@ export const textFileFormat = {
       bytes.byteLength > TEXT_MAX_BYTES
     ) {
       return {
-        error: `Text file exceeds ${formatBytes(TEXT_MAX_BYTES)} limit (got ${formatBytes(bytes.byteLength)}). Use offset/limit to slice.`,
+        type: 'error-text',
+        value: `Text file exceeds ${formatBytes(TEXT_MAX_BYTES)} limit (got ${formatBytes(bytes.byteLength)}). Use offset/limit to slice.`,
       };
     }
 
     const content = readFileContent(bytes, { encoding: 'utf-8' });
-    if (offset === undefined && limit === undefined) return { content };
+    if (offset === undefined && limit === undefined) {
+      return { type: 'text', value: content };
+    }
 
     const start = (offset ?? 1) - 1;
     const end = limit === undefined ? undefined : start + limit;
     return {
-      content: content
+      type: 'text',
+      value: content
         .split(/\r\n|\n|\r/u)
         .slice(start, end)
         .join('\n'),

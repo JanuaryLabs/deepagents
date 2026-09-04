@@ -1,10 +1,8 @@
+import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import type { ToolExecutionOptions } from 'ai';
+import path from 'node:path';
 
-import type {
-  ReadFileMediaType,
-  ReadFileToolInput,
-  ReadFileToolResult,
-} from '../types.ts';
+import type { ReadFileToolInput } from '../types.ts';
 
 export interface FileFormatInput extends ReadFileToolInput {
   bytes: Uint8Array;
@@ -12,7 +10,7 @@ export interface FileFormatInput extends ReadFileToolInput {
 }
 
 export interface FileFormat {
-  read(input: FileFormatInput): ReadFileToolResult | undefined;
+  read(input: FileFormatInput): ToolResultOutput | undefined;
 }
 
 export function formatBytes(bytes: number): string {
@@ -28,17 +26,28 @@ export function attachment(
   }: {
     label: string;
     maxBytes: number;
-    mediaType: ReadFileMediaType;
+    mediaType: string;
   },
-): ReadFileToolResult {
+): ToolResultOutput {
   input.options.abortSignal?.throwIfAborted();
   if (input.bytes.byteLength > maxBytes) {
     return {
-      error: `${label} exceeds ${formatBytes(maxBytes)} limit (got ${formatBytes(input.bytes.byteLength)})`,
+      type: 'error-text',
+      value: `${label} exceeds ${formatBytes(maxBytes)} limit (got ${formatBytes(input.bytes.byteLength)})`,
     };
   }
   return {
-    mediaType,
-    base64: Buffer.from(input.bytes).toString('base64'),
+    type: 'content',
+    value: [
+      {
+        type: 'file',
+        data: {
+          type: 'data',
+          data: Buffer.from(input.bytes).toString('base64'),
+        },
+        mediaType,
+        filename: path.posix.basename(input.path),
+      },
+    ],
   };
 }

@@ -1,4 +1,5 @@
 import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
+import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import { asSchema, generateText, isStepCount } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { InMemoryFs } from 'just-bash';
@@ -16,7 +17,6 @@ import {
   type ReadFileOptions,
   type ReadFileTool,
   type ReadFileToolInput,
-  type ReadFileToolResult,
   type WrappedBashTool,
   createBashTool,
   createVirtualSandbox,
@@ -107,7 +107,7 @@ async function executeReadFile(
   readFile: ReadFileTool,
   input: ReadFileToolInput,
   toolCallId: string,
-): Promise<ReadFileToolResult> {
+): Promise<ToolResultOutput> {
   const execute = readFile.execute;
   assert.ok(execute);
   const result = await execute(input, executionOptions(toolCallId));
@@ -145,7 +145,8 @@ describe('bash toolkit', () => {
         'read-uploaded-dotfile',
       ),
       {
-        content: 'MODE=test',
+        type: 'text',
+        value: 'MODE=test',
       },
     );
     assert.deepStrictEqual(
@@ -154,7 +155,7 @@ describe('bash toolkit', () => {
         { path: 'shared.txt' },
         'read-overridden-file',
       ),
-      { content: 'from inline files' },
+      { type: 'text', value: 'from inline files' },
     );
   });
 
@@ -175,7 +176,7 @@ describe('bash toolkit', () => {
         { path: 'included.txt' },
         'read-included-file',
       ),
-      { content: 'included' },
+      { type: 'text', value: 'included' },
     );
     await assert.rejects(
       executeReadFile(
@@ -252,7 +253,7 @@ describe('bash toolkit', () => {
         { path: result.teeFiles[0].stdoutFile },
         'read-captured-pipeline',
       ),
-      { content: 'first\nsecond\n' },
+      { type: 'text', value: 'first\nsecond\n' },
     );
   });
 
@@ -274,7 +275,7 @@ describe('bash toolkit', () => {
 
     assert.deepStrictEqual(
       await read({ path: 'notes/result.txt' }, executionOptions('read-file')),
-      { content: 'prototype methods work' },
+      { type: 'text', value: 'prototype methods work' },
     );
   });
 
@@ -464,7 +465,18 @@ describe('readFile tool', () => {
       { path: 'pixel.png' },
       'read-png',
     );
-    assert.deepStrictEqual(output, { mediaType: 'image/png', base64 });
+    const expected = {
+      type: 'content',
+      value: [
+        {
+          type: 'file',
+          data: { type: 'data', data: base64 },
+          mediaType: 'image/png',
+          filename: 'pixel.png',
+        },
+      ],
+    } satisfies ToolResultOutput;
+    assert.deepStrictEqual(output, expected);
     assert.deepStrictEqual(generated.steps[0].toolResults[0].output, output);
     const toModelOutput = tools.readFile.toModelOutput;
     assert.ok(toModelOutput);
@@ -474,17 +486,7 @@ describe('readFile tool', () => {
         input: { path: 'pixel.png' },
         output,
       }),
-      {
-        type: 'content',
-        value: [
-          {
-            type: 'file',
-            data: { type: 'data', data: base64 },
-            mediaType: 'image/png',
-            filename: 'pixel.png',
-          },
-        ],
-      },
+      expected,
     );
     const [forwarded] = toolResultOutputs(model.doGenerateCalls[1].prompt);
     assert.ok(forwarded?.type === 'content');
@@ -495,7 +497,7 @@ describe('readFile tool', () => {
     assert.deepStrictEqual(filePart.data, { type: 'data', data: base64 });
   });
 
-  it('returns a text file as content and sends it to the model as json', async () => {
+  it('returns text using the AI SDK model-output contract', async () => {
     const { tools } = await createBashTool({
       sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
       files: { 'notes.txt': 'plain text' },
@@ -507,7 +509,7 @@ describe('readFile tool', () => {
       'read-text',
     );
 
-    assert.deepStrictEqual(output, { content: 'plain text' });
+    assert.deepStrictEqual(output, { type: 'text', value: 'plain text' });
     const toModelOutput = tools.readFile.toModelOutput;
     assert.ok(toModelOutput);
     assert.deepStrictEqual(
@@ -516,7 +518,7 @@ describe('readFile tool', () => {
         input: { path: 'notes.txt' },
         output,
       }),
-      { type: 'json', value: { content: 'plain text' } },
+      output,
     );
   });
 
@@ -532,7 +534,7 @@ describe('readFile tool', () => {
         { path: 'notes.txt', offset: 2, limit: 2 },
         'read-text-range',
       ),
-      { content: 'second\nthird' },
+      { type: 'text', value: 'second\nthird' },
     );
   });
 
@@ -551,10 +553,18 @@ describe('readFile tool', () => {
       'read-pdf',
     );
 
-    assert.deepStrictEqual(output, {
-      mediaType: 'application/pdf',
-      base64: pdf.toString('base64'),
-    });
+    const expected = {
+      type: 'content',
+      value: [
+        {
+          type: 'file',
+          data: { type: 'data', data: pdf.toString('base64') },
+          mediaType: 'application/pdf',
+          filename: 'report.pdf',
+        },
+      ],
+    } satisfies ToolResultOutput;
+    assert.deepStrictEqual(output, expected);
     const toModelOutput = tools.readFile.toModelOutput;
     assert.ok(toModelOutput);
     assert.deepStrictEqual(
@@ -563,17 +573,7 @@ describe('readFile tool', () => {
         input: { path: 'report.pdf' },
         output,
       }),
-      {
-        type: 'content',
-        value: [
-          {
-            type: 'file',
-            data: { type: 'data', data: pdf.toString('base64') },
-            mediaType: 'application/pdf',
-            filename: 'report.pdf',
-          },
-        ],
-      },
+      expected,
     );
   });
 
@@ -606,8 +606,15 @@ describe('readFile tool', () => {
       assert.deepStrictEqual(
         await executeReadFile(tools.readFile, { path }, `read-${path}`),
         {
-          mediaType: mediaTypes[path as keyof typeof mediaTypes],
-          base64: content.toString('base64'),
+          type: 'content',
+          value: [
+            {
+              type: 'file',
+              data: { type: 'data', data: content.toString('base64') },
+              mediaType: mediaTypes[path as keyof typeof mediaTypes],
+              filename: path,
+            },
+          ],
         },
       );
     }
@@ -639,10 +646,18 @@ describe('readFile tool', () => {
         { path },
         `read-${path}`,
       );
-      assert.deepStrictEqual(output, {
-        mediaType,
-        base64: bytes.toString('base64'),
-      });
+      const expected = {
+        type: 'content',
+        value: [
+          {
+            type: 'file',
+            data: { type: 'data', data: bytes.toString('base64') },
+            mediaType,
+            filename: path,
+          },
+        ],
+      } satisfies ToolResultOutput;
+      assert.deepStrictEqual(output, expected);
 
       const toModelOutput = tools.readFile.toModelOutput;
       assert.ok(toModelOutput);
@@ -652,17 +667,7 @@ describe('readFile tool', () => {
           input: { path },
           output,
         }),
-        {
-          type: 'content',
-          value: [
-            {
-              type: 'file',
-              data: { type: 'data', data: bytes.toString('base64') },
-              mediaType,
-              filename: path,
-            },
-          ],
-        },
+        expected,
       );
     }
   });
@@ -682,8 +687,8 @@ describe('readFile tool', () => {
       { path: 'oversized.png' },
       'read-oversized-image',
     );
-    assert.ok('error' in output);
-    assert.match(output.error, /^Image exceeds 5\.00 MB limit/);
+    assert.strictEqual(output.type, 'error-text');
+    assert.match(output.value, /^Image exceeds 5\.00 MB limit/);
     const toModelOutput = tools.readFile.toModelOutput;
     assert.ok(toModelOutput);
     assert.deepStrictEqual(
@@ -692,7 +697,7 @@ describe('readFile tool', () => {
         input: { path: 'oversized.png' },
         output,
       }),
-      { type: 'error-text', value: output.error },
+      output,
     );
   });
 

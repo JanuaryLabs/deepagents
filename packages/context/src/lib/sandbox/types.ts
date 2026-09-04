@@ -1,3 +1,4 @@
+import type { ToolResultOutput } from '@ai-sdk/provider-utils';
 import type { Tool } from 'ai';
 
 export interface CommandResult {
@@ -137,29 +138,6 @@ export interface ReadFileToolInput {
   limit?: number;
 }
 
-export const READ_FILE_MEDIA_TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-] as const;
-
-export type ReadFileMediaType = (typeof READ_FILE_MEDIA_TYPES)[number];
-
-/**
- * Text decodes to `content`. Recognized image, PDF, and OOXML files are carried
- * as base64 so the result survives JSON persistence and replays to the model as
- * a file part. Oversized files return a model-facing `error`.
- */
-export type ReadFileToolResult =
-  | { content: string }
-  | { mediaType: ReadFileMediaType; base64: string }
-  | { error: string };
-
 export interface WriteFileToolInput {
   path: string;
   content: string;
@@ -209,7 +187,7 @@ export interface CreateBashToolOptions {
 }
 
 export type WrappedBashTool = Tool<BashToolInput, BashToolResult>;
-export type ReadFileTool = Tool<ReadFileToolInput, ReadFileToolResult>;
+export type ReadFileTool = Tool<ReadFileToolInput, ToolResultOutput>;
 export type WriteFileTool = Tool<WriteFileToolInput, WriteFileToolResult>;
 
 export interface BashToolkit {

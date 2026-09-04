@@ -1,10 +1,9 @@
 import { extname } from 'node:path';
 
-import type { ReadFileMediaType } from '../types.ts';
 import { type FileFormat, attachment } from './format.ts';
 
 const OFFICE_MAX_BYTES = 50 * 1024 * 1024;
-const mediaTypeByExtension: Partial<Record<string, ReadFileMediaType>> = {
+const mediaTypeByExtension: Record<string, string> = {
   '.docx':
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.pptx':
