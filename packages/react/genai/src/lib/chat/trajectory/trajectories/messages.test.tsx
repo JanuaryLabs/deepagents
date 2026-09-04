@@ -193,32 +193,6 @@ describe('Messages.UserBubble', () => {
     expect(screen.getByText('Summarize data')).toBeInTheDocument();
     expect(screen.queryByText('original text')).not.toBeInTheDocument();
   });
-
-  it('shows file info for file parts', () => {
-    const message: UIMessage = {
-      id: 'user-file',
-      role: 'user',
-      parts: [
-        {
-          type: 'file',
-          filename: 'report.csv',
-          mediaType: 'text/csv',
-          url: '',
-        },
-      ],
-    };
-
-    render(
-      <Messages.Root messages={[message]}>
-        <Messages.List>
-          <Messages.Item message={message} index={0}>
-            <Messages.UserBubble />
-          </Messages.Item>
-        </Messages.List>
-      </Messages.Root>,
-    );
-    expect(screen.getByText(/report\.csv/)).toBeInTheDocument();
-  });
 });
 
 describe('Messages.AssistantContent', () => {

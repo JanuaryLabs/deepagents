@@ -6,9 +6,12 @@ import {
   stripReminders,
 } from '@deepagents/context/browser';
 import { PersistedPromptText } from '@deepagents/react-input/browser';
-import { cn } from '@deepagents/react-shadcn';
+import {
+  AttachmentGroup,
+  AttachmentMedia,
+  cn,
+} from '@deepagents/react-shadcn';
 
-import { MessageAttachmentPart } from '../../message-parts.tsx';
 import { formatUsageBreakdown, parseMetadataUsage } from '../../usage.ts';
 import { uploadReceiptSchema } from '../../zukhruf-chat-transport.ts';
 import { useMessageItem } from '../messages-context.ts';
@@ -104,6 +107,27 @@ function UserMessageReminders({
   );
 }
 
+function UserMessageAttachments({ message }: { message: UIMessage }) {
+  const uploads = extractUploads(message);
+  if (uploads.length === 0) return null;
+
+  return (
+    <AttachmentGroup
+      role="list"
+      aria-label="Attached images"
+      className="max-w-full gap-2 py-0"
+    >
+      {uploads.map((upload) => (
+        <div key={upload.path} role="listitem" data-slot="attachment">
+          <AttachmentMedia variant="image" className="size-36 rounded-2xl">
+            <img src={upload.url} alt={upload.name} />
+          </AttachmentMedia>
+        </div>
+      ))}
+    </AttachmentGroup>
+  );
+}
+
 function UserBubbleShell({
   body,
   reminders,
@@ -155,45 +179,23 @@ export function UserMessageContent({
   }
 
   return (
-    <UserBubbleShell
-      reminders={reminders}
-      metadata={message.metadata}
-      body={
-        <>
-          {extractUploads(message).map((upload) => (
-            <MessageAttachmentPart
-              key={upload.path}
-              filename={upload.name}
-              mediaType={upload.mediaType}
-              url={upload.url}
-            />
-          ))}
-          {message.parts.map((part, partIndex) => {
-            if (part.type === 'text') {
-              return (
-                <div
-                  key={`${message.id}-${partIndex}-text`}
-                  className="text-sm whitespace-pre-wrap"
-                >
-                  <PersistedPromptText text={part.text} />
-                </div>
-              );
-            }
-            if (part.type === 'file') {
-              return (
-                <MessageAttachmentPart
-                  key={`${message.id}-${partIndex}-file`}
-                  filename={part.filename}
-                  mediaType={part.mediaType}
-                  url={part.url}
-                />
-              );
-            }
-            return null;
-          })}
-        </>
-      }
-    />
+    <div className="flex w-full min-w-0 flex-col items-end gap-3">
+      <UserMessageAttachments message={message} />
+      <UserBubbleShell
+        reminders={reminders}
+        metadata={message.metadata}
+        body={message.parts.map((part, partIndex) =>
+          part.type === 'text' ? (
+            <div
+              key={`${message.id}-${partIndex}-text`}
+              className="text-sm whitespace-pre-wrap"
+            >
+              <PersistedPromptText text={part.text} />
+            </div>
+          ) : null,
+        )}
+      />
+    </div>
   );
 }
 
