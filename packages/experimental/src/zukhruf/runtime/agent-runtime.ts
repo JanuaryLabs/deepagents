@@ -229,7 +229,7 @@ interface AgentObservationStatus {
 export class AgentObservation {
   readonly engine: ContextEngine;
   readonly #conversation: ConversationId;
-  readonly #store: ContextStore;
+  readonly #directory: AgentDirectory;
   readonly #streams: StreamManager;
   readonly #queue: TurnQueue;
   readonly #status: AgentObservationStatus;
@@ -238,6 +238,7 @@ export class AgentObservation {
   constructor(
     conversation: ConversationId,
     store: ContextStore,
+    directory: AgentDirectory,
     streams: StreamManager,
     queue: TurnQueue,
     status: AgentObservationStatus,
@@ -249,7 +250,7 @@ export class AgentObservation {
       userId: conversation.userId,
     });
     this.#conversation = conversation;
-    this.#store = store;
+    this.#directory = directory;
     this.#streams = streams;
     this.#queue = queue;
     this.#status = status;
@@ -300,27 +301,14 @@ export class AgentObservation {
   }
 
   async #assertOwner(): Promise<void> {
-    const chat = await this.#store.getChat(this.#conversation.chatId);
-    if (chat && chat.userId !== this.#conversation.userId) {
-      throw new Error(
-        `chat "${this.#conversation.chatId}" belongs to user "${chat.userId}", not "${this.#conversation.userId}"`,
-      );
-    }
+    await this.#directory.assertOwnerIfExists(this.#conversation);
   }
 
   async #headStreamId(): Promise<string | undefined> {
     const scheduled = await this.#queue.getCurrentTurn(this.#conversation);
     if (scheduled) return scheduled.streamId;
 
-    const chat = await this.#store.getChat(this.#conversation.chatId);
-    if (!chat) return undefined;
-    if (chat.userId !== this.#conversation.userId) {
-      throw new Error(
-        `chat "${this.#conversation.chatId}" belongs to user "${chat.userId}", not "${this.#conversation.userId}"`,
-      );
-    }
-    const head = await this.engine.headMessage();
-    return head?.name === 'assistant' ? head.id : undefined;
+    return (await this.#directory.load(this.#conversation))?.lastTurnId;
   }
 }
 
@@ -691,6 +679,7 @@ export class AgentRuntime {
     return new AgentObservation(
       conversation,
       this.#store,
+      this.#directory,
       this.#streams,
       this.#queue,
       {

@@ -10,6 +10,7 @@ import {
   simulateReadableStream,
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+import { Hono } from 'hono';
 import { InMemoryFs } from 'just-bash';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtempDisposable, unlink, writeFile } from 'node:fs/promises';
@@ -52,6 +53,7 @@ import {
   defineSandbox,
   defineTool,
 } from '@deepagents/experimental/zukhruf';
+import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import {
   scheduleFiles,
   schedules,
@@ -1580,6 +1582,79 @@ describe('zukhruf runtime — background executor', () => {
       .map((p) => p.text)
       .join('');
     assert.equal(committedText, 'reply:hi');
+  });
+
+  it('reconnects over HTTP after an in-turn reminder splits the assistant response', async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        calls++;
+        const chunks: LanguageModelV4StreamPart[] =
+          calls === 1
+            ? [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'lookup-1',
+                  toolName: 'lookup',
+                  input: '{}',
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'tool-calls', raw: '' },
+                  usage,
+                },
+              ]
+            : [
+                { type: 'text-start', id: 't1' },
+                { type: 'text-delta', id: 't1', delta: 'done' },
+                { type: 'text-end', id: 't1' },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'stop', raw: '' },
+                  usage,
+                },
+              ];
+        return { stream: simulateReadableStream({ chunks }) };
+      },
+    });
+    const agentDeclaration = defineAgent({
+      ...declaration(model, {
+        lookup: defineTool({
+          description: 'Look up a value.',
+          inputSchema: z.object({}),
+          execute: async () => 'found',
+        }),
+      }),
+      instructions: [
+        reminder('REVIEW', {
+          when: once('resume-after-reminder'),
+          target: 'steer',
+        }),
+      ],
+    });
+    await using h = await harness(model, undefined, {
+      declaration: agentDeclaration,
+    });
+    await using worker = await h.runtime.work();
+    void worker;
+    const conversation = { chatId: crypto.randomUUID(), userId: 'user-1' };
+    const result = await h.runtime.enqueue(conversation, turn('look it up'));
+    await collectText(result.stream);
+    assert.equal(calls, 2);
+
+    const app = new Hono<HttpEnv>();
+    app.use('/zukhruf/v1/*', (context, next) => {
+      context.set('userId', conversation.userId);
+      return next();
+    });
+    app.route('/zukhruf/v1', http(h.runtime));
+
+    const response = await app.request(
+      `/zukhruf/v1/session/${conversation.chatId}/stream`,
+    );
+    assert.equal(response.status, 200);
+    assert.ok(response.body);
+    await response.body.cancel();
   });
 
   it('resume() returns null when no turn has started', async () => {
