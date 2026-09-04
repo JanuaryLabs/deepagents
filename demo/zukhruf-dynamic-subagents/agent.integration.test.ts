@@ -26,19 +26,19 @@ test('builds the demo root in code and discovers its file agents through the run
         model: runtime.info.agents[0].model.modelId,
       },
       {
-        name: 'code-architect',
+        name: 'coding-team:code-architect',
         description:
           "Designs one small implementation that fits the repository's existing modules.",
         model: runtime.info.agents[0].model.modelId,
       },
       {
-        name: 'code-explorer',
+        name: 'coding-team:code-explorer',
         description:
           'Traces existing behavior, call sites, conventions, and relevant tests.',
         model: runtime.info.agents[0].model.modelId,
       },
       {
-        name: 'code-reviewer',
+        name: 'coding-team:code-reviewer',
         description:
           'Reviews the current diff for correctness, regressions, and needless complexity.',
         model: runtime.info.agents[0].model.modelId,

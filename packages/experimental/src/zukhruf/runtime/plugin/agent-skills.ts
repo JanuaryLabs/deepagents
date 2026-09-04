@@ -9,7 +9,7 @@ import {
   skills,
 } from '@deepagents/context';
 
-import type { ZukhrufSandbox } from '../agent.ts';
+import type { ZukhrufSandbox } from '../../agent.ts';
 
 export interface AgentSkills {
   available: readonly AvailableSkill[];

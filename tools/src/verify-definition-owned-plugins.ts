@@ -110,7 +110,6 @@ import {
   conversationScheduling,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 import {
   schedules,
   schedulesCapabilities,
@@ -137,7 +136,10 @@ const custom: AgentPluginDefinition<{ value: string }> = {
   capabilities: [hostValue],
   create: (bindings) => ({ value: bindings.get(hostValue) }),
 };
-const files = fileAgents({ directory: new URL('./agents/', import.meta.url) });
+const agentFiles: AgentPluginDefinition = {
+  name: 'consumer-agents',
+  create: () => ({ agents: [new URL('./agents/', import.meta.url)] }),
+};
 const conversation = conversationScheduling();
 const scheduled = schedules({
   queue: 'consumer-schedules',
@@ -149,7 +151,7 @@ const root = defineAgent({
   model: { provider: 'consumer', modelId: 'consumer' } as never,
   sandbox: async () => ({}) as never,
   instructions: [],
-  plugins: [custom, files, conversation, scheduled, traceDefinition],
+  plugins: [custom, agentFiles, conversation, scheduled, traceDefinition],
 });
 const scheduler = new ConsumerWakeScheduler();
 const boss = { getDb: () => ({}) } as never;
@@ -189,7 +191,9 @@ if (
   throw new Error('schedules capability is not advertised');
 }
 if (typeof devtool().fetch !== 'function') throw new Error('devtool is not mountable');
-if (first.plugin(files) === second.plugin(files)) throw new Error('shared file-agents instance');
+if (first.plugin(agentFiles) === second.plugin(agentFiles)) {
+  throw new Error('shared agent-files instance');
+}
 if (first.plugin(conversation) === second.plugin(conversation)) {
   throw new Error('shared conversation-scheduling instance');
 }

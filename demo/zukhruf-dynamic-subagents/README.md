@@ -3,11 +3,12 @@
 A minimal code-defined root agent with Markdown specialists and a Markdown
 feature-development skill.
 
-At startup, Zukhruf's `fileAgents` plugin reads every immediate
-`subagents/*.md` file, validates each filename against its frontmatter,
-sorts the specialists, and extends the code-defined root declaration. Zukhruf
-then supplies independent durable conversations, collaboration tools,
-mailboxes, waiting, and result delivery.
+At startup, the `coding-team` plugin contributes the `subagents/` directory.
+Zukhruf reads every immediate Markdown file, validates each filename against
+its frontmatter, namespaces the specialists as `coding-team:<name>`, and
+extends the code-defined root declaration. Zukhruf then supplies independent
+durable conversations, collaboration tools, mailboxes, waiting, and result
+delivery.
 
 This keeps the split at the intended boundary:
 
@@ -15,7 +16,7 @@ This keeps the split at the intended boundary:
 - `instructions.ts` owns the root's prompt fragments.
 - `sandbox.ts` owns the per-conversation Docker sandbox.
 - Markdown owns specialist identity, description, and instructions.
-- `fileAgents` composes specialists into the declaration graph.
+- The plugin's `agents` field composes specialists into the declaration graph.
 - `AgentRuntime` owns multi-agent execution and durable coordination.
 - `defineSandbox` exposes `skills/feature-development/SKILL.md` through native
   per-conversation skill discovery.
@@ -36,9 +37,6 @@ OPENAI_API_KEY=... node demo/zukhruf-dynamic-subagents/run.ts \
   --workspace /absolute/path/to/repository \
   "Add a health endpoint following the repository's existing conventions"
 ```
-
-The root defaults to `gpt-5.6-luna`; discovered specialists inherit its exact
-model and sandbox. Override the model with `OPENAI_MODEL`.
 
 Each agent receives its own Docker sandbox. The target repository is mounted at
 `/agent/workspace`. The demo skill is mounted read-only at `/agent/skills`,

@@ -176,7 +176,7 @@ leaves changes unstaged unless the user explicitly authorizes staging.
 
 ```sh
 nx run @deepagents/experimental:typecheck
-node --test --no-warnings packages/experimental/src/zukhruf/plugins/http/http.integration.test.ts packages/experimental/src/zukhruf/runtime/agent-runtime-plugin.integration.test.ts
+node --test --no-warnings packages/experimental/src/zukhruf/plugins/http/http.integration.test.ts packages/experimental/src/zukhruf/runtime/plugin/agent-runtime-plugin.integration.test.ts
 nx run @deepagents/devtool-traces:typecheck
 nx run @deepagents/devtool-traces:test
 nx run @deepagents/devtool:typecheck

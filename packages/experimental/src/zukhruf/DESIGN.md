@@ -817,7 +817,7 @@ Node+Postgres bundle; the DO adapter).
   working directory to the runtime and leaves uploads explicit through the existing
   `uploadDirectory` option; proven over docker + virtual).
 - `instructions.ts` — `defineInstructions(...fragments) => fragments`.
-- `runtime/agent-skills.ts` — discovers immediate `skills/<name>/SKILL.md` children from the
+- `runtime/plugin/agent-skills.ts` — discovers immediate `skills/<name>/SKILL.md` children from the
   configured sandbox on the conversation's first executable turn, requires frontmatter names to
   match their directories, and persists the ordered `{name, description, path}` catalog under the
   chat's Zukhruf metadata. Later turns and process restarts reconstruct the same stable

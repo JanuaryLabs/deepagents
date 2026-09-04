@@ -30,7 +30,6 @@ import {
 } from '../multi-agent-config.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
-import { loadPluginSkills } from './agent-skills.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
 import type { ConversationStatusChangeSource } from './conversation-status-change-source.ts';
@@ -39,7 +38,8 @@ import {
   type ConversationStatusEvent,
   ConversationStatusProjector,
 } from './conversation-status.ts';
-import { loadPluginAgents } from './plugin-agents.ts';
+import { loadPluginSkills } from './plugin/agent-skills.ts';
+import { loadPluginAgents } from './plugin/plugin-agents.ts';
 import { StatusPublishingTurnQueue } from './status-publishing-turn-queue.ts';
 
 export interface AgentPluginToolContext extends Readonly<

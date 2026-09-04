@@ -33,13 +33,13 @@ import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
+import type { ApprovalController } from './approval-controller.ts';
 import {
   type AgentSkills,
   type PluginSkills,
   createAgentSkills,
   discoverAgentSkills,
-} from './agent-skills.ts';
-import type { ApprovalController } from './approval-controller.ts';
+} from './plugin/agent-skills.ts';
 
 export interface AgentTurnExecutorOptions {
   store: ContextStore;

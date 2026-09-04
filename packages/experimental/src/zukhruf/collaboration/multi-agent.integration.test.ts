@@ -27,7 +27,6 @@ import {
   createInterAgentCommunication,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
-import { fileAgents } from '@deepagents/experimental/zukhruf/file-agents';
 
 const userTurn = (id: string, text: string) => ({
   message: {
@@ -478,7 +477,7 @@ test('spawn output is the canonical task name without agent_path', async (t) => 
   assert.doesNotMatch(serialized, /agent_path/);
 });
 
-test('file-loaded subagent uses AI SDK code mode collaboration', async (t) => {
+test('plugin-contributed subagent uses AI SDK code mode collaboration', async (t) => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'zukhruf-code-mode-'),
   );
@@ -494,7 +493,7 @@ test('file-loaded subagent uses AI SDK code mode collaboration', async (t) => {
       requests.push({ prompt, tools });
       if (requests.length === 1) {
         return toolCallResponse('code_mode', {
-          js: `return await tools.spawn_agent({ agent_type: 'reviewer', task_name: 'review', message: 'Review the implementation.', fork_turns: 'none' });`,
+          js: `return await tools.spawn_agent({ agent_type: 'engineering:reviewer', task_name: 'review', message: 'Review the implementation.', fork_turns: 'none' });`,
         });
       }
       if (requests.length === 3) {
@@ -511,7 +510,12 @@ test('file-loaded subagent uses AI SDK code mode collaboration', async (t) => {
       model,
       sandbox: async () => ({}) as AgentSandbox,
       instructions: [],
-      plugins: [fileAgents({ directory: directory.path })],
+      plugins: [
+        {
+          name: 'engineering',
+          create: () => ({ agents: [directory.path] }),
+        },
+      ],
     }),
     {
       ...h,
