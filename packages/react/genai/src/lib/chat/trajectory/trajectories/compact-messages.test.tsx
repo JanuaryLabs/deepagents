@@ -146,7 +146,7 @@ describe('CompactTrajectory (recomposed from outside)', () => {
         item.kind === 'group' ? (
           <CompactTrajectory.Group key={item.key} group={item}>
             <CompactTrajectory.GroupTrigger>
-              <CompactTrajectory.GroupTitle title="Queried 2 times · Prod DB">
+              <CompactTrajectory.GroupTitle title="Host-provided activity">
                 <CompactTrajectory.GroupChevron />
               </CompactTrajectory.GroupTitle>
             </CompactTrajectory.GroupTrigger>
@@ -162,7 +162,7 @@ describe('CompactTrajectory (recomposed from outside)', () => {
         </CompactMessages.Item>
       </CompactMessages.Root>,
     );
-    expect(screen.getByText(/Queried 2 times · Prod DB/)).toBeInTheDocument();
+    expect(screen.getByText('Host-provided activity')).toBeInTheDocument();
   });
 
   it('appends the host suffix to the default title while the group is streaming', () => {
