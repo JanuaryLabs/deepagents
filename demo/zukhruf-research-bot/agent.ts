@@ -8,7 +8,6 @@ import sandbox from './sandbox.ts';
 import planner from './subagents/planner/agent.ts';
 
 export const traceTelemetry = fileTelemetry({
-  includeTimestamp: true,
   path: './telemetry.json',
 });
 

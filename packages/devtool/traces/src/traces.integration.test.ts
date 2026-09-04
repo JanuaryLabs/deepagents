@@ -215,7 +215,7 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
   const stores = createStores(resources);
   let declaredStarts = 0;
   let observedStarts = 0;
-  const traceTelemetry = fileTelemetry({ path: telemetry, append: false });
+  const traceTelemetry = fileTelemetry({ path: telemetry });
   const root = createDeclaration(
     [
       traceTelemetry,
@@ -428,7 +428,6 @@ test('fileTelemetry() advertises an empty file, omits absent telemetry, and reje
 
   const emptyTelemetry = fileTelemetry({
     path: join(directory.path, 'empty.jsonl'),
-    append: false,
   });
   const emptyRuntime = new AgentRuntime(createDeclaration([emptyTelemetry]), {
     ...stores,

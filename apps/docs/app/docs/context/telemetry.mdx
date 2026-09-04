@@ -56,15 +56,13 @@ import { createConsoleTelemetry } from '@deepagents/context/telemetry';
 
 const telemetry = createConsoleTelemetry({
   pretty: true,
-  includeTimestamp: true,
 });
 ```
 
-| Option             | Type                              | Default   | Description                                                     |
-| ------------------ | --------------------------------- | --------- | --------------------------------------------------------------- |
-| `pretty`           | `boolean`                         | `true`    | Indent records for interactive console use                      |
-| `includeTimestamp` | `boolean`                         | `true`    | Add an ISO timestamp to each record                             |
-| `logger`           | `Pick<Console, 'log' \| 'error'>` | `console` | Replace the output destination with a console-compatible logger |
+| Option   | Type                              | Default   | Description                                                     |
+| -------- | --------------------------------- | --------- | --------------------------------------------------------------- |
+| `pretty` | `boolean`                         | `true`    | Indent records for interactive console use                      |
+| `logger` | `Pick<Console, 'log' \| 'error'>` | `console` | Replace the output destination with a console-compatible logger |
 
 Normal lifecycle events use `logger.log`. The `onError` event uses
 `logger.error`. Logger failures are swallowed so observability cannot break
@@ -80,24 +78,20 @@ import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 
 const telemetry = createFileTelemetry({
   path: './logs/ai-telemetry.jsonl',
-  append: true,
-  includeTimestamp: true,
   onWriteError(error) {
     console.error('AI telemetry write failed', error);
   },
 });
 ```
 
-| Option                   | Type                                            | Default  | Description                                                                               |
-| ------------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `path`                   | `string`                                        | required | Destination JSONL file                                                                    |
-| `append`                 | `boolean`                                       | `true`   | Append to an existing file; set to `false` to truncate it when the integration is created |
-| `includeTimestamp`       | `boolean`                                       | `true`   | Add an ISO timestamp to each record                                                       |
-| `onWriteError`           | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation                                   |
+| Option         | Type                                            | Default  | Description                                             |
+| -------------- | ----------------------------------------------- | -------- | ------------------------------------------------------- |
+| `path`         | `string`                                        | required | Destination JSONL file                                  |
+| `onWriteError` | `(error: unknown) => void \| PromiseLike<void>` | —        | Observe write failures without failing the AI operation |
 
-Parent directories are created automatically. Writes from the same integration
-instance are serialized, so concurrent AI events cannot interleave and corrupt
-JSONL records.
+Parent directories are created automatically, and existing files are preserved.
+Writes from the same integration instance are serialized, so concurrent AI
+events cannot interleave and corrupt JSONL records.
 
 The returned integration exposes `telemetry.traces.path` as an absolute `file:`
 URL. It writes to that same resolved file, allowing runtimes to advertise the
@@ -105,11 +99,12 @@ trace source without duplicating the configured path.
 
 ## Record format
 
-Both integrations emit the same record shape:
+Both integrations emit the same record shape with the ISO timestamp captured
+when the event is logged:
 
 ```typescript
 interface TelemetryLogRecord {
-  timestamp?: string;
+  timestamp: string;
   event: string;
   data: unknown;
 }

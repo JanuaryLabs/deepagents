@@ -1,5 +1,5 @@
 export interface TelemetryLogRecord {
-  timestamp?: string;
+  timestamp: string;
   event: string;
   data: unknown;
 }
@@ -7,10 +7,9 @@ export interface TelemetryLogRecord {
 export function createTelemetryLogRecord(
   event: string,
   data: unknown,
-  includeTimestamp: boolean,
 ): TelemetryLogRecord {
   return {
-    ...(includeTimestamp ? { timestamp: new Date().toISOString() } : {}),
+    timestamp: new Date().toISOString(),
     event,
     data: normalizeTelemetryValue(data),
   };

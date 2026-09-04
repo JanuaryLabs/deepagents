@@ -1,9 +1,9 @@
 import { type Telemetry, generateText } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import assert from 'node:assert';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
@@ -47,12 +47,12 @@ function createTextModel(): MockLanguageModelV4 {
 }
 
 describe('createFileTelemetry()', () => {
-  it('writes the complete generateText lifecycle as JSONL', async () => {
+  it('writes the timestamped generateText lifecycle as JSONL', async (t) => {
+    const timestamp = '2026-07-12T10:00:00.000Z';
+    t.mock.timers.enable({ apis: ['Date'] });
+    t.mock.timers.setTime(Date.parse(timestamp));
     const path = await temporaryLogPath();
-    const telemetry = createFileTelemetry({
-      path,
-      includeTimestamp: false,
-    });
+    const telemetry = createFileTelemetry({ path });
     assert.deepEqual(telemetry.traces, { path: pathToFileURL(path).href });
 
     await generateText({
@@ -64,7 +64,18 @@ describe('createFileTelemetry()', () => {
     const records = (await readFile(path, 'utf8'))
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line) as { event: string; data: unknown });
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            timestamp: string;
+            event: string;
+            data: unknown;
+          },
+      );
+    assert.deepStrictEqual(
+      [...new Set(records.map((record) => record.timestamp))],
+      [timestamp],
+    );
     assert.deepStrictEqual(
       records.map(({ event }) => event),
       [
@@ -82,10 +93,7 @@ describe('createFileTelemetry()', () => {
 
   it('redacts runtime context when inputs are not recorded', async () => {
     const path = await temporaryLogPath();
-    const telemetry = createFileTelemetry({
-      path,
-      includeTimestamp: false,
-    });
+    const telemetry = createFileTelemetry({ path });
 
     await telemetry.onStart?.({
       recordInputs: false,
@@ -106,10 +114,7 @@ describe('createFileTelemetry()', () => {
 
   it('writes every AI SDK telemetry lifecycle callback', async () => {
     const path = await temporaryLogPath();
-    const telemetry = createFileTelemetry({
-      path,
-      includeTimestamp: false,
-    });
+    const telemetry = createFileTelemetry({ path });
     const callbackNames = [
       'onStart',
       'onStepStart',
@@ -147,15 +152,14 @@ describe('createFileTelemetry()', () => {
     assert.strictEqual(telemetry.onStepFinish, undefined);
   });
 
-  it('serializes concurrent writes and can truncate an existing log', async () => {
+  it('preserves existing records and serializes concurrent writes', async () => {
     const path = await temporaryLogPath();
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, 'old log entry\n');
-    const telemetry = createFileTelemetry({
-      path,
-      append: false,
-      includeTimestamp: false,
+    await generateText({
+      model: createTextModel(),
+      prompt: 'before-restart',
+      telemetry: { integrations: createFileTelemetry({ path }) },
     });
+    const telemetry = createFileTelemetry({ path });
 
     const model = createTextModel();
     await Promise.all(
@@ -169,14 +173,19 @@ describe('createFileTelemetry()', () => {
     );
 
     const lines = (await readFile(path, 'utf8')).trim().split('\n');
-    assert.strictEqual(lines.length, 600);
+    assert.strictEqual(lines.length, 606);
     const starts = lines
       .map(
         (line) =>
           JSON.parse(line) as { event: string; data: Record<string, unknown> },
       )
       .filter(({ event }) => event === 'onStart');
-    assert.strictEqual(starts.length, 100);
+    assert.strictEqual(starts.length, 101);
+    assert.ok(
+      starts.some(({ data }) =>
+        JSON.stringify(data).includes('before-restart'),
+      ),
+    );
     for (let sequence = 0; sequence < 100; sequence++) {
       assert.ok(
         starts.some(({ data }) =>

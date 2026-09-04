@@ -8,7 +8,6 @@ import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
 
 export const traceTelemetry = fileTelemetry({
-  append: false,
   path: join(import.meta.dirname, 'telemetry.jsonl'),
 });
 

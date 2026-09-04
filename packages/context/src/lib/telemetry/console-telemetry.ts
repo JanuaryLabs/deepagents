@@ -7,7 +7,6 @@ import {
 } from './safe-serialize.ts';
 
 export interface ConsoleTelemetryOptions {
-  includeTimestamp?: boolean;
   pretty?: boolean;
   logger?: Pick<Console, 'log' | 'error'>;
 }
@@ -16,10 +15,9 @@ export function createConsoleTelemetry(
   options: ConsoleTelemetryOptions = {},
 ): Telemetry {
   const logger = options.logger ?? console;
-  const includeTimestamp = options.includeTimestamp ?? true;
   const indentation = (options.pretty ?? true) ? 2 : undefined;
   const write = (method: 'log' | 'error', event: string, data: unknown) => {
-    const record = createTelemetryLogRecord(event, data, includeTimestamp);
+    const record = createTelemetryLogRecord(event, data);
     try {
       logger[method](stringifyTelemetryLogRecord(record, indentation));
     } catch {

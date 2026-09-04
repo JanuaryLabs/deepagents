@@ -105,7 +105,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   );
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
   const store = new InMemoryContextStore();
-  const traceTelemetry = fileTelemetry({ path: telemetry, append: true });
+  const traceTelemetry = fileTelemetry({ path: telemetry });
   const runtime = new AgentRuntime(
     defineAgent({
       name: 'devtool-test',

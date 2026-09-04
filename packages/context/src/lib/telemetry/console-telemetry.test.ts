@@ -20,11 +20,13 @@ interface CapturedTelemetryRecord {
 }
 
 describe('createConsoleTelemetry()', () => {
-  it('logs the complete generateText lifecycle with inputs and outputs', async () => {
+  it('logs the timestamped generateText lifecycle with inputs and outputs', async (t) => {
+    const timestamp = '2026-07-12T10:00:00.000Z';
+    t.mock.timers.enable({ apis: ['Date'] });
+    t.mock.timers.setTime(Date.parse(timestamp));
     const stdout: string[] = [];
     const stderr: string[] = [];
     const telemetry = createConsoleTelemetry({
-      includeTimestamp: false,
       pretty: false,
       logger: {
         log: (value) => stdout.push(String(value)),
@@ -49,7 +51,16 @@ describe('createConsoleTelemetry()', () => {
     });
 
     const records = stdout.map(
-      (line) => JSON.parse(line) as { event: string; data: unknown },
+      (line) =>
+        JSON.parse(line) as {
+          timestamp: string;
+          event: string;
+          data: unknown;
+        },
+    );
+    assert.deepStrictEqual(
+      [...new Set(records.map((record) => record.timestamp))],
+      [timestamp],
     );
     assert.deepStrictEqual(
       records.map(({ event }) => event),
@@ -70,7 +81,6 @@ describe('createConsoleTelemetry()', () => {
   it('logs tool execution inputs and outputs', async () => {
     const output: string[] = [];
     const telemetry = createConsoleTelemetry({
-      includeTimestamp: false,
       pretty: false,
       logger: {
         log: (value) => output.push(String(value)),
@@ -131,7 +141,6 @@ describe('createConsoleTelemetry()', () => {
     const capture = async (recordInputs: boolean, recordOutputs: boolean) => {
       const output: string[] = [];
       const telemetry = createConsoleTelemetry({
-        includeTimestamp: false,
         pretty: false,
         logger: {
           log: (value) => output.push(String(value)),
@@ -206,7 +215,6 @@ describe('createConsoleTelemetry()', () => {
   it('redacts embedding and structured-object payloads without fabricating fields', async () => {
     const output: string[] = [];
     const telemetry = createConsoleTelemetry({
-      includeTimestamp: false,
       pretty: false,
       logger: {
         log: (value) => output.push(String(value)),
@@ -290,7 +298,6 @@ describe('createConsoleTelemetry()', () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const telemetry = createConsoleTelemetry({
-      includeTimestamp: false,
       pretty: false,
       logger: {
         log: (value) => stdout.push(String(value)),
@@ -344,7 +351,6 @@ describe('createConsoleTelemetry()', () => {
   it('preserves own __proto__ fields without prototype pollution', async () => {
     const errors: string[] = [];
     const telemetry = createConsoleTelemetry({
-      includeTimestamp: false,
       pretty: false,
       logger: {
         log: () => {},
@@ -371,7 +377,6 @@ describe('createConsoleTelemetry()', () => {
     const output: string[] = [];
     const errors: string[] = [];
     const telemetry = createConsoleTelemetry({
-      includeTimestamp: false,
       pretty: false,
       logger: {
         log: (value) => output.push(String(value)),
@@ -398,8 +403,7 @@ describe('createConsoleTelemetry()', () => {
 
     for (const name of callbackNames) {
       const callback = telemetry[name] as
-        | ((event: unknown) => void | PromiseLike<void>)
-        | undefined;
+        ((event: unknown) => void | PromiseLike<void>) | undefined;
       assert.ok(callback, `${name} should be implemented`);
       await callback({ marker: name });
     }

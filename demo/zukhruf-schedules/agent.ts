@@ -14,7 +14,6 @@ export const scheduled = schedules({
   workerOptions: { pollingIntervalSeconds: 0.5 },
 });
 export const traceTelemetry = fileTelemetry({
-  append: false,
   path: join(import.meta.dirname, 'telemetry.jsonl'),
 });
 export default defineAgent({
