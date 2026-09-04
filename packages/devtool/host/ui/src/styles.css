@@ -137,6 +137,110 @@
   }
 }
 
+/* Keep Streamdown list markers aligned with multiline and nested content. */
+[data-streamdown="list-item"] > p {
+  display: inline;
+}
+
+[data-streamdown="list-item"]
+  > :is(
+    [data-streamdown="ordered-list"],
+    [data-streamdown="unordered-list"]
+  ):only-child,
+[data-streamdown="list-item"]
+  > :is(
+    [data-streamdown="ordered-list"],
+    [data-streamdown="unordered-list"]
+  ):only-child
+  > [data-streamdown="list-item"] {
+  display: inline;
+}
+
+[data-streamdown="unordered-list"],
+[data-streamdown="ordered-list"] {
+  list-style-position: outside;
+  padding-left: 1.5rem;
+}
+
+[data-streamdown="code-block-header"] {
+  padding: 0.5rem !important;
+}
+
+[data-streamdown="code-block-body"] {
+  padding: 0.5rem !important;
+  font-size: 0.75rem !important;
+}
+
+/* Opt-in long-form Markdown: <Response mode="static" className="markdown-document" /> */
+.markdown-document {
+  font-family: var(--font-heading);
+  font-size: 0.875rem;
+  line-height: 1.75;
+  color: var(--foreground);
+}
+
+.markdown-document [data-streamdown="heading-1"] {
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-document [data-streamdown="heading-2"] {
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-document [data-streamdown="heading-3"] {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.markdown-document [data-streamdown="heading-4"],
+.markdown-document [data-streamdown="heading-5"],
+.markdown-document [data-streamdown="heading-6"] {
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.markdown-document [data-streamdown="strong"] {
+  font-weight: 600;
+}
+
+.markdown-document [data-streamdown="blockquote"] {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding-left: 1.25rem;
+}
+
+.markdown-document [data-streamdown="ordered-list"],
+.markdown-document [data-streamdown="unordered-list"] {
+  padding-left: 0.5rem;
+}
+
+.markdown-document [data-streamdown="list-item"] {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.markdown-document [data-streamdown="inline-code"] {
+  font-size: 0.8125rem;
+}
+
+.markdown-document [data-streamdown="table-wrapper"] {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
 * {
   box-sizing: border-box;
 }

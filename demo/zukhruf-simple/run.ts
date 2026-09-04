@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
-  InMemoryContextStore,
   PollingChangeSource,
+  SqliteContextStore,
   SqliteStreamStore,
   StreamManager,
 } from '@deepagents/context';
@@ -42,7 +42,7 @@ const streamStore = resources.adopt(
 );
 const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
 const runtime = new AgentRuntime(declaration, {
-  store: new InMemoryContextStore(),
+  store: new SqliteContextStore(join(__dirname, 'simple.context.sqlite')),
   streams: new StreamManager({
     store: streamStore,
     changeSource: new PollingChangeSource({ reads: streamStore }),

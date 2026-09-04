@@ -14,8 +14,8 @@ import {
   AgentProvider,
   ChatBot,
   ChatComposer,
+  CompactMessages,
   MessageQueue,
-  Messages,
   PendingToolInput,
   SubmitButton,
   ZukhrufChatTransport,
@@ -170,7 +170,7 @@ function ChatSession({
       registry={TOOL_REGISTRY}
       transport={transport}
     >
-      <ChatBot className="max-w-5xl">
+      <ChatBot className="**:data-[slot='content']:max-w-3xl">
         <AgentHeader.Root className="px-6">
           <AgentHeader.Hero>How can I help?</AgentHeader.Hero>
         </AgentHeader.Root>
@@ -185,26 +185,30 @@ function ChatMessages() {
   const { error, messages, regenerate, status } = useAgentMessages();
   if (messages.length === 0 && !error) return null;
   return (
-    <Messages.Root
-      className="mx-auto mb-4 min-h-0 w-full max-w-3xl flex-1 px-6"
+    <CompactMessages.Root
+      className="mb-8 min-h-0 flex-1 px-6"
       messages={messages}
       elements={INTERACTIVE_ELEMENTS}
       status={status}
     >
-      <Messages.List>
+      <CompactMessages.List>
         {messages.map((message, index) => (
-          <Messages.Item key={message.id} message={message} index={index}>
+          <CompactMessages.Item
+            key={message.id}
+            message={message}
+            index={index}
+          >
             {message.role === 'user' ? (
-              <Messages.UserBubble />
+              <CompactMessages.UserBubble />
             ) : (
-              <Messages.AssistantContent />
+              <CompactMessages.AssistantContent />
             )}
-          </Messages.Item>
+          </CompactMessages.Item>
         ))}
-      </Messages.List>
-      <Messages.Error error={error} onRetry={regenerate} />
-      <Messages.Thinking />
-    </Messages.Root>
+      </CompactMessages.List>
+      <CompactMessages.Error error={error} onRetry={regenerate} />
+      <CompactMessages.Thinking />
+    </CompactMessages.Root>
   );
 }
 
@@ -216,7 +220,7 @@ function ChatInput() {
   return (
     <div
       className={cn(
-        'mx-auto w-full max-w-3xl px-6 pb-6',
+        'w-full px-6 pb-6',
         hasSubmitted && 'bg-background sticky bottom-0 mt-auto pt-2',
       )}
     >
