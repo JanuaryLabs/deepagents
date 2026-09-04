@@ -30,11 +30,12 @@ results held by the root.
 
 ## Files
 
-- `agent.ts`, `instructions.ts`, and `sandbox.ts` form the manager declaration.
+- `agent.ts`, `instructions.ts`, and `sandbox.ts` form the manager declaration;
+  `agent.ts` also installs the run's telemetry plugin.
 - `subagents/participant/` owns the shared parameterized participant
   declaration, instructions, and read-only sandbox.
 - `run.ts` owns runtime initialization and the executable scenario.
-- `environment.ts` and `telemetry.ts` hold run-local paths and telemetry.
+- `environment.ts` holds run-local paths.
 - `channels/`, `connections/`, `schedules/`, `skills/`, and `tools/` are
   reserved declaration slots.
 

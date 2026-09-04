@@ -206,14 +206,13 @@ function createDeclaration(
   });
 }
 
-test('fileTelemetry() composes integrations and serves owner-scoped trace reads from one real AgentRuntime turn', async () => {
+test('fileTelemetry() composes plugin integrations with agent policy and serves owner-scoped trace reads from one real AgentRuntime turn', async () => {
   await using directory = await mkdtempDisposable(
     join(tmpdir(), 'deepagents-traces-'),
   );
   const telemetry = join(directory.path, 'telemetry.jsonl');
   await using resources = new AsyncDisposableStack();
   const stores = createStores(resources);
-  let declaredStarts = 0;
   let observedStarts = 0;
   const traceTelemetry = fileTelemetry({ path: telemetry });
   const root = createDeclaration(
@@ -234,11 +233,6 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
       isEnabled: true,
       recordInputs: false,
       recordOutputs: true,
-      integrations: {
-        onStart: () => {
-          declaredStarts += 1;
-        },
-      },
     },
     {
       model: createTraceModel(),
@@ -270,7 +264,6 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
     (await runtime.observe(conversation).status(turn.id))?.status,
     'completed',
   );
-  assert.equal(declaredStarts, 1);
   assert.equal(observedStarts, 1);
   const records = (await readFile(telemetry, 'utf8'))
     .trim()
@@ -361,7 +354,6 @@ test('fileTelemetry() composes integrations and serves owner-scoped trace reads 
     (await runtime.observe(conversation).status(failedTurn.id))?.status,
     'failed',
   );
-  assert.equal(declaredStarts, 2);
   assert.equal(observedStarts, 2);
   const failedTraces = (await (
     await app.request(listUrl, asUser('user-1'))

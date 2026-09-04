@@ -353,8 +353,8 @@ implementing, but the behavior is fixed:
 
 - [x] Keep `devtool()` as an embedded runtime plugin and remove the standalone
       attachment client.
-- [x] Keep telemetry integrations in agent declarations; do not add a runtime
-      observability owner or narrow the declaration telemetry type.
+- [x] Historical Phase 5 kept telemetry integrations in agent declarations;
+      Phase 7 superseded this with definition-owned telemetry plugins.
 - [x] Keep trace discovery and `traces: { path: "file:///..." }` projection in
       the devtool plugin's own `/zukhruf/v1/info` route.
 - [x] Select the devtool adapter from the URI scheme and keep file access in

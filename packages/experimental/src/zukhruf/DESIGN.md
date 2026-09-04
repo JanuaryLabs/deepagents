@@ -765,7 +765,7 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   and adapt its installed instance into services, interceptors, and streams. Core does not derive
   REST or RPC semantics from arbitrary TypeScript methods.
 - Each plugin may independently contribute one AI SDK telemetry integration per turn through
-  `telemetry(context)`.
+  `telemetry(context)`; agent declarations configure policy, not integrations.
 
 ## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
 

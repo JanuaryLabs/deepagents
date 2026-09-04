@@ -1,11 +1,13 @@
 import { openai } from '@ai-sdk/openai';
+import { join } from 'node:path';
 
+import { fileTelemetry } from '@deepagents/devtool-traces';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 
+import { groupChatHostDirectory } from './environment.ts';
 import instructions from './instructions.ts';
 import { managerSandbox } from './sandbox.ts';
 import { participant } from './subagents/participant/agent.ts';
-import { telemetry } from './telemetry.ts';
 
 const community = participant(
   'community',
@@ -24,7 +26,11 @@ export default defineAgent({
   name: 'group-chat-manager',
   model: openai('gpt-5.6-terra'),
   sandbox: managerSandbox,
-  telemetry: telemetry('manager'),
+  plugins: [
+    fileTelemetry({
+      path: join(groupChatHostDirectory, 'telemetry.jsonl'),
+    }),
+  ],
   subagents: [community, environment, budget],
   instructions,
 });

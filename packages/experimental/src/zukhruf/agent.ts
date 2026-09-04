@@ -1,4 +1,4 @@
-import type { generateText } from 'ai';
+import type { TelemetryOptions } from 'ai';
 
 import type {
   AgentModel,
@@ -39,7 +39,7 @@ export interface AgentDeclaration {
   subagents?: AgentDeclaration[];
   /** Runtime plugins owned by this declaration when it is the root agent. */
   plugins?: readonly AgentPluginDefinition[];
-  telemetry?: Parameters<typeof generateText>[0]['telemetry'];
+  telemetry?: Omit<TelemetryOptions, 'integrations'>;
 }
 
 export interface DefinedAgentDeclaration extends AgentDeclaration {
