@@ -1,4 +1,4 @@
-import type { ConversationId } from '../mailbox/types.ts';
+import type { ConversationId } from '../../mailbox/types.ts';
 
 /**
  * Cross-process wake hints for conversation status.

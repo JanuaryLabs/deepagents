@@ -1,11 +1,11 @@
-import type { ConversationId } from '../mailbox/types.ts';
+import type { ConversationId } from '../../mailbox/types.ts';
 import {
   type ConsumeContext,
   type ConsumeOptions,
   type TurnActivity,
   TurnQueue,
   type TurnRef,
-} from '../queue/turn-queue.ts';
+} from '../../queue/turn-queue.ts';
 
 /**
  * Publishes the target conversation's status after every durable push.

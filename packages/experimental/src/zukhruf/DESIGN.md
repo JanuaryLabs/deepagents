@@ -884,21 +884,21 @@ work({concurrency?}) → AsyncDisposable }`.
   an actor host may absorb both capabilities (see the executor section).
 - `demo/zukhruf-durable-turns/agent.ts`, `instructions.ts`, and sandbox factories are pure
   declarations (no top-level await; importing spins no container or agent turn).
-- `runtime/conversation-status.ts` — Codex `thread/status/changed` for hosts. `ConversationStatus`
+- `runtime/conversation-status/projector.ts` — Codex `thread/status/changed` for hosts. `ConversationStatus`
   is `idle | active{activeFlags: waitingOnApproval | waitingOnUserInput} | systemError`, derived
   from durable state (queue activity, unsettled tool parts at a completed chain head, the latest
   stream's status), so `observe(conv).conversationStatus()` is correct from any process.
   `subscribeConversationStatus(signal)` resolves only after its cross-process listener is live, then
   yields the changes this process observes: every durable
-  `push` (`runtime/status-publishing-turn-queue.ts` decorates the `TurnQueue`, so host asks, spawns,
+  `push` (`runtime/conversation-status/status-publishing-turn-queue.ts` decorates the `TurnQueue`, so host asks, spawns,
   mailbox wakes, and recovery pushes all count), the executor's stream claim, approval parking, queue
   settle (`onSettled` is always wired now; status publishes before plugin availability
   reconciliation), and `observe().cancel()`. Each signal re-reads and dedupes, so duplicates are free
   and a publish never rejects into `onSettled`. Cross-process push is opt-in through
-  `conversationStatusChanges: ConversationStatusChangeSource` (`runtime/conversation-status-change-source.ts`):
+  `conversationStatusChanges: ConversationStatusChangeSource` (`runtime/conversation-status/change-source.ts`):
   a local change also `notify`s a wake hint carrying only `{chatId, userId}`, and a subscribing process
   re-reads on each hint, so the payload can never be stale. `PgBossConversationStatusChangeSource`
-  (`queue/pg-boss.conversation-status-change-source.ts`) raises `pg_notify` through the pg-boss
+  (`runtime/conversation-status/pg-boss-change-source.ts`) raises `pg_notify` through the pg-boss
   database and subscribes through pg-boss's `IDatabase.listen`, which the pooled Postgres driver and the
   PGlite adapter both implement; the remote subscription is held only while a local subscriber exists.
   HTTP folds status changes into the user-scoped SSE `GET /events`

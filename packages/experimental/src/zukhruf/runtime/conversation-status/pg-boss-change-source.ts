@@ -1,11 +1,11 @@
 import type { PgBoss } from 'pg-boss';
 
-import type { ConversationId } from '../mailbox/types.ts';
+import type { ConversationId } from '../../mailbox/types.ts';
+import { pgBossNotifications } from '../../queue/pg-boss-notifications.ts';
 import type {
   ConversationStatusChangeHint,
   ConversationStatusChangeSource,
-} from '../runtime/conversation-status-change-source.ts';
-import { pgBossNotifications } from './pg-boss-notifications.ts';
+} from './change-source.ts';
 
 export const DEFAULT_CONVERSATION_STATUS_CHANNEL =
   'zukhruf_conversation_status';

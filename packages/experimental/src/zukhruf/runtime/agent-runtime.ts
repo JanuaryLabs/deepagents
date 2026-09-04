@@ -32,15 +32,15 @@ import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
 import type { ZukhrufToolSet } from '../tool.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
-import type { ConversationStatusChangeSource } from './conversation-status-change-source.ts';
+import type { ConversationStatusChangeSource } from './conversation-status/change-source.ts';
 import {
   type ConversationStatus,
   type ConversationStatusEvent,
   ConversationStatusProjector,
-} from './conversation-status.ts';
+} from './conversation-status/projector.ts';
+import { StatusPublishingTurnQueue } from './conversation-status/status-publishing-turn-queue.ts';
 import { loadPluginSkills, selectPluginSkills } from './plugin/agent-skills.ts';
 import { loadPluginAgents } from './plugin/plugin-agents.ts';
-import { StatusPublishingTurnQueue } from './status-publishing-turn-queue.ts';
 
 export interface AgentPluginToolContext extends Readonly<
   Record<string, unknown>

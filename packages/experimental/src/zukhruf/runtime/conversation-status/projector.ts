@@ -8,14 +8,14 @@ import {
   type StreamManager,
 } from '@deepagents/context';
 
-import type { AgentDirectory } from '../control-plane/agent-directory.ts';
-import type { ConversationId } from '../mailbox/types.ts';
-import type { TurnQueue } from '../queue/turn-queue.ts';
+import type { AgentDirectory } from '../../control-plane/agent-directory.ts';
+import type { ConversationId } from '../../mailbox/types.ts';
+import type { TurnQueue } from '../../queue/turn-queue.ts';
 import {
   hasPendingClientInput,
   hasUnansweredApprovals,
-} from './approval-controller.ts';
-import type { ConversationStatusChangeSource } from './conversation-status-change-source.ts';
+} from '../approval-controller.ts';
+import type { ConversationStatusChangeSource } from './change-source.ts';
 
 /** Why an active conversation is not making progress on its own. */
 export type ConversationActiveFlag = 'waitingOnApproval' | 'waitingOnUserInput';
