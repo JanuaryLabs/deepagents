@@ -8,6 +8,7 @@ export type Discovery = {
     history: { href: string };
     traces?: { href: string };
     schedules?: { href: string };
+    uploads?: { href: string };
   };
 };
 

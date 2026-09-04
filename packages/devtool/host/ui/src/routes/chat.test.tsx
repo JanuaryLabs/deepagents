@@ -12,7 +12,7 @@ import {
 import { SidebarProvider } from '@deepagents/react-shadcn';
 
 import { DevtoolSidebar, NewChatButton } from '../app/sidebar.tsx';
-import { loader } from './chat.tsx';
+import { Component, loader } from './chat.tsx';
 
 const { loadRuntime } = vi.hoisted(() => ({ loadRuntime: vi.fn() }));
 
@@ -149,6 +149,47 @@ it('highlights a query chat as soon as it appears in Runs', async () => {
       'aria-current',
     ),
   ).toBe('true');
+});
+
+it('only offers image attachments when the runtime advertises uploads', async () => {
+  const runtimeCapabilities = {
+    chat: { href: api },
+    history: { href: '/zukhruf/v1/history' },
+  };
+  const renderChat = (uploads: { href: string } | undefined) => {
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/chat/:sessionId',
+          Component,
+          loader: () => ({
+            chatId: sessionId,
+            discovery: {
+              capabilities: {
+                ...runtimeCapabilities,
+                ...(uploads && { uploads }),
+              },
+            },
+            initialMessages: undefined,
+            sessionError: false,
+            sessionExists: false,
+          }),
+        },
+      ],
+      { initialEntries: [`/chat/${sessionId}`] },
+    );
+    return render(<RouterProvider router={router} />);
+  };
+
+  const withoutUploads = renderChat(undefined);
+  await screen.findByLabelText('Rich prompt composer');
+  expect(screen.queryByRole('button', { name: 'Attach image' })).toBeNull();
+  withoutUploads.unmount();
+
+  renderChat({ href: api });
+  expect(
+    await screen.findByRole('button', { name: 'Attach image' }),
+  ).toBeTruthy();
 });
 
 function load(path: string) {

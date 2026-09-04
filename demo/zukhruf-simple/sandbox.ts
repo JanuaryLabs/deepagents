@@ -1,10 +1,12 @@
-import { InMemoryFs } from 'just-bash';
-
-import { createVirtualSandbox } from '@deepagents/context';
+import { createMicrosandboxSandbox } from '@deepagents/context';
 import { defineSandbox } from '@deepagents/experimental/zukhruf';
 
 export default defineSandbox(
-  () => createVirtualSandbox({ fs: new InMemoryFs(), javascript: true }),
+  ({ chatId }) =>
+    createMicrosandboxSandbox({
+      name: `zukhruf-simple-${chatId}`,
+      configure: (builder) => builder.image('node:lts'),
+    }),
   {
     uploadDirectory: {
       source: import.meta.dirname,

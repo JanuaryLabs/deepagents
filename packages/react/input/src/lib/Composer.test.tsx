@@ -215,6 +215,7 @@ function renderRichInput(
     slashCommands?: ComposerItemEntry[];
     isTaskRunning?: boolean;
     maxExpandedTextChars?: number;
+    persistDraft?: boolean;
     send?: (submission: ComposerSubmission) => Promise<unknown> | void;
   } = {},
 ) {
@@ -238,6 +239,7 @@ function RichInputScenario({
   slashCommands = SLASH_COMMANDS,
   isTaskRunning = false,
   maxExpandedTextChars,
+  persistDraft = true,
   send,
 }: {
   disabled?: boolean;
@@ -248,6 +250,7 @@ function RichInputScenario({
   slashCommands?: ComposerItemEntry[];
   isTaskRunning?: boolean;
   maxExpandedTextChars?: number;
+  persistDraft?: boolean;
   send?: (submission: ComposerSubmission) => Promise<unknown> | void;
 }) {
   const [running, setRunning] = useState(isTaskRunning);
@@ -260,7 +263,9 @@ function RichInputScenario({
       mentionCandidates,
       remoteImageUrls: initialRemoteImageUrls,
     });
-  const [draftKey] = useState(() => seedDraft(initialState));
+  const [draftKey] = useState(() =>
+    persistDraft ? seedDraft(initialState) : undefined,
+  );
   const [submissions, setSubmissions] = useState<ComposerSubmission[]>([]);
   const [snapshot, setSnapshot] = useState<{
     state: ComposerState;
@@ -4027,6 +4032,7 @@ describe('Composer image attachments', () => {
     const { promise, reject } = Promise.withResolvers<never>();
     let sends = 0;
     const { user, prompt, submissions } = renderRichInput({
+      persistDraft: false,
       send: () => {
         sends += 1;
         return sends === 1 ? promise : Promise.resolve();
@@ -4055,6 +4061,7 @@ describe('Composer image attachments', () => {
 
     await act(async () => reject(new Error('offline')));
 
+    expect(await screen.findByText('offline')).toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByRole('region', { name: /rich composer snapshot/i }),

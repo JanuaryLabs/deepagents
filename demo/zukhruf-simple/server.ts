@@ -5,8 +5,9 @@ import { styleText } from 'node:util';
 import { devtool } from '@deepagents/devtool';
 import { tracesHttp } from '@deepagents/devtool-traces/http';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
+import { uploadsHttp } from '@deepagents/experimental/zukhruf/uploads/http';
 
-import { traceTelemetry } from './agent.ts';
+import { imageUploads, traceTelemetry } from './agent.ts';
 import runtime, { resources } from './run.ts';
 
 await using runtimeResources = resources;
@@ -17,7 +18,10 @@ app.use('/zukhruf/v1/*', (context, next) => {
   context.set('userId', 'demo');
   return next();
 });
-app.route('/zukhruf/v1', http(runtime, tracesHttp(traceTelemetry)));
+app.route(
+  '/zukhruf/v1',
+  http(runtime, uploadsHttp(imageUploads), tracesHttp(traceTelemetry)),
+);
 app.route(devtoolPath, devtool());
 
 const started = Promise.withResolvers<URL>();

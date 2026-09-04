@@ -132,6 +132,7 @@ function ChatSessionBoundary({ chatId }: { chatId: string }) {
       chatId={chatId}
       initialMessages={initialMessages}
       sessionExists={sessionExists}
+      supportsUploads={discovery.capabilities.uploads !== undefined}
     />
   );
 }
@@ -141,11 +142,13 @@ function ChatSession({
   chatId,
   initialMessages,
   sessionExists,
+  supportsUploads,
 }: {
   api: string;
   chatId: string;
   initialMessages?: UIMessage[];
   sessionExists: boolean;
+  supportsUploads: boolean;
 }) {
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
@@ -175,7 +178,7 @@ function ChatSession({
           <AgentHeader.Hero>How can I help?</AgentHeader.Hero>
         </AgentHeader.Root>
         <ChatMessages />
-        <ChatInput />
+        <ChatInput supportsUploads={supportsUploads} />
       </ChatBot>
     </AgentProvider>
   );
@@ -212,7 +215,7 @@ function ChatMessages() {
   );
 }
 
-function ChatInput() {
+function ChatInput({ supportsUploads }: { supportsUploads: boolean }) {
   const { submit } = useAgent();
   const { hasSubmitted } = useAgentMeta();
   const { status } = useAgentStatus();
@@ -227,22 +230,33 @@ function ChatInput() {
       <PendingToolInput className="bg-background">
         <ChatComposer.Provider
           isTaskRunning={isRunning}
-          onSubmit={(submission, context) =>
-            submit({
+          onSubmit={(submission, context) => {
+            const files = submission.items.flatMap((item) =>
+              item.type === 'image' ? [item.file] : [],
+            );
+            if (!supportsUploads && files.length > 0) {
+              return Promise.reject(
+                new Error('This runtime does not support image uploads'),
+              );
+            }
+            return submit({
               prompt: submission.prompt,
               persistedPrompt: submission.persistedPrompt,
               editableSource: context.editableSource,
-            })
-          }
+              files,
+            });
+          }}
         >
           <ChatComposer.Root>
             <QueuedMessagesStrip />
             <ChatComposer.Popup />
             <ChatComposer.Content>
+              <ChatComposer.AttachedImages />
               <ChatComposer.Editor placeholder="Message Zukhruf…" />
               <ChatComposer.Error />
             </ChatComposer.Content>
             <ChatComposer.Toolbar>
+              {supportsUploads && <ChatComposer.AttachImage />}
               <ChatSubmitButton />
             </ChatComposer.Toolbar>
           </ChatComposer.Root>

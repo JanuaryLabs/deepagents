@@ -1203,18 +1203,28 @@ function ComposerRootInner({
       prepared.persistedPrompt,
     );
     const submitResult = onSubmitRef.current?.(event, { editableSource });
-    if (draftKey !== undefined && isThenable(submitResult)) {
+    if (isThenable(submitResult)) {
       pendingSendsRef.current += 1;
       submitResult
-        .then(() => writeStoredDraft(draftKey, null))
-        .catch(() => {
+        .then(() => {
+          if (draftKey !== undefined) writeStoredDraft(draftKey, null);
+        })
+        .catch((error: unknown) => {
           for (const [id, file] of sentImageFiles) {
             attachedImagesRef.current.set(id, file);
           }
-          writeStoredDraft(draftKey, editableSource);
+          if (draftKey !== undefined)
+            writeStoredDraft(draftKey, editableSource);
           if (mountedRef.current) {
             replaceEditorContent(submittedContent);
             editor?.commands.focus('end');
+            setComposer((state) => ({
+              ...state,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Could not send prompt',
+            }));
           }
         })
         .finally(() => {
