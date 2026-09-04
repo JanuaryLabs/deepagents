@@ -45,7 +45,10 @@ export async function loader(args: LoaderFunctionArgs) {
     (entry) => entry.chatId === chatId,
   );
   const api = runtime.discovery?.capabilities.chat.href;
-  if (!api) {
+  if (
+    !api ||
+    (!params.sessionId && !conversation && !runtime.historyError)
+  ) {
     return {
       ...runtime,
       chatId,

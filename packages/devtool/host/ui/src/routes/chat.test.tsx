@@ -72,11 +72,11 @@ it('loads the same query chat ID before creation and after reload', async () => 
     });
   const request = vi
     .fn<typeof fetch>()
-    .mockResolvedValueOnce(new Response(null, { status: 404 }))
-    .mockResolvedValueOnce(Response.json({ sessionId, messages }));
+    .mockResolvedValue(Response.json({ sessionId, messages }));
   vi.stubGlobal('fetch', request);
 
   const first = await load(`/chat?chatId=${sessionId}`);
+  expect(request).not.toHaveBeenCalled();
   expect(first).toMatchObject({
     chatId: sessionId,
     conversation: undefined,
@@ -93,13 +93,8 @@ it('loads the same query chat ID before creation and after reload', async () => 
     sessionExists: true,
     sessionError: false,
   });
-  expect(request).toHaveBeenNthCalledWith(
-    1,
-    `${api}/${sessionId}`,
-    expect.objectContaining({ signal: expect.any(AbortSignal) }),
-  );
-  expect(request).toHaveBeenNthCalledWith(
-    2,
+  expect(request).toHaveBeenCalledOnce();
+  expect(request).toHaveBeenCalledWith(
     `${api}/${sessionId}`,
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
