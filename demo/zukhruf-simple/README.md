@@ -2,7 +2,7 @@
 
 The smallest complete Zukhruf deployable unit.
 
-- `agent.ts` declares the agent and writes telemetry events to `telemetry.jsonl`.
+- `agent.ts` declares the agent and writes AI SDK OpenTelemetry spans as Halo-compatible JSONL to `telemetry.jsonl`.
 - `instructions.ts` declares its behavior and Socratic plan recitation.
 - `sandbox.ts` declares its per-chat sandbox and explicitly uploads this demo's
   local `skills/` directory.

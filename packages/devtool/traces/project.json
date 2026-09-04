@@ -21,10 +21,15 @@
           }
         ],
         "external": [
+          "@ai-sdk/otel",
           "@deepagents/context",
           "@deepagents/devtool-history",
           "@deepagents/react-shadcn",
           "@deepagents/experimental",
+          "@opentelemetry/api",
+          "@opentelemetry/core",
+          "@opentelemetry/sdk-trace-base",
+          "@opentelemetry/semantic-conventions",
           "hono",
           "lucide-react",
           "react"

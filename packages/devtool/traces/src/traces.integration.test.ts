@@ -1,4 +1,9 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import {
+  ATTR_GEN_AI_AGENT_NAME,
+  ATTR_SESSION_ID,
+  ATTR_USER_ID,
+} from '@opentelemetry/semantic-conventions/incubating';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
@@ -265,22 +270,49 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
     'completed',
   );
   assert.equal(observedStarts, 1);
-  const records = (await readFile(telemetry, 'utf8'))
+  const persistedSpans = (await readFile(telemetry, 'utf8'))
     .trim()
     .split('\n')
     .map(
       (line) =>
-        JSON.parse(line) as { event: string; data: Record<string, unknown> },
+        JSON.parse(line) as {
+          trace_id: string;
+          span_id: string;
+          start_time: string;
+          kind: string;
+          status: { code: string };
+          attributes: Record<string, unknown>;
+        },
     );
-  const start = records.find(({ event }) => event === 'onStart');
-  assert(start);
-  assert.deepEqual(start.data.zukhruf, {
-    conversation,
-    streamId: turn.id,
-    agentName: 'trace-agent',
-    agentPath: '/root',
-  });
-  assert.equal(start.data.runtimeContext, '[Redacted]');
+  assert(persistedSpans.length > 0);
+  assert(
+    persistedSpans.every(
+      ({ trace_id, span_id, start_time, kind, status, attributes }) =>
+        /^[0-9a-f]{32}$/.test(trace_id) &&
+        /^[0-9a-f]{16}$/.test(span_id) &&
+        Number.isFinite(Date.parse(start_time)) &&
+        kind.startsWith('SPAN_KIND_') &&
+        status.code.startsWith('STATUS_CODE_') &&
+        attributes[ATTR_SESSION_ID] === conversation.chatId &&
+        attributes[ATTR_USER_ID] === conversation.userId &&
+        attributes[ATTR_GEN_AI_AGENT_NAME] === 'trace-agent' &&
+        attributes['deepagents.stream.id'] === turn.id &&
+        attributes['deepagents.agent.path'] === '/root' &&
+        typeof attributes['openinference.span.kind'] === 'string',
+    ),
+  );
+  assert.deepEqual(
+    new Set(
+      persistedSpans.map(
+        ({ attributes }) => attributes['openinference.span.kind'],
+      ),
+    ),
+    new Set(['AGENT', 'CHAIN', 'LLM', 'TOOL']),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(persistedSpans),
+    /runtimeContext|ai\.settings\.context/,
+  );
 
   const app = createHost(runtime, tracesHttp(traceTelemetry));
   const { body, capabilities } = await readCapabilities(app, 'user-1');

@@ -24,8 +24,8 @@ each child receives a standalone task.
 Nothing waits for a child agent. The runtime host only loads these declarations
 and keeps the worker alive; it does not create a conversation or submit a turn.
 
-The declaration's `fileTelemetry()` plugin records `./telemetry.json`,
-correlates each turn, and advertises the `traces` capability from
+The declaration's `fileTelemetry()` plugin records AI SDK OpenTelemetry spans
+as Halo-compatible JSONL in `./telemetry.json` and advertises the `traces` capability from
 `/zukhruf/v1/info`. `run.ts` starts the worker; `server.ts` serves one Hono
 server that imports the runtime, mounts the authenticated Zukhruf protocol at
 `/zukhruf/v1` and the `@deepagents/devtool` UI at `/devtool`, and owns shutdown.

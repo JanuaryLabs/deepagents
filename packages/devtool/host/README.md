@@ -70,11 +70,11 @@ runtime request. Runtime health comes from `GET /zukhruf/v1/health`.
 `traces` appears only when the runtime installs the `fileTelemetry()` plugin
 from `@deepagents/devtool-traces` and the host passes
 `tracesHttp(traceTelemetry)` from `@deepagents/devtool-traces/http` to `http()`.
-The plugin instance contributes the AI SDK file telemetry integration and a
+The plugin instance contributes the AI SDK OpenTelemetry integration and a
 transport-neutral trace reader; the definition-bound HTTP projection adds the
 runtime's authenticated trace routes and discovery entry. Together they
 correlate the conversation, stream, and agent identifiers on each turn, project
-the JSONL in place inside the runtime process, and serve
+the Halo-compatible JSONL in place inside the runtime process, and serve
 `GET /zukhruf/v1/traces/:chatId` and `GET /zukhruf/v1/traces/:chatId/:traceId`
 behind the Zukhruf authentication boundary. Ownership comes from the
 authenticated `userId`; the file URI is never exposed and the browser never
