@@ -131,6 +131,10 @@ export type BashToolResult = CommandResult;
 
 export interface ReadFileToolInput {
   path: string;
+  /** 1-based line number to start at for text files. */
+  offset?: number;
+  /** Number of text lines to return from `offset`. */
+  limit?: number;
 }
 
 export const READ_FILE_MEDIA_TYPES = [
@@ -139,17 +143,22 @@ export const READ_FILE_MEDIA_TYPES = [
   'image/gif',
   'image/webp',
   'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ] as const;
 
 export type ReadFileMediaType = (typeof READ_FILE_MEDIA_TYPES)[number];
 
 /**
- * Text decodes to `content`. A file whose leading bytes match one of
- * {@link READ_FILE_MEDIA_TYPES} is carried as base64 so the result survives
- * JSON persistence and replays to the model as a file part.
+ * Text decodes to `content`. Recognized image, PDF, and OOXML files are carried
+ * as base64 so the result survives JSON persistence and replays to the model as
+ * a file part. Oversized files return a model-facing `error`.
  */
 export type ReadFileToolResult =
-  { content: string } | { mediaType: ReadFileMediaType; base64: string };
+  | { content: string }
+  | { mediaType: ReadFileMediaType; base64: string }
+  | { error: string };
 
 export interface WriteFileToolInput {
   path: string;
