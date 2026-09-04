@@ -146,7 +146,7 @@ function uploadReceipt(sessionId: string, file: File) {
   return {
     path: `/workspace/.uploads/${sessionId}/${file.name}`,
     name: file.name,
-    mediaType: file.type,
+    mediaType: 'image/png' as const,
     size: file.size,
     url: `https://uploads.test/${sessionId}/${file.name}`,
   };
@@ -654,6 +654,53 @@ describe('ChatManager', () => {
       } finally {
         unmount();
         transport.closeAll();
+      }
+    });
+
+    it('rejects an upload completion after the manager binds a different chat', async () => {
+      const uploading = new UploadingTransport({ holdUploads: true });
+      const replacement = new ControllableTransport();
+      const manager = new ChatManager({
+        uploadFile: uploading.uploadFile,
+        onResetChat: () => {},
+      });
+      const first = renderChatManager(manager, {
+        transport: uploading,
+        chatId: 'chat-a',
+      });
+      const second = renderChatManager(manager, {
+        transport: replacement,
+        chatId: 'chat-b',
+      });
+      try {
+        let pending!: Promise<void>;
+        await act(async () => {
+          manager.bind(first.result.current);
+          pending = manager.submit({
+            ...plainSubmission('describe [Image #1]'),
+            files: [imageFile()],
+          });
+        });
+        await waitFor(() => {
+          expect(uploading.uploads).toHaveLength(1);
+        });
+
+        manager.bind(second.result.current);
+        const rejection = expect(pending).rejects.toThrow(
+          'The chat changed before the submission was sent.',
+        );
+        await act(async () => {
+          uploading.completeUpload(0);
+          await rejection;
+        });
+
+        expect(second.result.current.messages).toEqual([]);
+        expect(replacement.sendCount).toBe(0);
+      } finally {
+        first.unmount();
+        second.unmount();
+        uploading.closeAll();
+        replacement.closeAll();
       }
     });
 

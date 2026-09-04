@@ -28,7 +28,6 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import {
-  UPLOAD_FILE_ID_PATTERN,
   type UploadsOptions,
   uploads,
 } from '@deepagents/experimental/zukhruf/uploads';
@@ -46,6 +45,7 @@ const PNG_PIXEL = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
+const MAX_UPLOAD_BYTES = PNG_PIXEL.byteLength;
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -178,7 +178,7 @@ async function harness(options: { withUploads?: boolean } = {}) {
     MOUNT,
     options.withUploads === false
       ? http(runtime)
-      : http(runtime, uploadsHttp(uploaded)),
+      : http(runtime, uploadsHttp(uploaded, { maxBytes: MAX_UPLOAD_BYTES })),
   );
 
   return {
@@ -186,6 +186,7 @@ async function harness(options: { withUploads?: boolean } = {}) {
     fs,
     model,
     queue,
+    uploads: runtime.plugin(uploaded),
     [Symbol.asyncDispose]: () => resources.disposeAsync(),
   };
 }
@@ -289,6 +290,24 @@ test('uploads() requires an absolute sandbox directory', () => {
     () => uploads({} as UploadsOptions),
     /directory must be an absolute sandbox path/,
   );
+  assert.throws(
+    () =>
+      uploadsHttp(uploads({ directory: UPLOAD_DIRECTORY }), { maxBytes: 0 }),
+    /maxBytes must be a positive safe integer/,
+  );
+});
+
+test('uploads reject path segments that can escape their owner and session scope', async () => {
+  await using h = await harness();
+
+  await assert.rejects(
+    h.uploads.write(
+      { userId: OWNER, sessionId: '../victim' },
+      { data: PNG_PIXEL, mediaType: 'image/png' },
+    ),
+    /sessionId must be a single path segment/,
+  );
+  assert.equal(await sessionDirectoryExists(h.fs, 'victim', ''), false);
 });
 
 test('discovery advertises the uploads capability only when it is composed', async () => {
@@ -340,7 +359,6 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
   assert.equal(response.status, 201);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const fileId = posix.basename(new URL(receipt.url).pathname);
-  assert.match(fileId, UPLOAD_FILE_ID_PATTERN);
   assert.deepEqual(receipt, {
     path: `${UPLOAD_DIRECTORY}/${OWNER}/${sessionId}/${fileId}`,
     name: 'screen shot.png',
@@ -457,6 +475,38 @@ test('POST /session/:sessionId/uploads rejects anything but a supported image ty
       'zukhruf/unsupported-media-type',
     );
   }
+});
+
+test('POST /session/:sessionId/uploads rejects declared and streamed oversized bodies', async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+  const body = new Uint8Array(MAX_UPLOAD_BYTES + 1);
+  const streamed = await upload(h.app, sessionId, {
+    body,
+    filename: 'large.png',
+  });
+  const declared = await request(
+    h.app,
+    `${MOUNT}/session/${sessionId}/uploads`,
+    {
+      method: 'POST',
+      body,
+      headers: {
+        'content-length': String(body.byteLength),
+        'content-type': 'image/png',
+        [UPLOAD_FILENAME_HEADER]: 'large.png',
+      },
+    },
+  );
+
+  for (const response of [streamed, declared]) {
+    assert.equal(response.status, 413);
+    assert.equal(
+      ((await response.json()) as { cause: { code: string } }).cause.code,
+      'api/payload-too-large',
+    );
+  }
+  assert.equal(await sessionDirectoryExists(h.fs, OWNER, sessionId), false);
 });
 
 test('POST /session/:sessionId accepts any well-formed user message, https file parts included, since nothing resolves URLs into the prompt', async () => {

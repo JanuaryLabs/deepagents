@@ -1,7 +1,7 @@
 import { safeParse as parseContentType } from 'fast-content-type-parse';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
-import { validate as validateUuid } from 'uuid';
 import z from 'zod';
 
 import type { AgentPluginDefinition } from '../../runtime/agent-runtime.ts';
@@ -27,7 +27,7 @@ const NO_STORE = { 'cache-control': 'no-store' } as const;
 const IMMUTABLE = {
   'cache-control': 'private, max-age=31536000, immutable',
 } as const;
-const sessionIdSchema = z.string().refine(validateUuid);
+const sessionIdSchema = z.uuid();
 const uploadFilenameSchema = z
   .string()
   .min(1)
@@ -61,21 +61,39 @@ export interface UploadReceipt {
 
 /**
  * Per-session image upload and retrieval bound to one `uploads()` definition.
- * Compose with `http(runtime, uploadsHttp(uploaded))`.
+ * The caller must choose the maximum accepted upload size in bytes.
  */
 export function uploadsHttp(
   definition: AgentPluginDefinition<Uploads>,
+  { maxBytes }: { maxBytes: number },
 ): HttpProjection {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new TypeError(
+      'uploadsHttp: maxBytes must be a positive safe integer',
+    );
+  }
   return projectHttp(definition, (plugin) => ({
     capabilities: { uploads: { path: '/session' } },
-    authenticatedRoutes: uploadRoutes(plugin),
+    authenticatedRoutes: uploadRoutes(plugin, maxBytes),
   }));
 }
 
-function uploadRoutes(uploads: Uploads) {
+function uploadRoutes(uploads: Uploads, maxBytes: number) {
   const app = new Hono<HttpEnv>();
   app.post(
     SESSION_UPLOADS_ROUTE_PATH,
+    bodyLimit({
+      maxSize: maxBytes,
+      onError: () => {
+        throw new HTTPException(413, {
+          message: 'Upload is too large',
+          cause: {
+            code: 'api/payload-too-large',
+            detail: `Upload exceeds ${maxBytes} bytes`,
+          },
+        });
+      },
+    }),
     validate((payload) => ({
       sessionId: {
         select: payload.params.sessionId,

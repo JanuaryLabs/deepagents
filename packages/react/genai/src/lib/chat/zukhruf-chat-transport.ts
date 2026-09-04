@@ -9,12 +9,12 @@ import type { SerializedToolRegistry } from './tools-schema.ts';
 /** Carries the URI-encoded original filename alongside the raw upload body. */
 const UPLOAD_FILENAME_HEADER = 'x-upload-filename';
 
-export const uploadReceiptSchema = z.looseObject({
-  path: z.string(),
-  name: z.string(),
-  mediaType: z.string(),
-  size: z.number(),
-  url: z.string(),
+export const uploadReceiptSchema = z.strictObject({
+  path: z.string().startsWith('/'),
+  name: z.string().min(1),
+  mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  size: z.int().nonnegative(),
+  url: z.url(),
 });
 
 export interface ZukhrufChatTransportOptions {

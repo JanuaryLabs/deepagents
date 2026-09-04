@@ -339,12 +339,18 @@ it('uploads a file to the session uploads endpoint and returns the receipt', asy
   expect(init?.body).toBe(file);
 });
 
-it('rejects an upload response that is not a receipt', async () => {
+it('rejects a semantically invalid upload receipt', async () => {
   const transport = new ZukhrufChatTransport({
     api,
     fetch: async () =>
       Response.json(
-        { type: 'file', mediaType: 'image/jpeg', url: 'https://api.test/f2' },
+        {
+          path: '/workspace/.uploads/file',
+          name: 'shot.svg',
+          mediaType: 'image/svg+xml',
+          size: -1,
+          url: 'not a URL',
+        },
         { status: 201 },
       ),
   });

@@ -5,7 +5,6 @@ export * from './lib/chat/citations.ts';
 export { defineElements, type ElementDescriptor } from '@deepagents/elements';
 export * from './lib/elements/interactive-element.ts';
 export * from './lib/chat/prefill.ts';
-export * from './lib/chat/prepare-image.ts';
 export * from './lib/chat/read-only-transport.ts';
 export * from './lib/chat/tool-abort.ts';
 export * from './lib/chat/tools-schema.ts';

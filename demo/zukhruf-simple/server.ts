@@ -20,7 +20,11 @@ app.use('/zukhruf/v1/*', (context, next) => {
 });
 app.route(
   '/zukhruf/v1',
-  http(runtime, uploadsHttp(imageUploads), tracesHttp(traceTelemetry)),
+  http(
+    runtime,
+    uploadsHttp(imageUploads, { maxBytes: 20 * 1024 * 1024 }),
+    tracesHttp(traceTelemetry),
+  ),
 );
 app.route(devtoolPath, devtool());
 

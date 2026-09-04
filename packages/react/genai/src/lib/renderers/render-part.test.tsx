@@ -28,7 +28,7 @@ class RecordingTransport implements ChatTransport<UIMessage> {
   uploadFile = async (sessionId: string, file: File) => ({
     path: `/workspace/.uploads/${sessionId}/${file.name}`,
     name: file.name,
-    mediaType: file.type,
+    mediaType: 'image/png' as const,
     size: file.size,
     url: `https://uploads.test/${sessionId}/${file.name}`,
   });

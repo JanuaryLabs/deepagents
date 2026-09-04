@@ -33,7 +33,7 @@ export const UPLOAD_MEDIA_TYPES = Object.keys(
 ) as readonly UploadMediaType[];
 
 /** `<uuid>.<ext>` is the only file name this store writes or reads. */
-export const UPLOAD_FILE_ID_PATTERN = /^[0-9a-f-]{36}\.(png|jpe?g|webp|gif)$/;
+const UPLOAD_FILE_ID_PATTERN = /^[0-9a-f-]{36}\.(png|jpe?g|webp|gif)$/;
 
 export interface UploadScope {
   userId: string;
@@ -193,23 +193,28 @@ class UploadsPlugin implements Uploads {
     return { data: new Uint8Array(bytes), mediaType };
   }
 
-  /** `<directory>/<userId>/<sessionId>`; `userId` must be one path segment. */
+  /** `<directory>/<userId>/<sessionId>`; both identifiers must be one path segment. */
   #scopeFor({ userId, sessionId }: UploadScope): string {
-    if (
-      userId.length === 0 ||
-      userId === '.' ||
-      userId === '..' ||
-      userId.includes('/')
-    ) {
-      throw new Error(
-        `uploads: userId must be a single path segment, received "${userId}"`,
-      );
-    }
+    assertPathSegment('userId', userId);
+    assertPathSegment('sessionId', sessionId);
     return posix.join(this.#directory, userId, sessionId);
   }
 
   #pathFor(scope: UploadScope, fileId: string): string {
     return posix.join(this.#scopeFor(scope), fileId);
+  }
+}
+
+function assertPathSegment(name: string, value: string): void {
+  if (
+    value.length === 0 ||
+    value === '.' ||
+    value === '..' ||
+    value.includes('/')
+  ) {
+    throw new Error(
+      `uploads: ${name} must be a single path segment, received "${value}"`,
+    );
   }
 }
 

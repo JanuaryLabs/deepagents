@@ -4,7 +4,6 @@ import type { ChatStatus, UIDataTypes, UITools } from 'ai';
 import type { ComposerDraftSource } from '@deepagents/react-input/browser';
 
 import { clearPrefill, readPrefill, writePrefill } from './prefill.ts';
-import { prepareImageFile } from './prepare-image.ts';
 import type { ZukhrufChatTransport } from './zukhruf-chat-transport.ts';
 
 type UploadFile = ZukhrufChatTransport['uploadFile'];
@@ -136,10 +135,12 @@ export class ChatManager {
     const current = (this.pendingSubmissions ?? Promise.resolve()).then(
       async () => {
         if (files.length === 0) {
+          this.assertCurrentChat(chatId);
           this.dispatch(message);
           return;
         }
         const uploads = await this.uploadFiles(chatId, files);
+        this.assertCurrentChat(chatId);
         this.dispatch({ ...message, uploads });
       },
     );
@@ -153,11 +154,13 @@ export class ChatManager {
   }
 
   private async uploadFiles(chatId: string, files: readonly File[]) {
-    return Promise.all(
-      files.map(async (file) =>
-        this.uploadFile(chatId, await prepareImageFile(file)),
-      ),
-    );
+    return Promise.all(files.map((file) => this.uploadFile(chatId, file)));
+  }
+
+  private assertCurrentChat(chatId: string): void {
+    if (this.chat?.id !== chatId) {
+      throw new Error('The chat changed before the submission was sent.');
+    }
   }
 
   private dispatch(message: PreparedSubmission): void {
