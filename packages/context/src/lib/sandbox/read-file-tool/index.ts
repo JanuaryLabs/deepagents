@@ -3,6 +3,7 @@ import path from 'node:path';
 import z from 'zod';
 
 import type { DisposableSandbox, ReadFileTool } from '../types.ts';
+import { binaryFileFormat } from './binary.ts';
 import { type FileFormat } from './format.ts';
 import { imageFileFormat } from './image.ts';
 import { ooxmlFileFormat } from './ooxml.ts';
@@ -13,6 +14,7 @@ const formats = [
   imageFileFormat,
   pdfFileFormat,
   ooxmlFileFormat,
+  binaryFileFormat,
   textFileFormat,
 ] satisfies readonly FileFormat[];
 
@@ -41,7 +43,7 @@ export function createReadFileTool({
 }): ReadFileTool {
   return tool({
     description:
-      'Read a sandbox file. Supports text, PNG, JPEG, GIF, WebP, PDF, XLSX, DOCX, and PPTX. Use offset/limit with large text files.',
+      'Read a sandbox file. Supports text, PNG, JPEG, GIF, WebP, PDF, XLSX, DOCX, and PPTX; other binary files such as HEIC, video, and audio are refused with conversion guidance. Use offset/limit with large text files.',
     inputExamples: [
       { input: { path: 'README.md' } },
       { input: { path: 'logs/trace.jsonl', offset: 1, limit: 200 } },

@@ -701,6 +701,49 @@ describe('readFile tool', () => {
     );
   });
 
+  it('refuses HEIC and video bytes with conversion guidance instead of decoding them as text', async () => {
+    const { tools, sandbox } = await createBashTool({
+      sandbox: await createVirtualSandbox({ fs: new InMemoryFs() }),
+    });
+    const heic = Buffer.from('0000002066747970686569630000000068656963', 'hex');
+    const mov = Buffer.from('0000001466747970717420200000000071742020', 'hex');
+    const blob = Buffer.from('000000000000000000000000', 'hex');
+    await sandbox.writeFiles([
+      { path: '/workspace/IMG_0001.HEIC', content: heic },
+      { path: '/workspace/IMG_0002.MOV', content: mov },
+      { path: '/workspace/weights.bin', content: blob },
+      { path: '/workspace/notes.txt', content: 'hello' },
+    ]);
+
+    const [still, clip, unknown, text] = await Promise.all([
+      executeReadFile(tools.readFile, { path: 'IMG_0001.HEIC' }, 'read-heic'),
+      executeReadFile(tools.readFile, { path: 'IMG_0002.MOV' }, 'read-mov'),
+      executeReadFile(tools.readFile, { path: 'weights.bin' }, 'read-bin'),
+      executeReadFile(tools.readFile, { path: 'notes.txt' }, 'read-text'),
+    ]);
+
+    const errorText = (output: ToolResultOutput) =>
+      output.type === 'error-text' ? output.value : '';
+    assert.deepStrictEqual(
+      { still: still.type, clip: clip.type, unknown: unknown.type, text },
+      {
+        still: 'error-text',
+        clip: 'error-text',
+        unknown: 'error-text',
+        text: { type: 'text', value: 'hello' },
+      },
+    );
+    assert.match(
+      errorText(still),
+      /^IMG_0001\.HEIC is a binary image\/heic .*heif-dec/,
+    );
+    assert.match(
+      errorText(clip),
+      /^IMG_0002\.MOV is a binary video\/mp4 .*ffmpeg -i/,
+    );
+    assert.match(errorText(unknown), /^weights\.bin is a binary file /);
+  });
+
   it('stops an aborted read before touching the sandbox', async () => {
     const backend = new RecordingSandbox();
     backend.files.set('/workspace/notes.txt', 'plain text');
