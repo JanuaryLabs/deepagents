@@ -339,6 +339,29 @@ it('uploads a file to the session uploads endpoint and returns the receipt', asy
   expect(init?.body).toBe(file);
 });
 
+it('accepts video and audio upload receipts', async () => {
+  const receipt = {
+    path: `/workspace/.uploads/${sessionId}/f1.mov`,
+    name: 'IMG_0002.MOV',
+    mediaType: 'video/quicktime',
+    size: 4,
+    url: `https://api.test${api}/${sessionId}/uploads/f1.mov`,
+  };
+  const transport = new ZukhrufChatTransport({
+    api,
+    fetch: async () => Response.json(receipt, { status: 201 }),
+  });
+
+  const returned = await transport.uploadFile(
+    sessionId,
+    new File([new Uint8Array([0, 0, 0, 0x20])], 'IMG_0002.MOV', {
+      type: 'video/quicktime',
+    }),
+  );
+
+  expect(returned).toEqual(receipt);
+});
+
 it('rejects a semantically invalid upload receipt', async () => {
   const transport = new ZukhrufChatTransport({
     api,

@@ -1,6 +1,7 @@
-import type { UIMessage } from 'ai';
+import { type UIMessage, tool } from 'ai';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
+import z from 'zod';
 
 import { reminder } from '@deepagents/context';
 
@@ -9,6 +10,7 @@ import type {
   AgentPluginDefinition,
   AgentPluginHost,
   AgentPluginInstance,
+  AgentPluginToolContext,
 } from '../../runtime/agent-runtime.ts';
 
 const extensionByMediaType = {
@@ -16,15 +18,14 @@ const extensionByMediaType = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/wav': 'wav',
 } as const;
-
-const mediaTypeByExtension: Record<string, UploadMediaType> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-};
 
 export type UploadMediaType = keyof typeof extensionByMediaType;
 
@@ -32,8 +33,21 @@ export const UPLOAD_MEDIA_TYPES = Object.keys(
   extensionByMediaType,
 ) as readonly UploadMediaType[];
 
+/** Every extension the store writes, plus the `jpeg` spelling it accepts on read. */
+const mediaTypeByExtension: Readonly<Record<string, UploadMediaType>> = {
+  ...Object.fromEntries(
+    Object.entries(extensionByMediaType).map(([mediaType, extension]) => [
+      extension,
+      mediaType,
+    ]),
+  ),
+  jpeg: 'image/jpeg',
+};
+
 /** `<uuid>.<ext>` is the only file name this store writes or reads. */
-const UPLOAD_FILE_ID_PATTERN = /^[0-9a-f-]{36}\.(png|jpe?g|webp|gif)$/;
+const UPLOAD_FILE_ID_PATTERN = new RegExp(
+  `^[0-9a-f-]{36}\\.(${Object.keys(mediaTypeByExtension).join('|')})$`,
+);
 
 export interface UploadScope {
   userId: string;
@@ -51,6 +65,22 @@ export interface WrittenUpload {
   path: string;
 }
 
+export interface PublishRequest {
+  /** Absolute sandbox path of a file below the session's uploads directory. */
+  path: string;
+  /** Display name for the user; defaults to the file's basename. */
+  name?: string;
+}
+
+export interface PublishedUpload extends WrittenUpload {
+  mediaType: UploadMediaType;
+  name: string;
+  /** `GET` route relative to the mounted `http()` app that serves the bytes. */
+  href: string;
+  /** Absolute URL when the plugin knows its public mount (`publicUrl`). */
+  url?: string;
+}
+
 /** One entry of `message.metadata.uploads`: the upload receipt the composer sends back. */
 interface AttachedUpload {
   path: string;
@@ -60,14 +90,28 @@ interface AttachedUpload {
 }
 
 export interface UploadsOptions {
-  /** Absolute sandbox directory that receives `<userId>/<sessionId>/<fileId>` image files. */
+  /** Absolute sandbox directory that receives `<userId>/<sessionId>/<fileId>` files. */
   directory: string;
+  /**
+   * Absolute URL where the host mounts `http(runtime, uploadsHttp(...))`, for
+   * example `http://127.0.0.1:4317/zukhruf/v1`. When set, `publish_upload`
+   * returns an absolute `url` the model can hand to the user verbatim.
+   */
+  publicUrl?: string;
 }
 
 export interface Uploads extends AgentPluginInstance {
-  /** Stores one image in the session's sandbox. */
+  /** Stores one file in the session's sandbox. */
   write(scope: UploadScope, upload: StoredUpload): Promise<WrittenUpload>;
   read(scope: UploadScope, fileId: string): Promise<StoredUpload | undefined>;
+  /**
+   * Adopts a file the agent wrote below the session's uploads directory: it
+   * is renamed to a stable `<uuid>.<ext>` id so the `GET` route can serve it.
+   */
+  publish(
+    scope: UploadScope,
+    request: PublishRequest,
+  ): Promise<PublishedUpload>;
 }
 
 export function isUploadMediaType(
@@ -77,30 +121,66 @@ export function isUploadMediaType(
 }
 
 /**
- * Keep composer image uploads in the conversation sandbox and tell the model
- * where the files a turn attaches under `message.metadata.uploads` live, so it
- * reads them by path with the sandbox read tool.
+ * Keep composer uploads (images, video, audio) in the conversation sandbox,
+ * tell the model where the files a turn attaches under
+ * `message.metadata.uploads` live, and let any agent in the tree publish a
+ * file it produced so the user can open or download it.
  */
 export function uploads({
   directory,
+  publicUrl,
 }: UploadsOptions): AgentPluginDefinition<Uploads> {
   if (typeof directory !== 'string' || !posix.isAbsolute(directory)) {
     throw new Error(
       `uploads: directory must be an absolute sandbox path, received ${JSON.stringify(directory)}`,
     );
   }
+  const resolvedPublicUrl = normalizePublicUrl(publicUrl);
   return {
     name: 'uploads',
-    create: () => new UploadsPlugin(directory),
+    create: () => new UploadsPlugin(directory, resolvedPublicUrl),
   };
 }
 
+const publishInputSchema = z.object({
+  path: z
+    .string()
+    .startsWith('/')
+    .describe(
+      "Absolute sandbox path of the file to publish; it must be inside this session's uploads directory (the directory the attached files live in, subdirectories included).",
+    ),
+  name: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Display name shown to the user; defaults to the file name.'),
+});
+
 class UploadsPlugin implements Uploads {
   readonly #directory: string;
+  readonly #publicUrl: string | undefined;
   #host: AgentPluginHost | undefined;
 
-  constructor(directory: string) {
+  readonly tools = {
+    publish_upload: tool<
+      z.infer<typeof publishInputSchema>,
+      PublishedUpload,
+      AgentPluginToolContext
+    >({
+      description:
+        "Publish a file you produced in the sandbox so the user can open or download it. The path must be inside this session's uploads directory; the file is renamed to a stable id and the returned url (or href relative to the API) is what the user opens.",
+      inputSchema: publishInputSchema,
+      execute: (input, { context }) =>
+        this.publish(
+          { userId: context.conversation.userId, sessionId: context.treeId },
+          input,
+        ),
+    }),
+  };
+
+  constructor(directory: string, publicUrl: string | undefined) {
     this.#directory = directory;
+    this.#publicUrl = publicUrl;
   }
 
   configure(root: AgentDeclaration): AgentDeclaration {
@@ -133,6 +213,57 @@ class UploadsPlugin implements Uploads {
     return this.#readFrom(await this.#sandboxFor(scope), scope, fileId);
   }
 
+  async publish(
+    scope: UploadScope,
+    { path, name }: PublishRequest,
+  ): Promise<PublishedUpload> {
+    const root = this.#scopeFor(scope);
+    if (!isBelow(root, path)) {
+      throw new Error(
+        `publish_upload: ${path} is outside this session's uploads directory ${root}`,
+      );
+    }
+    const extension = posix.extname(path).slice(1).toLowerCase();
+    const mediaType = mediaTypeByExtension[extension];
+    if (mediaType === undefined) {
+      throw new Error(
+        `publish_upload: unsupported file extension "${extension}"; publishable extensions are ${Object.keys(mediaTypeByExtension).join(', ')}`,
+      );
+    }
+    const sandbox = await this.#sandboxFor(scope);
+    if (!(await sandbox.sandbox.exists(path))) {
+      throw new Error(`publish_upload: ${path} does not exist in the sandbox`);
+    }
+    const basename = posix.basename(path);
+    const alreadyPublished =
+      posix.dirname(path) === root && UPLOAD_FILE_ID_PATTERN.test(basename);
+    const fileId = alreadyPublished
+      ? basename
+      : `${randomUUID()}.${extensionByMediaType[mediaType]}`;
+    const target = this.#pathFor(scope, fileId);
+    if (target !== path) {
+      const moved = await sandbox.sandbox.executeCommand(
+        `mv -- ${shellQuote(path)} ${shellQuote(target)}`,
+      );
+      if (moved.exitCode !== 0) {
+        throw new Error(
+          `publish_upload: could not move ${path}: ${moved.stderr.trim() || `exit ${moved.exitCode}`}`,
+        );
+      }
+    }
+    const href = `/session/${scope.sessionId}/uploads/${fileId}`;
+    return {
+      fileId,
+      path: target,
+      mediaType,
+      name: name ?? basename,
+      href,
+      ...(this.#publicUrl === undefined
+        ? {}
+        : { url: `${this.#publicUrl}${href}` }),
+    };
+  }
+
   /**
    * Lists the turn's attachments for the model. The engine folds it into the
    * user message being saved and hands over that chat, so only files uploaded
@@ -155,7 +286,7 @@ class UploadsPlugin implements Uploads {
         );
         if (attached.length === 0) return '';
         return [
-          'The user attached the files listed below for this turn; read them by path with the readFile tool when needed, and [Image #N] in the message refers to the Nth listed file.',
+          'The user attached the files listed below for this turn; read images by path with the readFile tool when needed (convert HEIC and extract video frames with sandbox commands first), and [Image #N], [Video #N], or [Audio #N] in the message refers to the Nth listed file.',
           ...attached.map(
             ({ path, name, mediaType, size }) =>
               `- ${path} (${name}, ${mediaType}, ${size} bytes)`,
@@ -203,6 +334,28 @@ class UploadsPlugin implements Uploads {
   #pathFor(scope: UploadScope, fileId: string): string {
     return posix.join(this.#scopeFor(scope), fileId);
   }
+}
+
+function normalizePublicUrl(publicUrl: string | undefined): string | undefined {
+  if (publicUrl === undefined) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(publicUrl);
+  } catch {
+    throw new Error(
+      `uploads: publicUrl must be an absolute http(s) URL, received ${JSON.stringify(publicUrl)}`,
+    );
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `uploads: publicUrl must be an absolute http(s) URL, received ${JSON.stringify(publicUrl)}`,
+    );
+  }
+  return parsed.href.replace(/\/+$/, '');
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function assertPathSegment(name: string, value: string): void {

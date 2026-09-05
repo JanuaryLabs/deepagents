@@ -73,7 +73,9 @@ export function uploadsHttp(
     );
   }
   return projectHttp(definition, (plugin) => ({
-    capabilities: { uploads: { path: '/session' } },
+    capabilities: {
+      uploads: { path: '/session', mediaTypes: UPLOAD_MEDIA_TYPES },
+    },
     authenticatedRoutes: uploadRoutes(plugin, maxBytes),
   }));
 }
@@ -146,7 +148,8 @@ function uploadRoutes(uploads: Uploads, maxBytes: number) {
     methodNotAllowed(context, 'POST'),
   );
 
-  app.get(
+  app.on(
+    ['GET', 'HEAD'],
     SESSION_UPLOAD_ROUTE_PATH,
     validate((payload) => ({
       sessionId: {
@@ -170,17 +173,71 @@ function uploadRoutes(uploads: Uploads, maxBytes: number) {
           },
         });
       }
-      return context.body(upload.data, 200, {
+      // Byte ranges let <video>/<audio> seek and let Safari play at all; the
+      // whole file is already in memory, so a range is a plain subarray.
+      const total = upload.data.byteLength;
+      const headers = {
         'content-type': upload.mediaType,
+        'accept-ranges': 'bytes',
         ...IMMUTABLE,
-      });
+      };
+      const rangeHeader = context.req.header('range');
+      const head = context.req.method === 'HEAD';
+      if (rangeHeader === undefined) {
+        const full = { ...headers, 'content-length': String(total) };
+        return head
+          ? context.body(null, 200, full)
+          : context.body(upload.data, 200, full);
+      }
+      const range = parseByteRange(rangeHeader, total);
+      if (range === undefined) {
+        return context.body(null, 416, {
+          ...headers,
+          'content-range': `bytes */${total}`,
+        });
+      }
+      const partial = {
+        ...headers,
+        'content-range': `bytes ${range.start}-${range.end}/${total}`,
+        'content-length': String(range.end - range.start + 1),
+      };
+      return head
+        ? context.body(null, 206, partial)
+        : context.body(
+            upload.data.subarray(range.start, range.end + 1),
+            206,
+            partial,
+          );
     },
   );
   app.all(SESSION_UPLOAD_ROUTE_PATH, (context) =>
-    methodNotAllowed(context, 'GET'),
+    methodNotAllowed(context, 'GET, HEAD'),
   );
 
   return app;
+}
+
+/**
+ * One `bytes=` range (RFC 9110 §14.1.2): `a-b`, `a-`, or `-n`; `undefined`
+ * when the header is malformed, multi-range, or unsatisfiable.
+ */
+function parseByteRange(
+  header: string,
+  total: number,
+): { start: number; end: number } | undefined {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (match === null || total === 0) return undefined;
+  const [, first, last] = match;
+  if (first === '' && last === '') return undefined;
+  if (first === '') {
+    const suffix = Number(last);
+    if (suffix === 0) return undefined;
+    return { start: Math.max(total - suffix, 0), end: total - 1 };
+  }
+  const start = Number(first);
+  const end = last === '' ? total - 1 : Math.min(Number(last), total - 1);
+  if (start > end || start >= total) return undefined;
+  return { start, end };
 }
 
 function methodNotAllowed(

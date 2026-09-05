@@ -46,6 +46,8 @@ export interface AgentPluginToolContext extends Readonly<
   Record<string, unknown>
 > {
   readonly conversation: ConversationId;
+  /** Root conversation id of this agent tree, which is the session id per-conversation plugin state is scoped by. */
+  readonly treeId: string;
   readonly streamId: string;
   readonly agentName: string;
   readonly agentPath: string;

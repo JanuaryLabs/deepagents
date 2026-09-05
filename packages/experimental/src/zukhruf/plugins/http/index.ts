@@ -41,8 +41,14 @@ export type OwnerEventSource = (
   signal: AbortSignal,
 ) => Promise<AsyncIterable<OwnerEventNotification>>;
 
+/** A discoverable feature: its route under the mount plus any detail the client needs to use it. */
+export interface HttpCapability {
+  readonly path: string;
+  readonly [detail: string]: unknown;
+}
+
 export interface HttpContribution {
-  readonly capabilities: Readonly<Record<string, { readonly path: string }>>;
+  readonly capabilities: Readonly<Record<string, HttpCapability>>;
   readonly publicRoutes?: Hono<HttpEnv>;
   readonly authenticatedRoutes?: Hono<HttpEnv>;
   readonly events?: OwnerEventSource;
@@ -133,7 +139,7 @@ export function http(
   const contributions = projections.map((projection) =>
     projection.project(runtime),
   );
-  const capabilities: Record<string, { path: string }> = {
+  const capabilities: Record<string, HttpCapability> = {
     history: { path: HISTORY_ROUTE_PATH },
     chat: { path: '/session' },
     events: { path: EVENTS_ROUTE_PATH },
@@ -198,9 +204,9 @@ export function http(
       {
         ...runtime.info,
         capabilities: Object.fromEntries(
-          Object.entries(capabilities).map(([name, { path }]) => [
+          Object.entries(capabilities).map(([name, { path, ...detail }]) => [
             name,
-            { href: `${mount}${path}` },
+            { href: `${mount}${path}`, ...detail },
           ]),
         ),
       },

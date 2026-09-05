@@ -28,6 +28,8 @@ import {
 } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 import {
+  type PublishedUpload,
+  UPLOAD_MEDIA_TYPES,
   type UploadsOptions,
   uploads,
 } from '@deepagents/experimental/zukhruf/uploads';
@@ -45,7 +47,18 @@ const PNG_PIXEL = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
-const MAX_UPLOAD_BYTES = PNG_PIXEL.byteLength;
+/** `ftyp` boxes are enough for the store, which never sniffs bytes. */
+const MP4_HEADER = Buffer.from(
+  '0000002066747970697736d00000020069736f6d69736f32',
+  'hex',
+);
+const HEIC_HEADER = Buffer.from(
+  '0000001866747970686569630000000068656963',
+  'hex',
+);
+const MP3_HEADER = Buffer.from('494433040000000000', 'hex');
+const MAX_UPLOAD_BYTES = 4096;
+const PUBLIC_URL = `http://localhost${MOUNT}`;
 
 class ControlledTurnQueue extends TurnQueue {
   readonly turns: TurnRef[] = [];
@@ -109,34 +122,69 @@ class ControlledTurnQueue extends TurnQueue {
   }
 }
 
-function completingModel() {
-  return new MockLanguageModelV4({
+const usage = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 1, text: 1, reasoning: 0 },
+};
+
+function textChunks(text: string): LanguageModelV4StreamPart[] {
+  return [
+    { type: 'text-start', id: 'text-1' },
+    { type: 'text-delta', id: 'text-1', delta: text },
+    { type: 'text-end', id: 'text-1' },
+    {
+      type: 'finish',
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage,
+    },
+  ];
+}
+
+function toolCallChunks(
+  toolName: string,
+  input: Record<string, unknown>,
+): LanguageModelV4StreamPart[] {
+  return [
+    {
+      type: 'tool-call',
+      toolCallId: `call-${toolName}`,
+      toolName,
+      input: JSON.stringify(input),
+    },
+    {
+      type: 'finish',
+      finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+      usage,
+    },
+  ];
+}
+
+/** Streams the scripted chunk list for each successive model call, then keeps answering with text. */
+function scriptedModel(script: LanguageModelV4StreamPart[][] = []) {
+  const model: MockLanguageModelV4 = new MockLanguageModelV4({
     provider: 'test',
     modelId: 'uploads-model',
-    doStream: async () => {
-      const chunks: LanguageModelV4StreamPart[] = [
-        { type: 'text-start', id: 'text-1' },
-        { type: 'text-delta', id: 'text-1', delta: 'I see a pixel.' },
-        { type: 'text-end', id: 'text-1' },
-        {
-          type: 'finish',
-          finishReason: { unified: 'stop', raw: 'stop' },
-          usage: {
-            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-            outputTokens: { total: 1, text: 1, reasoning: 0 },
-          },
-        },
-      ];
-      return { stream: simulateReadableStream({ chunks }) };
-    },
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks:
+          script[model.doStreamCalls.length - 1] ??
+          textChunks('I see a pixel.'),
+      }),
+    }),
   });
+  return model;
 }
 
 /**
  * One real runtime over one in-memory sandbox filesystem that every attach
  * shares, the way a named backend keeps its rootfs across attaches.
  */
-async function harness(options: { withUploads?: boolean } = {}) {
+async function harness(
+  options: {
+    withUploads?: boolean;
+    script?: LanguageModelV4StreamPart[][];
+  } = {},
+) {
   const resources = new AsyncDisposableStack();
   const fs = new InMemoryFs();
   const streamStore = resources.adopt(
@@ -144,8 +192,11 @@ async function harness(options: { withUploads?: boolean } = {}) {
     (value) => value.close(),
   );
   const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
-  const uploaded = uploads({ directory: UPLOAD_DIRECTORY });
-  const model = completingModel();
+  const uploaded = uploads({
+    directory: UPLOAD_DIRECTORY,
+    publicUrl: PUBLIC_URL,
+  });
+  const model = scriptedModel(options.script);
   const queue = new ControlledTurnQueue();
   const runtime = new AgentRuntime(
     defineAgent({
@@ -205,6 +256,16 @@ async function storedBytes(
       { encoding: 'binary' },
     ),
   );
+}
+
+/** Writes a file into the shared sandbox filesystem the way an agent's bash tool would. */
+async function writeSandboxFile(
+  fs: InMemoryFs,
+  path: string,
+  content: Buffer,
+): Promise<void> {
+  await using sandbox = await createVirtualSandbox({ fs });
+  await sandbox.writeFiles([{ path, content }]);
 }
 
 async function sessionDirectoryExists(
@@ -281,7 +342,7 @@ function promptedUserText(model: MockLanguageModelV4, call: number): string {
     .join('\n');
 }
 
-test('uploads() requires an absolute sandbox directory', () => {
+test('uploads() requires an absolute sandbox directory and an absolute public URL', () => {
   assert.throws(
     () => uploads({ directory: 'relative' }),
     /directory must be an absolute sandbox path/,
@@ -289,6 +350,14 @@ test('uploads() requires an absolute sandbox directory', () => {
   assert.throws(
     () => uploads({} as UploadsOptions),
     /directory must be an absolute sandbox path/,
+  );
+  assert.throws(
+    () => uploads({ directory: UPLOAD_DIRECTORY, publicUrl: 'zukhruf/v1' }),
+    /publicUrl must be an absolute http\(s\) URL/,
+  );
+  assert.throws(
+    () => uploads({ directory: UPLOAD_DIRECTORY, publicUrl: 'ftp://host/v1' }),
+    /publicUrl must be an absolute http\(s\) URL/,
   );
   assert.throws(
     () =>
@@ -322,7 +391,10 @@ test('discovery advertises the uploads capability only when it is composed', asy
     await request(withoutCapability.app, `${MOUNT}/info`)
   ).json()) as { capabilities: Record<string, unknown> };
 
-  assert.deepEqual(present.capabilities.uploads, { href: `${MOUNT}/session` });
+  assert.deepEqual(present.capabilities.uploads, {
+    href: `${MOUNT}/session`,
+    mediaTypes: [...UPLOAD_MEDIA_TYPES],
+  });
   assert.equal(absent.capabilities.uploads, undefined);
   assert.equal(
     (await upload(withoutCapability.app, sessionId, { filename: 'pixel.png' }))
@@ -379,6 +451,28 @@ test('POST /session/:sessionId/uploads stores the image in the session sandbox a
   ).json()) as UploadReceipt;
   assert.equal(jpeg.mediaType, 'image/jpeg');
   assert.match(jpeg.path, /\.jpg$/);
+
+  const stored: Array<[string, Buffer, string, RegExp]> = [
+    ['image/heic', HEIC_HEADER, 'IMG_0001.HEIC', /\.heic$/],
+    ['video/mp4', MP4_HEADER, 'clip.mp4', /\.mp4$/],
+    ['video/quicktime', MP4_HEADER, 'IMG_0002.MOV', /\.mov$/],
+    ['audio/mpeg', MP3_HEADER, 'track.mp3', /\.mp3$/],
+    ['audio/mp4', MP4_HEADER, 'voice.m4a', /\.m4a$/],
+  ];
+  for (const [contentType, body, filename, extension] of stored) {
+    const receipt = (await (
+      await upload(h.app, sessionId, { body, contentType, filename })
+    ).json()) as UploadReceipt;
+    assert.deepEqual(
+      { mediaType: receipt.mediaType, name: receipt.name, size: receipt.size },
+      { mediaType: contentType, name: filename, size: body.byteLength },
+    );
+    assert.match(receipt.path, extension);
+    assert.deepEqual(
+      await storedBytes(h.fs, OWNER, sessionId, posix.basename(receipt.path)),
+      body,
+    );
+  }
 });
 
 test('POST /session/:sessionId/uploads requires a URI-encoded x-upload-filename header', async () => {
@@ -418,6 +512,7 @@ test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only
   const path = new URL(url).pathname;
 
   const served = await request(h.app, path);
+  const head = await request(h.app, path, { method: 'HEAD' });
   const foreign = await request(h.app, path, { user: 'owner-2' });
   const missing = await request(
     h.app,
@@ -429,12 +524,27 @@ test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only
   );
 
   assert.equal(served.status, 200);
-  assert.equal(served.headers.get('content-type'), 'image/png');
-  assert.equal(
-    served.headers.get('cache-control'),
-    'private, max-age=31536000, immutable',
+  assert.deepEqual(
+    {
+      type: served.headers.get('content-type'),
+      cache: served.headers.get('cache-control'),
+      ranges: served.headers.get('accept-ranges'),
+      length: served.headers.get('content-length'),
+    },
+    {
+      type: 'image/png',
+      cache: 'private, max-age=31536000, immutable',
+      ranges: 'bytes',
+      length: String(PNG_PIXEL.byteLength),
+    },
   );
   assert.deepEqual(Buffer.from(await served.arrayBuffer()), PNG_PIXEL);
+  assert.equal(head.status, 200);
+  assert.equal(
+    head.headers.get('content-length'),
+    String(PNG_PIXEL.byteLength),
+  );
+  assert.equal((await head.arrayBuffer()).byteLength, 0);
   for (const response of [foreign, missing, traversal]) {
     assert.equal(response.status, 404);
     assert.equal(
@@ -444,7 +554,70 @@ test('GET /session/:sessionId/uploads/:fileId serves the bytes to the owner only
   }
 });
 
-test('POST /session/:sessionId/uploads rejects anything but a supported image type', async () => {
+test('GET /session/:sessionId/uploads/:fileId honours single byte ranges so media elements can seek', async () => {
+  await using h = await harness();
+  const sessionId = randomUUID();
+  const { url } = (await (
+    await upload(h.app, sessionId, {
+      body: MP4_HEADER,
+      contentType: 'video/mp4',
+      filename: 'clip.mp4',
+    })
+  ).json()) as UploadReceipt;
+  const path = new URL(url).pathname;
+  const total = MP4_HEADER.byteLength;
+
+  const prefix = await request(h.app, path, {
+    headers: { range: 'bytes=0-3' },
+  });
+  const suffix = await request(h.app, path, { headers: { range: 'bytes=-4' } });
+  const open = await request(h.app, path, { headers: { range: 'bytes=20-' } });
+  const beyond = await request(h.app, path, {
+    headers: { range: `bytes=${total}-` },
+  });
+  const multi = await request(h.app, path, {
+    headers: { range: 'bytes=0-1,4-5' },
+  });
+
+  assert.deepEqual(
+    {
+      status: prefix.status,
+      range: prefix.headers.get('content-range'),
+      length: prefix.headers.get('content-length'),
+      type: prefix.headers.get('content-type'),
+      body: Buffer.from(await prefix.arrayBuffer()),
+    },
+    {
+      status: 206,
+      range: `bytes 0-3/${total}`,
+      length: '4',
+      type: 'video/mp4',
+      body: MP4_HEADER.subarray(0, 4),
+    },
+  );
+  assert.equal(
+    suffix.headers.get('content-range'),
+    `bytes ${total - 4}-${total - 1}/${total}`,
+  );
+  assert.deepEqual(
+    Buffer.from(await suffix.arrayBuffer()),
+    MP4_HEADER.subarray(total - 4),
+  );
+  assert.equal(
+    open.headers.get('content-range'),
+    `bytes 20-${total - 1}/${total}`,
+  );
+  assert.deepEqual(
+    Buffer.from(await open.arrayBuffer()),
+    MP4_HEADER.subarray(20),
+  );
+  for (const response of [beyond, multi]) {
+    assert.equal(response.status, 416);
+    assert.equal(response.headers.get('content-range'), `bytes */${total}`);
+  }
+});
+
+test('POST /session/:sessionId/uploads rejects anything but a supported media type', async () => {
   await using h = await harness();
   const sessionId = randomUUID();
 
@@ -559,8 +732,16 @@ test('receipts under message.metadata.uploads reach the model as a reminder list
     mediaType: receipt.mediaType,
   };
 
+  const clip = (await (
+    await upload(h.app, sessionId, {
+      body: MP4_HEADER,
+      contentType: 'video/mp4',
+      filename: 'clip.mp4',
+    })
+  ).json()) as UploadReceipt;
+
   const attached = await turn(h.app, sessionId, {
-    parts: [{ type: 'text', text: 'What is in [Image #1]?' }],
+    parts: [{ type: 'text', text: 'What is in [Image #1] and [Video #2]?' }],
     metadata: {
       uploads: [
         outsideDirectory,
@@ -569,6 +750,7 @@ test('receipts under message.metadata.uploads reach the model as a reminder list
         otherSession,
         traversal,
         withoutSize,
+        clip,
       ],
     },
   });
@@ -582,16 +764,100 @@ test('receipts under message.metadata.uploads reach the model as a reminder list
   await h.queue.runNext();
   const plainText = promptedUserText(h.model, 1);
 
-  assert.match(attachedText, /^What is in \[Image #1\]\?\n/);
+  assert.match(attachedText, /^What is in \[Image #1\] and \[Video #2\]\?\n/);
   const reminder = /<system-reminder>(?<body>[^]*)<\/system-reminder>/.exec(
     attachedText,
   )?.groups?.body;
   assert.equal(
     reminder,
     [
-      'The user attached the files listed below for this turn; read them by path with the readFile tool when needed, and [Image #N] in the message refers to the Nth listed file.',
+      'The user attached the files listed below for this turn; read images by path with the readFile tool when needed (convert HEIC and extract video frames with sandbox commands first), and [Image #N], [Video #N], or [Audio #N] in the message refers to the Nth listed file.',
       `- ${receipt.path} (pixel.png, image/png, ${PNG_PIXEL.byteLength} bytes)`,
+      `- ${clip.path} (clip.mp4, video/mp4, ${MP4_HEADER.byteLength} bytes)`,
     ].join('\n'),
   );
   assert.equal(plainText, 'Thanks');
+});
+
+test('publish_upload adopts a file the agent rendered into the session and the GET route serves it', async () => {
+  const sessionId = randomUUID();
+  const scope = `${UPLOAD_DIRECTORY}/${OWNER}/${sessionId}`;
+  const rendered = `${scope}/render/reel.mp4`;
+  await using h = await harness({
+    script: [
+      toolCallChunks('publish_upload', {
+        path: rendered,
+        name: 'Highlight reel',
+      }),
+      textChunks('Published.'),
+    ],
+  });
+  await writeSandboxFile(h.fs, rendered, MP4_HEADER);
+
+  const response = await turn(h.app, sessionId, {
+    parts: [{ type: 'text', text: 'Publish the reel.' }],
+  });
+  assert.equal(response.status, 202);
+  await h.queue.runNext();
+
+  assert.equal(h.model.doStreamCalls.length, 2);
+  const result = h.model.doStreamCalls[1]?.prompt
+    .flatMap((message) => (message.role === 'tool' ? message.content : []))
+    .find(
+      (part) =>
+        part.type === 'tool-result' && part.toolName === 'publish_upload',
+    );
+  assert.ok(result?.type === 'tool-result' && result.output.type === 'json');
+  const published = result.output.value as unknown as PublishedUpload;
+  const fileId = published.fileId;
+  assert.match(fileId, /^[0-9a-f-]{36}\.mp4$/);
+  assert.deepEqual(published, {
+    fileId,
+    path: `${scope}/${fileId}`,
+    mediaType: 'video/mp4',
+    name: 'Highlight reel',
+    href: `/session/${sessionId}/uploads/${fileId}`,
+    url: `${PUBLIC_URL}/session/${sessionId}/uploads/${fileId}`,
+  });
+  assert.deepEqual(
+    await storedBytes(h.fs, OWNER, sessionId, fileId),
+    MP4_HEADER,
+  );
+  const served = await request(h.app, new URL(published.url ?? '').pathname, {
+    headers: { range: 'bytes=0-7' },
+  });
+  assert.equal(served.status, 206);
+  assert.deepEqual(
+    Buffer.from(await served.arrayBuffer()),
+    MP4_HEADER.subarray(0, 8),
+  );
+
+  const again = await h.uploads.publish(
+    { userId: OWNER, sessionId },
+    { path: published.path },
+  );
+  assert.equal(again.fileId, fileId);
+  await assert.rejects(
+    h.uploads.publish({ userId: OWNER, sessionId }, { path: '/etc/passwd' }),
+    /outside this session's uploads directory/,
+  );
+  await writeSandboxFile(h.fs, `${scope}/render/tool.exe`, MP4_HEADER);
+  await assert.rejects(
+    h.uploads.publish(
+      { userId: OWNER, sessionId },
+      { path: `${scope}/render/tool.exe` },
+    ),
+    /unsupported file extension "exe"/,
+  );
+  await assert.rejects(
+    h.uploads.publish(
+      { userId: OWNER, sessionId },
+      { path: `${scope}/render/missing.mp4` },
+    ),
+    /does not exist in the sandbox/,
+  );
+  await assert.rejects(
+    h.uploads.publish({ userId: 'owner-2', sessionId }, { path: rendered }),
+    /outside this session's uploads directory/,
+  );
 });

@@ -122,11 +122,16 @@ preserving their run history. An explicitly archived task is never restored by
 the filesystem.
 
 The optional `@deepagents/experimental/zukhruf/uploads` plugin stores
-composer image uploads in the conversation sandbox under a host-selected
-absolute directory. Compose
-`@deepagents/experimental/zukhruf/uploads/http` with `http(runtime, ...)` when
-the browser should upload image bytes; the model receives a turn-local reminder
-with the sandbox paths to read.
+composer uploads (PNG, JPEG, WebP, GIF, HEIC/HEIF, MP4, QuickTime, MP3, M4A,
+WAV) in the conversation sandbox under a host-selected absolute directory.
+Compose `@deepagents/experimental/zukhruf/uploads/http` with
+`http(runtime, ...)` when the browser should upload bytes: the `GET` route
+serves them with byte ranges so media elements can seek, discovery advertises
+the accepted `mediaTypes`, and the model receives a turn-local reminder with
+the sandbox paths to read. Every agent in the tree also gets a
+`publish_upload` tool that adopts a file it produced below the session's
+uploads directory and returns the link the user can open; pass `publicUrl`
+(the absolute mount of `http()`) so that link is absolute.
 
 Runnable end-to-end showcases live in
 [`demo/zukhruf-simple`](../../demo/zukhruf-simple) (the smallest complete

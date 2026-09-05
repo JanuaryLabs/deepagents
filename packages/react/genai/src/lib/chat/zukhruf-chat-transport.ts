@@ -12,7 +12,19 @@ const UPLOAD_FILENAME_HEADER = 'x-upload-filename';
 export const uploadReceiptSchema = z.strictObject({
   path: z.string().startsWith('/'),
   name: z.string().min(1),
-  mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  mediaType: z.enum([
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+    'image/heic',
+    'image/heif',
+    'video/mp4',
+    'video/quicktime',
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/wav',
+  ]),
   size: z.int().nonnegative(),
   url: z.url(),
 });

@@ -190,6 +190,7 @@ export class AgentTurnExecutor {
     } satisfies AgentToolContext;
     const pluginContext = {
       conversation: { chatId: turn.chatId, userId: turn.userId },
+      treeId: thread.treeId,
       streamId: turn.streamId,
       agentName: declaration.name,
       agentPath: thread.path.toString(),
