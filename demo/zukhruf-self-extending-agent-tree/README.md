@@ -37,23 +37,23 @@ User message
         Root -> User
 ```
 
-The shared catalog is the handoff boundary. Root and General Task mount it
-read-only; Skill Authority mounts it read-write. Root inspects the current
+The shared catalog is the handoff boundary. Each role has one named Microsandbox
+microVM, scoped to this tree rather than a chat. Every microVM mounts the same
+workspace and skill catalog as read-write volumes. Root inspects the current
 catalog for each request. General Task receives skill names in its delegation
-message and discovers the published `SKILL.md` files on its first turn. There
-is no separate manifest or skill-invocation API.
+message and discovers the published `SKILL.md` files on its first turn. There is
+no separate manifest or skill-invocation API.
 
 ## Run
 
-Create an empty catalog and point the demo at a disposable workspace:
+Run the demo from the repository root:
 
 ```sh
-mkdir -p /tmp/zukhruf-skills /tmp/hono-project
-OPENAI_API_KEY=... nx run @deepagents/demo-zukhruf-self-extending-agent-tree:start -- \
-  --workspace /tmp/hono-project \
-  --skills /tmp/zukhruf-skills \
+node --env-file=.env demo/zukhruf-self-extending-agent-tree/run.ts \
   "Build a TypeScript API with Hono. Use a reusable hono skill; commission it if missing."
 ```
 
-Docker is required. The runnable demo uses `gpt-5.6-terra` for all three
-roles and permits four concurrent turns so Root can wait while a child works.
+The demo creates and reuses `workspace/` and `skills/` beside `run.ts`. The root
+`.env` must define `OPENAI_API_KEY`. Microsandbox requires Apple silicon or
+Linux with KVM. The runnable demo uses `gpt-5.6-terra` for all three roles and
+permits four concurrent turns so Root can wait while a child works.

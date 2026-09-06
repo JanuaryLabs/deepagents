@@ -4,14 +4,11 @@ import { defineAgent } from '@deepagents/experimental/zukhruf';
 
 import instructions from './instructions.ts';
 import sandbox from './sandbox.ts';
-import generalTask from './subagents/general-task/agent.ts';
-import skillAuthority from './subagents/skill-authority/agent.ts';
 
 export default defineAgent({
-  name: 'root',
-  description: 'Decomposes requests, resolves skills, and delegates work.',
+  name: 'skill-authority',
+  description: 'Creates, validates, and publishes missing reusable skills.',
   model: openai('gpt-5.6-terra'),
   sandbox,
   instructions,
-  subagents: [skillAuthority, generalTask],
 });

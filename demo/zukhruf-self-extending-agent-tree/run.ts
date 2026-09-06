@@ -1,6 +1,6 @@
-import { openai } from '@ai-sdk/openai';
 import { PGlite } from '@electric-sql/pglite';
-import { parseArgs } from 'node:util';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { PgBoss, fromPglite } from 'pg-boss';
 
 import {
@@ -16,38 +16,15 @@ import {
   renderTurn,
 } from '@deepagents/experimental/zukhruf';
 
-import { createSelfExtendingAgentTree } from './agent.ts';
-import { createTreeSandboxes } from './sandbox.ts';
+import root from './agent.ts';
 
-const { values, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    workspace: { type: 'string', short: 'C' },
-    skills: { type: 'string', short: 'S' },
-  },
-});
-if (!values.workspace || !values.skills) {
-  throw new Error(
-    'Usage: node run.ts --workspace /path/to/repo --skills /path/to/catalog "Describe the task"',
-  );
-}
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error('OPENAI_API_KEY is required');
-}
+mkdirSync(join(import.meta.dirname, 'workspace'), { recursive: true });
+mkdirSync(join(import.meta.dirname, 'skills'), { recursive: true });
 
-const input =
-  positionals.join(' ').trim() ||
-  'Build a TypeScript API with Hono. Use a reusable hono skill; commission it if missing.';
-const sandboxes = createTreeSandboxes({
-  workspaceDirectory: values.workspace,
-  skillsDirectory: values.skills,
-});
-const model = openai('gpt-5.6-terra');
-const root = createSelfExtendingAgentTree({
-  root: { model, sandbox: sandboxes.root },
-  skillAuthority: { model, sandbox: sandboxes.skillAuthority },
-  generalTask: { model, sandbox: sandboxes.generalTask },
-});
+const input = process.argv.slice(2).join(' ').trim();
+if (!input) {
+  throw new Error('Usage: node --env-file=.env run.ts "Describe the task"');
+}
 
 await using resources = new AsyncDisposableStack();
 const database = resources.adopt(new PGlite(), (database) => database.close());
@@ -78,14 +55,14 @@ const runtime = new AgentRuntime(root, {
 resources.use(await runtime.work({ concurrency: 4 }));
 
 const turn = await runtime.enqueue(
-  { chatId: crypto.randomUUID(), userId: process.env.USER ?? 'demo' },
+  { chatId: crypto.randomUUID(), userId: 'demo' },
   {
+    trigger: 'submit-message',
     message: {
       id: crypto.randomUUID(),
       role: 'user',
       parts: [{ type: 'text', text: input }],
     },
-    trigger: 'submit-message',
   },
 );
 await renderTurn(turn.stream);

@@ -13,7 +13,7 @@ import {
   StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
-import { createSelfExtendingAgentTree } from '@deepagents/demo-zukhruf-self-extending-agent-tree';
+import declaration from '@deepagents/demo-zukhruf-self-extending-agent-tree';
 import {
   AgentRuntime,
   PgBossTurnQueue,
@@ -32,8 +32,8 @@ const usage = {
 } as const;
 
 test('authors a missing skill before a fresh general task agent uses it', async () => {
-  const fs = new InMemoryFs();
-  const sandbox = defineSandbox(() => createVirtualSandbox({ fs }), {
+  await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+  const sandbox = defineSandbox(async () => backend, {
     destination: '/agent',
   });
 
@@ -113,8 +113,10 @@ test('authors a missing skill before a fresh general task agent uses it', async 
         assert.match(serializedPrompt, /Build TypeScript HTTP APIs with Hono/);
         assert.match(serializedPrompt, /skills\/hono\/SKILL\.md/);
         return toolResponse('bash', 'read-hono-skill', {
-          command: 'cat skills/hono/SKILL.md',
-          reasoning: 'Read the named skill before implementing the task.',
+          command:
+            "cat skills/hono/SKILL.md && printf '%s\\n' 'export default {}' > workspace/server.ts",
+          reasoning:
+            'Read the named skill, then implement the task in the shared workspace.',
         });
       }
       assert.match(serializedPrompt, /Use Hono routing conventions/);
@@ -122,11 +124,16 @@ test('authors a missing skill before a fresh general task agent uses it', async 
     },
   });
 
-  const root = createSelfExtendingAgentTree({
-    root: { model: rootModel, sandbox },
-    skillAuthority: { model: skillAuthorityModel, sandbox },
-    generalTask: { model: generalTaskModel, sandbox },
-  });
+  const [skillAuthority, generalTask] = declaration.subagents;
+  const root = {
+    ...declaration,
+    model: rootModel,
+    sandbox,
+    subagents: [
+      { ...skillAuthority, model: skillAuthorityModel, sandbox },
+      { ...generalTask, model: generalTaskModel, sandbox },
+    ],
+  };
 
   await using resources = new AsyncDisposableStack();
   const database = resources.adopt(new PGlite(), (database) =>
@@ -178,6 +185,14 @@ test('authors a missing skill before a fresh general task agent uses it', async 
   assert.equal(rootCalls, 6);
   assert.equal(skillAuthorityCalls, 2);
   assert.equal(generalTaskCalls, 2);
+  assert.match(
+    await backend.readFile('/agent/skills/hono/SKILL.md'),
+    /^name: hono$/m,
+  );
+  assert.equal(
+    await backend.readFile('/agent/workspace/server.ts'),
+    'export default {}\n',
+  );
 });
 
 function textResponse(text: string) {
