@@ -45,7 +45,6 @@ const ai = agent({
   sandbox,
   telemetry: {
     integrations: createFileTelemetry({
-      includeTimestamp: true,
       path: './telemetry.json',
     }),
   },

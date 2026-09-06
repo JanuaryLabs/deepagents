@@ -13,8 +13,13 @@
 ### Running Tests
 
 ```sh
-node --test --no-warnings  path/to/package/test/file.test.ts
+node --test --no-warnings --test-timeout=60000 path/to/package/test/file.test.ts
 ```
+
+- **Always pass `--test-timeout=<ms>` to direct `node --test` runs.** Neither `node --test` nor
+  `tools/src/run-node-tests.ts` (behind `nx run <project>:test`) bounds a single test, so a hung
+  stream or an unresolved wait runs until the outer tool timeout instead of failing in seconds.
+  Pick the bound from the slowest legitimate test in the file (Docker-backed suites need more).
 
 ### Test Import Rules
 
@@ -29,6 +34,13 @@ node --test --no-warnings  path/to/package/test/file.test.ts
   ```
 
 - **Why**: TypeScript treats private class members (`#field`) as unique per class declaration. Mixing imports from built packages and source files creates two incompatible types.
+
+## Demos
+
+- **A demo showcases its feature unconditionally.** No `--no-<feature>` opt-out flags, no
+  `start:no-<feature>` script aliases, no parallel "plain" entry points. The capability-absence
+  path is proven by the package's integration test (e.g. `schedules-http.integration.test.ts`
+  composes `http(runtime)` without `schedulesHttp`), never by a second way to run the demo.
 
 ## Package Overview
 

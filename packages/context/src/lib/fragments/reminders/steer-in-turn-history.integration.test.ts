@@ -92,7 +92,7 @@ describe('steer reminders and in-turn history', () => {
           }),
         },
         telemetry: {
-          integrations: createFileTelemetry({ path, includeTimestamp: false }),
+          integrations: createFileTelemetry({ path }),
         },
       });
 

@@ -460,6 +460,11 @@ declarationName}` in existing chat metadata. Runtime execution also records `las
   projection waits for continuation, guaranteeing one final answer. A failed or cancelled
   continuation overrides that pause and is projected immediately. Child progress UI remains
   deferred.
+  This matches Codex (`openai/codex` `bdfd769`): `forward_child_completion_to_parent` builds the
+  envelope with `trigger_turn: false`, and the parent's `inter_agent_communication` handler starts
+  a turn only for trigger mail or a durable-sleep extension. **An idle parent is not woken by a
+  child result in either system.** A parent that must react calls `wait_agent` inside its turn, or
+  the host starts its next turn; hosts watch completion through the conversation status signal.
 
 ### Codex multi-agent parity boundary
 
@@ -909,8 +914,9 @@ work({concurrency?}) → AsyncDisposable }`.
   contribute task/run changes after commit without browser polling.
 - `demo/zukhruf-durable-turns/run.ts` — the **independent-agent showcase**: PGlite-backed pg-boss
   (self-contained, no server), concurrent in-process `work()`, detach/resume a root turn that calls
-  nonblocking `spawn_agent`, wait until the specialist's queue-only `FINAL_ANSWER` is durable, then
-  enqueue a second root turn that consumes it. Uses
+  nonblocking `spawn_agent` and then `wait_agent` until the specialist's queue-only `FINAL_ANSWER`
+  lands in the same turn, while the host prints conversation status changes for the root and the
+  specialist. Uses
   `SqliteContextStore('./zukhruf.sqlite')` + `SqliteStreamStore('./zukhruf.streams.sqlite')` +
   `SqliteMailboxStore('./zukhruf.mailbox.sqlite')` + `PGlite('./zukhruf.queue')`.
 - Integration suites cover enqueue/work/observe durability, ownership and stream isolation,

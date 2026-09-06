@@ -38,7 +38,6 @@ jobs:
 
       - name: Test affected
         run: npx nx affected -t test
-        continue-on-error: true
 
       - name: Publish test results
         uses: mikepenz/action-junit-report@v6

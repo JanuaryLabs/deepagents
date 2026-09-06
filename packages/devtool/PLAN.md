@@ -441,8 +441,8 @@ implementing, but the behavior is fixed:
       history, and the owner-wide pending-review query.
 - [x] Replace the placeholder route with the capability-gated task management
       and review workspace.
-- [x] Add the public `zukhruf-schedules` demo with `--no-schedules` proving the
-      absent-capability path.
+- [x] Add the public `zukhruf-schedules` demo; the absent-capability path is
+      covered by the `schedulesHttp` integration test.
 
 ### Phase 11 — Trace package consolidation (implemented 2026-09-04)
 
@@ -528,7 +528,7 @@ execution.
 
 **Exact next action:** keep the one-server composition as the only supported
 topology and browser-smoke the implemented Scheduled Tasks demo across task
-management, the pending-review inbox, exact-conversation navigation, capability
-absence, Back/Forward, and console/accessibility checks. No Scheduled Tasks
+management, the pending-review inbox, exact-conversation navigation,
+Back/Forward, and console/accessibility checks. No Scheduled Tasks
 implementation phase remains. Do not stage or commit without explicit
 authorization.

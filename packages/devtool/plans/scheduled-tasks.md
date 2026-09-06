@@ -342,6 +342,5 @@ remaining required work.
 ## Exact next action
 
 Browser-smoke the implemented `zukhruf-schedules` demo across task management,
-pending review, exact-conversation navigation, the `--no-schedules` absence
-path, browser Back/Forward, responsive overflow, accessibility, and console
-errors. No implementation phase remains.
+pending review, exact-conversation navigation, browser Back/Forward, responsive
+overflow, accessibility, and console errors. No implementation phase remains.

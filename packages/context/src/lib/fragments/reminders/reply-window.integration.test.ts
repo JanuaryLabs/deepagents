@@ -103,7 +103,7 @@ async function streakFired(
         }),
       },
       telemetry: {
-        integrations: createFileTelemetry({ path, includeTimestamp: false }),
+        integrations: createFileTelemetry({ path }),
       },
     });
 

@@ -130,7 +130,7 @@ describe('tool-failure streak reminders', () => {
           }),
         },
         telemetry: {
-          integrations: createFileTelemetry({ path, includeTimestamp: false }),
+          integrations: createFileTelemetry({ path }),
         },
       });
       context.set(repeatedFailureReminder('bash'));

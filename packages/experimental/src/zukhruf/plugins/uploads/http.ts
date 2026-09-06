@@ -60,7 +60,7 @@ export interface UploadReceipt {
 }
 
 /**
- * Per-session image upload and retrieval bound to one `uploads()` definition.
+ * Per-session upload and retrieval bound to one `uploads()` definition.
  * The caller must choose the maximum accepted upload size in bytes.
  */
 export function uploadsHttp(
