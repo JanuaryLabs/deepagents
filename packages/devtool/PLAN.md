@@ -8,7 +8,7 @@ canonical implementation and continuation record. Chat context is disposable;
 update this file whenever a decision, finding, completed phase, or next action
 changes.
 
-## Current state — 2026-08-31 (host-configurable protocol mount)
+## Current state — 2026-09-04 (host-configurable protocol mount)
 
 - The approved one-server, HTTP-only topology is implemented in the working
   tree. The host owns one Hono server and one `@hono/node-server` listener,
@@ -40,16 +40,16 @@ changes.
   `publicRoutes` before auth and `authenticatedRoutes` after auth. No projection
   registry, DevTool type, or Hono type enters core, and no generic REST
   semantics are derived from arbitrary runtime methods.
-- `@deepagents/devtool-traces` owns the `fileTelemetry()` runtime plugin. It
-  creates the file telemetry integration, correlates conversation, stream,
-  agent name, and agent path on each turn, and exposes a transport-neutral trace
-  reader on its typed plugin instance. Its `/http` entry point exports
-  `tracesHttp(definition)`, which contributes `capabilities.traces` plus
+- `@deepagents/devtool/traces` owns the `fileTelemetry()` runtime plugin. It
+  records AI SDK OpenTelemetry spans as Halo-compatible JSONL, correlates
+  conversation, stream, agent name, and agent path on each turn, and exposes a
+  transport-neutral trace reader on its typed plugin instance. The same
+  subpath exports `tracesHttp(definition)`, which contributes `capabilities.traces` plus
   relative trace routes that resolve beneath the host-selected Hono mount.
   Ownership is the authenticated `userId` plus `chatId`;
   durable turn status still overrides the projected status; empty files remain
-  readable as an empty list and no file URI appears in discovery. The package
-  has its own `test` Nx target.
+  readable as an empty list and no file URI appears in discovery. Trace tests
+  run under the `@deepagents/devtool` Nx target.
 - Consumers migrated to one server: `demo/zukhruf-simple` (`--devtool` mode,
   ordinary CLI turn preserved) and `demo/zukhruf-research-bot`. Each agent
   declaration installs `fileTelemetry()`; each `run.ts` runs `runtime.work()`
@@ -59,9 +59,8 @@ changes.
   `devtool({ protocolPath: '/zukhruf/v1' })` at `/devtool`, and owns the one listener on
   `127.0.0.1:4317`), returns the `/devtool` URL, and `run.ts` disposes worker and
   server through the existing `AsyncDisposableStack`.
-  `tools/src/verify-definition-owned-plugins.ts` packs
-  `@deepagents/devtool-traces` and uses `fileTelemetry()` as the
-  definition-owned plugin.
+  `tools/src/verify-definition-owned-plugins.ts` packs `@deepagents/devtool`
+  and imports `fileTelemetry()` from its `/traces` subpath.
 - Obsolete and removed: the embedded `devtool()` runtime plugin, `DevtoolOptions`,
   loopback listener ownership, `runtime.url`, runtime headers, `hono/proxy`,
   `startDevtool`, direct `AgentPluginHost` access from the DevTool, the
@@ -115,6 +114,8 @@ Re-read these before changing their contracts:
   where one declaration becomes one conversation-scoped durable turn.
 - `packages/context/src/lib/telemetry/*` — the built-in AI SDK lifecycle
   integrations, recording controls, JSONL record format, and file writer.
+- `packages/devtool/host/src/traces/*` — the OpenTelemetry file exporter,
+  trace reader, and authenticated HTTP projection.
 - Installed AI SDK source under `node_modules/ai/src/telemetry/*` — current
   telemetry event behavior.
 - `TEST_PRIMITIVES.md` — use native Node testing primitives and public package
@@ -255,9 +256,9 @@ another one:
 - Agent declarations remain the owners of AI SDK recording policy and any
   declaration-local integrations. Runtime plugins may contribute additional
   integrations; the AI SDK dispatches to all of them.
-- `fileTelemetry()` uses the existing `createFileTelemetry()` integration and
-  `TelemetryLogRecord` vocabulary. Its public `traces.path` descriptor may be
-  projected, but records must not be copied into another persistence mechanism.
+- `fileTelemetry()` uses the AI SDK OpenTelemetry integration and persists
+  Halo-compatible flat spans. Records must not be copied into another
+  persistence mechanism.
 - Zukhruf supplies conversation/turn context at the runtime boundary;
   the plugin adds that correlation metadata to its integration's start event
   for each turn.
@@ -390,7 +391,7 @@ implementing, but the behavior is fixed:
 - [x] Add the original plugin HTTP contribution seam to
       `@deepagents/experimental`; Phase 8 replaces it with transport-neutral
       plugin instances and explicit projections.
-- [x] Add `fileTelemetry()` to `@deepagents/devtool-traces`; it contributes one
+- [x] Add `fileTelemetry()` to the original trace child package; it contributes one
       AI SDK telemetry integration plus authenticated trace discovery and
       routes. Its Nx `test` target proves multi-integration dispatch, owner
       isolation, list/detail, durable status, empty files, omitted capability
@@ -418,8 +419,8 @@ implementing, but the behavior is fixed:
       `@deepagents/experimental/zukhruf/http`.
 - [x] Add explicit HTTP projections and prove installed, absent,
       authenticated, duplicate, and invalid-path behavior.
-- [x] Move trace HTTP routes to `@deepagents/devtool-traces/http`; retain the
-      trace reader and telemetry integration as transport-neutral plugin data.
+- [x] Move trace HTTP routes out of core into an explicit projection; Phase 11
+      later exposes that projection from `@deepagents/devtool/traces`.
 - [x] Migrate both demos and the DevTool host composition to
       `http(runtime, tracesHttp(traceTelemetry))`.
 
@@ -442,6 +443,16 @@ implementing, but the behavior is fixed:
       and review workspace.
 - [x] Add the public `zukhruf-schedules` demo with `--no-schedules` proving the
       absent-capability path.
+
+### Phase 11 — Trace package consolidation (implemented 2026-09-04)
+
+- [x] Remove the standalone trace package and its Nx, TypeScript, dependency,
+      and packed-artifact surface.
+- [x] Export `fileTelemetry()` and `tracesHttp()` together from
+      `@deepagents/devtool/traces` with no compatibility re-export.
+- [x] Internalize the trace UI and styles in the DevTool host.
+- [x] Move the trace integration suite under the DevTool project and preserve
+      runtime, HTTP, ownership, persistence, and recording-policy coverage.
 
 ## Non-goals
 
@@ -491,14 +502,12 @@ execution.
 
 ### Selected capture design
 
-- `fileTelemetry()` owns one existing `createFileTelemetry()` integration and
-  its `TelemetryLogRecord` output. The devtool's file adapter groups lifecycle
-  events by AI SDK `callId` and derives the agent, generation, and function
-  spans required by the existing UI.
+- `fileTelemetry()` owns one AI SDK OpenTelemetry integration and writes
+  Halo-compatible flat spans. The DevTool adapter groups them by trace ID and
+  derives the agent, generation, and function spans required by the UI.
 - The Zukhruf runtime supplies the conversation, stream, declaration name, and
   canonical agent path to each per-turn plugin telemetry contribution. The
-  file plugin adds that correlation metadata to its integration's `onStart`
-  event.
+  file plugin enriches every emitted span with that correlation metadata.
 - The plugin keeps its absolute `file:` URI private and advertises only the
   authenticated trace route.
 - When `recordInputs` is false, prompt, tool, and runtime context remain

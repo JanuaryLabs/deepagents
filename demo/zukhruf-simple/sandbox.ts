@@ -5,7 +5,7 @@ export default defineSandbox(
   ({ chatId }) =>
     createMicrosandboxSandbox({
       name: `zukhruf-simple-${chatId}`,
-      configure: (builder) => builder.image('node:lts'),
+      configure: (builder) => builder.image('node:lts').detached(true),
     }),
   {
     uploadDirectory: {

@@ -1,5 +1,5 @@
 @import "@deepagents/react-input/styles.css";
-@import "@deepagents/devtool-traces/styles.css";
+@import "./traces/styles.css";
 @import "streamdown/styles.css";
 @import "tailwindcss";
 
@@ -14,7 +14,6 @@
 @source "../../../../react/shadcn";
 @source "../../../../test";
 @source "../../../history";
-@source "../../../traces";
 /* nx-tailwind-sources:end */
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";

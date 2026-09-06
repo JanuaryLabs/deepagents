@@ -1,0 +1,33 @@
+{
+  "name": "@deepagents/demo-zukhruf-self-extending-agent-tree",
+  "version": "6.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Zukhruf demo where a root agent commissions missing skills before delegating execution.",
+  "exports": {
+    ".": "./agent.ts"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "start": "node run.ts",
+    "test": "node --test --no-warnings --test-timeout=30000 agent.integration.test.ts"
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "dependsOn": [
+          "build"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.52",
+    "@deepagents/context": "6.2.0",
+    "@deepagents/experimental": "6.2.0",
+    "@electric-sql/pglite": "^0.5.4",
+    "ai": "^7.0.85",
+    "just-bash": "^3.2.0",
+    "pg-boss": "^12.29.0"
+  }
+}

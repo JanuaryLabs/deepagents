@@ -16,12 +16,35 @@ import {
 } from '@deepagents/devtool-history';
 import { cn } from '@deepagents/react-shadcn';
 
-import type {
-  AgentTrace,
-  AgentTraceSpan,
-  AgentTraceSummary,
-  RecordingState,
-} from './file-trace-adapter.ts';
+type RecordingState = 'recorded' | 'not-recorded';
+type TraceStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+interface AgentTraceSummary {
+  id: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  status: TraceStatus;
+}
+
+interface AgentTraceSpan {
+  id: string;
+  parentId: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  status: TraceStatus;
+  type: string;
+  name: string;
+  input?: unknown;
+  output?: unknown;
+  usage?: unknown;
+  error?: unknown;
+  data: Record<string, unknown>;
+}
+
+type AgentTrace = AgentTraceSummary & {
+  recording: { inputs: RecordingState; outputs: RecordingState };
+  spans: AgentTraceSpan[];
+};
 
 export function TracesView({
   conversation,

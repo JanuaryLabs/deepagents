@@ -16,6 +16,7 @@
         }
       ],
       "options": {
+        "additionalEntryPoints": ["packages/devtool/host/src/traces/index.ts"],
         "assets": [
           {
             "input": "packages/devtool/host/ui/dist",

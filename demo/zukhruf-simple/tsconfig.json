@@ -16,9 +16,6 @@
     },
     {
       "path": "../../packages/experimental"
-    },
-    {
-      "path": "../../packages/devtool/traces"
     }
   ]
 }

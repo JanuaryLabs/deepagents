@@ -15,7 +15,7 @@
       "path": "../../packages/context"
     },
     {
-      "path": "../../packages/devtool/traces"
+      "path": "../../packages/devtool/host"
     }
   ]
 }

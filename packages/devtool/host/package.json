@@ -21,6 +21,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./traces": {
+      "development": "./src/traces/index.ts",
+      "types": "./dist/traces/index.d.ts",
+      "import": "./dist/traces/index.js",
+      "default": "./dist/traces/index.js"
     }
   },
   "files": [
@@ -34,15 +40,23 @@
     "access": "public"
   },
   "dependencies": {
+    "@ai-sdk/otel": "1.0.85",
     "@hono/node-server": "^2.0.10",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/core": "2.11.0",
+    "@opentelemetry/sdk-trace-base": "2.11.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
     "hono": "^4.12.33"
+  },
+  "peerDependencies": {
+    "@deepagents/context": "6.2.0",
+    "@deepagents/experimental": "6.2.0"
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.9",
     "@deepagents/react-input": "6.2.0",
     "@deepagents/context": "6.2.0",
     "@deepagents/devtool-history": "6.2.0",
-    "@deepagents/devtool-traces": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@deepagents/react-genai": "6.2.0",
     "@deepagents/react-shadcn": "6.2.0",

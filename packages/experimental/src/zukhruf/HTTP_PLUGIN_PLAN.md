@@ -61,19 +61,19 @@ The dirty working tree already contained an in-progress transport extraction:
   `@deepagents/experimental/zukhruf/http`.
 - Zukhruf core no longer imports Hono or owns plugin routes.
 - HTTP projections bind directly to installed plugin definitions; no augmentation registry remains.
-- `@deepagents/devtool-traces/http` projects the typed `fileTelemetry()` instance into authenticated
+- `@deepagents/devtool/traces` projects the typed `fileTelemetry()` instance into authenticated
   trace routes.
 - The demos and DevTool host mount `http(runtime, tracesHttp(traceTelemetry))`
   on their host-owned Hono app.
 
 Verification recorded before this plan:
 
-- experimental, DevTool traces, and DevTool typechecks passed;
+- experimental and DevTool typechecks passed;
 - focused HTTP and runtime-plugin tests passed 26/26;
-- DevTool traces passed 2/2 and DevTool host passed 3/3;
+- trace tests passed 2/2 and DevTool host passed 3/3;
 - scoped changed-file lint and both demo lint targets passed;
 - the full experimental suite retained the already tracked pg-boss FIFO and retained-turn failures;
-- DevTool traces package lint retained the already tracked `ai` dependency-classification failure.
+- the former trace package lint retained the already tracked `ai` dependency-classification failure.
 
 Preserve the current staged and unstaged state. Each phase below changes only its declared scope and
 leaves changes unstaged unless the user explicitly authorizes staging.
@@ -177,8 +177,6 @@ leaves changes unstaged unless the user explicitly authorizes staging.
 ```sh
 nx run @deepagents/experimental:typecheck
 node --test --no-warnings packages/experimental/src/zukhruf/plugins/http/http.integration.test.ts packages/experimental/src/zukhruf/runtime/plugin/agent-runtime-plugin.integration.test.ts
-nx run @deepagents/devtool-traces:typecheck
-nx run @deepagents/devtool-traces:test
 nx run @deepagents/devtool:typecheck
 nx run @deepagents/devtool:test
 nx run @deepagents/demo-zukhruf-simple:lint
@@ -212,7 +210,7 @@ unless its diagnostic changes because of this work.
   fallback was removed.
 - The existing packed-consumer probe imports and composes the public HTTP and trace-HTTP entry
   points.
-- Experimental, DevTool traces, and DevTool typechecks passed. Focused HTTP/runtime-plugin tests
+- Experimental and DevTool typechecks passed. Focused HTTP/runtime-plugin tests
   passed 26/26, the root-barrel suite passed 5/5, trace tests passed 2/2, DevTool host tests passed
   3/3, changed-file lint passed, and both demo lint targets passed.
 - The full experimental comparison passed 282 tests and retained four out-of-scope failures plus

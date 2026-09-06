@@ -8,9 +8,9 @@ import {
 } from 'react-router';
 
 import type { HistoryRecord } from '@deepagents/devtool-history';
-import { TracesView } from '@deepagents/devtool-traces/ui';
 
 import { loadRuntime } from '../app/runtime-data.ts';
+import { TracesView } from '../traces/view.tsx';
 import { ConversationSummary } from './history.tsx';
 
 export async function loader({ params, request }: LoaderFunctionArgs) {

@@ -23,7 +23,6 @@ try {
     pack('packages/experimental'),
     pack('packages/react/shadcn'),
     pack('packages/devtool/history'),
-    pack('packages/devtool/traces'),
     pack('packages/devtool/host'),
   ];
   writeFileSync(
@@ -95,8 +94,7 @@ function pack(directory: string): string {
 function createConsumerSource(): string {
   return String.raw`
 import { devtool } from '@deepagents/devtool';
-import { fileTelemetry } from '@deepagents/devtool-traces';
-import { tracesHttp } from '@deepagents/devtool-traces/http';
+import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
 import {
   type AgentPluginDefinition,
   AgentPluginCapability,

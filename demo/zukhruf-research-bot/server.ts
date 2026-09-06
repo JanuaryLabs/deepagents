@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { styleText } from 'node:util';
 
 import { devtool } from '@deepagents/devtool';
-import { tracesHttp } from '@deepagents/devtool-traces/http';
+import { tracesHttp } from '@deepagents/devtool/traces';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
 import { traceTelemetry } from './agent.ts';

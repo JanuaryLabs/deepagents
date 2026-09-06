@@ -13,8 +13,7 @@ chat flows, local retrieval, and Text2SQL assistants.
 | `@deepagents/text2sql`         | Convert natural language to SQL, index database schemas, and run validated SQL through the package `sql` CLI inside a sandbox.      |
 | `@deepagents/retrieval`        | Ingest local files and external sources into a SQLite vector store for semantic search.                                             |
 | `@deepagents/evals`            | Run LLM evals with datasets, scorers, persistence, and reports.                                                                     |
-| `@deepagents/devtool`          | Serve the Zukhruf development UI on the same origin as the authenticated runtime protocol.                                          |
-| `@deepagents/devtool-traces`   | Record file telemetry and expose correlated, authenticated Zukhruf traces.                                                          |
+| `@deepagents/devtool`          | Serve the Zukhruf development UI and expose correlated trace recording through `@deepagents/devtool/traces`.                        |
 | `@deepagents/react-input`      | Provide the reusable structured prompt composer used by browser chat surfaces.                                                      |
 | `@deepagents/react-formatters` | Format dates, durations, bytes, numbers, booleans, and generic display values for React UIs.                                        |
 | `@deepagents/react-genai`      | Render AI SDK chat flows, trajectories, tools, citations, dynamic UI, and interactive responses.                                    |

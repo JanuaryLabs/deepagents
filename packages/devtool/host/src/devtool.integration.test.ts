@@ -1,3 +1,10 @@
+import {
+  ATTR_GEN_AI_AGENT_NAME,
+  ATTR_GEN_AI_OPERATION_NAME,
+  ATTR_GEN_AI_RESPONSE_FINISH_REASONS,
+  ATTR_SESSION_ID,
+  ATTR_USER_ID,
+} from '@opentelemetry/semantic-conventions/incubating';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
 import { mkdtempDisposable, writeFile } from 'node:fs/promises';
@@ -13,8 +20,7 @@ import {
   StreamManager,
 } from '@deepagents/context';
 import { devtool } from '@deepagents/devtool';
-import { fileTelemetry } from '@deepagents/devtool-traces';
-import { tracesHttp } from '@deepagents/devtool-traces/http';
+import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
 import {
   AgentRuntime,
   SqliteMailboxStore,
@@ -60,36 +66,35 @@ const CREATE_SESSION_URL = `${ZUKHRUF_MOUNT_PATH}/session`;
 const HEALTH_URL = `${ZUKHRUF_MOUNT_PATH}/health`;
 const HISTORY_URL = `${ZUKHRUF_MOUNT_PATH}/history`;
 const INFO_URL = `${ZUKHRUF_MOUNT_PATH}/info`;
+const TRACE_ID = '1'.repeat(32);
 
 function telemetryRecords(
   conversation: { chatId: string; userId: string },
   streamId: string,
 ) {
-  const zukhruf = {
-    conversation,
-    streamId,
-    agentName: 'devtool-test',
-    agentPath: '/root',
-  };
-  return [
-    {
-      event: 'onStart',
-      timestamp: '2026-08-27T10:00:00.000Z',
-      data: { callId: 'call-1', zukhruf, recordInputs: false },
+  return `${JSON.stringify({
+    trace_id: TRACE_ID,
+    span_id: '2'.repeat(16),
+    parent_span_id: '',
+    name: 'ai.streamText',
+    kind: 'SPAN_KIND_INTERNAL',
+    start_time: '2026-08-27T10:00:00.000000000Z',
+    end_time: '2026-08-27T10:00:01.000000000Z',
+    status: { code: 'STATUS_CODE_UNSET', message: '' },
+    attributes: {
+      [ATTR_SESSION_ID]: conversation.chatId,
+      [ATTR_USER_ID]: conversation.userId,
+      [ATTR_GEN_AI_AGENT_NAME]: 'devtool-test',
+      [ATTR_GEN_AI_OPERATION_NAME]: 'invoke_agent',
+      [ATTR_GEN_AI_RESPONSE_FINISH_REASONS]: ['stop'],
+      'deepagents.stream.id': streamId,
+      'deepagents.agent.path': '/root',
+      'deepagents.span.type': 'operation',
+      'deepagents.record.inputs': false,
+      'deepagents.record.outputs': true,
     },
-    {
-      event: 'onEnd',
-      timestamp: '2026-08-27T10:00:01.000Z',
-      data: {
-        callId: 'call-1',
-        finishReason: 'stop',
-        totalUsage: { inputTokens: 3, outputTokens: 2 },
-      },
-    },
-  ]
-    .map((record) => JSON.stringify(record))
-    .join('\n')
-    .concat('\n');
+    events: [],
+  })}\n`;
 }
 
 test('one host server mounts Zukhruf and the DevTool UI on one origin', async () => {
@@ -187,7 +192,7 @@ test('one host server mounts Zukhruf and the DevTool UI on one origin', async ()
   }>;
   assert.deepEqual(
     { id: trace.id, streamId: trace.streamId, status: trace.status },
-    { id: 'call-1', streamId: turn.id, status: 'queued' },
+    { id: TRACE_ID, streamId: turn.id, status: 'queued' },
   );
   const traceDetail = await app.request(
     `${ZUKHRUF_MOUNT_PATH}/traces/${conversation.chatId}/${trace.id}`,

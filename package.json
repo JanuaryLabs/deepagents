@@ -102,6 +102,7 @@
     "demo/mcp",
     "demo/minio",
     "demo/zukhruf-dynamic-subagents",
+    "demo/zukhruf-self-extending-agent-tree",
     "demo/zukhruf-durable-turns",
     "demo/zukhruf-group-chat",
     "demo/zukhruf-mailbox",

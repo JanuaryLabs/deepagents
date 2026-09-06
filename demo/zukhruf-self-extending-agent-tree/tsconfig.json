@@ -6,16 +6,13 @@
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["**/*.ts"],
+  "include": ["*.ts"],
   "references": [
     {
-      "path": "../../packages/devtool/host"
+      "path": "../../packages/experimental"
     },
     {
       "path": "../../packages/context"
-    },
-    {
-      "path": "../../packages/experimental"
     }
   ]
 }

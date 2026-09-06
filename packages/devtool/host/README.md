@@ -6,7 +6,7 @@ not import React or CSS, and the DevTool owns no listener, port, runtime
 object, credentials, or proxy.
 
 ```sh
-npm install --save-dev @deepagents/devtool @deepagents/devtool-traces
+npm install --save-dev @deepagents/devtool
 ```
 
 The host owns one Hono server and chooses each plugin's mount. This example
@@ -18,8 +18,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 
 import { devtool } from '@deepagents/devtool';
-import { fileTelemetry } from '@deepagents/devtool-traces';
-import { tracesHttp } from '@deepagents/devtool-traces/http';
+import { fileTelemetry, tracesHttp } from '@deepagents/devtool/traces';
 import { AgentRuntime, defineAgent } from '@deepagents/experimental/zukhruf';
 import { type HttpEnv, http } from '@deepagents/experimental/zukhruf/http';
 
@@ -68,8 +67,8 @@ the current origin, so the host's own authentication middleware guards every
 runtime request. Runtime health comes from `GET /zukhruf/v1/health`.
 
 `traces` appears only when the runtime installs the `fileTelemetry()` plugin
-from `@deepagents/devtool-traces` and the host passes
-`tracesHttp(traceTelemetry)` from `@deepagents/devtool-traces/http` to `http()`.
+from `@deepagents/devtool/traces` and the host passes
+`tracesHttp(traceTelemetry)` from the same subpath to `http()`.
 The plugin instance contributes the AI SDK OpenTelemetry integration and a
 transport-neutral trace reader; the definition-bound HTTP projection adds the
 runtime's authenticated trace routes and discovery entry. Together they

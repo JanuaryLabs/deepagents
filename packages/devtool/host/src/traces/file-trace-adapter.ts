@@ -19,6 +19,9 @@ import { fileURLToPath } from 'node:url';
 import type { ConversationId } from '@deepagents/experimental/zukhruf';
 
 const AGENT_PATH = 'deepagents.agent.path';
+const RECORD_INPUTS = 'deepagents.record.inputs';
+const RECORD_OUTPUTS = 'deepagents.record.outputs';
+const SPAN_STATUS = 'deepagents.span.status';
 const SPAN_TYPE = 'deepagents.span.type';
 const STREAM_ID = 'deepagents.stream.id';
 const ERROR = 'STATUS_CODE_ERROR';
@@ -126,7 +129,7 @@ function projectTrace(
   if (!context) return undefined;
   const root = spans.find(
     (span) =>
-      !span.parent_span_id &&
+      span.attributes[SPAN_TYPE] === 'operation' &&
       span.attributes[ATTR_GEN_AI_OPERATION_NAME] === 'invoke_agent',
   );
   const visible = spans
@@ -149,18 +152,15 @@ function projectTrace(
     workflowName: context.agentName,
     startedAt: root?.start_time ?? spans[0]?.start_time ?? null,
     endedAt: root?.end_time ?? null,
-    status: root
-      ? root.status.code === ERROR
-        ? 'failed'
-        : 'completed'
-      : 'running',
+    status: root ? spanStatus(root) : 'running',
     stepCount: projected.filter(({ type }) => type === 'generation').length,
     finishReason:
       firstString(root?.attributes[ATTR_GEN_AI_RESPONSE_FINISH_REASONS]) ??
       null,
     usage: readUsage(root?.attributes) ?? sumUsage(visible),
     recording: {
-      inputs: recorded(
+      inputs: recordingState(
+        root?.attributes[RECORD_INPUTS],
         spans.some(({ attributes }) =>
           has(
             attributes,
@@ -169,7 +169,8 @@ function projectTrace(
           ),
         ),
       ),
-      outputs: recorded(
+      outputs: recordingState(
+        root?.attributes[RECORD_OUTPUTS],
         spans.some(({ attributes }) =>
           has(
             attributes,
@@ -216,7 +217,7 @@ function projectSpan(
     parentId: visibleParent(span, byId, generationByStep),
     startedAt: span.start_time,
     endedAt: span.end_time,
-    status: span.status.code === ERROR ? 'failed' : 'completed',
+    status: spanStatus(span),
     type,
     name:
       type === 'agent'
@@ -249,7 +250,8 @@ function visibleParent(
 ): string | null {
   if (!span.parent_span_id) return null;
   const parent = byId.get(span.parent_span_id);
-  if (parent?.attributes[SPAN_TYPE] !== 'step') return span.parent_span_id;
+  if (!parent) return null;
+  if (parent.attributes[SPAN_TYPE] !== 'step') return span.parent_span_id;
   return span.attributes[SPAN_TYPE] === 'tool'
     ? (generationByStep.get(parent.span_id) ?? parent.parent_span_id ?? null)
     : parent.parent_span_id || null;
@@ -322,8 +324,15 @@ function has(attributes: Record<string, unknown>, ...keys: string[]) {
   return keys.some((key) => Object.hasOwn(attributes, key));
 }
 
-function recorded(value: boolean): RecordingState {
-  return value ? 'recorded' : 'not-recorded';
+function recordingState(policy: unknown, observed: boolean): RecordingState {
+  return policy === true || (policy !== false && observed)
+    ? 'recorded'
+    : 'not-recorded';
+}
+
+function spanStatus(span: FlatSpan): 'completed' | 'failed' | 'cancelled' {
+  if (span.attributes[SPAN_STATUS] === 'cancelled') return 'cancelled';
+  return span.status.code === ERROR ? 'failed' : 'completed';
 }
 
 function firstString(value: unknown): string | undefined {

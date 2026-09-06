@@ -105,10 +105,14 @@
           "@deepagents/context",
           "@deepagents/elements",
           "@deepagents/devtool-history",
-          "@deepagents/devtool-traces",
           "@deepagents/react-shadcn",
           "@deepagents/evals",
-          "@deepagents/experimental"
+          "@deepagents/experimental",
+          "@ai-sdk/otel",
+          "@opentelemetry/api",
+          "@opentelemetry/core",
+          "@opentelemetry/sdk-trace-base",
+          "@opentelemetry/semantic-conventions"
         ]
       },
       "cache": true,

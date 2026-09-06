@@ -1,7 +1,7 @@
 import { openai } from '@ai-sdk/openai';
 import { join } from 'node:path';
 
-import { fileTelemetry } from '@deepagents/devtool-traces';
+import { fileTelemetry } from '@deepagents/devtool/traces';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 import { uploads } from '@deepagents/experimental/zukhruf/uploads';
 

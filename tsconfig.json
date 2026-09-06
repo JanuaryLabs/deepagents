@@ -58,13 +58,13 @@
       "path": "./packages/devtool/history"
     },
     {
-      "path": "./packages/devtool/traces"
-    },
-    {
       "path": "./packages/devtool/host"
     },
     {
       "path": "./demo/zukhruf-dynamic-subagents"
+    },
+    {
+      "path": "./demo/zukhruf-self-extending-agent-tree"
     },
     {
       "path": "./demo/zukhruf-group-chat"

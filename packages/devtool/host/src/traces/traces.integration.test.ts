@@ -1,16 +1,19 @@
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import {
   ATTR_GEN_AI_AGENT_NAME,
+  ATTR_GEN_AI_OPERATION_NAME,
+  ATTR_GEN_AI_RESPONSE_FINISH_REASONS,
   ATTR_SESSION_ID,
   ATTR_USER_ID,
 } from '@opentelemetry/semantic-conventions/incubating';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { Hono } from 'hono';
 import assert from 'node:assert/strict';
-import { mkdtempDisposable, readFile } from 'node:fs/promises';
+import { mkdtempDisposable, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import type { AgentModel, AgentSandbox } from '@deepagents/context';
@@ -20,8 +23,11 @@ import {
   SqliteStreamStore,
   StreamManager,
 } from '@deepagents/context';
-import { fileTelemetry } from '@deepagents/devtool-traces';
-import { tracesHttp } from '@deepagents/devtool-traces/http';
+import {
+  FileTraceAdapter,
+  fileTelemetry,
+  tracesHttp,
+} from '@deepagents/devtool/traces';
 import {
   type AgentDeclaration,
   AgentRuntime,
@@ -47,6 +53,7 @@ const TRACES_HREF = `${ZUKHRUF_MOUNT_PATH}/traces`;
 
 class ControlledTurnQueue extends TurnQueue {
   readonly #turns: TurnRef[] = [];
+  #active?: { turn: TurnRef; abort: AbortController };
   #handler?: (turn: TurnRef, context: ConsumeContext) => Promise<void>;
   #options?: ConsumeOptions;
 
@@ -56,14 +63,17 @@ class ControlledTurnQueue extends TurnQueue {
   }
 
   getTurnActivity(): Promise<TurnActivity> {
-    return Promise.resolve(this.#turns.length === 0 ? 'idle' : 'queued');
+    return Promise.resolve(
+      this.#active ? 'running' : this.#turns.length === 0 ? 'idle' : 'queued',
+    );
   }
 
   getCurrentTurn(): Promise<TurnRef | undefined> {
-    return Promise.resolve(this.#turns[0]);
+    return Promise.resolve(this.#active?.turn ?? this.#turns[0]);
   }
 
   cancel(streamId: string): Promise<void> {
+    if (this.#active?.turn.streamId === streamId) this.#active.abort.abort();
     const index = this.#turns.findIndex((turn) => turn.streamId === streamId);
     if (index >= 0) this.#turns.splice(index, 1);
     return Promise.resolve();
@@ -92,9 +102,11 @@ class ControlledTurnQueue extends TurnQueue {
     const turn = this.#turns.shift();
     assert(turn, 'expected a queued turn');
     assert(this.#handler, 'expected a running queue consumer');
+    const abort = new AbortController();
+    this.#active = { turn, abort };
     try {
       await this.#handler(turn, {
-        signal: new AbortController().signal,
+        signal: abort.signal,
         park: () => Promise.resolve(),
       });
       await this.#options?.onSettled?.(turn);
@@ -103,6 +115,8 @@ class ControlledTurnQueue extends TurnQueue {
         turn,
         error instanceof Error ? error.message : String(error),
       );
+    } finally {
+      this.#active = undefined;
     }
   }
 }
@@ -192,6 +206,37 @@ function createTraceModel() {
             ];
       return { stream: simulateReadableStream({ chunks }) };
     },
+  });
+}
+
+function createSlowTraceModel() {
+  return new MockLanguageModelV4({
+    provider: 'test-provider',
+    modelId: 'slow-trace-model',
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        initialDelayInMs: 1_000,
+        chunkDelayInMs: 1_000,
+        chunks: [
+          { type: 'text-start', id: 'text-1' },
+          { type: 'text-delta', id: 'text-1', delta: 'Too late.' },
+          { type: 'text-end', id: 'text-1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: {
+              inputTokens: {
+                total: 1,
+                noCache: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+              },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+          },
+        ],
+      }),
+    }),
   });
 }
 
@@ -298,6 +343,8 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
         attributes[ATTR_GEN_AI_AGENT_NAME] === 'trace-agent' &&
         attributes['deepagents.stream.id'] === turn.id &&
         attributes['deepagents.agent.path'] === '/root' &&
+        attributes['deepagents.record.inputs'] === false &&
+        attributes['deepagents.record.outputs'] === true &&
         typeof attributes['openinference.span.kind'] === 'string',
     ),
   );
@@ -440,6 +487,126 @@ test('fileTelemetry() composes plugin integrations with agent policy and serves 
   assert.equal(restartedResponse.status, 200);
   assert.equal(((await restartedResponse.json()) as unknown[]).length, 2);
   await restartedWorker[Symbol.asyncDispose]();
+});
+
+test('fileTelemetry() preserves cancellation and recording policy in exported traces', async (t) => {
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), 'deepagents-traces-'),
+  );
+  await using resources = new AsyncDisposableStack();
+  const stores = createStores(resources);
+  const traceTelemetry = fileTelemetry({
+    path: join(directory.path, 'telemetry.jsonl'),
+  });
+  const queue = new ControlledTurnQueue();
+  let started = false;
+  const runtime = new AgentRuntime(
+    createDeclaration(
+      [
+        traceTelemetry,
+        {
+          name: 'abort-observer',
+          create: () => ({
+            telemetry: () => ({
+              onStart: () => {
+                started = true;
+              },
+            }),
+          }),
+        },
+      ],
+      { isEnabled: true, recordInputs: true, recordOutputs: true },
+      { model: createSlowTraceModel() },
+    ),
+    { ...stores, queue },
+  );
+  const worker = await runtime.work();
+  const conversation = { chatId: 'chat-abort', userId: 'user-1' };
+  await runtime.createSession(conversation);
+  const turn = await runtime.enqueue(conversation, {
+    message: {
+      id: 'message-abort',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Wait.' }],
+    },
+    trigger: 'submit-message',
+  });
+  // Drive and cancel the real queued turn after AI SDK telemetry has started.
+  const run = queue.runNext();
+  await t.waitFor(() => assert(started));
+  await runtime.observe(conversation).cancel(turn.id);
+  await run;
+
+  const reader = runtime.plugin(traceTelemetry).traces;
+  let trace: Awaited<ReturnType<typeof reader.list>>[number] | undefined;
+  await t.waitFor(async () => {
+    trace = (await reader.list(conversation)).find(
+      ({ streamId }) => streamId === turn.id,
+    );
+    assert(trace);
+  });
+  assert(trace);
+  assert.equal(trace.status, 'cancelled');
+  assert.deepEqual(trace.recording, {
+    inputs: 'recorded',
+    outputs: 'recorded',
+  });
+  const detail = await reader.get(conversation, trace.id);
+  assert(detail?.spans.some(({ status }) => status === 'cancelled'));
+  await worker[Symbol.asyncDispose]();
+});
+
+test('FileTraceAdapter treats an AI operation under an external OTel parent as the trace root', async () => {
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), 'deepagents-traces-'),
+  );
+  const path = join(directory.path, 'telemetry.jsonl');
+  const traceId = '1'.repeat(32);
+  const spanId = '2'.repeat(16);
+  await writeFile(
+    path,
+    `${JSON.stringify({
+      trace_id: traceId,
+      span_id: spanId,
+      parent_span_id: '3'.repeat(16),
+      name: 'ai.streamText',
+      kind: 'SPAN_KIND_INTERNAL',
+      start_time: '2026-01-01T00:00:00.000000000Z',
+      end_time: '2026-01-01T00:00:01.000000000Z',
+      status: { code: 'STATUS_CODE_UNSET', message: '' },
+      attributes: {
+        [ATTR_SESSION_ID]: 'chat-1',
+        [ATTR_USER_ID]: 'user-1',
+        [ATTR_GEN_AI_AGENT_NAME]: 'trace-agent',
+        [ATTR_GEN_AI_OPERATION_NAME]: 'invoke_agent',
+        [ATTR_GEN_AI_RESPONSE_FINISH_REASONS]: ['stop'],
+        'deepagents.stream.id': 'stream-1',
+        'deepagents.agent.path': '/root',
+        'deepagents.span.type': 'operation',
+        'deepagents.record.inputs': false,
+        'deepagents.record.outputs': true,
+      },
+      events: [],
+    })}\n`,
+  );
+
+  const [trace] = await new FileTraceAdapter(pathToFileURL(path)).list({
+    chatId: 'chat-1',
+    userId: 'user-1',
+  });
+  assert(trace);
+  assert.equal(trace.status, 'completed');
+  assert.equal(trace.endedAt, '2026-01-01T00:00:01.000000000Z');
+  assert.equal(trace.finishReason, 'stop');
+  assert.deepEqual(trace.recording, {
+    inputs: 'not-recorded',
+    outputs: 'recorded',
+  });
+  const detail = await new FileTraceAdapter(pathToFileURL(path)).get(
+    { chatId: 'chat-1', userId: 'user-1' },
+    traceId,
+  );
+  assert.equal(detail?.spans[0]?.parentId, null);
 });
 
 test('fileTelemetry() advertises an empty file, omits absent telemetry, and rejects duplicate HTTP projections', async () => {

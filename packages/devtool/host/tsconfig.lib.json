@@ -12,9 +12,6 @@
   "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"],
   "references": [
     {
-      "path": "../traces/tsconfig.lib.json"
-    },
-    {
       "path": "../../react/shadcn/tsconfig.lib.json"
     },
     {
