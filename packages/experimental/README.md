@@ -144,8 +144,6 @@ planner and researcher chats with mailbox-delivered findings),
 managed from the DevTool and launched into fresh root tasks),
 [`demo/zukhruf-group-chat`](../../demo/zukhruf-group-chat) (managed group-chat
 orchestration over a shared transcript),
-[`demo/zukhruf-event-reels`](../../demo/zukhruf-event-reels) (uploads-driven
-curation and reel editing from event photos and videos),
 [`demo/zukhruf-whatsapp`](../../demo/zukhruf-whatsapp) (manager-free group
 notifications where specialists volunteer public replies),
 [`demo/zukhruf-dynamic-subagents`](../../demo/zukhruf-dynamic-subagents)

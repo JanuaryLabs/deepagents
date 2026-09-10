@@ -19,10 +19,10 @@ import declaration from './agent.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export const resources = new AsyncDisposableStack();
+await using startup = new AsyncDisposableStack();
 
-const database = resources.adopt(new PGlite(), (database) => database.close());
-const boss = resources.adopt(
+const database = startup.adopt(new PGlite(), (database) => database.close());
+const boss = startup.adopt(
   new PgBoss({
     db: fromPglite(database),
     backend: 'pglite',
@@ -36,20 +36,23 @@ const queue = new PgBossTurnQueue(boss, {
   schema: 'pgboss',
 });
 await queue.initialize();
-const streamStore = resources.adopt(
+const streamStore = startup.adopt(
   new SqliteStreamStore(join(__dirname, 'simple.sqlite')),
   (store) => store.close(),
 );
-const mailboxStore = resources.use(new SqliteMailboxStore(':memory:'));
-const runtime = new AgentRuntime(declaration, {
-  store: new SqliteContextStore(join(__dirname, 'simple.context.sqlite')),
-  streams: new StreamManager({
-    store: streamStore,
-    changeSource: new PollingChangeSource({ reads: streamStore }),
+const mailboxStore = startup.use(new SqliteMailboxStore(':memory:'));
+const runtime = startup.use(
+  new AgentRuntime(declaration, {
+    store: new SqliteContextStore(join(__dirname, 'simple.context.sqlite')),
+    streams: new StreamManager({
+      store: streamStore,
+      changeSource: new PollingChangeSource({ reads: streamStore }),
+    }),
+    queue,
+    mailboxStore,
   }),
-  queue,
-  mailboxStore,
-});
+);
 
-resources.use(await runtime.work());
+startup.use(await runtime.work());
+export const resources = startup.move();
 export default runtime;

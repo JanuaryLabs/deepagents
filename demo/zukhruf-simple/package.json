@@ -4,20 +4,38 @@
   "private": true,
   "type": "module",
   "description": "Smallest complete Zukhruf agent declaration.",
+  "exports": {
+    ".": "./agent.ts"
+  },
   "scripts": {
-    "start": "node server.ts"
+    "build": "tsc --build tsconfig.json",
+    "start": "node server.ts",
+    "test": "node --test --no-warnings --test-timeout=60000 webmcp.integration.test.ts"
+  },
+  "nx": {
+    "targets": {
+      "test": {
+        "dependsOn": [
+          "build"
+        ]
+      }
+    }
   },
   "dependencies": {
+    "@ai-sdk/mcp": "2.0.41",
     "@ai-sdk/openai": "^4.0.52",
     "@deepagents/context": "6.2.0",
     "@deepagents/devtool": "6.2.0",
     "@deepagents/experimental": "6.2.0",
     "@electric-sql/pglite": "^0.5.4",
+    "chrome-devtools-mcp": "1.8.0",
     "microsandbox": "^0.6.15",
     "pg-boss": "^12.29.0"
   },
   "devDependencies": {
     "@hono/node-server": "^2.0.10",
-    "hono": "^4.12.33"
+    "ai": "^7.0.85",
+    "hono": "^4.12.33",
+    "just-bash": "^3.2.0"
   }
 }

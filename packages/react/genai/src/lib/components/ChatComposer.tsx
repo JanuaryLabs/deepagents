@@ -1,10 +1,10 @@
-import { ImagePlus, Plus } from 'lucide-react';
+import { Paperclip, Plus } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
 import {
   Composer,
-  type ComposerAttachImageFilesProps,
-  type ComposerAttachedImagesProps,
+  type ComposerAttachFilesProps,
+  type ComposerAttachmentsProps,
   type ComposerContentProps,
   type ComposerEditorProps,
   type ComposerRootProps,
@@ -63,12 +63,12 @@ function ChatComposerEditor({ className, ...props }: ComposerEditorProps) {
   );
 }
 
-function ChatComposerAttachedImages({
+function ChatComposerAttachments({
   className,
   ...props
-}: ComposerAttachedImagesProps) {
+}: ComposerAttachmentsProps) {
   return (
-    <Composer.AttachedImages className={cn('pb-1.5', className)} {...props} />
+    <Composer.Attachments className={cn('pb-1.5', className)} {...props} />
   );
 }
 
@@ -78,11 +78,11 @@ function ChatComposerToolbar({ className, ...props }: ComposerToolbarProps) {
   );
 }
 
-function ChatComposerAttachImage(props: ComposerAttachImageFilesProps) {
+function ChatComposerAttachFiles(props: ComposerAttachFilesProps) {
   return (
-    <Composer.AttachImageFiles
-      aria-label="Attach image"
-      render={<ChatActionButton icon={<ImagePlus className="size-4" />} />}
+    <Composer.AttachFiles
+      aria-label="Attach files"
+      render={<ChatActionButton icon={<Paperclip className="size-4" />} />}
       {...props}
     />
   );
@@ -110,10 +110,10 @@ export const ChatComposer = {
   Root: ChatComposerRoot,
   Popup: Composer.Popup,
   Content: ChatComposerContent,
-  AttachedImages: ChatComposerAttachedImages,
+  Attachments: ChatComposerAttachments,
   Editor: ChatComposerEditor,
   Error: Composer.Error,
   Toolbar: ChatComposerToolbar,
   CommandButton: ChatComposerCommandButton,
-  AttachImage: ChatComposerAttachImage,
+  AttachFiles: ChatComposerAttachFiles,
 };

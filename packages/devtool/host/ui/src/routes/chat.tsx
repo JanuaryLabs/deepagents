@@ -3,10 +3,10 @@ import { useState, useSyncExternalStore } from 'react';
 import {
   type LoaderFunctionArgs,
   type ShouldRevalidateFunctionArgs,
+  redirect,
   useLoaderData,
   useNavigate,
   useRevalidator,
-  redirect,
 } from 'react-router';
 
 import { ChildProgressList } from '@deepagents/devtool-history';
@@ -42,14 +42,9 @@ export async function loader(args: LoaderFunctionArgs) {
     throw redirect(`/chat?chatId=${encodeURIComponent(crypto.randomUUID())}`);
   }
   const runtime = await loadRuntime(request.signal);
-  const conversation = runtime.history.find(
-    (entry) => entry.chatId === chatId,
-  );
+  const conversation = runtime.history.find((entry) => entry.chatId === chatId);
   const api = runtime.discovery?.capabilities.chat.href;
-  if (
-    !api ||
-    (!params.sessionId && !conversation && !runtime.historyError)
-  ) {
+  if (!api || (!params.sessionId && !conversation && !runtime.historyError)) {
     return {
       ...runtime,
       chatId,
@@ -108,8 +103,7 @@ export function shouldRevalidate({
 }: ShouldRevalidateFunctionArgs) {
   return (
     currentParams.sessionId !== nextParams.sessionId ||
-    currentUrl.searchParams.get('chatId') !==
-      nextUrl.searchParams.get('chatId')
+    currentUrl.searchParams.get('chatId') !== nextUrl.searchParams.get('chatId')
   );
 }
 
@@ -137,6 +131,7 @@ function ChatSessionBoundary({ chatId }: { chatId: string }) {
       initialMessages={initialMessages}
       sessionExists={sessionExists}
       supportsUploads={discovery.capabilities.uploads !== undefined}
+      accept={discovery.capabilities.uploads?.mediaTypes?.join(',')}
     />
   );
 }
@@ -147,12 +142,14 @@ function ChatSession({
   initialMessages,
   sessionExists,
   supportsUploads,
+  accept,
 }: {
   api: string;
   chatId: string;
   initialMessages?: UIMessage[];
   sessionExists: boolean;
   supportsUploads: boolean;
+  accept?: string;
 }) {
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
@@ -187,7 +184,7 @@ function ChatSession({
           treeId={chatId}
           snapshot={runtime.conversation?.children}
         />
-        <ChatInput supportsUploads={supportsUploads} />
+        <ChatInput supportsUploads={supportsUploads} accept={accept} />
       </ChatBot>
     </AgentProvider>
   );
@@ -224,7 +221,13 @@ function ChatMessages() {
   );
 }
 
-function ChatInput({ supportsUploads }: { supportsUploads: boolean }) {
+function ChatInput({
+  supportsUploads,
+  accept,
+}: {
+  supportsUploads: boolean;
+  accept?: string;
+}) {
   const { submit } = useAgent();
   const { hasSubmitted } = useAgentMeta();
   const { status } = useAgentStatus();
@@ -241,11 +244,15 @@ function ChatInput({ supportsUploads }: { supportsUploads: boolean }) {
           isTaskRunning={isRunning}
           onSubmit={(submission, context) => {
             const files = submission.items.flatMap((item) =>
-              item.type === 'image' ? [item.file] : [],
+              item.type === 'image' ||
+              item.type === 'video' ||
+              item.type === 'audio'
+                ? [item.file]
+                : [],
             );
             if (!supportsUploads && files.length > 0) {
               return Promise.reject(
-                new Error('This runtime does not support image uploads'),
+                new Error('This runtime does not support file uploads'),
               );
             }
             return submit({
@@ -260,12 +267,12 @@ function ChatInput({ supportsUploads }: { supportsUploads: boolean }) {
             <QueuedMessagesStrip />
             <ChatComposer.Popup />
             <ChatComposer.Content>
-              <ChatComposer.AttachedImages />
+              <ChatComposer.Attachments />
               <ChatComposer.Editor placeholder="Message Zukhruf…" />
               <ChatComposer.Error />
             </ChatComposer.Content>
             <ChatComposer.Toolbar>
-              {supportsUploads && <ChatComposer.AttachImage />}
+              {supportsUploads && <ChatComposer.AttachFiles accept={accept} />}
               <ChatSubmitButton />
             </ChatComposer.Toolbar>
           </ChatComposer.Root>

@@ -19,13 +19,7 @@ type MessageAttachmentPartProps = {
   url: string;
 };
 
-function ImageFilePart({
-  filename,
-  url,
-}: {
-  filename?: string;
-  url: string;
-}) {
+function ImageFilePart({ filename, url }: { filename?: string; url: string }) {
   return (
     <img
       src={url}
@@ -38,13 +32,46 @@ function ImageFilePart({
 function FileAttachmentPart({
   filename,
   mediaType,
+  url,
 }: {
   filename?: string;
   mediaType: string;
+  url?: string;
 }) {
+  const name = filename || 'Untitled';
+  const player = url?.startsWith('data:') ? null : url &&
+    mediaType.startsWith('video/') ? (
+    <video
+      controls
+      playsInline
+      preload="metadata"
+      src={url}
+      aria-label={name}
+      className="max-h-96 w-full rounded-md bg-black"
+    />
+  ) : url && mediaType.startsWith('audio/') ? (
+    <audio
+      controls
+      preload="metadata"
+      src={url}
+      aria-label={name}
+      className="w-full"
+    />
+  ) : null;
   return (
     <Attachment className="bg-muted/30 block w-full rounded-md p-3 text-sm text-inherit">
-      <strong>File:</strong> {filename || 'Untitled'} ({mediaType})
+      {player}
+      <div className={player ? 'mt-2' : undefined}>
+        <strong>File:</strong> {name} ({mediaType})
+        {url ? (
+          <>
+            {' '}
+            <a href={url} download={filename} className="underline">
+              Download
+            </a>
+          </>
+        ) : null}
+      </div>
     </Attachment>
   );
 }
@@ -57,7 +84,7 @@ export function MessageAttachmentPart({
   return mediaType.startsWith('image/') ? (
     <ImageFilePart filename={filename} url={url} />
   ) : (
-    <FileAttachmentPart filename={filename} mediaType={mediaType} />
+    <FileAttachmentPart filename={filename} mediaType={mediaType} url={url} />
   );
 }
 

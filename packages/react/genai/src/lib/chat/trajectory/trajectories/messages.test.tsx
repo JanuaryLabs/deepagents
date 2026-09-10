@@ -235,6 +235,39 @@ describe('Messages.AssistantContent', () => {
     );
     expect(screen.getByText(/output\.json/)).toBeInTheDocument();
   });
+
+  it('plays a video file part inline and offers a download link', () => {
+    const message: UIMessage = {
+      id: 'asst-video',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'file',
+          filename: 'highlight.mp4',
+          mediaType: 'video/mp4',
+          url: 'https://reels.test/highlight.mp4',
+        },
+      ],
+    };
+
+    const { container } = render(
+      <Messages.Root messages={[message]}>
+        <Messages.List>
+          <Messages.Item message={message} index={0}>
+            <Messages.AssistantContent />
+          </Messages.Item>
+        </Messages.List>
+      </Messages.Root>,
+    );
+    const video = container.querySelector('video');
+    expect(video).toHaveAttribute('src', 'https://reels.test/highlight.mp4');
+    expect(video).toHaveAttribute('controls');
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'href',
+      'https://reels.test/highlight.mp4',
+    );
+    expect(screen.getByText(/highlight\.mp4/)).toBeInTheDocument();
+  });
 });
 
 describe('Messages.Thinking', () => {

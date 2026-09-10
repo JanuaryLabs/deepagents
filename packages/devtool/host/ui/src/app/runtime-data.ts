@@ -9,7 +9,7 @@ export type Discovery = {
     events: { href: string };
     traces?: { href: string };
     schedules?: { href: string };
-    uploads?: { href: string };
+    uploads?: { href: string; mediaTypes?: string[] };
   };
 };
 

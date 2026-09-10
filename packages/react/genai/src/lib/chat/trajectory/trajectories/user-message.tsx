@@ -6,11 +6,7 @@ import {
   stripReminders,
 } from '@deepagents/context/browser';
 import { PersistedPromptText } from '@deepagents/react-input/browser';
-import {
-  AttachmentGroup,
-  AttachmentMedia,
-  cn,
-} from '@deepagents/react-shadcn';
+import { AttachmentGroup, AttachmentMedia, cn } from '@deepagents/react-shadcn';
 
 import { formatUsageBreakdown, parseMetadataUsage } from '../../usage.ts';
 import { uploadReceiptSchema } from '../../zukhruf-chat-transport.ts';
@@ -107,6 +103,60 @@ function UserMessageReminders({
   );
 }
 
+function UploadTile({
+  upload,
+}: {
+  upload: { url: string; name: string; mediaType: string };
+}) {
+  if (upload.mediaType.startsWith('video/')) {
+    return (
+      <AttachmentMedia
+        variant="image"
+        className="size-36 rounded-2xl"
+        title={upload.name}
+      >
+        <video
+          src={upload.url}
+          aria-label={upload.name}
+          muted
+          playsInline
+          preload="metadata"
+          className="size-full object-cover"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 flex items-center justify-center text-2xl text-white drop-shadow"
+        >
+          ▶
+        </span>
+      </AttachmentMedia>
+    );
+  }
+  if (upload.mediaType.startsWith('audio/')) {
+    return (
+      <AttachmentMedia
+        variant="icon"
+        className="h-36 w-48 flex-col gap-1 rounded-2xl px-3 text-xs"
+        title={upload.name}
+        aria-label={upload.name}
+      >
+        <span aria-hidden className="text-2xl">
+          ♪
+        </span>
+        <span className="text-foreground w-full truncate text-center">
+          {upload.name}
+        </span>
+        <span className="text-muted-foreground">{upload.mediaType}</span>
+      </AttachmentMedia>
+    );
+  }
+  return (
+    <AttachmentMedia variant="image" className="size-36 rounded-2xl">
+      <img src={upload.url} alt={upload.name} />
+    </AttachmentMedia>
+  );
+}
+
 function UserMessageAttachments({ message }: { message: UIMessage }) {
   const uploads = extractUploads(message);
   if (uploads.length === 0) return null;
@@ -114,14 +164,12 @@ function UserMessageAttachments({ message }: { message: UIMessage }) {
   return (
     <AttachmentGroup
       role="list"
-      aria-label="Attached images"
+      aria-label="Attached files"
       className="max-w-full gap-2 py-0"
     >
       {uploads.map((upload) => (
         <div key={upload.path} role="listitem" data-slot="attachment">
-          <AttachmentMedia variant="image" className="size-36 rounded-2xl">
-            <img src={upload.url} alt={upload.name} />
-          </AttachmentMedia>
+          <UploadTile upload={upload} />
         </div>
       ))}
     </AttachmentGroup>

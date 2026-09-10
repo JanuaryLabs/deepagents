@@ -26,7 +26,7 @@ test('upload receipts render as one thumbnail strip above the original text', ()
   try {
     const { container } = render(<UserMessageContent message={message} />);
 
-    const strip = screen.getByRole('list', { name: 'Attached images' });
+    const strip = screen.getByRole('list', { name: 'Attached files' });
     expect(strip).toHaveClass('flex', 'overflow-x-auto');
     expect(within(strip).getAllByRole('listitem')).toHaveLength(5);
     const firstImage = screen.getByRole('img', { name: 'shot-0.png' });
@@ -48,6 +48,49 @@ test('upload receipts render as one thumbnail strip above the original text', ()
         .closest('.bg-secondary'),
     ).not.toBeNull();
     expect(strip.closest('.bg-secondary')).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
+test('video and audio receipts render as playable tiles beside image thumbnails', () => {
+  const receipt = (name: string, mediaType: string) => ({
+    path: `/workspace/.uploads/s1/${name}`,
+    name,
+    mediaType,
+    size: 4,
+    url: `https://uploads.test/s1/${name}`,
+  });
+  const message: UIMessage = {
+    id: 'u6',
+    role: 'user',
+    parts: [
+      { type: 'text', text: '[Image #1] [Video #2] [Audio #3] make reels' },
+    ],
+    metadata: {
+      uploads: [
+        receipt('still.png', 'image/png'),
+        receipt('clip.mov', 'video/quicktime'),
+        receipt('track.mp3', 'audio/mpeg'),
+      ],
+    },
+  };
+  try {
+    render(<UserMessageContent message={message} />);
+
+    const strip = screen.getByRole('list', { name: 'Attached files' });
+    expect(within(strip).getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.getByRole('img', { name: 'still.png' })).toHaveAttribute(
+      'src',
+      'https://uploads.test/s1/still.png',
+    );
+    const video = within(strip).getByTitle('clip.mov').querySelector('video');
+    expect(video).toHaveAttribute('src', 'https://uploads.test/s1/clip.mov');
+    expect(video).toHaveAttribute('preload', 'metadata');
+    const audio = within(strip).getByTitle('track.mp3');
+    expect(audio).toHaveTextContent('track.mp3');
+    expect(audio).toHaveTextContent('audio/mpeg');
+    expect(audio.querySelector('video, img')).toBeNull();
   } finally {
     cleanup();
   }

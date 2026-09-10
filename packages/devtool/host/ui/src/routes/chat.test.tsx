@@ -164,12 +164,14 @@ it('highlights a query chat as soon as it appears in Runs', async () => {
   ).toBe('true');
 });
 
-it('only offers image attachments when the runtime advertises uploads', async () => {
+it('only offers file attachments when the runtime advertises uploads, accepting what it lists', async () => {
   const runtimeCapabilities = {
     chat: { href: api },
     history: { href: '/zukhruf/v1/history' },
   };
-  const renderChat = (uploads: { href: string } | undefined) => {
+  const renderChat = (
+    uploads: { href: string; mediaTypes?: string[] } | undefined,
+  ) => {
     const router = createMemoryRouter(
       [
         {
@@ -196,13 +198,22 @@ it('only offers image attachments when the runtime advertises uploads', async ()
 
   const withoutUploads = renderChat(undefined);
   await screen.findByLabelText('Rich prompt composer');
-  expect(screen.queryByRole('button', { name: 'Attach image' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull();
   withoutUploads.unmount();
 
-  renderChat({ href: api });
+  const withUploads = renderChat({ href: api });
   expect(
-    await screen.findByRole('button', { name: 'Attach image' }),
+    await screen.findByRole('button', { name: 'Attach files' }),
   ).toBeTruthy();
+  expect(
+    screen.getByLabelText('Attach media files').getAttribute('accept'),
+  ).toBe('image/*,video/*,audio/*');
+  withUploads.unmount();
+
+  renderChat({ href: api, mediaTypes: ['image/png', 'video/mp4'] });
+  expect(
+    (await screen.findByLabelText('Attach media files')).getAttribute('accept'),
+  ).toBe('image/png,video/mp4');
 });
 
 function load(path: string) {
