@@ -73,6 +73,7 @@ export type ComposerState = {
   imageAttachments: Array<{
     id: string;
     placeholder: string;
+    media: ComposerAttachmentMedia;
   }>;
   remoteImages: ComposerRemoteImage[];
   pendingPastes: ComposerPendingPaste[];
@@ -116,10 +117,23 @@ export type ComposerTriggerSets = {
 
 export type ComposerSuggestion = ComposerItemEntry;
 
+/** Top-level media type of an attached file; it names the `[Image #N]`, `[Video #N]`, or `[Audio #N]` placeholder. */
+export type ComposerAttachmentMedia = 'image' | 'video' | 'audio';
+
 export type ComposerSubmissionItem =
   | { type: 'text'; text: string; textElements: ComposerTextElement[] }
   | {
       type: 'image';
+      placeholder: string;
+      file: File;
+    }
+  | {
+      type: 'video';
+      placeholder: string;
+      file: File;
+    }
+  | {
+      type: 'audio';
       placeholder: string;
       file: File;
     }

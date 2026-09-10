@@ -19,6 +19,9 @@ import StarterKit from '@tiptap/starter-kit';
 import { tokenizePersistedPrompt } from '../../persisted-prompt.ts';
 import {
   type ComposerPreparedPayload,
+  attachmentMediaFromAttr,
+  attachmentMediaOf,
+  attachmentPlaceholder,
   createComposerState,
   createDraftFromPersistedText,
   decodeComposerTextLinkHref,
@@ -33,6 +36,7 @@ import {
   triggerAlternation,
 } from '../ComposerTriggers.ts';
 import type {
+  ComposerAttachmentMedia,
   ComposerDropTransfer,
   ComposerInitialDraft,
   ComposerItemBinding,
@@ -205,6 +209,7 @@ const ComposerAtomNode = Node.create({
       content: { default: '' },
       href: { default: '' },
       attachmentId: { default: '', rendered: false },
+      media: { default: 'image', rendered: false },
       metadata: { default: null },
     };
   },
@@ -246,8 +251,8 @@ function createComposerClipboardExtension(options: ComposerClipboardOptions) {
                 return false;
               }
 
-              const imageFile = Array.from(clipboard.files).find((file) =>
-                file.type.startsWith('image/'),
+              const imageFile = Array.from(clipboard.files).find(
+                (file) => attachmentMediaOf(file) !== null,
               );
               if (imageFile) {
                 event.preventDefault();
@@ -261,7 +266,7 @@ function createComposerClipboardExtension(options: ComposerClipboardOptions) {
               }
 
               const fileItem = Array.from(clipboard.files).find(
-                (file) => !file.type.startsWith('image/'),
+                (file) => attachmentMediaOf(file) === null,
               );
               if (fileItem) {
                 event.preventDefault();
@@ -371,15 +376,15 @@ export function handleComposerDropInView(
   mentionTrigger: string,
   attachImageFile: ComposerAttachImageFile,
 ) {
-  const imageFile = Array.from(transfer.files).find((file) =>
-    file.type.startsWith('image/'),
+  const imageFile = Array.from(transfer.files).find(
+    (file) => attachmentMediaOf(file) !== null,
   );
   if (imageFile) {
     insertImageFileInView(view, remoteImageCount, imageFile, attachImageFile);
     return true;
   }
   const fileItem = Array.from(transfer.files).find(
-    (file) => !file.type.startsWith('image/'),
+    (file) => attachmentMediaOf(file) === null,
   );
   if (fileItem) {
     insertFileMentionInView(
@@ -807,6 +812,7 @@ function serializeNodeContent(
       output.imageAttachments.push({
         id,
         placeholder: label,
+        media: attachmentMediaFromAttr(node.attrs?.media),
       });
     }
     if (kind === 'paste') {
@@ -966,10 +972,11 @@ export function atomNodeContent({
 export function imageAttachmentNodeContent(
   id: string,
   label: string,
+  media: ComposerAttachmentMedia = 'image',
 ): JSONContent {
   return {
     type: 'composerAtom',
-    attrs: { kind: 'image', attachmentId: id, label },
+    attrs: { kind: 'image', attachmentId: id, label, media },
   };
 }
 
@@ -1234,9 +1241,9 @@ function insertImageFileInView(
   }
   const localCount = countAtomKind(view.state.doc.toJSON(), 'image');
   const number = remoteImageCount + localCount + 1;
-  const placeholder = `[Image #${number}]`;
+  const media = attachmentMediaOf(file) ?? 'image';
   const node = view.state.schema.nodeFromJSON(
-    imageAttachmentNodeContent(id, placeholder),
+    imageAttachmentNodeContent(id, attachmentPlaceholder(media, number), media),
   );
   if (!node) {
     return;
@@ -1284,7 +1291,10 @@ export function renumberImageAttachmentAtoms(
       ...node,
       attrs: {
         ...node.attrs,
-        label: `[Image #${remoteCount + index}]`,
+        label: attachmentPlaceholder(
+          attachmentMediaFromAttr(node.attrs?.media),
+          remoteCount + index,
+        ),
       },
     };
   });

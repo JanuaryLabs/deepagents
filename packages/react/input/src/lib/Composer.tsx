@@ -1,14 +1,11 @@
 import { Button } from '@base-ui/react/button';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
-import { X } from 'lucide-react';
 import {
   type ComponentPropsWithoutRef,
   type MouseEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
-  createContext,
-  use,
   useEffect,
   useMemo,
   useRef,
@@ -17,8 +14,17 @@ import {
 
 import { cn } from '@deepagents/react-shadcn';
 
+import { ComposerAttachments } from './ComposerAttachments.tsx';
+import {
+  type ComposerAcceptSuggestionOptions,
+  ComposerContext,
+  type ComposerContextValue,
+  useComposerContext,
+} from './ComposerContext.ts';
 import {
   type ComposerPreparedPayload,
+  attachmentMediaOf,
+  attachmentPlaceholder,
   createComposerDraftSource,
   createDraftFromSource,
   createDraftFromState,
@@ -52,7 +58,6 @@ import type {
   ComposerRichLinkMetadata,
   ComposerState,
   ComposerSubmission,
-  ComposerSuggestion,
 } from './ComposerTypes.ts';
 import {
   type ComposerAttachImageFile,
@@ -118,8 +123,6 @@ export type ComposerToolbarProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerRemoteImagesProps = ComponentPropsWithoutRef<'div'>;
 
-export type ComposerAttachedImagesProps = ComponentPropsWithoutRef<'div'>;
-
 export type ComposerEditorProps = ComponentPropsWithoutRef<'div'> & {
   placeholder?: string;
 };
@@ -134,7 +137,7 @@ export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
 
 type ComposerActionTriggerProps = Button.Props;
 
-export type ComposerAttachImageFilesProps = ComposerActionTriggerProps & {
+export type ComposerAttachFilesProps = ComposerActionTriggerProps & {
   accept?: string;
   multiple?: boolean;
 };
@@ -157,10 +160,6 @@ export type ComposerSubmitProps = ComposerActionTriggerProps;
 
 export type ComposerResetProps = ComposerActionTriggerProps;
 
-export type ComposerAcceptSuggestionOptions = {
-  index?: number;
-};
-
 type ComposerKeyboardEvent = {
   key: string;
   altKey: boolean;
@@ -169,78 +168,6 @@ type ComposerKeyboardEvent = {
   shiftKey: boolean;
   preventDefault: () => void;
 };
-
-export type ComposerActions = {
-  acceptSuggestion: (options?: ComposerAcceptSuggestionOptions) => void;
-  toggleSlashMenu: () => void;
-  insertText: (text: string) => void;
-  attachImageFiles: (files: Iterable<File>) => void;
-  removeImageAttachment: (id: string) => void;
-  addRemoteImage: (url: string) => void;
-  handleDrop: (transfer: ComposerDropTransfer) => boolean;
-  insertPaste: (content: string) => void;
-  insertRichLink: (
-    href: string,
-    label?: string,
-    metadata?: ComposerRichLinkMetadata,
-  ) => void;
-  openShortcuts: () => void;
-  closeShortcuts: () => void;
-  toggleShortcuts: () => void;
-  submit: () => void;
-  reset: () => void;
-};
-
-type ComposerEditorMeta = {
-  editor: Editor | null;
-};
-
-export type ComposerMeta = ComposerEditorMeta & {
-  disabled: boolean;
-  activePopup: ActivePopup | null;
-  suggestions: ComposerSuggestion[];
-};
-
-export type ComposerContextApi = {
-  state: ComposerState;
-  actions: ComposerActions;
-  meta: ComposerMeta;
-};
-
-type ComposerContextValue = {
-  state: ComposerState;
-  disabled: boolean;
-  commandTriggers: string[];
-  activePopup: ActivePopup | null;
-  suggestions: ComposerSuggestion[];
-  attachedImages: ReadonlyMap<string, File>;
-  actions: ComposerActions;
-  meta: ComposerEditorMeta;
-};
-
-const ComposerContext = createContext<ComposerContextValue | null>(null);
-
-function useComposerContext(componentName: string) {
-  const context = use(ComposerContext);
-  if (!context) {
-    throw new Error(`${componentName} must be used inside Composer.Root.`);
-  }
-  return context;
-}
-
-export function useComposer(componentName = 'useComposer'): ComposerContextApi {
-  const context = useComposerContext(componentName);
-  return {
-    state: context.state,
-    actions: context.actions,
-    meta: {
-      ...context.meta,
-      disabled: context.disabled,
-      activePopup: context.activePopup,
-      suggestions: context.suggestions,
-    },
-  };
-}
 
 function ComposerRoot(props: ComposerRootProps) {
   return <ComposerRootInner key={props.draftKey ?? ''} {...props} />;
@@ -769,10 +696,10 @@ function ComposerRootInner({
   }
 
   function attachImageFile(file: File) {
-    if (!file.type.startsWith('image/')) {
+    if (attachmentMediaOf(file) === null) {
       setComposer((state) => ({
         ...state,
-        error: `Only image files can be attached: ${file.name || 'unnamed file'}`,
+        error: `Only image, video, or audio files can be attached: ${file.name || 'unnamed file'}`,
         shortcutsOpen: false,
       }));
       setActivePopup(null);
@@ -791,12 +718,16 @@ function ComposerRootInner({
     const current = currentStateFromEditor();
     const number =
       current.remoteImages.length + current.imageAttachments.length + 1;
-    const placeholder = `[Image #${number}]`;
+    const media = attachmentMediaOf(file) ?? 'image';
     currentEditor
       .chain()
       .focus()
       .insertContent([
-        imageAttachmentNodeContent(id, placeholder),
+        imageAttachmentNodeContent(
+          id,
+          attachmentPlaceholder(media, number),
+          media,
+        ),
         { type: 'text', text: ' ' },
       ])
       .run();
@@ -1169,7 +1100,11 @@ function ComposerRootInner({
         return;
       }
       sentImageFiles.set(image.id, file);
-      imageItems.push({ type: 'image', placeholder: image.placeholder, file });
+      imageItems.push({
+        type: image.media,
+        placeholder: image.placeholder,
+        file,
+      });
     }
     const remoteItems = prepared.items.filter(
       (item) => item.type === 'remote_image',
@@ -1829,7 +1764,7 @@ function ComposerDefaultLayout() {
       <ComposerPopup />
       <ComposerContent>
         <ComposerRemoteImages />
-        <ComposerAttachedImages />
+        <ComposerAttachments />
         <ComposerEditor />
         <ComposerError />
       </ComposerContent>
@@ -1880,84 +1815,6 @@ function ComposerRemoteImages({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function ComposerAttachedImages({
-  className,
-  ...props
-}: ComposerAttachedImagesProps) {
-  const { state, disabled, attachedImages, actions } = useComposerContext(
-    'Composer.AttachedImages',
-  );
-  const images = state.imageAttachments.flatMap((image) => {
-    const file = attachedImages.get(image.id);
-    return file ? [{ id: image.id, placeholder: image.placeholder, file }] : [];
-  });
-  if (images.length === 0) {
-    return null;
-  }
-  return (
-    <div
-      role="list"
-      aria-label="Attached images"
-      className={cn('flex flex-wrap gap-2', className)}
-      {...props}
-    >
-      {images.map((image) => (
-        <ComposerAttachedImageThumbnail
-          key={image.id}
-          placeholder={image.placeholder}
-          file={image.file}
-          disabled={disabled}
-          onRemove={() => actions.removeImageAttachment(image.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ComposerAttachedImageThumbnail({
-  placeholder,
-  file,
-  disabled,
-  onRemove,
-}: {
-  placeholder: string;
-  file: File;
-  disabled: boolean;
-  onRemove: () => void;
-}) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const url = URL.createObjectURL(file);
-    setObjectUrl(url);
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [file]);
-
-  return (
-    <div role="listitem" className="relative">
-      {objectUrl ? (
-        <img
-          src={objectUrl}
-          alt={placeholder}
-          title={file.name}
-          className="border-border size-16 rounded-md border object-cover"
-        />
-      ) : null}
-      <button
-        type="button"
-        aria-label={`Remove ${placeholder}`}
-        disabled={disabled}
-        onClick={onRemove}
-        className="bg-background text-foreground border-border hover:bg-muted absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border disabled:opacity-50"
-      >
-        <X aria-hidden className="size-3" />
-      </button>
     </div>
   );
 }
@@ -2279,14 +2136,14 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
   );
 }
 
-function ComposerAttachImageFiles({
-  accept = 'image/*',
+function ComposerAttachFiles({
+  accept = 'image/*,video/*,audio/*',
   multiple = true,
   disabled,
   ...props
-}: ComposerAttachImageFilesProps) {
+}: ComposerAttachFilesProps) {
   const { actions, disabled: rootDisabled } = useComposerContext(
-    'Composer.AttachImageFiles',
+    'Composer.AttachFiles',
   );
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -2301,7 +2158,7 @@ function ComposerAttachImageFiles({
         type="file"
         accept={accept}
         multiple={multiple}
-        aria-label="Attach image files"
+        aria-label="Attach media files"
         hidden
         disabled={rootDisabled || disabled}
         onChange={(event) => {
@@ -2498,13 +2355,13 @@ export const Composer = {
   Content: ComposerContent,
   Toolbar: ComposerToolbar,
   RemoteImages: ComposerRemoteImages,
-  AttachedImages: ComposerAttachedImages,
+  Attachments: ComposerAttachments,
   Editor: ComposerEditor,
   Error: ComposerError,
   Popup: ComposerPopup,
   Shortcuts: ComposerShortcuts,
   Footer: ComposerFooter,
-  AttachImageFiles: ComposerAttachImageFiles,
+  AttachFiles: ComposerAttachFiles,
   AddRemoteImage: ComposerAddRemoteImage,
   InsertPaste: ComposerInsertPaste,
   InsertRichLink: ComposerInsertRichLink,

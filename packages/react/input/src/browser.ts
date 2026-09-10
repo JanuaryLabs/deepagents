@@ -1,23 +1,26 @@
 export * from './index.ts';
-export { Composer, useComposer } from './lib/Composer.tsx';
-export { ComposerTokenText } from './lib/ComposerTokenText.tsx';
-export { PersistedPromptText } from './lib/PersistedPromptText.tsx';
-export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection.ts';
+export { Composer } from './lib/Composer.tsx';
+export { useComposer } from './lib/ComposerContext.ts';
 export type {
   ComposerAcceptSuggestionOptions,
   ComposerActions,
   ComposerContextApi,
   ComposerMeta,
+} from './lib/ComposerContext.ts';
+export type { ComposerAttachmentsProps } from './lib/ComposerAttachments.tsx';
+export { ComposerTokenText } from './lib/ComposerTokenText.tsx';
+export { PersistedPromptText } from './lib/PersistedPromptText.tsx';
+export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection.ts';
+export type {
   ComposerRootProps,
   ComposerAddRemoteImageProps,
-  ComposerAttachImageFilesProps,
+  ComposerAttachFilesProps,
   ComposerContentProps,
   ComposerEditorProps,
   ComposerErrorProps,
   ComposerFooterProps,
   ComposerInsertPasteProps,
   ComposerInsertRichLinkProps,
-  ComposerAttachedImagesProps,
   ComposerPopupProps,
   ComposerRemoteImagesProps,
   ComposerResetProps,

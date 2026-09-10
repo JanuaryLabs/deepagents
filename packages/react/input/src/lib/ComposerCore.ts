@@ -11,6 +11,7 @@ import {
   triggerAlternation,
 } from './ComposerTriggers.ts';
 import type {
+  ComposerAttachmentMedia,
   ComposerDraftSource,
   ComposerInitialDraft,
   ComposerItemBinding,
@@ -686,13 +687,42 @@ function sortElements(elements: ComposerTextElement[]) {
   return [...elements].sort((a, b) => a.range.start - b.range.start);
 }
 
+const attachmentLabels: Record<ComposerAttachmentMedia, string> = {
+  image: 'Image',
+  video: 'Video',
+  audio: 'Audio',
+};
+
+/** Which placeholder family a file belongs to, or `null` when it cannot be attached. */
+export function attachmentMediaOf(
+  file: Pick<File, 'type'>,
+): ComposerAttachmentMedia | null {
+  const media = file.type.split('/')[0];
+  return media === 'image' || media === 'video' || media === 'audio'
+    ? media
+    : null;
+}
+
+export function attachmentMediaFromAttr(
+  value: unknown,
+): ComposerAttachmentMedia {
+  return value === 'video' || value === 'audio' ? value : 'image';
+}
+
+export function attachmentPlaceholder(
+  media: ComposerAttachmentMedia,
+  number: number,
+): string {
+  return `[${attachmentLabels[media]} #${number}]`;
+}
+
 function renumberImageAttachments(
   images: ComposerState['imageAttachments'],
   remoteCount: number,
 ) {
   return images.map((image, index) => ({
     ...image,
-    placeholder: `[Image #${remoteCount + index + 1}]`,
+    placeholder: attachmentPlaceholder(image.media, remoteCount + index + 1),
   }));
 }
 

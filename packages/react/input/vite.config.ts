@@ -53,6 +53,8 @@ export default defineConfig(() => ({
     watch: false,
     globals: true,
     environment: 'happy-dom',
+    // Built workspace packages have no source tsconfig and run directly in Node.
+    server: { deps: { external: [/\/dist\//] } },
     pool: 'forks',
     execArgv: ['--no-experimental-webstorage'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],

@@ -296,9 +296,7 @@ function RichInputScenario({
         <Composer.Popup />
         <Composer.Content>
           <Composer.Toolbar>
-            <Composer.AttachImageFiles>
-              Browse image files
-            </Composer.AttachImageFiles>
+            <Composer.AttachFiles>Browse image files</Composer.AttachFiles>
             <Composer.AddRemoteImage url={REMOTE_IMAGE_URL}>
               Add remote image
             </Composer.AddRemoteImage>
@@ -321,7 +319,7 @@ function RichInputScenario({
             <Composer.Reset>Reset rich prompt</Composer.Reset>
           </Composer.Toolbar>
           <Composer.RemoteImages />
-          <Composer.AttachedImages />
+          <Composer.Attachments />
           <Composer.Editor />
           <Composer.Error />
         </Composer.Content>
@@ -561,8 +559,8 @@ function formatSubmissionItem(item: ComposerSubmission['items'][number]) {
   if (item.type === 'text') {
     return `text:${item.text}`;
   }
-  if (item.type === 'image') {
-    return `image:${item.file.name}:${item.file.size}`;
+  if (item.type === 'image' || item.type === 'video' || item.type === 'audio') {
+    return `${item.type}:${item.file.name}:${item.file.size}`;
   }
   if (item.type === 'remote_image') {
     return `remote_image:${item.url}`;
@@ -1922,7 +1920,7 @@ describe('Composer editing shortcuts', () => {
     await user.keyboard('keep @fro');
     await user.keyboard('{Tab}');
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['local'], 'attached.png', { type: 'image/png' }),
     );
     fireEvent.paste(prompt, {
@@ -1959,7 +1957,7 @@ describe('Composer editing shortcuts', () => {
       ).toHaveTextContent('Draft: keep ');
     });
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
 
     fireEditorKeyDown(prompt, { key: 'y', code: 'KeyY', ctrlKey: true });
@@ -2000,7 +1998,7 @@ describe('Composer editing shortcuts', () => {
     await user.keyboard('keep @fro');
     await user.keyboard('{Tab}');
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['local'], 'attached.png', { type: 'image/png' }),
     );
     await user.click(
@@ -2433,7 +2431,7 @@ describe('Composer history behavior', () => {
     await user.keyboard('{Tab}');
     await user.click(screen.getByRole('button', { name: /add remote image/i }));
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['local'], 'attached.png', { type: 'image/png' }),
     );
     await user.click(
@@ -2462,7 +2460,7 @@ describe('Composer history behavior', () => {
     });
     expect(screen.getByText(REMOTE_IMAGE_URL)).toBeInTheDocument();
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
 
     fireEditorKeyDown(prompt, { key: 'Enter', code: 'Enter' });
@@ -2508,7 +2506,7 @@ describe('Composer history behavior', () => {
     const { user, prompt } = renderRichInput();
 
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
@@ -2521,7 +2519,7 @@ describe('Composer history behavior', () => {
       screen.getByRole('region', { name: /rich composer snapshot/i }),
     ).toHaveTextContent('History: 0');
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -2951,7 +2949,7 @@ describe('Composer link and paste behavior', () => {
 
     placeCursorAfterText(prompt, 'docs');
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
@@ -3150,7 +3148,7 @@ describe('Composer link and paste behavior', () => {
 
     expect(submissions()).toHaveTextContent('image:clipboard.png:3');
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -3364,7 +3362,7 @@ describe('Composer atomic token deletion', () => {
     const { user, prompt, submissions } = renderRichInput();
 
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
@@ -3398,7 +3396,7 @@ describe('Composer atomic token deletion', () => {
     await user.click(prompt);
     placeCursorAfterText(prompt, 'keep ');
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
@@ -3616,7 +3614,7 @@ describe('Composer atomic token deletion', () => {
     });
     placeCursorAfterText(prompt, 'docs');
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
@@ -3655,7 +3653,7 @@ describe('Composer atomic token deletion', () => {
 
     placeCursorAfterText(prompt, 'keep ');
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
     await user.click(prompt);
@@ -3904,7 +3902,7 @@ describe('Composer remote image behavior', () => {
     const { user, prompt, submissions } = renderRichInput();
 
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'chart.png', { type: 'image/png' }),
     );
 
@@ -3930,10 +3928,73 @@ describe('Composer remote image behavior', () => {
   });
 });
 
-describe('Composer image attachments', () => {
+describe('Composer attachments', () => {
+  it('owns preview URLs, image fallback, and disabled removal through the composer', async () => {
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL');
+    const user = userEvent.setup();
+    const view = render(<RichInputScenario persistDraft={false} />);
+
+    try {
+      const files = [
+        new File(['still'], 'still.png', { type: 'image/png' }),
+        new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+        new File(['track'], 'track.mp3', { type: 'audio/mpeg' }),
+      ];
+      await user.upload(screen.getByLabelText('Attach media files'), files);
+
+      const image = await screen.findByRole<HTMLImageElement>('img', {
+        name: '[Image #1]',
+      });
+      const imageUrl = image.src;
+      const videoTile = screen.getByRole('img', { name: '[Video #2]' });
+      const video = videoTile.querySelector('video');
+      if (!video) {
+        throw new Error('Missing video preview');
+      }
+      const videoUrl = video.src;
+      expect(createObjectUrl).toHaveBeenCalledTimes(2);
+      expect(createObjectUrl).toHaveBeenNthCalledWith(1, files[0]);
+      expect(createObjectUrl).toHaveBeenNthCalledWith(2, files[1]);
+
+      fireEvent.error(image);
+      expect(screen.getByRole('img', { name: '[Image #1]' })).toHaveTextContent(
+        'still.png',
+      );
+      Object.defineProperty(video, 'duration', { value: 65.2 });
+      fireEvent.loadedMetadata(video);
+      expect(videoTile).toHaveTextContent('1:05');
+
+      view.rerender(<RichInputScenario persistDraft={false} disabled />);
+      const removeImage = screen.getByRole('button', {
+        name: 'Remove [Image #1]',
+      });
+      expect(removeImage).toBeDisabled();
+      await user.click(removeImage);
+      expect(screen.getAllByRole('listitem')).toHaveLength(3);
+
+      view.rerender(<RichInputScenario persistDraft={false} />);
+      await user.click(removeImage);
+      expect(revokeObjectUrl).toHaveBeenCalledWith(imageUrl);
+      expect(revokeObjectUrl).not.toHaveBeenCalledWith(videoUrl);
+      expect(screen.getByRole('img', { name: '[Video #1]' })).toHaveTextContent(
+        '1:05',
+      );
+      expect(createObjectUrl).toHaveBeenCalledTimes(2);
+
+      view.unmount();
+      expect(revokeObjectUrl).toHaveBeenCalledWith(videoUrl);
+      expect(revokeObjectUrl).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      createObjectUrl.mockRestore();
+      revokeObjectUrl.mockRestore();
+    }
+  });
+
   it('attaches images chosen from the file input and submits their bytes', async () => {
     const { user, prompt, submissions } = renderRichInput();
-    const input = screen.getByLabelText<HTMLInputElement>('Attach image files');
+    const input = screen.getByLabelText<HTMLInputElement>('Attach media files');
     const openFileDialog = vi.spyOn(input, 'click');
 
     try {
@@ -3955,7 +4016,7 @@ describe('Composer image attachments', () => {
         screen.getByRole('region', { name: /rich composer snapshot/i }),
       ).toHaveTextContent('Draft: [Image #1] [Image #2]');
     });
-    const strip = await screen.findByRole('list', { name: /attached images/i });
+    const strip = await screen.findByRole('list', { name: /attached files/i });
     expect(
       await within(strip).findByRole('img', { name: '[Image #1]' }),
     ).toHaveAttribute('title', 'first.png');
@@ -3969,34 +4030,79 @@ describe('Composer image attachments', () => {
     expect(submissions()).toHaveTextContent('image:first.png:5');
     expect(submissions()).toHaveTextContent('image:second.jpg:7');
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
   });
 
-  it('rejects a non-image file from the file input with an inline error', async () => {
+  it('rejects a non-media file from the file input with an inline error', async () => {
     renderRichInput();
     const user = userEvent.setup({ applyAccept: false });
 
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['a,b'], 'report.csv', { type: 'text/csv' }),
     );
 
     expect(
-      await screen.findByText('Only image files can be attached: report.csv'),
+      await screen.findByText(
+        'Only image, video, or audio files can be attached: report.csv',
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('region', { name: /rich composer snapshot/i }),
     ).not.toHaveTextContent('[Image #1]');
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('attaches video and audio files under their own placeholders and renumbers across kinds', async () => {
+    const { user, prompt, submissions } = renderRichInput();
+
+    await user.upload(screen.getByLabelText('Attach media files'), [
+      new File(['still'], 'still.png', { type: 'image/png' }),
+      new File(['clip bytes'], 'clip.mov', { type: 'video/quicktime' }),
+      new File(['track'], 'track.mp3', { type: 'audio/mpeg' }),
+    ]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Image #1] [Video #2] [Audio #3]');
+    });
+    const strip = await screen.findByRole('list', { name: /attached files/i });
+    expect(
+      await within(strip).findByRole('img', { name: '[Video #2]' }),
+    ).toHaveAttribute('title', 'clip.mov');
+    expect(
+      within(strip).getByRole('img', { name: '[Audio #3]' }),
+    ).toHaveTextContent('track.mp3');
+
+    await user.click(screen.getByRole('button', { name: 'Remove [Image #1]' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('region', { name: /rich composer snapshot/i }),
+      ).toHaveTextContent('Draft: [Video #1] [Audio #2]');
+    });
+    expect(
+      await screen.findByRole('img', { name: '[Video #1]' }),
+    ).toHaveAttribute('title', 'clip.mov');
+    expect(
+      screen.queryByRole('button', { name: 'Remove [Audio #3]' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter' });
+
+    expect(submissions()).toHaveTextContent('video:clip.mov:10');
+    expect(submissions()).toHaveTextContent('audio:track.mp3:5');
+    expect(submissions()).not.toHaveTextContent('still.png');
   });
 
   it('removes an attached image from the thumbnail strip and renumbers the rest', async () => {
     const { user, prompt, submissions } = renderRichInput();
 
-    await user.upload(screen.getByLabelText('Attach image files'), [
+    await user.upload(screen.getByLabelText('Attach media files'), [
       new File(['first'], 'first.png', { type: 'image/png' }),
       new File(['second!'], 'second.png', { type: 'image/png' }),
     ]);
@@ -4040,7 +4146,7 @@ describe('Composer image attachments', () => {
     });
 
     await user.upload(
-      screen.getByLabelText('Attach image files'),
+      screen.getByLabelText('Attach media files'),
       new File(['bytes'], 'retry.png', { type: 'image/png' }),
     );
     await waitFor(() => {
@@ -4056,7 +4162,7 @@ describe('Composer image attachments', () => {
       screen.getByRole('region', { name: /rich composer snapshot/i }),
     ).not.toHaveTextContent('[Image #1]');
     expect(
-      screen.queryByRole('list', { name: /attached images/i }),
+      screen.queryByRole('list', { name: /attached files/i }),
     ).not.toBeInTheDocument();
 
     await act(async () => reject(new Error('offline')));

@@ -205,7 +205,7 @@ describe('Composer.Root draftKey', () => {
       expect(promptElement()).toHaveTextContent('describe this');
       expect(promptElement()).not.toHaveTextContent('[Image #1]');
       expect(
-        screen.queryByRole('list', { name: 'Attached images' }),
+        screen.queryByRole('list', { name: 'Attached files' }),
       ).not.toBeInTheDocument();
     } finally {
       localStorage.clear();
