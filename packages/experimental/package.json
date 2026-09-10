@@ -32,6 +32,11 @@
       "import": "./dist/zukhruf/index.js",
       "default": "./dist/zukhruf/index.js"
     },
+    "./zukhruf/mcp": {
+      "types": "./dist/zukhruf/plugins/mcp/index.d.ts",
+      "import": "./dist/zukhruf/plugins/mcp/index.js",
+      "default": "./dist/zukhruf/plugins/mcp/index.js"
+    },
     "./zukhruf/http": {
       "types": "./dist/zukhruf/plugins/http/index.d.ts",
       "import": "./dist/zukhruf/plugins/http/index.js",
@@ -74,6 +79,7 @@
   },
   "dependencies": {
     "@ai-sdk/code-mode": "^1.0.42",
+    "@ai-sdk/mcp": "2.0.41",
     "@deepagents/context": "6.2.0",
     "@deepagents/elements": "6.2.0",
     "ai": "^7.0.85",

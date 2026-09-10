@@ -20,9 +20,8 @@ import {
   elementsStreamTransform,
 } from '@deepagents/elements/context';
 
-import type { AgentDeclaration, ZukhrufSandbox } from '../agent.ts';
+import type { ZukhrufSandbox } from '../agent.ts';
 import type { AgentToolContext } from '../collaboration/agent-tool-context.ts';
-import { createCollaborationTools } from '../collaboration/collaboration-tools.ts';
 import type { AgentControlPlane } from '../control-plane/agent-control-plane.ts';
 import type { MailboxCoordinator } from '../mailbox/coordinator.ts';
 import type {
@@ -31,15 +30,23 @@ import type {
 } from '../mailbox/types.ts';
 import type { ResolvedMultiAgentHostConfig } from '../multi-agent-config.ts';
 import type { ConsumeContext, TurnRef } from '../queue/turn-queue.ts';
-import type { ZukhrufToolSet } from '../tool.ts';
 import type { AgentPluginToolContext } from './agent-runtime.ts';
 import type { ApprovalController } from './approval-controller.ts';
 import {
   type AgentSkills,
-  type PluginSkills,
   createAgentSkills,
   discoverAgentSkills,
 } from './plugin/agent-skills.ts';
+import type { PluginManager } from './plugin/plugin-manager.ts';
+
+type TurnPlugins = Pick<
+  PluginManager,
+  | 'collaborationTools'
+  | 'tools'
+  | 'skillsByAgent'
+  | 'runtimeContext'
+  | 'configureTelemetry'
+>;
 
 export interface AgentTurnExecutorOptions {
   store: ContextStore;
@@ -48,14 +55,7 @@ export interface AgentTurnExecutorOptions {
   mailbox: MailboxCoordinator;
   approvals: ApprovalController;
   multiAgent: ResolvedMultiAgentHostConfig;
-  collaborationTools: ReturnType<typeof createCollaborationTools>;
-  pluginTools: ZukhrufToolSet;
-  pluginSkillsByAgent: ReadonlyMap<string, PluginSkills>;
-  pluginRuntimeContext?: Readonly<Record<string, unknown>>;
-  configureTelemetry: (
-    context: AgentPluginToolContext,
-    telemetry: AgentDeclaration['telemetry'],
-  ) => AgentDeclaration['telemetry'];
+  plugins: TurnPlugins;
   /** Signals that the conversation's status may have changed. Never rejects. */
   publishConversationStatus: (conversation: ConversationId) => Promise<void>;
 }
@@ -72,11 +72,7 @@ export class AgentTurnExecutor {
   readonly #mailbox: MailboxCoordinator;
   readonly #approvals: ApprovalController;
   readonly #multiAgent: ResolvedMultiAgentHostConfig;
-  readonly #collaborationTools: ReturnType<typeof createCollaborationTools>;
-  readonly #pluginTools: ZukhrufToolSet;
-  readonly #pluginSkillsByAgent: ReadonlyMap<string, PluginSkills>;
-  readonly #pluginRuntimeContext: Readonly<Record<string, unknown>>;
-  readonly #configureTelemetry: AgentTurnExecutorOptions['configureTelemetry'];
+  readonly #plugins: TurnPlugins;
   readonly #publishConversationStatus: AgentTurnExecutorOptions['publishConversationStatus'];
 
   constructor(options: AgentTurnExecutorOptions) {
@@ -86,11 +82,7 @@ export class AgentTurnExecutor {
     this.#mailbox = options.mailbox;
     this.#approvals = options.approvals;
     this.#multiAgent = options.multiAgent;
-    this.#collaborationTools = options.collaborationTools;
-    this.#pluginTools = options.pluginTools;
-    this.#pluginSkillsByAgent = options.pluginSkillsByAgent;
-    this.#pluginRuntimeContext = options.pluginRuntimeContext ?? {};
-    this.#configureTelemetry = options.configureTelemetry;
+    this.#plugins = options.plugins;
     this.#publishConversationStatus = options.publishConversationStatus;
   }
 
@@ -201,9 +193,12 @@ export class AgentTurnExecutor {
       model: declaration.model,
       sandbox,
       context: engine,
-      telemetry: this.#configureTelemetry(pluginContext, declaration.telemetry),
+      telemetry: this.#plugins.configureTelemetry(
+        pluginContext,
+        declaration.telemetry,
+      ),
       runtimeContext: {
-        ...this.#pluginRuntimeContext,
+        ...this.#plugins.runtimeContext,
         zukhruf: {
           chatId: turn.chatId,
           userId: turn.userId,
@@ -216,7 +211,7 @@ export class AgentTurnExecutor {
       ...(this.#multiAgent.codeMode
         ? {
             experimental_toolCallers: Object.fromEntries(
-              Object.keys(this.#collaborationTools).map((name) => [
+              Object.keys(this.#plugins.collaborationTools).map((name) => [
                 name,
                 ['code_mode'] as const,
               ]),
@@ -237,11 +232,11 @@ export class AgentTurnExecutor {
           )
         : {}),
       ...declaration.tools,
-      ...this.#collaborationTools,
+      ...this.#plugins.collaborationTools,
       ...(this.#multiAgent.codeMode
         ? { code_mode: experimental_codeModeTool() }
         : {}),
-      ...this.#pluginTools,
+      ...this.#plugins.tools,
     };
     const collaborationToolsContext = {
       spawn_agent: agentContext,
@@ -252,7 +247,7 @@ export class AgentTurnExecutor {
       interrupt_agent: agentContext,
       ...(this.#multiAgent.codeMode ? { code_mode: agentContext } : {}),
       ...Object.fromEntries(
-        Object.keys(this.#pluginTools).map((name) => [name, pluginContext]),
+        Object.keys(this.#plugins.tools).map((name) => [name, pluginContext]),
       ),
     };
 
@@ -466,7 +461,7 @@ export class AgentTurnExecutor {
     agentName: string,
     sandbox: ZukhrufSandbox,
   ): Promise<AgentSkills> {
-    const pluginSkills = this.#pluginSkillsByAgent.get(agentName);
+    const pluginSkills = this.#plugins.skillsByAgent.get(agentName);
     if (!pluginSkills || pluginSkills.available.length === 0) {
       return createAgentSkills(available);
     }

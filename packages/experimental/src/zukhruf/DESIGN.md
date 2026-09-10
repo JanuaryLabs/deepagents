@@ -770,6 +770,33 @@ const traceTelemetry: AgentPluginDefinition<TracePlugin> = {
   REST or RPC semantics from arbitrary TypeScript methods.
 - Each plugin may independently contribute one AI SDK telemetry integration per turn through
   `telemetry(context)`; agent declarations configure policy, not integrations.
+- `PluginManager` owns plugin instances, ordered root configuration, lookup, telemetry, and
+  lifecycle dispatch. It coordinates `PluginBindings` for capability validation and scoped
+  access, `PluginToolComposition` for tools, `PluginContextComposition` for context namespaces,
+  `PluginSkillComposition` for skill catalogs and per-agent selection, and
+  `PluginAgentComposition` for contributed agents, provenance, and the combined declaration
+  registry. Agent and skill loaders stay private to their composition modules.
+  `AgentRuntime` owns the host implementation, queues, stores, and conversation execution.
+  Construction composes static contributions; initialization receives the completed host.
+  Plugin workers join the queue worker's disposal scope, preserving cleanup and error order.
+- Plugin `create()` remains synchronous. Its asynchronous `initialize(host)` may return an
+  `AgentPluginInitialization`: discovered `tools` and a `Symbol.asyncDispose` method. The runtime
+  validates those tools against static plugin tools, runtime tools, and every agent's tools
+  before starting a worker. Failed initialization disposes all acquired contributions.
+- `PluginToolComposition` owns shared tool names, owner diagnostics, and composition. Each
+  contribution is checked before the next plugin runs; `compose()` validates agent-local names
+  and returns a snapshot. `PluginManager` publishes each snapshot after validation succeeds.
+  Different agents may reuse local tool names. These checks run during construction for static
+  tools and during initialization for discovered tools.
+- `await using runtime = new AgentRuntime(...)` owns initialization resources. Declare workers
+  after the runtime so they stop before its resources close. Runtime disposal waits for pending
+  initialization, closes resources once, and prevents another initialization. Queues, stores,
+  and streams remain host-owned; stopping a worker alone leaves runtime resources available.
+- `@deepagents/experimental/zukhruf/mcp` supplies `mcp({name, connect})`. The caller provides an
+  AI SDK `MCPClient` factory; the plugin discovers all tools once per runtime and closes the
+  client on discovery failure, later initialization failure, or runtime disposal. Browser,
+  transport, and authentication configuration stay with the caller. This is a startup snapshot;
+  changes to the server's tool catalog require a new runtime.
 
 ## Stacks: one runtime, swappable (or absorbed) adapters _(Designed)_
 

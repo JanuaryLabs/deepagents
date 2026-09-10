@@ -9,7 +9,7 @@ import {
   skills,
 } from '@deepagents/context';
 
-import type { ZukhrufSandbox } from '../../agent.ts';
+import type { AgentDeclaration, ZukhrufSandbox } from '../../agent.ts';
 
 export interface AgentSkills {
   available: readonly AvailableSkill[];
@@ -24,81 +24,108 @@ export interface PluginSkills {
 const EMPTY_SKILLS: AgentSkills = { available: [], fragments: [] };
 const EMPTY_PLUGIN_SKILLS: PluginSkills = { available: [], files: [] };
 
-export function loadPluginSkills(
-  directories: readonly (string | URL)[],
-): PluginSkills {
-  const skillsByName = new Map<string, AvailableSkill>();
-  const files: { path: string; content: Buffer }[] = [];
+/** Collects plugin skill sources and composes validated selections per agent. */
+export class PluginSkillComposition {
+  readonly #directories: (string | URL)[] = [];
 
-  for (const directory of directories) {
-    const directoryPath =
-      directory instanceof URL ? fileURLToPath(directory) : directory;
-    const directoryName = path.basename(directoryPath);
-    const available = availableSkill(
-      readFileSync(path.join(directoryPath, 'SKILL.md'), 'utf8'),
-      directoryName,
-    );
-    if (skillsByName.has(available.name)) {
-      throw new Error(
-        `AgentRuntime: duplicate plugin skill "${available.name}"`,
-      );
-    }
-    skillsByName.set(available.name, available);
+  add(directories: readonly (string | URL)[]): void {
+    this.#directories.push(...directories);
+  }
 
-    for (const entry of readdirSync(directoryPath, {
-      recursive: true,
-      withFileTypes: true,
-    })) {
-      if (!entry.isFile()) continue;
-      const source = path.join(entry.parentPath, entry.name);
-      files.push({
-        path: path.posix.join(
-          'skills',
-          directoryName,
-          ...path.relative(directoryPath, source).split(path.sep),
+  compose(
+    declarations: Iterable<AgentDeclaration>,
+  ): ReadonlyMap<string, PluginSkills> {
+    const catalog = this.#loadPluginSkills();
+    return new Map(
+      Array.from(declarations, (declaration) => [
+        declaration.name,
+        this.#selectPluginSkills(
+          catalog,
+          declaration.skills ?? [],
+          declaration.name,
         ),
-        content: readFileSync(source),
-      });
-    }
-  }
-
-  return {
-    available: [...skillsByName.values()].toSorted((left, right) =>
-      left.name.localeCompare(right.name),
-    ),
-    files: files.toSorted((left, right) => left.path.localeCompare(right.path)),
-  };
-}
-
-export function selectPluginSkills(
-  catalog: PluginSkills,
-  names: readonly string[],
-  agentName: string,
-): PluginSkills {
-  if (names.length === 0) return EMPTY_PLUGIN_SKILLS;
-  const selectedNames = new Set(names);
-  if (selectedNames.size !== names.length) {
-    throw new Error(
-      `AgentRuntime: agent "${agentName}" cannot select the same plugin skill more than once`,
+      ]),
     );
   }
-  const availableByName = new Map(
-    catalog.available.map((available) => [available.name, available]),
-  );
-  for (const name of names) {
-    if (!availableByName.has(name)) {
+
+  #loadPluginSkills(): PluginSkills {
+    const skillsByName = new Map<string, AvailableSkill>();
+    const files: { path: string; content: Buffer }[] = [];
+
+    for (const directory of this.#directories) {
+      const directoryPath =
+        directory instanceof URL ? fileURLToPath(directory) : directory;
+      const directoryName = path.basename(directoryPath);
+      const available = availableSkill(
+        readFileSync(path.join(directoryPath, 'SKILL.md'), 'utf8'),
+        directoryName,
+      );
+      if (skillsByName.has(available.name)) {
+        throw new Error(
+          `AgentRuntime: duplicate plugin skill "${available.name}"`,
+        );
+      }
+      skillsByName.set(available.name, available);
+
+      for (const entry of readdirSync(directoryPath, {
+        recursive: true,
+        withFileTypes: true,
+      })) {
+        if (!entry.isFile()) continue;
+        const source = path.join(entry.parentPath, entry.name);
+        files.push({
+          path: path.posix.join(
+            'skills',
+            directoryName,
+            ...path.relative(directoryPath, source).split(path.sep),
+          ),
+          content: readFileSync(source),
+        });
+      }
+    }
+
+    return {
+      available: [...skillsByName.values()].toSorted((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
+      files: files.toSorted((left, right) =>
+        left.path.localeCompare(right.path),
+      ),
+    };
+  }
+
+  #selectPluginSkills(
+    catalog: PluginSkills,
+    names: readonly string[],
+    agentName: string,
+  ): PluginSkills {
+    if (names.length === 0) return EMPTY_PLUGIN_SKILLS;
+    const selectedNames = new Set(names);
+    if (selectedNames.size !== names.length) {
       throw new Error(
-        `AgentRuntime: agent "${agentName}" references unknown plugin skill "${name}"`,
+        `AgentRuntime: agent "${agentName}" cannot select the same plugin skill more than once`,
       );
     }
+    const availableByName = new Map(
+      catalog.available.map((available) => [available.name, available]),
+    );
+    for (const name of names) {
+      if (!availableByName.has(name)) {
+        throw new Error(
+          `AgentRuntime: agent "${agentName}" references unknown plugin skill "${name}"`,
+        );
+      }
+    }
+    return {
+      available: catalog.available.filter(({ name }) =>
+        selectedNames.has(name),
+      ),
+      files: catalog.files.filter(({ path: file }) => {
+        const [, skillName] = file.split('/');
+        return skillName !== undefined && selectedNames.has(skillName);
+      }),
+    };
   }
-  return {
-    available: catalog.available.filter(({ name }) => selectedNames.has(name)),
-    files: catalog.files.filter(({ path: file }) => {
-      const [, skillName] = file.split('/');
-      return skillName !== undefined && selectedNames.has(skillName);
-    }),
-  };
 }
 
 export async function discoverAgentSkills(

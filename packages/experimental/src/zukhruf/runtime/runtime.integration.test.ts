@@ -1174,6 +1174,133 @@ describe('zukhruf runtime — setup failure durability', () => {
 });
 
 describe('zukhruf runtime — background executor', () => {
+  it('preserves disposal error ordering across queue and plugin workers', async (t) => {
+    const failures = ['first', 'second', 'queue'].map(
+      (name) => new Error(name),
+    );
+    const events: string[] = [];
+    await using h = await harness(new MockLanguageModelV4({}), undefined, {
+      composition: () => ({
+        definitions: failures.slice(0, 2).map((failure) => ({
+          name: failure.message,
+          create: () => ({
+            async work() {
+              return {
+                async [Symbol.asyncDispose]() {
+                  events.push(failure.message);
+                  throw failure;
+                },
+              };
+            },
+          }),
+        })),
+      }),
+    });
+    await using runtime = h.runtime;
+    t.mock.method(h.queue, 'consume', async () => ({
+      async [Symbol.asyncDispose]() {
+        events.push('queue');
+        throw failures[2];
+      },
+    }));
+    const worker = await runtime.work();
+    await assert.rejects(
+      async () => worker[Symbol.asyncDispose](),
+      (error) => {
+        assert.ok(error instanceof SuppressedError);
+        assert.equal(error.error, failures[0]);
+        assert.ok(error.suppressed instanceof SuppressedError);
+        assert.equal(error.suppressed.error, failures[1]);
+        assert.equal(error.suppressed.suppressed, failures[2]);
+        return true;
+      },
+    );
+    assert.deepEqual(events, ['queue', 'second', 'first']);
+  });
+
+  it('composes plugin telemetry per turn and preserves worker and runtime lifetimes', async () => {
+    const events: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({ stream: buildStream(['ok'], 0) }),
+    });
+    const definitions: AgentPluginDefinition[] = ['first', 'second'].map(
+      (name) => ({
+        name,
+        create: () => ({
+          runtimeContext: { [name]: name },
+          async initialize() {
+            events.push(`${name}:initialize`);
+            return {
+              async [Symbol.asyncDispose]() {
+                events.push(`${name}:dispose`);
+              },
+            };
+          },
+          async work() {
+            events.push(`${name}:work`);
+            return {
+              async [Symbol.asyncDispose]() {
+                events.push(`${name}:stop`);
+              },
+            };
+          },
+          telemetry(context) {
+            assert.equal(context.conversation.chatId, 'plugin-lifecycle');
+            assert.equal(context.agentName, 'test-agent');
+            events.push(`${name}:telemetry`);
+            return {
+              onStart(event) {
+                assert.ok('runtimeContext' in event);
+                assert.equal(event.runtimeContext.first, 'first');
+                assert.equal(event.runtimeContext.second, 'second');
+                events.push(`${name}:start`);
+              },
+            };
+          },
+        }),
+      }),
+    );
+    await using h = await harness(model, undefined, {
+      declaration: {
+        ...declaration(model),
+        telemetry: { includeRuntimeContext: { first: true, second: true } },
+      },
+      composition: () => ({ definitions }),
+    });
+    await using runtime = h.runtime;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await using worker = await runtime.work();
+      void worker;
+      const result = await runtime.enqueue(
+        { chatId: 'plugin-lifecycle', userId: 'u1' },
+        turn('run plugins'),
+      );
+      assert.equal(await collectText(result.stream), 'ok');
+    }
+    assert.deepEqual(events, [
+      'first:initialize',
+      'second:initialize',
+      'first:work',
+      'second:work',
+      'first:telemetry',
+      'second:telemetry',
+      'first:start',
+      'second:start',
+      'second:stop',
+      'first:stop',
+      'first:work',
+      'second:work',
+      'first:telemetry',
+      'second:telemetry',
+      'first:start',
+      'second:start',
+      'second:stop',
+      'first:stop',
+    ]);
+    await runtime[Symbol.asyncDispose]();
+    assert.deepEqual(events.slice(18), ['second:dispose', 'first:dispose']);
+  });
+
   it('installs only the plugin skills selected by each agent', async () => {
     await using directory = await mkdtempDisposable(
       join(tmpdir(), 'zukhruf-plugin-skill-'),
