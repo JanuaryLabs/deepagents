@@ -458,7 +458,7 @@ implementing, but the behavior is fixed:
 
 - Global traces page or aggregate dashboard.
 - Cost calculation without a real pricing source.
-- Agent topology, handoff graph, or dedicated child-progress protocol.
+- Agent topology or handoff graph.
 - Trace mutation, retry, cancellation, approval, or other controls.
 - DevTool-owned listener, proxy, runtime URL, credentials, or hosted collector.
 - WebSocket/SSE transport.

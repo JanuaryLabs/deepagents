@@ -1,6 +1,7 @@
 import { type LoaderFunctionArgs, useLoaderData } from 'react-router';
 
 import {
+  ChildProgressList,
   type HistoryRecord,
   StatusBadge,
   conversationStatusLabel,
@@ -61,6 +62,10 @@ export function ConversationSummary({
         <dt className="text-muted-foreground">Updated</dt>
         <dd>{formatTimestamp(conversation.updatedAt)}</dd>
       </dl>
+      <ChildProgressList
+        treeId={conversation.chatId}
+        snapshot={conversation.children}
+      />
     </div>
   );
 }

@@ -56,15 +56,18 @@ example mount, `GET /zukhruf/v1/info` returns:
   "capabilities": {
     "history": { "href": "/zukhruf/v1/history" },
     "chat": { "href": "/zukhruf/v1/session" },
+    "events": { "href": "/zukhruf/v1/events" },
     "traces": { "href": "/zukhruf/v1/traces" }
   }
 }
 ```
 
-`history` and `chat` are always advertised by `http(runtime)`. **New Chat**,
+`history`, `chat`, and `events` are always advertised by `http(runtime)`. **New Chat**,
 conversation loading, streaming, and cancellation use the session protocol on
 the current origin, so the host's own authentication middleware guards every
-runtime request. Runtime health comes from `GET /zukhruf/v1/health`.
+runtime request. The owner event stream keeps conversation status and child
+progress current without browser polling. Runtime health comes from
+`GET /zukhruf/v1/health`.
 
 `traces` appears only when the runtime installs the `fileTelemetry()` plugin
 from `@deepagents/devtool/traces` and the host passes

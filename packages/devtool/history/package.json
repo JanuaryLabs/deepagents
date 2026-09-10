@@ -13,6 +13,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/spec/**",
+    "!**/*.test.*",
     "!**/*.tsbuildinfo"
   ],
   "publishConfig": {

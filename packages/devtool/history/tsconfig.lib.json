@@ -8,6 +8,7 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
     {
       "path": "../../react/shadcn/tsconfig.lib.json"

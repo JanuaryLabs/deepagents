@@ -33,6 +33,7 @@ import type { ZukhrufToolSet } from '../tool.ts';
 import { AgentTurnExecutor } from './agent-turn-executor.ts';
 import { ApprovalController } from './approval-controller.ts';
 import type { ConversationStatusChangeSource } from './conversation-status/change-source.ts';
+import type { ChildProgress } from './conversation-status/child-progress.ts';
 import {
   type ConversationStatus,
   type ConversationStatusEvent,
@@ -213,6 +214,7 @@ export interface AgentHistoryItem {
   readonly updatedAt: number;
   readonly messageCount: number;
   readonly status: ConversationStatus;
+  readonly children?: readonly ChildProgress[];
 }
 
 export interface AgentTurnStatus {
@@ -557,6 +559,8 @@ export class AgentRuntime {
       directory,
       statusProjector,
       historyForker,
+      recordActivity: (thread, activity) =>
+        conversationStatus.recordActivity(thread, activity),
       maxConcurrentThreadsPerSession: multiAgent.maxConcurrentThreadsPerSession,
     });
     this.#store = options.store;
@@ -768,6 +772,7 @@ export class AgentRuntime {
         updatedAt: chat.updatedAt,
         messageCount: chat.messageCount,
         status: await this.#conversationStatus.read(conversation),
+        children: await this.#conversationStatus.children(conversation),
       })),
     );
   }

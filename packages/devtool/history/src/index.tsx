@@ -15,7 +15,11 @@ import {
   useState,
 } from 'react';
 
-import type { ConversationStatus } from '@deepagents/experimental/zukhruf';
+import type {
+  ChildActivity,
+  ChildProgress,
+  ConversationStatus,
+} from '@deepagents/experimental/zukhruf';
 import type { OwnerEvent } from '@deepagents/experimental/zukhruf/http';
 import { cn } from '@deepagents/react-shadcn';
 
@@ -29,6 +33,7 @@ export type HistoryRecord = {
   updatedAt: number;
   messageCount: number;
   status: ConversationStatus;
+  children?: readonly ChildProgress[];
 };
 
 export type ConversationEvent = {
@@ -36,6 +41,7 @@ export type ConversationEvent = {
   resource: 'conversation';
   id: string;
   status: ConversationStatus;
+  child?: ChildProgress;
 };
 
 export type RuntimeEvent = OwnerEvent;
@@ -53,17 +59,20 @@ export function conversationStatusLabel(status: ConversationStatus) {
   }
 }
 
-type LiveStatuses = ReadonlyMap<string, ConversationStatus>;
+type LiveStatuses = ReadonlyMap<string, ConversationEvent>;
 
 const ConversationStatusContext = createContext<LiveStatuses | null>(null);
+const RuntimeHistoryContext = createContext<readonly HistoryRecord[]>([]);
 
 export function RuntimeEventsProvider({
   href,
   onEvent,
+  history = [],
   children,
 }: {
   href: string | undefined;
   onEvent: (event: RuntimeEvent) => void;
+  history?: readonly HistoryRecord[];
   children: ReactNode;
 }) {
   const [statuses, setStatuses] = useState<LiveStatuses>(new Map());
@@ -77,9 +86,7 @@ export function RuntimeEventsProvider({
       if (event.type === 'ready') {
         setStatuses(new Map());
       } else if (isConversationEvent(event)) {
-        setStatuses((previous) =>
-          new Map(previous).set(event.id, event.status),
-        );
+        setStatuses((previous) => new Map(previous).set(event.id, event));
       }
       notify(event);
     };
@@ -91,7 +98,7 @@ export function RuntimeEventsProvider({
   }, [href]);
   return (
     <ConversationStatusContext value={statuses}>
-      {children}
+      <RuntimeHistoryContext value={history}>{children}</RuntimeHistoryContext>
     </ConversationStatusContext>
   );
 }
@@ -106,7 +113,80 @@ export function useConversationStatus(
       'useConversationStatus must be used inside <RuntimeEventsProvider>.',
     );
   }
-  return statuses.get(chatId) ?? snapshot;
+  return statuses.get(chatId)?.status ?? snapshot;
+}
+
+const childStateLabels: Record<ChildProgress['state'], string> = {
+  pending: 'Pending',
+  queued: 'Queued',
+  running: 'Running',
+  waitingOnApproval: 'Waiting on approval',
+  waitingOnUserInput: 'Waiting on user input',
+  completed: 'Completed',
+  failed: 'Failed',
+  interrupted: 'Interrupted',
+};
+
+const activityLabels: Record<ChildActivity['type'], string> = {
+  spawn: 'Spawned',
+  message: 'Message sent',
+  followup: 'Follow-up sent',
+  interrupt: 'Interrupt accepted',
+  completion: 'Turn finished',
+};
+
+/** One row per child in the selected project, refreshed by the owner stream. */
+export function ChildProgressList({
+  treeId,
+  snapshot = [],
+}: {
+  treeId: string;
+  snapshot?: readonly ChildProgress[];
+}) {
+  const events = use(ConversationStatusContext);
+  const history = use(RuntimeHistoryContext);
+  const saved =
+    history.find((record) => record.chatId === treeId)?.children ?? snapshot;
+  const children = new Map(
+    saved
+      .filter((child) => child.treeId === treeId)
+      .map((child) => [child.chatId, child]),
+  );
+  for (const event of events?.values() ?? []) {
+    if (event.child?.treeId === treeId) children.set(event.id, event.child);
+  }
+  if (children.size === 0) return null;
+  return (
+    <section aria-label="Child agents" className="border-t px-6 py-3">
+      <h2 className="mb-2 text-sm font-medium">Child agents</h2>
+      <ul className="space-y-2">
+        {[...children.values()]
+          .sort((a, b) => a.path.localeCompare(b.path))
+          .map((child) => {
+            const latest = Object.values(child.activities).sort(
+              (a, b) => b.at - a.at,
+            )[0];
+            return (
+              <li
+                key={child.chatId}
+                className="flex items-center justify-between gap-4 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-xs">{child.path}</p>
+                  {latest && (
+                    <p className="text-muted-foreground text-xs">
+                      {activityLabels[latest.type]} · {latest.actorPath} →{' '}
+                      {latest.targetPath}
+                    </p>
+                  )}
+                </div>
+                <StatusBadge status={childStateLabels[child.state]} />
+              </li>
+            );
+          })}
+      </ul>
+    </section>
+  );
 }
 
 export function isConversationEvent(
@@ -115,7 +195,9 @@ export function isConversationEvent(
   return (
     event.type === 'change' &&
     event.resource === 'conversation' &&
-    isConversationStatus(event.status)
+    isConversationStatus(event.status) &&
+    (event.child === undefined ||
+      (isChildProgress(event.child) && event.child.chatId === event.id))
   );
 }
 
@@ -139,7 +221,9 @@ function parseRuntimeEvent(data: string): RuntimeEvent | undefined {
   }
   if (
     event.resource === 'conversation' &&
-    !isConversationStatus(event.status)
+    (!isConversationStatus(event.status) ||
+      (event.child !== undefined &&
+        (!isChildProgress(event.child) || event.child.chatId !== event.id)))
   ) {
     return undefined;
   }
@@ -160,6 +244,34 @@ function isConversationStatus(value: unknown): value is ConversationStatus {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isChildProgress(value: unknown): value is ChildProgress {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.activities) ||
+    !['chatId', 'treeId', 'path', 'parentChatId', 'declarationName'].every(
+      (key) => typeof value[key] === 'string',
+    ) ||
+    typeof value.state !== 'string' ||
+    !Object.hasOwn(childStateLabels, value.state)
+  )
+    return false;
+  return Object.entries(value.activities).every(
+    ([kind, activity]) =>
+      Object.hasOwn(activityLabels, kind) &&
+      isRecord(activity) &&
+      activity.type === kind &&
+      typeof activity.at === 'number' &&
+      Number.isFinite(activity.at) &&
+      (activity.outcome === undefined ||
+        ['completed', 'failed', 'cancelled'].includes(
+          activity.outcome as string,
+        )) &&
+      ['id', 'actorPath', 'targetPath', 'streamId'].every(
+        (key) => typeof activity[key] === 'string',
+      ),
+  );
 }
 
 type HistoryContextValue = {

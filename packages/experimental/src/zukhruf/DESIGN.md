@@ -489,8 +489,7 @@ not copying its process-local implementation:
 - **Zukhruf advantages to preserve:** durable cross-runtime mailbox delivery, durable whole-tree
   identity and listing, deterministic terminal tombstones, and queue-backed wait/interrupt/follow-up
   behavior.
-- **Parity work:** current spawn context inheritance, dedicated child lifecycle/activity events, and
-  a host-facing child progress surface.
+- **Parity work:** current spawn context inheritance.
 - **Production hardening:** bounded tree residency/concurrency, startup orphan reconciliation,
   external-Postgres multi-worker evidence, sandbox reclamation, queued observer visibility, and
   blocking CI.
@@ -912,6 +911,19 @@ work({concurrency?}) → AsyncDisposable }`.
   another `ready`, so the browser repairs missed lossy notifications by
   rereading authoritative history and schedule APIs. Schedule table triggers
   contribute task/run changes after commit without browser polling.
+- **Child activity and progress** — successful control-plane spawn, message, follow-up, and
+  interrupt operations record activity; the shared terminal projection records completion,
+  failure, or cancellation after excluding approval/input pauses. Receipts live in reserved
+  `zukhruf.childActivities` context metadata, with at most one receipt per kind per child and no
+  message content. Deterministic spawn/interrupt/completion IDs deduplicate retries. Mailbox
+  storage remains transport-only. Conversation changes carry an optional `child` projection
+  (owner-scoped tree identity, queue/terminal/wait state, and activity receipts), even when the
+  coarse conversation status stays unchanged. The existing cross-process hints re-read this
+  projection; notifications remain lossy state changes, not a replayable operation log.
+  Root history snapshots include their own `children`, so a fresh host or reconnect can recover
+  the view. DevTool consumes the same owner event connection and shows only the selected tree's
+  children in chat/history, one row per child. Activity storage failures cannot fail an accepted
+  operation; durable queue/stream state remains the execution authority.
 - `demo/zukhruf-durable-turns/run.ts` — the **independent-agent showcase**: PGlite-backed pg-boss
   (self-contained, no server), concurrent in-process `work()`, detach/resume a root turn that calls
   nonblocking `spawn_agent` and then `wait_agent` until the specialist's queue-only `FINAL_ANSWER`
@@ -950,9 +962,6 @@ work({concurrency?}) → AsyncDisposable }`.
 - **Multi-agent capacity / residency** — there is no per-tree agent cap or Codex-style LRU unloading
   for idle terminal/interrupted children. Worker concurrency limits execution but does not bound
   persisted tree growth or loaded resources.
-- **Child lifecycle / progress** — Zukhruf has generic model telemetry and durable status listing,
-  but no dedicated spawn/message/interrupt lifecycle event contract or host UI projection for
-  bounded child activity.
 - **Per-chat sandbox GC** — sandboxes are per-chat, named by chatId, and never disposed by the
   runtime. Nothing reclaims a dead chat's container yet (chat deletion hook? idle TTL? host policy?).
 - **Queued-turn visibility** — `resume()` only sees executing/executed turns (the chain mutates at

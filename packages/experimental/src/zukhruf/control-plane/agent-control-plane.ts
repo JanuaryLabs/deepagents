@@ -12,6 +12,7 @@ import {
   createInterAgentCommunication,
 } from '../mailbox/types.ts';
 import type { TurnQueue, TurnRef, TurnRequest } from '../queue/turn-queue.ts';
+import type { ChildActivity } from '../runtime/conversation-status/child-progress.ts';
 import { AgentDeclarationRegistry } from './agent-declaration-registry.ts';
 import { AgentDirectory } from './agent-directory.ts';
 import { AgentHistoryForker } from './agent-history-forker.ts';
@@ -32,6 +33,10 @@ export interface AgentControlPlaneOptions {
   directory: AgentDirectory;
   statusProjector: AgentStatusProjector;
   historyForker: AgentHistoryForker;
+  recordActivity: (
+    thread: AgentThread,
+    activity: ChildActivity,
+  ) => Promise<void>;
   /** Codex `max_concurrent_threads_per_session`, root included. */
   maxConcurrentThreadsPerSession: number;
 }
@@ -68,6 +73,7 @@ export class AgentControlPlane {
   readonly #directory: AgentDirectory;
   readonly #statusProjector: AgentStatusProjector;
   readonly #historyForker: AgentHistoryForker;
+  readonly #recordActivity: AgentControlPlaneOptions['recordActivity'];
   readonly #maxConcurrentThreadsPerSession: number;
 
   constructor(options: AgentControlPlaneOptions) {
@@ -79,6 +85,7 @@ export class AgentControlPlane {
     this.#directory = options.directory;
     this.#statusProjector = options.statusProjector;
     this.#historyForker = options.historyForker;
+    this.#recordActivity = options.recordActivity;
     this.#maxConcurrentThreadsPerSession =
       options.maxConcurrentThreadsPerSession;
   }
@@ -234,6 +241,14 @@ export class AgentControlPlane {
       },
       trigger: 'submit-message',
     });
+    await this.#recordActivity(child, {
+      id: `spawn:${streamId}`,
+      type: 'spawn',
+      at: Date.now(),
+      actorPath: actor.thread.path.toString(),
+      targetPath: childPath,
+      streamId,
+    });
     return { task_name: childPath };
   }
 
@@ -312,11 +327,16 @@ export class AgentControlPlane {
       // idempotent. Project before destructive queue cleanup: if mailbox
       // delivery fails, the still-discoverable scheduler receipt lets a later
       // interrupt_agent call retry instead of losing FINAL_ANSWER forever.
-      await this.#statusProjector.projectTerminal(
-        currentTurn,
-        interruptedThread,
-      );
+      await this.projectTerminal(currentTurn, interruptedThread);
       await this.#queue.cancel(currentTurn.streamId);
+      await this.#recordActivity(target, {
+        id: `interrupt:${currentTurn.streamId}`,
+        type: 'interrupt',
+        at: Date.now(),
+        actorPath: actor.thread.path.toString(),
+        targetPath: target.path.toString(),
+        streamId: currentTurn.streamId,
+      });
     }
     return { previous_status: previous.agent_status };
   }
@@ -329,7 +349,17 @@ export class AgentControlPlane {
   }
 
   async projectTerminal(turn: TurnRef, thread: AgentThread): Promise<void> {
-    await this.#statusProjector.projectTerminal(turn, thread);
+    const terminal = await this.#statusProjector.projectTerminal(turn, thread);
+    if (!terminal) return;
+    await this.#recordActivity(thread, {
+      id: `completion:${turn.streamId}`,
+      type: 'completion',
+      outcome: terminal.status,
+      at: terminal.finishedAt ?? Date.now(),
+      actorPath: thread.path.toString(),
+      targetPath: thread.path.toString(),
+      streamId: turn.streamId,
+    });
   }
 
   async #deliverAgentMessage(
@@ -356,19 +386,25 @@ export class AgentControlPlane {
     ) {
       throw new Error('collab tool failed: agent thread limit reached');
     }
-    await this.#mailbox.deliver(
-      createInterAgentCommunication({
-        type: options.type,
-        author: actor.thread.conversation,
-        recipient: target.conversation,
-        content: input.message,
-        metadata: {
-          authorPath: actor.thread.path.toString(),
-          recipientPath: target.path.toString(),
-        },
-      }),
-      options.mode,
-    );
+    const message = createInterAgentCommunication({
+      type: options.type,
+      author: actor.thread.conversation,
+      recipient: target.conversation,
+      content: input.message,
+      metadata: {
+        authorPath: actor.thread.path.toString(),
+        recipientPath: target.path.toString(),
+      },
+    });
+    await this.#mailbox.deliver(message, options.mode);
+    await this.#recordActivity(target.path.isRoot ? actor.thread : target, {
+      id: message.id,
+      type: options.mode === DeliveryMode.TriggerTurn ? 'followup' : 'message',
+      at: Date.now(),
+      actorPath: actor.thread.path.toString(),
+      targetPath: target.path.toString(),
+      streamId: actor.turn.streamId,
+    });
     return { target: target.path.toString() };
   }
 

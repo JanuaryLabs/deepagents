@@ -58,6 +58,7 @@ export function AppLayout() {
         return;
       }
       if (!isConversationEvent(event)) return;
+      if (event.child) return;
       if (
         event.status.type !== 'active' ||
         !history.some(({ chatId }) => chatId === event.id)
@@ -72,6 +73,7 @@ export function AppLayout() {
     <RuntimeEventsProvider
       href={discovery?.capabilities.events.href}
       onEvent={refreshRuntime}
+      history={history}
     >
       <SidebarProvider
         defaultOpen={sidebarOpen}

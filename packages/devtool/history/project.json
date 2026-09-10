@@ -5,6 +5,11 @@
   "projectType": "library",
   "tags": ["scope:public"],
   "targets": {
+    "test": {
+      "options": {
+        "command": "node ../../../tools/src/run-node-tests.ts ../../../test-results/devtool-history.xml --test-timeout=10000 src/child-progress.integration.test.ts"
+      }
+    },
     "build": {
       "executor": "@nx/esbuild:esbuild",
       "outputs": ["{options.outputPath}"],

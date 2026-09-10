@@ -390,6 +390,7 @@ export function http(
                 resource: 'conversation',
                 id: event.conversation.chatId,
                 status: event.status,
+                ...(event.child ? { child: event.child } : {}),
               } satisfies OwnerEvent;
             }
           }

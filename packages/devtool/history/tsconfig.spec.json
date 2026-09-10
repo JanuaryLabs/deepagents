@@ -1,0 +1,12 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/spec",
+    "tsBuildInfoFile": "dist/tsconfig.spec.tsbuildinfo",
+    "types": ["node"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.lib.json" }]
+}

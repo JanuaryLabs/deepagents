@@ -9,6 +9,7 @@ import {
   redirect,
 } from 'react-router';
 
+import { ChildProgressList } from '@deepagents/devtool-history';
 import {
   AgentHeader,
   AgentProvider,
@@ -155,6 +156,7 @@ function ChatSession({
 }) {
   const navigate = useNavigate();
   const { revalidate } = useRevalidator();
+  const runtime = useLoaderData<typeof loader>();
   const [transport] = useState(
     () =>
       new ZukhrufChatTransport({
@@ -181,6 +183,10 @@ function ChatSession({
           <AgentHeader.Hero>How can I help?</AgentHeader.Hero>
         </AgentHeader.Root>
         <ChatMessages />
+        <ChildProgressList
+          treeId={chatId}
+          snapshot={runtime.conversation?.children}
+        />
         <ChatInput supportsUploads={supportsUploads} />
       </ChatBot>
     </AgentProvider>

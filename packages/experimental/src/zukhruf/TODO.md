@@ -144,7 +144,7 @@
 - [ ] Keep host run context (agentId, modelId, surface context, tools, elements) separate from
       message metadata when the runtime begins accepting it.
 - [ ] Port stays payload-opaque: contract requires JSON-round-trip fidelity only.
-- [ ] Add dedicated child lifecycle/activity events for spawn, message/follow-up, interrupt, and
+- [x] Add dedicated child lifecycle/activity events for spawn, message/follow-up, interrupt, and
       terminal completion. Keep mailbox storage transport-only; expose events through the existing
       telemetry/host boundary rather than restoring the removed mailbox activity subscription.
 - [x] Conversation status changed (Codex `thread/status/changed` shape) through
@@ -155,8 +155,9 @@
         and PGlite), waits until LISTEN is live, and asks clients to resync after reconnect.
   - [x] Schedule task/run table triggers contribute post-commit changes to `/events`, including
         worker-owned transitions; Devtool invalidates the affected queries without polling.
-- [ ] Add a bounded host-facing child progress projection after lifecycle events exist. It must not
-      inject progress into the parent model mailbox or make UI concerns part of the runtime core.
+- [x] Project child state and at most one receipt per activity kind through conversation-status
+      changes, owner `/events`, and history snapshots. DevTool shows one row per child in the
+      selected tree and resyncs on reconnect; no progress is injected into the parent mailbox.
 - [x] Multi-agent shape: public `defineAgent({name, subagents})` with a required stable name, one
       runtime/TurnQueue, internal declaration lookup, deterministic path-derived child identities,
       and dynamic chat topology persisted in existing `ContextStore` metadata.

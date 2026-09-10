@@ -9,6 +9,7 @@ import {
 } from '@deepagents/context';
 
 import type { AgentDirectory } from '../../control-plane/agent-directory.ts';
+import type { AgentThread } from '../../control-plane/agent-thread.ts';
 import type { ConversationId } from '../../mailbox/types.ts';
 import type { TurnQueue } from '../../queue/turn-queue.ts';
 import {
@@ -16,6 +17,11 @@ import {
   hasUnansweredApprovals,
 } from '../approval-controller.ts';
 import type { ConversationStatusChangeSource } from './change-source.ts';
+import {
+  type ChildActivity,
+  type ChildProgress,
+  childActivityMetadataSchema,
+} from './child-progress.ts';
 
 /** Why an active conversation is not making progress on its own. */
 export type ConversationActiveFlag = 'waitingOnApproval' | 'waitingOnUserInput';
@@ -34,6 +40,7 @@ export interface ConversationStatusChange {
   type: 'change';
   conversation: ConversationId;
   status: ConversationStatus;
+  child?: ChildProgress;
 }
 
 export type ConversationStatusEvent =
@@ -66,7 +73,7 @@ export class ConversationStatusProjector {
   readonly #directory: AgentDirectory;
   readonly #changeSource?: ConversationStatusChangeSource;
   readonly #emitter = new EventEmitter();
-  readonly #last = new Map<string, ConversationStatus>();
+  readonly #last = new Map<string, ConversationStatusChange>();
   readonly #publishing = new Map<string, Promise<void>>();
   #subscribers = 0;
   #remote?: { abort: AbortController; ready: Promise<void> };
@@ -106,20 +113,106 @@ export class ConversationStatusProjector {
     return { type: 'idle' };
   }
 
+  async children(conversation: ConversationId): Promise<ChildProgress[]> {
+    const thread = await this.#directory.load(conversation);
+    if (!thread) return [];
+    const children = await Promise.all(
+      (await this.#directory.listTree(thread)).map((member) =>
+        this.#child(member),
+      ),
+    );
+    return children.filter((child) => child !== undefined);
+  }
+
+  /** Records successful runtime operations outside the transport mailbox. */
+  async recordActivity(
+    thread: AgentThread,
+    activity: ChildActivity,
+  ): Promise<void> {
+    if (thread.path.isRoot) return;
+    return this.#serialize(thread.conversation, async (key) => {
+      try {
+        await this.#store.updateChat(thread.conversation.chatId, (chat) => {
+          if (chat.userId !== thread.conversation.userId)
+            throw new Error('Child activity owner mismatch');
+          const metadata = childActivityMetadataSchema.parse(
+            chat.metadata?.zukhruf,
+          );
+          const activities = metadata.childActivities;
+          const previous = activities[activity.type];
+          if (
+            previous?.id === activity.id ||
+            (previous && previous.at > activity.at)
+          )
+            return undefined;
+          return {
+            metadata: {
+              ...chat.metadata,
+              zukhruf: {
+                ...metadata,
+                childActivities: { ...activities, [activity.type]: activity },
+              },
+            },
+          };
+        });
+      } catch {
+        // Observability must not turn an already accepted operation into a failed turn.
+        return;
+      }
+      await this.#publish(thread.conversation, key);
+    });
+  }
+
+  async #child(thread: AgentThread): Promise<ChildProgress | undefined> {
+    if (thread.parentChatId === null) return undefined;
+    const activity = await this.#queue.getTurnActivity(thread.conversation);
+    const status = await this.read(thread.conversation);
+    const stream = thread.lastTurnId
+      ? await this.#streams.store.getStream(thread.lastTurnId)
+      : undefined;
+    const chat = await this.#store.getChat(thread.conversation.chatId);
+    const state: ChildProgress['state'] =
+      status.type === 'active' && status.activeFlags.length > 0
+        ? status.activeFlags[0]
+        : activity === 'running' || activity === 'queued'
+          ? activity
+          : stream?.status === 'cancelled'
+            ? 'interrupted'
+            : stream?.status === 'completed'
+              ? 'completed'
+              : stream?.status === 'failed'
+                ? 'failed'
+                : 'pending';
+    return {
+      chatId: thread.conversation.chatId,
+      treeId: thread.treeId,
+      path: thread.path.toString(),
+      parentChatId: thread.parentChatId,
+      declarationName: thread.declarationName,
+      state,
+      activities: childActivityMetadataSchema.parse(chat?.metadata?.zukhruf)
+        .childActivities,
+    };
+  }
+
   /**
    * Re-reads the status after a local transition, emits it if it changed, and
    * hints other processes. Never rejects.
    */
   publish(conversation: ConversationId): Promise<void> {
-    return this.#serialize(conversation, async (key) => {
-      if (!(await this.#project(conversation, key))) return;
-      try {
-        await this.#changeSource?.notify(conversation);
-      } catch {
-        // The hint is best effort; every process re-reads durable state on
-        // its own transitions and on pull.
-      }
-    });
+    return this.#serialize(conversation, (key) =>
+      this.#publish(conversation, key),
+    );
+  }
+
+  async #publish(conversation: ConversationId, key: string): Promise<void> {
+    if (!(await this.#project(conversation, key))) return;
+    try {
+      await this.#changeSource?.notify(conversation);
+    } catch {
+      // The hint is best effort; every process re-reads durable state on
+      // its own transitions and on pull.
+    }
   }
 
   async subscribe(
@@ -170,24 +263,27 @@ export class ConversationStatusProjector {
   }
 
   async #project(conversation: ConversationId, key: string): Promise<boolean> {
-    let status: ConversationStatus;
+    let change: ConversationStatusChange;
     try {
-      status = await this.read(conversation);
+      const status = await this.read(conversation);
+      const thread = await this.#directory.load(conversation);
+      const child = thread ? await this.#child(thread) : undefined;
+      change = {
+        type: 'change',
+        conversation: {
+          chatId: conversation.chatId,
+          userId: conversation.userId,
+        },
+        status,
+        ...(child ? { child } : {}),
+      };
     } catch {
       // A read failure must not surface as a turn orphan through onSettled;
       // the next transition re-reads from durable state anyway.
       return false;
     }
-    if (isDeepStrictEqual(this.#last.get(key), status)) return false;
-    this.#last.set(key, status);
-    const change: ConversationStatusChange = {
-      type: 'change',
-      conversation: {
-        chatId: conversation.chatId,
-        userId: conversation.userId,
-      },
-      status,
-    };
+    if (isDeepStrictEqual(this.#last.get(key), change)) return false;
+    this.#last.set(key, change);
     this.#emitter.emit('event', change);
     return true;
   }

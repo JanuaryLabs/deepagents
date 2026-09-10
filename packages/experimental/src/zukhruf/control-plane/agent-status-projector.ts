@@ -102,7 +102,16 @@ export class AgentStatusProjector {
     };
   }
 
-  async projectTerminal(turn: TurnRef, thread: AgentThread): Promise<void> {
+  async projectTerminal(
+    turn: TurnRef,
+    thread: AgentThread,
+  ): Promise<
+    | {
+        finishedAt: number | null;
+        status: 'completed' | 'failed' | 'cancelled';
+      }
+    | undefined
+  > {
     if (thread.parentChatId === null) return;
     const stream = await this.#streams.store.getStream(turn.streamId);
     if (
@@ -155,6 +164,7 @@ export class AgentStatusProjector {
       }),
       MessageDeliveryMode.QueueOnly,
     );
+    return { finishedAt: stream.finishedAt, status: stream.status };
   }
 
   async #messages(thread: AgentThread): Promise<UIMessage[]> {
