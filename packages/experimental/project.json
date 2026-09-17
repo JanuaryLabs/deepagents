@@ -11,6 +11,7 @@
       "options": {
         "additionalEntryPoints": [
           "packages/experimental/src/coding-agent-reminders/index.ts",
+          "packages/experimental/src/providers/codex/index.ts",
           "packages/experimental/src/zukhruf/index.ts",
           "packages/experimental/src/zukhruf/plugins/mcp/index.ts",
           "packages/experimental/src/zukhruf/plugins/http/index.ts",
@@ -27,7 +28,7 @@
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/test-results/experimental.xml"],
       "options": {
-        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/experimental.xml --test-global-setup=test/global-setup.ts --test-force-exit"
+        "command": "node ../../tools/src/run-node-tests.ts ../../test-results/experimental.xml --experimental-test-module-mocks --test-global-setup=test/global-setup.ts --test-force-exit"
       }
     }
   }

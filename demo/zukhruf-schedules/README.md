@@ -12,8 +12,11 @@ A Zukhruf Scheduled Tasks agent managed from the browser DevTool.
   reserved declaration slots. `schedules/` is available for schedule files if
   this demo later installs `scheduleFiles()`.
 
+The demo uses `codex('gpt-5.5')` with your existing Codex ChatGPT login. Run
+`codex login` first if needed; no OpenAI API key is required.
+
 Run the browser DevTool from the repository root:
 
 ```sh
-nx run @deepagents/devtool:build && node --env-file=.env demo/zukhruf-schedules/server.ts
+nx run @deepagents/devtool:build && node demo/zukhruf-schedules/server.ts
 ```

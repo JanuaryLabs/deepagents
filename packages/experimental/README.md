@@ -3,6 +3,12 @@
 A home for unstable, in-progress building blocks that are not yet part of the
 stable `@deepagents/*` surface. APIs here may change without notice.
 
+## `@deepagents/experimental/providers/codex`
+
+`codex('gpt-5.5')` creates an AI SDK model using an existing ChatGPT login from
+`codex login`. Zukhruf continues to own tools, history, and turn execution. See
+the [provider API and credential behavior](./src/providers/codex/README.md).
+
 ## `@deepagents/experimental/coding-agent-reminders`
 
 `coding-agent-reminders` is an experimental event-aware reminder and guard

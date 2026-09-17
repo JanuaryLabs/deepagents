@@ -5,7 +5,6 @@
   "type": "module",
   "description": "Runnable Zukhruf Scheduled Tasks showcase managed from the DevTool, backed by pg-boss and PGlite.",
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.52",
     "@deepagents/context": "6.2.0",
     "@deepagents/devtool": "6.2.0",
     "@deepagents/experimental": "6.2.0",

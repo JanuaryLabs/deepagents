@@ -1,7 +1,7 @@
-import { openai } from '@ai-sdk/openai';
 import { join } from 'node:path';
 
 import { fileTelemetry } from '@deepagents/devtool/traces';
+import { codex } from '@deepagents/experimental/providers/codex';
 import { defineAgent } from '@deepagents/experimental/zukhruf';
 import { schedules } from '@deepagents/experimental/zukhruf/schedules';
 
@@ -18,7 +18,7 @@ export const traceTelemetry = fileTelemetry({
 });
 export default defineAgent({
   name: 'scheduled-assistant',
-  model: openai('gpt-5.6-luna'),
+  model: codex('gpt-5.5'),
   sandbox,
   instructions,
   plugins: [scheduled, traceTelemetry],
