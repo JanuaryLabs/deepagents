@@ -562,6 +562,27 @@ describe('Stream Chunks', () => {
       }
     });
 
+    it('should record a stream that ended by abort as cancelled', async () => {
+      await withStreamStore(async (store) => {
+        const streams = makeManager(store);
+        const streamId = crypto.randomUUID();
+        await streams.register(streamId);
+
+        await streams.persist(
+          simulateReadableStream<UIMessageChunk>({
+            chunks: [
+              { type: 'text-start', id: 'part-1' },
+              { type: 'text-delta', id: 'part-1', delta: 'partial' },
+              { type: 'abort' },
+            ],
+          }),
+          streamId,
+        );
+
+        assert.strictEqual(await store.getStreamStatus(streamId), 'cancelled');
+      });
+    });
+
     it('should keep adaptive jitter delay within configured bounds', () => {
       mock.method(Math, 'random', () => 1);
       try {

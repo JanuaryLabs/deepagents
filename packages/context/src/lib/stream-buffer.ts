@@ -42,6 +42,7 @@ export async function persistedWriter(
   let seq = 0;
   let buffer: StreamChunkData[] = [];
   let failedByErrorChunk = false;
+  let abortedByChunk = false;
 
   async function flush() {
     if (buffer.length === 0) return;
@@ -76,6 +77,9 @@ export async function persistedWriter(
   }
 
   async function persistChunk(chunk: StreamChunkData) {
+    if (chunk.data.type === 'abort') {
+      abortedByChunk = true;
+    }
     if (strategy === 'immediate') {
       await appendBatch([chunk]);
     } else {
@@ -110,7 +114,10 @@ export async function persistedWriter(
     async complete() {
       await flush();
       if (failedByErrorChunk) return;
-      await store.updateStreamStatus(streamId, 'completed');
+      await store.updateStreamStatus(
+        streamId,
+        abortedByChunk ? 'cancelled' : 'completed',
+      );
     },
     async fail(error?: string) {
       await flush();

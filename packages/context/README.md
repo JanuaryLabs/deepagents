@@ -177,13 +177,19 @@ parent thread.
 
 ```typescript
 import { openai } from '@ai-sdk/openai';
+import { InMemoryFs } from 'just-bash';
 
 import {
   ContextEngine,
   InMemoryContextStore,
   agent,
+  createBashTool,
+  createVirtualSandbox,
   role,
 } from '@deepagents/context';
+
+await using backend = await createVirtualSandbox({ fs: new InMemoryFs() });
+const sandbox = await createBashTool({ sandbox: backend });
 
 const context = new ContextEngine({
   store: new InMemoryContextStore(),
@@ -194,14 +200,16 @@ const context = new ContextEngine({
 const analyst = agent({
   name: 'analyst',
   context,
+  sandbox,
   model: openai('gpt-5.4-mini'),
 });
 
-const { tool: advisor } = analyst.asAdvisor({ concise: true });
+const { tool: advisor } = analyst.asAdvisor();
 
 const coordinator = agent({
   name: 'coordinator',
   context,
+  sandbox,
   model: openai('gpt-5.4'),
   tools: {
     analyze: analyst.asTool({
